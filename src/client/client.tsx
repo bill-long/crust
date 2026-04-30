@@ -38,16 +38,24 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	});
 
 	const [syncState, setSyncState] = createSignal<AppSyncState>("initial");
+	let hasPrepared = false;
 
 	const onSync = (state: SyncState): void => {
 		switch (state) {
 			case SyncState.Prepared:
-			case SyncState.Syncing:
+				hasPrepared = true;
 				setSyncState("live");
+				break;
+			case SyncState.Syncing:
+				if (hasPrepared) {
+					setSyncState("live");
+				}
 				break;
 			case SyncState.Catchup:
 			case SyncState.Reconnecting:
-				setSyncState("catching-up");
+				if (hasPrepared) {
+					setSyncState("catching-up");
+				}
 				break;
 			case SyncState.Error:
 				setSyncState("error");
