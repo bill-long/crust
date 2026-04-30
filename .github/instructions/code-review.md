@@ -34,8 +34,8 @@ gh api graphql -f query='{
 ```
 
 - **0** = clean review, all comments addressed
-- **>0** = unaddressed comments; pipe through `| .[] | {path, line, body:
-  .comments.nodes[-1].body[0:120]}` to see them
+- **>0** = unaddressed comments; pipe through the jq filter
+  `.[] | {path, line, body: .comments.nodes[-1].body[0:120]}` to see them
 
 Always run this check after confirming a new Copilot review exists (check
 `gh api /repos/.../pulls/N/reviews` for latest commit). A review with 0

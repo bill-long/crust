@@ -73,7 +73,7 @@ const TimelineItem: Component<{ event: TimelineEvent }> = (props) => {
 						}
 					>
 						{/* Image */}
-						<Show when={ev.msgtype === "m.image" && ev.imageUrl}>
+						<Show when={(ev.msgtype === "m.image" || ev.type === "m.sticker") && ev.imageUrl}>
 							<img
 								src={ev.imageUrl ?? ""}
 								alt={ev.body?.trim() || "Image"}
@@ -83,7 +83,7 @@ const TimelineItem: Component<{ event: TimelineEvent }> = (props) => {
 						</Show>
 
 						{/* Text */}
-						<Show when={ev.msgtype !== "m.image" || !ev.imageUrl}>
+						<Show when={ev.msgtype !== "m.image" && ev.type !== "m.sticker"}>
 							<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
 								{ev.body}
 							</p>
