@@ -1,6 +1,8 @@
 import { useNavigate } from "@solidjs/router";
 import type { Component } from "solid-js";
 import { useClient } from "../client/client";
+import RoomList from "../features/room/RoomList";
+import SpacesSidebar from "../features/space/SpacesSidebar";
 import { clearSession } from "../stores/session";
 
 const Layout: Component = () => {
@@ -42,22 +44,8 @@ const Layout: Component = () => {
 
 			{/* Three-column layout */}
 			<div class="flex min-h-0 flex-1">
-				{/* Spaces sidebar */}
-				<aside class="flex w-16 shrink-0 flex-col items-center gap-2 border-r border-neutral-800 bg-neutral-900 py-3">
-					<div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-700 text-xs text-neutral-400">
-						S
-					</div>
-				</aside>
-
-				{/* Room list */}
-				<aside class="flex w-64 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900/50">
-					<div class="border-b border-neutral-800 px-4 py-3">
-						<span class="text-sm font-semibold text-neutral-300">Rooms</span>
-					</div>
-					<div class="flex flex-1 items-center justify-center p-4">
-						<span class="text-xs text-neutral-600">Phase 2</span>
-					</div>
-				</aside>
+				<SpacesSidebar />
+				<RoomList />
 
 				{/* Main area */}
 				<main class="flex flex-1 flex-col">
@@ -65,7 +53,7 @@ const Layout: Component = () => {
 						<div class="text-center">
 							<p class="text-neutral-500">Select a room to start chatting</p>
 							<p class="mt-1 text-xs text-neutral-700">
-								Room list and timeline coming in Phase 2
+								Timeline coming in Phase 2 PR 3
 							</p>
 						</div>
 					</div>

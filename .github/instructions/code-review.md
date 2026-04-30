@@ -83,3 +83,15 @@ additions at the end of the category list:
 - **Prefer canonical type imports.** When a library exports a named type
   (e.g., `SetStoreFunction<T>`), use it instead of deriving types with
   `ReturnType<typeof ...>`. Derived types are fragile and non-idiomatic.
+- **A11y goes beyond keyboard nav.** Icon-only buttons need `aria-label`,
+  not just `title`. Color-only distinctions (e.g., red vs grey badges) need
+  text alternatives. Selected/current states need `aria-current` or
+  `aria-pressed`. Emoji used as icons need `aria-label` on the container.
+- **Display data can be degenerate too.** SDK room names can be empty strings
+  or whitespace-only. Always use `.trim()` before testing — `||` alone does
+  not catch whitespace-only strings. Apply this to names, labels, titles,
+  aria-labels, and any text rendered in the UI.
+- **When fixing a guard in one function, audit siblings.** Selector functions
+  that share a contract (e.g., getSpaceRooms, getSpaceUnreadRollup,
+  getOrphanRooms) must apply the same precondition checks. When you add a
+  guard to one, scan for related functions that need the same fix.
