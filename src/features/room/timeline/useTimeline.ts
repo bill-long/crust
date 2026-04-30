@@ -106,10 +106,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 	function loadRoom(rid: string): void {
 		currentRoomId = rid;
+		setLoading(true);
 		const room = client.getRoom(rid);
 		if (!room) {
 			setEvents([]);
-			setLoading(true);
 			return;
 		}
 

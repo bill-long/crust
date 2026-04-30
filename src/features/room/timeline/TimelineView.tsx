@@ -40,7 +40,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			() => {
 				setAtBottom(true);
 				requestAnimationFrame(() => {
-					scrollRef?.scrollTo({ top: scrollRef.scrollHeight });
+					const el = scrollRef;
+					if (el) el.scrollTo({ top: el.scrollHeight });
 				});
 			},
 		),
@@ -53,9 +54,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			() => {
 				if (atBottom() && scrollRef) {
 					requestAnimationFrame(() => {
-						scrollRef?.scrollTo({
-							top: scrollRef.scrollHeight,
-						});
+						const el = scrollRef;
+						if (el) el.scrollTo({ top: el.scrollHeight });
 					});
 				}
 			},
@@ -125,12 +125,11 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						<button
 							type="button"
 							class="rounded-full bg-neutral-700 p-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
-							onClick={() =>
-								scrollRef?.scrollTo({
-									top: scrollRef.scrollHeight,
-									behavior: "smooth",
-								})
-							}
+							onClick={() => {
+								const el = scrollRef;
+								if (el)
+									el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+							}}
 							aria-label="Scroll to bottom"
 						>
 							↓
