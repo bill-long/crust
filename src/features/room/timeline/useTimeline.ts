@@ -32,8 +32,12 @@ function eventToTimelineEvent(
 	const member = room.getMember(sender);
 
 	let imageUrl: string | null = null;
-	if (content.url && typeof content.url === "string") {
-		imageUrl = client.mxcUrlToHttp(content.url, 800, 600, "scale") ?? null;
+	const mxcUrl =
+		(typeof content.url === "string" && content.url) ||
+		(typeof content.file?.url === "string" && content.file.url) ||
+		null;
+	if (mxcUrl) {
+		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
 	}
 
 	// Aggregate reactions from SDK relations
