@@ -1,0 +1,20 @@
+{
+	"defaultHomeserver": "no.strange.pizza",
+	"homeserverList": ["no.strange.pizza", "matrix.org"],
+	"allowCustomHomeservers": true,
+	"elementCall": {
+		"url": "https://call.strange.pizza"
+	},
+	"gif": {
+		"enabled": false,
+		"provider": "giphy",
+		"apiKey": "",
+		"trendingOnOpen": true,
+		"maxRating": "g"
+	},
+	"branding": {
+		"name": "Crust",
+		"logoUrl": "/favicon.svg",
+		"primaryColor": "#e33e7f"
+	}
+}

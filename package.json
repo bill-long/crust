@@ -1,0 +1,35 @@
+{
+	"name": "crust",
+	"packageManager": "pnpm@10.10.0",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"@kobalte/core": "^0.13.11",
+		"@solidjs/router": "^0.16.1",
+		"@tanstack/solid-virtual": "^3.13.24",
+		"matrix-js-sdk": "^41.4.0",
+		"solid-js": "^1.9.12"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.13",
+		"@solidjs/testing-library": "^0.8.10",
+		"@tailwindcss/vite": "^4.2.4",
+		"jsdom": "^26.0.0",
+		"tailwindcss": "^4.2.4",
+		"typescript": "^6.0.3",
+		"vite": "^8.0.10",
+		"vite-plugin-solid": "^2.11.12",
+		"vitest": "^4.1.5"
+	}
+}
