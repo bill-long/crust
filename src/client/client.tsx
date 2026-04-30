@@ -8,10 +8,12 @@ import {
 	createContext,
 	createSignal,
 	onCleanup,
+	onMount,
 	type ParentComponent,
 	useContext,
 } from "solid-js";
 import type { Session } from "../stores/session";
+import { createSummariesStore, type SummariesStore } from "./summaries";
 
 export type AppSyncState =
 	| "initial"
@@ -20,9 +22,13 @@ export type AppSyncState =
 	| "error"
 	| "stopped";
 
+export type CryptoState = "loading" | "ready" | "error" | "unsupported";
+
 interface ClientContextValue {
 	client: MatrixClient;
 	syncState: () => AppSyncState;
+	cryptoState: () => CryptoState;
+	summaries: SummariesStore;
 }
 
 const ClientContext = createContext<ClientContextValue>();
@@ -38,12 +44,21 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	});
 
 	const [syncState, setSyncState] = createSignal<AppSyncState>("initial");
+	const [cryptoState, setCryptoState] = createSignal<CryptoState>("loading");
 	let hasPrepared = false;
+	let disposed = false;
+
+	const {
+		summaries,
+		init: initSummaries,
+		cleanup: cleanupSummaries,
+	} = createSummariesStore(matrixClient);
 
 	const onSync = (state: SyncState): void => {
 		switch (state) {
 			case SyncState.Prepared:
 				hasPrepared = true;
+				initSummaries();
 				setSyncState("live");
 				break;
 			case SyncState.Syncing:
@@ -67,15 +82,32 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	};
 
 	matrixClient.on(ClientEvent.Sync, onSync);
-	matrixClient.startClient({ initialSyncLimit: 20 });
+
+	onMount(async () => {
+		try {
+			await matrixClient.initRustCrypto({ useIndexedDB: true });
+			if (disposed) return;
+			setCryptoState("ready");
+		} catch (e) {
+			console.error("Crypto init failed:", e);
+			if (disposed) return;
+			setCryptoState("error");
+		}
+		if (disposed) return;
+		matrixClient.startClient({ initialSyncLimit: 20 });
+	});
 
 	onCleanup(() => {
+		disposed = true;
+		cleanupSummaries();
 		matrixClient.removeListener(ClientEvent.Sync, onSync);
 		matrixClient.stopClient();
 	});
 
 	return (
-		<ClientContext.Provider value={{ client: matrixClient, syncState }}>
+		<ClientContext.Provider
+			value={{ client: matrixClient, syncState, cryptoState, summaries }}
+		>
 			{props.children}
 		</ClientContext.Provider>
 	);
