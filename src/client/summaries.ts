@@ -8,7 +8,7 @@ import {
 	RoomEvent,
 	RoomStateEvent,
 } from "matrix-js-sdk";
-import { createStore, produce } from "solid-js/store";
+import { createStore, produce, type SetStoreFunction } from "solid-js/store";
 
 export interface RoomSummary {
 	roomId: string;
@@ -43,15 +43,15 @@ function buildSummary(
 	baseUrl: string,
 	dmRoomIds: Set<string>,
 ): RoomSummary {
-	const lastEvent = room.getLastLiveEvent();
+	// Find the most recent displayable event for the lastMessage preview
 	let lastMessage: RoomSummary["lastMessage"] = null;
-	if (lastEvent) {
-		const content = lastEvent.getContent();
-		lastMessage = {
-			body: content.body ?? content.msgtype ?? lastEvent.getType(),
-			sender: lastEvent.getSender() ?? "",
-			timestamp: lastEvent.getTs(),
-		};
+	const timeline = room.getLiveTimeline().getEvents();
+	for (let i = timeline.length - 1; i >= 0; i--) {
+		const ev = timeline[i];
+		if (isDisplayableMessage(ev)) {
+			lastMessage = buildLastMessage(ev);
+			break;
+		}
 	}
 
 	const createEvent = room.currentState.getStateEvents("m.room.create", "");
@@ -101,9 +101,18 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	);
 }
 
+function buildLastMessage(event: MatrixEvent): RoomSummary["lastMessage"] {
+	const content = event.getContent();
+	return {
+		body: content.body ?? content.msgtype ?? event.getType(),
+		sender: event.getSender() ?? "",
+		timestamp: event.getTs(),
+	};
+}
+
 export function createSummariesStore(client: MatrixClient): {
 	summaries: SummariesStore;
-	setSummaries: ReturnType<typeof createStore<SummariesStore>>[1];
+	setSummaries: SetStoreFunction<SummariesStore>;
 	init: () => void;
 	cleanup: () => void;
 } {
@@ -161,12 +170,7 @@ export function createSummariesStore(client: MatrixClient): {
 
 		if (!isDisplayableMessage(event)) return;
 
-		const content = event.getContent();
-		setSummaries(room.roomId, "lastMessage", {
-			body: content.body ?? content.msgtype ?? event.getType(),
-			sender: event.getSender() ?? "",
-			timestamp: event.getTs(),
-		});
+		setSummaries(room.roomId, "lastMessage", buildLastMessage(event));
 	}
 
 	function updateUnreadCounts(room: Room): void {

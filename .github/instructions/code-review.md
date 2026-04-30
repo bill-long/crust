@@ -76,3 +76,10 @@ additions at the end of the category list:
 - **Intra-file duplication drifts.** When the same logic is copied within a
   file (e.g., space-children extraction), extract a helper immediately.
   Duplicates invariably diverge on the next edit.
+- **Initial vs incremental paths must agree.** When a field is populated in
+  both an initial-load path and an incremental-update path, verify they apply
+  the same filtering, transformation, and fallback rules. Divergent logic for
+  the same field is a consistency bug waiting to happen.
+- **Prefer canonical type imports.** When a library exports a named type
+  (e.g., `SetStoreFunction<T>`), use it instead of deriving types with
+  `ReturnType<typeof ...>`. Derived types are fragile and non-idiomatic.
