@@ -38,7 +38,11 @@ function loadWidths(): PaneWidths {
 }
 
 function saveWidths(widths: PaneWidths): void {
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(widths));
+	try {
+		localStorage.setItem(STORAGE_KEY, JSON.stringify(widths));
+	} catch {
+		// Storage may be unavailable (private mode, quota exceeded)
+	}
 }
 
 const STEP = 10;
