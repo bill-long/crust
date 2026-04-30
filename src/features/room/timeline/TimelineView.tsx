@@ -32,6 +32,19 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		overscan: 10,
 	});
 
+	// Reset scroll position when switching rooms
+	createEffect(
+		on(
+			() => props.roomId,
+			() => {
+				setAtBottom(true);
+				requestAnimationFrame(() => {
+					scrollRef?.scrollTo({ top: scrollRef.scrollHeight });
+				});
+			},
+		),
+	);
+
 	// Auto-scroll to bottom when new messages arrive and user is at bottom
 	createEffect(
 		on(

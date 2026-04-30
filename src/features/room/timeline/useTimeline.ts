@@ -22,7 +22,7 @@ export interface TimelineEvent {
 	imageInfo: { w?: number; h?: number; mimetype?: string } | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
-	reactions: Record<string, { count: number; senders: string[] }>;
+	reactions: Record<string, number>;
 }
 
 function eventToTimelineEvent(
@@ -56,10 +56,7 @@ function eventToTimelineEvent(
 				if (sortedEntries) {
 					for (const [key, evSet] of sortedEntries) {
 						if (key && evSet) {
-							reactions[key] = {
-								count: evSet.size,
-								senders: [...evSet].map((e) => e.getSender() ?? ""),
-							};
+							reactions[key] = evSet.size;
 						}
 					}
 				}
@@ -157,7 +154,31 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 			return;
 		}
 
-		if (!isDisplayable(event)) return;
+		if (!isDisplayable(event)) {
+			// Handle redactions by updating only the affected event
+			if (event.getType() === "m.room.redaction") {
+				const redactedId = event.event.redacts;
+				if (typeof redactedId === "string") {
+					setEvents(
+						produce((draft) => {
+							const idx = draft.findIndex((e) => e.eventId === redactedId);
+							if (idx >= 0) {
+								const sourceEvent = room
+									.getLiveTimeline()
+									.getEvents()
+									.find((e) => e.getId() === redactedId);
+								if (sourceEvent) {
+									draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
+								} else {
+									draft.splice(idx, 1);
+								}
+							}
+						}),
+					);
+				}
+			}
+			return;
+		}
 
 		setEvents(
 			produce((draft) => {

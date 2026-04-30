@@ -10,7 +10,7 @@ const ReactionPills: Component<{
 		<Show when={entries().length > 0}>
 			<div class="mt-1 flex flex-wrap gap-1">
 				<For each={entries()}>
-					{([key, { count }]) => (
+					{([key, count]) => (
 						<span class="inline-flex items-center gap-1 rounded-full bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
 							<span>{key}</span>
 							<span class="text-neutral-500">{count}</span>
@@ -66,21 +66,28 @@ const TimelineItem: Component<{ event: TimelineEvent }> = (props) => {
 						</p>
 					}
 				>
-					{/* Image */}
-					<Show when={ev.msgtype === "m.image" && ev.imageUrl}>
-						<img
-							src={ev.imageUrl ?? ""}
-							alt={ev.body?.trim() || "Image"}
-							class="mt-1 max-h-64 max-w-sm rounded"
-							loading="lazy"
-						/>
-					</Show>
+					<Show
+						when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
+						fallback={
+							<p class="text-sm italic text-neutral-500">Decrypting…</p>
+						}
+					>
+						{/* Image */}
+						<Show when={ev.msgtype === "m.image" && ev.imageUrl}>
+							<img
+								src={ev.imageUrl ?? ""}
+								alt={ev.body?.trim() || "Image"}
+								class="mt-1 max-h-64 max-w-sm rounded"
+								loading="lazy"
+							/>
+						</Show>
 
-					{/* Text */}
-					<Show when={ev.msgtype !== "m.image" || !ev.imageUrl}>
-						<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
-							{ev.body}
-						</p>
+						{/* Text */}
+						<Show when={ev.msgtype !== "m.image" || !ev.imageUrl}>
+							<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
+								{ev.body}
+							</p>
+						</Show>
 					</Show>
 				</Show>
 
