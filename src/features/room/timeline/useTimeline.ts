@@ -166,6 +166,20 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 									draft.splice(idx, 1);
 								}
 							}
+
+							// Recompute reactions for all events — redacted
+							// event content is already cleared by the SDK,
+							// so we can't look up the parent. The relations
+							// API excludes redacted reactions automatically.
+							for (let i = 0; i < draft.length; i++) {
+								const evt = room
+									.getLiveTimeline()
+									.getEvents()
+									.find((e) => e.getId() === draft[i].eventId);
+								if (evt) {
+									draft[i] = eventToTimelineEvent(evt, room, client);
+								}
+							}
 						}),
 					);
 				}
