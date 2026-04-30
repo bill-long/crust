@@ -79,7 +79,7 @@ const SpacesSidebar: Component = () => {
 							>
 								<img
 									src={space.avatarUrl ?? ""}
-									alt={space.name}
+									alt={space.name.trim() || "Space"}
 									class="h-10 w-10 rounded-2xl object-cover"
 								/>
 							</Show>
