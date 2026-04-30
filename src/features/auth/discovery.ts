@@ -20,7 +20,7 @@ export async function discoverHomeserver(input: string): Promise<string> {
 		try {
 			const parsed = new URL(server);
 			scheme = parsed.protocol.replace(":", "");
-			server = parsed.hostname + (parsed.port ? `:${parsed.port}` : "");
+			server = parsed.host;
 		} catch {
 			// Malformed URL — strip prefix and hope for the best
 			scheme = /^http:\/\//i.test(server) ? "http" : "https";
