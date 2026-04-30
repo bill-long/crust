@@ -1,10 +1,10 @@
-import { type Component, For, Show } from "solid-js";
+import { type Component, createMemo, For, Show } from "solid-js";
 import type { TimelineEvent } from "./useTimeline";
 
 const ReactionPills: Component<{
 	reactions: TimelineEvent["reactions"];
 }> = (props) => {
-	const entries = () => Object.entries(props.reactions);
+	const entries = createMemo(() => Object.entries(props.reactions));
 
 	return (
 		<Show when={entries().length > 0}>

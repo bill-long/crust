@@ -17,9 +17,7 @@ export interface TimelineEvent {
 	type: string;
 	msgtype: string;
 	body: string;
-	formattedBody: string | undefined;
 	imageUrl: string | null;
-	imageInfo: { w?: number; h?: number; mimetype?: string } | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	reactions: Record<string, number>;
@@ -74,12 +72,7 @@ function eventToTimelineEvent(
 		type: event.getType(),
 		msgtype: content.msgtype ?? "",
 		body: content.body ?? "",
-		formattedBody:
-			content.format === "org.matrix.custom.html"
-				? content.formatted_body
-				: undefined,
 		imageUrl,
-		imageInfo: content.info ?? null,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		reactions,
