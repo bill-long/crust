@@ -36,7 +36,7 @@ const RoomEntry: Component<{
 						</span>
 					</Show>
 					<span class="truncate text-sm font-medium">
-						{props.room.name || "Unnamed room"}
+						{props.room.name.trim() || "Unnamed room"}
 					</span>
 				</div>
 				<Show when={props.room.lastMessage}>

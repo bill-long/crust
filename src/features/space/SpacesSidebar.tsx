@@ -73,7 +73,7 @@ const SpacesSidebar: Component = () => {
 								when={space.avatarUrl}
 								fallback={
 									<span class="text-sm font-semibold">
-										{space.name.charAt(0).toUpperCase() || "?"}
+										{(space.name.trim() || "?").charAt(0).toUpperCase()}
 									</span>
 								}
 							>

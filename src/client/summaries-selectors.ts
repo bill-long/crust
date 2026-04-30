@@ -8,7 +8,7 @@ export function getSpaceRooms(
 	spaceId: string,
 ): RoomSummary[] {
 	const space = summaries[spaceId];
-	if (!space) return [];
+	if (!space?.isSpace || space.membership !== "join") return [];
 
 	return space.children
 		.map((id) => summaries[id])
@@ -30,7 +30,8 @@ export function getSpaceUnreadRollup(
 	spaceId: string,
 ): { unread: number; highlight: number } {
 	const space = summaries[spaceId];
-	if (!space) return { unread: 0, highlight: 0 };
+	if (!space?.isSpace || space.membership !== "join")
+		return { unread: 0, highlight: 0 };
 
 	let unread = 0;
 	let highlight = 0;
