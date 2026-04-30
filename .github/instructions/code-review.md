@@ -3,6 +3,44 @@
 When running local code reviews (via the code-review agent), use these prompt
 templates. They encode lessons learned from prior review rounds on this project.
 
+## Checking for Copilot PR Review Comments
+
+After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
+use this GraphQL query to reliably detect unaddressed comments. **Do NOT rely on
+REST API comment counts or timestamp comparisons** — comments can arrive at the
+same timestamp as the review entry and will be missed.
+
+```bash
+gh api graphql -f query='{
+  repository(owner: "bill-long", name: "crust") {
+    pullRequest(number: PR_NUMBER) {
+      reviewThreads(last: 50) {
+        nodes {
+          isOutdated
+          path
+          line
+          comments(last: 1) {
+            nodes { author { login } createdAt body }
+          }
+        }
+      }
+    }
+  }
+}' --jq '[
+  .data.repository.pullRequest.reviewThreads.nodes[]
+  | select(.isOutdated == false)
+  | select(.comments.nodes[-1].author.login | test("copilot"))
+] | length'
+```
+
+- **0** = clean review, all comments addressed
+- **>0** = unaddressed comments; pipe through `| .[] | {path, line, body:
+  .comments.nodes[-1].body[0:120]}` to see them
+
+Always run this check after confirming a new Copilot review exists (check
+`gh api /repos/.../pulls/N/reviews` for latest commit). A review with 0
+REST API "new comments" can still have new threads visible only via GraphQL.
+
 ## Scoped Pass
 
 Describe what changed, then include:

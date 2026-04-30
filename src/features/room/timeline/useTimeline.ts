@@ -68,8 +68,8 @@ function eventToTimelineEvent(
 		senderName: member?.name ?? sender,
 		timestamp: event.getTs(),
 		type: event.getType(),
-		msgtype: content.msgtype ?? "",
-		body: content.body ?? "",
+		msgtype: typeof content.msgtype === "string" ? content.msgtype : "",
+		body: typeof content.body === "string" ? content.body : "",
 		imageUrl,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
@@ -85,6 +85,8 @@ function isDisplayable(event: MatrixEvent): boolean {
 		type === "m.sticker"
 	);
 }
+
+const MAX_TIMELINE_EVENTS = 500;
 
 export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
@@ -192,6 +194,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		setEvents(
 			produce((draft) => {
 				draft.push(eventToTimelineEvent(event, room, client));
+				// Cap timeline size to prevent unbounded growth
+				if (draft.length > MAX_TIMELINE_EVENTS) {
+					draft.splice(0, draft.length - MAX_TIMELINE_EVENTS);
+				}
 			}),
 		);
 	}
