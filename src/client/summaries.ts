@@ -26,6 +26,18 @@ export interface RoomSummary {
 
 export type SummariesStore = Record<string, RoomSummary>;
 
+function getSpaceChildren(room: Room): string[] {
+	const children: string[] = [];
+	const childEvents = room.currentState.getStateEvents("m.space.child");
+	for (const ev of childEvents) {
+		if (ev.getContent()?.via) {
+			const stateKey = ev.getStateKey();
+			if (stateKey) children.push(stateKey);
+		}
+	}
+	return children;
+}
+
 function buildSummary(
 	room: Room,
 	baseUrl: string,
@@ -45,17 +57,6 @@ function buildSummary(
 	const createEvent = room.currentState.getStateEvents("m.room.create", "");
 	const isSpace = createEvent?.getContent()?.type === "m.space";
 
-	const children: string[] = [];
-	if (isSpace) {
-		const childEvents = room.currentState.getStateEvents("m.space.child");
-		for (const ev of childEvents) {
-			if (ev.getContent()?.via) {
-				const stateKey = ev.getStateKey();
-				if (stateKey) children.push(stateKey);
-			}
-		}
-	}
-
 	return {
 		roomId: room.roomId,
 		name: room.name,
@@ -69,7 +70,7 @@ function buildSummary(
 		isEncrypted: room.hasEncryptionStateEvent(),
 		isDirect: dmRoomIds.has(room.roomId),
 		isSpace,
-		children,
+		children: isSpace ? getSpaceChildren(room) : [],
 	};
 }
 
@@ -228,15 +229,7 @@ export function createSummariesStore(client: MatrixClient): {
 		} else if (type === "m.space.child") {
 			const createEv = room.currentState.getStateEvents("m.room.create", "");
 			if (createEv?.getContent()?.type === "m.space") {
-				const childEvents = room.currentState.getStateEvents("m.space.child");
-				const children: string[] = [];
-				for (const ev of childEvents) {
-					if (ev.getContent()?.via) {
-						const stateKey = ev.getStateKey();
-						if (stateKey) children.push(stateKey);
-					}
-				}
-				setSummaries(room.roomId, "children", children);
+				setSummaries(room.roomId, "children", getSpaceChildren(room));
 			}
 		}
 	}

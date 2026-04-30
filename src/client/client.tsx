@@ -22,7 +22,7 @@ export type AppSyncState =
 	| "error"
 	| "stopped";
 
-export type CryptoState = "loading" | "ready" | "error" | "unsupported";
+export type CryptoState = "loading" | "ready" | "error";
 
 interface ClientContextValue {
 	client: MatrixClient;
