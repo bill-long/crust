@@ -69,24 +69,21 @@ export function getDmRooms(summaries: SummariesStore): RoomSummary[] {
  * Rooms not belonging to any space and not DMs, sorted by recent activity.
  */
 export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
-	// Collect all room IDs that are children of any space
 	const spacedRoomIds = new Set<string>();
+	const candidates: RoomSummary[] = [];
+
 	for (const s of Object.values(summaries)) {
 		if (s.isSpace && s.membership === "join") {
 			for (const childId of s.children) {
 				spacedRoomIds.add(childId);
 			}
+		} else if (!s.isSpace && !s.isDirect && s.membership === "join") {
+			candidates.push(s);
 		}
 	}
 
-	return Object.values(summaries)
-		.filter(
-			(s) =>
-				!s.isSpace &&
-				!s.isDirect &&
-				s.membership === "join" &&
-				!spacedRoomIds.has(s.roomId),
-		)
+	return candidates
+		.filter((s) => !spacedRoomIds.has(s.roomId))
 		.sort(
 			(a, b) =>
 				(b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0),

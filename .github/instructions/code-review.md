@@ -83,3 +83,10 @@ additions at the end of the category list:
 - **Prefer canonical type imports.** When a library exports a named type
   (e.g., `SetStoreFunction<T>`), use it instead of deriving types with
   `ReturnType<typeof ...>`. Derived types are fragile and non-idiomatic.
+- **A11y goes beyond keyboard nav.** Icon-only buttons need `aria-label`,
+  not just `title`. Color-only distinctions (e.g., red vs grey badges) need
+  text alternatives. Selected/current states need `aria-current` or
+  `aria-pressed`. Emoji used as icons need `aria-label` on the container.
+- **Display data can be degenerate too.** SDK room names can be empty strings.
+  Always provide a fallback for display values derived from external data
+  (e.g., `name.charAt(0) || "?"`).

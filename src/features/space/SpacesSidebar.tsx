@@ -25,6 +25,8 @@ const SpacesSidebar: Component = () => {
 						: "bg-neutral-700 text-neutral-300 hover:rounded-xl hover:bg-neutral-600"
 				}`}
 				title="Home"
+				aria-label="Home"
+				aria-current={!params.spaceId ? "page" : undefined}
 			>
 				<svg
 					class="h-5 w-5"
@@ -64,12 +66,14 @@ const SpacesSidebar: Component = () => {
 									: "bg-neutral-700 text-neutral-300 hover:rounded-xl hover:bg-neutral-600"
 							}`}
 							title={space.name}
+							aria-label={space.name}
+							aria-pressed={isSelected()}
 						>
 							<Show
 								when={space.avatarUrl}
 								fallback={
 									<span class="text-sm font-semibold">
-										{space.name.charAt(0).toUpperCase()}
+										{space.name.charAt(0).toUpperCase() || "?"}
 									</span>
 								}
 							>

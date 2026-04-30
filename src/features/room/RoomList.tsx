@@ -22,11 +22,16 @@ const RoomEntry: Component<{
 					? "bg-neutral-700 text-white"
 					: "text-neutral-300 hover:bg-neutral-800"
 			}`}
+			aria-current={props.isSelected ? "true" : undefined}
 		>
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-1">
 					<Show when={props.room.isEncrypted}>
-						<span class="text-xs text-green-500" title="Encrypted">
+						<span
+							class="text-xs text-green-500"
+							role="img"
+							aria-label="Encrypted"
+						>
 							🔒
 						</span>
 					</Show>
@@ -45,6 +50,8 @@ const RoomEntry: Component<{
 					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${
 						props.room.highlightCount > 0 ? "bg-red-500" : "bg-neutral-500"
 					}`}
+					role="status"
+					aria-label={`${props.room.unreadCount} unread${props.room.highlightCount > 0 ? `, ${props.room.highlightCount} highlighted` : ""}`}
 				>
 					{props.room.unreadCount > 99 ? "99+" : props.room.unreadCount}
 				</span>
