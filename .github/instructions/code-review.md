@@ -87,6 +87,11 @@ additions at the end of the category list:
   not just `title`. Color-only distinctions (e.g., red vs grey badges) need
   text alternatives. Selected/current states need `aria-current` or
   `aria-pressed`. Emoji used as icons need `aria-label` on the container.
-- **Display data can be degenerate too.** SDK room names can be empty strings.
-  Always provide a fallback for display values derived from external data
-  (e.g., `name.charAt(0) || "?"`).
+- **Display data can be degenerate too.** SDK room names can be empty strings
+  or whitespace-only. Always use `.trim()` before testing — `||` alone does
+  not catch whitespace-only strings. Apply this to names, labels, titles,
+  aria-labels, and any text rendered in the UI.
+- **When fixing a guard in one function, audit siblings.** Selector functions
+  that share a contract (e.g., getSpaceRooms, getSpaceUnreadRollup,
+  getOrphanRooms) must apply the same precondition checks. When you add a
+  guard to one, scan for related functions that need the same fix.
