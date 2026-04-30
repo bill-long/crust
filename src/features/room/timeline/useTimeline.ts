@@ -11,7 +11,6 @@ import { createStore, produce } from "solid-js/store";
 
 export interface TimelineEvent {
 	eventId: string;
-	sender: string;
 	senderName: string;
 	timestamp: number;
 	type: string;
@@ -66,7 +65,6 @@ function eventToTimelineEvent(
 
 	return {
 		eventId: event.getId() ?? "",
-		sender,
 		senderName: member?.name ?? sender,
 		timestamp: event.getTs(),
 		type: event.getType(),
