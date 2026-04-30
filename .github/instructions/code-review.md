@@ -43,6 +43,11 @@ additions at the end of the category list:
 - Cross-file data flow: if file A produces a value consumed by file B, verify
   B handles all possible outputs from A. Read related files beyond the diff
   when needed (list them in the prompt).
+- Dead code and unused definitions: flag union type variants that are never
+  assigned, exported functions/types never imported, interface fields never
+  read, and enum members never referenced.
+- Intra-file duplication: when the same logic (3+ lines) appears in multiple
+  places within one file, flag it for extraction into a shared helper.
 ```
 
 ## Lessons Learned
@@ -65,3 +70,9 @@ additions at the end of the category list:
   sync state transition ordering, use non-deprecated APIs (loginRequest not
   login, initRustCrypto not initCrypto), and check that event callback
   signatures match the SDK version.
+- **Dead type variants are a code smell.** If a union type has a variant
+  that's never assigned anywhere in the diff, remove it. Speculative variants
+  invite consumers that never work.
+- **Intra-file duplication drifts.** When the same logic is copied within a
+  file (e.g., space-children extraction), extract a helper immediately.
+  Duplicates invariably diverge on the next edit.
