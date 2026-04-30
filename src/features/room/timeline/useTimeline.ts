@@ -83,11 +83,17 @@ function eventToTimelineEvent(
 
 function isDisplayable(event: MatrixEvent): boolean {
 	const type = event.getType();
-	return (
-		type === "m.room.message" ||
-		type === "m.room.encrypted" ||
-		type === "m.sticker"
-	);
+	if (
+		type !== "m.room.message" &&
+		type !== "m.room.encrypted" &&
+		type !== "m.sticker"
+	) {
+		return false;
+	}
+	// Filter out message edits (m.replace) — they update existing events
+	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
+	if (relType === "m.replace") return false;
+	return true;
 }
 
 const MAX_TIMELINE_EVENTS = 500;

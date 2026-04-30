@@ -59,7 +59,7 @@ const ResizeDivider: Component<{
 	let lastX = 0;
 
 	const onMouseDown = (e: MouseEvent): void => {
-		if (e.button !== 0) return;
+		if (e.button !== 0 || dragging) return;
 		e.preventDefault();
 		dragging = true;
 		lastX = e.clientX;
