@@ -220,7 +220,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	}
 
 	function onTimelineReset(room: Room | undefined): void {
-		if (!room || room.roomId !== currentRoomId) return;
+		if (!room || !currentRoomId || room.roomId !== currentRoomId) return;
 		loadRoom(currentRoomId);
 	}
 
@@ -243,7 +243,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	}
 
 	function onRoomAppeared(room: Room): void {
-		if (room.roomId === currentRoomId && loading()) {
+		if (currentRoomId && room.roomId === currentRoomId && loading()) {
 			loadRoom(currentRoomId);
 		}
 	}
