@@ -125,6 +125,43 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		setLoading(false);
 	}
 
+	function handleRedaction(room: Room, redactedId: string): void {
+		setEvents(
+			produce((draft) => {
+				const idx = draft.findIndex((e) => e.eventId === redactedId);
+				if (idx >= 0) {
+					const sourceEvent = room
+						.getLiveTimeline()
+						.getEvents()
+						.find((e) => e.getId() === redactedId);
+					if (sourceEvent) {
+						draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
+					} else {
+						draft.splice(idx, 1);
+					}
+				}
+
+				// Build lookup map once for O(1) access
+				const timelineEvents = room.getLiveTimeline().getEvents();
+				const eventMap = new Map<string, MatrixEvent>();
+				for (const evt of timelineEvents) {
+					const id = evt.getId();
+					if (id) eventMap.set(id, evt);
+				}
+
+				// Recompute reactions for all events (redacted content is
+				// already cleared by the SDK, so we can't identify which
+				// parent a redacted reaction belonged to)
+				for (let i = 0; i < draft.length; i++) {
+					const evt = eventMap.get(draft[i].eventId);
+					if (evt) {
+						draft[i] = eventToTimelineEvent(evt, room, client);
+					}
+				}
+			}),
+		);
+	}
+
 	function onTimelineEvent(
 		event: MatrixEvent,
 		eventRoom: Room | undefined,
@@ -162,45 +199,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		}
 
 		if (!isDisplayable(event)) {
-			// Handle redactions: update the redacted event if displayable,
-			// then recompute all reactions (redacted content is already
-			// cleared by the SDK, so we can't identify which parent
-			// a redacted reaction belonged to).
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {
-					setEvents(
-						produce((draft) => {
-							const idx = draft.findIndex((e) => e.eventId === redactedId);
-							if (idx >= 0) {
-								const sourceEvent = room
-									.getLiveTimeline()
-									.getEvents()
-									.find((e) => e.getId() === redactedId);
-								if (sourceEvent) {
-									draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
-								} else {
-									draft.splice(idx, 1);
-								}
-							}
-
-							// Build lookup map once for O(1) access
-							const timelineEvents = room.getLiveTimeline().getEvents();
-							const eventMap = new Map<string, MatrixEvent>();
-							for (const evt of timelineEvents) {
-								const id = evt.getId();
-								if (id) eventMap.set(id, evt);
-							}
-
-							// Recompute reactions for all events
-							for (let i = 0; i < draft.length; i++) {
-								const evt = eventMap.get(draft[i].eventId);
-								if (evt) {
-									draft[i] = eventToTimelineEvent(evt, room, client);
-								}
-							}
-						}),
-					);
+					handleRedaction(room, redactedId);
 				}
 			}
 			return;
@@ -231,6 +233,57 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 		const eid = event.getId();
 		if (!eid) return;
+
+		// After decryption, the event type changes from m.room.encrypted to
+		// the cleartext type. Re-check displayability: encrypted reactions,
+		// redactions, and edits were initially appended as m.room.encrypted
+		// placeholders and must now be reclassified.
+		// Decryption failures always update in place (SDK sets synthetic content).
+		if (!event.isDecryptionFailure() && !isDisplayable(event)) {
+			const decryptedType = event.getType();
+
+			setEvents(
+				produce((draft) => {
+					const idx = draft.findIndex((e) => e.eventId === eid);
+					if (idx >= 0) draft.splice(idx, 1);
+				}),
+			);
+
+			if (decryptedType === "m.reaction") {
+				const relatesTo = event.getContent()?.["m.relates_to"];
+				if (relatesTo?.event_id) {
+					const targetId = relatesTo.event_id as string;
+					const rid = currentRoomId;
+					// Defer to next microtask so SDK relation aggregation
+					// has finished processing the newly-decrypted reaction
+					queueMicrotask(() => {
+						if (currentRoomId !== rid) return;
+						const r = client.getRoom(rid);
+						if (!r) return;
+						const targetEvent = r
+							.getLiveTimeline()
+							.getEvents()
+							.find((e) => e.getId() === targetId);
+						if (!targetEvent) return;
+						const updated = eventToTimelineEvent(targetEvent, r, client);
+						setEvents(
+							produce((draft) => {
+								const idx = draft.findIndex((e) => e.eventId === targetId);
+								if (idx >= 0) {
+									draft[idx] = updated;
+								}
+							}),
+						);
+					});
+				}
+			} else if (decryptedType === "m.room.redaction") {
+				const redactedId = event.event.redacts;
+				if (typeof redactedId === "string") {
+					handleRedaction(room, redactedId);
+				}
+			}
+			return;
+		}
 
 		setEvents(
 			produce((draft) => {

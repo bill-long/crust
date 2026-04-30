@@ -72,21 +72,23 @@ const TimelineItem: Component<{ event: TimelineEvent }> = (props) => {
 							<p class="text-sm italic text-neutral-500">Decrypting…</p>
 						}
 					>
-						{/* Image */}
-						<Show when={(ev.msgtype === "m.image" || ev.type === "m.sticker") && ev.imageUrl}>
+						<Show
+							when={
+								(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
+								ev.imageUrl
+							}
+							fallback={
+								<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
+									{ev.body}
+								</p>
+							}
+						>
 							<img
 								src={ev.imageUrl ?? ""}
 								alt={ev.body?.trim() || "Image"}
 								class="mt-1 max-h-64 max-w-sm rounded"
 								loading="lazy"
 							/>
-						</Show>
-
-						{/* Text */}
-						<Show when={ev.msgtype !== "m.image" && ev.type !== "m.sticker"}>
-							<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
-								{ev.body}
-							</p>
 						</Show>
 					</Show>
 				</Show>
