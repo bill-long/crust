@@ -105,7 +105,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 		const timeline = room.getLiveTimeline().getEvents();
 		const displayable = timeline
-			.filter(isDisplayable)
+			.filter((e) => isDisplayable(e) && e.getId())
 			.map((e) => eventToTimelineEvent(e, room, client));
 		setEvents(displayable);
 		setLoading(false);
@@ -167,15 +167,17 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 								}
 							}
 
-							// Recompute reactions for all events — redacted
-							// event content is already cleared by the SDK,
-							// so we can't look up the parent. The relations
-							// API excludes redacted reactions automatically.
+							// Build lookup map once for O(1) access
+							const timelineEvents = room.getLiveTimeline().getEvents();
+							const eventMap = new Map<string, MatrixEvent>();
+							for (const evt of timelineEvents) {
+								const id = evt.getId();
+								if (id) eventMap.set(id, evt);
+							}
+
+							// Recompute reactions for all events
 							for (let i = 0; i < draft.length; i++) {
-								const evt = room
-									.getLiveTimeline()
-									.getEvents()
-									.find((e) => e.getId() === draft[i].eventId);
+								const evt = eventMap.get(draft[i].eventId);
 								if (evt) {
 									draft[i] = eventToTimelineEvent(evt, room, client);
 								}
@@ -186,6 +188,8 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 			}
 			return;
 		}
+
+		if (!event.getId()) return;
 
 		setEvents(
 			produce((draft) => {
