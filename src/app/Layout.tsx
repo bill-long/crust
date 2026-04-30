@@ -1,12 +1,15 @@
-import { useNavigate } from "@solidjs/router";
-import type { Component } from "solid-js";
+import { useNavigate, useParams } from "@solidjs/router";
+import { type Component, Show } from "solid-js";
 import { useClient } from "../client/client";
+import { ResizableLayout } from "../components/ResizableLayout";
 import RoomList from "../features/room/RoomList";
+import TimelineView from "../features/room/timeline/TimelineView";
 import SpacesSidebar from "../features/space/SpacesSidebar";
 import { clearSession } from "../stores/session";
 
 const Layout: Component = () => {
 	const { client, syncState } = useClient();
+	const params = useParams<{ roomId?: string }>();
 	const navigate = useNavigate();
 
 	const handleLogout = async (): Promise<void> => {
@@ -42,23 +45,27 @@ const Layout: Component = () => {
 				</div>
 			</header>
 
-			{/* Three-column layout */}
-			<div class="flex min-h-0 flex-1">
-				<SpacesSidebar />
-				<RoomList />
-
-				{/* Main area */}
-				<main class="flex flex-1 flex-col">
-					<div class="flex flex-1 items-center justify-center">
-						<div class="text-center">
-							<p class="text-neutral-500">Select a room to start chatting</p>
-							<p class="mt-1 text-xs text-neutral-700">
-								Timeline coming in Phase 2 PR 3
-							</p>
-						</div>
-					</div>
-				</main>
-			</div>
+			{/* Three-column resizable layout */}
+			<ResizableLayout
+				spaces={<SpacesSidebar />}
+				roomList={<RoomList />}
+				main={
+					<Show
+						when={params.roomId}
+						fallback={
+							<main class="flex flex-1 flex-col">
+								<div class="flex flex-1 items-center justify-center">
+									<p class="text-neutral-500">
+										Select a room to start chatting
+									</p>
+								</div>
+							</main>
+						}
+					>
+						{(roomId) => <TimelineView roomId={roomId()} />}
+					</Show>
+				}
+			/>
 		</div>
 	);
 };

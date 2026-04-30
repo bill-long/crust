@@ -102,7 +102,7 @@ const RoomList: Component = () => {
 	};
 
 	return (
-		<aside class="flex w-64 shrink-0 flex-col border-r border-neutral-800 bg-neutral-900/50">
+		<aside class="flex h-full flex-col border-r border-neutral-800 bg-neutral-900/50">
 			<div class="border-b border-neutral-800 px-4 py-3">
 				<span class="text-sm font-semibold text-neutral-300">
 					{spaceName()}
