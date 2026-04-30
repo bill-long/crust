@@ -74,7 +74,7 @@ const App: Component = () => {
 				<Route path="/" component={AuthGuard}>
 					<Route path="/" component={SyncGate}>
 						<Route path="/" component={HomePage} />
-						<Route path="/home" component={HomePage} />
+						<Route path="/home/:roomId?" component={HomePage} />
 						<Route path="/space/:spaceId/:roomId?" component={HomePage} />
 						<Route path="/dm/:roomId" component={HomePage} />
 						<Route path="/settings/*" component={HomePage} />
