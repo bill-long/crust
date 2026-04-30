@@ -47,6 +47,9 @@ const ResizeDivider: Component<{
 	onDrag: (delta: number) => void;
 	onDragEnd: () => void;
 	value: number;
+	min: number;
+	max: number;
+	label: string;
 }> = (props) => {
 	let dragging = false;
 	let lastX = 0;
@@ -99,6 +102,9 @@ const ResizeDivider: Component<{
 			role="separator"
 			aria-orientation="vertical"
 			aria-valuenow={props.value}
+			aria-valuemin={props.min}
+			aria-valuemax={props.max}
+			aria-label={props.label}
 			tabIndex={0}
 		/>
 	);
@@ -134,6 +140,9 @@ export const ResizableLayout: Component<{
 				}
 				onDragEnd={persist}
 				value={spacesWidth()}
+				min={MIN_SPACES}
+				max={MAX_SPACES}
+				label="Resize spaces sidebar"
 			/>
 			<div
 				style={{ width: `${roomListWidth()}px` }}
@@ -147,6 +156,9 @@ export const ResizableLayout: Component<{
 				}
 				onDragEnd={persist}
 				value={roomListWidth()}
+				min={MIN_ROOM_LIST}
+				max={MAX_ROOM_LIST}
+				label="Resize room list"
 			/>
 			<div class="min-w-0 flex-1">{props.main}</div>
 		</div>

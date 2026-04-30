@@ -57,7 +57,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	};
 
 	return (
-		<div class="flex h-full flex-col">
+		<div class="relative flex h-full flex-col">
 			{/* Room header */}
 			<div class="flex h-12 shrink-0 items-center border-b border-neutral-800 px-4">
 				<span class="text-sm font-semibold text-neutral-200">{roomName()}</span>

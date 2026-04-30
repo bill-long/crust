@@ -1,4 +1,5 @@
 import {
+	ClientEvent,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -104,14 +105,14 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	let currentRoomId: string | null = null;
 
 	function loadRoom(rid: string): void {
+		currentRoomId = rid;
 		const room = client.getRoom(rid);
 		if (!room) {
 			setEvents([]);
-			setLoading(false);
+			setLoading(true);
 			return;
 		}
 
-		currentRoomId = rid;
 		const timeline = room.getLiveTimeline().getEvents();
 		const displayable = timeline
 			.filter(isDisplayable)
@@ -188,6 +189,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		);
 	}
 
+	function onRoomAppeared(room: Room): void {
+		if (room.roomId === currentRoomId && loading()) {
+			loadRoom(currentRoomId);
+		}
+	}
+
 	// Initial load + reactive reload on room change
 	createEffect(() => {
 		loadRoom(roomId());
@@ -196,11 +203,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	client.on(RoomEvent.Timeline, onTimelineEvent);
 	client.on(RoomEvent.TimelineReset, onTimelineReset);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
+	client.on(ClientEvent.Room, onRoomAppeared);
 
 	onCleanup(() => {
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
 		client.off(MatrixEventEvent.Decrypted, onDecrypted);
+		client.off(ClientEvent.Room, onRoomAppeared);
 	});
 
 	return { events, loading };
