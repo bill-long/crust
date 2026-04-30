@@ -107,7 +107,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		const displayable = timeline
 			.filter((e) => isDisplayable(e) && e.getId())
 			.map((e) => eventToTimelineEvent(e, room, client));
-		setEvents(displayable);
+		setEvents(
+			displayable.length > MAX_TIMELINE_EVENTS
+				? displayable.slice(-MAX_TIMELINE_EVENTS)
+				: displayable,
+		);
 		setLoading(false);
 	}
 
@@ -148,7 +152,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		}
 
 		if (!isDisplayable(event)) {
-			// Handle redactions by updating only the affected event
+			// Handle redactions: update the redacted event if displayable,
+			// then recompute all reactions (redacted content is already
+			// cleared by the SDK, so we can't identify which parent
+			// a redacted reaction belonged to).
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {

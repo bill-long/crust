@@ -30,6 +30,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		getScrollElement: () => scrollRef ?? null,
 		estimateSize: () => 60,
 		overscan: 10,
+		getItemKey: (index: number) => events[index]?.eventId ?? index,
 	});
 
 	// Reset scroll position when switching rooms
