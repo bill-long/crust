@@ -35,7 +35,9 @@ const RoomEntry: Component<{
 							🔒
 						</span>
 					</Show>
-					<span class="truncate text-sm font-medium">{props.room.name}</span>
+					<span class="truncate text-sm font-medium">
+						{props.room.name || "Unnamed room"}
+					</span>
 				</div>
 				<Show when={props.room.lastMessage}>
 					<p class="truncate text-xs text-neutral-500">
@@ -78,7 +80,8 @@ const RoomList: Component = () => {
 
 	const spaceName = createMemo(() => {
 		if (isHome() || !params.spaceId) return "Home";
-		return summaries[params.spaceId]?.name ?? "Space";
+		const name = summaries[params.spaceId]?.name;
+		return name?.trim() ? name : "Space";
 	});
 
 	const navigateToRoom = (roomId: string): void => {

@@ -65,8 +65,8 @@ const SpacesSidebar: Component = () => {
 									? "rounded-xl bg-pink-600 text-white"
 									: "bg-neutral-700 text-neutral-300 hover:rounded-xl hover:bg-neutral-600"
 							}`}
-							title={space.name}
-							aria-label={space.name}
+							title={space.name || "Unnamed space"}
+							aria-label={space.name || "Unnamed space"}
 							aria-pressed={isSelected()}
 						>
 							<Show
@@ -90,6 +90,8 @@ const SpacesSidebar: Component = () => {
 									class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${
 										rollup().highlight > 0 ? "bg-red-500" : "bg-neutral-500"
 									}`}
+									role="status"
+									aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
 								>
 									{rollup().unread > 99 ? "99+" : rollup().unread}
 								</span>
