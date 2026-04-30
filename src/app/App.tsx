@@ -1,6 +1,6 @@
 import type { RouteSectionProps } from "@solidjs/router";
 import { Route, Router, useNavigate } from "@solidjs/router";
-import { type Component, Match, onMount, Switch } from "solid-js";
+import { type Component, Match, onMount, Show, Switch } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
 import LoginPage from "../features/auth/LoginPage";
 import { loadSession } from "../stores/session";
@@ -25,7 +25,7 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 
 /** Loading gate — shows spinner until initial sync completes. */
 const SyncGate: Component<RouteSectionProps> = (props) => {
-	const { syncState } = useClient();
+	const { syncState, cryptoState } = useClient();
 
 	return (
 		<Switch>
@@ -33,7 +33,11 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				<div class="flex h-screen items-center justify-center bg-neutral-950">
 					<div class="text-center">
 						<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
-						<p class="text-neutral-400">Syncing…</p>
+						<p class="text-neutral-400">
+							{cryptoState() === "loading"
+								? "Initializing encryption…"
+								: "Syncing…"}
+						</p>
 					</div>
 				</div>
 			</Match>
@@ -47,7 +51,15 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 					</div>
 				</div>
 			</Match>
-			<Match when={true}>{props.children}</Match>
+			<Match when={true}>
+				<Show when={cryptoState() === "error"}>
+					<div class="border-b border-amber-800 bg-amber-950/50 px-4 py-2 text-center text-sm text-amber-300">
+						Encryption initialization failed — encrypted messages may not be
+						readable.
+					</div>
+				</Show>
+				{props.children}
+			</Match>
 		</Switch>
 	);
 };
