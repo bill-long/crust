@@ -14,22 +14,37 @@ export async function discoverHomeserver(input: string): Promise<string> {
 		}
 	}
 
-	// If the input looks like a URL, parse it properly to extract origin + strip path
+	// Normalize through URL parsing so paths/query/fragments are stripped
+	// consistently for both explicit URLs and bare server names.
 	let scheme = "https";
-	if (/^https?:\/\//i.test(server)) {
-		try {
-			const parsed = new URL(server);
+	const hasExplicitScheme = /^https?:\/\//i.test(server);
+	try {
+		const parsed = new URL(hasExplicitScheme ? server : `https://${server}`);
+		if (hasExplicitScheme) {
 			scheme = parsed.protocol.replace(":", "");
-			server = parsed.host;
-		} catch {
-			// Malformed URL — strip prefix and hope for the best
-			scheme = /^http:\/\//i.test(server) ? "http" : "https";
-			server = server.replace(/^https?:\/\//i, "").replace(/\/.*$/, "");
 		}
+		server = parsed.host;
+	} catch {
+		// Malformed input — strip scheme/path and fall back
+		if (hasExplicitScheme) {
+			scheme = /^http:\/\//i.test(server) ? "http" : "https";
+		}
+		server = server
+			.replace(/^https?:\/\//i, "")
+			.replace(/[/?#].*$/, "")
+			.replace(/\/+$/, "");
 	}
 
-	// Strip trailing slashes from bare input
-	server = server.replace(/\/+$/, "");
+	if (!server) {
+		throw new Error("Please enter a homeserver address.");
+	}
+
+	// Validate server is a usable hostname
+	try {
+		new URL(`https://${server}`);
+	} catch {
+		throw new Error("Please enter a valid homeserver address.");
+	}
 
 	// Try .well-known discovery (always over HTTPS per Matrix spec)
 	try {
@@ -38,7 +53,14 @@ export async function discoverHomeserver(input: string): Promise<string> {
 			const data = await res.json();
 			const baseUrl: string | undefined = data?.["m.homeserver"]?.base_url;
 			if (baseUrl) {
-				return baseUrl.replace(/\/+$/, "");
+				try {
+					const parsed = new URL(baseUrl);
+					if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+						return baseUrl.replace(/\/+$/, "");
+					}
+				} catch {
+					// Invalid well-known URL — fall through to direct
+				}
 			}
 		}
 	} catch {

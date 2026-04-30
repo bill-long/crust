@@ -76,10 +76,18 @@ const LoginPage: Component = () => {
 			// Prefer well_known from the login response for the persisted URL
 			let resolvedUrl = baseUrl;
 			if (response.well_known?.["m.homeserver"]?.base_url) {
-				resolvedUrl = response.well_known["m.homeserver"].base_url.replace(
+				const candidate = response.well_known["m.homeserver"].base_url.replace(
 					/\/+$/,
 					"",
 				);
+				try {
+					const parsed = new URL(candidate);
+					if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+						resolvedUrl = candidate;
+					}
+				} catch {
+					// Malformed well_known URL — keep the discovered baseUrl
+				}
 			}
 
 			// Persist session
