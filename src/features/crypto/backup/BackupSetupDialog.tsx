@@ -91,6 +91,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 		try {
 			await navigator.clipboard.writeText(key);
 			setCopied(true);
+			if (copiedTimer !== undefined) clearTimeout(copiedTimer);
 			copiedTimer = setTimeout(() => {
 				copiedTimer = undefined;
 				if (!disposed) setCopied(false);

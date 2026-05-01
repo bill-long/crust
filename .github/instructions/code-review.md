@@ -86,6 +86,14 @@ Always run this check after confirming a new Copilot review exists (check
 `gh api /repos/.../pulls/N/reviews` for latest commit). A review with 0
 REST API "new comments" can still have new threads visible only via GraphQL.
 
+**IMPORTANT: GraphQL eventual consistency.** After the REST API confirms a
+review exists for HEAD, the GraphQL `reviewThreads` query may not yet include
+newly created threads. Do NOT declare "0 comments" on a single check
+immediately after REST confirmation. Instead, poll GraphQL **at least 3 times
+at 10-second intervals** after REST confirms the review exists. Only declare
+clean after all polls return 0. A single 0 immediately after REST confirmation
+is unreliable — threads can take 10-30 seconds to propagate.
+
 ## Scoped Pass
 
 Describe what changed, then include:
@@ -443,6 +451,11 @@ additions at the end of the category list:
   A timer that fires after component unmount will update disposed
   signals. Store the timer ID and `clearTimeout` in `onCleanup`.
   Also guard the callback with a `disposed` check for safety.
+  **Additionally: clear existing timers before creating new ones.**
+  When a timer-setting function can be called repeatedly (e.g., a
+  "Copy" button clicked multiple times), each call must
+  `clearTimeout(existingTimer)` before `setTimeout(...)`. Otherwise
+  earlier timers still fire and can revert state prematurely.
 - **Blob URL revocation must be deferred after programmatic clicks.**
   `URL.revokeObjectURL(url)` immediately after `a.click()` can fail
   because the browser hasn't consumed the URL yet. Wrap the
