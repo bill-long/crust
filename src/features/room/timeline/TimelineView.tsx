@@ -78,7 +78,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		const ev = events.find((e) => e.eventId === eventId);
 		if (!ev) return;
 
-		const existingId = ev.myReactions[key];
+		const existingId = Object.hasOwn(ev.myReactions, key)
+			? ev.myReactions[key]
+			: undefined;
 		try {
 			if (existingId) {
 				await client.redactEvent(props.roomId, existingId);

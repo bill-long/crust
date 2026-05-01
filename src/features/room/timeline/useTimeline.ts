@@ -43,8 +43,8 @@ function eventToTimelineEvent(
 	}
 
 	// Aggregate reactions from SDK relations
-	const reactions: TimelineEvent["reactions"] = {};
-	const myReactions: TimelineEvent["myReactions"] = {};
+	const reactions = Object.create(null) as TimelineEvent["reactions"];
+	const myReactions = Object.create(null) as TimelineEvent["myReactions"];
 	const myUserId = client.getUserId();
 	try {
 		const eventId = event.getId();
