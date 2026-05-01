@@ -188,6 +188,39 @@ additions at the end of the category list:
   usage, prefer `as unknown as TargetType` over `as any`. The double
   cast preserves type checking for the rest of the expression while
   working around the specific incompatibility.
+- State lifecycle across mode transitions: when a component supports
+  multiple modes (send/edit/reply), verify ALL signals and local
+  variables are properly initialized, cleared, or restored when
+  transitioning between modes. Common misses: entering edit mode
+  doesn't clear mention/picker state from the previous send;
+  switching edit targets doesn't reset state from the previous edit;
+  failed sends clear state that isn't restored in the catch block.
+  Audit every mode transition for every signal.
+- SDK return value edge cases: when using SDK methods that return
+  data (getEventReadUpTo, getContent, getUserId, getJoinedMembers),
+  verify the return value is valid in the consuming context — not
+  just non-null. A receipt can point at a non-displayable event; a
+  member userId already contains a leading `@`; an encrypted event's
+  content hides relation metadata until decryption. Test: "what
+  happens if this SDK method returns a technically-valid but
+  unexpected value?"
+- Reactive computation deduplication: when a condition is checked
+  both inside a component and by its parent (e.g., filtering a list
+  to check if any items match, then passing the full list to a child
+  that filters again), extract the shared computation into a single
+  memo. Duplicate reactive work multiplies per-keystroke cost in
+  interactive contexts like autocomplete.
+- ARIA attribute lifecycle: aria-controls must reference an element
+  that exists in the DOM. When the referenced element is conditionally
+  rendered (e.g., a picker that only renders when filtered items > 0),
+  the ARIA attribute must track the same condition. Also: hard-coded
+  IDs on reusable components will collide when multiple instances
+  render — use createUniqueId() or similar.
+- Token replacement completeness: when replacing a user-initiated
+  token (e.g., @partial → @DisplayName), replace the ENTIRE token
+  including any characters after the caret. Also verify the
+  replacement text matches what will appear in both plaintext body
+  and formatted HTML (e.g., include the @ prefix in link text).
 ```
 
 ## Lessons Learned
@@ -291,3 +324,34 @@ additions at the end of the category list:
 - **Prefer typed casts over `any`.** When SDK types are too restrictive,
   use `as unknown as TargetType` instead of `as any`. The double cast
   preserves type checking for the rest of the expression.
+- **Audit every mode transition for every signal.** When a component
+  has multiple modes (send/edit/reply, picker open/closed), each
+  transition must initialize, clear, or restore ALL relevant state.
+  The most common miss: entering edit mode without clearing mention
+  state from the send path, or failed sends clearing state that
+  isn't restored in the catch block. Walk through each transition
+  and list every signal that should change.
+- **SDK return values can be technically valid but contextually wrong.**
+  `room.getEventReadUpTo()` can return a non-displayable event ID;
+  `member.userId` already contains `@`; encrypted event content
+  hides `m.relates_to` until decryption. Don't assume SDK returns
+  are directly usable — verify they make sense in the consuming
+  context.
+- **Reactive deduplication matters for interactive paths.** When the
+  same filter/computation runs in both a parent memo and a child
+  component (e.g., checking if any members match AND passing the
+  full list to a picker that filters again), extract it once. Per-
+  keystroke double-filtering is measurable in rooms with 1000+
+  members.
+- **ARIA references must track conditional rendering.** `aria-controls`
+  pointing at an element that isn't rendered is worse than no
+  `aria-controls` at all. When the referenced element is inside a
+  `<Show>`, the ARIA attribute must be gated on the same condition.
+  Hard-coded IDs on reusable components collide when multiple
+  instances render — use `createUniqueId()`.
+- **Token replacement must consume the full token.** When replacing
+  `@partial` with `@DisplayName`, include any trailing characters
+  after the caret that are part of the same token. Otherwise the
+  user gets `@DisplayName artialSuffix`. Also verify replacement
+  text appears identically in body and formatted_body (e.g., the
+  `@` prefix in mention links).

@@ -87,12 +87,14 @@ const Composer: Component<{
 		return name.includes(q) || uid.includes(q);
 	}
 
-	// Whether the picker is actually rendered (visible and has matching items)
-	const pickerRendered = createMemo(() => {
+	// Shared filtered member list — used by both picker and ARIA state
+	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
-		if (q === null) return false;
-		return roomMembers().some((m) => filterMember(m, q));
+		if (q === null) return [];
+		return roomMembers().filter((m) => filterMember(m, q));
 	});
+
+	const pickerRendered = () => filteredMembers().length > 0;
 
 	function detectMention(currentText?: string): void {
 		const el = textareaRef;
@@ -462,12 +464,12 @@ const Composer: Component<{
 			</Show>
 			<div class="relative">
 				<MentionPicker
-					items={roomMembers()}
+					items={filteredMembers()}
 					query={mentionQuery() ?? ""}
 					visible={mentionQuery() !== null}
 					onSelect={onMentionSelect}
 					onClose={() => setMentionQuery(null)}
-					filterFn={filterMember}
+					filterFn={(_item, _q) => true}
 					keyFn={(m) => m.userId}
 					renderItem={(member, highlighted) => (
 						<div class="flex items-center gap-2">
