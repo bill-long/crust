@@ -119,18 +119,21 @@ const Composer: Component<{
 		}
 	}
 
-	/** Prune mentions whose @DisplayName is no longer in the text as a whole token */
+	/** Prune mentions whose @DisplayName is no longer in non-code text */
 	function reconcileMentions(msg: string): Mention[] {
+		// Strip code blocks and inline code so mentions inside code don't count
+		const stripped = msg.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "");
 		return mentions().filter((m) => {
 			const token = `@${m.displayName}`;
-			// Scan all occurrences — keep if any has valid word boundaries
+			// Scan all occurrences in stripped text — keep if any has valid word boundaries
 			let searchFrom = 0;
-			while (searchFrom < msg.length) {
-				const idx = msg.indexOf(token, searchFrom);
+			while (searchFrom < stripped.length) {
+				const idx = stripped.indexOf(token, searchFrom);
 				if (idx < 0) return false;
-				const beforeOk = idx === 0 || !/\w/.test(msg[idx - 1]);
+				const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
 				const afterIdx = idx + token.length;
-				const afterOk = afterIdx >= msg.length || !/\w/.test(msg[afterIdx]);
+				const afterOk =
+					afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
 				if (beforeOk && afterOk) return true;
 				searchFrom = idx + 1;
 			}
@@ -479,7 +482,6 @@ const Composer: Component<{
 					onSelect={onMentionSelect}
 					onClose={() => setMentionQuery(null)}
 					filterFn={(_item, _q) => true}
-					keyFn={(m) => m.userId}
 					renderItem={(member, highlighted) => (
 						<div class="flex items-center gap-2">
 							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-[10px] font-semibold text-neutral-300">

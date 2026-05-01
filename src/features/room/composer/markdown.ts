@@ -48,23 +48,32 @@ export function formatMarkdown(
 	});
 
 	// Protect mentions with placeholders before markdown transforms
+	let mentionsApplied = false;
 	if (mentions && mentions.length > 0) {
 		for (const mention of mentions) {
 			const escapedName = escapeHtml(`@${mention.displayName}`);
 			const permalink = `https://matrix.to/#/${encodeURIComponent(mention.userId)}`;
 			const link = `<a href="${escapeHtml(permalink)}">${escapedName}</a>`;
-			protectedBlocks.push(link);
-			const placeholder = `${PH}${protectedBlocks.length - 1}${PH}`;
 			// Replace @DisplayName with both-side boundary check (no lookbehind for Safari)
 			const escaped = escapeHtml(`@${mention.displayName}`).replace(
 				/[.*+?^${}()|[\]\\]/g,
 				"\\$&",
 			);
 			const boundaryPattern = new RegExp(`(^|[^\\w])${escaped}(?!\\w)`, "g");
-			html = html.replace(
-				boundaryPattern,
-				(_match, prefix) => prefix + placeholder,
-			);
+			// Only add to protectedBlocks if replacement actually matches
+			let matched = false;
+			const placeholderIdx = protectedBlocks.length;
+			protectedBlocks.push(link);
+			const placeholder = `${PH}${placeholderIdx}${PH}`;
+			html = html.replace(boundaryPattern, (_match, prefix) => {
+				matched = true;
+				return prefix + placeholder;
+			});
+			if (!matched) {
+				protectedBlocks.pop();
+			} else {
+				mentionsApplied = true;
+			}
 		}
 	}
 
@@ -88,7 +97,7 @@ export function formatMarkdown(
 	});
 
 	// Track whether formatting was applied by comparing against plain escaped text
-	const hasMentions = mentions && mentions.length > 0;
+	const hasMentions = mentionsApplied;
 	let hasFormatting = protectedBlocks.length > 0;
 	if (!hasFormatting) {
 		const plainHtml = escapeHtml(text)

@@ -221,6 +221,23 @@ additions at the end of the category list:
   including any characters after the caret. Also verify the
   replacement text matches what will appear in both plaintext body
   and formatted HTML (e.g., include the @ prefix in link text).
+- Cross-domain rule consistency: when two functions apply the same
+  logical rule (e.g., "what counts as a real mention"), they must
+  share the rule, not duplicate it independently. If markdown
+  processing excludes code blocks from mention linking, the
+  reconciliation step must also exclude code blocks when deciding
+  which mentions are active. Trace every consumer of the rule and
+  verify they agree.
+- Speculative allocation: don't push entries into shared arrays
+  (protectedBlocks, result lists) before confirming the entry will
+  be used. Unused entries cause false positives in downstream checks
+  (e.g., hasFormatting becomes true even though no formatting was
+  applied). Push only after confirming the operation matched.
+- Dead API surface after refactors: when refactoring internal logic
+  (e.g., switching from key-based to index-based IDs), audit the
+  public API (props, return values, type definitions) for fields
+  that are no longer consumed. Dead props mislead future callers
+  and accumulate unused code.
 ```
 
 ## Lessons Learned
@@ -355,3 +372,18 @@ additions at the end of the category list:
   user gets `@DisplayName artialSuffix`. Also verify replacement
   text appears identically in body and formatted_body (e.g., the
   `@` prefix in mention links).
+- **Two functions applying the same rule must share it.** When
+  reconciliation says "this mention is active" and markdown says
+  "this mention gets linked", they must agree on what qualifies.
+  If markdown excludes code blocks from linking, reconciliation
+  must also exclude them — otherwise m.mentions includes users
+  whose @mention appears only inside backticks.
+- **Don't allocate before confirming the operation matched.**
+  Pushing into protectedBlocks before checking if replacement
+  matched causes hasFormatting to be true even when no formatting
+  was applied. Always confirm the operation succeeded before
+  recording its side effects.
+- **Audit public API after internal refactors.** When switching
+  from key-based to index-based IDs, the `keyFn` prop became dead
+  code but survived in the type definition. Dead props mislead
+  future callers and accumulate unused code.

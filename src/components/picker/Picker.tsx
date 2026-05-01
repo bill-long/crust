@@ -17,7 +17,6 @@ export interface PickerProps<T> {
 	onClose: () => void;
 	renderItem: (item: T, isHighlighted: boolean) => JSX.Element;
 	filterFn: (item: T, query: string) => boolean;
-	keyFn: (item: T) => string;
 	visible: boolean;
 	position: { bottom: number; left: number };
 }
