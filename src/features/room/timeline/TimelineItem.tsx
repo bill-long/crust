@@ -86,8 +86,12 @@ function formatTime(ts: number): string {
 
 const TimelineItem: Component<{
 	event: TimelineEvent;
+	isOwnMessage: boolean;
 	onReact: (key: string) => void;
 	onReply: () => void;
+	onEdit: () => void;
+	onDelete: () => void;
+	readReceipts?: { userId: string; displayName: string }[];
 }> = (props) => {
 	const ev = props.event;
 
@@ -125,6 +129,26 @@ const TimelineItem: Component<{
 						>
 							↩
 						</button>
+						<Show when={props.isOwnMessage && ev.msgtype === "m.text"}>
+							<button
+								type="button"
+								class="rounded px-1.5 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-300"
+								onClick={props.onEdit}
+								aria-label="Edit"
+							>
+								✏
+							</button>
+						</Show>
+						<Show when={props.isOwnMessage}>
+							<button
+								type="button"
+								class="rounded px-1.5 py-0.5 text-xs text-red-700 transition-colors hover:bg-red-900/30 hover:text-red-400"
+								onClick={props.onDelete}
+								aria-label="Delete"
+							>
+								🗑
+							</button>
+						</Show>
 					</span>
 				</div>
 
@@ -151,6 +175,9 @@ const TimelineItem: Component<{
 							fallback={
 								<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
 									{ev.body}
+									<Show when={ev.isEdited}>
+										<span class="ml-1 text-xs text-neutral-600">(edited)</span>
+									</Show>
 								</p>
 							}
 						>
@@ -170,6 +197,24 @@ const TimelineItem: Component<{
 					myReactions={ev.myReactions}
 					onReact={props.onReact}
 				/>
+
+				{/* Read receipts */}
+				<Show when={props.readReceipts && props.readReceipts.length > 0}>
+					<div class="mt-0.5 flex gap-0.5">
+						<For each={props.readReceipts}>
+							{(receipt) => (
+								<div
+									class="flex h-4 w-4 items-center justify-center rounded-full bg-neutral-700 text-[8px] font-semibold text-neutral-400"
+									title={receipt.displayName}
+									role="img"
+									aria-label={`Read by ${receipt.displayName}`}
+								>
+									{(receipt.displayName.trim() || "?").charAt(0).toUpperCase()}
+								</div>
+							)}
+						</For>
+					</div>
+				</Show>
 			</div>
 		</div>
 	);
