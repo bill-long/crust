@@ -4,7 +4,10 @@ import { useClient } from "../../../client/client";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { escapeHtml, formatMarkdown } from "./markdown";
 
-function buildReplyFallback(replyTo: TimelineEvent): {
+function buildReplyFallback(
+	replyTo: TimelineEvent,
+	roomId: string,
+): {
 	bodyPrefix: string;
 	htmlPrefix: string;
 } {
@@ -20,9 +23,12 @@ function buildReplyFallback(replyTo: TimelineEvent): {
 
 	const escapedSender = escapeHtml(replyTo.senderId);
 	const escapedBody = escapeHtml(replyTo.body).replace(/\n/g, "<br>");
+	const eventPermalink = `https://matrix.to/#/${encodeURIComponent(roomId)}/${encodeURIComponent(replyTo.eventId)}`;
+	const senderPermalink = `https://matrix.to/#/${encodeURIComponent(replyTo.senderId)}`;
 	const htmlPrefix =
 		`<mx-reply><blockquote>` +
-		`<a href="https://matrix.to/#/${encodeURIComponent(replyTo.senderId)}">${escapedSender}</a><br>` +
+		`<a href="${eventPermalink}">In reply to</a> ` +
+		`<a href="${senderPermalink}">${escapedSender}</a><br>` +
 		`${escapedBody}` +
 		`</blockquote></mx-reply>`;
 
@@ -66,7 +72,10 @@ const Composer: Component<{
 
 		// Add reply metadata if replying
 		if (props.replyTo) {
-			const { bodyPrefix, htmlPrefix } = buildReplyFallback(props.replyTo);
+			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
+				props.replyTo,
+				props.roomId,
+			);
 			const replyHtmlBody =
 				(content.formatted_body as string | undefined) ??
 				escapeHtml(content.body as string).replace(/\n/g, "<br>");
