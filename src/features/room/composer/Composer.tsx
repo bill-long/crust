@@ -1,15 +1,18 @@
+import type { RoomMember } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import {
 	type Component,
 	createEffect,
+	createMemo,
 	createSignal,
 	on,
 	onCleanup,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { createPicker } from "../../../components/picker/Picker";
 import type { TimelineEvent } from "../timeline/useTimeline";
-import { escapeHtml, formatMarkdown } from "./markdown";
+import { escapeHtml, formatMarkdown, type Mention } from "./markdown";
 
 function buildReplyFallback(
 	replyTo: TimelineEvent,
@@ -57,10 +60,98 @@ const Composer: Component<{
 	const [text, setText] = createSignal("");
 	const [sending, setSending] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
+	const [mentions, setMentions] = createSignal<Mention[]>([]);
+	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
 
 	let textareaRef: HTMLTextAreaElement | undefined;
 	let lastTypingSentAt = 0;
 	let typingRoomId: string | null = null;
+
+	// Mention picker
+	const {
+		Picker: MentionPicker,
+		handlePickerKey,
+		getActiveDescendant,
+	} = createPicker<RoomMember>();
+
+	const roomMembers = createMemo(() => {
+		const room = client.getRoom(props.roomId);
+		return room ? room.getJoinedMembers() : [];
+	});
+
+	function filterMember(member: RoomMember, query: string): boolean {
+		const q = query.toLowerCase();
+		const name = (member.name ?? "").toLowerCase();
+		const uid = member.userId.toLowerCase();
+		return name.includes(q) || uid.includes(q);
+	}
+
+	function detectMention(currentText?: string): void {
+		const el = textareaRef;
+		if (!el) return;
+		const pos = el.selectionStart;
+		const before = (currentText ?? el.value).slice(0, pos);
+		// Look for @ at start or after non-word char, capture query after it
+		const match = before.match(/(^|[^\w])@(\S*)$/);
+		if (match) {
+			setMentionQuery(match[2]);
+		} else {
+			setMentionQuery(null);
+		}
+	}
+
+	/** Prune mentions whose @DisplayName is no longer in the text as a whole token */
+	function reconcileMentions(msg: string): Mention[] {
+		return mentions().filter((m) => {
+			const token = `@${m.displayName}`;
+			// Scan all occurrences — keep if any has valid word boundaries
+			let searchFrom = 0;
+			while (searchFrom < msg.length) {
+				const idx = msg.indexOf(token, searchFrom);
+				if (idx < 0) return false;
+				const beforeOk = idx === 0 || !/\w/.test(msg[idx - 1]);
+				const afterIdx = idx + token.length;
+				const afterOk = afterIdx >= msg.length || !/\w/.test(msg[afterIdx]);
+				if (beforeOk && afterOk) return true;
+				searchFrom = idx + 1;
+			}
+			return false;
+		});
+	}
+
+	function onMentionSelect(member: RoomMember): void {
+		const el = textareaRef;
+		if (!el) return;
+		const pos = el.selectionStart;
+		const currentText = text();
+		const before = currentText.slice(0, pos);
+		// Find the @ that triggered this mention (search backward from caret)
+		const atIdx = before.lastIndexOf("@");
+		if (atIdx < 0) return;
+
+		const displayName = member.name?.trim() || member.userId;
+		const insertion = `@${displayName} `;
+		const after = currentText.slice(pos);
+		const newText = currentText.slice(0, atIdx) + insertion + after;
+
+		setText(newText);
+		setMentionQuery(null);
+
+		// Add to mentions list (deduplicate by userId)
+		setMentions((prev) => {
+			if (prev.some((m) => m.userId === member.userId)) return prev;
+			return [...prev, { userId: member.userId, displayName }];
+		});
+
+		// Move caret after inserted mention
+		requestAnimationFrame(() => {
+			if (!textareaRef) return;
+			const newPos = atIdx + insertion.length;
+			textareaRef.setSelectionRange(newPos, newPos);
+			textareaRef.focus();
+			autoResize();
+		});
+	}
 
 	// Pre-fill text when entering edit mode
 	createEffect(
@@ -88,6 +179,8 @@ const Composer: Component<{
 				typingRoomId = null;
 				setText("");
 				setError(null);
+				setMentions([]);
+				setMentionQuery(null);
 				requestAnimationFrame(autoResize);
 			},
 		),
@@ -133,7 +226,11 @@ const Composer: Component<{
 
 		// Edit mode: send m.replace event
 		if (props.editingEvent) {
-			const { body: newBody, formatted_body } = formatMarkdown(msg);
+			const currentMentions = reconcileMentions(msg);
+			const { body: newBody, formatted_body } = formatMarkdown(
+				msg,
+				currentMentions,
+			);
 			const newContent: Record<string, unknown> = {
 				msgtype: "m.text",
 				body: newBody,
@@ -141,6 +238,11 @@ const Composer: Component<{
 			if (formatted_body) {
 				newContent.format = "org.matrix.custom.html";
 				newContent.formatted_body = formatted_body;
+			}
+			if (currentMentions.length > 0) {
+				newContent["m.mentions"] = {
+					user_ids: currentMentions.map((m) => m.userId),
+				};
 			}
 
 			const content: Record<string, unknown> = {
@@ -158,8 +260,11 @@ const Composer: Component<{
 			}
 
 			const draft = text();
+			const draftMentions = mentions();
 			setText("");
 			setError(null);
+			setMentions([]);
+			setMentionQuery(null);
 			setSending(true);
 			stopTyping();
 			requestAnimationFrame(autoResize);
@@ -171,7 +276,10 @@ const Composer: Component<{
 				);
 				props.onSent?.();
 			} catch (e) {
-				if (!text()) setText(draft);
+				if (!text()) {
+					setText(draft);
+					setMentions(draftMentions);
+				}
 				setError(e instanceof Error ? e.message : "Failed to edit message");
 				requestAnimationFrame(autoResize);
 			} finally {
@@ -188,7 +296,8 @@ const Composer: Component<{
 		}
 
 		// Normal send mode
-		const { body, formatted_body } = formatMarkdown(msg);
+		const currentMentions = reconcileMentions(msg);
+		const { body, formatted_body } = formatMarkdown(msg, currentMentions);
 		const content: Record<string, unknown> = {
 			msgtype: "m.text",
 			body,
@@ -196,6 +305,11 @@ const Composer: Component<{
 		if (formatted_body) {
 			content.format = "org.matrix.custom.html";
 			content.formatted_body = formatted_body;
+		}
+		if (currentMentions.length > 0) {
+			content["m.mentions"] = {
+				user_ids: currentMentions.map((m) => m.userId),
+			};
 		}
 
 		// Add reply metadata if replying
@@ -216,8 +330,11 @@ const Composer: Component<{
 		}
 
 		const draft = text();
+		const draftMentions = mentions();
 		setText("");
 		setError(null);
+		setMentions([]);
+		setMentionQuery(null);
 		setSending(true);
 		stopTyping();
 		requestAnimationFrame(autoResize);
@@ -229,7 +346,10 @@ const Composer: Component<{
 			);
 			props.onSent?.();
 		} catch (e) {
-			if (!text()) setText(draft);
+			if (!text()) {
+				setText(draft);
+				setMentions(draftMentions);
+			}
 			setError(e instanceof Error ? e.message : "Failed to send message");
 			requestAnimationFrame(autoResize);
 		} finally {
@@ -245,10 +365,15 @@ const Composer: Component<{
 	};
 
 	const onKeyDown = (e: KeyboardEvent): void => {
+		// Picker gets first dibs on keyboard events
+		if (handlePickerKey(e)) return;
+
 		if (e.key === "Escape" && props.editingEvent) {
 			e.preventDefault();
 			stopTyping();
 			setText("");
+			setMentions([]);
+			setMentionQuery(null);
 			requestAnimationFrame(autoResize);
 			props.onCancelEdit?.();
 			return;
@@ -278,6 +403,8 @@ const Composer: Component<{
 							onClick={() => {
 								stopTyping();
 								setText("");
+								setMentions([]);
+								setMentionQuery(null);
 								requestAnimationFrame(autoResize);
 								props.onCancelEdit?.();
 							}}
@@ -318,25 +445,67 @@ const Composer: Component<{
 					{error()}
 				</div>
 			</Show>
-			<textarea
-				ref={textareaRef}
-				value={text()}
-				onInput={(e) => {
-					setText(e.currentTarget.value);
-					autoResize();
-					if (e.currentTarget.value.trim()) {
-						sendTyping();
-					} else {
+			<div class="relative">
+				<MentionPicker
+					items={roomMembers()}
+					query={mentionQuery() ?? ""}
+					visible={mentionQuery() !== null}
+					onSelect={onMentionSelect}
+					onClose={() => setMentionQuery(null)}
+					filterFn={filterMember}
+					keyFn={(m) => m.userId}
+					renderItem={(member, highlighted) => (
+						<div class="flex items-center gap-2">
+							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-[10px] font-semibold text-neutral-300">
+								{((member.name ?? "").trim() || "?").charAt(0).toUpperCase()}
+							</div>
+							<div class="min-w-0 flex-1">
+								<span
+									class={highlighted ? "text-neutral-100" : "text-neutral-300"}
+								>
+									{member.name?.trim() || member.userId}
+								</span>
+								<span class="ml-1 text-xs text-neutral-600">
+									{member.userId}
+								</span>
+							</div>
+						</div>
+					)}
+					position={{ bottom: 48, left: 0 }}
+				/>
+				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}
+				<textarea
+					ref={textareaRef}
+					value={text()}
+					onInput={(e) => {
+						const val = e.currentTarget.value;
+						setText(val);
+						autoResize();
+						detectMention(val);
+						if (val.trim()) {
+							sendTyping();
+						} else {
+							stopTyping();
+						}
+					}}
+					onBlur={() => {
 						stopTyping();
-					}
-				}}
-				onBlur={() => stopTyping()}
-				onKeyDown={onKeyDown}
-				placeholder={props.editingEvent ? "Edit message…" : "Send a message…"}
-				aria-label={props.editingEvent ? "Edit message" : "Message"}
-				class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
-				rows={1}
-			/>
+						setMentionQuery(null);
+					}}
+					onKeyUp={() => detectMention()}
+					onClick={() => detectMention()}
+					onKeyDown={onKeyDown}
+					placeholder={props.editingEvent ? "Edit message…" : "Send a message…"}
+					role={mentionQuery() !== null ? "combobox" : undefined}
+					aria-label={props.editingEvent ? "Edit message" : "Message"}
+					aria-expanded={mentionQuery() !== null ? true : undefined}
+					aria-activedescendant={getActiveDescendant()}
+					aria-autocomplete={mentionQuery() !== null ? "list" : undefined}
+					aria-controls={mentionQuery() !== null ? "picker-listbox" : undefined}
+					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+					rows={1}
+				/>
+			</div>
 		</div>
 	);
 };
