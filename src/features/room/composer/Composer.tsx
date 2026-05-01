@@ -499,7 +499,7 @@ const Composer: Component<{
 							</div>
 						</div>
 					)}
-					position={{ bottom: 48, left: 0 }}
+					position={{ bottom: "100%", left: "0" }}
 				/>
 				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}
 				<textarea

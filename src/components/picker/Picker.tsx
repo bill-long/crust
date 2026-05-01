@@ -18,7 +18,7 @@ export interface PickerProps<T> {
 	renderItem: (item: T, isHighlighted: boolean) => JSX.Element;
 	filterFn: (item: T, query: string) => boolean;
 	visible: boolean;
-	position: { bottom: number; left: number };
+	position: { bottom: string; left: string };
 }
 
 const ITEM_HEIGHT = 36;
@@ -117,8 +117,8 @@ export function createPicker<T>() {
 					id={listboxId}
 					class="absolute z-20 max-h-[216px] w-64 overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-lg"
 					style={{
-						bottom: `${props.position.bottom}px`,
-						left: `${props.position.left}px`,
+						bottom: props.position.bottom,
+						left: props.position.left,
 					}}
 					role="listbox"
 					aria-label="Suggestions"

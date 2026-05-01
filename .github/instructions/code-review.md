@@ -387,3 +387,8 @@ additions at the end of the category list:
   from key-based to index-based IDs, the `keyFn` prop became dead
   code but survived in the type definition. Dead props mislead
   future callers and accumulate unused code.
+- **Hard-coded pixel offsets break with dynamic sizing.** When an
+  element's size changes dynamically (e.g., textarea auto-resizes),
+  any absolute-positioned sibling using a fixed pixel offset will
+  overlap. Use relative CSS values (`bottom: 100%`) or compute
+  the offset from the element's actual dimensions.
