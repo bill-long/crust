@@ -70,11 +70,45 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		const room = client.getRoom(props.roomId);
 		if (!room) return map;
 
+		// Build a set of displayable event IDs for quick lookup
+		const displayableIds = new Set<string>();
+		for (const ev of events) {
+			displayableIds.add(ev.eventId);
+		}
+
+		const timelineEvents = room.getLiveTimeline().getEvents();
+		// Precompute eventId→index map for O(1) lookup
+		const idxById = Object.create(null) as Record<string, number>;
+		for (let i = 0; i < timelineEvents.length; i++) {
+			const id = timelineEvents[i].getId();
+			if (id) idxById[id] = i;
+		}
+
 		const members = room.getMembers();
 		for (const member of members) {
 			if (member.userId === myUserId) continue;
-			const readUpToId = room.getEventReadUpTo(member.userId);
+			let readUpToId = room.getEventReadUpTo(member.userId);
 			if (!readUpToId) continue;
+
+			// If the receipt points at a non-displayable event (e.g. an edit),
+			// walk backwards through the SDK timeline to find the nearest
+			// displayable event
+			if (!displayableIds.has(readUpToId)) {
+				const idx = idxById[readUpToId];
+				if (idx !== undefined) {
+					let resolved: string | null = null;
+					for (let i = idx; i >= 0; i--) {
+						const id = timelineEvents[i].getId();
+						if (id && displayableIds.has(id)) {
+							resolved = id;
+							break;
+						}
+					}
+					if (!resolved) continue;
+					readUpToId = resolved;
+				}
+			}
+
 			if (!map[readUpToId]) map[readUpToId] = [];
 			map[readUpToId].push({
 				userId: member.userId,

@@ -111,13 +111,14 @@ const Composer: Component<{
 		lastTypingSentAt = now;
 		typingRoomId = props.roomId;
 		client.sendTyping(props.roomId, true, TYPING_TIMEOUT_MS).catch(() => {
-			// Best-effort; typing indicators are ephemeral
+			// Reset so next keystroke retries promptly
+			lastTypingSentAt = 0;
 		});
 	};
 
 	const stopTyping = (): void => {
-		if (lastTypingSentAt > 0) {
-			const roomToStop = typingRoomId ?? props.roomId;
+		if (typingRoomId) {
+			const roomToStop = typingRoomId;
 			lastTypingSentAt = 0;
 			typingRoomId = null;
 			client.sendTyping(roomToStop, false, TYPING_TIMEOUT_MS).catch(() => {
