@@ -110,7 +110,9 @@ const Composer: Component<{
 		if (now - lastTypingSentAt < TYPING_RESEND_MS) return;
 		lastTypingSentAt = now;
 		typingRoomId = props.roomId;
-		client.sendTyping(props.roomId, true, TYPING_TIMEOUT_MS).catch(() => {});
+		client.sendTyping(props.roomId, true, TYPING_TIMEOUT_MS).catch(() => {
+			// Best-effort; typing indicators are ephemeral
+		});
 	};
 
 	const stopTyping = (): void => {
@@ -118,7 +120,9 @@ const Composer: Component<{
 			const roomToStop = typingRoomId ?? props.roomId;
 			lastTypingSentAt = 0;
 			typingRoomId = null;
-			client.sendTyping(roomToStop, false, TYPING_TIMEOUT_MS).catch(() => {});
+			client.sendTyping(roomToStop, false, TYPING_TIMEOUT_MS).catch(() => {
+				// Best-effort; typing indicators are ephemeral
+			});
 		}
 	};
 

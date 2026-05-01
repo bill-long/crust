@@ -104,7 +104,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			.then(() => {
 				lastSentReceiptEventId = eventId;
 			})
-			.catch(() => {});
+			.catch(() => {
+				// Best-effort; receipt will retry on next scroll/event
+			});
 	}
 
 	// Send receipt when new events arrive while at bottom
