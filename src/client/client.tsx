@@ -42,7 +42,7 @@ interface ClientContextValue {
 	 */
 	requestRecoveryKey: () => Promise<Uint8Array<ArrayBuffer> | null>;
 	setRecoveryKeyResolver: (
-		resolver: () => Promise<Uint8Array<ArrayBuffer> | null>,
+		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
 	) => void;
 }
 
@@ -61,7 +61,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		| null = null;
 
 	const setRecoveryKeyResolver = (
-		resolver: () => Promise<Uint8Array<ArrayBuffer> | null>,
+		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
 	): void => {
 		recoveryKeyResolver = resolver;
 	};

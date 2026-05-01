@@ -17,6 +17,8 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 
 	const handleSubmit = (e: Event): void => {
 		e.preventDefault();
+		// Password is forwarded verbatim — no trimming, since valid
+		// passwords may contain leading/trailing whitespace.
 		const pwd = password();
 		if (pwd.length > 0) {
 			props.onSubmit(pwd);
