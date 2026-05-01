@@ -64,13 +64,14 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 	let requestGeneration = 0;
 
 	const cleanupRequest = (): void => {
-		// Remove listeners first to prevent re-entrance from cancel events
+		// Remove only our listeners to prevent re-entrance from cancel events
 		if (activeVerifier) {
-			activeVerifier.removeAllListeners();
+			activeVerifier.off(VerifierEvent.ShowSas, onShowSas);
+			activeVerifier.off(VerifierEvent.Cancel, onVerifierCancel);
 			activeVerifier = null;
 		}
 		if (activeRequest) {
-			activeRequest.removeAllListeners();
+			activeRequest.off(VerificationRequestEvent.Change, onRequestChange);
 			if (activeRequest.pending) {
 				activeRequest.cancel().catch(() => {});
 			}
@@ -117,7 +118,12 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 
 			verifier.verify().catch((e) => {
 				const s = state();
-				if (s !== "cancelled" && s !== "done" && s !== "sas-confirmed") {
+				if (
+					s !== "cancelled" &&
+					s !== "done" &&
+					s !== "sas-confirmed" &&
+					s !== "error"
+				) {
 					setError(e instanceof Error ? e.message : "Verification failed");
 					setState("error");
 					cleanupRequest();
