@@ -34,11 +34,6 @@ export function createPicker<T>() {
 	const pickerId = createUniqueId();
 	const listboxId = `picker-listbox-${pickerId}`;
 
-	// Sanitize key for use as a DOM ID (replace non-alphanumeric with _)
-	function safeId(key: string): string {
-		return key.replace(/[^a-zA-Z0-9_-]/g, "_");
-	}
-
 	const Picker: Component<PickerProps<T>> = (props) => {
 		const [highlightIndex, setHighlightIndex] = createSignal(0);
 
@@ -62,9 +57,7 @@ export function createPicker<T>() {
 			const idx = highlightIndex();
 			const items = filtered();
 			if (!props.visible || idx < 0 || idx >= items.length) return;
-			const el = document.getElementById(
-				`${listboxId}-item-${safeId(props.keyFn(items[idx]))}`,
-			);
+			const el = document.getElementById(`${listboxId}-item-${idx}`);
 			el?.scrollIntoView({ block: "nearest" });
 		});
 
@@ -73,7 +66,7 @@ export function createPicker<T>() {
 			const items = filtered();
 			const idx = highlightIndex();
 			if (idx >= 0 && idx < items.length) {
-				return `${listboxId}-item-${safeId(props.keyFn(items[idx]))}`;
+				return `${listboxId}-item-${idx}`;
 			}
 			return undefined;
 		};
@@ -103,7 +96,7 @@ export function createPicker<T>() {
 				setHighlightIndex((i) => (i - 1 + items.length) % items.length);
 				return true;
 			}
-			if (e.key === "Enter" || e.key === "Tab") {
+			if (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey)) {
 				e.preventDefault();
 				const idx = highlightIndex();
 				if (idx >= 0 && idx < items.length) {
@@ -137,7 +130,7 @@ export function createPicker<T>() {
 							const isHighlighted = () => index() === highlightIndex();
 							return (
 								<div
-									id={`${listboxId}-item-${safeId(props.keyFn(item))}`}
+									id={`${listboxId}-item-${index()}`}
 									role="option"
 									aria-selected={isHighlighted()}
 									tabIndex={-1}
