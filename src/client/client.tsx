@@ -4,6 +4,7 @@ import {
 	type MatrixClient,
 	SyncState,
 } from "matrix-js-sdk";
+import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
 import {
 	createContext,
 	createSignal,
@@ -12,6 +13,10 @@ import {
 	type ParentComponent,
 	useContext,
 } from "solid-js";
+import {
+	type CryptoStatus,
+	useCryptoStatus,
+} from "../features/crypto/useCryptoStatus";
 import type { Session } from "../stores/session";
 import { createSummariesStore, type SummariesStore } from "./summaries";
 
@@ -29,6 +34,19 @@ interface ClientContextValue {
 	syncState: () => AppSyncState;
 	cryptoState: () => CryptoState;
 	summaries: SummariesStore;
+	cryptoStatus: CryptoStatus;
+	/**
+	 * Request the recovery key from the user. Components that show a
+	 * recovery key input dialog should call setRecoveryKeyResolver to
+	 * register themselves.
+	 */
+	requestRecoveryKey: () => Promise<Uint8Array<ArrayBuffer> | null>;
+	setRecoveryKeyResolver: (
+		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
+	) => void;
+	/** Clear cached secret storage key so the next access re-prompts.
+	 *  Call from error handlers when a secret-storage operation fails. */
+	clearSecretStorageCache: () => void;
 }
 
 const ClientContext = createContext<ClientContextValue>();
@@ -36,11 +54,86 @@ const ClientContext = createContext<ClientContextValue>();
 export const ClientProvider: ParentComponent<{ session: Session }> = (
 	props,
 ) => {
+	// In-memory cache for the secret storage key. Cached optimistically
+	// after user entry so rapid successive SDK calls (e.g. 3x during
+	// bootstrapCrossSigning) don't re-prompt. Top-level error handlers
+	// call clearSecretStorageCache() on failure so retries re-prompt.
+	let cachedSecretStorageKeyId: string | null = null;
+	let cachedSecretStorageKey: Uint8Array<ArrayBuffer> | null = null;
+
+	const clearSecretStorageCache = (): void => {
+		cachedSecretStorageKeyId = null;
+		cachedSecretStorageKey = null;
+	};
+
+	// Pluggable resolver for when the user needs to enter their recovery key
+	let recoveryKeyResolver:
+		| (() => Promise<Uint8Array<ArrayBuffer> | null>)
+		| null = null;
+
+	const setRecoveryKeyResolver = (
+		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
+	): void => {
+		recoveryKeyResolver = resolver;
+	};
+
+	const requestRecoveryKey =
+		async (): Promise<Uint8Array<ArrayBuffer> | null> => {
+			if (recoveryKeyResolver) {
+				return recoveryKeyResolver();
+			}
+			return null;
+		};
+
 	const matrixClient = createClient({
 		baseUrl: props.session.homeserverUrl,
 		accessToken: props.session.accessToken,
 		userId: props.session.userId,
 		deviceId: props.session.deviceId,
+		cryptoCallbacks: {
+			getSecretStorageKey: async (
+				opts: {
+					keys: Record<string, SecretStorageKeyDescription>;
+				},
+				_name: string,
+			): Promise<[string, Uint8Array<ArrayBuffer>] | null> => {
+				// Return cached key for rapid successive calls
+				if (
+					cachedSecretStorageKeyId &&
+					cachedSecretStorageKey &&
+					cachedSecretStorageKeyId in opts.keys
+				) {
+					return [cachedSecretStorageKeyId, cachedSecretStorageKey];
+				}
+
+				// Prompt user for recovery key
+				const key = await requestRecoveryKey();
+				if (!key) return null;
+
+				// Prefer the account's default key ID; fall back to first available
+				const availableKeys = Object.keys(opts.keys);
+				if (availableKeys.length === 0) return null;
+
+				const defaultKeyId = await matrixClient.secretStorage.getDefaultKeyId();
+				const keyId =
+					defaultKeyId && defaultKeyId in opts.keys
+						? defaultKeyId
+						: availableKeys[0];
+
+				// Cache for successive calls within the same operation
+				cachedSecretStorageKeyId = keyId;
+				cachedSecretStorageKey = key;
+				return [keyId, key];
+			},
+			cacheSecretStorageKey: (
+				keyId: string,
+				_keyInfo: SecretStorageKeyDescription,
+				key: Uint8Array<ArrayBuffer>,
+			): void => {
+				cachedSecretStorageKeyId = keyId;
+				cachedSecretStorageKey = key;
+			},
+		},
 	});
 
 	const [syncState, setSyncState] = createSignal<AppSyncState>("initial");
@@ -97,6 +190,11 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		matrixClient.startClient({ initialSyncLimit: 20 });
 	});
 
+	const cryptoStatus = useCryptoStatus(
+		matrixClient,
+		() => syncState() === "live",
+	);
+
 	onCleanup(() => {
 		disposed = true;
 		cleanupSummaries();
@@ -106,7 +204,16 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	return (
 		<ClientContext.Provider
-			value={{ client: matrixClient, syncState, cryptoState, summaries }}
+			value={{
+				client: matrixClient,
+				syncState,
+				cryptoState,
+				summaries,
+				cryptoStatus,
+				requestRecoveryKey,
+				setRecoveryKeyResolver,
+				clearSecretStorageCache,
+			}}
 		>
 			{props.children}
 		</ClientContext.Provider>
