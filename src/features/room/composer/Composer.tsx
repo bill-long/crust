@@ -1,3 +1,4 @@
+import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import { type Component, createSignal, Show } from "solid-js";
 import { useClient } from "../../../client/client";
 import { formatMarkdown } from "./markdown";
@@ -38,8 +39,10 @@ const Composer: Component<{ roomId: string }> = (props) => {
 		requestAnimationFrame(autoResize);
 
 		try {
-			// biome-ignore lint/suspicious/noExplicitAny: SDK's RoomMessageEventContent union is overly restrictive for simple text messages
-			await client.sendMessage(props.roomId, content as any);
+			await client.sendMessage(
+				props.roomId,
+				content as unknown as RoomMessageEventContent,
+			);
 		} catch (e) {
 			if (!text()) setText(draft);
 			setError(e instanceof Error ? e.message : "Failed to send message");
