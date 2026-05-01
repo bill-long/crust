@@ -2,15 +2,7 @@ import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import { type Component, createSignal, Show } from "solid-js";
 import { useClient } from "../../../client/client";
 import type { TimelineEvent } from "../timeline/useTimeline";
-import { formatMarkdown } from "./markdown";
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
+import { escapeHtml, formatMarkdown } from "./markdown";
 
 function buildReplyFallback(replyTo: TimelineEvent): {
 	bodyPrefix: string;

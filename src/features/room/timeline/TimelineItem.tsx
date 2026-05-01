@@ -40,6 +40,9 @@ const ReactionPills: Component<{
 				type="button"
 				class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800 text-xs text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-neutral-200"
 				onClick={() => setShowPicker((v) => !v)}
+				onKeyDown={(e) => {
+					if (e.key === "Escape" && showPicker()) setShowPicker(false);
+				}}
 				aria-label="Add reaction"
 				aria-expanded={showPicker()}
 			>
