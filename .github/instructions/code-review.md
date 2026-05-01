@@ -3,6 +3,26 @@
 When running local code reviews (via the code-review agent), use these prompt
 templates. They encode lessons learned from prior review rounds on this project.
 
+## MANDATORY: Local Code Review Before Every Push
+
+**No code may be pushed to a PR branch without a full 4-pass local code review
+first.** This applies to ALL changes — including "trivial" one-liners, formatting
+fixes, documentation updates, and Copilot review comment fixes. No exceptions.
+
+The 4 passes are:
+1. **Scoped (Claude)** — describes intent, lists verification items
+2. **Scoped (GPT)** — same context, different model
+3. **Scope-blind (Claude)** — cold read, full category sweep
+4. **Scope-blind (GPT)** — same template, different model
+
+All 4 models must agree with no substantive findings before pushing. If any
+model finds an issue, fix it and re-run ALL 4 passes.
+
+**Why this is non-negotiable:** Each skipped local review causes a Copilot
+round-trip that costs 5+ minutes of wall time. Issues caught by Copilot that
+the local review should have caught waste the user's time waiting for the
+review cycle. Two skips in one session is unacceptable.
+
 ## Checking for Copilot PR Review Comments
 
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
@@ -153,6 +173,11 @@ additions at the end of the category list:
 
 ## Lessons Learned
 
+- **NEVER skip local code review before pushing.** This is the most
+  expensive mistake in the workflow. "It's just a one-liner" and "this is
+  an obvious fix" have both led to Copilot catching issues that wasted 5+
+  minutes per round-trip. The local review exists to catch these before
+  the push. Every commit, every time, no exceptions.
 - **Per-file review misses cross-file interactions.** The scoped pass must
   describe data flow across files, not just what each file does.
 - **"Unusual but valid" misses degenerate inputs.** Always include empty,
