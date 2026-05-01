@@ -1,4 +1,5 @@
 import { createVirtualizer } from "@tanstack/solid-virtual";
+import { EventType, RelationType } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -10,7 +11,7 @@ import {
 import { useClient } from "../../../client/client";
 import Composer from "../composer/Composer";
 import TimelineItem from "./TimelineItem";
-import { useTimeline } from "./useTimeline";
+import { type TimelineEvent, useTimeline } from "./useTimeline";
 
 const TimelineView: Component<{ roomId: string }> = (props) => {
 	const { client, summaries } = useClient();
@@ -18,6 +19,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	let scrollRef: HTMLDivElement | undefined;
 	const [atBottom, setAtBottom] = createSignal(true);
+	const [replyTo, setReplyTo] = createSignal<TimelineEvent | null>(null);
 
 	const roomName = () => {
 		const s = summaries[props.roomId];
@@ -34,12 +36,13 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		getItemKey: (index: number) => events[index]?.eventId ?? index,
 	});
 
-	// Reset scroll position when switching rooms
+	// Reset scroll position and reply state when switching rooms
 	createEffect(
 		on(
 			() => props.roomId,
 			() => {
 				setAtBottom(true);
+				setReplyTo(null);
 				requestAnimationFrame(() => {
 					const el = scrollRef;
 					if (el) el.scrollTo({ top: el.scrollHeight });
@@ -69,6 +72,30 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		const distFromBottom =
 			scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
 		setAtBottom(distFromBottom < threshold);
+	};
+
+	const onReact = async (eventId: string, key: string): Promise<void> => {
+		const ev = events.find((e) => e.eventId === eventId);
+		if (!ev) return;
+
+		const existingId = Object.hasOwn(ev.myReactions, key)
+			? ev.myReactions[key]
+			: undefined;
+		try {
+			if (existingId) {
+				await client.redactEvent(props.roomId, existingId);
+			} else {
+				await client.sendEvent(props.roomId, EventType.Reaction, {
+					"m.relates_to": {
+						rel_type: RelationType.Annotation,
+						event_id: eventId,
+						key,
+					},
+				});
+			}
+		} catch (e) {
+			console.error("Reaction failed:", e);
+		}
 	};
 
 	return (
@@ -116,7 +143,11 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 												data-index={vItem.index}
 												ref={(el) => virtualizer.measureElement(el)}
 											>
-												<TimelineItem event={event()} />
+												<TimelineItem
+													event={event()}
+													onReact={(key) => onReact(event().eventId, key)}
+													onReply={() => setReplyTo(event())}
+												/>
 											</div>
 										</Show>
 									);
@@ -144,7 +175,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			</Show>
 
 			{/* Composer */}
-			<Composer roomId={props.roomId} />
+			<Composer
+				roomId={props.roomId}
+				replyTo={replyTo()}
+				onCancelReply={() => setReplyTo(null)}
+				onSent={() => setReplyTo(null)}
+			/>
 		</main>
 	);
 };

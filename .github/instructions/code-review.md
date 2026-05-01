@@ -3,6 +3,26 @@
 When running local code reviews (via the code-review agent), use these prompt
 templates. They encode lessons learned from prior review rounds on this project.
 
+## MANDATORY: Local Code Review Before Every Push
+
+**No code may be pushed to a PR branch without a full 4-pass local code review
+first.** This applies to ALL changes — including "trivial" one-liners, formatting
+fixes, documentation updates, and Copilot review comment fixes. No exceptions.
+
+The 4 passes are:
+1. **Scoped (Claude)** — describes intent, lists verification items
+2. **Scoped (GPT)** — same context, different model
+3. **Scope-blind (Claude)** — cold read, full category sweep
+4. **Scope-blind (GPT)** — same template, different model
+
+All 4 models must agree with no substantive findings before pushing. If any
+model finds an issue, fix it and re-run ALL 4 passes.
+
+**Why this is non-negotiable:** Each skipped local review causes a Copilot
+round-trip that costs 5+ minutes of wall time. Issues caught by Copilot that
+the local review should have caught waste the user's time waiting for the
+review cycle. Two skips in one session is unacceptable.
+
 ## Checking for Copilot PR Review Comments
 
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
@@ -118,10 +138,46 @@ additions at the end of the category list:
   async operation (network request, setTimeout), verify the user hasn't
   moved focus elsewhere. Check `document.activeElement` before calling
   `.focus()` to avoid stealing focus from another control.
+- Prototype pollution: when using plain objects (`{}`) as maps keyed by
+  external/untrusted data (e.g., reaction emoji from other users, room
+  names, event types), use `Object.create(null)` to prevent prototype
+  pollution via keys like `__proto__`, `constructor`, `toString`. Also
+  prefer `Object.hasOwn(obj, key)` over `key in obj` — the `in` operator
+  matches inherited prototype properties.
+- HTML construction safety: when building HTML strings (e.g., Matrix
+  `formatted_body`, `<mx-reply>` fallbacks), verify ALL interpolated
+  values are escaped. Common misses: user IDs in `<a href>` and link
+  text, message body used as HTML fallback when `formatted_body` is null,
+  and newlines not converted to `<br>` in HTML context. Trace every path
+  that sets `formatted_body` and confirm no raw user text reaches it.
+- Conditional UI reachability: when a trigger control (button, link) is
+  inside a conditional block (`<Show>`, `v-if`, `{condition && ...}`),
+  verify the control is reachable in ALL relevant states. A common bug:
+  wrapping both the trigger and its popover/picker in the same conditional
+  makes the trigger unreachable when the condition is initially false
+  (e.g., "+" reaction button gated on reactions.length > 0).
+- Keyboard event handler placement: when adding keyboard handlers (e.g.,
+  Escape to close a popover), verify the handler fires when the focused
+  element receives the key event. If focus is on element A but the
+  handler is on sibling element B, the event won't reach B. Place
+  handlers on the focused element or a common ancestor.
+- Code duplication across files: when the same utility function appears
+  in multiple files (e.g., `escapeHtml`), flag it for extraction into a
+  shared module. Duplicates diverge on the next edit and create
+  inconsistent behavior.
+- Type safety over `any`: when SDK types are too restrictive for valid
+  usage, prefer `as unknown as TargetType` over `as any`. The double
+  cast preserves type checking for the rest of the expression while
+  working around the specific incompatibility.
 ```
 
 ## Lessons Learned
 
+- **NEVER skip local code review before pushing.** This is the most
+  expensive mistake in the workflow. "It's just a one-liner" and "this is
+  an obvious fix" have both led to Copilot catching issues that wasted 5+
+  minutes per round-trip. The local review exists to catch these before
+  the push. Every commit, every time, no exceptions.
 - **Per-file review misses cross-file interactions.** The scoped pass must
   describe data flow across files, not just what each file does.
 - **"Unusual but valid" misses degenerate inputs.** Always include empty,
@@ -193,3 +249,26 @@ additions at the end of the category list:
 - **Don't steal focus after async operations.** `element.focus()` in a
   `finally` block runs even when the user has clicked elsewhere during the
   await. Guard with `document.activeElement` check before re-focusing.
+- **Plain objects are not safe maps.** When keys come from untrusted
+  sources (reaction emoji, event content, user input), `__proto__` or
+  `toString` keys cause prototype pollution. Use `Object.create(null)`
+  for any object used as a key-value map with external keys. Pair with
+  `Object.hasOwn()` instead of the `in` operator for property checks.
+- **Trace every path that builds HTML.** When constructing `formatted_body`
+  or similar HTML strings, it's not enough to escape the "obvious" values.
+  Trace every code path: the no-markdown fallback, the reply fallback, the
+  edit path. Each one must escape ALL interpolated user text. A single
+  missed path is a stored XSS vulnerability.
+- **Conditional UI must not hide its own trigger.** When a `<Show>`/`v-if`
+  wraps both a trigger button and its popover content, the trigger becomes
+  unreachable when the condition is false. Always render triggers
+  unconditionally (or gate them on a different condition than their content).
+- **Keyboard handlers must be on the focused element.** An `onKeyDown` on
+  a sibling element won't fire when focus is elsewhere. Place escape/close
+  handlers on the element that actually has focus (or on a common ancestor).
+- **Don't duplicate utility functions across files.** When the same helper
+  (e.g., `escapeHtml`) appears in two files, extract to a shared module
+  immediately. Duplicates will diverge on the next edit.
+- **Prefer typed casts over `any`.** When SDK types are too restrictive,
+  use `as unknown as TargetType` instead of `as any`. The double cast
+  preserves type checking for the rest of the expression.
