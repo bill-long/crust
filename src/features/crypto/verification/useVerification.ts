@@ -102,8 +102,14 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 	const startSasVerification = async (): Promise<void> => {
 		if (!activeRequest || activeVerifier) return;
 
+		const gen = requestGeneration;
 		try {
 			const verifier = await activeRequest.startVerification("m.sas.v1");
+			// Abort if cancelled/reset during the await
+			if (gen !== requestGeneration || !activeRequest) {
+				verifier.cancel(new Error("Superseded"));
+				return;
+			}
 			activeVerifier = verifier;
 
 			verifier.on(VerifierEvent.ShowSas, onShowSas);
@@ -118,6 +124,7 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 				}
 			});
 		} catch (e) {
+			if (gen !== requestGeneration) return;
 			setError(e instanceof Error ? e.message : "Failed to start verification");
 			setState("error");
 			cleanupRequest();
@@ -172,10 +179,14 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 		}
 
 		const gen = ++requestGeneration;
+		cleanupRequest();
 		try {
 			setState("requested");
 			const request = await crypto.requestOwnUserVerification();
-			if (gen !== requestGeneration) return;
+			if (gen !== requestGeneration) {
+				if (request.pending) request.cancel().catch(() => {});
+				return;
+			}
 			bindRequest(request);
 		} catch (e) {
 			if (gen !== requestGeneration) return;
@@ -202,10 +213,14 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 		}
 
 		const gen = ++requestGeneration;
+		cleanupRequest();
 		try {
 			setState("requested");
 			const request = await crypto.requestDeviceVerification(userId, deviceId);
-			if (gen !== requestGeneration) return;
+			if (gen !== requestGeneration) {
+				if (request.pending) request.cancel().catch(() => {});
+				return;
+			}
 			bindRequest(request);
 		} catch (e) {
 			if (gen !== requestGeneration) return;
@@ -217,8 +232,12 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 	};
 
 	const acceptIncoming = (request: VerificationRequest): void => {
+		const gen = ++requestGeneration;
 		bindRequest(request);
 		request.accept().catch((e) => {
+			if (gen !== requestGeneration) return;
+			const s = state();
+			if (s === "cancelled" || s === "done" || s === "error") return;
 			setError(
 				e instanceof Error ? e.message : "Failed to accept verification",
 			);
