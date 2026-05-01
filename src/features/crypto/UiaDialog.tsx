@@ -1,11 +1,9 @@
 import { type Component, createSignal } from "solid-js";
 
 interface UiaDialogProps {
-	/** Called with the password when user submits, or null if cancelled */
+	/** Called with the password when user submits */
 	onSubmit: (password: string) => void;
 	onCancel: () => void;
-	error?: string;
-	loading?: boolean;
 }
 
 /**
@@ -52,27 +50,22 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 					/>
 				</div>
 
-				{props.error && (
-					<p class="rounded bg-red-900/50 px-3 py-2 text-sm text-red-300">
-						{props.error}
-					</p>
-				)}
+				{/* Error display reserved for future UIA retry flows */}
 
 				<div class="flex justify-end gap-2">
 					<button
 						type="button"
 						onClick={props.onCancel}
-						disabled={props.loading}
-						class="rounded px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white disabled:opacity-50"
+						class="rounded px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
 					>
 						Cancel
 					</button>
 					<button
 						type="submit"
-						disabled={props.loading || password().length === 0}
+						disabled={password().length === 0}
 						class="rounded bg-pink-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-pink-500 disabled:opacity-50"
 					>
-						{props.loading ? "Verifying…" : "Continue"}
+						Continue
 					</button>
 				</div>
 			</form>

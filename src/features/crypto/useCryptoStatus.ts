@@ -72,10 +72,15 @@ export function useCryptoStatus(
 			const userId = client.getUserId();
 			const deviceId = client.getDeviceId();
 			if (userId && deviceId) {
-				const status: DeviceVerificationStatus | null =
-					await crypto.getDeviceVerificationStatus(userId, deviceId);
-				if (refreshVersion !== thisVersion) return;
-				setThisDeviceVerified(status?.isVerified() ?? false);
+				try {
+					const status: DeviceVerificationStatus | null =
+						await crypto.getDeviceVerificationStatus(userId, deviceId);
+					if (refreshVersion !== thisVersion) return;
+					setThisDeviceVerified(status?.isVerified() ?? false);
+				} catch {
+					if (refreshVersion !== thisVersion) return;
+					setThisDeviceVerified(false);
+				}
 			}
 
 			// Check backup trust if backup exists

@@ -18,8 +18,6 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 	const { client, cryptoStatus } = useClient();
 
 	const [step, setStep] = createSignal<SetupStep>("intro");
-	const [uiaError, setUiaError] = createSignal("");
-	const [uiaLoading, setUiaLoading] = createSignal(false);
 	const [errorMessage, setErrorMessage] = createSignal("");
 
 	const startSetup = (): void => {
@@ -34,8 +32,8 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			return;
 		}
 
+		setErrorMessage("");
 		setStep("working");
-		setUiaLoading(true);
 
 		try {
 			const userId = client.getUserId();
@@ -83,14 +81,10 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 				e instanceof Error ? e.message : "Setup failed. Please try again.",
 			);
 			setStep("error");
-		} finally {
-			setUiaLoading(false);
 		}
 	};
 
-	// When UIA dialog submits, store password and proceed
 	const onUiaPassword = (password: string): void => {
-		setUiaError("");
 		doBootstrap(password);
 	};
 
@@ -104,7 +98,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			role="dialog"
 			aria-modal="true"
 			aria-label="Set up secure messaging"
-			tabindex="-1"
+			tabIndex={-1}
 			ref={(el) => el.focus()}
 			onClick={(e) => {
 				if (e.target === e.currentTarget && step() !== "working") {
@@ -159,12 +153,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 				</Match>
 
 				<Match when={step() === "uia"}>
-					<UiaDialog
-						onSubmit={onUiaPassword}
-						onCancel={onUiaCancel}
-						error={uiaError()}
-						loading={uiaLoading()}
-					/>
+					<UiaDialog onSubmit={onUiaPassword} onCancel={onUiaCancel} />
 				</Match>
 
 				<Match when={step() === "working"}>
