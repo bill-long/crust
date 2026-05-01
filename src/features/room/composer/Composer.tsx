@@ -141,7 +141,10 @@ const Composer: Component<{
 		// Strip leading @ from userId fallback to avoid @@user:server
 		const displayName = rawName.startsWith("@") ? rawName.slice(1) : rawName;
 		const insertion = `@${displayName} `;
-		const after = currentText.slice(pos);
+		// Replace the entire @partial token (from @ through any non-whitespace after caret)
+		const afterCaret = currentText.slice(pos);
+		const trailingQuery = afterCaret.match(/^\S*/)?.[0] ?? "";
+		const after = currentText.slice(pos + trailingQuery.length);
 		const newText = currentText.slice(0, atIdx) + insertion + after;
 
 		setText(newText);
