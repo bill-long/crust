@@ -31,9 +31,11 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 	const [errorMessage, setErrorMessage] = createSignal("");
 	const [copied, setCopied] = createSignal(false);
 	let disposed = false;
+	let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
 	onCleanup(() => {
 		disposed = true;
+		if (copiedTimer !== undefined) clearTimeout(copiedTimer);
 	});
 
 	const doSetup = async (): Promise<void> => {
@@ -89,7 +91,10 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 		try {
 			await navigator.clipboard.writeText(key);
 			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			copiedTimer = setTimeout(() => {
+				copiedTimer = undefined;
+				if (!disposed) setCopied(false);
+			}, 2000);
 		} catch {
 			// Clipboard API not available; user can manually select + copy
 		}
@@ -105,8 +110,10 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 		const a = document.createElement("a");
 		a.href = url;
 		a.download = "crust-recovery-key.txt";
+		document.body.appendChild(a);
 		a.click();
-		URL.revokeObjectURL(url);
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 0);
 	};
 
 	const handleBackdropClick = (e: MouseEvent): void => {

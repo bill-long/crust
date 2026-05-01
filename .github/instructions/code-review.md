@@ -244,6 +244,18 @@ additions at the end of the category list:
   public API (props, return values, type definitions) for fields
   that are no longer consumed. Dead props mislead future callers
   and accumulate unused code.
+- Timer cleanup: when a component uses setTimeout/setInterval,
+  verify the timer ID is stored and cleared in onCleanup/onDestroy.
+  A timer firing after unmount is a state-update-after-disposal bug.
+- Blob URL lifecycle: when creating Blob URLs for programmatic
+  downloads, verify revokeObjectURL is deferred (not synchronous
+  after click) and the anchor element is attached to the DOM before
+  clicking (some browsers ignore clicks on detached elements).
+- Input accessibility: every input must have an explicit label
+  (aria-label, aria-labelledby, or associated label element).
+  Placeholder alone is insufficient. Error messages should be wired
+  via aria-describedby. Focus should land on the primary input, not
+  a container overlay.
 ```
 
 ## Lessons Learned
@@ -415,3 +427,30 @@ additions at the end of the category list:
   guard was meant to prevent. Also: when a guard discards a stale
   result, the orphaned resource (SDK request, verifier) must be
   explicitly cancelled/cleaned up, not just dropped.
+- **Focus target conflicts in dialogs.** When a dialog overlay uses
+  `ref={(el) => el.focus()}` AND an inner element has `autofocus`,
+  the overlay steals focus from the intended target. Choose one
+  focus target per dialog: either the overlay (for dialogs with no
+  primary input) or the first input field (for forms). When applying
+  a review suggestion to add autofocus, verify it doesn't conflict
+  with existing focus management in the same component.
+- **Input fields need explicit labels.** `placeholder` alone is not
+  accessible — screen readers may not announce it. Every `<input>`
+  needs an explicit `<label>`, `aria-label`, or `aria-labelledby`.
+  When error text is displayed, wire it to the input with
+  `aria-describedby` so screen readers announce the error in context.
+- **setTimeout/setInterval in components must be cleared on cleanup.**
+  A timer that fires after component unmount will update disposed
+  signals. Store the timer ID and `clearTimeout` in `onCleanup`.
+  Also guard the callback with a `disposed` check for safety.
+- **Blob URL revocation must be deferred after programmatic clicks.**
+  `URL.revokeObjectURL(url)` immediately after `a.click()` can fail
+  because the browser hasn't consumed the URL yet. Wrap the
+  revocation in `setTimeout(() => ..., 0)`. Also add the anchor to
+  the DOM before clicking and remove it after — some browsers ignore
+  clicks on detached elements.
+- **Stale error state after status transitions.** When a hook tracks
+  both error state and enabled/disabled state, clearing the error on
+  status change prevents the UI from showing a stale error from a
+  previous session. If the rubber-duck identifies a "non-blocking"
+  finding about stale state, address it — PR review will catch it.

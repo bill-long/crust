@@ -22,6 +22,7 @@ const RecoveryKeyInput: Component = () => {
 	const [isPrompting, setIsPrompting] = createSignal(false);
 	const [inputValue, setInputValue] = createSignal("");
 	const [errorText, setErrorText] = createSignal("");
+	const errorId = "recovery-key-error";
 
 	// All pending resolve functions for concurrent SDK requests
 	let pendingResolvers: Array<(key: Uint8Array<ArrayBuffer> | null) => void> =
@@ -88,8 +89,6 @@ const RecoveryKeyInput: Component = () => {
 				role="dialog"
 				aria-modal="true"
 				aria-label="Enter recovery key"
-				tabIndex={-1}
-				ref={(el) => el.focus()}
 				onClick={(e) => {
 					if (e.target === e.currentTarget) handleCancel();
 				}}
@@ -116,14 +115,16 @@ const RecoveryKeyInput: Component = () => {
 							if (e.key === "Enter") handleSubmit();
 						}}
 						placeholder="Enter your recovery key"
+						aria-label="Recovery key"
+						aria-describedby={errorText() ? errorId : undefined}
 						autocomplete="off"
-						autofocus
+						ref={(el) => el.focus()}
 						spellcheck={false}
 						class="mb-2 w-full rounded bg-neutral-800 px-3 py-2 font-mono text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-pink-500"
 					/>
 
 					<Show when={errorText()}>
-						<p class="mb-2 text-sm text-red-400" role="alert">
+						<p id={errorId} class="mb-2 text-sm text-red-400" role="alert">
 							{errorText()}
 						</p>
 					</Show>

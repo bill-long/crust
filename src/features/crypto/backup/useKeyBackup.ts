@@ -30,6 +30,7 @@ export function useKeyBackup(client: MatrixClient): KeyBackupProgress {
 
 	const onBackupStatus = (enabled: boolean): void => {
 		setBackupEnabled(enabled);
+		setLastError(null);
 		if (!enabled) {
 			setIsBackingUp(false);
 			setSessionsRemaining(0);
