@@ -28,6 +28,8 @@ export function formatMarkdown(text: string): FormatResult {
 	// Extract code blocks and inline code to protect from further formatting
 	const protectedBlocks: string[] = [];
 	const PH = "\uFFFD";
+	// Escape any existing placeholder chars so they can't collide
+	html = html.replaceAll(PH, "&#xFFFD;");
 	html = html.replace(/```\n?([\s\S]*?)```/g, (_, code) => {
 		protectedBlocks.push(`<pre><code>${code}</code></pre>`);
 		return `${PH}${protectedBlocks.length - 1}${PH}`;
@@ -43,8 +45,8 @@ export function formatMarkdown(text: string): FormatResult {
 	// Italic (*...*)
 	html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
 
-	// Italic (_..._) — only at word boundaries
-	html = html.replace(/(?<!\w)_(.+?)_(?!\w)/g, "<em>$1</em>");
+	// Italic (_..._) — only at word boundaries (no lookbehind for Safari compat)
+	html = html.replace(/(^|[^\w])_(.+?)_(?!\w)/g, "$1<em>$2</em>");
 
 	// Convert newlines to <br> before restoring code blocks so <pre> content
 	// keeps real newlines while regular text gets line breaks

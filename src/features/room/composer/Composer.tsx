@@ -46,7 +46,13 @@ const Composer: Component<{ roomId: string }> = (props) => {
 			requestAnimationFrame(autoResize);
 		} finally {
 			setSending(false);
-			textareaRef?.focus();
+			if (
+				!document.activeElement ||
+				document.activeElement === document.body ||
+				document.activeElement === textareaRef
+			) {
+				textareaRef?.focus();
+			}
 		}
 	};
 
