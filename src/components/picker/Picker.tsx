@@ -34,6 +34,11 @@ export function createPicker<T>() {
 	const pickerId = createUniqueId();
 	const listboxId = `picker-listbox-${pickerId}`;
 
+	// Sanitize key for use as a DOM ID (replace non-alphanumeric with _)
+	function safeId(key: string): string {
+		return key.replace(/[^a-zA-Z0-9_-]/g, "_");
+	}
+
 	const Picker: Component<PickerProps<T>> = (props) => {
 		const [highlightIndex, setHighlightIndex] = createSignal(0);
 
@@ -58,7 +63,7 @@ export function createPicker<T>() {
 			const items = filtered();
 			if (!props.visible || idx < 0 || idx >= items.length) return;
 			const el = document.getElementById(
-				`${listboxId}-item-${props.keyFn(items[idx])}`,
+				`${listboxId}-item-${safeId(props.keyFn(items[idx]))}`,
 			);
 			el?.scrollIntoView({ block: "nearest" });
 		});
@@ -68,7 +73,7 @@ export function createPicker<T>() {
 			const items = filtered();
 			const idx = highlightIndex();
 			if (idx >= 0 && idx < items.length) {
-				return `${listboxId}-item-${props.keyFn(items[idx])}`;
+				return `${listboxId}-item-${safeId(props.keyFn(items[idx]))}`;
 			}
 			return undefined;
 		};
@@ -132,7 +137,7 @@ export function createPicker<T>() {
 							const isHighlighted = () => index() === highlightIndex();
 							return (
 								<div
-									id={`${listboxId}-item-${props.keyFn(item)}`}
+									id={`${listboxId}-item-${safeId(props.keyFn(item))}`}
 									role="option"
 									aria-selected={isHighlighted()}
 									tabIndex={-1}
