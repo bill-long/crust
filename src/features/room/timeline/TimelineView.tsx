@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import Composer from "../composer/Composer";
 import TimelineItem from "./TimelineItem";
 import { useTimeline } from "./useTimeline";
 
@@ -71,7 +72,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	};
 
 	return (
-		<main class="relative flex h-full flex-col">
+		<main class="flex h-full flex-col">
 			{/* Room header */}
 			<div class="flex h-12 shrink-0 items-center border-b border-neutral-800 px-4">
 				<span class="text-sm font-semibold text-neutral-200">{roomName()}</span>
@@ -86,45 +87,49 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 					</div>
 				}
 			>
-				<div ref={scrollRef} class="flex-1 overflow-y-auto" onScroll={onScroll}>
+				<div class="relative min-h-0 flex-1">
 					<div
-						style={{
-							height: `${virtualizer.getTotalSize()}px`,
-							position: "relative",
-							width: "100%",
-						}}
+						ref={scrollRef}
+						class="absolute inset-0 overflow-y-auto"
+						onScroll={onScroll}
 					>
-						<For each={virtualizer.getVirtualItems()}>
-							{(vItem) => {
-								const event = () => events[vItem.index];
-								return (
-									<Show when={event()}>
-										<div
-											style={{
-												position: "absolute",
-												top: 0,
-												left: 0,
-												width: "100%",
-												transform: `translateY(${vItem.start}px)`,
-											}}
-											data-index={vItem.index}
-											ref={(el) => virtualizer.measureElement(el)}
-										>
-											<TimelineItem event={event()} />
-										</div>
-									</Show>
-								);
+						<div
+							style={{
+								height: `${virtualizer.getTotalSize()}px`,
+								position: "relative",
+								width: "100%",
 							}}
-						</For>
+						>
+							<For each={virtualizer.getVirtualItems()}>
+								{(vItem) => {
+									const event = () => events[vItem.index];
+									return (
+										<Show when={event()}>
+											<div
+												style={{
+													position: "absolute",
+													top: 0,
+													left: 0,
+													width: "100%",
+													transform: `translateY(${vItem.start}px)`,
+												}}
+												data-index={vItem.index}
+												ref={(el) => virtualizer.measureElement(el)}
+											>
+												<TimelineItem event={event()} />
+											</div>
+										</Show>
+									);
+								}}
+							</For>
+						</div>
 					</div>
-				</div>
 
-				{/* Scroll-to-bottom button */}
-				<Show when={!atBottom()}>
-					<div class="absolute bottom-4 right-4">
+					{/* Scroll-to-bottom button */}
+					<Show when={!atBottom()}>
 						<button
 							type="button"
-							class="rounded-full bg-neutral-700 p-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
+							class="absolute bottom-4 right-4 z-10 rounded-full bg-neutral-700 p-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
 							onClick={() => {
 								const el = scrollRef;
 								if (el)
@@ -134,9 +139,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						>
 							↓
 						</button>
-					</div>
-				</Show>
+					</Show>
+				</div>
 			</Show>
+
+			{/* Composer */}
+			<Composer roomId={props.roomId} />
 		</main>
 	);
 };
