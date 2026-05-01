@@ -80,22 +80,18 @@ const Composer: Component<{
 		return room ? room.getJoinedMembers() : [];
 	});
 
-	function filterMember(member: RoomMember, query: string): boolean {
-		const q = query.toLowerCase();
-		const name = (member.name ?? "").toLowerCase();
-		const uid = member.userId.toLowerCase();
-		return name.includes(q) || uid.includes(q);
-	}
-
 	const MAX_PICKER_RESULTS = 50;
 
 	// Shared filtered member list — used by both picker and ARIA state
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
+		const lowerQ = q.toLowerCase();
 		const results: RoomMember[] = [];
 		for (const m of roomMembers()) {
-			if (filterMember(m, q)) {
+			const name = (m.name ?? "").toLowerCase();
+			const uid = m.userId.toLowerCase();
+			if (name.includes(lowerQ) || uid.includes(lowerQ)) {
 				results.push(m);
 				if (results.length >= MAX_PICKER_RESULTS) break;
 			}
