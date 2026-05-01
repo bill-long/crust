@@ -38,10 +38,15 @@ export function formatMarkdown(
 	const PH = "\uFFFD";
 	// Escape any existing placeholder chars so they can't collide
 	html = html.replaceAll(PH, "&#xFFFD;");
-	html = html.replace(/```\n?([\s\S]*?)```/g, (_, code) => {
-		protectedBlocks.push(`<pre><code>${code}</code></pre>`);
-		return `${PH}${protectedBlocks.length - 1}${PH}`;
-	});
+	html = html.replace(
+		/```(?:[^\n]*\n)([\s\S]*?)```|```([\s\S]*?)```/g,
+		(_, codeWithLang, codeInline) => {
+			protectedBlocks.push(
+				`<pre><code>${codeWithLang ?? codeInline ?? ""}</code></pre>`,
+			);
+			return `${PH}${protectedBlocks.length - 1}${PH}`;
+		},
+	);
 	html = html.replace(/`([^`]+)`/g, (_, code) => {
 		protectedBlocks.push(`<code>${code}</code>`);
 		return `${PH}${protectedBlocks.length - 1}${PH}`;

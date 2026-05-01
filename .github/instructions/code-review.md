@@ -28,6 +28,12 @@ and review after." This is the #1 cause of wasted Copilot review round-trips.
 The review exists to catch issues *before* they reach the remote. Pushing
 first defeats the purpose.
 
+**Copilot comment fix cycle:** When addressing Copilot PR review comments,
+the workflow is: fix → build → 4-pass review → push → reply. Do NOT skip
+the review just because "Copilot asked for this change." Copilot-requested
+fixes are code changes and follow the same gate. This is the #2 failure
+mode — it has been violated repeatedly in this project.
+
 The 4 passes are:
 1. **Scoped (Claude)** — describes intent, lists verification items
 2. **Scoped (GPT)** — same context, different model

@@ -118,7 +118,9 @@ const Composer: Component<{
 	/** Prune mentions whose @DisplayName is no longer in non-code text */
 	function reconcileMentions(msg: string): Mention[] {
 		// Strip code blocks and inline code so mentions inside code don't count
-		const stripped = msg.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "");
+		const stripped = msg
+			.replace(/```(?:[^\n]*\n[\s\S]*?```|[\s\S]*?```)/g, "")
+			.replace(/`[^`]+`/g, "");
 		return mentions().filter((m) => {
 			const token = `@${m.displayName}`;
 			// Scan all occurrences in stripped text — keep if any has valid word boundaries
