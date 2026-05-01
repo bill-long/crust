@@ -254,10 +254,12 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 
 	const confirmSas = async (): Promise<void> => {
 		if (!sasCallbacks) return;
+		const gen = requestGeneration;
 		setState("sas-confirmed");
 		try {
 			await sasCallbacks.confirm();
 		} catch (e) {
+			if (gen !== requestGeneration) return;
 			setError(
 				e instanceof Error ? e.message : "Failed to confirm verification",
 			);
