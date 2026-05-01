@@ -147,9 +147,10 @@ const Composer: Component<{
 		const pos = el.selectionStart;
 		const currentText = text();
 		const before = currentText.slice(0, pos);
-		// Find the @ that triggered this mention (search backward from caret)
-		const atIdx = before.lastIndexOf("@");
-		if (atIdx < 0) return;
+		// Use same regex as detectMention to find the triggering @
+		const triggerMatch = before.match(/(^|[^\w])@(\S*)$/);
+		if (!triggerMatch) return;
+		const atIdx = before.length - triggerMatch[2].length - 1;
 
 		const rawName = member.name?.trim() || member.userId;
 		// Strip leading @ from userId fallback to avoid @@user:server

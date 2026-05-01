@@ -40,7 +40,7 @@ export function createPicker<T>() {
 			props.items.filter((item) => props.filterFn(item, props.query)),
 		);
 
-		// Reset highlight when query changes or filtered list shrinks
+		// Clamp highlight index when filtered list shrinks or picker reopens
 		createEffect(
 			on(
 				() => [props.query, props.visible, filtered().length] as const,
