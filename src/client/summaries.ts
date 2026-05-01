@@ -94,11 +94,17 @@ function getDmRoomIds(client: MatrixClient): Set<string> {
 
 function isDisplayableMessage(event: MatrixEvent): boolean {
 	const type = event.getType();
-	return (
-		type === "m.room.message" ||
-		type === "m.room.encrypted" ||
-		type === "m.sticker"
-	);
+	if (
+		type !== "m.room.message" &&
+		type !== "m.room.encrypted" &&
+		type !== "m.sticker"
+	) {
+		return false;
+	}
+	// Filter out edits — they update existing messages, not new ones
+	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
+	if (relType === "m.replace") return false;
+	return true;
 }
 
 function buildLastMessage(event: MatrixEvent): RoomSummary["lastMessage"] {
@@ -168,7 +174,26 @@ export function createSummariesStore(client: MatrixClient): {
 		// Update unread counts on any live event (counts change server-side)
 		updateUnreadCounts(room);
 
-		if (!isDisplayableMessage(event)) return;
+		if (!isDisplayableMessage(event)) {
+			// Edit events — refresh lastMessage if the edited event was the latest
+			const relType = event.getContent()?.["m.relates_to"]?.rel_type;
+			if (relType === "m.replace") {
+				// Defer so SDK aggregation applies the edit to the original event
+				queueMicrotask(() => {
+					const timeline = room.getLiveTimeline().getEvents();
+					for (let i = timeline.length - 1; i >= 0; i--) {
+						const ev = timeline[i];
+						if (isDisplayableMessage(ev)) {
+							if (summaries[room.roomId]) {
+								setSummaries(room.roomId, "lastMessage", buildLastMessage(ev));
+							}
+							break;
+						}
+					}
+				});
+			}
+			return;
+		}
 
 		setSummaries(room.roomId, "lastMessage", buildLastMessage(event));
 	}

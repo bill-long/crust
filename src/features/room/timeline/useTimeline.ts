@@ -5,6 +5,8 @@ import {
 	MatrixEventEvent,
 	type Room,
 	RoomEvent,
+	type RoomMember,
+	RoomMemberEvent,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce } from "solid-js/store";
@@ -20,6 +22,7 @@ export interface TimelineEvent {
 	imageUrl: string | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
+	isEdited: boolean;
 	reactions: Record<string, number>;
 	myReactions: Record<string, string>;
 }
@@ -90,6 +93,7 @@ function eventToTimelineEvent(
 		imageUrl,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
+		isEdited: !!event.replacingEventId(),
 		reactions,
 		myReactions,
 	};
@@ -115,12 +119,16 @@ const MAX_TIMELINE_EVENTS = 500;
 export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
+	const [typingUsers, setTypingUsers] = createSignal<
+		{ userId: string; displayName: string }[]
+	>([]);
 
 	let currentRoomId: string | null = null;
 
 	function loadRoom(rid: string): void {
 		currentRoomId = rid;
 		setLoading(true);
+		setTypingUsers([]);
 		const room = client.getRoom(rid);
 		if (!room) {
 			setEvents([]);
@@ -176,6 +184,46 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		);
 	}
 
+	function handleEdit(room: Room, targetId: string): void {
+		// Defer to next microtask so SDK relation aggregation
+		// has finished applying the edit to the original event
+		queueMicrotask(() => {
+			if (room.roomId !== currentRoomId) return;
+			const targetEvent = room
+				.getLiveTimeline()
+				.getEvents()
+				.find((e) => e.getId() === targetId);
+			if (!targetEvent) return;
+			const updated = eventToTimelineEvent(targetEvent, room, client);
+			setEvents(
+				produce((draft) => {
+					const idx = draft.findIndex((e) => e.eventId === targetId);
+					if (idx >= 0) {
+						draft[idx] = updated;
+					}
+				}),
+			);
+		});
+	}
+
+	function onReplaced(originalEvent: MatrixEvent): void {
+		if (!currentRoomId) return;
+		const rid = originalEvent.getRoomId();
+		if (rid !== currentRoomId) return;
+		const room = client.getRoom(rid);
+		if (!room) return;
+		const eid = originalEvent.getId();
+		if (!eid) return;
+		setEvents(
+			produce((draft) => {
+				const idx = draft.findIndex((e) => e.eventId === eid);
+				if (idx >= 0) {
+					draft[idx] = eventToTimelineEvent(originalEvent, room, client);
+				}
+			}),
+		);
+	}
+
 	function onTimelineEvent(
 		event: MatrixEvent,
 		eventRoom: Room | undefined,
@@ -208,6 +256,16 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 						}
 					}),
 				);
+			}
+			return;
+		}
+
+		// Handle edit events — update the original message in place
+		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
+		if (relType === "m.replace") {
+			const targetId = event.getContent()?.["m.relates_to"]?.event_id;
+			if (typeof targetId === "string") {
+				handleEdit(room, targetId);
 			}
 			return;
 		}
@@ -295,6 +353,15 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 				if (typeof redactedId === "string") {
 					handleRedaction(room, redactedId);
 				}
+			} else {
+				// Encrypted edit (m.replace) — update the original message
+				const relType = event.getContent()?.["m.relates_to"]?.rel_type;
+				if (relType === "m.replace") {
+					const targetId = event.getContent()?.["m.relates_to"]?.event_id;
+					if (typeof targetId === "string") {
+						handleEdit(room, targetId);
+					}
+				}
 			}
 			return;
 		}
@@ -315,6 +382,34 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		}
 	}
 
+	function onTyping(_event: MatrixEvent, member: RoomMember): void {
+		if (member.roomId !== currentRoomId) return;
+		const room = client.getRoom(currentRoomId);
+		if (!room) return;
+		const myUserId = client.getUserId();
+		const typing: { userId: string; displayName: string }[] = [];
+		for (const m of room.getMembers()) {
+			if (m.typing && m.userId !== myUserId) {
+				typing.push({
+					userId: m.userId,
+					displayName: m.name?.trim() || m.userId,
+				});
+			}
+		}
+		setTypingUsers(typing);
+	}
+
+	/** Get the SDK MatrixEvent for edit prefill */
+	function getSourceEvent(eventId: string): MatrixEvent | undefined {
+		if (!currentRoomId) return undefined;
+		const room = client.getRoom(currentRoomId);
+		if (!room) return undefined;
+		return room
+			.getLiveTimeline()
+			.getEvents()
+			.find((e) => e.getId() === eventId);
+	}
+
 	// Initial load + reactive reload on room change
 	createEffect(() => {
 		loadRoom(roomId());
@@ -323,14 +418,18 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	client.on(RoomEvent.Timeline, onTimelineEvent);
 	client.on(RoomEvent.TimelineReset, onTimelineReset);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
+	client.on(MatrixEventEvent.Replaced, onReplaced);
 	client.on(ClientEvent.Room, onRoomAppeared);
+	client.on(RoomMemberEvent.Typing, onTyping);
 
 	onCleanup(() => {
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
 		client.off(MatrixEventEvent.Decrypted, onDecrypted);
+		client.off(MatrixEventEvent.Replaced, onReplaced);
 		client.off(ClientEvent.Room, onRoomAppeared);
+		client.off(RoomMemberEvent.Typing, onTyping);
 	});
 
-	return { events, loading };
+	return { events, loading, typingUsers, getSourceEvent };
 }
