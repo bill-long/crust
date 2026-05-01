@@ -151,7 +151,11 @@ const CryptoStatusBanner: Component = () => {
 				/>
 			</Show>
 
-			<Show when={bannerState() === "hidden"}>
+			<Show
+				when={
+					bannerState() === "hidden" && cryptoStatus.backupVersion() != null
+				}
+			>
 				<BackupStatus backup={backupProgress} />
 			</Show>
 
