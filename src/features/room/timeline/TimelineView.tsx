@@ -297,6 +297,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							<For each={virtualizer.getVirtualItems()}>
 								{(vItem) => {
 									const event = () => events[vItem.index];
+									let itemRef: HTMLDivElement | undefined;
 									return (
 										<Show when={event()}>
 											<div
@@ -308,7 +309,10 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													transform: `translateY(${vItem.start}px)`,
 												}}
 												data-index={vItem.index}
-												ref={(el) => virtualizer.measureElement(el)}
+												ref={(el) => {
+													itemRef = el;
+													virtualizer.measureElement(el);
+												}}
 											>
 												<TimelineItem
 													event={event()}
@@ -317,6 +321,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													onReply={() => setReplyTo(event())}
 													onEdit={() => onEdit(event())}
 													onDelete={() => onDelete(event().eventId)}
+													onImageLoad={() => {
+														if (itemRef) virtualizer.measureElement(itemRef);
+													}}
 													readReceipts={receipts()[event().eventId]}
 												/>
 											</div>
