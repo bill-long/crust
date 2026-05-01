@@ -51,9 +51,32 @@ review cycle. Two skips in one session is unacceptable.
 ## Checking for Copilot PR Review Comments
 
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
-use this GraphQL query to reliably detect unaddressed comments. **Do NOT rely on
-REST API comment counts or timestamp comparisons** — comments can arrive at the
-same timestamp as the review entry and will be missed.
+determine review completion using the **summary review body**, not thread counts.
+
+### Step 1: Wait for the summary review
+
+Copilot publishes individual thread comments first (empty `body`), then a
+**summary review** whose `body` starts with `## Pull request overview` and
+contains a sentence like "generated no new comments" or "generated N comment(s)".
+Poll the REST reviews endpoint until a summary review arrives for HEAD:
+
+```bash
+gh api /repos/bill-long/crust/pulls/PR_NUMBER/reviews \
+  --jq '.[] | select(.commit_id | startswith("HEAD_SHORT")) | select(.body | length > 0) | .body[0:200]'
+```
+
+- Poll every 30 seconds for up to 10 minutes.
+- A review with an **empty body** is just a thread comment, NOT the summary.
+  Keep polling until a review with a non-empty body appears for HEAD.
+
+### Step 2: Check the summary text
+
+- **"generated no new comments"** → review is clean, loop complete.
+- **"generated N comment(s)"** → there are new comments to address.
+
+### Step 3: Read new comments (if any)
+
+Use this GraphQL query to find unaddressed threads:
 
 ```bash
 gh api graphql -f query='{
@@ -78,21 +101,14 @@ gh api graphql -f query='{
 ] | length'
 ```
 
-- **0** = clean review, all comments addressed
 - **>0** = unaddressed comments; pipe through the jq filter
   `.[] | {path, line, body: .comments.nodes[-1].body[0:120]}` to see them
 
-Always run this check after confirming a new Copilot review exists (check
-`gh api /repos/.../pulls/N/reviews` for latest commit). A review with 0
-REST API "new comments" can still have new threads visible only via GraphQL.
-
 **IMPORTANT: GraphQL eventual consistency.** After the REST API confirms a
-review exists for HEAD, the GraphQL `reviewThreads` query may not yet include
-newly created threads. Do NOT declare "0 comments" on a single check
-immediately after REST confirmation. Instead, poll GraphQL **at least 3 times
-at 10-second intervals** after REST confirms the review exists. Only declare
-clean after all polls return 0. A single 0 immediately after REST confirmation
-is unreliable — threads can take 10-30 seconds to propagate.
+summary review exists, GraphQL `reviewThreads` may not yet include newly
+created threads. Poll GraphQL **at least 3 times at 10-second intervals**
+after the summary review arrives. A single 0 immediately after REST
+confirmation is unreliable — threads can take 10-30 seconds to propagate.
 
 ## Scoped Pass
 
