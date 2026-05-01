@@ -87,11 +87,20 @@ const Composer: Component<{
 		return name.includes(q) || uid.includes(q);
 	}
 
+	const MAX_PICKER_RESULTS = 50;
+
 	// Shared filtered member list — used by both picker and ARIA state
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
-		return roomMembers().filter((m) => filterMember(m, q));
+		const results: RoomMember[] = [];
+		for (const m of roomMembers()) {
+			if (filterMember(m, q)) {
+				results.push(m);
+				if (results.length >= MAX_PICKER_RESULTS) break;
+			}
+		}
+		return results;
 	});
 
 	const pickerRendered = () => filteredMembers().length > 0;

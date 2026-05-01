@@ -52,6 +52,17 @@ export function createPicker<T>() {
 			),
 		);
 
+		// Scroll highlighted item into view
+		createEffect(() => {
+			const idx = highlightIndex();
+			const items = filtered();
+			if (!props.visible || idx < 0 || idx >= items.length) return;
+			const el = document.getElementById(
+				`${listboxId}-item-${props.keyFn(items[idx])}`,
+			);
+			el?.scrollIntoView({ block: "nearest" });
+		});
+
 		const activeDescendant = () => {
 			if (!props.visible) return undefined;
 			const items = filtered();
