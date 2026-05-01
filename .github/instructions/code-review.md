@@ -9,6 +9,25 @@ templates. They encode lessons learned from prior review rounds on this project.
 first.** This applies to ALL changes — including "trivial" one-liners, formatting
 fixes, documentation updates, and Copilot review comment fixes. No exceptions.
 
+### Pre-Push Gate (execute in this exact order)
+
+This is a blocking checklist. Do NOT skip steps. Do NOT reorder steps.
+Do NOT call `git push` until step 5 says "push".
+
+1. **Edit** — make your code changes
+2. **Build** — run `pnpm typecheck && pnpm lint && pnpm build` (all must pass)
+3. **Review** — launch all 4 code-review passes (scoped Claude, scoped GPT,
+   blind Claude, blind GPT). Wait for ALL 4 to complete.
+4. **Fix loop** — if ANY pass found a substantive issue, fix it, go back to
+   step 2. Do NOT push the unfixed code "to save time".
+5. **Push** — all 4 passes agree with no substantive findings → `git push`
+6. **Reply** — reply to any Copilot PR review comments referencing the commit
+
+**Common failure mode:** "It's just a comment / one-liner / TODO, I'll push
+and review after." This is the #1 cause of wasted Copilot review round-trips.
+The review exists to catch issues *before* they reach the remote. Pushing
+first defeats the purpose.
+
 The 4 passes are:
 1. **Scoped (Claude)** — describes intent, lists verification items
 2. **Scoped (GPT)** — same context, different model
