@@ -15,7 +15,7 @@ interface CrossSigningSetupProps {
  * keys, then uploads them with UIA.
  */
 export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
-	const { client, cryptoStatus } = useClient();
+	const { client, cryptoStatus, clearSecretStorageCache } = useClient();
 
 	const [step, setStep] = createSignal<SetupStep>("intro");
 	const [errorMessage, setErrorMessage] = createSignal("");
@@ -77,6 +77,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			setStep("done");
 		} catch (e) {
 			console.error("Cross-signing bootstrap failed:", e);
+			clearSecretStorageCache();
 			setErrorMessage(
 				e instanceof Error ? e.message : "Setup failed. Please try again.",
 			);

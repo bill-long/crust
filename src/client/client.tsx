@@ -44,6 +44,9 @@ interface ClientContextValue {
 	setRecoveryKeyResolver: (
 		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
 	) => void;
+	/** Clear cached secret storage key so the next access re-prompts.
+	 *  Call from error handlers when a secret-storage operation fails. */
+	clearSecretStorageCache: () => void;
 }
 
 const ClientContext = createContext<ClientContextValue>();
@@ -51,9 +54,17 @@ const ClientContext = createContext<ClientContextValue>();
 export const ClientProvider: ParentComponent<{ session: Session }> = (
 	props,
 ) => {
-	// In-memory cache for the secret storage key, keyed by key ID
+	// In-memory cache for the secret storage key. Cached optimistically
+	// after user entry so rapid successive SDK calls (e.g. 3x during
+	// bootstrapCrossSigning) don't re-prompt. Top-level error handlers
+	// call clearSecretStorageCache() on failure so retries re-prompt.
 	let cachedSecretStorageKeyId: string | null = null;
 	let cachedSecretStorageKey: Uint8Array<ArrayBuffer> | null = null;
+
+	const clearSecretStorageCache = (): void => {
+		cachedSecretStorageKeyId = null;
+		cachedSecretStorageKey = null;
+	};
 
 	// Pluggable resolver for when the user needs to enter their recovery key
 	let recoveryKeyResolver:
@@ -86,7 +97,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				},
 				_name: string,
 			): Promise<[string, Uint8Array<ArrayBuffer>] | null> => {
-				// Try cached key first
+				// Return cached key for rapid successive calls
 				if (
 					cachedSecretStorageKeyId &&
 					cachedSecretStorageKey &&
@@ -109,7 +120,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 						? defaultKeyId
 						: availableKeys[0];
 
-				// Cache it for subsequent requests
+				// Cache for successive calls within the same operation
 				cachedSecretStorageKeyId = keyId;
 				cachedSecretStorageKey = key;
 				return [keyId, key];
@@ -201,6 +212,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				cryptoStatus,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,
+				clearSecretStorageCache,
 			}}
 		>
 			{props.children}
