@@ -3,7 +3,13 @@ import {
 	CryptoEvent,
 	type DeviceVerificationStatus,
 } from "matrix-js-sdk/lib/crypto-api";
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import {
+	type Accessor,
+	batch,
+	createEffect,
+	createSignal,
+	onCleanup,
+} from "solid-js";
 
 export interface CryptoStatus {
 	/** Whether cross-signing keys are set up on this account */
@@ -61,14 +67,10 @@ export function useCryptoStatus(
 				crypto.getActiveSessionBackupVersion(),
 			]);
 
-			// Discard if a newer refresh started while we were awaiting
 			if (refreshVersion !== thisVersion) return;
 
-			setCrossSigningReady(csReady);
-			setSecretStorageReady(ssReady);
-			setBackupVersion(bkVersion);
-
 			// Check this device's verification status
+			let deviceVerified = false;
 			const userId = client.getUserId();
 			const deviceId = client.getDeviceId();
 			if (userId && deviceId) {
@@ -76,27 +78,39 @@ export function useCryptoStatus(
 					const status: DeviceVerificationStatus | null =
 						await crypto.getDeviceVerificationStatus(userId, deviceId);
 					if (refreshVersion !== thisVersion) return;
-					setThisDeviceVerified(status?.isVerified() ?? false);
+					deviceVerified = status?.isVerified() ?? false;
 				} catch {
 					if (refreshVersion !== thisVersion) return;
-					setThisDeviceVerified(false);
 				}
 			}
 
 			// Check backup trust if backup exists
+			let bkTrusted: boolean | undefined;
 			if (bkVersion) {
-				const info = await crypto.getKeyBackupInfo();
-				if (refreshVersion !== thisVersion) return;
-				if (info) {
-					const trust = await crypto.isKeyBackupTrusted(info);
+				try {
+					const info = await crypto.getKeyBackupInfo();
 					if (refreshVersion !== thisVersion) return;
-					setBackupTrusted(trust.trusted);
-				} else {
-					setBackupTrusted(false);
+					if (info) {
+						const trust = await crypto.isKeyBackupTrusted(info);
+						if (refreshVersion !== thisVersion) return;
+						bkTrusted = trust.trusted;
+					} else {
+						bkTrusted = false;
+					}
+				} catch {
+					if (refreshVersion !== thisVersion) return;
+					bkTrusted = false;
 				}
-			} else {
-				setBackupTrusted(undefined);
 			}
+
+			// Set all signals in a batch so dependents see one coherent update
+			batch(() => {
+				setCrossSigningReady(csReady);
+				setSecretStorageReady(ssReady);
+				setBackupVersion(bkVersion);
+				setThisDeviceVerified(deviceVerified);
+				setBackupTrusted(bkTrusted);
+			});
 		} catch (e) {
 			console.error("Failed to refresh crypto status:", e);
 		}
