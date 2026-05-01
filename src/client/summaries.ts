@@ -102,6 +102,9 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 		return false;
 	}
 	// Filter out edits — they update existing messages, not new ones
+	// NOTE: encrypted edits arrive as m.room.encrypted and won't expose
+	// m.relates_to until decryption. A future improvement should listen
+	// for MatrixEventEvent.Decrypted to correct the sidebar preview.
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
 	return true;

@@ -95,18 +95,17 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			// displayable event
 			if (!displayableIds.has(readUpToId)) {
 				const idx = idxById[readUpToId];
-				if (idx !== undefined) {
-					let resolved: string | null = null;
-					for (let i = idx; i >= 0; i--) {
-						const id = timelineEvents[i].getId();
-						if (id && displayableIds.has(id)) {
-							resolved = id;
-							break;
-						}
+				if (idx === undefined) continue;
+				let resolved: string | null = null;
+				for (let i = idx; i >= 0; i--) {
+					const id = timelineEvents[i].getId();
+					if (id && displayableIds.has(id)) {
+						resolved = id;
+						break;
 					}
-					if (!resolved) continue;
-					readUpToId = resolved;
 				}
+				if (!resolved) continue;
+				readUpToId = resolved;
 			}
 
 			if (!map[readUpToId]) map[readUpToId] = [];
