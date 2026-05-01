@@ -3,6 +3,7 @@ import { Route, Router, useNavigate } from "@solidjs/router";
 import { type Component, Match, onMount, Show, Switch } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
 import LoginPage from "../features/auth/LoginPage";
+import CryptoStatusBanner from "../features/crypto/CryptoStatusBanner";
 import { loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
 import Layout from "./Layout";
@@ -58,6 +59,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 						readable.
 					</div>
 				</Show>
+				<CryptoStatusBanner />
 				{props.children}
 			</Match>
 		</Switch>
