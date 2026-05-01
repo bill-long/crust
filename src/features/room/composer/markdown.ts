@@ -61,7 +61,9 @@ export function formatMarkdown(text: string): FormatResult {
 	// Track whether formatting was applied by comparing against plain escaped text
 	let hasFormatting = protectedBlocks.length > 0;
 	if (!hasFormatting) {
-		const plainHtml = escapeHtml(text).replace(/\n/g, "<br>");
+		const plainHtml = escapeHtml(text)
+			.replaceAll(PH, "&#xFFFD;")
+			.replace(/\n/g, "<br>");
 		hasFormatting = html !== plainHtml;
 	}
 
