@@ -51,9 +51,32 @@ review cycle. Two skips in one session is unacceptable.
 ## Checking for Copilot PR Review Comments
 
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
-use this GraphQL query to reliably detect unaddressed comments. **Do NOT rely on
-REST API comment counts or timestamp comparisons** — comments can arrive at the
-same timestamp as the review entry and will be missed.
+determine review completion using the **summary review body**, not thread counts.
+
+### Step 1: Wait for the summary review
+
+Copilot publishes individual thread comments first (empty `body`), then a
+**summary review** whose `body` starts with `## Pull request overview` and
+contains a sentence like "generated no new comments" or "generated N comment(s)".
+Poll the REST reviews endpoint until a summary review arrives for HEAD:
+
+```bash
+gh api /repos/bill-long/crust/pulls/PR_NUMBER/reviews \
+  --jq '.[] | select(.commit_id | startswith("HEAD_SHORT")) | select(.body | length > 0) | .body[0:200]'
+```
+
+- Poll every 30 seconds for up to 10 minutes.
+- A review with an **empty body** is just a thread comment, NOT the summary.
+  Keep polling until a review with a non-empty body appears for HEAD.
+
+### Step 2: Check the summary text
+
+- **"generated no new comments"** → review is clean, loop complete.
+- **"generated N comment(s)"** → there are new comments to address.
+
+### Step 3: Read new comments (if any)
+
+Use this GraphQL query to find unaddressed threads:
 
 ```bash
 gh api graphql -f query='{
@@ -78,13 +101,14 @@ gh api graphql -f query='{
 ] | length'
 ```
 
-- **0** = clean review, all comments addressed
 - **>0** = unaddressed comments; pipe through the jq filter
   `.[] | {path, line, body: .comments.nodes[-1].body[0:120]}` to see them
 
-Always run this check after confirming a new Copilot review exists (check
-`gh api /repos/.../pulls/N/reviews` for latest commit). A review with 0
-REST API "new comments" can still have new threads visible only via GraphQL.
+**IMPORTANT: GraphQL eventual consistency.** After the REST API confirms a
+summary review exists, GraphQL `reviewThreads` may not yet include newly
+created threads. Poll GraphQL **at least 3 times at 10-second intervals**
+after the summary review arrives. A single 0 immediately after REST
+confirmation is unreliable — threads can take 10-30 seconds to propagate.
 
 ## Scoped Pass
 
@@ -244,6 +268,18 @@ additions at the end of the category list:
   public API (props, return values, type definitions) for fields
   that are no longer consumed. Dead props mislead future callers
   and accumulate unused code.
+- Timer cleanup: when a component uses setTimeout/setInterval,
+  verify the timer ID is stored and cleared in onCleanup/onDestroy.
+  A timer firing after unmount is a state-update-after-disposal bug.
+- Blob URL lifecycle: when creating Blob URLs for programmatic
+  downloads, verify revokeObjectURL is deferred (not synchronous
+  after click) and the anchor element is attached to the DOM before
+  clicking (some browsers ignore clicks on detached elements).
+- Input accessibility: every input must have an explicit label
+  (aria-label, aria-labelledby, or associated label element).
+  Placeholder alone is insufficient. Error messages should be wired
+  via aria-describedby. Focus should land on the primary input, not
+  a container overlay.
 ```
 
 ## Lessons Learned
@@ -415,3 +451,35 @@ additions at the end of the category list:
   guard was meant to prevent. Also: when a guard discards a stale
   result, the orphaned resource (SDK request, verifier) must be
   explicitly cancelled/cleaned up, not just dropped.
+- **Focus target conflicts in dialogs.** When a dialog overlay uses
+  `ref={(el) => el.focus()}` AND an inner element has `autofocus`,
+  the overlay steals focus from the intended target. Choose one
+  focus target per dialog: either the overlay (for dialogs with no
+  primary input) or the first input field (for forms). When applying
+  a review suggestion to add autofocus, verify it doesn't conflict
+  with existing focus management in the same component.
+- **Input fields need explicit labels.** `placeholder` alone is not
+  accessible — screen readers may not announce it. Every `<input>`
+  needs an explicit `<label>`, `aria-label`, or `aria-labelledby`.
+  When error text is displayed, wire it to the input with
+  `aria-describedby` so screen readers announce the error in context.
+- **setTimeout/setInterval in components must be cleared on cleanup.**
+  A timer that fires after component unmount will update disposed
+  signals. Store the timer ID and `clearTimeout` in `onCleanup`.
+  Also guard the callback with a `disposed` check for safety.
+  **Additionally: clear existing timers before creating new ones.**
+  When a timer-setting function can be called repeatedly (e.g., a
+  "Copy" button clicked multiple times), each call must
+  `clearTimeout(existingTimer)` before `setTimeout(...)`. Otherwise
+  earlier timers still fire and can revert state prematurely.
+- **Blob URL revocation must be deferred after programmatic clicks.**
+  `URL.revokeObjectURL(url)` immediately after `a.click()` can fail
+  because the browser hasn't consumed the URL yet. Wrap the
+  revocation in `setTimeout(() => ..., 0)`. Also add the anchor to
+  the DOM before clicking and remove it after — some browsers ignore
+  clicks on detached elements.
+- **Stale error state after status transitions.** When a hook tracks
+  both error state and enabled/disabled state, clearing the error on
+  status change prevents the UI from showing a stale error from a
+  previous session. If the rubber-duck identifies a "non-blocking"
+  finding about stale state, address it — PR review will catch it.
