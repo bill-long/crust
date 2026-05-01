@@ -11,6 +11,7 @@ import { createStore, produce } from "solid-js/store";
 
 export interface TimelineEvent {
 	eventId: string;
+	senderId: string;
 	senderName: string;
 	timestamp: number;
 	type: string;
@@ -20,6 +21,7 @@ export interface TimelineEvent {
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	reactions: Record<string, number>;
+	myReactions: Record<string, string>;
 }
 
 function eventToTimelineEvent(
@@ -42,6 +44,8 @@ function eventToTimelineEvent(
 
 	// Aggregate reactions from SDK relations
 	const reactions: TimelineEvent["reactions"] = {};
+	const myReactions: TimelineEvent["myReactions"] = {};
+	const myUserId = client.getUserId();
 	try {
 		const eventId = event.getId();
 		if (eventId) {
@@ -58,6 +62,14 @@ function eventToTimelineEvent(
 					for (const [key, evSet] of sortedEntries) {
 						if (key && evSet) {
 							reactions[key] = evSet.size;
+							if (myUserId) {
+								for (const ev of evSet) {
+									if (ev.getSender() === myUserId) {
+										const id = ev.getId();
+										if (id) myReactions[key] = id;
+									}
+								}
+							}
 						}
 					}
 				}
@@ -69,6 +81,7 @@ function eventToTimelineEvent(
 
 	return {
 		eventId: event.getId() ?? "",
+		senderId: sender,
 		senderName: member?.name ?? sender,
 		timestamp: event.getTs(),
 		type: event.getType(),
@@ -78,6 +91,7 @@ function eventToTimelineEvent(
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		reactions,
+		myReactions,
 	};
 }
 
