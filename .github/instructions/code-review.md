@@ -398,3 +398,20 @@ additions at the end of the category list:
   any absolute-positioned sibling using a fixed pixel offset will
   overlap. Use relative CSS values (`bottom: 100%`) or compute
   the offset from the element's actual dimensions.
+- **Async safety guards applied to one function must cover ALL peers.**
+  When a fix adds a generation counter to `requestSelfVerification`,
+  the same guard is needed in `requestDeviceVerification`,
+  `acceptIncoming`, `startSasVerification`, and `accept().catch` —
+  every async path sharing the same mutable state. The local review
+  caught the concept but missed 4 of 6 instances, which the Copilot
+  PR review then flagged. When introducing a guard, enumerate every
+  function that touches the guarded state and apply uniformly.
+- **Async safety guards must cover ALL entry points.** When adding
+  generation counters, abort tokens, or stale-result checks to one
+  async function, enumerate ALL async entry points and ALL await
+  points in the same module that share state. Verify every one has
+  the same guard. Incomplete application (guarding 2 of 5 paths) is
+  the most common miss — it produces the exact race condition the
+  guard was meant to prevent. Also: when a guard discards a stale
+  result, the orphaned resource (SDK request, verifier) must be
+  explicitly cancelled/cleaned up, not just dropped.

@@ -8,6 +8,9 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import { CrossSigningSetup } from "./CrossSigningSetup";
+import IncomingVerificationToast from "./verification/IncomingVerificationToast";
+import { useVerification } from "./verification/useVerification";
+import VerificationDialog from "./verification/VerificationDialog";
 
 type BannerState =
 	| "loading"
@@ -30,8 +33,11 @@ function deriveBannerState(
 }
 
 const CryptoStatusBanner: Component = () => {
-	const { cryptoStatus } = useClient();
+	const { client, cryptoStatus } = useClient();
 	const [showSetup, setShowSetup] = createSignal(false);
+	const [showVerification, setShowVerification] = createSignal(false);
+
+	const verification = useVerification(client);
 
 	const bannerState = createMemo(
 		(): BannerState =>
@@ -41,6 +47,16 @@ const CryptoStatusBanner: Component = () => {
 				cryptoStatus.backupVersion(),
 			),
 	);
+
+	const startSelfVerification = (): void => {
+		verification.requestSelfVerification();
+		setShowVerification(true);
+	};
+
+	const handleVerificationClose = (): void => {
+		setShowVerification(false);
+		cryptoStatus.refresh();
+	};
 
 	return (
 		<>
@@ -81,9 +97,8 @@ const CryptoStatusBanner: Component = () => {
 							</div>
 							<button
 								type="button"
-								disabled
-								class="shrink-0 rounded bg-neutral-700 px-3 py-1 text-sm font-medium text-neutral-400 opacity-50"
-								aria-label="Verify — coming soon"
+								onClick={startSelfVerification}
+								class="shrink-0 rounded bg-amber-700 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-amber-600"
 							>
 								Verify
 							</button>
@@ -114,6 +129,21 @@ const CryptoStatusBanner: Component = () => {
 			<Show when={showSetup()}>
 				<CrossSigningSetup onClose={() => setShowSetup(false)} />
 			</Show>
+
+			<Show when={showVerification()}>
+				<VerificationDialog
+					verification={verification}
+					onClose={handleVerificationClose}
+				/>
+			</Show>
+
+			<IncomingVerificationToast
+				client={client}
+				onAccept={(request) => {
+					verification.acceptIncoming(request);
+					setShowVerification(true);
+				}}
+			/>
 		</>
 	);
 };
