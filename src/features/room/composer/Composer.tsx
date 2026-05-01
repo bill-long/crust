@@ -11,8 +11,16 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { createPicker } from "../../../components/picker/Picker";
+import EmojiPicker from "../../emoji/EmojiPicker";
+import type { ImagePack, PickerEmoji } from "../../emoji/types";
+import { buildShortcodeLookup } from "../../emoji/useImagePacks";
 import type { TimelineEvent } from "../timeline/useTimeline";
-import { escapeHtml, formatMarkdown, type Mention } from "./markdown";
+import {
+	type CustomEmoji,
+	escapeHtml,
+	formatMarkdown,
+	type Mention,
+} from "./markdown";
 
 function buildReplyFallback(
 	replyTo: TimelineEvent,
@@ -45,6 +53,31 @@ function buildReplyFallback(
 	return { bodyPrefix, htmlPrefix };
 }
 
+const SHORTCODE_RE = /(?:^|[^:\w]):([a-zA-Z0-9_-]{2,50}):(?![\w:])/g;
+
+/** Extract custom emoji from packs that appear as :shortcode: in text. */
+function findCustomEmoji(text: string, packs: ImagePack[]): CustomEmoji[] {
+	const lookup = buildShortcodeLookup(packs);
+	if (lookup.size === 0) return [];
+
+	const found: CustomEmoji[] = [];
+	const seen = new Set<string>();
+
+	// Strip code blocks before scanning
+	const stripped = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "");
+
+	for (const match of stripped.matchAll(SHORTCODE_RE)) {
+		const shortcode = match[1];
+		if (seen.has(shortcode)) continue;
+		const emote = lookup.get(shortcode);
+		if (emote) {
+			seen.add(shortcode);
+			found.push({ shortcode, mxcUrl: emote.mxcUrl });
+		}
+	}
+	return found;
+}
+
 const TYPING_TIMEOUT_MS = 30_000;
 const TYPING_RESEND_MS = 25_000;
 
@@ -55,6 +88,7 @@ const Composer: Component<{
 	onCancelReply?: () => void;
 	onCancelEdit?: () => void;
 	onSent?: () => void;
+	packs: ImagePack[];
 }> = (props) => {
 	const { client } = useClient();
 	const [text, setText] = createSignal("");
@@ -62,6 +96,7 @@ const Composer: Component<{
 	const [error, setError] = createSignal<string | null>(null);
 	const [mentions, setMentions] = createSignal<Mention[]>([]);
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
+	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 
 	let textareaRef: HTMLTextAreaElement | undefined;
 	let lastTypingSentAt = 0;
@@ -179,6 +214,37 @@ const Composer: Component<{
 		});
 	}
 
+	function onEmojiSelect(item: PickerEmoji): void {
+		const el = textareaRef;
+		if (!el) return;
+
+		let insertion: string;
+		if (item.kind === "unicode") {
+			insertion = item.emoji.unicode;
+		} else {
+			// Custom emoji: insert :shortcode: in text
+			insertion = `:${item.emote.shortcode}:`;
+		}
+
+		const pos = el.selectionStart;
+		const currentText = text();
+		const before = currentText.slice(0, pos);
+		const after = currentText.slice(el.selectionEnd);
+		// Add space after emoji if there isn't one
+		const spacer = after.length > 0 && after[0] !== " " ? " " : "";
+		const newText = before + insertion + spacer + after;
+		setText(newText);
+		setEmojiPickerOpen(false);
+
+		requestAnimationFrame(() => {
+			if (!textareaRef) return;
+			const newPos = pos + insertion.length + spacer.length;
+			textareaRef.setSelectionRange(newPos, newPos);
+			textareaRef.focus();
+			autoResize();
+		});
+	}
+
 	// Pre-fill text when entering edit mode
 	createEffect(
 		on(
@@ -209,6 +275,7 @@ const Composer: Component<{
 				setError(null);
 				setMentions([]);
 				setMentionQuery(null);
+				setEmojiPickerOpen(false);
 				requestAnimationFrame(autoResize);
 			},
 		),
@@ -255,9 +322,11 @@ const Composer: Component<{
 		// Edit mode: send m.replace event
 		if (props.editingEvent) {
 			const currentMentions = reconcileMentions(msg);
+			const emoji = findCustomEmoji(msg, props.packs);
 			const { body: newBody, formatted_body } = formatMarkdown(
 				msg,
 				currentMentions,
+				emoji,
 			);
 			const newContent: Record<string, unknown> = {
 				msgtype: "m.text",
@@ -325,7 +394,12 @@ const Composer: Component<{
 
 		// Normal send mode
 		const currentMentions = reconcileMentions(msg);
-		const { body, formatted_body } = formatMarkdown(msg, currentMentions);
+		const emoji = findCustomEmoji(msg, props.packs);
+		const { body, formatted_body } = formatMarkdown(
+			msg,
+			currentMentions,
+			emoji,
+		);
 		const content: Record<string, unknown> = {
 			msgtype: "m.text",
 			body,
@@ -529,9 +603,29 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 pr-10 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
 					rows={1}
 				/>
+				{/* Emoji picker button */}
+				<button
+					type="button"
+					class="absolute bottom-2.5 right-2 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+					onClick={() => setEmojiPickerOpen((v) => !v)}
+					aria-label="Open emoji picker"
+					aria-expanded={emojiPickerOpen()}
+				>
+					😀
+				</button>
+				{/* Emoji picker popover */}
+				<Show when={emojiPickerOpen()}>
+					<div class="absolute bottom-full right-0 z-20 mb-1">
+						<EmojiPicker
+							packs={props.packs}
+							onSelect={onEmojiSelect}
+							onClose={() => setEmojiPickerOpen(false)}
+						/>
+					</div>
+				</Show>
 			</div>
 		</div>
 	);

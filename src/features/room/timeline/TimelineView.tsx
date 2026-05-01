@@ -11,6 +11,13 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import EmojiPicker from "../../emoji/EmojiPicker";
+import type { PickerEmoji } from "../../emoji/types";
+import {
+	buildEmoteLookup,
+	buildShortcodeLookup,
+	useImagePacks,
+} from "../../emoji/useImagePacks";
 import Composer from "../composer/Composer";
 import TimelineItem from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
@@ -27,12 +34,20 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		() => props.roomId,
 	);
 
+	// Custom emoji packs for this room
+	const packs = useImagePacks(client, () => props.roomId);
+	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
+	const emoteLookup = createMemo(() => buildEmoteLookup(packs()));
+
 	let scrollRef: HTMLDivElement | undefined;
 	const [atBottom, setAtBottom] = createSignal(true);
 	const [replyTo, setReplyTo] = createSignal<TimelineEvent | null>(null);
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
 	);
+	const [reactionPickerEventId, setReactionPickerEventId] = createSignal<
+		string | null
+	>(null);
 
 	const myUserId = client.getUserId() ?? "";
 
@@ -240,6 +255,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		}
 	};
 
+	const onReactionPickerSelect = (eventId: string, item: PickerEmoji): void => {
+		const key = item.kind === "custom" ? item.emote.mxcUrl : item.emoji.unicode;
+		onReact(eventId, key);
+		setReactionPickerEventId(null);
+	};
+
 	const onEdit = (ev: TimelineEvent): void => {
 		// Get current body from SDK event for accurate prefill
 		// Use getContent() (includes edits) not getOriginalContent()
@@ -325,7 +346,26 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 														if (itemRef) virtualizer.measureElement(itemRef);
 													}}
 													readReceipts={receipts()[event().eventId]}
+													client={client}
+													shortcodeLookup={shortcodeLookup()}
+													emoteLookup={emoteLookup()}
+													onOpenReactionPicker={() =>
+														setReactionPickerEventId(event().eventId)
+													}
 												/>
+												<Show
+													when={reactionPickerEventId() === event().eventId}
+												>
+													<div class="ml-11 mt-1 mb-1">
+														<EmojiPicker
+															packs={packs()}
+															onSelect={(item) =>
+																onReactionPickerSelect(event().eventId, item)
+															}
+															onClose={() => setReactionPickerEventId(null)}
+														/>
+													</div>
+												</Show>
 											</div>
 										</Show>
 									);
@@ -373,6 +413,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 					setReplyTo(null);
 					setEditingEvent(null);
 				}}
+				packs={packs()}
 			/>
 		</main>
 	);
