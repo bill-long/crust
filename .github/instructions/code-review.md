@@ -104,6 +104,20 @@ additions at the end of the category list:
   obvious ones. For timeline: messages, reactions, AND redactions. For
   encrypted events: pending-decryption needs a distinct placeholder from
   decryption-failure.
+- Browser compatibility: when using regex features (lookbehind `(?<=)`,
+  `(?<!)`), `structuredClone`, `Array.at()`, or other modern JS APIs,
+  verify they are supported by the project's browser baseline. Lookbehind
+  is unsupported in Safari <16.4 (March 2023). Prefer equivalent rewrites
+  (e.g., capture-and-reinsert instead of lookbehind) unless the baseline
+  explicitly excludes older browsers.
+- Sentinel/placeholder safety: when using sentinel characters or strings
+  to protect regions of text from transformation (e.g., code blocks during
+  markdown processing), verify the sentinel cannot appear in user input.
+  Pre-escape or replace any existing occurrences before inserting sentinels.
+- Focus management in async flows: when re-focusing an element after an
+  async operation (network request, setTimeout), verify the user hasn't
+  moved focus elsewhere. Check `document.activeElement` before calling
+  `.focus()` to avoid stealing focus from another control.
 ```
 
 ## Lessons Learned
@@ -168,3 +182,14 @@ additions at the end of the category list:
 - **Data stored but never rendered is waste.** If a field is computed in
   the data model but no UI component reads it, remove it. It adds
   allocation overhead and maintenance surface for no benefit.
+- **Regex lookbehind breaks older Safari.** `(?<!\w)` and `(?<=\w)` throw
+  SyntaxError in Safari <16.4. Vite/esbuild do not transpile regex syntax.
+  Rewrite with capture-and-reinsert: `(^|[^\w])` + `$1` in replacement.
+- **Sentinel characters must not collide with user input.** When using
+  placeholder tokens (e.g., U+FFFD) to protect text regions, pre-escape
+  any existing occurrences of the sentinel before inserting placeholders.
+  An index guard on restoration is not enough — it prevents `undefined`
+  but still allows wrong-block substitution.
+- **Don't steal focus after async operations.** `element.focus()` in a
+  `finally` block runs even when the user has clicked elsewhere during the
+  await. Guard with `document.activeElement` check before re-focusing.
