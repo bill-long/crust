@@ -86,12 +86,12 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			setEmoji(sas.sas.emoji);
 			setState("sas-showing");
 		} else {
-			// Emoji SAS not negotiated (decimal-only) — cancel since
-			// our UI only supports emoji comparison
-			sas.cancel();
+			// Emoji SAS not negotiated (decimal-only). Detach listeners
+			// first so the cancel event can't overwrite our error state.
+			cleanupRequest();
 			setError("Emoji verification not supported by the other device");
 			setState("error");
-			cleanupRequest();
+			sas.cancel();
 		}
 	};
 
@@ -117,6 +117,7 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			verifier.on(VerifierEvent.Cancel, onVerifierCancel);
 
 			verifier.verify().catch((e) => {
+				if (gen !== requestGeneration) return;
 				const s = state();
 				if (
 					s !== "cancelled" &&
