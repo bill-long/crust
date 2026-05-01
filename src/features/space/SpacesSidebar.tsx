@@ -14,7 +14,7 @@ const SpacesSidebar: Component = () => {
 	const spaces = createMemo(() => getSpaces(summaries));
 
 	return (
-		<aside class="flex w-16 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-neutral-800 bg-neutral-900 py-3">
+		<aside class="flex h-full flex-col items-center gap-1 overflow-y-auto border-r border-neutral-800 bg-neutral-900 py-3">
 			{/* Home button */}
 			<button
 				type="button"
@@ -65,8 +65,8 @@ const SpacesSidebar: Component = () => {
 									? "rounded-xl bg-pink-600 text-white"
 									: "bg-neutral-700 text-neutral-300 hover:rounded-xl hover:bg-neutral-600"
 							}`}
-							title={space.name || "Unnamed space"}
-							aria-label={space.name || "Unnamed space"}
+							title={space.name.trim() || "Unnamed space"}
+							aria-label={space.name.trim() || "Unnamed space"}
 							aria-pressed={isSelected()}
 						>
 							<Show
@@ -79,7 +79,7 @@ const SpacesSidebar: Component = () => {
 							>
 								<img
 									src={space.avatarUrl ?? ""}
-									alt={space.name}
+									alt={space.name.trim() || "Space"}
 									class="h-10 w-10 rounded-2xl object-cover"
 								/>
 							</Show>

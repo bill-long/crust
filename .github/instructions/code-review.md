@@ -3,6 +3,44 @@
 When running local code reviews (via the code-review agent), use these prompt
 templates. They encode lessons learned from prior review rounds on this project.
 
+## Checking for Copilot PR Review Comments
+
+After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
+use this GraphQL query to reliably detect unaddressed comments. **Do NOT rely on
+REST API comment counts or timestamp comparisons** — comments can arrive at the
+same timestamp as the review entry and will be missed.
+
+```bash
+gh api graphql -f query='{
+  repository(owner: "bill-long", name: "crust") {
+    pullRequest(number: PR_NUMBER) {
+      reviewThreads(last: 50) {
+        nodes {
+          isOutdated
+          path
+          line
+          comments(last: 1) {
+            nodes { author { login } createdAt body }
+          }
+        }
+      }
+    }
+  }
+}' --jq '[
+  .data.repository.pullRequest.reviewThreads.nodes[]
+  | select(.isOutdated == false)
+  | select(.comments.nodes[-1].author.login | test("copilot"))
+] | length'
+```
+
+- **0** = clean review, all comments addressed
+- **>0** = unaddressed comments; pipe through the jq filter
+  `.[] | {path, line, body: .comments.nodes[-1].body[0:120]}` to see them
+
+Always run this check after confirming a new Copilot review exists (check
+`gh api /repos/.../pulls/N/reviews` for latest commit). A review with 0
+REST API "new comments" can still have new threads visible only via GraphQL.
+
 ## Scoped Pass
 
 Describe what changed, then include:
@@ -45,9 +83,27 @@ additions at the end of the category list:
   when needed (list them in the prompt).
 - Dead code and unused definitions: flag union type variants that are never
   assigned, exported functions/types never imported, interface fields never
-  read, and enum members never referenced.
+  read, and enum members never referenced. Also flag stored data fields that
+  are computed but never consumed by any UI component.
 - Intra-file duplication: when the same logic (3+ lines) appears in multiple
   places within one file, flag it for extraction into a shared helper.
+- CSS positioning: when an element uses `position: absolute` (or Tailwind
+  `absolute`), verify there is a `position: relative` (or `relative`) ancestor
+  within the same component. Missing positioning context causes elements to
+  escape their intended container.
+- ARIA completeness: when using `role="separator"`, verify all required ARIA
+  attributes are present (aria-valuenow, aria-valuemin, aria-valuemax). When
+  adding one ARIA attribute, check what others the role requires. Interactive
+  ARIA widgets must be keyboard-operable (not just focusable).
+- Reactive hooks: when a Solid hook receives a signal accessor (e.g.,
+  `roomId: () => string`), verify the hook tracks changes via `createEffect`.
+  A one-time read misses subsequent updates. Also verify that component state
+  (scroll position, flags) resets when the driving signal changes.
+- Event-type coverage: when handling SDK events incrementally, verify ALL
+  event types that affect the rendered state are handled — not just the
+  obvious ones. For timeline: messages, reactions, AND redactions. For
+  encrypted events: pending-decryption needs a distinct placeholder from
+  decryption-failure.
 ```
 
 ## Lessons Learned
@@ -95,3 +151,20 @@ additions at the end of the category list:
   that share a contract (e.g., getSpaceRooms, getSpaceUnreadRollup,
   getOrphanRooms) must apply the same precondition checks. When you add a
   guard to one, scan for related functions that need the same fix.
+- **Reactive signals must be tracked, not just read once.** When a Solid
+  hook receives `() => string`, wrap reads in `createEffect` for reactivity.
+  Also reset derived state (scroll position, atBottom flags, loading states)
+  when the driving signal changes — component reuse across param changes is
+  common in SPA routers.
+- **Absolute positioning needs a relative ancestor.** Always check that CSS
+  `absolute` elements have a `relative` parent within the same component.
+- **ARIA attributes come in sets.** When a role requires multiple ARIA props
+  (e.g., separator needs valuenow + valuemin + valuemax), adding one without
+  the others is incomplete. Check the WAI-ARIA spec for required attributes
+  per role.
+- **Handle all event types that affect rendered state.** For timelines:
+  messages, reactions, redactions, and pending-decryption all produce
+  distinct visual states. Missing any one creates stale UI.
+- **Data stored but never rendered is waste.** If a field is computed in
+  the data model but no UI component reads it, remove it. It adds
+  allocation overhead and maintenance surface for no benefit.
