@@ -7,6 +7,10 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import BackupSetupDialog from "./backup/BackupSetupDialog";
+import BackupStatus from "./backup/BackupStatus";
+import RecoveryKeyInput from "./backup/RecoveryKeyInput";
+import { useKeyBackup } from "./backup/useKeyBackup";
 import { CrossSigningSetup } from "./CrossSigningSetup";
 import IncomingVerificationToast from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
@@ -36,8 +40,10 @@ const CryptoStatusBanner: Component = () => {
 	const { client, cryptoStatus } = useClient();
 	const [showSetup, setShowSetup] = createSignal(false);
 	const [showVerification, setShowVerification] = createSignal(false);
+	const [showBackupSetup, setShowBackupSetup] = createSignal(false);
 
 	const verification = useVerification(client);
+	const backupProgress = useKeyBackup(client);
 
 	const bannerState = createMemo(
 		(): BannerState =>
@@ -115,9 +121,8 @@ const CryptoStatusBanner: Component = () => {
 							</div>
 							<button
 								type="button"
-								disabled
-								class="shrink-0 rounded bg-neutral-700 px-3 py-1 text-sm font-medium text-neutral-400 opacity-50"
-								aria-label="Set up backup — coming soon"
+								onClick={() => setShowBackupSetup(true)}
+								class="shrink-0 rounded bg-amber-700 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-amber-600"
 							>
 								Set up backup
 							</button>
@@ -136,6 +141,21 @@ const CryptoStatusBanner: Component = () => {
 					onClose={handleVerificationClose}
 				/>
 			</Show>
+
+			<Show when={showBackupSetup()}>
+				<BackupSetupDialog
+					onClose={() => {
+						setShowBackupSetup(false);
+						cryptoStatus.refresh();
+					}}
+				/>
+			</Show>
+
+			<Show when={bannerState() === "hidden"}>
+				<BackupStatus backup={backupProgress} />
+			</Show>
+
+			<RecoveryKeyInput />
 
 			<IncomingVerificationToast
 				client={client}
