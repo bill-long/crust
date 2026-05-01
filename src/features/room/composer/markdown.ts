@@ -1,11 +1,16 @@
 /**
  * Simple inline markdown → HTML converter for Matrix formatted_body.
- * Handles: **bold**, *italic*, _italic_, `code`, ```code blocks```
+ * Handles: **bold**, *italic*, _italic_, `code`, ```code blocks```, @mentions
  *
  * body is always raw user text (never escaped).
  * formatted_body is HTML with markdown transforms, or null if no
  * formatting was applied.
  */
+
+export interface Mention {
+	userId: string;
+	displayName: string;
+}
 
 export interface FormatResult {
 	body: string;
@@ -20,7 +25,10 @@ export function escapeHtml(text: string): string {
 		.replace(/"/g, "&quot;");
 }
 
-export function formatMarkdown(text: string): FormatResult {
+export function formatMarkdown(
+	text: string,
+	mentions?: Mention[],
+): FormatResult {
 	const body = text;
 
 	let html = escapeHtml(text);
@@ -30,14 +38,49 @@ export function formatMarkdown(text: string): FormatResult {
 	const PH = "\uFFFD";
 	// Escape any existing placeholder chars so they can't collide
 	html = html.replaceAll(PH, "&#xFFFD;");
-	html = html.replace(/```\n?([\s\S]*?)```/g, (_, code) => {
-		protectedBlocks.push(`<pre><code>${code}</code></pre>`);
-		return `${PH}${protectedBlocks.length - 1}${PH}`;
-	});
+	html = html.replace(
+		/```(?:[^\n]*\n)([\s\S]*?)```|```([\s\S]*?)```/g,
+		(_, codeWithLang, codeInline) => {
+			protectedBlocks.push(
+				`<pre><code>${codeWithLang ?? codeInline ?? ""}</code></pre>`,
+			);
+			return `${PH}${protectedBlocks.length - 1}${PH}`;
+		},
+	);
 	html = html.replace(/`([^`]+)`/g, (_, code) => {
 		protectedBlocks.push(`<code>${code}</code>`);
 		return `${PH}${protectedBlocks.length - 1}${PH}`;
 	});
+
+	// Protect mentions with placeholders before markdown transforms
+	let mentionsApplied = false;
+	if (mentions && mentions.length > 0) {
+		for (const mention of mentions) {
+			const escapedName = escapeHtml(`@${mention.displayName}`);
+			const permalink = `https://matrix.to/#/${encodeURIComponent(mention.userId)}`;
+			const link = `<a href="${escapeHtml(permalink)}">${escapedName}</a>`;
+			// Replace @DisplayName with both-side boundary check (no lookbehind for Safari)
+			const escaped = escapeHtml(`@${mention.displayName}`).replace(
+				/[.*+?^${}()|[\]\\]/g,
+				"\\$&",
+			);
+			const boundaryPattern = new RegExp(`(^|[^\\w])${escaped}(?!\\w)`, "g");
+			// Only add to protectedBlocks if replacement actually matches
+			let matched = false;
+			const placeholderIdx = protectedBlocks.length;
+			protectedBlocks.push(link);
+			const placeholder = `${PH}${placeholderIdx}${PH}`;
+			html = html.replace(boundaryPattern, (_match, prefix) => {
+				matched = true;
+				return prefix + placeholder;
+			});
+			if (!matched) {
+				protectedBlocks.pop();
+			} else {
+				mentionsApplied = true;
+			}
+		}
+	}
 
 	// Bold (**...**) — must be before italic
 	html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -59,6 +102,7 @@ export function formatMarkdown(text: string): FormatResult {
 	});
 
 	// Track whether formatting was applied by comparing against plain escaped text
+	const hasMentions = mentionsApplied;
 	let hasFormatting = protectedBlocks.length > 0;
 	if (!hasFormatting) {
 		const plainHtml = escapeHtml(text)
@@ -67,5 +111,8 @@ export function formatMarkdown(text: string): FormatResult {
 		hasFormatting = html !== plainHtml;
 	}
 
-	return { body, formatted_body: hasFormatting ? html : null };
+	return {
+		body,
+		formatted_body: hasFormatting || hasMentions ? html : null,
+	};
 }

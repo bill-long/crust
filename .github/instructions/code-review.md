@@ -28,6 +28,12 @@ and review after." This is the #1 cause of wasted Copilot review round-trips.
 The review exists to catch issues *before* they reach the remote. Pushing
 first defeats the purpose.
 
+**Copilot comment fix cycle:** When addressing Copilot PR review comments,
+the workflow is: fix → build → 4-pass review → push → reply. Do NOT skip
+the review just because "Copilot asked for this change." Copilot-requested
+fixes are code changes and follow the same gate. This is the #2 failure
+mode — it has been violated repeatedly in this project.
+
 The 4 passes are:
 1. **Scoped (Claude)** — describes intent, lists verification items
 2. **Scoped (GPT)** — same context, different model
@@ -188,6 +194,56 @@ additions at the end of the category list:
   usage, prefer `as unknown as TargetType` over `as any`. The double
   cast preserves type checking for the rest of the expression while
   working around the specific incompatibility.
+- State lifecycle across mode transitions: when a component supports
+  multiple modes (send/edit/reply), verify ALL signals and local
+  variables are properly initialized, cleared, or restored when
+  transitioning between modes. Common misses: entering edit mode
+  doesn't clear mention/picker state from the previous send;
+  switching edit targets doesn't reset state from the previous edit;
+  failed sends clear state that isn't restored in the catch block.
+  Audit every mode transition for every signal.
+- SDK return value edge cases: when using SDK methods that return
+  data (getEventReadUpTo, getContent, getUserId, getJoinedMembers),
+  verify the return value is valid in the consuming context — not
+  just non-null. A receipt can point at a non-displayable event; a
+  member userId already contains a leading `@`; an encrypted event's
+  content hides relation metadata until decryption. Test: "what
+  happens if this SDK method returns a technically-valid but
+  unexpected value?"
+- Reactive computation deduplication: when a condition is checked
+  both inside a component and by its parent (e.g., filtering a list
+  to check if any items match, then passing the full list to a child
+  that filters again), extract the shared computation into a single
+  memo. Duplicate reactive work multiplies per-keystroke cost in
+  interactive contexts like autocomplete.
+- ARIA attribute lifecycle: aria-controls must reference an element
+  that exists in the DOM. When the referenced element is conditionally
+  rendered (e.g., a picker that only renders when filtered items > 0),
+  the ARIA attribute must track the same condition. Also: hard-coded
+  IDs on reusable components will collide when multiple instances
+  render — use createUniqueId() or similar.
+- Token replacement completeness: when replacing a user-initiated
+  token (e.g., @partial → @DisplayName), replace the ENTIRE token
+  including any characters after the caret. Also verify the
+  replacement text matches what will appear in both plaintext body
+  and formatted HTML (e.g., include the @ prefix in link text).
+- Cross-domain rule consistency: when two functions apply the same
+  logical rule (e.g., "what counts as a real mention"), they must
+  share the rule, not duplicate it independently. If markdown
+  processing excludes code blocks from mention linking, the
+  reconciliation step must also exclude code blocks when deciding
+  which mentions are active. Trace every consumer of the rule and
+  verify they agree.
+- Speculative allocation: don't push entries into shared arrays
+  (protectedBlocks, result lists) before confirming the entry will
+  be used. Unused entries cause false positives in downstream checks
+  (e.g., hasFormatting becomes true even though no formatting was
+  applied). Push only after confirming the operation matched.
+- Dead API surface after refactors: when refactoring internal logic
+  (e.g., switching from key-based to index-based IDs), audit the
+  public API (props, return values, type definitions) for fields
+  that are no longer consumed. Dead props mislead future callers
+  and accumulate unused code.
 ```
 
 ## Lessons Learned
@@ -291,3 +347,54 @@ additions at the end of the category list:
 - **Prefer typed casts over `any`.** When SDK types are too restrictive,
   use `as unknown as TargetType` instead of `as any`. The double cast
   preserves type checking for the rest of the expression.
+- **Audit every mode transition for every signal.** When a component
+  has multiple modes (send/edit/reply, picker open/closed), each
+  transition must initialize, clear, or restore ALL relevant state.
+  The most common miss: entering edit mode without clearing mention
+  state from the send path, or failed sends clearing state that
+  isn't restored in the catch block. Walk through each transition
+  and list every signal that should change.
+- **SDK return values can be technically valid but contextually wrong.**
+  `room.getEventReadUpTo()` can return a non-displayable event ID;
+  `member.userId` already contains `@`; encrypted event content
+  hides `m.relates_to` until decryption. Don't assume SDK returns
+  are directly usable — verify they make sense in the consuming
+  context.
+- **Reactive deduplication matters for interactive paths.** When the
+  same filter/computation runs in both a parent memo and a child
+  component (e.g., checking if any members match AND passing the
+  full list to a picker that filters again), extract it once. Per-
+  keystroke double-filtering is measurable in rooms with 1000+
+  members.
+- **ARIA references must track conditional rendering.** `aria-controls`
+  pointing at an element that isn't rendered is worse than no
+  `aria-controls` at all. When the referenced element is inside a
+  `<Show>`, the ARIA attribute must be gated on the same condition.
+  Hard-coded IDs on reusable components collide when multiple
+  instances render — use `createUniqueId()`.
+- **Token replacement must consume the full token.** When replacing
+  `@partial` with `@DisplayName`, include any trailing characters
+  after the caret that are part of the same token. Otherwise the
+  user gets `@DisplayName artialSuffix`. Also verify replacement
+  text appears identically in body and formatted_body (e.g., the
+  `@` prefix in mention links).
+- **Two functions applying the same rule must share it.** When
+  reconciliation says "this mention is active" and markdown says
+  "this mention gets linked", they must agree on what qualifies.
+  If markdown excludes code blocks from linking, reconciliation
+  must also exclude them — otherwise m.mentions includes users
+  whose @mention appears only inside backticks.
+- **Don't allocate before confirming the operation matched.**
+  Pushing into protectedBlocks before checking if replacement
+  matched causes hasFormatting to be true even when no formatting
+  was applied. Always confirm the operation succeeded before
+  recording its side effects.
+- **Audit public API after internal refactors.** When switching
+  from key-based to index-based IDs, the `keyFn` prop became dead
+  code but survived in the type definition. Dead props mislead
+  future callers and accumulate unused code.
+- **Hard-coded pixel offsets break with dynamic sizing.** When an
+  element's size changes dynamically (e.g., textarea auto-resizes),
+  any absolute-positioned sibling using a fixed pixel offset will
+  overlap. Use relative CSS values (`bottom: 100%`) or compute
+  the offset from the element's actual dimensions.
