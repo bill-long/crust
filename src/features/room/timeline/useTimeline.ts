@@ -111,6 +111,8 @@ function isDisplayable(event: MatrixEvent): boolean {
 	// Filter out message edits (m.replace) — they update existing events
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// Filter out redacted events (content cleared by server)
+	if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 	return true;
 }
 
@@ -157,7 +159,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 						.getEvents()
 						.find((e) => e.getId() === redactedId);
 					if (sourceEvent) {
-						draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
+						if (isDisplayable(sourceEvent)) {
+							draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
+						} else {
+							draft.splice(idx, 1);
+						}
 					} else {
 						draft.splice(idx, 1);
 					}

@@ -84,6 +84,19 @@ function formatTime(ts: number): string {
 	return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function unsupportedLabel(msgtype: string): string {
+	switch (msgtype) {
+		case "m.video":
+			return "🎬 Video";
+		case "m.audio":
+			return "🔊 Audio";
+		case "m.file":
+			return "📎 File";
+		default:
+			return "📎 Attachment";
+	}
+}
+
 const TimelineItem: Component<{
 	event: TimelineEvent;
 	isOwnMessage: boolean;
@@ -91,6 +104,7 @@ const TimelineItem: Component<{
 	onReply: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onImageLoad?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
 }> = (props) => {
 	const ev = props.event;
@@ -174,7 +188,12 @@ const TimelineItem: Component<{
 							}
 							fallback={
 								<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
-									{ev.body}
+									{ev.body ||
+										(ev.msgtype &&
+										ev.msgtype !== "m.text" &&
+										ev.msgtype !== "m.emote"
+											? unsupportedLabel(ev.msgtype)
+											: "")}
 									<Show when={ev.isEdited}>
 										<span class="ml-1 text-xs text-neutral-600">(edited)</span>
 									</Show>
@@ -186,6 +205,7 @@ const TimelineItem: Component<{
 								alt={ev.body?.trim() || "Image"}
 								class="mt-1 max-h-64 max-w-sm rounded"
 								loading="lazy"
+								onLoad={() => props.onImageLoad?.()}
 							/>
 						</Show>
 					</Show>
