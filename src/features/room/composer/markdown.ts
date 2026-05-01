@@ -50,7 +50,7 @@ export function formatMarkdown(
 	// Protect mentions with placeholders before markdown transforms
 	if (mentions && mentions.length > 0) {
 		for (const mention of mentions) {
-			const escapedName = escapeHtml(mention.displayName);
+			const escapedName = escapeHtml(`@${mention.displayName}`);
 			const permalink = `https://matrix.to/#/${encodeURIComponent(mention.userId)}`;
 			const link = `<a href="${escapeHtml(permalink)}">${escapedName}</a>`;
 			protectedBlocks.push(link);

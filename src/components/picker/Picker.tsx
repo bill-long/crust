@@ -3,6 +3,7 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
+	createUniqueId,
 	For,
 	type JSX,
 	on,
@@ -29,8 +30,9 @@ const ITEM_HEIGHT = 36;
  */
 export function createPicker<T>() {
 	let handleKey: ((e: KeyboardEvent) => boolean) | undefined;
-
 	let activeDescendantRef: (() => string | undefined) | undefined;
+	const pickerId = createUniqueId();
+	const listboxId = `picker-listbox-${pickerId}`;
 
 	const Picker: Component<PickerProps<T>> = (props) => {
 		const [highlightIndex, setHighlightIndex] = createSignal(0);
@@ -39,11 +41,14 @@ export function createPicker<T>() {
 			props.items.filter((item) => props.filterFn(item, props.query)),
 		);
 
-		// Reset highlight when query changes
+		// Reset highlight when query changes or filtered list shrinks
 		createEffect(
 			on(
-				() => props.query,
-				() => setHighlightIndex(0),
+				() => [props.query, props.visible, filtered().length] as const,
+				() =>
+					setHighlightIndex((i) =>
+						Math.min(i, Math.max(0, filtered().length - 1)),
+					),
 			),
 		);
 
@@ -52,7 +57,7 @@ export function createPicker<T>() {
 			const items = filtered();
 			const idx = highlightIndex();
 			if (idx >= 0 && idx < items.length) {
-				return `picker-item-${props.keyFn(items[idx])}`;
+				return `${listboxId}-item-${props.keyFn(items[idx])}`;
 			}
 			return undefined;
 		};
@@ -101,7 +106,7 @@ export function createPicker<T>() {
 		return (
 			<Show when={props.visible && filtered().length > 0}>
 				<div
-					id="picker-listbox"
+					id={listboxId}
 					class="absolute z-20 max-h-[216px] w-64 overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-lg"
 					style={{
 						bottom: `${props.position.bottom}px`,
@@ -116,7 +121,7 @@ export function createPicker<T>() {
 							const isHighlighted = () => index() === highlightIndex();
 							return (
 								<div
-									id={`picker-item-${props.keyFn(item)}`}
+									id={`${listboxId}-item-${props.keyFn(item)}`}
 									role="option"
 									aria-selected={isHighlighted()}
 									tabIndex={-1}
@@ -154,5 +159,5 @@ export function createPicker<T>() {
 		return activeDescendantRef ? activeDescendantRef() : undefined;
 	}
 
-	return { Picker, handlePickerKey, getActiveDescendant };
+	return { Picker, handlePickerKey, getActiveDescendant, listboxId };
 }

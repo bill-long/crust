@@ -72,6 +72,7 @@ const Composer: Component<{
 		Picker: MentionPicker,
 		handlePickerKey,
 		getActiveDescendant,
+		listboxId,
 	} = createPicker<RoomMember>();
 
 	const roomMembers = createMemo(() => {
@@ -85,6 +86,13 @@ const Composer: Component<{
 		const uid = member.userId.toLowerCase();
 		return name.includes(q) || uid.includes(q);
 	}
+
+	// Whether the picker is actually rendered (visible and has matching items)
+	const pickerRendered = createMemo(() => {
+		const q = mentionQuery();
+		if (q === null) return false;
+		return roomMembers().some((m) => filterMember(m, q));
+	});
 
 	function detectMention(currentText?: string): void {
 		const el = textareaRef;
@@ -129,7 +137,9 @@ const Composer: Component<{
 		const atIdx = before.lastIndexOf("@");
 		if (atIdx < 0) return;
 
-		const displayName = member.name?.trim() || member.userId;
+		const rawName = member.name?.trim() || member.userId;
+		// Strip leading @ from userId fallback to avoid @@user:server
+		const displayName = rawName.startsWith("@") ? rawName.slice(1) : rawName;
 		const insertion = `@${displayName} `;
 		const after = currentText.slice(pos);
 		const newText = currentText.slice(0, atIdx) + insertion + after;
@@ -158,6 +168,8 @@ const Composer: Component<{
 		on(
 			() => props.editingEvent,
 			(ev) => {
+				setMentions([]);
+				setMentionQuery(null);
 				if (ev) {
 					setText(ev.body);
 					requestAnimationFrame(() => {
@@ -496,12 +508,12 @@ const Composer: Component<{
 					onClick={() => detectMention()}
 					onKeyDown={onKeyDown}
 					placeholder={props.editingEvent ? "Edit message…" : "Send a message…"}
-					role={mentionQuery() !== null ? "combobox" : undefined}
+					role={pickerRendered() ? "combobox" : undefined}
 					aria-label={props.editingEvent ? "Edit message" : "Message"}
-					aria-expanded={mentionQuery() !== null ? true : undefined}
+					aria-expanded={pickerRendered() ? true : undefined}
 					aria-activedescendant={getActiveDescendant()}
-					aria-autocomplete={mentionQuery() !== null ? "list" : undefined}
-					aria-controls={mentionQuery() !== null ? "picker-listbox" : undefined}
+					aria-autocomplete={pickerRendered() ? "list" : undefined}
+					aria-controls={pickerRendered() ? listboxId : undefined}
 					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
 					rows={1}
 				/>
