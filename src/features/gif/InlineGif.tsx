@@ -60,6 +60,7 @@ const InlineGif: Component<{
 							href={props.url}
 							target="_blank"
 							rel="noopener noreferrer"
+							referrerPolicy="no-referrer"
 							class="text-pink-400 underline hover:text-pink-300"
 						>
 							Open link
