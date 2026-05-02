@@ -35,11 +35,26 @@ const GifPicker: Component<{
 
 	let searchRef: HTMLInputElement | undefined;
 	let scrollRef: HTMLDivElement | undefined;
+	let pickerRef: HTMLDivElement | undefined;
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	// Generation counter to discard stale responses
 	let fetchGen = 0;
 
+	// Outside-click handler
+	function onDocumentClick(e: MouseEvent) {
+		if (pickerRef && !pickerRef.contains(e.target as Node)) {
+			props.onClose();
+		}
+	}
+
+	// Defer listener so the opening click doesn't immediately close
+	const rafId = requestAnimationFrame(() => {
+		document.addEventListener("mousedown", onDocumentClick);
+	});
+
 	onCleanup(() => {
+		cancelAnimationFrame(rafId);
+		document.removeEventListener("mousedown", onDocumentClick);
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 	});
 
@@ -81,15 +96,20 @@ const GifPicker: Component<{
 		}
 	});
 
-	// Debounced search
+	// Debounced search — defer: true skips the initial run so we don't
+	// duplicate the trending fetch or fire when trendingOnOpen is false
 	createEffect(
-		on(query, (q) => {
-			if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-			debounceTimer = setTimeout(() => {
-				doFetch(provider(), q, 0, false);
-				if (scrollRef) scrollRef.scrollTop = 0;
-			}, DEBOUNCE_MS);
-		}),
+		on(
+			query,
+			(q) => {
+				if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+				debounceTimer = setTimeout(() => {
+					doFetch(provider(), q, 0, false);
+					if (scrollRef) scrollRef.scrollTop = 0;
+				}, DEBOUNCE_MS);
+			},
+			{ defer: true },
+		),
 	);
 
 	function loadMore() {
@@ -121,6 +141,7 @@ const GifPicker: Component<{
 
 	return (
 		<div
+			ref={pickerRef}
 			class="flex h-[400px] w-80 flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
 			onKeyDown={onKeyDown}
 		>

@@ -56,28 +56,47 @@ export interface CrustConfig {
 	};
 }
 
+function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
+	if (typeof raw !== "object" || raw === null) return { url: "" };
+	const obj = raw as Record<string, unknown>;
+	return {
+		url: typeof obj.url === "string" ? obj.url : "",
+	};
+}
+
+function normalizeBranding(raw: unknown): CrustConfig["branding"] {
+	if (typeof raw !== "object" || raw === null) {
+		return { name: "Crust", logoUrl: "/favicon.svg", primaryColor: "#e33e7f" };
+	}
+	const obj = raw as Record<string, unknown>;
+	return {
+		name: typeof obj.name === "string" ? obj.name : "Crust",
+		logoUrl: typeof obj.logoUrl === "string" ? obj.logoUrl : "/favicon.svg",
+		primaryColor:
+			typeof obj.primaryColor === "string" ? obj.primaryColor : "#e33e7f",
+	};
+}
+
 /** Apply defaults for missing/malformed fields in operator config. */
-export function normalizeConfig(raw: Record<string, unknown>): CrustConfig {
+export function normalizeConfig(raw: unknown): CrustConfig {
+	if (typeof raw !== "object" || raw === null) {
+		return normalizeConfig({});
+	}
+	const obj = raw as Record<string, unknown>;
 	return {
 		defaultHomeserver:
-			typeof raw.defaultHomeserver === "string"
-				? raw.defaultHomeserver
+			typeof obj.defaultHomeserver === "string"
+				? obj.defaultHomeserver
 				: "matrix.org",
-		homeserverList: Array.isArray(raw.homeserverList)
-			? (raw.homeserverList as string[])
+		homeserverList: Array.isArray(obj.homeserverList)
+			? (obj.homeserverList as string[])
 			: ["matrix.org"],
 		allowCustomHomeservers:
-			typeof raw.allowCustomHomeservers === "boolean"
-				? raw.allowCustomHomeservers
+			typeof obj.allowCustomHomeservers === "boolean"
+				? obj.allowCustomHomeservers
 				: true,
-		elementCall:
-			typeof raw.elementCall === "object" && raw.elementCall !== null
-				? (raw.elementCall as CrustConfig["elementCall"])
-				: { url: "" },
-		gif: normalizeGifConfig(raw.gif),
-		branding:
-			typeof raw.branding === "object" && raw.branding !== null
-				? (raw.branding as CrustConfig["branding"])
-				: { name: "Crust", logoUrl: "/favicon.svg", primaryColor: "#e33e7f" },
+		elementCall: normalizeElementCall(obj.elementCall),
+		gif: normalizeGifConfig(obj.gif),
+		branding: normalizeBranding(obj.branding),
 	};
 }

@@ -1,4 +1,4 @@
-import { type Component, createMemo, Show } from "solid-js";
+import { type Component, createMemo, createSignal, Show } from "solid-js";
 import { userSettings } from "../../stores/settings";
 
 /**
@@ -21,22 +21,13 @@ export function isGifUrl(url: string): boolean {
 
 /**
  * Extract a GIF CDN URL from a plain-text message body.
- * Returns the URL if the message is primarily a GIF link
- * (possibly with a label prefix like "Giphy .gif: https://...").
+ * Only matches when the entire message body is a single GIF URL
+ * (with optional trailing whitespace). Messages with surrounding text
+ * are rendered normally via MessageBody to preserve context.
  */
 export function extractGifUrl(body: string): string | null {
 	const trimmed = body.trim();
-
-	// Direct URL only
-	if (isGifUrl(trimmed)) return trimmed;
-
-	// "Label: URL" pattern (how Crust sends GIFs)
-	const match = trimmed.match(/^.{0,80}(https:\/\/\S+)$/);
-	if (match) {
-		const url = match[1];
-		if (isGifUrl(url)) return url;
-	}
-
+	if (isGifUrl(trimmed) && !trimmed.includes(" ")) return trimmed;
 	return null;
 }
 
@@ -49,23 +40,16 @@ const InlineGif: Component<{
 	alt: string;
 }> = (props) => {
 	const autoDownload = createMemo(() => userSettings().autoDownloadGifs);
+	const [manuallyLoaded, setManuallyLoaded] = createSignal(false);
 
 	return (
 		<Show
-			when={autoDownload()}
+			when={autoDownload() || manuallyLoaded()}
 			fallback={
 				<button
 					type="button"
 					class="mt-1 flex items-center gap-2 rounded bg-neutral-800 px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
-					onClick={(e) => {
-						// Replace this button with the actual image
-						const img = document.createElement("img");
-						img.src = props.url;
-						img.alt = props.alt;
-						img.className = "mt-1 max-h-64 max-w-sm rounded";
-						img.loading = "lazy";
-						(e.currentTarget as HTMLElement).replaceWith(img);
-					}}
+					onClick={() => setManuallyLoaded(true)}
 					aria-label={`Load GIF: ${props.alt}`}
 				>
 					<span class="text-lg">🖼️</span>
