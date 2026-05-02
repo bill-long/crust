@@ -124,7 +124,8 @@ function isDisplayable(event: MatrixEvent): boolean {
 	return true;
 }
 
-const MAX_TIMELINE_EVENTS = 500;
+const MAX_INITIAL_EVENTS = 500;
+const MAX_LIVE_EVENTS = 2000;
 
 export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
@@ -148,6 +149,8 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		}
 		currentRoomId = rid;
 		setLoading(true);
+		setLoadingOlder(false);
+		setCanLoadOlder(false);
 		setTypingUsers([]);
 
 		const room = client.getRoom(rid);
@@ -162,8 +165,8 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 			.filter((e) => isDisplayable(e) && e.getId())
 			.map((e) => eventToTimelineEvent(e, room, client));
 		const items =
-			displayable.length > MAX_TIMELINE_EVENTS
-				? displayable.slice(-MAX_TIMELINE_EVENTS)
+			displayable.length > MAX_INITIAL_EVENTS
+				? displayable.slice(-MAX_INITIAL_EVENTS)
 				: displayable;
 		// reconcile with key + merge:false forces a full replacement
 		// including correct array length reset
@@ -209,7 +212,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 			// Rebuild displayable events from the full timeline.
 			// Don't cap here — the SDK manages the pagination window size.
-			// MAX_TIMELINE_EVENTS only limits live event growth in onTimelineEvent.
+			// MAX_INITIAL_EVENTS only limits initial room load.
 			const allEvents = timeline.getEvents();
 			const displayable = allEvents
 				.filter((e) => isDisplayable(e) && e.getId())
@@ -380,9 +383,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		setEvents(
 			produce((draft) => {
 				draft.push(eventToTimelineEvent(event, room, client));
-				// Cap timeline size to prevent unbounded growth
-				if (draft.length > MAX_TIMELINE_EVENTS) {
-					draft.splice(0, draft.length - MAX_TIMELINE_EVENTS);
+				// Hard cap to prevent unbounded growth in long sessions.
+				// Set high enough (2000) that typical pagination (50 events
+				// per load, ~30 loads) won't be evicted by live traffic.
+				// Trims oldest events when exceeded.
+				if (draft.length > MAX_LIVE_EVENTS) {
+					draft.splice(0, draft.length - MAX_LIVE_EVENTS);
 				}
 			}),
 		);
