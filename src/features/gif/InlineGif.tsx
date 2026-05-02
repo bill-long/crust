@@ -21,12 +21,19 @@ export function isGifUrl(url: string): boolean {
 
 /**
  * Extract a GIF CDN URL from a plain-text message body.
- * Only matches when the entire message body is a single GIF URL
- * (with optional trailing whitespace). Messages with surrounding text
- * are rendered normally via MessageBody to preserve context.
+ * Matches when the message body (after stripping Matrix reply fallback)
+ * is a single GIF URL with no other content.
  */
 export function extractGifUrl(body: string): string | null {
-	const trimmed = body.trim();
+	// Strip Matrix reply fallback: lines starting with "> " until the first
+	// non-quoted line (the reply prefix format is "> <@user> text\n\n")
+	let stripped = body;
+	if (stripped.startsWith("> ")) {
+		const endOfQuote = stripped.indexOf("\n\n");
+		stripped = endOfQuote >= 0 ? stripped.slice(endOfQuote + 2) : stripped;
+	}
+
+	const trimmed = stripped.trim();
 	if (isGifUrl(trimmed) && !/\s/.test(trimmed)) return trimmed;
 	return null;
 }

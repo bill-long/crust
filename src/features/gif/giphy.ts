@@ -1,5 +1,6 @@
 import type { GifRating } from "../../types/config";
 import type { GifItem, GifProvider, GifSearchResult } from "./types";
+import { isValidHttpsUrl } from "./urlValidation";
 
 const GIPHY_BASE = "https://api.giphy.com/v1/gifs";
 const DEFAULT_LIMIT = 25;
@@ -36,6 +37,8 @@ function toGifItem(gif: GiphyGif): GifItem | null {
 	const still = gif.images.fixed_width_still;
 
 	if (!original?.url || !preview?.url) return null;
+	if (!isValidHttpsUrl(original.url) || !isValidHttpsUrl(preview.url))
+		return null;
 
 	return {
 		id: gif.id,

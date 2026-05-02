@@ -293,7 +293,13 @@ const Composer: Component<{
 			setError(e instanceof Error ? e.message : "Failed to send GIF");
 		} finally {
 			setSending(false);
-			textareaRef?.focus();
+			if (
+				!document.activeElement ||
+				document.activeElement === document.body ||
+				document.activeElement === textareaRef
+			) {
+				textareaRef?.focus();
+			}
 		}
 	}
 

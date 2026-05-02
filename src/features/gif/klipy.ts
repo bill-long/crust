@@ -1,5 +1,6 @@
 import type { GifRating } from "../../types/config";
 import type { GifItem, GifProvider, GifSearchResult } from "./types";
+import { isValidHttpsUrl } from "./urlValidation";
 
 const KLIPY_BASE = "https://api.klipy.com/api/v1";
 const DEFAULT_LIMIT = 24;
@@ -46,7 +47,7 @@ function toGifItem(gif: KlipyGif): GifItem | null {
 	const preview = gif.file.sm?.gif ?? gif.file.md?.gif ?? hd;
 	const still = gif.file.sm?.jpg ?? gif.file.xs?.jpg;
 
-	if (!hd?.url) return null;
+	if (!hd?.url || !isValidHttpsUrl(hd.url)) return null;
 
 	return {
 		id: gif.slug || String(gif.id),
