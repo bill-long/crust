@@ -30,6 +30,12 @@ const ReactionPills: Component<{
 					/>
 				);
 			}
+			// Unknown pack — show placeholder instead of raw URL
+			return (
+				<span title={key} role="img" aria-label="custom emoji">
+					❓
+				</span>
+			);
 		}
 		return <span>{key}</span>;
 	};

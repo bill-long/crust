@@ -255,10 +255,17 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		}
 	};
 
-	const onReactionPickerSelect = (eventId: string, item: PickerEmoji): void => {
+	const onReactionPickerSelect = (
+		eventId: string,
+		item: PickerEmoji,
+		itemRef: HTMLDivElement | undefined,
+	): void => {
 		const key = item.kind === "custom" ? item.emote.mxcUrl : item.emoji.unicode;
 		onReact(eventId, key);
 		setReactionPickerEventId(null);
+		requestAnimationFrame(() => {
+			if (itemRef) virtualizer.measureElement(itemRef);
+		});
 	};
 
 	const onEdit = (ev: TimelineEvent): void => {
@@ -349,9 +356,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													client={client}
 													shortcodeLookup={shortcodeLookup()}
 													emoteLookup={emoteLookup()}
-													onOpenReactionPicker={() =>
-														setReactionPickerEventId(event().eventId)
-													}
+													onOpenReactionPicker={() => {
+														setReactionPickerEventId(event().eventId);
+														requestAnimationFrame(() => {
+															if (itemRef) virtualizer.measureElement(itemRef);
+														});
+													}}
 												/>
 												<Show
 													when={reactionPickerEventId() === event().eventId}
@@ -360,9 +370,19 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 														<EmojiPicker
 															packs={packs()}
 															onSelect={(item) =>
-																onReactionPickerSelect(event().eventId, item)
+																onReactionPickerSelect(
+																	event().eventId,
+																	item,
+																	itemRef,
+																)
 															}
-															onClose={() => setReactionPickerEventId(null)}
+															onClose={() => {
+																setReactionPickerEventId(null);
+																requestAnimationFrame(() => {
+																	if (itemRef)
+																		virtualizer.measureElement(itemRef);
+																});
+															}}
 														/>
 													</div>
 												</Show>
