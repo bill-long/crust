@@ -71,7 +71,7 @@ describe("extractGifUrl", () => {
 		expect(extractGifUrl("https://media.giphy.com/\t")).toBeNull();
 	});
 
-	it("rejects URLs with invalid percent-encoding (handled gracefully)", () => {
+	it("accepts URLs with invalid percent-encoding (URL constructor is permissive)", () => {
 		// The URL constructor accepts most malformed URLs, so invalid
 		// percent-encoding is parsed successfully. This test documents
 		// that such URLs are still accepted (the catch branch is a safety net).

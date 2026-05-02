@@ -15,7 +15,7 @@ interface KlipyGif {
 	id: number;
 	slug: string;
 	title: string;
-	file: {
+	file?: {
 		hd?: KlipyRendition;
 		md?: KlipyRendition;
 		sm?: KlipyRendition;
@@ -88,14 +88,18 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 	if (!res.ok) {
 		throw new Error(`Klipy API error: ${res.status} ${res.statusText}`);
 	}
-	const json = (await res.json()) as Record<string, unknown>;
-	if (typeof json.result !== "boolean") {
+	const json: unknown = await res.json();
+	if (typeof json !== "object" || json === null || Array.isArray(json)) {
 		throw new Error("Klipy API returned an unexpected response shape");
 	}
-	if (!json.result) {
+	const obj = json as Record<string, unknown>;
+	if (typeof obj.result !== "boolean") {
+		throw new Error("Klipy API returned an unexpected response shape");
+	}
+	if (!obj.result) {
 		throw new Error("Klipy API returned an error");
 	}
-	const data = json.data as Record<string, unknown> | undefined;
+	const data = obj.data as Record<string, unknown> | undefined;
 	if (
 		!data ||
 		!Array.isArray(data.data) ||
@@ -105,7 +109,7 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 	) {
 		throw new Error("Klipy API returned an unexpected response shape");
 	}
-	return json as unknown as KlipyResponse;
+	return obj as unknown as KlipyResponse;
 }
 
 function toSearchResult(data: KlipyResponse, perPage: number): GifSearchResult {
