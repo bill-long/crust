@@ -1,5 +1,6 @@
 import {
 	ClientEvent,
+	Direction,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -9,7 +10,7 @@ import {
 	RoomMemberEvent,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { createStore, produce, reconcile } from "solid-js/store";
 
 export interface TimelineEvent {
 	eventId: string;
@@ -123,24 +124,39 @@ function isDisplayable(event: MatrixEvent): boolean {
 	return true;
 }
 
-const MAX_TIMELINE_EVENTS = 500;
+const MAX_INITIAL_EVENTS = 500;
+const MAX_LIVE_EVENTS = 2000;
 
 export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
+	const [loadingOlder, setLoadingOlder] = createSignal(false);
+	const [canLoadOlder, setCanLoadOlder] = createSignal(true);
 	const [typingUsers, setTypingUsers] = createSignal<
 		{ userId: string; displayName: string }[]
 	>([]);
 
 	let currentRoomId: string | null = null;
+	let backfillReloadAttempted = false;
+	// Generation counter — increments on every room load. Async operations
+	// capture the current generation and bail if it changed (A→B→A safety).
+	let roomGeneration = 0;
 
 	function loadRoom(rid: string): void {
+		if (rid !== currentRoomId) {
+			backfillReloadAttempted = false;
+		}
 		currentRoomId = rid;
+		roomGeneration++;
 		setLoading(true);
+		setLoadingOlder(false);
+		setCanLoadOlder(false);
 		setTypingUsers([]);
+
 		const room = client.getRoom(rid);
 		if (!room) {
-			setEvents([]);
+			setEvents(reconcile([], { key: "eventId", merge: false }));
+			setLoading(false);
 			return;
 		}
 
@@ -148,12 +164,75 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		const displayable = timeline
 			.filter((e) => isDisplayable(e) && e.getId())
 			.map((e) => eventToTimelineEvent(e, room, client));
-		setEvents(
-			displayable.length > MAX_TIMELINE_EVENTS
-				? displayable.slice(-MAX_TIMELINE_EVENTS)
-				: displayable,
-		);
+		const items =
+			displayable.length > MAX_INITIAL_EVENTS
+				? displayable.slice(-MAX_INITIAL_EVENTS)
+				: displayable;
+		// reconcile with key + merge:false forces a full replacement
+		// including correct array length reset
+		setEvents(reconcile(items, { key: "eventId", merge: false }));
 		setLoading(false);
+
+		// Check if older messages can be loaded
+		const paginationToken = room
+			.getLiveTimeline()
+			.getPaginationToken(Direction.Backward);
+		setCanLoadOlder(paginationToken !== null);
+		setLoadingOlder(false);
+	}
+
+	const PAGINATION_SIZE = 50;
+	let paginationRoomId: string | null = null;
+
+	async function loadOlderMessages(): Promise<void> {
+		if (loadingOlder() || !canLoadOlder() || !currentRoomId) return;
+
+		const rid = currentRoomId;
+		const gen = roomGeneration;
+		const room = client.getRoom(rid);
+		if (!room) {
+			setCanLoadOlder(false);
+			return;
+		}
+
+		const timeline = room.getLiveTimeline();
+		const token = timeline.getPaginationToken(Direction.Backward);
+		if (!token) {
+			setCanLoadOlder(false);
+			return;
+		}
+
+		// Set immediately to prevent concurrent scroll-triggered requests
+		setLoadingOlder(true);
+		paginationRoomId = rid;
+
+		try {
+			const hasMore = await client.paginateEventTimeline(timeline, {
+				backwards: true,
+				limit: PAGINATION_SIZE,
+			});
+			// Generation guard — catches A→B→A where roomId matches but
+			// this request is from a previous visit
+			if (gen !== roomGeneration) return;
+
+			// Rebuild displayable events from the full timeline.
+			// Don't cap here — the SDK manages the pagination window size.
+			const allEvents = timeline.getEvents();
+			const displayable = allEvents
+				.filter((e) => isDisplayable(e) && e.getId())
+				.map((e) => eventToTimelineEvent(e, room, client));
+			setEvents(reconcile(displayable, { key: "eventId", merge: false }));
+			setCanLoadOlder(hasMore);
+		} catch {
+			// Pagination failed — leave current state, user can retry
+		} finally {
+			// Only clear loading if this is still the active pagination request.
+			// Use generation to handle A→B→A where rid matches but request is stale.
+			if (paginationRoomId === rid && gen === roomGeneration) {
+				setLoadingOlder(false);
+				paginationRoomId = null;
+			}
+		}
 	}
 
 	function handleRedaction(room: Room, redactedId: string): void {
@@ -245,7 +324,18 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		data: { liveEvent?: boolean },
 	): void {
 		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
-		if (!data.liveEvent) return;
+
+		// For non-live events (backfill/initial sync), reload the full
+		// timeline so we pick up historical events that weren't available
+		// when loadRoom first ran. Only attempt once per room to prevent
+		// infinite reload loops when a room has only non-displayable events.
+		if (!data.liveEvent) {
+			if (events.length === 0 && !backfillReloadAttempted) {
+				backfillReloadAttempted = true;
+				loadRoom(currentRoomId);
+			}
+			return;
+		}
 
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
@@ -298,9 +388,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		setEvents(
 			produce((draft) => {
 				draft.push(eventToTimelineEvent(event, room, client));
-				// Cap timeline size to prevent unbounded growth
-				if (draft.length > MAX_TIMELINE_EVENTS) {
-					draft.splice(0, draft.length - MAX_TIMELINE_EVENTS);
+				// Hard cap to prevent unbounded growth in long sessions.
+				// Set high enough (2000) that typical pagination (50 events
+				// per load, ~30 loads) won't be evicted by live traffic.
+				// Trims oldest events when exceeded.
+				if (draft.length > MAX_LIVE_EVENTS) {
+					draft.splice(0, draft.length - MAX_LIVE_EVENTS);
 				}
 			}),
 		);
@@ -308,6 +401,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 	function onTimelineReset(room: Room | undefined): void {
 		if (!room || !currentRoomId || room.roomId !== currentRoomId) return;
+		backfillReloadAttempted = false;
 		loadRoom(currentRoomId);
 	}
 
@@ -390,7 +484,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	}
 
 	function onRoomAppeared(room: Room): void {
-		if (currentRoomId && room.roomId === currentRoomId && loading()) {
+		if (currentRoomId && room.roomId === currentRoomId && events.length === 0) {
 			loadRoom(currentRoomId);
 		}
 	}
@@ -444,5 +538,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		client.off(RoomMemberEvent.Typing, onTyping);
 	});
 
-	return { events, loading, typingUsers, getSourceEvent };
+	return {
+		events,
+		loading,
+		loadingOlder,
+		canLoadOlder,
+		loadOlderMessages,
+		typingUsers,
+		getSourceEvent,
+	};
 }

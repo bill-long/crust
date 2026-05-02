@@ -29,10 +29,15 @@ interface ReadReceiptEntry {
 
 const TimelineView: Component<{ roomId: string }> = (props) => {
 	const { client, summaries } = useClient();
-	const { events, loading, typingUsers, getSourceEvent } = useTimeline(
-		client,
-		() => props.roomId,
-	);
+	const {
+		events,
+		loading,
+		loadingOlder,
+		canLoadOlder,
+		loadOlderMessages,
+		typingUsers,
+		getSourceEvent,
+	} = useTimeline(client, () => props.roomId);
 
 	// Custom emoji packs for this room
 	const packs = useImagePacks(client, () => props.roomId);
@@ -193,7 +198,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				setReplyTo(null);
 				setEditingEvent(null);
 				setReactionPickerEventId(null);
+				// Force the virtualizer to recalculate after the store updates
 				requestAnimationFrame(() => {
+					virtualizer.measure();
 					const el = scrollRef;
 					if (el) el.scrollTo({ top: el.scrollHeight });
 				});
@@ -222,6 +229,25 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		const distFromBottom =
 			scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
 		setAtBottom(distFromBottom < threshold);
+
+		// Load older messages when scrolled near the top
+		if (scrollRef.scrollTop < 200 && canLoadOlder() && !loadingOlder()) {
+			const prevHeight = scrollRef.scrollHeight;
+			const roomAtRequest = props.roomId;
+			loadOlderMessages().then(() => {
+				// Preserve scroll position after prepending older messages
+				// Only if we're still in the same room
+				if (scrollRef && props.roomId === roomAtRequest) {
+					requestAnimationFrame(() => {
+						virtualizer.measure();
+						if (scrollRef) {
+							const newHeight = scrollRef.scrollHeight;
+							scrollRef.scrollTop += newHeight - prevHeight;
+						}
+					});
+				}
+			});
+		}
 	};
 
 	const onReact = async (eventId: string, key: string): Promise<void> => {
@@ -317,6 +343,17 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						onScroll={onScroll}
 						tabIndex={-1}
 					>
+						{/* Loading older messages indicator */}
+						<Show when={loadingOlder()}>
+							<div class="flex justify-center py-3">
+								<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+							</div>
+						</Show>
+						<Show when={!canLoadOlder() && events.length > 0}>
+							<div class="py-3 text-center text-xs text-neutral-600">
+								Beginning of conversation
+							</div>
+						</Show>
 						<div
 							style={{
 								height: `${virtualizer.getTotalSize()}px`,
