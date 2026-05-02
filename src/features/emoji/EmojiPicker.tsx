@@ -236,11 +236,10 @@ const EmojiPicker: Component<{
 				/>
 			</div>
 
-			{/* Tab bar */}
+			{/* Category bar */}
 			<Show when={!query()}>
-				<div
+				<nav
 					class="flex shrink-0 gap-0.5 overflow-x-auto border-b border-neutral-700 px-1 py-1"
-					role="tablist"
 					aria-label="Emoji categories"
 				>
 					<For each={tabs()}>
@@ -257,8 +256,7 @@ const EmojiPicker: Component<{
 							return (
 								<button
 									type="button"
-									role="tab"
-									aria-selected={isActive()}
+									aria-pressed={isActive()}
 									class={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-sm transition-colors ${
 										isActive()
 											? "bg-pink-900/40 text-neutral-100"
@@ -281,7 +279,7 @@ const EmojiPicker: Component<{
 							);
 						}}
 					</For>
-				</div>
+				</nav>
 			</Show>
 
 			{/* Emoji list */}
