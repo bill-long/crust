@@ -492,4 +492,92 @@ describe("useTimeline", () => {
 			expect(canLoadOlder()).toBe(true);
 		});
 	});
+
+	it("discards stale pagination results after A→B→A room switch", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$a1", "@alice:test", "room A msg", 1000),
+		]);
+		const roomB = createMockRoom("!roomB:test", [
+			textMessage("!roomB:test", "$b1", "@bob:test", "room B msg", 2000),
+		]);
+		// Room A has a pagination token
+		roomA.getLiveTimeline().getPaginationToken = () => "token-a";
+
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		// paginateEventTimeline will resolve after a delay, simulating network.
+		// When it resolves, it mutates room A's timeline with an older event.
+		let resolvePagination!: (value: boolean) => void;
+		client.paginateEventTimeline = vi.fn().mockImplementation(
+			() =>
+				new Promise<boolean>((resolve) => {
+					resolvePagination = (val: boolean) => {
+						// Simulate SDK prepending older events to the timeline
+						const timeline = roomA.getLiveTimeline();
+						const existingEvents = timeline.getEvents();
+						const staleEvent = {
+							getId: () => "$stale",
+							getRoomId: () => "!roomA:test",
+							getSender: () => "@old:test",
+							getType: () => "m.room.message",
+							getContent: () => ({
+								msgtype: "m.text",
+								body: "STALE - should not appear",
+							}),
+							getTs: () => 500,
+							isEncrypted: () => false,
+							isDecryptionFailure: () => false,
+							replacingEventId: () => null,
+							event: { redacts: undefined },
+						};
+						existingEvents.unshift(
+							staleEvent as unknown as (typeof existingEvents)[0],
+						);
+						resolve(val);
+					};
+				}),
+		);
+
+		await withRoot(async () => {
+			const [roomId, setRoomId] = createSignal("!roomA:test");
+			const { events, loadOlderMessages } = useTimeline(
+				client as unknown as MatrixClient,
+				roomId,
+			);
+
+			await Promise.resolve();
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room A msg");
+
+			// Start pagination for room A (will hang until we resolve)
+			const paginationPromise = loadOlderMessages();
+
+			// Switch to room B while pagination is in flight
+			setRoomId("!roomB:test");
+			await Promise.resolve();
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room B msg");
+
+			// Switch back to room A (A→B→A)
+			setRoomId("!roomA:test");
+			await Promise.resolve();
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room A msg");
+
+			// Now resolve the stale pagination from the first visit to A
+			resolvePagination(true);
+			await paginationPromise;
+			await Promise.resolve();
+
+			// Events should still be room A's current state — stale pagination
+			// result must NOT be applied (generation counter should catch it)
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room A msg");
+		});
+	});
 });
