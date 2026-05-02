@@ -266,8 +266,15 @@ const Composer: Component<{
 			body: gif.url,
 		};
 
-		// Attach reply metadata if replying
+		// Attach reply fallback + metadata if replying (same format as normal sends)
 		if (props.replyTo) {
+			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
+				props.replyTo,
+				props.roomId,
+			);
+			content.body = bodyPrefix + gif.url;
+			content.format = "org.matrix.custom.html";
+			content.formatted_body = htmlPrefix + escapeHtml(gif.url);
 			content["m.relates_to"] = {
 				"m.in_reply_to": { event_id: props.replyTo.eventId },
 			};
@@ -697,6 +704,7 @@ const Composer: Component<{
 								setGifPickerOpen(false);
 								gifButtonRef?.focus();
 							}}
+							triggerRef={gifButtonRef}
 						/>
 					</div>
 				</Show>

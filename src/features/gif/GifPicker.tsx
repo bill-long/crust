@@ -19,6 +19,8 @@ const PAGE_SIZE = 25;
 const GifPicker: Component<{
 	onSelect: (gif: GifItem) => void;
 	onClose: () => void;
+	/** The trigger element — excluded from outside-click detection. */
+	triggerRef?: HTMLElement;
 }> = (props) => {
 	const config = useConfig();
 
@@ -41,7 +43,10 @@ const GifPicker: Component<{
 	// Outside-click handler
 	let mounted = true;
 	function onDocumentClick(e: MouseEvent) {
-		if (pickerRef && !pickerRef.contains(e.target as Node)) {
+		const target = e.target as Node;
+		if (pickerRef && !pickerRef.contains(target)) {
+			// Don't close if the click is on the trigger button (toggle handles it)
+			if (props.triggerRef?.contains(target)) return;
 			props.onClose();
 		}
 	}
@@ -145,9 +150,6 @@ const GifPicker: Component<{
 		<div
 			ref={pickerRef}
 			class="flex h-[400px] w-80 flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
-			onKeyDown={onKeyDown}
-			role="dialog"
-			aria-label="GIF picker"
 		>
 			{/* Search input */}
 			<div class="border-b border-neutral-700 p-2">
@@ -156,6 +158,7 @@ const GifPicker: Component<{
 					type="text"
 					value={query()}
 					onInput={(e) => setQuery(e.currentTarget.value)}
+					onKeyDown={onKeyDown}
 					placeholder={attr().searchPlaceholder}
 					aria-label={attr().searchPlaceholder}
 					class="w-full rounded bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
