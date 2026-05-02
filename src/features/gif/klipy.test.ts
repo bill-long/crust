@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createKlipyProvider } from "./klipy";
 
 describe("createKlipyProvider", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
 	it("throws when API returns result: false", async () => {
 		const mockResponse = { result: false, data: null };
 		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
@@ -15,8 +19,6 @@ describe("createKlipyProvider", () => {
 		await expect(provider.search("cats", "g")).rejects.toThrow(
 			"Klipy API returned an error",
 		);
-
-		vi.restoreAllMocks();
 	});
 
 	it("throws when API returns unexpected response shape", async () => {
@@ -32,14 +34,12 @@ describe("createKlipyProvider", () => {
 		await expect(provider.search("cats", "g")).rejects.toThrow(
 			"unexpected response shape",
 		);
-
-		vi.restoreAllMocks();
 	});
 
 	it("throws when pagination fields are missing", async () => {
 		const mockResponse = {
 			result: true,
-			data: { data: [], per_page: 24 },
+			data: { data: [] },
 		};
 		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
 			new Response(JSON.stringify(mockResponse), {
@@ -52,8 +52,39 @@ describe("createKlipyProvider", () => {
 		await expect(provider.search("cats", "g")).rejects.toThrow(
 			"unexpected response shape",
 		);
+	});
 
-		vi.restoreAllMocks();
+	it("throws when per_page is missing but other fields are valid", async () => {
+		const mockResponse = {
+			result: true,
+			data: { data: [], current_page: 1, has_next: false },
+		};
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+			new Response(JSON.stringify(mockResponse), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+		);
+
+		const provider = createKlipyProvider("test-api-key");
+		await expect(provider.search("cats", "g")).rejects.toThrow(
+			"unexpected response shape",
+		);
+	});
+
+	it("throws when result is truthy but not boolean", async () => {
+		const mockResponse = { result: "true", data: null };
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+			new Response(JSON.stringify(mockResponse), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+		);
+
+		const provider = createKlipyProvider("test-api-key");
+		await expect(provider.search("cats", "g")).rejects.toThrow(
+			"Klipy API returned an error",
+		);
 	});
 
 	it("throws on HTTP error", async () => {
@@ -65,8 +96,6 @@ describe("createKlipyProvider", () => {
 		await expect(provider.search("cats", "g")).rejects.toThrow(
 			"Klipy API error: 403",
 		);
-
-		vi.restoreAllMocks();
 	});
 
 	it("returns items from a valid response", async () => {
@@ -123,7 +152,5 @@ describe("createKlipyProvider", () => {
 		expect(result.items[0].id).toBe("test-gif");
 		expect(result.items[0].url).toBe("https://static.klipy.com/gifs/hd.gif");
 		expect(result.hasMore).toBe(false);
-
-		vi.restoreAllMocks();
 	});
 });

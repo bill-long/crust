@@ -88,7 +88,7 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 		throw new Error(`Klipy API error: ${res.status} ${res.statusText}`);
 	}
 	const json = (await res.json()) as Record<string, unknown>;
-	if (!json.result) {
+	if (typeof json.result !== "boolean" || json.result !== true) {
 		throw new Error("Klipy API returned an error");
 	}
 	const data = json.data as Record<string, unknown> | undefined;
@@ -96,6 +96,7 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 		!data ||
 		!Array.isArray(data.data) ||
 		typeof data.current_page !== "number" ||
+		typeof data.per_page !== "number" ||
 		typeof data.has_next !== "boolean"
 	) {
 		throw new Error("Klipy API returned an unexpected response shape");
