@@ -6,13 +6,15 @@ import {
 	useContext,
 } from "solid-js";
 import type { CrustConfig } from "../types/config";
+import { normalizeConfig } from "../types/config";
 
 const ConfigContext = createContext<CrustConfig>();
 
 async function fetchConfig(): Promise<CrustConfig> {
 	const res = await fetch("/config.json");
 	if (!res.ok) throw new Error("Failed to load config.json");
-	return res.json();
+	const raw = await res.json();
+	return normalizeConfig(raw);
 }
 
 export const ConfigProvider: ParentComponent = (props) => {

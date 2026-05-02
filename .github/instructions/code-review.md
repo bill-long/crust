@@ -280,6 +280,43 @@ additions at the end of the category list:
   Placeholder alone is insufficient. Error messages should be wired
   via aria-describedby. Focus should land on the primary input, not
   a container overlay.
+- DOMPurify / sanitizer config: when ALLOWED_ATTR or ALLOWED_TAGS
+  lists are extended beyond the default allowlist, verify each added
+  attribute cannot be exploited. `class` enables CSS-based tracking
+  (background-image exfiltration); `style` enables inline CSS
+  attacks; `id` enables CSS selector targeting. Prefer the narrowest
+  allowlist that achieves the feature. When in doubt, strip rather
+  than allow.
+- Tracking pixel bypass: when sanitizing HTML that may contain
+  images, verify that user-controlled attributes (class, style, data-*)
+  on allowed elements cannot be used to load external resources via
+  CSS (e.g., `background-image: url(...)` in a class defined by the
+  sender). Stripping `class` and `style` from untrusted HTML is the
+  safest default.
+- ARIA role + keyboard coupling: when adding an ARIA role (listbox,
+  grid, tablist, menu, etc.), the element MUST implement the
+  corresponding keyboard interaction pattern (arrow keys, Home/End,
+  type-ahead). A role without keyboard behavior is worse than no role
+  — it promises interaction that doesn't exist. If keyboard nav is
+  not yet implemented, omit the role entirely.
+- Focus return on popover/picker close: when a popover, picker, or
+  dialog closes, focus must return to the element that opened it
+  (the trigger). Verify this for all close paths: explicit close
+  button, Escape key, outside click, and selection-completes-action.
+  A popover that closes without returning focus strands the keyboard
+  user.
+- Per-call data structure rebuilds: when a function is called on
+  every keystroke, message send, or render, verify it does not
+  rebuild expensive data structures (Map, lookup tables, flattened
+  arrays) on each call. Hoist the build into a memo/signal and pass
+  the prebuilt structure. Common miss: building emoji shortcode
+  lookups inside a send handler instead of memoizing once per pack
+  change.
+- CSS white-space on HTML content: `white-space: pre-wrap` on
+  containers that render sanitized HTML (formatted_body) double-
+  spaces content because HTML already has `<br>` and `<p>` for line
+  breaks. Use `pre-wrap` only on plain-text containers; HTML
+  containers should use normal white-space handling.
 ```
 
 ## Lessons Learned
@@ -483,3 +520,33 @@ additions at the end of the category list:
   status change prevents the UI from showing a stale error from a
   previous session. If the rubber-duck identifies a "non-blocking"
   finding about stale state, address it — PR review will catch it.
+- **DOMPurify ALLOWED_ATTR is a security surface.** Each attribute
+  added to ALLOWED_ATTR must be individually justified. `class`
+  enables CSS-based tracking pixels (background-image exfiltration
+  via sender-controlled class names). `style` enables inline CSS
+  attacks. The default DOMPurify allowlist strips both for good
+  reason — re-adding them requires proving no exploit path exists.
+- **ARIA roles require keyboard behavior.** Adding `role="tablist"`
+  or `role="listbox"` without implementing arrow-key navigation and
+  Home/End is worse than no role at all. Screen readers announce the
+  role and users expect the keyboard pattern. If keyboard nav is out
+  of scope, omit the role and use plain buttons/divs.
+- **Tracking pixels bypass DOMPurify via allowed attributes.** Even
+  after stripping `<img>` tags for non-emoticon images, user-
+  controlled `class` or `style` attributes on remaining elements can
+  load external resources via CSS. The safest default for untrusted
+  HTML is to strip `class` and `style` entirely.
+- **Focus must return to the trigger on popover close.** All close
+  paths (button, Escape, outside click, selection) must restore focus
+  to the trigger element. This was missed on the emoji picker in
+  Phase 5 — the picker closed but focus was stranded. Test all close
+  paths, not just the primary one.
+- **Memoize expensive lookups, don't rebuild per call.** Building
+  shortcode lookup maps on every message send is O(n) per keystroke
+  in rooms with large emoji packs. Hoist into a createMemo that
+  rebuilds only when packs change. The pattern: expensive-build in
+  a memo, cheap-lookup in the hot path.
+- **Don't use white-space: pre-wrap on HTML content.** Sanitized
+  HTML with `<br>` and `<p>` tags already handles line breaks.
+  Applying `pre-wrap` double-spaces the content. Reserve `pre-wrap`
+  for plain-text-only containers (like code blocks or raw body text).

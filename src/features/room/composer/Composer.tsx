@@ -14,6 +14,9 @@ import { createPicker } from "../../../components/picker/Picker";
 import EmojiPicker from "../../emoji/EmojiPicker";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { buildShortcodeLookup } from "../../emoji/useImagePacks";
+import GifPicker from "../../gif/GifPicker";
+import { useGifConfig } from "../../gif/gifConfig";
+import type { GifItem } from "../../gif/types";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import {
 	type CustomEmoji,
@@ -99,12 +102,15 @@ const Composer: Component<{
 	const [mentions, setMentions] = createSignal<Mention[]>([]);
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
+	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
+	const gifConfig = useGifConfig();
 
 	// Memoize shortcode lookup to avoid rebuilding on every send
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
 
 	let textareaRef: HTMLTextAreaElement | undefined;
 	let emojiButtonRef: HTMLButtonElement | undefined;
+	let gifButtonRef: HTMLButtonElement | undefined;
 	let lastTypingSentAt = 0;
 	let typingRoomId: string | null = null;
 
@@ -251,6 +257,52 @@ const Composer: Component<{
 		});
 	}
 
+	async function onGifSelect(gif: GifItem): Promise<void> {
+		setGifPickerOpen(false);
+
+		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting)
+		const content: Record<string, unknown> = {
+			msgtype: "m.text",
+			body: gif.url,
+		};
+
+		// Attach reply fallback + metadata if replying (same format as normal sends)
+		if (props.replyTo) {
+			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
+				props.replyTo,
+				props.roomId,
+			);
+			content.body = bodyPrefix + gif.url;
+			content.format = "org.matrix.custom.html";
+			content.formatted_body = htmlPrefix + escapeHtml(gif.url);
+			content["m.relates_to"] = {
+				"m.in_reply_to": { event_id: props.replyTo.eventId },
+			};
+		}
+
+		setSending(true);
+		setError(null);
+		stopTyping();
+		try {
+			await client.sendMessage(
+				props.roomId,
+				content as unknown as RoomMessageEventContent,
+			);
+			props.onSent?.();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "Failed to send GIF");
+		} finally {
+			setSending(false);
+			if (
+				!document.activeElement ||
+				document.activeElement === document.body ||
+				document.activeElement === textareaRef
+			) {
+				textareaRef?.focus();
+			}
+		}
+	}
+
 	// Pre-fill text when entering edit mode
 	createEffect(
 		on(
@@ -258,6 +310,7 @@ const Composer: Component<{
 			(ev) => {
 				setMentions([]);
 				setMentionQuery(null);
+				setGifPickerOpen(false);
 				if (ev) {
 					setText(ev.body);
 					requestAnimationFrame(() => {
@@ -282,6 +335,7 @@ const Composer: Component<{
 				setMentions([]);
 				setMentionQuery(null);
 				setEmojiPickerOpen(false);
+				setGifPickerOpen(false);
 				requestAnimationFrame(autoResize);
 			},
 		),
@@ -611,9 +665,27 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 pr-10 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 pr-20 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
 					rows={1}
 				/>
+				{/* GIF picker button (only when GIF search is available and not editing) */}
+				<Show when={gifConfig.available() && !props.editingEvent}>
+					<button
+						ref={(el) => {
+							gifButtonRef = el;
+						}}
+						type="button"
+						class="absolute bottom-2.5 right-9 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+						onClick={() => {
+							setGifPickerOpen((v) => !v);
+							setEmojiPickerOpen(false);
+						}}
+						aria-label="Open GIF picker"
+						aria-expanded={gifPickerOpen()}
+					>
+						GIF
+					</button>
+				</Show>
 				{/* Emoji picker button */}
 				<button
 					ref={(el) => {
@@ -621,12 +693,28 @@ const Composer: Component<{
 					}}
 					type="button"
 					class="absolute bottom-2.5 right-2 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
-					onClick={() => setEmojiPickerOpen((v) => !v)}
+					onClick={() => {
+						setEmojiPickerOpen((v) => !v);
+						setGifPickerOpen(false);
+					}}
 					aria-label="Open emoji picker"
 					aria-expanded={emojiPickerOpen()}
 				>
 					😀
 				</button>
+				{/* GIF picker popover */}
+				<Show when={gifPickerOpen()}>
+					<div class="absolute bottom-full right-0 z-20 mb-1">
+						<GifPicker
+							onSelect={onGifSelect}
+							onClose={(focusTrigger) => {
+								setGifPickerOpen(false);
+								if (focusTrigger) gifButtonRef?.focus();
+							}}
+							triggerRef={gifButtonRef}
+						/>
+					</div>
+				</Show>
 				{/* Emoji picker popover */}
 				<Show when={emojiPickerOpen()}>
 					<div class="absolute bottom-full right-0 z-20 mb-1">

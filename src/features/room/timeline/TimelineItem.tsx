@@ -2,6 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import MessageBody from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
+import InlineGif, { extractGifUrl } from "../../gif/InlineGif";
 import type { TimelineEvent } from "./useTimeline";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -255,14 +256,45 @@ const TimelineItem: Component<{
 										</p>
 									}
 								>
-									<MessageBody
-										body={ev.body}
-										format={ev.format}
-										formattedBody={ev.formattedBody}
-										isEdited={ev.isEdited}
-										client={props.client}
-										shortcodeLookup={props.shortcodeLookup}
-									/>
+									{(() => {
+										const gifUrl =
+											ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
+										if (!gifUrl) {
+											return (
+												<MessageBody
+													body={ev.body}
+													format={ev.format}
+													formattedBody={ev.formattedBody}
+													isEdited={ev.isEdited}
+													client={props.client}
+													shortcodeLookup={props.shortcodeLookup}
+												/>
+											);
+										}
+										// Extract reply context from body prefix if present
+										const isReply = ev.body.startsWith("> ");
+										const replyPreview = isReply
+											? ev.body
+													.split("\n")[0]
+													.replace(/^> <([^>]+)> /, "$1: ")
+													.replace(/^> /, "")
+											: null;
+										return (
+											<>
+												<Show when={replyPreview}>
+													<div class="mb-1 border-l-2 border-neutral-600 pl-2 text-xs text-neutral-500">
+														{replyPreview}
+													</div>
+												</Show>
+												<InlineGif url={gifUrl} alt="GIF" />
+												<Show when={ev.isEdited}>
+													<span class="ml-1 text-xs text-neutral-600">
+														(edited)
+													</span>
+												</Show>
+											</>
+										);
+									})()}
 								</Show>
 							}
 						>

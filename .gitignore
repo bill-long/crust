@@ -19,6 +19,11 @@ Thumbs.db
 
 # Test
 coverage/
+test-results/
+playwright-report/
+
+# Spike (throwaway testing)
+spike/
 
 # Debug
 npm-debug.log*
