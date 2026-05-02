@@ -197,10 +197,12 @@ export function useImagePacks(
 					const emoteRoom = client.getRoom(emoteRoomId);
 					if (!emoteRoom) continue;
 
-					const keys =
+					const rawKeys =
 						stateKeys && typeof stateKeys === "object"
 							? Object.keys(stateKeys)
-							: [""];
+							: [];
+					// MSC2545: empty object {} means default state key ""
+					const keys = rawKeys.length > 0 ? rawKeys : [""];
 
 					for (const sk of keys) {
 						const stateEvent = emoteRoom.currentState.getStateEvents(

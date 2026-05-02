@@ -367,6 +367,7 @@ const Composer: Component<{
 			setError(null);
 			setMentions([]);
 			setMentionQuery(null);
+			setEmojiPickerOpen(false);
 			setSending(true);
 			stopTyping();
 			requestAnimationFrame(autoResize);
@@ -442,6 +443,7 @@ const Composer: Component<{
 		setError(null);
 		setMentions([]);
 		setMentionQuery(null);
+		setEmojiPickerOpen(false);
 		setSending(true);
 		stopTyping();
 		requestAnimationFrame(autoResize);

@@ -30,7 +30,6 @@ const EmojiPicker: Component<{
 	const [query, setQuery] = createSignal("");
 	const [activeTab, setActiveTab] = createSignal("recent");
 	let searchRef: HTMLInputElement | undefined;
-	let gridRef: HTMLDivElement | undefined;
 
 	// Lazy-load Unicode emoji data
 	const [unicodeData] = createResource(async () => {
@@ -284,7 +283,6 @@ const EmojiPicker: Component<{
 
 			{/* Emoji list */}
 			<section
-				ref={gridRef}
 				class="min-h-0 flex-1 overflow-y-auto p-1"
 				aria-label="Emoji"
 				id={`emoji-grid-${pickerId}`}
