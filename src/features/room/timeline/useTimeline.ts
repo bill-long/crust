@@ -137,17 +137,17 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	>([]);
 
 	let currentRoomId: string | null = null;
-	// Tracks whether we've already attempted a backfill reload for the
-	// current room while events are empty. Prevents infinite reload loops
-	// for rooms with only non-displayable events.
 	let backfillReloadAttempted = false;
+	// Generation counter — increments on every room load. Async operations
+	// capture the current generation and bail if it changed (A→B→A safety).
+	let roomGeneration = 0;
 
 	function loadRoom(rid: string): void {
-		// Only reset backfill flag when switching to a different room
 		if (rid !== currentRoomId) {
 			backfillReloadAttempted = false;
 		}
 		currentRoomId = rid;
+		roomGeneration++;
 		setLoading(true);
 		setLoadingOlder(false);
 		setCanLoadOlder(false);
@@ -188,8 +188,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		if (loadingOlder() || !canLoadOlder() || !currentRoomId) return;
 
 		const rid = currentRoomId;
+		const gen = roomGeneration;
 		const room = client.getRoom(rid);
-		if (!room) return;
+		if (!room) {
+			setCanLoadOlder(false);
+			return;
+		}
 
 		const timeline = room.getLiveTimeline();
 		const token = timeline.getPaginationToken(Direction.Backward);
@@ -207,12 +211,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 				backwards: true,
 				limit: PAGINATION_SIZE,
 			});
-			// Stale room guard — both for room switch and cleanup
-			if (currentRoomId !== rid) return;
+			// Generation guard — catches A→B→A where roomId matches but
+			// this request is from a previous visit
+			if (gen !== roomGeneration) return;
 
 			// Rebuild displayable events from the full timeline.
 			// Don't cap here — the SDK manages the pagination window size.
-			// MAX_INITIAL_EVENTS only limits initial room load.
 			const allEvents = timeline.getEvents();
 			const displayable = allEvents
 				.filter((e) => isDisplayable(e) && e.getId())
@@ -222,8 +226,9 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		} catch {
 			// Pagination failed — leave current state, user can retry
 		} finally {
-			// Only clear loading if this is still the active pagination
-			if (paginationRoomId === rid) {
+			// Only clear loading if this is still the active pagination request.
+			// Use generation to handle A→B→A where rid matches but request is stale.
+			if (paginationRoomId === rid && gen === roomGeneration) {
 				setLoadingOlder(false);
 				paginationRoomId = null;
 			}
