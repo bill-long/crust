@@ -42,6 +42,7 @@ const RATING_TO_LEVEL: Record<GifRating, string> = {
 };
 
 function toGifItem(gif: KlipyGif): GifItem | null {
+	if (!gif.file) return null;
 	// Use hd gif for the sent URL, sm/xs for preview
 	const hd = gif.file.hd?.gif ?? gif.file.md?.gif;
 	const preview = gif.file.sm?.gif ?? gif.file.md?.gif ?? hd;

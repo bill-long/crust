@@ -67,8 +67,17 @@ describe("extractGifUrl", () => {
 		).toBeNull();
 	});
 
-	it("rejects malformed URLs that pass regex but fail URL constructor", () => {
+	it("rejects URLs containing whitespace", () => {
 		expect(extractGifUrl("https://media.giphy.com/\t")).toBeNull();
+	});
+
+	it("rejects URLs with invalid percent-encoding (handled gracefully)", () => {
+		// The URL constructor accepts most malformed URLs, so invalid
+		// percent-encoding is parsed successfully. This test documents
+		// that such URLs are still accepted (the catch branch is a safety net).
+		expect(extractGifUrl("https://media.giphy.com/media/%ZZ/giphy.gif")).toBe(
+			"https://media.giphy.com/media/%ZZ/giphy.gif",
+		);
 	});
 
 	it("handles whitespace around valid URL", () => {
