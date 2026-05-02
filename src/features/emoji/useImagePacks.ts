@@ -84,8 +84,20 @@ export function useImagePacks(
 	}
 
 	function onRoomState(event: MatrixEvent): void {
-		if (event.getType() === ROOM_EMOTES_TYPE) {
+		if (event.getType() !== ROOM_EMOTES_TYPE) return;
+		const eventRoomId = event.getRoomId();
+		if (!eventRoomId) return;
+		// Only recompute for current room or known emote rooms
+		if (eventRoomId === roomId()) {
 			setRoomStateTick((n) => n + 1);
+			return;
+		}
+		const emoteRoomsEvent = client.getAccountData(EMOTE_ROOMS_TYPE);
+		if (emoteRoomsEvent) {
+			const content = emoteRoomsEvent.getContent() as EmoteRoomsContent;
+			if (content.rooms && Object.hasOwn(content.rooms, eventRoomId)) {
+				setRoomStateTick((n) => n + 1);
+			}
 		}
 	}
 

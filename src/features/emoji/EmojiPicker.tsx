@@ -284,13 +284,12 @@ const EmojiPicker: Component<{
 				</div>
 			</Show>
 
-			{/* Grid */}
-			{/* biome-ignore lint/a11y/useSemanticElements: emoji grid is not tabular data */}
+			{/* Emoji list */}
 			<div
 				ref={gridRef}
 				class="min-h-0 flex-1 overflow-y-auto p-1"
-				role="grid"
-				aria-label="Emoji grid"
+				role="listbox"
+				aria-label="Emoji"
 				id={`emoji-grid-${pickerId}`}
 			>
 				<Show
@@ -319,6 +318,7 @@ const EmojiPicker: Component<{
 								return (
 									<button
 										type="button"
+										role="option"
 										class="flex h-9 w-9 items-center justify-center rounded text-xl transition-colors hover:bg-neutral-700"
 										onClick={() => handleSelect(item)}
 										title={title}
