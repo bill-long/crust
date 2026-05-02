@@ -36,7 +36,7 @@ const GifPicker: Component<{
 
 	let searchRef: HTMLInputElement | undefined;
 	let scrollRef: HTMLDivElement | undefined;
-	let pickerRef: HTMLDivElement | undefined;
+	let pickerRef: HTMLElement | undefined;
 	let debounceTimer: ReturnType<typeof setTimeout> | undefined;
 	// Generation counter to discard stale responses
 	let fetchGen = 0;
@@ -76,18 +76,44 @@ const GifPicker: Component<{
 		setLoading(true);
 		setError(null);
 		try {
-			const result = q.trim()
-				? await p.search(q.trim(), config.gif.maxRating, offset, PAGE_SIZE)
-				: await p.trending(config.gif.maxRating, offset, PAGE_SIZE);
-
-			if (gen !== fetchGen) return; // stale
-			if (append) {
-				setItems((prev) => [...prev, ...result.items]);
+			if (!q.trim()) {
+				// Empty query — show trending if configured, otherwise clear
+				if (!config.gif.trendingOnOpen) {
+					if (gen !== fetchGen) return;
+					setItems([]);
+					setHasMore(false);
+					setNextOffset(0);
+					return;
+				}
+				const result = await p.trending(
+					config.gif.maxRating,
+					offset,
+					PAGE_SIZE,
+				);
+				if (gen !== fetchGen) return;
+				if (append) {
+					setItems((prev) => [...prev, ...result.items]);
+				} else {
+					setItems(result.items);
+				}
+				setHasMore(result.hasMore);
+				setNextOffset(result.nextOffset);
 			} else {
-				setItems(result.items);
+				const result = await p.search(
+					q.trim(),
+					config.gif.maxRating,
+					offset,
+					PAGE_SIZE,
+				);
+				if (gen !== fetchGen) return;
+				if (append) {
+					setItems((prev) => [...prev, ...result.items]);
+				} else {
+					setItems(result.items);
+				}
+				setHasMore(result.hasMore);
+				setNextOffset(result.nextOffset);
 			}
-			setHasMore(result.hasMore);
-			setNextOffset(result.nextOffset);
 		} catch (e) {
 			if (gen !== fetchGen) return;
 			setError(e instanceof Error ? e.message : "Failed to load GIFs");
