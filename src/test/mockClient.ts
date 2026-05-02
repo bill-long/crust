@@ -37,9 +37,19 @@ function createMatrixEvent(evt: MockEvent) {
 export function createMockRoom(
 	roomId: string,
 	events: MockEvent[] = [],
-	members: { userId: string; name: string }[] = [],
+	members: { userId: string; name: string; typing?: boolean }[] = [],
 ) {
 	const matrixEvents = events.map(createMatrixEvent);
+	// Mutable member state for typing simulation
+	const memberState = members.map((m) => ({
+		userId: m.userId,
+		name: m.name,
+		roomId,
+		typing: m.typing ?? false,
+	}));
+	// Configurable read receipt positions per user
+	const readUpTo = new Map<string, string | null>();
+
 	return {
 		roomId,
 		getLiveTimeline: () => ({
@@ -50,24 +60,23 @@ export function createMockRoom(
 				getChildEventsForEvent: () => null,
 			},
 		}),
-		getEventReadUpTo: (_userId: string, _ignoreSynthesized?: boolean) =>
-			null as string | null,
+		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
+			readUpTo.get(userId) ?? null,
 		getMember: (userId: string) => {
-			const m = members.find((m) => m.userId === userId);
-			return m ? { name: m.name, userId: m.userId, typing: false } : null;
+			const m = memberState.find((m) => m.userId === userId);
+			return m ?? null;
 		},
-		getJoinedMembers: () =>
-			members.map((m) => ({
-				userId: m.userId,
-				name: m.name,
-				typing: false,
-			})),
-		getMembers: () =>
-			members.map((m) => ({
-				userId: m.userId,
-				name: m.name,
-				typing: false,
-			})),
+		getJoinedMembers: () => [...memberState],
+		getMembers: () => [...memberState],
+
+		// Test helpers
+		__setReadUpTo: (userId: string, eventId: string | null) => {
+			readUpTo.set(userId, eventId);
+		},
+		__setTyping: (userId: string, typing: boolean) => {
+			const m = memberState.find((m) => m.userId === userId);
+			if (m) m.typing = typing;
+		},
 	};
 }
 
