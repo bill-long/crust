@@ -2,6 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import MessageBody from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
+import InlineGif, { extractGifUrl } from "../../gif/InlineGif";
 import type { TimelineEvent } from "./useTimeline";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -255,14 +256,21 @@ const TimelineItem: Component<{
 										</p>
 									}
 								>
-									<MessageBody
-										body={ev.body}
-										format={ev.format}
-										formattedBody={ev.formattedBody}
-										isEdited={ev.isEdited}
-										client={props.client}
-										shortcodeLookup={props.shortcodeLookup}
-									/>
+									{(() => {
+										const gifUrl = ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
+										return gifUrl ? (
+											<InlineGif url={gifUrl} alt={ev.body?.trim() || "GIF"} />
+										) : (
+											<MessageBody
+												body={ev.body}
+												format={ev.format}
+												formattedBody={ev.formattedBody}
+												isEdited={ev.isEdited}
+												client={props.client}
+												shortcodeLookup={props.shortcodeLookup}
+											/>
+										);
+									})()}
 								</Show>
 							}
 						>
