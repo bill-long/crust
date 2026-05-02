@@ -23,7 +23,7 @@ calls) is table stakes for a chat client we'd actually use daily.
   `/v3/notifications` dependency)
 - E2EE by default for DMs, with SAS verification and key backup
 - Custom emoji and image packs (MSC2545)
-- GIF search (Giphy / Klipy) — opt-in, TOS-compliant *(in progress)*
+- GIF search (Giphy / Klipy) — opt-in, TOS-compliant
 - Embedded MatrixRTC calls via self-hosted Element Call *(planned)*
 - Strict Content Security Policy from day one
 
@@ -47,7 +47,8 @@ Crust resolves this honestly:
    instead of an inline GIF. This is a trade-off we're transparent about.
 4. **Encrypted rooms**: the URL is encrypted in the message body, but when Crust
    fetches the GIF for display, the user's IP is visible to the CDN. This is the
-   same trade-off as URL previews. A brief privacy hint appears when sending.
+   same trade-off as URL previews. Users can disable automatic GIF loading in
+   settings.
 
 GIF search is **off by default**. The operator enables it in `config.json` by
 providing a provider API key. Content rating defaults to `g`.

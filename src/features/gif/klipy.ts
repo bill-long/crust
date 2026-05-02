@@ -49,12 +49,17 @@ function toGifItem(gif: KlipyGif): GifItem | null {
 
 	if (!hd?.url || !isValidHttpsUrl(hd.url)) return null;
 
+	const safePreview =
+		preview?.url && isValidHttpsUrl(preview.url) ? preview.url : hd.url;
+	const safeStill =
+		still?.url && isValidHttpsUrl(still.url) ? still.url : safePreview;
+
 	return {
 		id: gif.slug || String(gif.id),
 		title: gif.title || "",
 		url: hd.url,
-		previewUrl: preview?.url ?? hd.url,
-		stillUrl: still?.url ?? preview?.url ?? hd.url,
+		previewUrl: safePreview,
+		stillUrl: safeStill,
 		width: hd.width || 200,
 		height: hd.height || 200,
 	};

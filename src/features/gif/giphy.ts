@@ -45,7 +45,8 @@ function toGifItem(gif: GiphyGif): GifItem | null {
 		title: gif.title || "",
 		url: original.url,
 		previewUrl: preview.url,
-		stillUrl: still?.url ?? preview.url,
+		stillUrl:
+			still?.url && isValidHttpsUrl(still.url) ? still.url : preview.url,
 		width: Number.parseInt(original.width ?? "0", 10) || 200,
 		height: Number.parseInt(original.height ?? "0", 10) || 200,
 	};
