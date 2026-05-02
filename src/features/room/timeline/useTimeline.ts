@@ -133,8 +133,16 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	>([]);
 
 	let currentRoomId: string | null = null;
+	// Tracks whether we've already attempted a backfill reload for the
+	// current room while events are empty. Prevents infinite reload loops
+	// for rooms with only non-displayable events.
+	let backfillReloadAttempted = false;
 
 	function loadRoom(rid: string): void {
+		// Only reset backfill flag when switching to a different room
+		if (rid !== currentRoomId) {
+			backfillReloadAttempted = false;
+		}
 		currentRoomId = rid;
 		setLoading(true);
 		setTypingUsers([]);
@@ -252,10 +260,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 		// For non-live events (backfill/initial sync), reload the full
 		// timeline so we pick up historical events that weren't available
-		// when loadRoom first ran. Guard with loading() to prevent
+		// when loadRoom first ran. Only attempt once per room to prevent
 		// infinite reload loops when a room has only non-displayable events.
 		if (!data.liveEvent) {
-			if (events.length === 0 && !loading()) {
+			if (events.length === 0 && !backfillReloadAttempted) {
+				backfillReloadAttempted = true;
 				loadRoom(currentRoomId);
 			}
 			return;
@@ -322,6 +331,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 	function onTimelineReset(room: Room | undefined): void {
 		if (!room || !currentRoomId || room.roomId !== currentRoomId) return;
+		backfillReloadAttempted = false;
 		loadRoom(currentRoomId);
 	}
 
@@ -404,12 +414,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	}
 
 	function onRoomAppeared(room: Room): void {
-		if (
-			currentRoomId &&
-			room.roomId === currentRoomId &&
-			events.length === 0 &&
-			!loading()
-		) {
+		if (currentRoomId && room.roomId === currentRoomId && events.length === 0) {
 			loadRoom(currentRoomId);
 		}
 	}

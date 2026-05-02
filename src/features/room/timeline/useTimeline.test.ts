@@ -34,7 +34,7 @@ describe("useTimeline", () => {
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const { events, loading } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!roomA:test",
@@ -52,7 +52,7 @@ describe("useTimeline", () => {
 	it("returns empty events for unknown room", async () => {
 		const client = createMockClient(new Map());
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const { events, loading } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!unknown:test",
@@ -81,7 +81,7 @@ describe("useTimeline", () => {
 			]),
 		);
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const [roomId, setRoomId] = createSignal("!roomA:test");
 
 			const { events } = useTimeline(client as unknown as MatrixClient, roomId);
@@ -131,7 +131,7 @@ describe("useTimeline", () => {
 			]),
 		);
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const [roomId, setRoomId] = createSignal("!roomA:test");
 
 			const { events } = useTimeline(client as unknown as MatrixClient, roomId);
@@ -175,7 +175,7 @@ describe("useTimeline", () => {
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const { events } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!roomA:test",
@@ -196,7 +196,7 @@ describe("useTimeline", () => {
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const { events } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!roomA:test",
@@ -214,7 +214,7 @@ describe("useTimeline", () => {
 		// Room doesn't exist initially
 		const client = createMockClient(new Map());
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const { events, loading } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!roomA:test",
@@ -247,7 +247,7 @@ describe("useTimeline", () => {
 		]);
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			// Spy on getRoom to count reload attempts
 			let getRoomCalls = 0;
 			const originalGetRoom = client.getRoom;
@@ -280,7 +280,7 @@ describe("useTimeline", () => {
 		const roomA = createMockRoom("!roomA:test", []);
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			const { events } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!roomA:test",
@@ -326,7 +326,7 @@ describe("useTimeline", () => {
 		]);
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await withRoot(async (dispose) => {
+		await withRoot(async (_dispose) => {
 			let getRoomCalls = 0;
 			const originalGetRoom = client.getRoom;
 			client.getRoom = (roomId: string) => {
@@ -368,6 +368,70 @@ describe("useTimeline", () => {
 			// Events unchanged
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("existing");
+		});
+	});
+
+	it("does not repeatedly reload on multiple non-live events for empty room", async () => {
+		// Room has only non-displayable events
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.member",
+				content: { membership: "join" },
+				ts: 1000,
+			},
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			let getRoomCalls = 0;
+			const originalGetRoom = client.getRoom;
+			client.getRoom = (roomId: string) => {
+				getRoomCalls++;
+				return originalGetRoom(roomId);
+			};
+
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await Promise.resolve();
+			expect(events.length).toBe(0);
+			const callsAfterLoad = getRoomCalls;
+
+			const makeFakeEvent = (id: string, ts: number) => ({
+				getId: () => id,
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@alice:test",
+				getType: () => "m.room.member",
+				getContent: () => ({ membership: "join" }),
+				getTs: () => ts,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			});
+
+			// Emit 5 non-live events — should only reload once (not 5 times)
+			for (let i = 0; i < 5; i++) {
+				client.__emit(
+					"Room.timeline",
+					makeFakeEvent(`$evt${i}`, 2000 + i),
+					roomA,
+					false,
+					false,
+					{ liveEvent: false },
+				);
+			}
+
+			await Promise.resolve();
+
+			// Only 1 additional getRoom call (from the single backfill reload)
+			expect(getRoomCalls - callsAfterLoad).toBe(1);
+			expect(events.length).toBe(0);
 		});
 	});
 });
