@@ -40,6 +40,8 @@ function resolvePackImages(
 	const entries = Object.entries(images);
 	for (const [shortcode, img] of entries) {
 		if (!img || typeof img.url !== "string") continue;
+		// Only accept mxc:// URLs — reject http(s) to prevent tracking
+		if (!img.url.startsWith("mxc://")) continue;
 		// Only include emoticons (not stickers-only)
 		if (img.usage && img.usage.length > 0 && !img.usage.includes("emoticon")) {
 			continue;

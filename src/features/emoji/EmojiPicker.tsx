@@ -216,10 +216,11 @@ const EmojiPicker: Component<{
 	}
 
 	return (
+		// biome-ignore lint/a11y/useSemanticElements: picker is not a fieldset
 		<div
 			class="flex h-[360px] w-[352px] flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
 			onKeyDown={handleKeyDown}
-			role="dialog"
+			role="group"
 			aria-label="Emoji picker"
 		>
 			{/* Search */}
@@ -307,7 +308,9 @@ const EmojiPicker: Component<{
 										: `:${item.emote.shortcode}:`;
 								const title =
 									item.kind === "unicode"
-										? `${item.emoji.label} :${item.emoji.shortcodes[0] ?? ""}:`
+										? item.emoji.shortcodes[0]
+											? `${item.emoji.label} :${item.emoji.shortcodes[0]}:`
+											: item.emoji.label
 										: `:${item.emote.shortcode}:`;
 
 								return (

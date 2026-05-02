@@ -192,6 +192,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				setAtBottom(true);
 				setReplyTo(null);
 				setEditingEvent(null);
+				setReactionPickerEventId(null);
 				requestAnimationFrame(() => {
 					const el = scrollRef;
 					if (el) el.scrollTo({ top: el.scrollHeight });
