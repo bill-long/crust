@@ -30,7 +30,9 @@ function normalizeGifConfig(raw: unknown): GifConfig {
 			? (obj.provider as GifProvider)
 			: defaultGifConfig.provider,
 		apiKey:
-			typeof obj.apiKey === "string" ? obj.apiKey : defaultGifConfig.apiKey,
+			typeof obj.apiKey === "string"
+				? obj.apiKey.trim()
+				: defaultGifConfig.apiKey,
 		trendingOnOpen:
 			typeof obj.trendingOnOpen === "boolean"
 				? obj.trendingOnOpen
@@ -88,11 +90,13 @@ export function normalizeConfig(raw: unknown): CrustConfig {
 			typeof obj.defaultHomeserver === "string"
 				? obj.defaultHomeserver
 				: "matrix.org",
-		homeserverList: Array.isArray(obj.homeserverList)
-			? (obj.homeserverList as unknown[]).filter(
-					(v): v is string => typeof v === "string",
-				)
-			: ["matrix.org"],
+		homeserverList: (() => {
+			if (!Array.isArray(obj.homeserverList)) return ["matrix.org"];
+			const filtered = (obj.homeserverList as unknown[]).filter(
+				(v): v is string => typeof v === "string",
+			);
+			return filtered.length > 0 ? filtered : ["matrix.org"];
+		})(),
 		allowCustomHomeservers:
 			typeof obj.allowCustomHomeservers === "boolean"
 				? obj.allowCustomHomeservers
