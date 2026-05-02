@@ -259,8 +259,33 @@ const TimelineItem: Component<{
 									{(() => {
 										const gifUrl =
 											ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
-										return gifUrl ? (
+										if (!gifUrl) {
+											return (
+												<MessageBody
+													body={ev.body}
+													format={ev.format}
+													formattedBody={ev.formattedBody}
+													isEdited={ev.isEdited}
+													client={props.client}
+													shortcodeLookup={props.shortcodeLookup}
+												/>
+											);
+										}
+										// Extract reply context from body prefix if present
+										const isReply = ev.body.startsWith("> ");
+										const replyPreview = isReply
+											? ev.body
+													.split("\n")[0]
+													.replace(/^> <([^>]+)> /, "$1: ")
+													.replace(/^> /, "")
+											: null;
+										return (
 											<>
+												<Show when={replyPreview}>
+													<div class="mb-1 border-l-2 border-neutral-600 pl-2 text-xs text-neutral-500">
+														{replyPreview}
+													</div>
+												</Show>
 												<InlineGif url={gifUrl} alt="GIF" />
 												<Show when={ev.isEdited}>
 													<span class="ml-1 text-xs text-neutral-600">
@@ -268,15 +293,6 @@ const TimelineItem: Component<{
 													</span>
 												</Show>
 											</>
-										) : (
-											<MessageBody
-												body={ev.body}
-												format={ev.format}
-												formattedBody={ev.formattedBody}
-												isEdited={ev.isEdited}
-												client={props.client}
-												shortcodeLookup={props.shortcodeLookup}
-											/>
 										);
 									})()}
 								</Show>

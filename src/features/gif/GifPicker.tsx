@@ -18,7 +18,8 @@ const PAGE_SIZE = 25;
 
 const GifPicker: Component<{
 	onSelect: (gif: GifItem) => void;
-	onClose: () => void;
+	/** Called when picker should close. focusTrigger=true for keyboard/select closes. */
+	onClose: (focusTrigger: boolean) => void;
 	/** The trigger element — excluded from outside-click detection. */
 	triggerRef?: HTMLElement;
 }> = (props) => {
@@ -47,7 +48,7 @@ const GifPicker: Component<{
 		if (pickerRef && !pickerRef.contains(target)) {
 			// Don't close if the click is on the trigger button (toggle handles it)
 			if (props.triggerRef?.contains(target)) return;
-			props.onClose();
+			props.onClose(false); // Outside click — don't steal focus
 		}
 	}
 
@@ -135,7 +136,7 @@ const GifPicker: Component<{
 	function onKeyDown(e: KeyboardEvent) {
 		if (e.key === "Escape") {
 			e.preventDefault();
-			props.onClose();
+			props.onClose(true); // Keyboard close — return focus to trigger
 		}
 	}
 
@@ -147,9 +148,11 @@ const GifPicker: Component<{
 	const attr = createMemo(() => provider().attribution);
 
 	return (
-		<div
+		<section
 			ref={pickerRef}
 			class="flex h-[400px] w-80 flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
+			onKeyDown={onKeyDown}
+			aria-label="GIF picker"
 		>
 			{/* Search input */}
 			<div class="border-b border-neutral-700 p-2">
@@ -158,7 +161,6 @@ const GifPicker: Component<{
 					type="text"
 					value={query()}
 					onInput={(e) => setQuery(e.currentTarget.value)}
-					onKeyDown={onKeyDown}
 					placeholder={attr().searchPlaceholder}
 					aria-label={attr().searchPlaceholder}
 					class="w-full rounded bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
@@ -234,7 +236,7 @@ const GifPicker: Component<{
 					{attr().name}
 				</a>
 			</div>
-		</div>
+		</section>
 	);
 };
 

@@ -706,9 +706,9 @@ const Composer: Component<{
 					<div class="absolute bottom-full right-0 z-20 mb-1">
 						<GifPicker
 							onSelect={onGifSelect}
-							onClose={() => {
+							onClose={(focusTrigger) => {
 								setGifPickerOpen(false);
-								gifButtonRef?.focus();
+								if (focusTrigger) gifButtonRef?.focus();
 							}}
 							triggerRef={gifButtonRef}
 						/>
