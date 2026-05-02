@@ -87,7 +87,20 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 	if (!res.ok) {
 		throw new Error(`Klipy API error: ${res.status} ${res.statusText}`);
 	}
-	return res.json();
+	const json = (await res.json()) as Record<string, unknown>;
+	if (!json.result) {
+		throw new Error("Klipy API returned an error");
+	}
+	const data = json.data as Record<string, unknown> | undefined;
+	if (
+		!data ||
+		!Array.isArray(data.data) ||
+		typeof data.current_page !== "number" ||
+		typeof data.has_next !== "boolean"
+	) {
+		throw new Error("Klipy API returned an unexpected response shape");
+	}
+	return json as unknown as KlipyResponse;
 }
 
 function toSearchResult(data: KlipyResponse, perPage: number): GifSearchResult {

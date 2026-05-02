@@ -28,7 +28,7 @@ const Layout: Component = () => {
 	};
 
 	return (
-		<div class="flex h-screen flex-col bg-neutral-950 text-white">
+		<div class="flex min-h-0 flex-1 flex-col bg-neutral-950 text-white">
 			{/* Top bar */}
 			<header class="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
 				<span class="text-lg font-bold">Crust</span>
