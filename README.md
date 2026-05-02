@@ -41,14 +41,12 @@ Crust resolves this honestly:
 1. **Send**: the selected GIF is sent as a normal text message containing the
    provider's CDN URL. This complies with provider TOS.
 2. **Render**: Crust recognizes GIF provider URLs in the timeline and renders
-   them inline, fetching directly from the CDN. Users can disable automatic
-   fetching in settings (it defaults to on).
+   them inline, fetching directly from the CDN.
 3. **Cross-client**: recipients using other Matrix clients see a clickable link
    instead of an inline GIF. This is a trade-off we're transparent about.
 4. **Encrypted rooms**: the URL is encrypted in the message body, but when Crust
    fetches the GIF for display, the user's IP is visible to the CDN. This is the
-   same trade-off as URL previews. Users can disable automatic GIF loading in
-   settings.
+   same trade-off as URL previews.
 
 GIF search is **off by default**. The operator enables it in `config.json` by
 providing a provider API key. Content rating defaults to `g`.
