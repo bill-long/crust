@@ -289,7 +289,7 @@ const TimelineItem: Component<{
 												<InlineGif
 													url={gifUrl}
 													alt="GIF"
-													onLoad={props.onImageLoad}
+													onSizeSettled={props.onImageLoad}
 												/>
 												<Show when={ev.isEdited}>
 													<span class="ml-1 text-xs text-neutral-600">

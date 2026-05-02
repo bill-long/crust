@@ -1,7 +1,4 @@
-/**
- * Known GIF provider CDN URL patterns.
- * Order matters — first match wins.
- */
+/** Known GIF provider CDN URL patterns. */
 const GIF_URL_PATTERNS: readonly RegExp[] = [
 	// Giphy: media.giphy.com, media0-4.giphy.com
 	/^https:\/\/media[0-4]?\.giphy\.com\//,

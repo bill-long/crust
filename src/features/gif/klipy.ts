@@ -88,7 +88,10 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 		throw new Error(`Klipy API error: ${res.status} ${res.statusText}`);
 	}
 	const json = (await res.json()) as Record<string, unknown>;
-	if (typeof json.result !== "boolean" || json.result !== true) {
+	if (typeof json.result !== "boolean") {
+		throw new Error("Klipy API returned an unexpected response shape");
+	}
+	if (!json.result) {
 		throw new Error("Klipy API returned an error");
 	}
 	const data = json.data as Record<string, unknown> | undefined;

@@ -18,7 +18,7 @@ export { extractGifUrl, isGifUrl } from "./gifUrl";
 const InlineGif: Component<{
 	url: string;
 	alt: string;
-	onLoad?: () => void;
+	onSizeSettled?: () => void;
 }> = (props) => {
 	const autoDownload = createMemo(() => userSettings().autoDownloadGifs);
 	const [manuallyLoaded, setManuallyLoaded] = createSignal(false);
@@ -72,10 +72,10 @@ const InlineGif: Component<{
 					class="mt-1 block max-h-64 max-w-sm rounded"
 					loading="lazy"
 					referrerPolicy="no-referrer"
-					onLoad={() => props.onLoad?.()}
+					onLoad={() => props.onSizeSettled?.()}
 					onError={() => {
 						setLoadError(true);
-						props.onLoad?.();
+						props.onSizeSettled?.();
 					}}
 				/>
 			</Show>

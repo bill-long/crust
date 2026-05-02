@@ -83,7 +83,7 @@ describe("createKlipyProvider", () => {
 
 		const provider = createKlipyProvider("test-api-key");
 		await expect(provider.search("cats", "g")).rejects.toThrow(
-			"Klipy API returned an error",
+			"unexpected response shape",
 		);
 	});
 
