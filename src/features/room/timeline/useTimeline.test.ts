@@ -1,6 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	createMockClient,
 	createMockRoom,
@@ -432,6 +432,64 @@ describe("useTimeline", () => {
 			// Only 1 additional getRoom call (from the single backfill reload)
 			expect(getRoomCalls - callsAfterLoad).toBe(1);
 			expect(events.length).toBe(0);
+		});
+	});
+
+	it("loadOlderMessages fetches and prepends older events", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$3", "@alice:test", "recent", 3000),
+		]);
+		// Set pagination token before useTimeline initializes
+		roomA.getLiveTimeline().getPaginationToken = () => "token-1";
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		// Mock paginateEventTimeline to simulate adding older events
+		client.paginateEventTimeline = vi.fn().mockImplementation(async () => {
+			// Simulate SDK adding older events to the timeline
+			const room = client.getRoom("!roomA:test");
+			if (room) {
+				const timeline = room.getLiveTimeline();
+				const existingEvents = timeline.getEvents();
+				// Prepend older events
+				const olderEvent = {
+					getId: () => "$1",
+					getRoomId: () => "!roomA:test",
+					getSender: () => "@bob:test",
+					getType: () => "m.room.message",
+					getContent: () => ({ msgtype: "m.text", body: "older msg" }),
+					getTs: () => 1000,
+					isEncrypted: () => false,
+					isDecryptionFailure: () => false,
+					replacingEventId: () => null,
+					event: { redacts: undefined },
+				};
+				existingEvents.unshift(
+					olderEvent as unknown as (typeof existingEvents)[0],
+				);
+				// Update pagination token to indicate more history
+				timeline.getPaginationToken = () => "token-2";
+			}
+			return true; // hasMore
+		});
+
+		await withRoot(async () => {
+			const { events, loadOlderMessages, canLoadOlder, loadingOlder } =
+				useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
+
+			await Promise.resolve();
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("recent");
+			expect(canLoadOlder()).toBe(true);
+
+			await loadOlderMessages();
+			await Promise.resolve();
+
+			expect(events.length).toBe(2);
+			expect(events[0].body).toBe("older msg");
+			expect(events[1].body).toBe("recent");
+			expect(loadingOlder()).toBe(false);
+			expect(canLoadOlder()).toBe(true);
 		});
 	});
 });

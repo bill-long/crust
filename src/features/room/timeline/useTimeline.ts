@@ -208,17 +208,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 			if (currentRoomId !== rid) return;
 
 			// Rebuild displayable events from the full timeline.
-			// For backward pagination, keep the oldest events (head) not
-			// the newest (tail), so the user sees the history they scrolled to.
+			// Don't cap here — the SDK manages the pagination window size.
+			// MAX_TIMELINE_EVENTS only limits live event growth in onTimelineEvent.
 			const allEvents = timeline.getEvents();
 			const displayable = allEvents
 				.filter((e) => isDisplayable(e) && e.getId())
 				.map((e) => eventToTimelineEvent(e, room, client));
-			const items =
-				displayable.length > MAX_TIMELINE_EVENTS
-					? displayable.slice(0, MAX_TIMELINE_EVENTS)
-					: displayable;
-			setEvents(reconcile(items, { key: "eventId", merge: false }));
+			setEvents(reconcile(displayable, { key: "eventId", merge: false }));
 			setCanLoadOlder(hasMore);
 		} catch {
 			// Pagination failed — leave current state, user can retry

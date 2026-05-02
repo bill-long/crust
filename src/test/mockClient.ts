@@ -50,12 +50,14 @@ export function createMockRoom(
 	// Configurable read receipt positions per user
 	const readUpTo = new Map<string, string | null>();
 
+	const timeline = {
+		getEvents: () => matrixEvents,
+		getPaginationToken: () => null as string | null,
+	};
+
 	return {
 		roomId,
-		getLiveTimeline: () => ({
-			getEvents: () => matrixEvents,
-			getPaginationToken: () => null,
-		}),
+		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => ({
 			relations: {
 				getChildEventsForEvent: () => null,
@@ -106,6 +108,7 @@ export function createMockClient(
 		sendTyping: vi.fn().mockResolvedValue(undefined),
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
 		redactEvent: vi.fn().mockResolvedValue(undefined),
+		paginateEventTimeline: vi.fn().mockResolvedValue(false),
 		getAccountData: () => null,
 		getHomeserverUrl: () => "https://example.com",
 		on: (event: string, handler: (...args: unknown[]) => void) => {
