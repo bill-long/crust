@@ -171,14 +171,15 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		// reconcile with key + merge:false forces a full replacement
 		// including correct array length reset
 		setEvents(reconcile(items, { key: "eventId", merge: false }));
-		setLoading(false);
 
-		// Check if older messages can be loaded
+		// Set canLoadOlder before loading=false so dependents never observe
+		// the transient state (loading=false, canLoadOlder=false, events>0)
 		const paginationToken = room
 			.getLiveTimeline()
 			.getPaginationToken(Direction.Backward);
 		setCanLoadOlder(paginationToken !== null);
 		setLoadingOlder(false);
+		setLoading(false);
 	}
 
 	const PAGINATION_SIZE = 50;

@@ -245,27 +245,36 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	// Auto-paginate when content doesn't fill the viewport (no scrollbar
 	// means onScroll never fires, so pagination can't be user-triggered).
 	// Capped to prevent runaway fetches if events are non-displayable.
+	// Stops scheduling RAFs once content overflows the viewport.
 	const MAX_AUTO_PAGES = 10;
 	const [autoPageCount, setAutoPageCount] = createSignal(0);
+	let hasOverflow = false;
+	let autoPagRafPending = false;
 	createEffect(
 		on(
 			() =>
 				[props.roomId, events.length, canLoadOlder(), loadingOlder()] as const,
 			([roomId, , canLoad, isLoading], prev) => {
-				// Reset counter on room change
+				// Reset state on room change
 				if (!prev || prev[0] !== roomId) {
 					setAutoPageCount(0);
+					hasOverflow = false;
+					autoPagRafPending = false;
 				}
-				if (!canLoad || isLoading || !scrollRef) return;
+				if (hasOverflow || !canLoad || isLoading || !scrollRef) return;
 				if (autoPageCount() >= MAX_AUTO_PAGES) return;
+				if (autoPagRafPending) return;
 				const currentRef = scrollRef;
+				const rafRoomId = roomId;
+				autoPagRafPending = true;
 				requestAnimationFrame(() => {
-					if (
-						currentRef &&
-						currentRef.scrollHeight <= currentRef.clientHeight &&
-						canLoadOlder() &&
-						!loadingOlder()
-					) {
+					autoPagRafPending = false;
+					if (!currentRef || rafRoomId !== props.roomId) return;
+					if (currentRef.scrollHeight > currentRef.clientHeight) {
+						hasOverflow = true;
+						return;
+					}
+					if (canLoadOlder() && !loadingOlder()) {
 						setAutoPageCount((c) => c + 1);
 						loadOlderMessages();
 					}
