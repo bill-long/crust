@@ -69,6 +69,7 @@ const InlineGif: Component<{
 				alt={props.alt}
 				class="mt-1 max-h-64 max-w-sm rounded"
 				loading="lazy"
+				referrerPolicy="no-referrer"
 			/>
 		</Show>
 	);

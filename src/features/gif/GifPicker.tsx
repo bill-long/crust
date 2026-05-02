@@ -225,6 +225,7 @@ const GifPicker: Component<{
 										alt={gif.title || "GIF"}
 										class="h-full w-full object-cover"
 										loading="lazy"
+										referrerPolicy="no-referrer"
 									/>
 									<Show when={gif.title}>
 										<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
