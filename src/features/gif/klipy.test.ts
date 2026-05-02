@@ -153,4 +153,47 @@ describe("createKlipyProvider", () => {
 		expect(result.items[0].url).toBe("https://static.klipy.com/gifs/hd.gif");
 		expect(result.hasMore).toBe(false);
 	});
+
+	it("filters out null, non-object, and missing-file entries", async () => {
+		const mockResponse = {
+			result: true,
+			data: {
+				data: [
+					null,
+					"string",
+					{ id: 1, slug: "no-file", title: "No file" },
+					{
+						id: 2,
+						slug: "valid",
+						title: "Valid",
+						file: {
+							hd: {
+								gif: {
+									url: "https://static.klipy.com/gifs/valid.gif",
+									width: 480,
+									height: 360,
+									size: 10000,
+								},
+							},
+						},
+					},
+				],
+				current_page: 1,
+				per_page: 24,
+				has_next: false,
+			},
+		};
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+			new Response(JSON.stringify(mockResponse), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+		);
+
+		const provider = createKlipyProvider("test-api-key");
+		const result = await provider.search("cats", "g");
+
+		expect(result.items).toHaveLength(1);
+		expect(result.items[0].id).toBe("valid");
+	});
 });

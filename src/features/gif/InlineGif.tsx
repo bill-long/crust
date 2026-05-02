@@ -24,13 +24,14 @@ const InlineGif: Component<{
 	const [manuallyLoaded, setManuallyLoaded] = createSignal(false);
 	const [loadError, setLoadError] = createSignal(false);
 
-	// Reset state when URL changes
+	// Reset state when URL changes; notify virtualizer after DOM swap
 	createEffect(
 		on(
 			() => props.url,
 			() => {
 				setManuallyLoaded(false);
 				setLoadError(false);
+				queueMicrotask(() => props.onSizeSettled?.());
 			},
 		),
 	);
@@ -72,10 +73,10 @@ const InlineGif: Component<{
 					class="mt-1 block max-h-64 max-w-sm rounded"
 					loading="lazy"
 					referrerPolicy="no-referrer"
-					onLoad={() => props.onSizeSettled?.()}
+					onLoad={() => queueMicrotask(() => props.onSizeSettled?.())}
 					onError={() => {
 						setLoadError(true);
-						props.onSizeSettled?.();
+						queueMicrotask(() => props.onSizeSettled?.());
 					}}
 				/>
 			</Show>
