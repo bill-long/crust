@@ -75,7 +75,7 @@ async function fetchGiphy(url: string): Promise<GiphyResponse> {
 	return res.json();
 }
 
-function toSearchResult(data: GiphyResponse, limit: number): GifSearchResult {
+function toSearchResult(data: GiphyResponse): GifSearchResult {
 	const items = data.data
 		.map(toGifItem)
 		.filter((item): item is GifItem => item !== null);
@@ -97,7 +97,7 @@ export function createGiphyProvider(apiKey: string): GifProvider {
 		): Promise<GifSearchResult> {
 			const url = buildUrl("search", apiKey, rating, offset, limit, query);
 			const data = await fetchGiphy(url);
-			return toSearchResult(data, limit);
+			return toSearchResult(data);
 		},
 
 		async trending(
@@ -107,7 +107,7 @@ export function createGiphyProvider(apiKey: string): GifProvider {
 		): Promise<GifSearchResult> {
 			const url = buildUrl("trending", apiKey, rating, offset, limit);
 			const data = await fetchGiphy(url);
-			return toSearchResult(data, limit);
+			return toSearchResult(data);
 		},
 
 		attribution: {

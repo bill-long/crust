@@ -9,7 +9,7 @@ const GIF_URL_PATTERNS: readonly RegExp[] = [
 	// Giphy: media.giphy.com, media0-4.giphy.com
 	/^https:\/\/media[0-4]?\.giphy\.com\//,
 	// Klipy
-	/^https:\/\/media\.klipy\.com\//,
+	/^https:\/\/static\.klipy\.com\//,
 	// Tenor (for receiving GIFs from other clients)
 	/^https:\/\/(?:media|c)\.tenor\.com\//,
 ];
@@ -27,7 +27,7 @@ export function isGifUrl(url: string): boolean {
  */
 export function extractGifUrl(body: string): string | null {
 	const trimmed = body.trim();
-	if (isGifUrl(trimmed) && !trimmed.includes(" ")) return trimmed;
+	if (isGifUrl(trimmed) && !/\s/.test(trimmed)) return trimmed;
 	return null;
 }
 

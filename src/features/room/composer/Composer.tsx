@@ -10,7 +10,6 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
-import { useConfig } from "../../../app/ConfigProvider";
 import { createPicker } from "../../../components/picker/Picker";
 import EmojiPicker from "../../emoji/EmojiPicker";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";

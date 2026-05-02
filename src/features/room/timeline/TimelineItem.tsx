@@ -257,7 +257,8 @@ const TimelineItem: Component<{
 									}
 								>
 									{(() => {
-										const gifUrl = ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
+										const gifUrl =
+											ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
 										return gifUrl ? (
 											<InlineGif url={gifUrl} alt={ev.body?.trim() || "GIF"} />
 										) : (

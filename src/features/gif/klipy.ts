@@ -4,23 +4,31 @@ import type { GifItem, GifProvider, GifSearchResult } from "./types";
 const KLIPY_BASE = "https://api.klipy.com/api/v1";
 const DEFAULT_LIMIT = 24;
 
+interface KlipyRendition {
+	gif?: { url: string; width: number; height: number; size: number };
+	webp?: { url: string; width: number; height: number; size: number };
+	jpg?: { url: string; width: number; height: number; size: number };
+}
+
 interface KlipyGif {
-	id: string;
+	id: number;
 	slug: string;
 	title: string;
-	url: string;
-	preview: string;
-	width: number;
-	height: number;
+	file: {
+		hd?: KlipyRendition;
+		md?: KlipyRendition;
+		sm?: KlipyRendition;
+		xs?: KlipyRendition;
+	};
 }
 
 interface KlipyResponse {
-	data: KlipyGif[];
-	pagination: {
-		total: number;
-		per_page: number;
+	result: boolean;
+	data: {
+		data: KlipyGif[];
 		current_page: number;
-		next_page: number | null;
+		per_page: number;
+		has_next: boolean;
 	};
 }
 
@@ -33,15 +41,21 @@ const RATING_TO_LEVEL: Record<GifRating, string> = {
 };
 
 function toGifItem(gif: KlipyGif): GifItem | null {
-	if (!gif.url) return null;
+	// Use hd gif for the sent URL, sm/xs for preview
+	const hd = gif.file.hd?.gif ?? gif.file.md?.gif;
+	const preview = gif.file.sm?.gif ?? gif.file.md?.gif ?? hd;
+	const still = gif.file.sm?.jpg ?? gif.file.xs?.jpg;
+
+	if (!hd?.url) return null;
+
 	return {
-		id: gif.slug || gif.id,
+		id: gif.slug || String(gif.id),
 		title: gif.title || "",
-		url: gif.url,
-		previewUrl: gif.preview || gif.url,
-		stillUrl: gif.preview || gif.url,
-		width: gif.width || 200,
-		height: gif.height || 200,
+		url: hd.url,
+		previewUrl: preview?.url ?? hd.url,
+		stillUrl: still?.url ?? preview?.url ?? hd.url,
+		width: hd.width || 200,
+		height: hd.height || 200,
 	};
 }
 
@@ -70,16 +84,14 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 	return res.json();
 }
 
-// Klipy uses page-based pagination; we normalize to offset-based.
-// offset = (page - 1) * perPage, nextOffset = page * perPage
 function toSearchResult(data: KlipyResponse, perPage: number): GifSearchResult {
-	const items = data.data
+	const items = data.data.data
 		.map(toGifItem)
 		.filter((item): item is GifItem => item !== null);
-	const currentPage = data.pagination.current_page;
+	const currentPage = data.data.current_page;
 	return {
 		items,
-		hasMore: data.pagination.next_page !== null,
+		hasMore: data.data.has_next,
 		nextOffset: currentPage * perPage,
 	};
 }

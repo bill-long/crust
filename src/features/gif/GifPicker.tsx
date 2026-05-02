@@ -3,7 +3,6 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
-	createUniqueId,
 	For,
 	on,
 	onCleanup,
@@ -22,7 +21,6 @@ const GifPicker: Component<{
 	onClose: () => void;
 }> = (props) => {
 	const config = useConfig();
-	const pickerId = createUniqueId();
 
 	const provider = createMemo(() => createGifProvider(config.gif));
 
@@ -41,6 +39,7 @@ const GifPicker: Component<{
 	let fetchGen = 0;
 
 	// Outside-click handler
+	let mounted = true;
 	function onDocumentClick(e: MouseEvent) {
 		if (pickerRef && !pickerRef.contains(e.target as Node)) {
 			props.onClose();
@@ -49,10 +48,13 @@ const GifPicker: Component<{
 
 	// Defer listener so the opening click doesn't immediately close
 	const rafId = requestAnimationFrame(() => {
-		document.addEventListener("mousedown", onDocumentClick);
+		if (mounted) {
+			document.addEventListener("mousedown", onDocumentClick);
+		}
 	});
 
 	onCleanup(() => {
+		mounted = false;
 		cancelAnimationFrame(rafId);
 		document.removeEventListener("mousedown", onDocumentClick);
 		if (debounceTimer !== undefined) clearTimeout(debounceTimer);
@@ -144,6 +146,8 @@ const GifPicker: Component<{
 			ref={pickerRef}
 			class="flex h-[400px] w-80 flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
 			onKeyDown={onKeyDown}
+			role="dialog"
+			aria-label="GIF picker"
 		>
 			{/* Search input */}
 			<div class="border-b border-neutral-700 p-2">
@@ -193,9 +197,7 @@ const GifPicker: Component<{
 									/>
 									<Show when={gif.title}>
 										<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-											<p class="truncate text-[10px] text-white">
-												{gif.title}
-											</p>
+											<p class="truncate text-[10px] text-white">{gif.title}</p>
 										</div>
 									</Show>
 								</button>
