@@ -93,10 +93,8 @@ export function formatMarkdown(
 	let customEmojiApplied = false;
 	if (customEmoji && customEmoji.length > 0) {
 		for (const ce of customEmoji) {
-			const escapedSc = escapeHtml(ce.shortcode).replace(
-				/[.*+?^${}()|[\]\\]/g,
-				"\\$&",
-			);
+			// Regex-escape the raw shortcode for pattern matching
+			const escapedSc = ce.shortcode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 			// Safari compat: use capture-and-reinsert instead of lookbehind
 			const safariPattern = new RegExp(
 				`(^|[^:\\w]):${escapedSc}:(?![\\w:])`,

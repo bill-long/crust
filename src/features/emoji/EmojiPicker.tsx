@@ -285,10 +285,9 @@ const EmojiPicker: Component<{
 			</Show>
 
 			{/* Emoji list */}
-			<div
+			<section
 				ref={gridRef}
 				class="min-h-0 flex-1 overflow-y-auto p-1"
-				role="listbox"
 				aria-label="Emoji"
 				id={`emoji-grid-${pickerId}`}
 			>
@@ -318,7 +317,6 @@ const EmojiPicker: Component<{
 								return (
 									<button
 										type="button"
-										role="option"
 										class="flex h-9 w-9 items-center justify-center rounded text-xl transition-colors hover:bg-neutral-700"
 										onClick={() => handleSelect(item)}
 										title={title}
@@ -339,7 +337,7 @@ const EmojiPicker: Component<{
 						</For>
 					</div>
 				</Show>
-			</div>
+			</section>
 		</div>
 	);
 };

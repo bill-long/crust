@@ -12,7 +12,7 @@ import {
 import { useClient } from "../../../client/client";
 import { createPicker } from "../../../components/picker/Picker";
 import EmojiPicker from "../../emoji/EmojiPicker";
-import type { ImagePack, PickerEmoji } from "../../emoji/types";
+import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { buildShortcodeLookup } from "../../emoji/useImagePacks";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import {
@@ -55,9 +55,11 @@ function buildReplyFallback(
 
 const SHORTCODE_RE = /(?:^|[^:\w]):([a-zA-Z0-9_-]{2,50}):(?![\w:])/g;
 
-/** Extract custom emoji from packs that appear as :shortcode: in text. */
-function findCustomEmoji(text: string, packs: ImagePack[]): CustomEmoji[] {
-	const lookup = buildShortcodeLookup(packs);
+/** Extract custom emoji shortcodes present in text using a prebuilt lookup. */
+function findCustomEmoji(
+	text: string,
+	lookup: Map<string, ResolvedEmote>,
+): CustomEmoji[] {
 	if (lookup.size === 0) return [];
 
 	const found: CustomEmoji[] = [];
@@ -97,6 +99,9 @@ const Composer: Component<{
 	const [mentions, setMentions] = createSignal<Mention[]>([]);
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
+
+	// Memoize shortcode lookup to avoid rebuilding on every send
+	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
 
 	let textareaRef: HTMLTextAreaElement | undefined;
 	let lastTypingSentAt = 0;
@@ -322,7 +327,7 @@ const Composer: Component<{
 		// Edit mode: send m.replace event
 		if (props.editingEvent) {
 			const currentMentions = reconcileMentions(msg);
-			const emoji = findCustomEmoji(msg, props.packs);
+			const emoji = findCustomEmoji(msg, shortcodeLookup());
 			const { body: newBody, formatted_body } = formatMarkdown(
 				msg,
 				currentMentions,
@@ -394,7 +399,7 @@ const Composer: Component<{
 
 		// Normal send mode
 		const currentMentions = reconcileMentions(msg);
-		const emoji = findCustomEmoji(msg, props.packs);
+		const emoji = findCustomEmoji(msg, shortcodeLookup());
 		const { body, formatted_body } = formatMarkdown(
 			msg,
 			currentMentions,
