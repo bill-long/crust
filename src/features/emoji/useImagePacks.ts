@@ -5,13 +5,7 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import type { AccountDataEvents } from "matrix-js-sdk/lib/@types/event";
-import {
-	createEffect,
-	createMemo,
-	createSignal,
-	on,
-	onCleanup,
-} from "solid-js";
+import { createMemo, createSignal, onCleanup } from "solid-js";
 import type {
 	EmoteRoomsContent,
 	ImagePack,
@@ -111,12 +105,7 @@ export function useImagePacks(
 		client.off(RoomStateEvent.Events, onRoomState);
 	});
 
-	// Reset room state tick when room changes
-	createEffect(
-		on(roomId, () => {
-			setRoomStateTick((n) => n + 1);
-		}),
-	);
+	// packs memo already tracks roomId() directly — no extra effect needed
 
 	const packs = createMemo(() => {
 		// Track reactivity

@@ -104,6 +104,7 @@ const Composer: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
 
 	let textareaRef: HTMLTextAreaElement | undefined;
+	let emojiButtonRef: HTMLButtonElement | undefined;
 	let lastTypingSentAt = 0;
 	let typingRoomId: string | null = null;
 
@@ -615,6 +616,9 @@ const Composer: Component<{
 				/>
 				{/* Emoji picker button */}
 				<button
+					ref={(el) => {
+						emojiButtonRef = el;
+					}}
 					type="button"
 					class="absolute bottom-2.5 right-2 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
 					onClick={() => setEmojiPickerOpen((v) => !v)}
@@ -629,7 +633,10 @@ const Composer: Component<{
 						<EmojiPicker
 							packs={props.packs}
 							onSelect={onEmojiSelect}
-							onClose={() => setEmojiPickerOpen(false)}
+							onClose={() => {
+								setEmojiPickerOpen(false);
+								emojiButtonRef?.focus();
+							}}
 						/>
 					</div>
 				</Show>

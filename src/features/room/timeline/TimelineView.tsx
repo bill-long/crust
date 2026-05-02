@@ -315,6 +315,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						ref={scrollRef}
 						class="absolute inset-0 overflow-y-auto"
 						onScroll={onScroll}
+						tabIndex={-1}
 					>
 						<div
 							style={{
@@ -382,6 +383,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 																requestAnimationFrame(() => {
 																	if (itemRef)
 																		virtualizer.measureElement(itemRef);
+																	scrollRef?.focus();
 																});
 															}}
 														/>

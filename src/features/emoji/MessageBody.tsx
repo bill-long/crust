@@ -328,7 +328,7 @@ const MessageBody: Component<{
 			}
 		>
 			{(html) => (
-				<div class="message-body whitespace-pre-wrap break-words text-sm text-neutral-300">
+				<div class="message-body break-words text-sm text-neutral-300">
 					<div innerHTML={html()} />
 					<Show when={props.isEdited}>
 						<span class="ml-1 text-xs text-neutral-600">(edited)</span>
