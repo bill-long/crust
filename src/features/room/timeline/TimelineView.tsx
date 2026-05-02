@@ -193,7 +193,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				setReplyTo(null);
 				setEditingEvent(null);
 				setReactionPickerEventId(null);
+				// Force the virtualizer to recalculate after the store updates
 				requestAnimationFrame(() => {
+					virtualizer.measure();
 					const el = scrollRef;
 					if (el) el.scrollTo({ top: el.scrollHeight });
 				});

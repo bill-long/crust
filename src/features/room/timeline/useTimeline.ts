@@ -9,7 +9,7 @@ import {
 	RoomMemberEvent,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { createStore, produce, reconcile } from "solid-js/store";
 
 export interface TimelineEvent {
 	eventId: string;
@@ -138,9 +138,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		currentRoomId = rid;
 		setLoading(true);
 		setTypingUsers([]);
+
 		const room = client.getRoom(rid);
 		if (!room) {
-			setEvents([]);
+			setEvents(reconcile([], { key: "eventId", merge: false }));
+			setLoading(false);
 			return;
 		}
 
@@ -148,11 +150,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		const displayable = timeline
 			.filter((e) => isDisplayable(e) && e.getId())
 			.map((e) => eventToTimelineEvent(e, room, client));
-		setEvents(
+		const items =
 			displayable.length > MAX_TIMELINE_EVENTS
 				? displayable.slice(-MAX_TIMELINE_EVENTS)
-				: displayable,
-		);
+				: displayable;
+		// reconcile with key + merge:false forces a full replacement
+		// including correct array length reset
+		setEvents(reconcile(items, { key: "eventId", merge: false }));
 		setLoading(false);
 	}
 
@@ -245,7 +249,17 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		data: { liveEvent?: boolean },
 	): void {
 		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
-		if (!data.liveEvent) return;
+
+		// For non-live events (backfill/initial sync), reload the full
+		// timeline so we pick up historical events that weren't available
+		// when loadRoom first ran. Guard with loading() to prevent
+		// infinite reload loops when a room has only non-displayable events.
+		if (!data.liveEvent) {
+			if (events.length === 0 && !loading()) {
+				loadRoom(currentRoomId);
+			}
+			return;
+		}
 
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
@@ -390,7 +404,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	}
 
 	function onRoomAppeared(room: Room): void {
-		if (currentRoomId && room.roomId === currentRoomId && loading()) {
+		if (
+			currentRoomId &&
+			room.roomId === currentRoomId &&
+			events.length === 0 &&
+			!loading()
+		) {
 			loadRoom(currentRoomId);
 		}
 	}
