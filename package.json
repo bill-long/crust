@@ -18,6 +18,8 @@
 		"@kobalte/core": "^0.13.11",
 		"@solidjs/router": "^0.16.1",
 		"@tanstack/solid-virtual": "^3.13.24",
+		"dompurify": "^3.4.2",
+		"emojibase-data": "^17.0.0",
 		"matrix-js-sdk": "^41.4.0",
 		"solid-js": "^1.9.12"
 	},

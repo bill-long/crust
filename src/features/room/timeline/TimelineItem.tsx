@@ -1,4 +1,7 @@
+import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import MessageBody from "../../emoji/MessageBody";
+import type { ResolvedEmote } from "../../emoji/types";
 import type { TimelineEvent } from "./useTimeline";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -7,9 +10,43 @@ const ReactionPills: Component<{
 	reactions: TimelineEvent["reactions"];
 	myReactions: TimelineEvent["myReactions"];
 	onReact: (key: string) => void;
+	emoteLookup: Map<string, ResolvedEmote>;
+	onOpenFullPicker?: () => void;
 }> = (props) => {
 	const entries = createMemo(() => Object.entries(props.reactions));
 	const [showPicker, setShowPicker] = createSignal(false);
+
+	const renderReactionKey = (key: string) => {
+		// Custom emoji: reaction key is an mxc:// URL
+		if (key.startsWith("mxc://")) {
+			const emote = props.emoteLookup.get(key);
+			if (emote) {
+				return (
+					<img
+						src={emote.httpUrl}
+						alt={`:${emote.shortcode}:`}
+						title={`:${emote.shortcode}:`}
+						class="inline h-4 w-4 object-contain"
+					/>
+				);
+			}
+			// Unknown pack — show placeholder instead of raw URL
+			return (
+				<span title={key} role="img" aria-label="custom emoji">
+					❓
+				</span>
+			);
+		}
+		return <span>{key}</span>;
+	};
+
+	const reactionLabel = (key: string): string => {
+		if (key.startsWith("mxc://")) {
+			const emote = props.emoteLookup.get(key);
+			return emote ? `:${emote.shortcode}:` : "custom emoji";
+		}
+		return key;
+	};
 
 	return (
 		<div class="mt-1 flex flex-wrap gap-1">
@@ -25,10 +62,10 @@ const ReactionPills: Component<{
 									: "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
 							}`}
 							onClick={() => props.onReact(key)}
-							aria-label={`${key} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
+							aria-label={`${reactionLabel(key)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
 							aria-pressed={isMine()}
 						>
-							<span>{key}</span>
+							{renderReactionKey(key)}
 							<span class={isMine() ? "text-pink-400" : "text-neutral-500"}>
 								{count}
 							</span>
@@ -73,6 +110,19 @@ const ReactionPills: Component<{
 							</button>
 						)}
 					</For>
+					<Show when={props.onOpenFullPicker}>
+						<button
+							type="button"
+							class="rounded px-1 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+							onClick={() => {
+								setShowPicker(false);
+								props.onOpenFullPicker?.();
+							}}
+							aria-label="More reactions"
+						>
+							⋯
+						</button>
+					</Show>
 				</div>
 			</Show>
 		</div>
@@ -106,6 +156,10 @@ const TimelineItem: Component<{
 	onDelete: () => void;
 	onImageLoad?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
+	client: MatrixClient;
+	shortcodeLookup: Map<string, ResolvedEmote>;
+	emoteLookup: Map<string, ResolvedEmote>;
+	onOpenReactionPicker?: () => void;
 }> = (props) => {
 	const ev = props.event;
 
@@ -187,17 +241,29 @@ const TimelineItem: Component<{
 								ev.imageUrl
 							}
 							fallback={
-								<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
-									{ev.body ||
-										(ev.msgtype &&
-										ev.msgtype !== "m.text" &&
-										ev.msgtype !== "m.emote"
-											? unsupportedLabel(ev.msgtype)
-											: "")}
-									<Show when={ev.isEdited}>
-										<span class="ml-1 text-xs text-neutral-600">(edited)</span>
-									</Show>
-								</p>
+								<Show
+									when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
+									fallback={
+										<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
+											{ev.body ||
+												(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
+											<Show when={ev.isEdited}>
+												<span class="ml-1 text-xs text-neutral-600">
+													(edited)
+												</span>
+											</Show>
+										</p>
+									}
+								>
+									<MessageBody
+										body={ev.body}
+										format={ev.format}
+										formattedBody={ev.formattedBody}
+										isEdited={ev.isEdited}
+										client={props.client}
+										shortcodeLookup={props.shortcodeLookup}
+									/>
+								</Show>
 							}
 						>
 							<img
@@ -216,6 +282,8 @@ const TimelineItem: Component<{
 					reactions={ev.reactions}
 					myReactions={ev.myReactions}
 					onReact={props.onReact}
+					emoteLookup={props.emoteLookup}
+					onOpenFullPicker={props.onOpenReactionPicker}
 				/>
 
 				{/* Read receipts */}

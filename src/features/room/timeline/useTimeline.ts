@@ -19,6 +19,8 @@ export interface TimelineEvent {
 	type: string;
 	msgtype: string;
 	body: string;
+	format: string | null;
+	formattedBody: string | null;
 	imageUrl: string | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
@@ -90,6 +92,11 @@ function eventToTimelineEvent(
 		type: event.getType(),
 		msgtype: typeof content.msgtype === "string" ? content.msgtype : "",
 		body: typeof content.body === "string" ? content.body : "",
+		format: typeof content.format === "string" ? content.format : null,
+		formattedBody:
+			typeof content.formatted_body === "string"
+				? content.formatted_body
+				: null,
 		imageUrl,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),

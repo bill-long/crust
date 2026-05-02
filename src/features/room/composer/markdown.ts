@@ -1,6 +1,7 @@
 /**
  * Simple inline markdown → HTML converter for Matrix formatted_body.
- * Handles: **bold**, *italic*, _italic_, `code`, ```code blocks```, @mentions
+ * Handles: **bold**, *italic*, _italic_, `code`, ```code blocks```, @mentions,
+ * custom emoji :shortcode:
  *
  * body is always raw user text (never escaped).
  * formatted_body is HTML with markdown transforms, or null if no
@@ -10,6 +11,11 @@
 export interface Mention {
 	userId: string;
 	displayName: string;
+}
+
+export interface CustomEmoji {
+	shortcode: string;
+	mxcUrl: string;
 }
 
 export interface FormatResult {
@@ -28,6 +34,7 @@ export function escapeHtml(text: string): string {
 export function formatMarkdown(
 	text: string,
 	mentions?: Mention[],
+	customEmoji?: CustomEmoji[],
 ): FormatResult {
 	const body = text;
 
@@ -82,6 +89,34 @@ export function formatMarkdown(
 		}
 	}
 
+	// Custom emoji :shortcode: → <img data-mx-emoticon>
+	let customEmojiApplied = false;
+	if (customEmoji && customEmoji.length > 0) {
+		for (const ce of customEmoji) {
+			// Regex-escape the raw shortcode for pattern matching
+			const escapedSc = ce.shortcode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+			// Safari compat: use capture-and-reinsert instead of lookbehind
+			const safariPattern = new RegExp(
+				`(^|[^:\\w]):${escapedSc}:(?![\\w:])`,
+				"g",
+			);
+			const img = `<img data-mx-emoticon height="32" src="${escapeHtml(ce.mxcUrl)}" alt=":${escapeHtml(ce.shortcode)}:" title=":${escapeHtml(ce.shortcode)}:" />`;
+			const placeholderIdx = protectedBlocks.length;
+			protectedBlocks.push(img);
+			const placeholder = `${PH}${placeholderIdx}${PH}`;
+			let matched = false;
+			html = html.replace(safariPattern, (_match, prefix) => {
+				matched = true;
+				return prefix + placeholder;
+			});
+			if (!matched) {
+				protectedBlocks.pop();
+			} else {
+				customEmojiApplied = true;
+			}
+		}
+	}
+
 	// Bold (**...**) — must be before italic
 	html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 
@@ -103,6 +138,7 @@ export function formatMarkdown(
 
 	// Track whether formatting was applied by comparing against plain escaped text
 	const hasMentions = mentionsApplied;
+	const hasCustomEmoji = customEmojiApplied;
 	let hasFormatting = protectedBlocks.length > 0;
 	if (!hasFormatting) {
 		const plainHtml = escapeHtml(text)
@@ -113,6 +149,7 @@ export function formatMarkdown(
 
 	return {
 		body,
-		formatted_body: hasFormatting || hasMentions ? html : null,
+		formatted_body:
+			hasFormatting || hasMentions || hasCustomEmoji ? html : null,
 	};
 }
