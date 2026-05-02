@@ -20,5 +20,9 @@ export function createGifProvider(config: GifConfig): GifProvider {
 			return createGiphyProvider(config.apiKey);
 		case "klipy":
 			return createKlipyProvider(config.apiKey);
+		default: {
+			const _exhaustive: never = config.provider;
+			throw new Error(`Unknown GIF provider: ${_exhaustive}`);
+		}
 	}
 }

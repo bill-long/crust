@@ -21,7 +21,7 @@ export interface GifSearchResult {
 	items: GifItem[];
 	/** Whether more pages are available. */
 	hasMore: boolean;
-	/** Opaque cursor for the next page (provider-specific). */
+	/** Numeric offset for the next page of results. */
 	nextOffset: number;
 }
 

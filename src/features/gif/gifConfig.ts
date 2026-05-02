@@ -26,7 +26,7 @@ export function useGifConfig(): GifConfigState {
 	const config = useConfig();
 
 	const available = createMemo(
-		() => config.gif.enabled && config.gif.apiKey.length > 0,
+		() => config.gif.enabled && config.gif.apiKey.trim().length > 0,
 	);
 
 	return {

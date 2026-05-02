@@ -89,7 +89,9 @@ export function normalizeConfig(raw: unknown): CrustConfig {
 				? obj.defaultHomeserver
 				: "matrix.org",
 		homeserverList: Array.isArray(obj.homeserverList)
-			? (obj.homeserverList as string[])
+			? (obj.homeserverList as unknown[]).filter(
+					(v): v is string => typeof v === "string",
+				)
 			: ["matrix.org"],
 		allowCustomHomeservers:
 			typeof obj.allowCustomHomeservers === "boolean"

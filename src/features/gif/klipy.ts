@@ -73,7 +73,7 @@ function buildUrl(
 		level: RATING_TO_LEVEL[rating],
 	});
 	if (query) params.set("q", query);
-	return `${KLIPY_BASE}/${apiKey}/gifs/${endpoint}?${params}`;
+	return `${KLIPY_BASE}/${encodeURIComponent(apiKey)}/gifs/${endpoint}?${params}`;
 }
 
 async function fetchKlipy(url: string): Promise<KlipyResponse> {

@@ -260,7 +260,14 @@ const TimelineItem: Component<{
 										const gifUrl =
 											ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
 										return gifUrl ? (
-											<InlineGif url={gifUrl} alt={ev.body?.trim() || "GIF"} />
+											<>
+												<InlineGif url={gifUrl} alt="GIF" />
+												<Show when={ev.isEdited}>
+													<span class="ml-1 text-xs text-neutral-600">
+														(edited)
+													</span>
+												</Show>
+											</>
 										) : (
 											<MessageBody
 												body={ev.body}

@@ -259,7 +259,6 @@ const Composer: Component<{
 
 	async function onGifSelect(gif: GifItem): Promise<void> {
 		setGifPickerOpen(false);
-		gifButtonRef?.focus();
 
 		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting)
 		const content: Record<string, unknown> = {
@@ -267,17 +266,27 @@ const Composer: Component<{
 			body: gif.url,
 		};
 
+		// Attach reply metadata if replying
+		if (props.replyTo) {
+			content["m.relates_to"] = {
+				"m.in_reply_to": { event_id: props.replyTo.eventId },
+			};
+		}
+
 		setSending(true);
 		setError(null);
+		stopTyping();
 		try {
 			await client.sendMessage(
 				props.roomId,
 				content as unknown as RoomMessageEventContent,
 			);
+			props.onSent?.();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to send GIF");
 		} finally {
 			setSending(false);
+			textareaRef?.focus();
 		}
 	}
 
