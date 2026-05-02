@@ -310,6 +310,7 @@ const Composer: Component<{
 			(ev) => {
 				setMentions([]);
 				setMentionQuery(null);
+				setGifPickerOpen(false);
 				if (ev) {
 					setText(ev.body);
 					requestAnimationFrame(() => {
@@ -667,8 +668,8 @@ const Composer: Component<{
 					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 pr-20 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
 					rows={1}
 				/>
-				{/* GIF picker button (only when GIF search is available) */}
-				<Show when={gifConfig.available()}>
+				{/* GIF picker button (only when GIF search is available and not editing) */}
+				<Show when={gifConfig.available() && !props.editingEvent}>
 					<button
 						ref={(el) => {
 							gifButtonRef = el;
