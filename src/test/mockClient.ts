@@ -50,6 +50,7 @@ export function createMockRoom(
 				getChildEventsForEvent: () => null,
 			},
 		}),
+		getEventReadUpTo: () => null,
 		getMember: (userId: string) => {
 			const m = members.find((m) => m.userId === userId);
 			return m ? { name: m.name, userId: m.userId, typing: false } : null;

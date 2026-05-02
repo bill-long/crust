@@ -9,6 +9,22 @@ import {
 } from "../../../test/mockClient";
 import { useTimeline } from "./useTimeline";
 
+/** Run a test inside createRoot with proper error propagation. */
+function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		createRoot(async (dispose) => {
+			try {
+				await fn(dispose);
+				dispose();
+				resolve();
+			} catch (e) {
+				dispose();
+				reject(e);
+			}
+		});
+	});
+}
+
 describe("useTimeline", () => {
 	it("loads events for the initial room", async () => {
 		const roomA = createMockRoom("!roomA:test", [
@@ -18,42 +34,34 @@ describe("useTimeline", () => {
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const { events, loading } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+		await withRoot(async (dispose) => {
+			const { events, loading } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
+			await Promise.resolve();
 
-				expect(events.length).toBe(2);
-				expect(events[0].body).toBe("hello");
-				expect(events[1].body).toBe("world");
-				expect(loading()).toBe(false);
-				dispose();
-				resolve();
-			});
+			expect(events.length).toBe(2);
+			expect(events[0].body).toBe("hello");
+			expect(events[1].body).toBe("world");
+			expect(loading()).toBe(false);
 		});
 	});
 
 	it("returns empty events for unknown room", async () => {
 		const client = createMockClient(new Map());
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const { events, loading } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!unknown:test",
-				);
+		await withRoot(async (dispose) => {
+			const { events, loading } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!unknown:test",
+			);
 
-				await Promise.resolve();
+			await Promise.resolve();
 
-				expect(events.length).toBe(0);
-				expect(loading()).toBe(false);
-				dispose();
-				resolve();
-			});
+			expect(events.length).toBe(0);
+			expect(loading()).toBe(false);
 		});
 	});
 
@@ -73,44 +81,36 @@ describe("useTimeline", () => {
 			]),
 		);
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const [roomId, setRoomId] = createSignal("!roomA:test");
+		await withRoot(async (dispose) => {
+			const [roomId, setRoomId] = createSignal("!roomA:test");
 
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					roomId,
-				);
+			const { events } = useTimeline(client as unknown as MatrixClient, roomId);
 
-				// Allow initial reactive effect to run
-				await Promise.resolve();
+			// Allow initial reactive effect to run
+			await Promise.resolve();
 
-				// Initial load: room A
-				expect(events.length).toBe(1);
-				expect(events[0].body).toBe("room A msg");
-				expect(events[0].eventId).toBe("$a1");
+			// Initial load: room A
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room A msg");
+			expect(events[0].eventId).toBe("$a1");
 
-				// Switch to room B
-				setRoomId("!roomB:test");
+			// Switch to room B
+			setRoomId("!roomB:test");
 
-				// Allow reactive effect to run
-				await Promise.resolve();
+			// Allow reactive effect to run
+			await Promise.resolve();
 
-				expect(events.length).toBe(2);
-				expect(events[0].body).toBe("room B msg");
-				expect(events[0].eventId).toBe("$b1");
-				expect(events[1].body).toBe("room B msg 2");
+			expect(events.length).toBe(2);
+			expect(events[0].body).toBe("room B msg");
+			expect(events[0].eventId).toBe("$b1");
+			expect(events[1].body).toBe("room B msg 2");
 
-				// No events from room A should remain
-				const allBodies = Array.from(
-					{ length: events.length },
-					(_, i) => events[i].body,
-				);
-				expect(allBodies).not.toContain("room A msg");
-
-				dispose();
-				resolve();
-			});
+			// No events from room A should remain
+			const allBodies = Array.from(
+				{ length: events.length },
+				(_, i) => events[i].body,
+			);
+			expect(allBodies).not.toContain("room A msg");
 		});
 	});
 
@@ -131,28 +131,20 @@ describe("useTimeline", () => {
 			]),
 		);
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const [roomId, setRoomId] = createSignal("!roomA:test");
+		await withRoot(async (dispose) => {
+			const [roomId, setRoomId] = createSignal("!roomA:test");
 
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					roomId,
-				);
+			const { events } = useTimeline(client as unknown as MatrixClient, roomId);
 
-				await Promise.resolve();
-				expect(events.length).toBe(3);
+			await Promise.resolve();
+			expect(events.length).toBe(3);
 
-				setRoomId("!roomB:test");
-				await Promise.resolve();
+			setRoomId("!roomB:test");
+			await Promise.resolve();
 
-				// Must be exactly 1 event, not 3 with stale trailing items
-				expect(events.length).toBe(1);
-				expect(events[0].body).toBe("only msg");
-
-				dispose();
-				resolve();
-			});
+			// Must be exactly 1 event, not 3 with stale trailing items
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("only msg");
 		});
 	});
 
@@ -183,20 +175,16 @@ describe("useTimeline", () => {
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+		await withRoot(async (dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
+			await Promise.resolve();
 
-				expect(events.length).toBe(1);
-				expect(events[0].body).toBe("visible");
-				dispose();
-				resolve();
-			});
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("visible");
 		});
 	});
 
@@ -208,21 +196,17 @@ describe("useTimeline", () => {
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+		await withRoot(async (dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
+			await Promise.resolve();
 
-				expect(events.length).toBe(2);
-				expect(events[0].isDecryptionFailure).toBe(true);
-				expect(events[1].body).toBe("normal");
-				dispose();
-				resolve();
-			});
+			expect(events.length).toBe(2);
+			expect(events[0].isDecryptionFailure).toBe(true);
+			expect(events[1].body).toBe("normal");
 		});
 	});
 
@@ -230,34 +214,30 @@ describe("useTimeline", () => {
 		// Room doesn't exist initially
 		const client = createMockClient(new Map());
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const { events, loading } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+		await withRoot(async (dispose) => {
+			const { events, loading } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
+			await Promise.resolve();
 
-				// No room yet — empty
-				expect(events.length).toBe(0);
-				expect(loading()).toBe(false);
+			// No room yet — empty
+			expect(events.length).toBe(0);
+			expect(loading()).toBe(false);
 
-				// Room appears with messages
-				const roomA = createMockRoom("!roomA:test", [
-					textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
-				]);
-				client.__setRooms(new Map([["!roomA:test", roomA]]));
-				client.__emit("Room", roomA);
+			// Room appears with messages
+			const roomA = createMockRoom("!roomA:test", [
+				textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+			]);
+			client.__setRooms(new Map([["!roomA:test", roomA]]));
+			client.__emit("Room", roomA);
 
-				await Promise.resolve();
+			await Promise.resolve();
 
-				// Events should now be loaded
-				expect(events.length).toBe(1);
-				expect(events[0].body).toBe("hello");
-				dispose();
-				resolve();
-			});
+			// Events should now be loaded
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("hello");
 		});
 	});
 
@@ -267,35 +247,31 @@ describe("useTimeline", () => {
 		]);
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				// Spy on getRoom to count reload attempts
-				let getRoomCalls = 0;
-				const originalGetRoom = client.getRoom;
-				client.getRoom = (roomId: string) => {
-					getRoomCalls++;
-					return originalGetRoom(roomId);
-				};
+		await withRoot(async (dispose) => {
+			// Spy on getRoom to count reload attempts
+			let getRoomCalls = 0;
+			const originalGetRoom = client.getRoom;
+			client.getRoom = (roomId: string) => {
+				getRoomCalls++;
+				return originalGetRoom(roomId);
+			};
 
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
-				expect(events.length).toBe(1);
-				const callsAfterInitialLoad = getRoomCalls;
+			await Promise.resolve();
+			expect(events.length).toBe(1);
+			const callsAfterInitialLoad = getRoomCalls;
 
-				// Emit Room event again — should NOT reload (events already loaded)
-				client.__emit("Room", roomA);
-				await Promise.resolve();
+			// Emit Room event again — should NOT reload (events already loaded)
+			client.__emit("Room", roomA);
+			await Promise.resolve();
 
-				// getRoom should not have been called again
-				expect(getRoomCalls).toBe(callsAfterInitialLoad);
-				expect(events.length).toBe(1);
-				dispose();
-				resolve();
-			});
+			// getRoom should not have been called again
+			expect(getRoomCalls).toBe(callsAfterInitialLoad);
+			expect(events.length).toBe(1);
 		});
 	});
 
@@ -304,46 +280,42 @@ describe("useTimeline", () => {
 		const roomA = createMockRoom("!roomA:test", []);
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+		await withRoot(async (dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
-				expect(events.length).toBe(0);
+			await Promise.resolve();
+			expect(events.length).toBe(0);
 
-				// Simulate backfill: room now has events, non-live event arrives
-				const updatedRoom = createMockRoom("!roomA:test", [
-					textMessage("!roomA:test", "$1", "@alice:test", "backfilled", 1000),
-				]);
-				client.__setRooms(new Map([["!roomA:test", updatedRoom]]));
+			// Simulate backfill: room now has events, non-live event arrives
+			const updatedRoom = createMockRoom("!roomA:test", [
+				textMessage("!roomA:test", "$1", "@alice:test", "backfilled", 1000),
+			]);
+			client.__setRooms(new Map([["!roomA:test", updatedRoom]]));
 
-				// Emit a non-live timeline event
-				const fakeEvent = {
-					getId: () => "$1",
-					getRoomId: () => "!roomA:test",
-					getSender: () => "@alice:test",
-					getType: () => "m.room.message",
-					getContent: () => ({ msgtype: "m.text", body: "backfilled" }),
-					getTs: () => 1000,
-					isEncrypted: () => false,
-					isDecryptionFailure: () => false,
-					replacingEventId: () => null,
-					event: { redacts: undefined },
-				};
-				client.__emit("Room.timeline", fakeEvent, updatedRoom, false, false, {
-					liveEvent: false,
-				});
-
-				await Promise.resolve();
-
-				expect(events.length).toBe(1);
-				expect(events[0].body).toBe("backfilled");
-				dispose();
-				resolve();
+			// Emit a non-live timeline event
+			const fakeEvent = {
+				getId: () => "$1",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@alice:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "backfilled" }),
+				getTs: () => 1000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			client.__emit("Room.timeline", fakeEvent, updatedRoom, false, false, {
+				liveEvent: false,
 			});
+
+			await Promise.resolve();
+
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("backfilled");
 		});
 	});
 
@@ -354,52 +326,48 @@ describe("useTimeline", () => {
 		]);
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
 
-		await new Promise<void>((resolve) => {
-			createRoot(async (dispose) => {
-				let getRoomCalls = 0;
-				const originalGetRoom = client.getRoom;
-				client.getRoom = (roomId: string) => {
-					getRoomCalls++;
-					return originalGetRoom(roomId);
-				};
+		await withRoot(async (dispose) => {
+			let getRoomCalls = 0;
+			const originalGetRoom = client.getRoom;
+			client.getRoom = (roomId: string) => {
+				getRoomCalls++;
+				return originalGetRoom(roomId);
+			};
 
-				const { events } = useTimeline(
-					client as unknown as MatrixClient,
-					() => "!roomA:test",
-				);
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
 
-				await Promise.resolve();
-				expect(events.length).toBe(1);
-				const callsAfterLoad = getRoomCalls;
+			await Promise.resolve();
+			expect(events.length).toBe(1);
+			const callsAfterLoad = getRoomCalls;
 
-				// Emit a non-live timeline event for a room that already has events
-				// The guard should skip reload (events.length > 0)
-				const fakeEvent = {
-					getId: () => "$2",
-					getRoomId: () => "!roomA:test",
-					getSender: () => "@alice:test",
-					getType: () => "m.room.message",
-					getContent: () => ({ msgtype: "m.text", body: "backfilled" }),
-					getTs: () => 500,
-					isEncrypted: () => false,
-					isDecryptionFailure: () => false,
-					replacingEventId: () => null,
-					event: { redacts: undefined },
-				};
-				client.__emit("Room.timeline", fakeEvent, roomA, false, false, {
-					liveEvent: false,
-				});
-
-				await Promise.resolve();
-
-				// getRoom should NOT have been called — non-live event skipped
-				expect(getRoomCalls).toBe(callsAfterLoad);
-				// Events unchanged
-				expect(events.length).toBe(1);
-				expect(events[0].body).toBe("existing");
-				dispose();
-				resolve();
+			// Emit a non-live timeline event for a room that already has events
+			// The guard should skip reload (events.length > 0)
+			const fakeEvent = {
+				getId: () => "$2",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@alice:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "backfilled" }),
+				getTs: () => 500,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			client.__emit("Room.timeline", fakeEvent, roomA, false, false, {
+				liveEvent: false,
 			});
+
+			await Promise.resolve();
+
+			// getRoom should NOT have been called — non-live event skipped
+			expect(getRoomCalls).toBe(callsAfterLoad);
+			// Events unchanged
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("existing");
 		});
 	});
 });
