@@ -53,14 +53,16 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				</div>
 			</Match>
 			<Match when={true}>
-				<Show when={cryptoState() === "error"}>
-					<div class="border-b border-amber-800 bg-amber-950/50 px-4 py-2 text-center text-sm text-amber-300">
-						Encryption initialization failed — encrypted messages may not be
-						readable.
-					</div>
-				</Show>
-				<CryptoStatusBanner />
-				{props.children}
+				<div class="flex h-screen flex-col bg-neutral-950 text-white">
+					<Show when={cryptoState() === "error"}>
+						<div class="shrink-0 border-b border-amber-800 bg-amber-950/50 px-4 py-2 text-center text-sm text-amber-300">
+							Encryption initialization failed — encrypted messages may not be
+							readable.
+						</div>
+					</Show>
+					<CryptoStatusBanner />
+					<div class="flex min-h-0 flex-1 flex-col">{props.children}</div>
+				</div>
 			</Match>
 		</Switch>
 	);

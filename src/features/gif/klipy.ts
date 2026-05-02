@@ -15,7 +15,7 @@ interface KlipyGif {
 	id: number;
 	slug: string;
 	title: string;
-	file: {
+	file?: {
 		hd?: KlipyRendition;
 		md?: KlipyRendition;
 		sm?: KlipyRendition;
@@ -42,6 +42,7 @@ const RATING_TO_LEVEL: Record<GifRating, string> = {
 };
 
 function toGifItem(gif: KlipyGif): GifItem | null {
+	if (!gif || typeof gif !== "object" || !gif.file) return null;
 	// Use hd gif for the sent URL, sm/xs for preview
 	const hd = gif.file.hd?.gif ?? gif.file.md?.gif;
 	const preview = gif.file.sm?.gif ?? gif.file.md?.gif ?? hd;
@@ -87,7 +88,28 @@ async function fetchKlipy(url: string): Promise<KlipyResponse> {
 	if (!res.ok) {
 		throw new Error(`Klipy API error: ${res.status} ${res.statusText}`);
 	}
-	return res.json();
+	const json: unknown = await res.json();
+	if (typeof json !== "object" || json === null || Array.isArray(json)) {
+		throw new Error("Klipy API returned an unexpected response shape");
+	}
+	const obj = json as Record<string, unknown>;
+	if (typeof obj.result !== "boolean") {
+		throw new Error("Klipy API returned an unexpected response shape");
+	}
+	if (!obj.result) {
+		throw new Error("Klipy API returned an error");
+	}
+	const data = obj.data as Record<string, unknown> | undefined;
+	if (
+		!data ||
+		!Array.isArray(data.data) ||
+		typeof data.current_page !== "number" ||
+		typeof data.per_page !== "number" ||
+		typeof data.has_next !== "boolean"
+	) {
+		throw new Error("Klipy API returned an unexpected response shape");
+	}
+	return obj as unknown as KlipyResponse;
 }
 
 function toSearchResult(data: KlipyResponse, perPage: number): GifSearchResult {
