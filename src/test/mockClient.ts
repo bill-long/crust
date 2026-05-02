@@ -54,6 +54,7 @@ export function createMockRoom(
 		roomId,
 		getLiveTimeline: () => ({
 			getEvents: () => matrixEvents,
+			getPaginationToken: () => null,
 		}),
 		getUnfilteredTimelineSet: () => ({
 			relations: {

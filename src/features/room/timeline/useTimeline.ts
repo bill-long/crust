@@ -1,5 +1,6 @@
 import {
 	ClientEvent,
+	Direction,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -128,6 +129,8 @@ const MAX_TIMELINE_EVENTS = 500;
 export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
+	const [loadingOlder, setLoadingOlder] = createSignal(false);
+	const [canLoadOlder, setCanLoadOlder] = createSignal(true);
 	const [typingUsers, setTypingUsers] = createSignal<
 		{ userId: string; displayName: string }[]
 	>([]);
@@ -166,6 +169,66 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		// including correct array length reset
 		setEvents(reconcile(items, { key: "eventId", merge: false }));
 		setLoading(false);
+
+		// Check if older messages can be loaded
+		const paginationToken = room
+			.getLiveTimeline()
+			.getPaginationToken(Direction.Backward);
+		setCanLoadOlder(paginationToken !== null);
+		setLoadingOlder(false);
+	}
+
+	const PAGINATION_SIZE = 50;
+	let paginationRoomId: string | null = null;
+
+	async function loadOlderMessages(): Promise<void> {
+		if (loadingOlder() || !canLoadOlder() || !currentRoomId) return;
+
+		const rid = currentRoomId;
+		const room = client.getRoom(rid);
+		if (!room) return;
+
+		const timeline = room.getLiveTimeline();
+		const token = timeline.getPaginationToken(Direction.Backward);
+		if (!token) {
+			setCanLoadOlder(false);
+			return;
+		}
+
+		// Set immediately to prevent concurrent scroll-triggered requests
+		setLoadingOlder(true);
+		paginationRoomId = rid;
+
+		try {
+			const hasMore = await client.paginateEventTimeline(timeline, {
+				backwards: true,
+				limit: PAGINATION_SIZE,
+			});
+			// Stale room guard — both for room switch and cleanup
+			if (currentRoomId !== rid) return;
+
+			// Rebuild displayable events from the full timeline.
+			// For backward pagination, keep the oldest events (head) not
+			// the newest (tail), so the user sees the history they scrolled to.
+			const allEvents = timeline.getEvents();
+			const displayable = allEvents
+				.filter((e) => isDisplayable(e) && e.getId())
+				.map((e) => eventToTimelineEvent(e, room, client));
+			const items =
+				displayable.length > MAX_TIMELINE_EVENTS
+					? displayable.slice(0, MAX_TIMELINE_EVENTS)
+					: displayable;
+			setEvents(reconcile(items, { key: "eventId", merge: false }));
+			setCanLoadOlder(hasMore);
+		} catch {
+			// Pagination failed — leave current state, user can retry
+		} finally {
+			// Only clear loading if this is still the active pagination
+			if (paginationRoomId === rid) {
+				setLoadingOlder(false);
+				paginationRoomId = null;
+			}
+		}
 	}
 
 	function handleRedaction(room: Room, redactedId: string): void {
@@ -468,5 +531,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		client.off(RoomMemberEvent.Typing, onTyping);
 	});
 
-	return { events, loading, typingUsers, getSourceEvent };
+	return {
+		events,
+		loading,
+		loadingOlder,
+		canLoadOlder,
+		loadOlderMessages,
+		typingUsers,
+		getSourceEvent,
+	};
 }
