@@ -53,6 +53,25 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	const [reactionPickerEventId, setReactionPickerEventId] = createSignal<
 		string | null
 	>(null);
+	const [paginationStatus, setPaginationStatus] = createSignal("");
+
+	// Announce pagination state changes for screen readers
+	createEffect(
+		on(
+			() => [loadingOlder(), canLoadOlder(), loading(), events.length] as const,
+			([isLoading, canLoad, isInitialLoading, eventCount]) => {
+				if (isInitialLoading) {
+					setPaginationStatus("");
+				} else if (isLoading) {
+					setPaginationStatus("Loading older messages…");
+				} else if (!canLoad && eventCount > 0) {
+					setPaginationStatus("Beginning of conversation reached.");
+				} else {
+					setPaginationStatus("");
+				}
+			},
+		),
+	);
 
 	const myUserId = client.getUserId() ?? "";
 
@@ -223,6 +242,38 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		),
 	);
 
+	// Auto-paginate when content doesn't fill the viewport (no scrollbar
+	// means onScroll never fires, so pagination can't be user-triggered).
+	// Capped to prevent runaway fetches if events are non-displayable.
+	const MAX_AUTO_PAGES = 10;
+	const [autoPageCount, setAutoPageCount] = createSignal(0);
+	createEffect(
+		on(
+			() =>
+				[props.roomId, events.length, canLoadOlder(), loadingOlder()] as const,
+			([roomId, , canLoad, isLoading], prev) => {
+				// Reset counter on room change
+				if (!prev || prev[0] !== roomId) {
+					setAutoPageCount(0);
+				}
+				if (!canLoad || isLoading || !scrollRef) return;
+				if (autoPageCount() >= MAX_AUTO_PAGES) return;
+				const currentRef = scrollRef;
+				requestAnimationFrame(() => {
+					if (
+						currentRef &&
+						currentRef.scrollHeight <= currentRef.clientHeight &&
+						canLoadOlder() &&
+						!loadingOlder()
+					) {
+						setAutoPageCount((c) => c + 1);
+						loadOlderMessages();
+					}
+				});
+			},
+		),
+	);
+
 	const onScroll = (): void => {
 		if (!scrollRef) return;
 		const threshold = 50;
@@ -337,9 +388,14 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				}
 			>
 				<div class="relative min-h-0 flex-1">
+					{/* Screen reader announcement for pagination */}
+					<div aria-live="polite" role="status" class="sr-only">
+						{paginationStatus()}
+					</div>
 					<div
 						ref={scrollRef}
 						class="absolute inset-0 overflow-y-auto"
+						style={{ "overflow-anchor": "none" }}
 						onScroll={onScroll}
 						tabIndex={-1}
 					>
