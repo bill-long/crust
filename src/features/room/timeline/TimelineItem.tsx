@@ -34,6 +34,14 @@ const ReactionPills: Component<{
 		return <span>{key}</span>;
 	};
 
+	const reactionLabel = (key: string): string => {
+		if (key.startsWith("mxc://")) {
+			const emote = props.emoteLookup.get(key);
+			return emote ? `:${emote.shortcode}:` : "custom emoji";
+		}
+		return key;
+	};
+
 	return (
 		<div class="mt-1 flex flex-wrap gap-1">
 			<For each={entries()}>
@@ -48,7 +56,7 @@ const ReactionPills: Component<{
 									: "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
 							}`}
 							onClick={() => props.onReact(key)}
-							aria-label={`${key} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
+							aria-label={`${reactionLabel(key)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
 							aria-pressed={isMine()}
 						>
 							{renderReactionKey(key)}

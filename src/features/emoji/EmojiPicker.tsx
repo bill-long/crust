@@ -186,12 +186,18 @@ const EmojiPicker: Component<{
 		requestAnimationFrame(() => searchRef?.focus());
 	});
 
-	// Reset tab to recent when closing and reopening
+	// Reset active tab when packs change and current tab no longer exists
 	createEffect(
 		on(
 			() => props.packs,
 			() => {
-				// Keep current tab if valid
+				const tab = activeTab();
+				if (tab.startsWith("pack:")) {
+					const packId = tab.slice(5);
+					if (!props.packs.some((p) => p.id === packId)) {
+						setActiveTab("recent");
+					}
+				}
 			},
 		),
 	);

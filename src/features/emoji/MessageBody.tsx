@@ -61,7 +61,6 @@ const ALLOWED_ATTR = [
 	"title",
 	"width",
 	"height",
-	"class",
 	"data-mx-pill",
 	"start",
 	"colspan",
@@ -103,21 +102,22 @@ function sanitizeMatrixHtml(
 	const div = document.createElement("div");
 	div.innerHTML = clean;
 
-	// Rewrite mxc:// URLs in img src to HTTP
+	// Process images: only keep data-mx-emoticon with mxc:// src (strip tracking pixels)
 	for (const img of div.querySelectorAll("img")) {
 		const src = img.getAttribute("src");
-		if (src?.startsWith("mxc://")) {
-			const httpUrl = client.mxcUrlToHttp(src, 64, 64, "scale");
-			if (httpUrl) {
-				img.setAttribute("src", httpUrl);
-			} else {
-				img.remove();
-				continue;
-			}
+		const isEmoticon = img.hasAttribute("data-mx-emoticon");
+		if (!isEmoticon || !src?.startsWith("mxc://")) {
+			img.remove();
+			continue;
 		}
-		if (img.hasAttribute("data-mx-emoticon")) {
-			img.classList.add("emoji-inline");
+		const httpUrl = client.mxcUrlToHttp(src, 64, 64, "scale");
+		if (httpUrl) {
+			img.setAttribute("src", httpUrl);
+		} else {
+			img.remove();
+			continue;
 		}
+		img.classList.add("emoji-inline");
 	}
 
 	// Make all links open in new tab
