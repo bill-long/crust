@@ -48,6 +48,23 @@ round-trip that costs 5+ minutes of wall time. Issues caught by Copilot that
 the local review should have caught waste the user's time waiting for the
 review cycle. Two skips in one session is unacceptable.
 
+## Creating PR Descriptions
+
+**Always use `--body-file` for PR descriptions, never inline `--body`.**
+PowerShell treats backticks as escape characters, which silently mangles
+any markdown containing inline code spans — backticks are consumed as
+escape characters, and sequences like backtick-t or backtick-n are
+interpreted as tab/newline. This has been a recurring problem.
+
+Workflow:
+1. Write the PR body to a temporary file (e.g., `pr-body.md` in the repo root)
+2. Create or edit the PR: `gh pr create --body-file pr-body.md ...`
+   or `gh pr edit NUMBER --body-file pr-body.md`
+3. Delete the temporary file — do NOT commit it
+
+This applies to both `gh pr create` and `gh pr edit` — never use
+inline `--body` for either.
+
 ## Checking for Copilot PR Review Comments
 
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,

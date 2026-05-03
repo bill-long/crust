@@ -168,6 +168,11 @@ export function useTimeline(
 	// When false (user scrolled up), live events are withheld and
 	// canLoadNewer is set so the UI can offer forward pagination.
 	let followingLive = true;
+	// Count of live events that arrived during the async gap between
+	// loadRoom() setting currentTimelineWindow = null and .then()
+	// publishing the new window. On completion, the window extends
+	// forward by this count to capture the deferred events.
+	let deferredLiveCount = 0;
 
 	/** Find a raw MatrixEvent in the current window by ID */
 	function findWindowEvent(eventId: string): MatrixEvent | undefined {
@@ -221,6 +226,7 @@ export function useTimeline(
 		roomGeneration++;
 		const gen = roomGeneration;
 		currentTimelineWindow = null;
+		deferredLiveCount = 0;
 		followingLive = true;
 		setLoading(true);
 		setLoadingOlder(false);
@@ -250,6 +256,15 @@ export function useTimeline(
 				if (gen !== roomGeneration) return;
 
 				currentTimelineWindow = tw;
+
+				// Catch up on live events that arrived during the async gap.
+				// These events are on the SDK's live timeline but outside the
+				// window's range because load() snapshotted before they arrived.
+				if (deferredLiveCount > 0) {
+					tw.extend(Direction.Forward, deferredLiveCount);
+					deferredLiveCount = 0;
+				}
+
 				rebuildEventsFromWindow(room);
 				// Set canLoadOlder before loading=false so dependents never
 				// observe the transient state (loading=false, canLoadOlder=false,
@@ -485,6 +500,23 @@ export function useTimeline(
 				loadRoom(currentRoomId);
 			}
 			return;
+		}
+
+		// Live event during the async gap between loadRoom() setting
+		// currentTimelineWindow = null and .then() publishing the new
+		// window. We can't extend or query the window, and anything
+		// pushed to the store would be overwritten by rebuildEventsFromWindow.
+		// Track the count so .then() can extend to include them.
+		// Gate on loading() to avoid permanently withholding events after
+		// a failed load (where window stays null but no .then() will run).
+		if (!currentTimelineWindow) {
+			if (loading()) {
+				deferredLiveCount++;
+				return;
+			}
+			// Window is null outside a load (e.g., after a failed load).
+			// Fall through — can't extend, but displayable events can
+			// still be pushed to the store in degraded mode.
 		}
 
 		const room = client.getRoom(currentRoomId);
