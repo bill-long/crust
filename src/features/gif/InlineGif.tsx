@@ -74,10 +74,10 @@ const InlineGif: Component<{
 					class="mt-1 block max-h-64 max-w-sm rounded"
 					loading="lazy"
 					referrerPolicy="no-referrer"
-					onLoad={() => queueMicrotask(() => props.onSizeSettled?.())}
+					onLoad={() => props.onSizeSettled?.()}
 					onError={() => {
 						setLoadError(true);
-						queueMicrotask(() => props.onSizeSettled?.());
+						props.onSizeSettled?.();
 					}}
 				/>
 			</Show>
