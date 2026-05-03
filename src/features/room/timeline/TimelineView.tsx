@@ -1,3 +1,4 @@
+import { useNavigate, useParams } from "@solidjs/router";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { EventType, ReceiptType, RelationType, RoomEvent } from "matrix-js-sdk";
 import {
@@ -29,6 +30,8 @@ interface ReadReceiptEntry {
 
 const TimelineView: Component<{ roomId: string }> = (props) => {
 	const { client, summaries } = useClient();
+	const navigate = useNavigate();
+	const params = useParams<{ spaceId?: string }>();
 	const {
 		events,
 		loading,
@@ -78,6 +81,23 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	const roomName = () => {
 		const s = summaries[props.roomId];
 		return s?.name?.trim() || "Room";
+	};
+
+	const [leaving, setLeaving] = createSignal(false);
+	const handleLeave = async (): Promise<void> => {
+		if (leaving()) return;
+		setLeaving(true);
+		try {
+			await client.leave(props.roomId);
+			if (params.spaceId) {
+				navigate(`/space/${encodeURIComponent(params.spaceId)}`);
+			} else {
+				navigate("/home");
+			}
+		} catch (err) {
+			console.error("Failed to leave room:", err);
+			setLeaving(false);
+		}
 	};
 
 	const virtualizer = createVirtualizer({
@@ -383,8 +403,17 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	return (
 		<main class="flex h-full flex-col">
 			{/* Room header */}
-			<div class="flex h-12 shrink-0 items-center border-b border-neutral-800 px-4">
+			<div class="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
 				<span class="text-sm font-semibold text-neutral-200">{roomName()}</span>
+				<button
+					type="button"
+					onClick={handleLeave}
+					disabled={leaving()}
+					class="rounded px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-400"
+					title="Leave room"
+				>
+					{leaving() ? "Leaving…" : "Leave"}
+				</button>
 			</div>
 
 			{/* Timeline */}
