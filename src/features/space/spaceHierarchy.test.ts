@@ -1,11 +1,13 @@
 import type { HierarchyRoom } from "matrix-js-sdk";
-import { JoinRule } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "../../client/summaries";
 import { extractViaServers, filterDiscoverableRooms } from "./spaceHierarchy";
 
 function makeHierarchyRoom(
-	overrides: Partial<HierarchyRoom> & { room_id: string },
+	overrides: Omit<Partial<HierarchyRoom>, "join_rule"> & {
+		room_id: string;
+		join_rule?: string;
+	},
 ): HierarchyRoom {
 	return {
 		name: "name" in overrides ? overrides.name : overrides.room_id,
@@ -17,7 +19,7 @@ function makeHierarchyRoom(
 		guest_can_join: overrides.guest_can_join ?? false,
 		num_joined_members: overrides.num_joined_members ?? 5,
 		room_type: overrides.room_type,
-		join_rule: overrides.join_rule,
+		join_rule: overrides.join_rule as HierarchyRoom["join_rule"],
 		children_state: overrides.children_state ?? [],
 		room_id: overrides.room_id,
 	};
@@ -139,7 +141,7 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!room1:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const summaries: SummariesStore = {};
@@ -163,7 +165,7 @@ describe("filterDiscoverableRooms", () => {
 			}),
 			makeHierarchyRoom({
 				room_id: "!room1:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const summaries: SummariesStore = {};
@@ -183,11 +185,11 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!joined:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 			makeHierarchyRoom({
 				room_id: "!notjoined:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const summaries: SummariesStore = {
@@ -209,11 +211,11 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!invited:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 			makeHierarchyRoom({
 				room_id: "!left:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const summaries: SummariesStore = {
@@ -239,7 +241,7 @@ describe("filterDiscoverableRooms", () => {
 				topic: "A place to chat",
 				avatar_url: "mxc://example.com/abc123",
 				num_joined_members: 42,
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const summaries: SummariesStore = {};
@@ -270,13 +272,13 @@ describe("filterDiscoverableRooms", () => {
 				room_id: "!room1:example.com",
 				name: undefined,
 				canonical_alias: "#general:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 			makeHierarchyRoom({
 				room_id: "!room2:example.com",
 				name: undefined,
 				canonical_alias: undefined,
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const summaries: SummariesStore = {};
@@ -298,13 +300,13 @@ describe("filterDiscoverableRooms", () => {
 				room_id: "!empty:example.com",
 				name: "",
 				canonical_alias: "#fallback:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 			makeHierarchyRoom({
 				room_id: "!spaces:example.com",
 				name: "   ",
 				canonical_alias: undefined,
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
@@ -317,7 +319,7 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!pub:example.com",
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
@@ -329,7 +331,7 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!knock:example.com",
-				join_rule: JoinRule.Knock,
+				join_rule: "knock",
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
@@ -341,7 +343,7 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!restricted:example.com",
-				join_rule: JoinRule.Restricted as JoinRule.Public,
+				join_rule: "restricted",
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
@@ -353,7 +355,7 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!inv:example.com",
-				join_rule: JoinRule.Invite as JoinRule.Public,
+				join_rule: "invite",
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
@@ -391,7 +393,7 @@ describe("filterDiscoverableRooms", () => {
 			makeHierarchyRoom({
 				room_id: "!noavatar:example.com",
 				avatar_url: undefined,
-				join_rule: JoinRule.Public,
+				join_rule: "public",
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);

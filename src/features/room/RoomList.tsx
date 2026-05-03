@@ -112,7 +112,9 @@ const DiscoverEntry: Component<{
 							? `Joined ${props.room.name}`
 							: isJoining()
 								? `Joining ${props.room.name}`
-								: `Join ${props.room.name}`
+								: isError()
+									? `Retry joining ${props.room.name}`
+									: `Join ${props.room.name}`
 					}
 					class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors ${
 						isJoined()
