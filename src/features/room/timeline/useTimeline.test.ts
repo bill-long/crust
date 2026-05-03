@@ -25,6 +25,11 @@ function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
 	});
 }
 
+/** Flush all pending microtasks (loadRoom uses Promise.resolve().then()) */
+function flushPromises(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe("useTimeline", () => {
 	it("loads events for the initial room", async () => {
 		const roomA = createMockRoom("!roomA:test", [
@@ -40,7 +45,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(2);
 			expect(events[0].body).toBe("hello");
@@ -58,7 +63,7 @@ describe("useTimeline", () => {
 				() => "!unknown:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(0);
 			expect(loading()).toBe(false);
@@ -87,7 +92,7 @@ describe("useTimeline", () => {
 			const { events } = useTimeline(client as unknown as MatrixClient, roomId);
 
 			// Allow initial reactive effect to run
-			await Promise.resolve();
+			await flushPromises();
 
 			// Initial load: room A
 			expect(events.length).toBe(1);
@@ -98,7 +103,7 @@ describe("useTimeline", () => {
 			setRoomId("!roomB:test");
 
 			// Allow reactive effect to run
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(2);
 			expect(events[0].body).toBe("room B msg");
@@ -136,11 +141,11 @@ describe("useTimeline", () => {
 
 			const { events } = useTimeline(client as unknown as MatrixClient, roomId);
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(3);
 
 			setRoomId("!roomB:test");
-			await Promise.resolve();
+			await flushPromises();
 
 			// Must be exactly 1 event, not 3 with stale trailing items
 			expect(events.length).toBe(1);
@@ -181,7 +186,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("visible");
@@ -202,7 +207,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(2);
 			expect(events[0].isDecryptionFailure).toBe(true);
@@ -220,7 +225,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 
 			// No room yet — empty
 			expect(events.length).toBe(0);
@@ -233,7 +238,7 @@ describe("useTimeline", () => {
 			client.__setRooms(new Map([["!roomA:test", roomA]]));
 			client.__emit("Room", roomA);
 
-			await Promise.resolve();
+			await flushPromises();
 
 			// Events should now be loaded
 			expect(events.length).toBe(1);
@@ -261,13 +266,13 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(1);
 			const callsAfterInitialLoad = getRoomCalls;
 
 			// Emit Room event again — should NOT reload (events already loaded)
 			client.__emit("Room", roomA);
-			await Promise.resolve();
+			await flushPromises();
 
 			// getRoom should not have been called again
 			expect(getRoomCalls).toBe(callsAfterInitialLoad);
@@ -286,7 +291,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(0);
 
 			// Simulate backfill: room now has events, non-live event arrives
@@ -312,7 +317,7 @@ describe("useTimeline", () => {
 				liveEvent: false,
 			});
 
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("backfilled");
@@ -339,7 +344,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(1);
 			const callsAfterLoad = getRoomCalls;
 
@@ -361,7 +366,7 @@ describe("useTimeline", () => {
 				liveEvent: false,
 			});
 
-			await Promise.resolve();
+			await flushPromises();
 
 			// getRoom should NOT have been called — non-live event skipped
 			expect(getRoomCalls).toBe(callsAfterLoad);
@@ -398,7 +403,7 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(0);
 			const callsAfterLoad = getRoomCalls;
 
@@ -427,7 +432,7 @@ describe("useTimeline", () => {
 				);
 			}
 
-			await Promise.resolve();
+			await flushPromises();
 
 			// Only 1 additional getRoom call (from the single backfill reload)
 			expect(getRoomCalls - callsAfterLoad).toBe(1);
@@ -446,12 +451,9 @@ describe("useTimeline", () => {
 
 		// Mock paginateEventTimeline to simulate adding older events
 		client.paginateEventTimeline = vi.fn().mockImplementation(async () => {
-			// Simulate SDK adding older events to the timeline
 			const room = client.getRoom("!roomA:test");
 			if (room) {
 				const timeline = room.getLiveTimeline();
-				const existingEvents = timeline.getEvents();
-				// Prepend older events
 				const olderEvent = {
 					getId: () => "$1",
 					getRoomId: () => "!roomA:test",
@@ -464,10 +466,10 @@ describe("useTimeline", () => {
 					replacingEventId: () => null,
 					event: { redacts: undefined },
 				};
-				existingEvents.unshift(
-					olderEvent as unknown as (typeof existingEvents)[0],
+				// Use __prepend to properly track baseIndex for TimelineWindow
+				timeline.__prepend(
+					olderEvent as unknown as Parameters<typeof timeline.__prepend>[0],
 				);
-				// Update pagination token to indicate more history
 				timeline.getPaginationToken = () => "token-2";
 			}
 			return true; // hasMore
@@ -477,13 +479,13 @@ describe("useTimeline", () => {
 			const { events, loadOlderMessages, canLoadOlder, loadingOlder } =
 				useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("recent");
 			expect(canLoadOlder()).toBe(true);
 
 			await loadOlderMessages();
-			await Promise.resolve();
+			await flushPromises();
 
 			expect(events.length).toBe(2);
 			expect(events[0].body).toBe("older msg");
@@ -519,7 +521,6 @@ describe("useTimeline", () => {
 					resolvePagination = (val: boolean) => {
 						// Simulate SDK prepending older events to the timeline
 						const timeline = roomA.getLiveTimeline();
-						const existingEvents = timeline.getEvents();
 						const staleEvent = {
 							getId: () => "$stale",
 							getRoomId: () => "!roomA:test",
@@ -535,8 +536,9 @@ describe("useTimeline", () => {
 							replacingEventId: () => null,
 							event: { redacts: undefined },
 						};
-						existingEvents.unshift(
-							staleEvent as unknown as (typeof existingEvents)[0],
+						// Use __prepend to properly track baseIndex
+						timeline.__prepend(
+							staleEvent as unknown as Parameters<typeof timeline.__prepend>[0],
 						);
 						resolve(val);
 					};
@@ -550,7 +552,7 @@ describe("useTimeline", () => {
 				roomId,
 			);
 
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("room A msg");
 
@@ -559,20 +561,20 @@ describe("useTimeline", () => {
 
 			// Switch to room B while pagination is in flight
 			setRoomId("!roomB:test");
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("room B msg");
 
 			// Switch back to room A (A→B→A)
 			setRoomId("!roomA:test");
-			await Promise.resolve();
+			await flushPromises();
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("room A msg");
 
 			// Now resolve the stale pagination from the first visit to A
 			resolvePagination(true);
 			await paginationPromise;
-			await Promise.resolve();
+			await flushPromises();
 
 			// Events should still be room A's current state — stale pagination
 			// result must NOT be applied (generation counter should catch it)

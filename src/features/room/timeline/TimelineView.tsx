@@ -41,6 +41,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		loadOlderMessages,
 		typingUsers,
 		getSourceEvent,
+		getWindowEvents,
 	} = useTimeline(client, () => props.roomId);
 
 	// Custom emoji packs for this room
@@ -137,7 +138,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			displayableIds.add(ev.eventId);
 		}
 
-		const timelineEvents = room.getLiveTimeline().getEvents();
+		const timelineEvents = getWindowEvents();
 		// Precompute eventId→index map for O(1) lookup
 		const idxById = Object.create(null) as Record<string, number>;
 		for (let i = 0; i < timelineEvents.length; i++) {
@@ -185,12 +186,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		if (!atBottom()) return;
 		const lastEvent = events[events.length - 1];
 		if (!lastEvent || lastEvent.eventId === lastSentReceiptEventId) return;
-		const room = client.getRoom(props.roomId);
-		if (!room) return;
-		const matrixEvent = room
-			.getLiveTimeline()
-			.getEvents()
-			.find((e) => e.getId() === lastEvent.eventId);
+		const matrixEvent = getSourceEvent(lastEvent.eventId);
 		if (!matrixEvent) return;
 		const eventId = lastEvent.eventId;
 		client
@@ -461,6 +457,24 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						<Show when={loadingOlder()}>
 							<div class="flex justify-center py-3">
 								<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+							</div>
+						</Show>
+						{/* Manual load button when auto-pagination exhausted */}
+						<Show
+							when={
+								!loadingOlder() &&
+								canLoadOlder() &&
+								autoPageCount() >= MAX_AUTO_PAGES
+							}
+						>
+							<div class="flex justify-center py-3">
+								<button
+									type="button"
+									class="rounded px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+									onClick={() => loadOlderMessages()}
+								>
+									Load older messages
+								</button>
 							</div>
 						</Show>
 						<Show when={!canLoadOlder() && events.length > 0}>
