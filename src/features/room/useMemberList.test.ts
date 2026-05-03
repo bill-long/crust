@@ -488,6 +488,27 @@ describe("useMemberList hook", () => {
 
 				// Pending frame should have been cancelled
 				expect(cancelledFrames).toContain(42);
+
+				// Reset rAF stub to track post-dispose calls
+				let postDisposeRafCalled = false;
+				globalThis.requestAnimationFrame = () => {
+					postDisposeRafCalled = true;
+					return 99;
+				};
+
+				// Emit after dispose — listeners should be removed
+				client.__emit(
+					RoomStateEvent.Members,
+					{},
+					{},
+					{
+						userId: "@alice:x",
+						roomId: "!room:x",
+					},
+				);
+
+				// No rAF should have been scheduled
+				expect(postDisposeRafCalled).toBe(false);
 			});
 		} finally {
 			globalThis.requestAnimationFrame = originalRAF;

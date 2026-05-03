@@ -122,7 +122,8 @@ export function createMockRoom(
 			powerLevel?: number;
 			avatarUrl?: string;
 		}) => {
-			memberState.push({
+			const existing = memberState.findIndex((m) => m.userId === member.userId);
+			const entry = {
 				userId: member.userId,
 				name: member.name,
 				roomId,
@@ -130,7 +131,12 @@ export function createMockRoom(
 				membership: member.membership ?? "join",
 				powerLevel: member.powerLevel ?? 0,
 				getMxcAvatarUrl: () => member.avatarUrl ?? undefined,
-			});
+			};
+			if (existing >= 0) {
+				memberState[existing] = entry;
+			} else {
+				memberState.push(entry);
+			}
 		},
 		__setPaginationToken: (token: string | null, direction?: "b" | "f") => {
 			if (direction === "f") {
