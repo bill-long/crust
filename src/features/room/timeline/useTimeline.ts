@@ -290,7 +290,9 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 		if (!tw.canPaginate(Direction.Forward)) {
 			setCanLoadNewer(false);
-			followingLive = true;
+			// Don't set followingLive here — let the view's
+			// [atBottom, canLoadNewer] effect handle the transition
+			// when the user actually scrolls to the bottom.
 			return;
 		}
 
@@ -306,7 +308,9 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 			if (!tw.canPaginate(Direction.Forward)) {
 				setCanLoadNewer(false);
-				followingLive = true;
+				// Don't set followingLive here — the view drives the
+				// transition via the [atBottom, canLoadNewer] effect
+				// once the user scrolls to the actual bottom.
 			}
 		} catch {
 			// Forward pagination failed — leave current state, user can retry
