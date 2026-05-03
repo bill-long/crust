@@ -1,5 +1,11 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { createRoot, createSignal } from "solid-js";
+import {
+	createEffect,
+	createRoot,
+	createSignal,
+	getOwner,
+	runWithOwner,
+} from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import {
 	createMockClient,
@@ -1448,6 +1454,63 @@ describe("useTimeline", () => {
 				(_, i) => events[i].eventId,
 			);
 			expect(storeIds).toEqual(displayableWindowIds);
+		});
+	});
+
+	it("canLoadOlder is set before loading becomes false (signal ordering)", async () => {
+		// Regression guard: dependents must never observe the transient state
+		// (loading=false, canLoadOlder=false, events.length > 0) when the
+		// room actually has backward pagination available. loadRoom must set
+		// canLoadOlder before setting loading=false.
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+			textMessage("!roomA:test", "$2", "@bob:test", "world", 2000),
+		]);
+		// Simulate a room with older messages available
+		roomA.__setPaginationToken("t_backward");
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const owner = getOwner();
+			if (!owner) throw new Error("Expected Solid owner inside createRoot");
+			const { events, loading, canLoadOlder, jumpToLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(loading()).toBe(false);
+			expect(events.length).toBe(2);
+			expect(canLoadOlder()).toBe(true);
+
+			// Capture signal states at every reactive notification during reload.
+			// createEffect tracks both signals, so it fires whenever either changes.
+			// Use runWithOwner to keep the effect inside the root (avoids leak
+			// after await boundaries lose Solid's owner context).
+			const states: { loading: boolean; canLoadOlder: boolean }[] = [];
+			runWithOwner(owner, () => {
+				createEffect(() => {
+					states.push({
+						loading: loading(),
+						canLoadOlder: canLoadOlder(),
+					});
+				});
+			});
+
+			// jumpToLive → loadRoom resets canLoadOlder=false and loading=true,
+			// then .then() must set canLoadOlder=true before setting loading=false.
+			jumpToLive();
+			await flushPromises();
+
+			// Verify the invariant: every state where loading=false must also
+			// have canLoadOlder=true (since the room has a pagination token).
+			// If the ordering were wrong (loading=false set first), we'd see
+			// a transient {loading: false, canLoadOlder: false}.
+			const loadDoneStates = states.filter((s) => !s.loading);
+			expect(loadDoneStates.length).toBeGreaterThan(0);
+			for (const s of loadDoneStates) {
+				expect(s.canLoadOlder).toBe(true);
+			}
 		});
 	});
 });
