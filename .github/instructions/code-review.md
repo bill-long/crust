@@ -65,6 +65,27 @@ Workflow:
 This applies to both `gh pr create` and `gh pr edit` — never use
 inline `--body` for either.
 
+## Requesting Copilot Reviews
+
+**Always use the `[bot]` syntax when requesting reviews from Copilot:**
+
+```bash
+gh api /repos/bill-long/crust/pulls/PR_NUMBER/requested_reviewers \
+  -f "reviewers[]=copilot-pull-request-reviewer[bot]"
+```
+
+Using `"reviewers[]=copilot"` (without the `[bot]` suffix) silently
+succeeds but does not actually add the reviewer. This has caused
+repeated missed reviews. Always verify the request worked:
+
+```bash
+gh api /repos/bill-long/crust/pulls/PR_NUMBER/requested_reviewers \
+  --jq ".users[].login"
+```
+
+The output should show `Copilot`. If `requested_reviewers` is empty,
+the request was silently dropped — retry with the `[bot]` syntax.
+
 ## Checking for Copilot PR Review Comments
 
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
