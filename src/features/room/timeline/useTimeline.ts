@@ -132,7 +132,9 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
 	const [loadingOlder, setLoadingOlder] = createSignal(false);
+	const [loadingNewer, setLoadingNewer] = createSignal(false);
 	const [canLoadOlder, setCanLoadOlder] = createSignal(true);
+	const [canLoadNewer, setCanLoadNewer] = createSignal(false);
 	const [typingUsers, setTypingUsers] = createSignal<
 		{ userId: string; displayName: string }[]
 	>([]);
@@ -143,6 +145,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	// capture the current generation and bail if it changed (A→B→A safety).
 	let roomGeneration = 0;
 	let currentTimelineWindow: TimelineWindow | null = null;
+	// When true, live events extend the window and push to the store.
+	// When false (user scrolled up), live events are withheld and
+	// canLoadNewer is set so the UI can offer forward pagination.
+	let followingLive = true;
 
 	/** Find a raw MatrixEvent in the current window by ID */
 	function findWindowEvent(eventId: string): MatrixEvent | undefined {
@@ -168,9 +174,12 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		roomGeneration++;
 		const gen = roomGeneration;
 		currentTimelineWindow = null;
+		followingLive = true;
 		setLoading(true);
 		setLoadingOlder(false);
+		setLoadingNewer(false);
 		setCanLoadOlder(false);
+		setCanLoadNewer(false);
 		setTypingUsers([]);
 
 		const room = client.getRoom(rid);
@@ -212,6 +221,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 	const PAGINATION_SIZE = 50;
 	let paginationRoomId: string | null = null;
+	let paginationNewerRoomId: string | null = null;
 
 	async function loadOlderMessages(): Promise<void> {
 		if (
@@ -258,6 +268,75 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 				paginationRoomId = null;
 			}
 		}
+	}
+
+	async function loadNewerMessages(): Promise<void> {
+		if (
+			loadingNewer() ||
+			!canLoadNewer() ||
+			!currentRoomId ||
+			!currentTimelineWindow
+		)
+			return;
+
+		const rid = currentRoomId;
+		const gen = roomGeneration;
+		const tw = currentTimelineWindow;
+		const room = client.getRoom(rid);
+		if (!room) {
+			setCanLoadNewer(false);
+			return;
+		}
+
+		if (!tw.canPaginate(Direction.Forward)) {
+			setCanLoadNewer(false);
+			followingLive = true;
+			return;
+		}
+
+		setLoadingNewer(true);
+		paginationNewerRoomId = rid;
+
+		try {
+			await tw.paginate(Direction.Forward, PAGINATION_SIZE);
+			if (gen !== roomGeneration) return;
+
+			rebuildEventsFromWindow(room);
+			setCanLoadOlder(tw.canPaginate(Direction.Backward));
+
+			if (!tw.canPaginate(Direction.Forward)) {
+				setCanLoadNewer(false);
+				followingLive = true;
+			}
+		} catch {
+			// Forward pagination failed — leave current state, user can retry
+		} finally {
+			if (paginationNewerRoomId === rid && gen === roomGeneration) {
+				setLoadingNewer(false);
+				paginationNewerRoomId = null;
+			}
+		}
+	}
+
+	/** Called by the view when the user's scroll position changes.
+	 *  When following transitions to true while behind live,
+	 *  auto-reloads the window from the live end. */
+	function setFollowingLive(following: boolean): void {
+		if (following === followingLive) return;
+		followingLive = following;
+		if (following && canLoadNewer()) {
+			jumpToLive();
+		}
+	}
+
+	/** Reload the window from the live end, discarding the current
+	 *  scroll position. Use when the user clicks "Jump to latest". */
+	function jumpToLive(): void {
+		if (!currentRoomId) return;
+		followingLive = true;
+		setCanLoadNewer(false);
+		setLoadingNewer(false);
+		loadRoom(currentRoomId);
 	}
 
 	function handleRedaction(room: Room, redactedId: string): void {
@@ -360,9 +439,15 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
 
-		// Extend the window to include the new live event (no HTTP request)
-		if (currentTimelineWindow) {
+		// Only extend the window when following live. When the user has
+		// scrolled up, withhold new events to keep the window stable and
+		// prevent eviction of events the user is viewing.
+		if (followingLive && currentTimelineWindow) {
 			currentTimelineWindow.extend(Direction.Forward, 1);
+		} else if (!followingLive) {
+			// Track that the window is behind live for ANY skipped event
+			// (displayable, reaction, edit, state), not just displayable ones.
+			setCanLoadNewer(true);
 		}
 
 		// Handle reaction events by updating the target message's reactions
@@ -406,6 +491,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		}
 
 		if (!event.getId()) return;
+
+		// When not following live, don't add new displayable events to the
+		// store. canLoadNewer was already set above for the skipped extend.
+		if (!followingLive) return;
 
 		setEvents(
 			produce((draft) => {
@@ -554,8 +643,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		events,
 		loading,
 		loadingOlder,
+		loadingNewer,
 		canLoadOlder,
+		canLoadNewer,
 		loadOlderMessages,
+		loadNewerMessages,
+		jumpToLive,
+		setFollowingLive,
 		typingUsers,
 		getSourceEvent,
 		/** Raw MatrixEvents in the current window (for receipt resolution) */

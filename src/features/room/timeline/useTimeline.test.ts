@@ -582,4 +582,301 @@ describe("useTimeline", () => {
 			expect(events[0].body).toBe("room A msg");
 		});
 	});
+
+	it("withholds live events when followingLive is false", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, setFollowingLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+			expect(canLoadNewer()).toBe(false);
+
+			// Stop following live (user scrolled up)
+			setFollowingLive(false);
+
+			// Simulate a live message arriving
+			const liveEvent = {
+				getId: () => "$2",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@bob:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "new msg" }),
+				getTs: () => 2000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			client.__emit("Room.timeline", liveEvent, roomA, false, false, {
+				liveEvent: true,
+			});
+
+			await flushPromises();
+
+			// Event should NOT be added to the store
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("initial");
+			// canLoadNewer should be set
+			expect(canLoadNewer()).toBe(true);
+		});
+	});
+
+	it("canLoadNewer is set for non-displayable skipped events too", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, setFollowingLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			setFollowingLive(false);
+
+			// Simulate a live reaction (non-displayable) arriving
+			const reactionEvent = {
+				getId: () => "$r1",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@bob:test",
+				getType: () => "m.reaction",
+				getContent: () => ({
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$1",
+						key: "👍",
+					},
+				}),
+				getTs: () => 2000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			client.__emit("Room.timeline", reactionEvent, roomA, false, false, {
+				liveEvent: true,
+			});
+
+			await flushPromises();
+
+			// canLoadNewer should still be set (non-displayable events count)
+			expect(canLoadNewer()).toBe(true);
+			// Store unchanged
+			expect(events.length).toBe(1);
+		});
+	});
+
+	it("jumpToLive reloads from live end and resets state", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, loading, setFollowingLive, jumpToLive } =
+				useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			// Stop following, simulate withheld event
+			setFollowingLive(false);
+			const liveEvent = {
+				getId: () => "$2",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@bob:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "new msg" }),
+				getTs: () => 2000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			// Append to the underlying timeline so it's available after reload
+			const timeline = roomA.getLiveTimeline();
+			timeline.__append(
+				liveEvent as unknown as Parameters<typeof timeline.__append>[0],
+			);
+			client.__emit("Room.timeline", liveEvent, roomA, false, false, {
+				liveEvent: true,
+			});
+
+			await flushPromises();
+			expect(canLoadNewer()).toBe(true);
+			expect(events.length).toBe(1);
+
+			// Jump to live
+			jumpToLive();
+			await flushPromises();
+
+			// Should reload and show both events
+			expect(canLoadNewer()).toBe(false);
+			expect(loading()).toBe(false);
+			expect(events.length).toBe(2);
+			expect(events[0].body).toBe("initial");
+			expect(events[1].body).toBe("new msg");
+		});
+	});
+
+	it("setFollowingLive(true) auto-jumps when behind live", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, setFollowingLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			setFollowingLive(false);
+
+			// Simulate withheld live event
+			const liveEvent = {
+				getId: () => "$2",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@bob:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "new msg" }),
+				getTs: () => 2000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			const timeline = roomA.getLiveTimeline();
+			timeline.__append(
+				liveEvent as unknown as Parameters<typeof timeline.__append>[0],
+			);
+			client.__emit("Room.timeline", liveEvent, roomA, false, false, {
+				liveEvent: true,
+			});
+			await flushPromises();
+			expect(canLoadNewer()).toBe(true);
+
+			// Setting followingLive back to true should trigger jumpToLive
+			setFollowingLive(true);
+			await flushPromises();
+
+			expect(canLoadNewer()).toBe(false);
+			expect(events.length).toBe(2);
+			expect(events[1].body).toBe("new msg");
+		});
+	});
+
+	it("room switch resets followingLive and canLoadNewer", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "room A", 1000),
+		]);
+		const roomB = createMockRoom("!roomB:test", [
+			textMessage("!roomB:test", "$b1", "@bob:test", "room B", 2000),
+		]);
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		await withRoot(async () => {
+			const [roomId, setRoomId] = createSignal("!roomA:test");
+			const { events, canLoadNewer, setFollowingLive } = useTimeline(
+				client as unknown as MatrixClient,
+				roomId,
+			);
+
+			await flushPromises();
+			setFollowingLive(false);
+
+			// Simulate withheld event in room A
+			const liveEvent = {
+				getId: () => "$2",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@bob:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "withheld" }),
+				getTs: () => 2000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			client.__emit("Room.timeline", liveEvent, roomA, false, false, {
+				liveEvent: true,
+			});
+			await flushPromises();
+			expect(canLoadNewer()).toBe(true);
+
+			// Switch to room B — should reset all forward pagination state
+			setRoomId("!roomB:test");
+			await flushPromises();
+
+			expect(canLoadNewer()).toBe(false);
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room B");
+		});
+	});
+
+	it("live events resume when followingLive is restored without pending newer", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, setFollowingLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			// Stop following, then resume without any events arriving
+			setFollowingLive(false);
+			setFollowingLive(true);
+			expect(canLoadNewer()).toBe(false);
+
+			// Now a live event should be handled normally
+			const liveEvent = {
+				getId: () => "$2",
+				getRoomId: () => "!roomA:test",
+				getSender: () => "@bob:test",
+				getType: () => "m.room.message",
+				getContent: () => ({ msgtype: "m.text", body: "live msg" }),
+				getTs: () => 2000,
+				isEncrypted: () => false,
+				isDecryptionFailure: () => false,
+				replacingEventId: () => null,
+				event: { redacts: undefined },
+			};
+			// Append to timeline for extend() to pick up
+			const timeline = roomA.getLiveTimeline();
+			timeline.__append(
+				liveEvent as unknown as Parameters<typeof timeline.__append>[0],
+			);
+			client.__emit("Room.timeline", liveEvent, roomA, false, false, {
+				liveEvent: true,
+			});
+
+			await flushPromises();
+
+			// Event should be added normally
+			expect(events.length).toBe(2);
+			expect(events[1].body).toBe("live msg");
+		});
+	});
 });

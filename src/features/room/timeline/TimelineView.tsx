@@ -37,8 +37,13 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		events,
 		loading,
 		loadingOlder,
+		loadingNewer,
 		canLoadOlder,
+		canLoadNewer,
 		loadOlderMessages,
+		loadNewerMessages,
+		jumpToLive,
+		setFollowingLive,
 		typingUsers,
 		getSourceEvent,
 		getWindowEvents,
@@ -60,7 +65,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	>(null);
 	const [paginationStatus, setPaginationStatus] = createSignal("");
 
-	// Announce pagination state changes for screen readers
+	// Announce backward pagination state changes for screen readers.
+	// Forward pagination has its own aria-live region at the spinner.
 	createEffect(
 		on(
 			() => [loadingOlder(), canLoadOlder(), loading(), events.length] as const,
@@ -184,6 +190,10 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	function sendReadReceipt(): void {
 		if (!atBottom()) return;
+		// Don't send receipts for events the user hasn't scrolled to.
+		// When behind live, forward pagination appends events but
+		// auto-scroll is suppressed, so atBottom can be stale-true.
+		if (canLoadNewer()) return;
 		const lastEvent = events[events.length - 1];
 		if (!lastEvent || lastEvent.eventId === lastSentReceiptEventId) return;
 		const matrixEvent = getSourceEvent(lastEvent.eventId);
@@ -211,6 +221,15 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	createEffect(
 		on(atBottom, (isAtBottom) => {
 			if (isAtBottom) sendReadReceipt();
+		}),
+	);
+
+	// Send receipt when forward pagination catches up to live.
+	// The events.length effect misses the final page because
+	// canLoadNewer is still true when events rebuild.
+	createEffect(
+		on(canLoadNewer, (hasNewer) => {
+			if (!hasNewer) sendReadReceipt();
 		}),
 	);
 
@@ -245,16 +264,37 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		),
 	);
 
-	// Auto-scroll to bottom when new messages arrive and user is at bottom
+	// Auto-scroll to bottom when new messages arrive and user is at bottom.
+	// Suppressed when behind live (canLoadNewer) so that forward pagination
+	// via "Load newer messages" doesn't jump past the loaded page.
 	createEffect(
 		on(
 			() => events.length,
 			() => {
-				if (atBottom() && scrollRef) {
+				if (atBottom() && !canLoadNewer() && scrollRef) {
 					requestAnimationFrame(() => {
 						const el = scrollRef;
 						if (el) el.scrollTo({ top: el.scrollHeight });
 					});
+				}
+			},
+		),
+	);
+
+	// Sync the timeline hook's followingLive state with scroll position.
+	// When the user scrolls up, stop extending the window with live events.
+	// When they scroll back to bottom AND no newer events are pending,
+	// resume live tracking. When behind live at bottom, the user must
+	// explicitly click "Load newer" or "Jump to latest" to catch up —
+	// auto-jumping would discard their reading position.
+	createEffect(
+		on(
+			() => [atBottom(), canLoadNewer()] as const,
+			([isAtBottom, hasNewer]) => {
+				if (isAtBottom && !hasNewer) {
+					setFollowingLive(true);
+				} else if (!isAtBottom) {
+					setFollowingLive(false);
 				}
 			},
 		),
@@ -560,21 +600,74 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 								}}
 							</For>
 						</div>
+						{/* Loading newer messages indicator */}
+						<Show when={loadingNewer()}>
+							<div
+								class="flex justify-center py-3"
+								role="status"
+								aria-live="polite"
+							>
+								<span class="sr-only">Loading newer messages</span>
+								<div
+									class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500"
+									aria-hidden="true"
+								/>
+							</div>
+						</Show>
+						{/* Manual load button for newer messages */}
+						<Show when={!loadingNewer() && canLoadNewer()}>
+							<div class="flex justify-center py-3">
+								<button
+									type="button"
+									class="rounded px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+									onClick={() => {
+										// Content will be appended below the user's current
+										// position, so they won't be at bottom after the load.
+										// Clear stale atBottom to prevent the followingLive and
+										// read-receipt effects from firing prematurely when
+										// canLoadNewer flips to false on the final page.
+										setAtBottom(false);
+										loadNewerMessages();
+									}}
+								>
+									Load newer messages
+								</button>
+							</div>
+						</Show>
 					</div>
 
-					{/* Scroll-to-bottom button */}
-					<Show when={!atBottom()}>
+					{/* Scroll-to-bottom / Jump to latest button.
+					     Show when scrolled up OR when behind live (even at
+					     bottom of current slice, so jump-to-live is reachable). */}
+					<Show when={!atBottom() || canLoadNewer()}>
 						<button
 							type="button"
-							class="absolute bottom-4 right-4 z-10 rounded-full bg-neutral-700 p-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
+							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-neutral-700 px-3 py-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
 							onClick={() => {
-								const el = scrollRef;
-								if (el)
-									el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+								if (canLoadNewer()) {
+									// Ensure atBottom is true so that when jumpToLive
+									// clears canLoadNewer, the followingLive effect
+									// sees [true, false] and confirms followingLive
+									// instead of seeing [false, false] and reverting it.
+									setAtBottom(true);
+									jumpToLive();
+								} else {
+									const el = scrollRef;
+									if (el)
+										el.scrollTo({
+											top: el.scrollHeight,
+											behavior: "smooth",
+										});
+								}
 							}}
-							aria-label="Scroll to bottom"
+							aria-label={
+								canLoadNewer() ? "Jump to latest messages" : "Scroll to bottom"
+							}
 						>
-							↓
+							<Show when={canLoadNewer()}>
+								<span class="text-xs">New messages</span>
+							</Show>
+							<span>↓</span>
 						</button>
 					</Show>
 				</div>
