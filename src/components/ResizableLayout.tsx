@@ -184,7 +184,7 @@ export const ResizableLayout: Component<{
 				label="Resize room list"
 			/>
 			<div class="min-w-0 flex-1">{props.main}</div>
-			<Show when={props.membersVisible}>
+			<Show when={props.membersVisible && props.members !== undefined}>
 				<ResizeDivider
 					onDrag={(d) =>
 						setMembersWidth((w) => clamp(w - d, MIN_MEMBERS, MAX_MEMBERS))

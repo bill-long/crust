@@ -100,6 +100,17 @@ export function useMemberList(
 		setLoading(false);
 	}
 
+	// Coalesce rapid events (e.g. multiple typing notifications) into
+	// at most one refresh per animation frame.
+	let pendingFrame: number | null = null;
+	function scheduleRefresh(): void {
+		if (pendingFrame !== null) return;
+		pendingFrame = requestAnimationFrame(() => {
+			pendingFrame = null;
+			refresh(roomId());
+		});
+	}
+
 	// Reload on room change
 	createEffect(() => {
 		const rid = roomId();
@@ -114,14 +125,14 @@ export function useMemberList(
 		member: RoomMember,
 	): void => {
 		if (member.roomId === roomId()) {
-			refresh(roomId());
+			scheduleRefresh();
 		}
 	};
 
 	// Refresh on typing changes
 	const onTyping = (_event: MatrixEvent, member: RoomMember): void => {
 		if (member.roomId === roomId()) {
-			refresh(roomId());
+			scheduleRefresh();
 		}
 	};
 
@@ -131,6 +142,7 @@ export function useMemberList(
 	onCleanup(() => {
 		client.off(RoomStateEvent.Members, onMemberStateChange);
 		client.off(RoomMemberEvent.Typing, onTyping);
+		if (pendingFrame !== null) cancelAnimationFrame(pendingFrame);
 	});
 
 	return { groups, memberCount, loading };
