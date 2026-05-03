@@ -128,7 +128,21 @@ function isDisplayable(event: MatrixEvent): boolean {
 const WINDOW_LIMIT = 2000;
 const INITIAL_WINDOW_SIZE = 500;
 
-export function useTimeline(client: MatrixClient, roomId: () => string) {
+export interface UseTimelineOptions {
+	windowLimit?: number;
+	initialWindowSize?: number;
+}
+
+export function useTimeline(
+	client: MatrixClient,
+	roomId: () => string,
+	opts?: UseTimelineOptions,
+) {
+	const windowLimit = Math.max(1, opts?.windowLimit ?? WINDOW_LIMIT);
+	const initialWindowSize = Math.max(
+		1,
+		Math.min(opts?.initialWindowSize ?? INITIAL_WINDOW_SIZE, windowLimit),
+	);
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
 	const [loadingOlder, setLoadingOlder] = createSignal(false);
@@ -166,6 +180,34 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		setEvents(reconcile(displayable, { key: "eventId", merge: false }));
 	}
 
+	/** Remove store events that the window has evicted from its backward end.
+	 *  Forward extends evict from the start (chronological order), so we only
+	 *  need to trim the store's front until every remaining event is still in
+	 *  the window. Only runs when the window is at capacity. */
+	function syncStoreEviction(): void {
+		if (!currentTimelineWindow) return;
+		const windowEvents = currentTimelineWindow.getEvents();
+		if (windowEvents.length < windowLimit) return;
+
+		const windowIds = new Set<string>();
+		for (const e of windowEvents) {
+			const id = e.getId();
+			if (id) windowIds.add(id);
+		}
+
+		setEvents(
+			produce((draft) => {
+				let trimTo = 0;
+				while (trimTo < draft.length && !windowIds.has(draft[trimTo].eventId)) {
+					trimTo++;
+				}
+				if (trimTo > 0) {
+					draft.splice(0, trimTo);
+				}
+			}),
+		);
+	}
+
 	function loadRoom(rid: string): void {
 		if (rid !== currentRoomId) {
 			backfillReloadAttempted = false;
@@ -192,13 +234,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 		const timelineSet = room.getUnfilteredTimelineSet();
 		const tw = new TimelineWindow(client, timelineSet, {
-			windowLimit: WINDOW_LIMIT,
+			windowLimit: windowLimit,
 		});
 		// Defer setting currentTimelineWindow until load completes to
 		// prevent live events from calling extend() on an uninitialized
 		// window during the async gap.
 
-		tw.load(undefined, INITIAL_WINDOW_SIZE)
+		tw.load(undefined, initialWindowSize)
 			.then(() => {
 				if (gen !== roomGeneration) return;
 
@@ -448,6 +490,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		// prevent eviction of events the user is viewing.
 		if (followingLive && currentTimelineWindow) {
 			currentTimelineWindow.extend(Direction.Forward, 1);
+			syncStoreEviction();
 		} else if (!followingLive) {
 			// Track that the window is behind live for ANY skipped event
 			// (displayable, reaction, edit, state), not just displayable ones.
@@ -506,8 +549,8 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 				// Keep the store bounded to match the TimelineWindow's limit.
 				// The window evicts internally, but the store is updated
 				// independently for live events.
-				if (draft.length > WINDOW_LIMIT) {
-					draft.splice(0, draft.length - WINDOW_LIMIT);
+				if (draft.length > windowLimit) {
+					draft.splice(0, draft.length - windowLimit);
 				}
 			}),
 		);
