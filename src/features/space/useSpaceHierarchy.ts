@@ -60,6 +60,7 @@ export function useSpaceHierarchy(
 	);
 
 	const discoverableRooms = createMemo((): DiscoverableRoom[] => {
+		if (hierarchy.error) return [];
 		const data = hierarchy();
 		if (!data) return [];
 		const sid = spaceId();
@@ -124,6 +125,7 @@ export function useSpaceHierarchy(
 			return null;
 		},
 		get truncated() {
+			if (hierarchy.error) return false;
 			return hierarchy()?.truncated ?? false;
 		},
 		joinRoom,
