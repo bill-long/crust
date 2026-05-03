@@ -617,7 +617,15 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 								<button
 									type="button"
 									class="rounded px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
-									onClick={() => loadNewerMessages()}
+									onClick={() => {
+										// Content will be appended below the user's current
+										// position, so they won't be at bottom after the load.
+										// Clear stale atBottom to prevent the followingLive and
+										// read-receipt effects from firing prematurely when
+										// canLoadNewer flips to false on the final page.
+										setAtBottom(false);
+										loadNewerMessages();
+									}}
 								>
 									Load newer messages
 								</button>
