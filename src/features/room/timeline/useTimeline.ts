@@ -561,7 +561,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		/** Raw MatrixEvents in the current window (for receipt resolution) */
 		getWindowEvents(): MatrixEvent[] {
 			if (!currentTimelineWindow) return [];
-			return currentTimelineWindow.getEvents();
+			return [...currentTimelineWindow.getEvents()];
 		},
 	};
 }
