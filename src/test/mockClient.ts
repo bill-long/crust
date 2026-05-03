@@ -19,7 +19,7 @@ export interface MockEvent {
 	replacingEventId?: string;
 }
 
-function createMatrixEvent(evt: MockEvent) {
+export function createMatrixEvent(evt: MockEvent) {
 	return {
 		getId: () => evt.eventId,
 		getRoomId: () => evt.roomId,
