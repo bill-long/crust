@@ -474,7 +474,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 			{/* Timeline */}
 			<Show
-				when={!loading()}
+				when={!loading() || events.length > 0}
 				fallback={
 					<div class="flex flex-1 items-center justify-center">
 						<div class="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
@@ -517,7 +517,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 								</button>
 							</div>
 						</Show>
-						<Show when={!canLoadOlder() && events.length > 0}>
+						<Show when={!loading() && !canLoadOlder() && events.length > 0}>
 							<div class="py-3 text-center text-xs text-neutral-600">
 								Beginning of conversation
 							</div>
