@@ -474,7 +474,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 			{/* Timeline */}
 			<Show
-				when={!loading()}
+				when={!loading() || events.length > 0}
 				fallback={
 					<div class="flex flex-1 items-center justify-center">
 						<div class="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />

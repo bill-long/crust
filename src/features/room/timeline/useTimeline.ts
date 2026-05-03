@@ -221,6 +221,10 @@ export function useTimeline(
 	function loadRoom(rid: string): void {
 		if (rid !== currentRoomId) {
 			backfillReloadAttempted = false;
+			// Clear stale events immediately on room switch so the view
+			// shows the loading spinner (events.length === 0) instead of
+			// the previous room's messages under the new room header.
+			setEvents(reconcile([], { key: "eventId", merge: false }));
 		}
 		currentRoomId = rid;
 		roomGeneration++;
