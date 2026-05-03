@@ -8,6 +8,7 @@ import {
 } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import {
+	createMatrixEvent,
 	createMockClient,
 	createMockRoom,
 	encryptedMessage,
@@ -46,18 +47,14 @@ function createFakeEvent(
 	type = "m.room.message",
 	content?: Record<string, unknown>,
 ) {
-	return {
-		getId: () => eventId,
-		getRoomId: () => roomId,
-		getSender: () => sender,
-		getType: () => type,
-		getContent: () => content ?? { msgtype: "m.text", body },
-		getTs: () => ts,
-		isEncrypted: () => false,
-		isDecryptionFailure: () => false,
-		replacingEventId: () => null,
-		event: { redacts: undefined },
-	};
+	return createMatrixEvent({
+		eventId,
+		roomId,
+		sender,
+		type,
+		content: content ?? { msgtype: "m.text", body },
+		ts,
+	});
 }
 
 /** Append event to mock timeline and emit as live event */
