@@ -1,4 +1,5 @@
 import type { MatrixClient, RoomMember } from "matrix-js-sdk";
+import { RoomMemberEvent, RoomStateEvent } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createMockClient, createMockRoom } from "../../test/mockClient";
@@ -175,12 +176,19 @@ describe("getJoinedMembers filtering", () => {
 function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		createRoot(async (dispose) => {
+			let disposed = false;
+			const safeDispose = () => {
+				if (!disposed) {
+					disposed = true;
+					dispose();
+				}
+			};
 			try {
-				await fn(dispose);
-				dispose();
+				await fn(safeDispose);
+				safeDispose();
 				resolve();
 			} catch (e) {
-				dispose();
+				safeDispose();
 				reject(e);
 			}
 		});
@@ -301,7 +309,7 @@ describe("useMemberList hook", () => {
 
 				// Emit member state change
 				client.__emit(
-					"RoomState.members",
+					RoomStateEvent.Members,
 					{},
 					{},
 					{
@@ -350,7 +358,7 @@ describe("useMemberList hook", () => {
 				room.__setTyping("@alice:x", true);
 
 				client.__emit(
-					"RoomMember.typing",
+					RoomMemberEvent.Typing,
 					{},
 					{
 						userId: "@alice:x",
@@ -392,7 +400,7 @@ describe("useMemberList hook", () => {
 				await flushPromises();
 
 				client.__emit(
-					"RoomState.members",
+					RoomStateEvent.Members,
 					{},
 					{},
 					{
@@ -432,7 +440,7 @@ describe("useMemberList hook", () => {
 				const member = { userId: "@alice:x", roomId: "!room:x" };
 
 				for (let i = 0; i < 5; i++) {
-					client.__emit("RoomState.members", {}, {}, member);
+					client.__emit(RoomStateEvent.Members, {}, {}, member);
 				}
 
 				expect(rafCallCount).toBe(1);
@@ -466,7 +474,7 @@ describe("useMemberList hook", () => {
 
 				// Schedule a refresh (creates pending rAF)
 				client.__emit(
-					"RoomState.members",
+					RoomStateEvent.Members,
 					{},
 					{},
 					{
