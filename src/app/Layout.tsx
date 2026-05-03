@@ -2,9 +2,11 @@ import { useNavigate, useParams } from "@solidjs/router";
 import { type Component, Show } from "solid-js";
 import { useClient } from "../client/client";
 import { ResizableLayout } from "../components/ResizableLayout";
+import MemberList from "../features/room/MemberList";
 import RoomList from "../features/room/RoomList";
 import TimelineView from "../features/room/timeline/TimelineView";
 import SpacesSidebar from "../features/space/SpacesSidebar";
+import { membersPaneVisible } from "../stores/layout";
 import { clearSession } from "../stores/session";
 
 const Layout: Component = () => {
@@ -45,7 +47,7 @@ const Layout: Component = () => {
 				</div>
 			</header>
 
-			{/* Three-column resizable layout */}
+			{/* Three-column resizable layout (plus optional members pane) */}
 			<ResizableLayout
 				spaces={<SpacesSidebar />}
 				roomList={<RoomList />}
@@ -63,6 +65,12 @@ const Layout: Component = () => {
 						}
 					>
 						{(roomId) => <TimelineView roomId={roomId()} />}
+					</Show>
+				}
+				membersVisible={!!params.roomId && membersPaneVisible()}
+				members={
+					<Show when={params.roomId}>
+						{(roomId) => <MemberList roomId={roomId()} />}
 					</Show>
 				}
 			/>
