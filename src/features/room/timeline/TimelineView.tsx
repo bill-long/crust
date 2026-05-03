@@ -65,30 +65,16 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	>(null);
 	const [paginationStatus, setPaginationStatus] = createSignal("");
 
-	// Announce pagination state changes for screen readers
+	// Announce backward pagination state changes for screen readers.
+	// Forward pagination has its own aria-live region at the spinner.
 	createEffect(
 		on(
-			() =>
-				[
-					loadingOlder(),
-					loadingNewer(),
-					canLoadOlder(),
-					loading(),
-					events.length,
-				] as const,
-			([
-				isLoadingOlder,
-				isLoadingNewer,
-				canLoad,
-				isInitialLoading,
-				eventCount,
-			]) => {
+			() => [loadingOlder(), canLoadOlder(), loading(), events.length] as const,
+			([isLoading, canLoad, isInitialLoading, eventCount]) => {
 				if (isInitialLoading) {
 					setPaginationStatus("");
-				} else if (isLoadingOlder) {
+				} else if (isLoading) {
 					setPaginationStatus("Loading older messages…");
-				} else if (isLoadingNewer) {
-					setPaginationStatus("Loading newer messages…");
 				} else if (!canLoad && eventCount > 0) {
 					setPaginationStatus("Beginning of conversation reached.");
 				} else {
@@ -601,7 +587,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						</div>
 						{/* Loading newer messages indicator */}
 						<Show when={loadingNewer()}>
-							<div class="flex justify-center py-3">
+							<div
+								class="flex justify-center py-3"
+								role="status"
+								aria-live="polite"
+								aria-label="Loading newer messages"
+							>
 								<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
 							</div>
 						</Show>
