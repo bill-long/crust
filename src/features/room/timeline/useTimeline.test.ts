@@ -25,7 +25,7 @@ function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
 	});
 }
 
-/** Flush all pending microtasks (loadRoom uses Promise.resolve().then()) */
+/** Wait for pending promise handlers (TimelineWindow.load() and its .then()/.catch()) */
 function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
