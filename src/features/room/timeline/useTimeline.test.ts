@@ -1252,6 +1252,128 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("captures live events arriving during loadRoom() async gap", async () => {
+		// Regression test for the microtask race: loadRoom() sets
+		// currentTimelineWindow = null before tw.load().then() publishes
+		// the window. A live event firing in that gap must not be lost.
+		// We use jumpToLive() to trigger loadRoom() after the initial
+		// load has completed, creating the null-window gap.
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, jumpToLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			// jumpToLive calls loadRoom synchronously, which sets
+			// currentTimelineWindow = null and queues .then() as a microtask.
+			jumpToLive();
+
+			// Fire a live event during the gap (window is null).
+			appendLive(
+				client,
+				roomA,
+				createFakeEvent("!roomA:test", "$live", "@bob:test", "gap msg", 2000),
+			);
+
+			await flushPromises();
+
+			// Both the initial event and the gap event must appear
+			expect(events.length).toBe(2);
+			expect(events[0].body).toBe("initial");
+			expect(events[1].body).toBe("gap msg");
+		});
+	});
+
+	it("captures multiple live events during loadRoom() async gap", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, jumpToLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			jumpToLive();
+
+			// Fire 3 live events during the gap
+			for (let i = 1; i <= 3; i++) {
+				appendLive(
+					client,
+					roomA,
+					createFakeEvent(
+						"!roomA:test",
+						`$live${i}`,
+						"@bob:test",
+						`gap msg ${i}`,
+						1000 + i,
+					),
+				);
+			}
+
+			await flushPromises();
+
+			expect(events.length).toBe(4);
+			expect(events[0].body).toBe("initial");
+			expect(events[1].body).toBe("gap msg 1");
+			expect(events[2].body).toBe("gap msg 2");
+			expect(events[3].body).toBe("gap msg 3");
+		});
+	});
+
+	it("non-displayable live events during loadRoom() gap do not create bogus store entries", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, jumpToLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			jumpToLive();
+
+			// Fire a non-displayable event (state) during the gap
+			appendLive(
+				client,
+				roomA,
+				createFakeEvent(
+					"!roomA:test",
+					"$state",
+					"@alice:test",
+					"",
+					2000,
+					"m.room.member",
+					{ membership: "join" },
+				),
+			);
+
+			await flushPromises();
+
+			// Only the initial displayable event should be in the store
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("initial");
+		});
+	});
+
 	it("store event IDs match displayable window event IDs after mixed live traffic", async () => {
 		// Invariant test: after a burst of mixed displayable and non-displayable
 		// live events that trigger eviction, the store must exactly equal the
