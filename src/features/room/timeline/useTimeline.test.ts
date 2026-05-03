@@ -1472,6 +1472,7 @@ describe("useTimeline", () => {
 
 		await withRoot(async () => {
 			const owner = getOwner();
+			if (!owner) throw new Error("Expected Solid owner inside createRoot");
 			const { events, loading, canLoadOlder, jumpToLive } = useTimeline(
 				client as unknown as MatrixClient,
 				() => "!roomA:test",
