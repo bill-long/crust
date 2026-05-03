@@ -9,6 +9,7 @@ import {
 } from "../../client/summaries-selectors";
 import {
 	type DiscoverableRoom,
+	type JoinState,
 	useSpaceHierarchy,
 } from "../space/useSpaceHierarchy";
 
@@ -68,7 +69,7 @@ const RoomEntry: Component<{
 
 const DiscoverEntry: Component<{
 	room: DiscoverableRoom;
-	joinState: string;
+	joinState: JoinState;
 	onJoin: () => void;
 }> = (props) => {
 	const isJoining = () => props.joinState === "joining";

@@ -43,8 +43,10 @@ function makeSummary(
 	};
 }
 
-const BASE_URL = "https://example.com";
 const SPACE_ID = "!space:example.com";
+
+const mockMxcToHttp = (mxcUrl: string): string | null =>
+	mxcUrl.replace("mxc://", "https://example.com/_matrix/media/v3/download/");
 
 describe("extractViaServers", () => {
 	it("extracts via servers from children_state matching the child room", () => {
@@ -146,7 +148,7 @@ describe("filterDiscoverableRooms", () => {
 			rooms,
 			SPACE_ID,
 			summaries,
-			BASE_URL,
+			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
 		expect(result[0].roomId).toBe("!room1:example.com");
@@ -170,7 +172,7 @@ describe("filterDiscoverableRooms", () => {
 			rooms,
 			SPACE_ID,
 			summaries,
-			BASE_URL,
+			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
 		expect(result[0].roomId).toBe("!room1:example.com");
@@ -196,7 +198,7 @@ describe("filterDiscoverableRooms", () => {
 			rooms,
 			SPACE_ID,
 			summaries,
-			BASE_URL,
+			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
 		expect(result[0].roomId).toBe("!notjoined:example.com");
@@ -223,7 +225,7 @@ describe("filterDiscoverableRooms", () => {
 			rooms,
 			SPACE_ID,
 			summaries,
-			BASE_URL,
+			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(2);
 	});
@@ -246,7 +248,7 @@ describe("filterDiscoverableRooms", () => {
 			rooms,
 			SPACE_ID,
 			summaries,
-			BASE_URL,
+			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
 		expect(result[0]).toEqual({
@@ -283,7 +285,7 @@ describe("filterDiscoverableRooms", () => {
 			rooms,
 			SPACE_ID,
 			summaries,
-			BASE_URL,
+			mockMxcToHttp,
 		);
 		expect(result[0].name).toBe("#general:example.com");
 		expect(result[1].name).toBe("!room2:example.com");
@@ -297,7 +299,7 @@ describe("filterDiscoverableRooms", () => {
 				join_rule: JoinRule.Public,
 			}),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].canJoin).toBe(true);
 	});
 
@@ -309,7 +311,7 @@ describe("filterDiscoverableRooms", () => {
 				join_rule: JoinRule.Knock,
 			}),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].canJoin).toBe(false);
 	});
 
@@ -321,7 +323,7 @@ describe("filterDiscoverableRooms", () => {
 				join_rule: JoinRule.Restricted as JoinRule.Public,
 			}),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].canJoin).toBe(true);
 	});
 
@@ -333,7 +335,7 @@ describe("filterDiscoverableRooms", () => {
 				join_rule: JoinRule.Invite as JoinRule.Public,
 			}),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].canJoin).toBe(false);
 	});
 
@@ -345,7 +347,7 @@ describe("filterDiscoverableRooms", () => {
 				join_rule: undefined,
 			}),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].canJoin).toBe(false);
 	});
 
@@ -353,12 +355,12 @@ describe("filterDiscoverableRooms", () => {
 		const rooms: HierarchyRoom[] = [
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result).toEqual([]);
 	});
 
 	it("handles empty hierarchy", () => {
-		const result = filterDiscoverableRooms([], SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms([], SPACE_ID, {}, mockMxcToHttp);
 		expect(result).toEqual([]);
 	});
 
@@ -371,7 +373,7 @@ describe("filterDiscoverableRooms", () => {
 				join_rule: JoinRule.Public,
 			}),
 		];
-		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, BASE_URL);
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].avatarUrl).toBeNull();
 	});
 });

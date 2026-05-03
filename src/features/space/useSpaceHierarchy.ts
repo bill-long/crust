@@ -38,7 +38,8 @@ export function useSpaceHierarchy(
 	spaceId: () => string | undefined,
 ): SpaceHierarchy {
 	const { client, summaries } = useClient();
-	const baseUrl = client.getHomeserverUrl();
+	const mxcToHttp = (mxcUrl: string): string | null =>
+		client.mxcUrlToHttp(mxcUrl, 48, 48, "crop") ?? null;
 
 	type HierarchyResult = { rooms: HierarchyRoom[]; truncated: boolean };
 
@@ -63,7 +64,7 @@ export function useSpaceHierarchy(
 		if (!data) return [];
 		const sid = spaceId();
 		if (!sid) return [];
-		return filterDiscoverableRooms(data.rooms, sid, summaries, baseUrl);
+		return filterDiscoverableRooms(data.rooms, sid, summaries, mxcToHttp);
 	});
 
 	const [joinStates, setJoinStates] = createSignal<Record<string, JoinState>>(

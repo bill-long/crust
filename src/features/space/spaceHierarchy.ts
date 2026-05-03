@@ -32,7 +32,7 @@ export function filterDiscoverableRooms(
 	hierarchyRooms: HierarchyRoom[],
 	spaceId: string,
 	summaries: SummariesStore,
-	baseUrl: string,
+	mxcToHttp: (mxcUrl: string) => string | null,
 ): DiscoverableRoom[] {
 	return hierarchyRooms
 		.filter((room) => {
@@ -48,9 +48,7 @@ export function filterDiscoverableRooms(
 			return {
 				roomId: room.room_id,
 				name: room.name ?? room.canonical_alias ?? room.room_id,
-				avatarUrl: room.avatar_url
-					? `${baseUrl}/_matrix/media/v3/download/${room.avatar_url.replace("mxc://", "")}`
-					: null,
+				avatarUrl: room.avatar_url ? mxcToHttp(room.avatar_url) : null,
 				topic: room.topic ?? null,
 				memberCount: room.num_joined_members,
 				joinRule: rule ?? null,
