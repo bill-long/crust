@@ -37,8 +37,13 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		events,
 		loading,
 		loadingOlder,
+		loadingNewer,
 		canLoadOlder,
+		canLoadNewer,
 		loadOlderMessages,
+		loadNewerMessages,
+		jumpToLive,
+		setFollowingLive,
 		typingUsers,
 		getSourceEvent,
 		getWindowEvents,
@@ -63,12 +68,27 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	// Announce pagination state changes for screen readers
 	createEffect(
 		on(
-			() => [loadingOlder(), canLoadOlder(), loading(), events.length] as const,
-			([isLoading, canLoad, isInitialLoading, eventCount]) => {
+			() =>
+				[
+					loadingOlder(),
+					loadingNewer(),
+					canLoadOlder(),
+					loading(),
+					events.length,
+				] as const,
+			([
+				isLoadingOlder,
+				isLoadingNewer,
+				canLoad,
+				isInitialLoading,
+				eventCount,
+			]) => {
 				if (isInitialLoading) {
 					setPaginationStatus("");
-				} else if (isLoading) {
+				} else if (isLoadingOlder) {
 					setPaginationStatus("Loading older messages…");
+				} else if (isLoadingNewer) {
+					setPaginationStatus("Loading newer messages…");
 				} else if (!canLoad && eventCount > 0) {
 					setPaginationStatus("Beginning of conversation reached.");
 				} else {
@@ -255,6 +275,25 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						const el = scrollRef;
 						if (el) el.scrollTo({ top: el.scrollHeight });
 					});
+				}
+			},
+		),
+	);
+
+	// Sync the timeline hook's followingLive state with scroll position.
+	// When the user scrolls up, stop extending the window with live events.
+	// When they scroll back to bottom AND no newer events are pending,
+	// resume live tracking. When behind live at bottom, the user must
+	// explicitly click "Load newer" or "Jump to latest" to catch up —
+	// auto-jumping would discard their reading position.
+	createEffect(
+		on(
+			() => [atBottom(), canLoadNewer()] as const,
+			([isAtBottom, hasNewer]) => {
+				if (isAtBottom && !hasNewer) {
+					setFollowingLive(true);
+				} else if (!isAtBottom) {
+					setFollowingLive(false);
 				}
 			},
 		),
@@ -560,21 +599,55 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 								}}
 							</For>
 						</div>
+						{/* Loading newer messages indicator */}
+						<Show when={loadingNewer()}>
+							<div class="flex justify-center py-3">
+								<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+							</div>
+						</Show>
+						{/* Manual load button for newer messages */}
+						<Show when={!loadingNewer() && canLoadNewer()}>
+							<div class="flex justify-center py-3">
+								<button
+									type="button"
+									class="rounded px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+									onClick={() => loadNewerMessages()}
+								>
+									Load newer messages
+								</button>
+							</div>
+						</Show>
 					</div>
 
-					{/* Scroll-to-bottom button */}
+					{/* Scroll-to-bottom / Jump to latest button */}
 					<Show when={!atBottom()}>
 						<button
 							type="button"
-							class="absolute bottom-4 right-4 z-10 rounded-full bg-neutral-700 p-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
+							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-neutral-700 px-3 py-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
 							onClick={() => {
-								const el = scrollRef;
-								if (el)
-									el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+								if (canLoadNewer()) {
+									// Set atBottom first so the followingLive effect
+									// doesn't immediately undo the jump when
+									// canLoadNewer transitions to false.
+									setAtBottom(true);
+									jumpToLive();
+								} else {
+									const el = scrollRef;
+									if (el)
+										el.scrollTo({
+											top: el.scrollHeight,
+											behavior: "smooth",
+										});
+								}
 							}}
-							aria-label="Scroll to bottom"
+							aria-label={
+								canLoadNewer() ? "Jump to latest messages" : "Scroll to bottom"
+							}
 						>
-							↓
+							<Show when={canLoadNewer()}>
+								<span class="text-xs">New messages</span>
+							</Show>
+							<span>↓</span>
 						</button>
 					</Show>
 				</div>

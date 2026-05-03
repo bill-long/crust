@@ -73,6 +73,10 @@ export function createMockRoom(
 			matrixEvents.unshift(event);
 			baseIndex++;
 		},
+		/** Test helper: append event (simulates live event arriving on timeline) */
+		__append: (event: ReturnType<typeof createMatrixEvent>) => {
+			matrixEvents.push(event);
+		},
 	};
 
 	const timelineSet = {
