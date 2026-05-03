@@ -84,18 +84,25 @@ export function useSpaceHierarchy(
 		const current = joinStates()[roomId];
 		if (current === "joining" || current === "joined") return;
 
+		const startSpaceId = spaceId();
 		setJoinStates((prev) => ({ ...prev, [roomId]: "joining" }));
 
 		try {
 			const data = hierarchy();
-			const sid = spaceId();
 			const viaServers =
-				data && sid ? extractViaServers(data.rooms, sid, roomId) : [];
+				data && startSpaceId
+					? extractViaServers(data.rooms, startSpaceId, roomId)
+					: [];
 			await client.joinRoom(roomId, { viaServers });
-			setJoinStates((prev) => ({ ...prev, [roomId]: "joined" }));
+			// Only update state if still on the same space
+			if (spaceId() === startSpaceId) {
+				setJoinStates((prev) => ({ ...prev, [roomId]: "joined" }));
+			}
 		} catch (err) {
 			console.error(`Failed to join room ${roomId}:`, err);
-			setJoinStates((prev) => ({ ...prev, [roomId]: "error" }));
+			if (spaceId() === startSpaceId) {
+				setJoinStates((prev) => ({ ...prev, [roomId]: "error" }));
+			}
 		}
 	};
 

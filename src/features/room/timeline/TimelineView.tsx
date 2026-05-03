@@ -96,6 +96,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			}
 		} catch (err) {
 			console.error("Failed to leave room:", err);
+		} finally {
 			setLeaving(false);
 		}
 	};
