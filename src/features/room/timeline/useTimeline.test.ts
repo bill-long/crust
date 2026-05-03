@@ -1510,4 +1510,78 @@ describe("useTimeline", () => {
 			}
 		});
 	});
+
+	it("room switch clears events immediately (no stale events during load)", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$a1", "@alice:test", "room A", 1000),
+		]);
+		const roomB = createMockRoom("!roomB:test", [
+			textMessage("!roomB:test", "$b1", "@bob:test", "room B", 2000),
+		]);
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		await withRoot(async () => {
+			const [roomId, setRoomId] = createSignal("!roomA:test");
+			const { events, loading } = useTimeline(
+				client as unknown as MatrixClient,
+				roomId,
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+			expect(loading()).toBe(false);
+
+			// Switch rooms — events must be cleared synchronously so
+			// stale room A events are never visible under room B's header.
+			setRoomId("!roomB:test");
+
+			// Before promises flush: events cleared, loading true
+			expect(events.length).toBe(0);
+			expect(loading()).toBe(true);
+
+			await flushPromises();
+
+			// After load: room B events
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room B");
+			expect(loading()).toBe(false);
+		});
+	});
+
+	it("jumpToLive preserves events during same-room reload (no spinner flash)", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, loading, jumpToLive } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+			expect(loading()).toBe(false);
+
+			// jumpToLive reloads the same room — events must stay so the
+			// view doesn't flash a spinner.
+			jumpToLive();
+
+			// Before promises flush: loading true, but events still present
+			expect(loading()).toBe(true);
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("hello");
+
+			await flushPromises();
+
+			expect(loading()).toBe(false);
+			expect(events.length).toBe(1);
+		});
+	});
 });
