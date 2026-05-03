@@ -1,4 +1,6 @@
 import type { MatrixClient, RoomMember } from "matrix-js-sdk";
+import { RoomMemberEvent, RoomStateEvent } from "matrix-js-sdk";
+import { createRoot, createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createMockClient, createMockRoom } from "../../test/mockClient";
 import {
@@ -6,6 +8,7 @@ import {
 	groupMembers,
 	type MemberEntry,
 	roleForPowerLevel,
+	useMemberList,
 } from "./useMemberList";
 
 describe("roleForPowerLevel", () => {
@@ -166,5 +169,350 @@ describe("getJoinedMembers filtering", () => {
 		const joined = room.getJoinedMembers();
 		expect(joined).toHaveLength(1);
 		expect(joined[0].userId).toBe("@joined:x");
+	});
+});
+
+/** Run a test inside createRoot with proper error propagation. */
+function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		createRoot(async (dispose) => {
+			let disposed = false;
+			const safeDispose = () => {
+				if (!disposed) {
+					disposed = true;
+					dispose();
+				}
+			};
+			try {
+				await fn(safeDispose);
+				safeDispose();
+				resolve();
+			} catch (e) {
+				safeDispose();
+				reject(e);
+			}
+		});
+	});
+}
+
+function flushPromises(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+describe("useMemberList hook", () => {
+	it("loads grouped members for initial room", async () => {
+		const room = createMockRoom(
+			"!room:x",
+			[],
+			[
+				{ userId: "@alice:x", name: "Alice", powerLevel: 100 },
+				{ userId: "@bob:x", name: "Bob", powerLevel: 0 },
+			],
+		);
+		const client = createMockClient(new Map([["!room:x", room]]));
+
+		await withRoot(async () => {
+			const { groups, memberCount, loading } = useMemberList(
+				client as unknown as MatrixClient,
+				() => "!room:x",
+			);
+
+			await flushPromises();
+			expect(loading()).toBe(false);
+			expect(memberCount()).toBe(2);
+			expect(groups().length).toBe(2);
+			expect(groups()[0].role).toBe("Admin");
+			expect(groups()[1].role).toBe("Member");
+		});
+	});
+
+	it("updates when roomId signal changes", async () => {
+		const roomA = createMockRoom(
+			"!a:x",
+			[],
+			[{ userId: "@alice:x", name: "Alice" }],
+		);
+		const roomB = createMockRoom(
+			"!b:x",
+			[],
+			[
+				{ userId: "@bob:x", name: "Bob" },
+				{ userId: "@carol:x", name: "Carol" },
+			],
+		);
+		const client = createMockClient(
+			new Map([
+				["!a:x", roomA],
+				["!b:x", roomB],
+			]),
+		);
+
+		await withRoot(async () => {
+			const [roomId, setRoomId] = createSignal("!a:x");
+			const { memberCount } = useMemberList(
+				client as unknown as MatrixClient,
+				roomId,
+			);
+
+			await flushPromises();
+			expect(memberCount()).toBe(1);
+
+			setRoomId("!b:x");
+			await flushPromises();
+			expect(memberCount()).toBe(2);
+		});
+	});
+
+	it("returns empty for unknown room", async () => {
+		const client = createMockClient(new Map());
+
+		await withRoot(async () => {
+			const { groups, memberCount, loading } = useMemberList(
+				client as unknown as MatrixClient,
+				() => "!unknown:x",
+			);
+
+			await flushPromises();
+			expect(loading()).toBe(false);
+			expect(memberCount()).toBe(0);
+			expect(groups()).toEqual([]);
+		});
+	});
+
+	it("refreshes on member state event via rAF", async () => {
+		const room = createMockRoom(
+			"!room:x",
+			[],
+			[{ userId: "@alice:x", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!room:x", room]]));
+
+		let rafCallback: FrameRequestCallback | null = null;
+		const originalRAF = globalThis.requestAnimationFrame;
+		globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+			rafCallback = cb;
+			return 1;
+		};
+
+		try {
+			await withRoot(async () => {
+				const { memberCount } = useMemberList(
+					client as unknown as MatrixClient,
+					() => "!room:x",
+				);
+
+				await flushPromises();
+				expect(memberCount()).toBe(1);
+
+				// Add a new member via mock helper
+				room.__addMember({ userId: "@bob:x", name: "Bob" });
+
+				// Emit member state change
+				client.__emit(
+					RoomStateEvent.Members,
+					{},
+					{},
+					{
+						userId: "@bob:x",
+						roomId: "!room:x",
+					},
+				);
+
+				expect(rafCallback).not.toBeNull();
+				rafCallback?.(0);
+				rafCallback = null;
+
+				await flushPromises();
+				expect(memberCount()).toBe(2);
+			});
+		} finally {
+			globalThis.requestAnimationFrame = originalRAF;
+		}
+	});
+
+	it("refreshes on typing event via rAF", async () => {
+		const room = createMockRoom(
+			"!room:x",
+			[],
+			[{ userId: "@alice:x", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!room:x", room]]));
+
+		let rafCallback: FrameRequestCallback | null = null;
+		const originalRAF = globalThis.requestAnimationFrame;
+		globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+			rafCallback = cb;
+			return 1;
+		};
+
+		try {
+			await withRoot(async () => {
+				const { groups } = useMemberList(
+					client as unknown as MatrixClient,
+					() => "!room:x",
+				);
+
+				await flushPromises();
+				expect(groups()[0].members[0].isTyping).toBe(false);
+
+				room.__setTyping("@alice:x", true);
+
+				client.__emit(
+					RoomMemberEvent.Typing,
+					{},
+					{
+						userId: "@alice:x",
+						roomId: "!room:x",
+					},
+				);
+
+				expect(rafCallback).not.toBeNull();
+				rafCallback?.(0);
+				rafCallback = null;
+
+				await flushPromises();
+				expect(groups()[0].members[0].isTyping).toBe(true);
+			});
+		} finally {
+			globalThis.requestAnimationFrame = originalRAF;
+		}
+	});
+
+	it("ignores events for other rooms", async () => {
+		const room = createMockRoom(
+			"!room:x",
+			[],
+			[{ userId: "@alice:x", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!room:x", room]]));
+
+		let rafCallback: FrameRequestCallback | null = null;
+		const originalRAF = globalThis.requestAnimationFrame;
+		globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+			rafCallback = cb;
+			return 1;
+		};
+
+		try {
+			await withRoot(async () => {
+				useMemberList(client as unknown as MatrixClient, () => "!room:x");
+
+				await flushPromises();
+
+				client.__emit(
+					RoomStateEvent.Members,
+					{},
+					{},
+					{
+						userId: "@bob:x",
+						roomId: "!other:x",
+					},
+				);
+
+				expect(rafCallback).toBeNull();
+			});
+		} finally {
+			globalThis.requestAnimationFrame = originalRAF;
+		}
+	});
+
+	it("coalesces multiple events into one rAF refresh", async () => {
+		const room = createMockRoom(
+			"!room:x",
+			[],
+			[{ userId: "@alice:x", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!room:x", room]]));
+
+		let rafCallCount = 0;
+		const originalRAF = globalThis.requestAnimationFrame;
+		globalThis.requestAnimationFrame = (_cb: FrameRequestCallback) => {
+			rafCallCount++;
+			return 1;
+		};
+
+		try {
+			await withRoot(async () => {
+				useMemberList(client as unknown as MatrixClient, () => "!room:x");
+
+				await flushPromises();
+
+				const member = { userId: "@alice:x", roomId: "!room:x" };
+
+				for (let i = 0; i < 5; i++) {
+					client.__emit(RoomStateEvent.Members, {}, {}, member);
+				}
+
+				expect(rafCallCount).toBe(1);
+			});
+		} finally {
+			globalThis.requestAnimationFrame = originalRAF;
+		}
+	});
+
+	it("removes listeners and cancels pending rAF on cleanup", async () => {
+		const room = createMockRoom(
+			"!room:x",
+			[],
+			[{ userId: "@alice:x", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!room:x", room]]));
+
+		const cancelledFrames: number[] = [];
+		const originalRAF = globalThis.requestAnimationFrame;
+		const originalCAF = globalThis.cancelAnimationFrame;
+		globalThis.requestAnimationFrame = () => 42;
+		globalThis.cancelAnimationFrame = (id: number) => {
+			cancelledFrames.push(id);
+		};
+
+		try {
+			await withRoot(async (dispose) => {
+				useMemberList(client as unknown as MatrixClient, () => "!room:x");
+
+				await flushPromises();
+
+				// Schedule a refresh (creates pending rAF)
+				client.__emit(
+					RoomStateEvent.Members,
+					{},
+					{},
+					{
+						userId: "@alice:x",
+						roomId: "!room:x",
+					},
+				);
+
+				// Dispose before rAF fires
+				dispose();
+
+				// Pending frame should have been cancelled
+				expect(cancelledFrames).toContain(42);
+
+				// Reset rAF stub to track post-dispose calls
+				let postDisposeRafCalled = false;
+				globalThis.requestAnimationFrame = () => {
+					postDisposeRafCalled = true;
+					return 99;
+				};
+
+				// Emit after dispose — listeners should be removed
+				client.__emit(
+					RoomStateEvent.Members,
+					{},
+					{},
+					{
+						userId: "@alice:x",
+						roomId: "!room:x",
+					},
+				);
+
+				// No rAF should have been scheduled
+				expect(postDisposeRafCalled).toBe(false);
+			});
+		} finally {
+			globalThis.requestAnimationFrame = originalRAF;
+			globalThis.cancelAnimationFrame = originalCAF;
+		}
 	});
 });
