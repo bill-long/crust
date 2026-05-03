@@ -60,19 +60,34 @@ export function createMockRoom(
 	// Configurable read receipt positions per user
 	const readUpTo = new Map<string, string | null>();
 
+	let baseIndex = 0;
 	const timeline = {
 		getEvents: () => matrixEvents,
 		getPaginationToken: () => null as string | null,
+		getBaseIndex: () => baseIndex,
+		getNeighbouringTimeline: () => null,
+		setNeighbouringTimeline: () => {},
+		setPaginationToken: () => {},
+		/** Test helper: prepend event with correct baseIndex tracking */
+		__prepend: (event: ReturnType<typeof createMatrixEvent>) => {
+			matrixEvents.unshift(event);
+			baseIndex++;
+		},
+	};
+
+	const timelineSet = {
+		room: null as unknown,
+		getLiveTimeline: () => timeline,
+		getTimelineForEvent: () => null,
+		relations: {
+			getChildEventsForEvent: () => null,
+		},
 	};
 
 	return {
 		roomId,
 		getLiveTimeline: () => timeline,
-		getUnfilteredTimelineSet: () => ({
-			relations: {
-				getChildEventsForEvent: () => null,
-			},
-		}),
+		getUnfilteredTimelineSet: () => timelineSet,
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
 			readUpTo.get(userId) ?? null,
 		getMember: (userId: string) => {

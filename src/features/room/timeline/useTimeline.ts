@@ -8,6 +8,7 @@ import {
 	RoomEvent,
 	type RoomMember,
 	RoomMemberEvent,
+	TimelineWindow,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
@@ -124,8 +125,8 @@ function isDisplayable(event: MatrixEvent): boolean {
 	return true;
 }
 
-const MAX_INITIAL_EVENTS = 500;
-const MAX_LIVE_EVENTS = 2000;
+const WINDOW_LIMIT = 2000;
+const INITIAL_WINDOW_SIZE = 500;
 
 export function useTimeline(client: MatrixClient, roomId: () => string) {
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
@@ -141,6 +142,23 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 	// Generation counter — increments on every room load. Async operations
 	// capture the current generation and bail if it changed (A→B→A safety).
 	let roomGeneration = 0;
+	let currentTimelineWindow: TimelineWindow | null = null;
+
+	/** Find a raw MatrixEvent in the current window by ID */
+	function findWindowEvent(eventId: string): MatrixEvent | undefined {
+		if (!currentTimelineWindow) return undefined;
+		return currentTimelineWindow.getEvents().find((e) => e.getId() === eventId);
+	}
+
+	/** Rebuild the displayable events store from the current window */
+	function rebuildEventsFromWindow(room: Room): void {
+		if (!currentTimelineWindow) return;
+		const matrixEvents = currentTimelineWindow.getEvents();
+		const displayable = matrixEvents
+			.filter((e) => isDisplayable(e) && e.getId())
+			.map((e) => eventToTimelineEvent(e, room, client));
+		setEvents(reconcile(displayable, { key: "eventId", merge: false }));
+	}
 
 	function loadRoom(rid: string): void {
 		if (rid !== currentRoomId) {
@@ -148,6 +166,8 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		}
 		currentRoomId = rid;
 		roomGeneration++;
+		const gen = roomGeneration;
+		currentTimelineWindow = null;
 		setLoading(true);
 		setLoadingOlder(false);
 		setCanLoadOlder(false);
@@ -157,48 +177,61 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		if (!room) {
 			setEvents(reconcile([], { key: "eventId", merge: false }));
 			setLoading(false);
+			currentTimelineWindow = null;
 			return;
 		}
 
-		const timeline = room.getLiveTimeline().getEvents();
-		const displayable = timeline
-			.filter((e) => isDisplayable(e) && e.getId())
-			.map((e) => eventToTimelineEvent(e, room, client));
-		const items =
-			displayable.length > MAX_INITIAL_EVENTS
-				? displayable.slice(-MAX_INITIAL_EVENTS)
-				: displayable;
-		// reconcile with key + merge:false forces a full replacement
-		// including correct array length reset
-		setEvents(reconcile(items, { key: "eventId", merge: false }));
+		const timelineSet = room.getUnfilteredTimelineSet();
+		const tw = new TimelineWindow(client, timelineSet, {
+			windowLimit: WINDOW_LIMIT,
+		});
+		// Defer setting currentTimelineWindow until load completes to
+		// prevent live events from calling extend() on an uninitialized
+		// window during the async gap.
 
-		// Set canLoadOlder before loading=false so dependents never observe
-		// the transient state (loading=false, canLoadOlder=false, events>0)
-		const paginationToken = room
-			.getLiveTimeline()
-			.getPaginationToken(Direction.Backward);
-		setCanLoadOlder(paginationToken !== null);
-		setLoadingOlder(false);
-		setLoading(false);
+		tw.load(undefined, INITIAL_WINDOW_SIZE)
+			.then(() => {
+				if (gen !== roomGeneration) return;
+
+				currentTimelineWindow = tw;
+				rebuildEventsFromWindow(room);
+				// Set canLoadOlder before loading=false so dependents never
+				// observe the transient state (loading=false, canLoadOlder=false,
+				// events>0)
+				setCanLoadOlder(tw.canPaginate(Direction.Backward));
+				setLoadingOlder(false);
+				setLoading(false);
+			})
+			.catch(() => {
+				if (gen !== roomGeneration) return;
+				setEvents(reconcile([], { key: "eventId", merge: false }));
+				setLoading(false);
+				setLoadingOlder(false);
+			});
 	}
 
 	const PAGINATION_SIZE = 50;
 	let paginationRoomId: string | null = null;
 
 	async function loadOlderMessages(): Promise<void> {
-		if (loadingOlder() || !canLoadOlder() || !currentRoomId) return;
+		if (
+			loadingOlder() ||
+			!canLoadOlder() ||
+			!currentRoomId ||
+			!currentTimelineWindow
+		)
+			return;
 
 		const rid = currentRoomId;
 		const gen = roomGeneration;
+		const tw = currentTimelineWindow;
 		const room = client.getRoom(rid);
 		if (!room) {
 			setCanLoadOlder(false);
 			return;
 		}
 
-		const timeline = room.getLiveTimeline();
-		const token = timeline.getPaginationToken(Direction.Backward);
-		if (!token) {
+		if (!tw.canPaginate(Direction.Backward)) {
 			setCanLoadOlder(false);
 			return;
 		}
@@ -208,22 +241,13 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		paginationRoomId = rid;
 
 		try {
-			const hasMore = await client.paginateEventTimeline(timeline, {
-				backwards: true,
-				limit: PAGINATION_SIZE,
-			});
+			await tw.paginate(Direction.Backward, PAGINATION_SIZE);
 			// Generation guard — catches A→B→A where roomId matches but
 			// this request is from a previous visit
 			if (gen !== roomGeneration) return;
 
-			// Rebuild displayable events from the full timeline.
-			// Don't cap here — the SDK manages the pagination window size.
-			const allEvents = timeline.getEvents();
-			const displayable = allEvents
-				.filter((e) => isDisplayable(e) && e.getId())
-				.map((e) => eventToTimelineEvent(e, room, client));
-			setEvents(reconcile(displayable, { key: "eventId", merge: false }));
-			setCanLoadOlder(hasMore);
+			rebuildEventsFromWindow(room);
+			setCanLoadOlder(tw.canPaginate(Direction.Backward));
 		} catch {
 			// Pagination failed — leave current state, user can retry
 		} finally {
@@ -241,10 +265,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 			produce((draft) => {
 				const idx = draft.findIndex((e) => e.eventId === redactedId);
 				if (idx >= 0) {
-					const sourceEvent = room
-						.getLiveTimeline()
-						.getEvents()
-						.find((e) => e.getId() === redactedId);
+					const sourceEvent = findWindowEvent(redactedId);
 					if (sourceEvent) {
 						if (isDisplayable(sourceEvent)) {
 							draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
@@ -256,10 +277,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 					}
 				}
 
-				// Build lookup map once for O(1) access
-				const timelineEvents = room.getLiveTimeline().getEvents();
+				// Build lookup map from window events for O(1) access
+				if (!currentTimelineWindow) return;
+				const windowEvents = currentTimelineWindow.getEvents();
 				const eventMap = new Map<string, MatrixEvent>();
-				for (const evt of timelineEvents) {
+				for (const evt of windowEvents) {
 					const id = evt.getId();
 					if (id) eventMap.set(id, evt);
 				}
@@ -282,10 +304,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		// has finished applying the edit to the original event
 		queueMicrotask(() => {
 			if (room.roomId !== currentRoomId) return;
-			const targetEvent = room
-				.getLiveTimeline()
-				.getEvents()
-				.find((e) => e.getId() === targetId);
+			const targetEvent = findWindowEvent(targetId);
 			if (!targetEvent) return;
 			const updated = eventToTimelineEvent(targetEvent, room, client);
 			setEvents(
@@ -341,6 +360,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
 
+		// Extend the window to include the new live event (no HTTP request)
+		if (currentTimelineWindow) {
+			currentTimelineWindow.extend(Direction.Forward, 1);
+		}
+
 		// Handle reaction events by updating the target message's reactions
 		if (event.getType() === "m.reaction") {
 			const relatesTo = event.getContent()?.["m.relates_to"];
@@ -350,10 +374,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 					produce((draft) => {
 						const idx = draft.findIndex((e) => e.eventId === targetId);
 						if (idx >= 0) {
-							const targetEvent = room
-								.getLiveTimeline()
-								.getEvents()
-								.find((e) => e.getId() === targetId);
+							const targetEvent = findWindowEvent(targetId);
 							if (targetEvent) {
 								draft[idx] = eventToTimelineEvent(targetEvent, room, client);
 							}
@@ -389,12 +410,11 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		setEvents(
 			produce((draft) => {
 				draft.push(eventToTimelineEvent(event, room, client));
-				// Hard cap to prevent unbounded growth in long sessions.
-				// Set high enough (2000) that typical pagination (50 events
-				// per load, ~30 loads) won't be evicted by live traffic.
-				// Trims oldest events when exceeded.
-				if (draft.length > MAX_LIVE_EVENTS) {
-					draft.splice(0, draft.length - MAX_LIVE_EVENTS);
+				// Keep the store bounded to match the TimelineWindow's limit.
+				// The window evicts internally, but the store is updated
+				// independently for live events.
+				if (draft.length > WINDOW_LIMIT) {
+					draft.splice(0, draft.length - WINDOW_LIMIT);
 				}
 			}),
 		);
@@ -440,10 +460,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 						if (currentRoomId !== rid) return;
 						const r = client.getRoom(rid);
 						if (!r) return;
-						const targetEvent = r
-							.getLiveTimeline()
-							.getEvents()
-							.find((e) => e.getId() === targetId);
+						const targetEvent = findWindowEvent(targetId);
 						if (!targetEvent) return;
 						const updated = eventToTimelineEvent(targetEvent, r, client);
 						setEvents(
@@ -509,13 +526,7 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 
 	/** Get the SDK MatrixEvent for edit prefill */
 	function getSourceEvent(eventId: string): MatrixEvent | undefined {
-		if (!currentRoomId) return undefined;
-		const room = client.getRoom(currentRoomId);
-		if (!room) return undefined;
-		return room
-			.getLiveTimeline()
-			.getEvents()
-			.find((e) => e.getId() === eventId);
+		return findWindowEvent(eventId);
 	}
 
 	// Initial load + reactive reload on room change
@@ -547,5 +558,10 @@ export function useTimeline(client: MatrixClient, roomId: () => string) {
 		loadOlderMessages,
 		typingUsers,
 		getSourceEvent,
+		/** Raw MatrixEvents in the current window (for receipt resolution) */
+		getWindowEvents(): MatrixEvent[] {
+			if (!currentTimelineWindow) return [];
+			return [...currentTimelineWindow.getEvents()];
+		},
 	};
 }
