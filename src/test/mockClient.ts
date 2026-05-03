@@ -37,7 +37,14 @@ function createMatrixEvent(evt: MockEvent) {
 export function createMockRoom(
 	roomId: string,
 	events: MockEvent[] = [],
-	members: { userId: string; name: string; typing?: boolean }[] = [],
+	members: {
+		userId: string;
+		name: string;
+		typing?: boolean;
+		membership?: string;
+		powerLevel?: number;
+		avatarUrl?: string;
+	}[] = [],
 ) {
 	const matrixEvents = events.map(createMatrixEvent);
 	// Mutable member state for typing simulation
@@ -46,6 +53,9 @@ export function createMockRoom(
 		name: m.name,
 		roomId,
 		typing: m.typing ?? false,
+		membership: m.membership ?? "join",
+		powerLevel: m.powerLevel ?? 0,
+		getMxcAvatarUrl: () => m.avatarUrl ?? undefined,
 	}));
 	// Configurable read receipt positions per user
 	const readUpTo = new Map<string, string | null>();
@@ -69,7 +79,7 @@ export function createMockRoom(
 			const m = memberState.find((m) => m.userId === userId);
 			return m ?? null;
 		},
-		getJoinedMembers: () => [...memberState],
+		getJoinedMembers: () => memberState.filter((m) => m.membership === "join"),
 		getMembers: () => [...memberState],
 
 		// Test helpers
@@ -113,7 +123,7 @@ export function createMockClient(
 		getHomeserverUrl: () => "https://example.com",
 		on: (event: string, handler: (...args: unknown[]) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());
-			listeners.get(event)!.add(handler);
+			listeners.get(event)?.add(handler);
 			return client;
 		},
 		off: (event: string, handler: (...args: unknown[]) => void) => {

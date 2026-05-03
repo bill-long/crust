@@ -12,6 +12,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { membersPaneVisible, toggleMembersPane } from "../../../stores/layout";
 import EmojiPicker from "../../emoji/EmojiPicker";
 import type { PickerEmoji } from "../../emoji/types";
 import {
@@ -406,15 +407,33 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			{/* Room header */}
 			<div class="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
 				<span class="text-sm font-semibold text-neutral-200">{roomName()}</span>
-				<button
-					type="button"
-					onClick={handleLeave}
-					disabled={leaving()}
-					class="rounded px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-400"
-					title="Leave room"
-				>
-					{leaving() ? "Leaving…" : "Leave"}
-				</button>
+				<div class="flex items-center gap-1">
+					<button
+						type="button"
+						onClick={toggleMembersPane}
+						class="rounded px-2 py-1 text-xs transition-colors"
+						classList={{
+							"bg-neutral-700 text-neutral-200": membersPaneVisible(),
+							"text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300":
+								!membersPaneVisible(),
+						}}
+						title={
+							membersPaneVisible() ? "Hide member list" : "Show member list"
+						}
+						aria-pressed={membersPaneVisible()}
+					>
+						Members
+					</button>
+					<button
+						type="button"
+						onClick={handleLeave}
+						disabled={leaving()}
+						class="rounded px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-400"
+						title="Leave room"
+					>
+						{leaving() ? "Leaving…" : "Leave"}
+					</button>
+				</div>
 			</div>
 
 			{/* Timeline */}
