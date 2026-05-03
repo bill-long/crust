@@ -963,7 +963,7 @@ describe("useTimeline", () => {
 		});
 	});
 
-	it("loadNewerMessages restores followingLive and resumes live events", async () => {
+	it("loadNewerMessages catches up then view restores followingLive for live events", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
 		]);
