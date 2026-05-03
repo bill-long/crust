@@ -517,7 +517,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 								</button>
 							</div>
 						</Show>
-						<Show when={!canLoadOlder() && events.length > 0}>
+						<Show when={!loading() && !canLoadOlder() && events.length > 0}>
 							<div class="py-3 text-center text-xs text-neutral-600">
 								Beginning of conversation
 							</div>
