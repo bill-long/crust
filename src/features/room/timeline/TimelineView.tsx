@@ -606,9 +606,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 								class="flex justify-center py-3"
 								role="status"
 								aria-live="polite"
-								aria-label="Loading newer messages"
 							>
-								<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+								<span class="sr-only">Loading newer messages</span>
+								<div
+									class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500"
+									aria-hidden="true"
+								/>
 							</div>
 						</Show>
 						{/* Manual load button for newer messages */}
@@ -642,9 +645,10 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-neutral-700 px-3 py-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
 							onClick={() => {
 								if (canLoadNewer()) {
-									// Set atBottom first so the followingLive effect
-									// doesn't immediately undo the jump when
-									// canLoadNewer transitions to false.
+									// Ensure atBottom is true so that when jumpToLive
+									// clears canLoadNewer, the followingLive effect
+									// sees [true, false] and confirms followingLive
+									// instead of seeing [false, false] and reverting it.
 									setAtBottom(true);
 									jumpToLive();
 								} else {
