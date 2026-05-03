@@ -61,9 +61,10 @@ export function createMockRoom(
 	const readUpTo = new Map<string, string | null>();
 
 	let baseIndex = 0;
+	let backwardPaginationToken: string | null = null;
 	const timeline = {
 		getEvents: () => matrixEvents,
-		getPaginationToken: () => null as string | null,
+		getPaginationToken: (_direction?: unknown) => backwardPaginationToken,
 		getBaseIndex: () => baseIndex,
 		getNeighbouringTimeline: () => null,
 		setNeighbouringTimeline: () => {},
@@ -108,6 +109,9 @@ export function createMockRoom(
 		__setTyping: (userId: string, typing: boolean) => {
 			const m = memberState.find((m) => m.userId === userId);
 			if (m) m.typing = typing;
+		},
+		__setPaginationToken: (token: string | null) => {
+			backwardPaginationToken = token;
 		},
 	};
 }
