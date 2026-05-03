@@ -190,6 +190,10 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	function sendReadReceipt(): void {
 		if (!atBottom()) return;
+		// Don't send receipts for events the user hasn't scrolled to.
+		// When behind live, forward pagination appends events but
+		// auto-scroll is suppressed, so atBottom can be stale-true.
+		if (canLoadNewer()) return;
 		const lastEvent = events[events.length - 1];
 		if (!lastEvent || lastEvent.eventId === lastSentReceiptEventId) return;
 		const matrixEvent = getSourceEvent(lastEvent.eventId);
@@ -251,12 +255,14 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		),
 	);
 
-	// Auto-scroll to bottom when new messages arrive and user is at bottom
+	// Auto-scroll to bottom when new messages arrive and user is at bottom.
+	// Suppressed when behind live (canLoadNewer) so that forward pagination
+	// via "Load newer messages" doesn't jump past the loaded page.
 	createEffect(
 		on(
 			() => events.length,
 			() => {
-				if (atBottom() && scrollRef) {
+				if (atBottom() && !canLoadNewer() && scrollRef) {
 					requestAnimationFrame(() => {
 						const el = scrollRef;
 						if (el) el.scrollTo({ top: el.scrollHeight });
