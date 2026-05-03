@@ -31,7 +31,7 @@ function flushPromises(): Promise<void> {
 }
 
 /** Create a fake SDK-like event for live event emissions in tests */
-function fakeEvent(
+function createFakeEvent(
 	roomId: string,
 	eventId: string,
 	sender: string,
@@ -58,7 +58,7 @@ function fakeEvent(
 function appendLive(
 	client: ReturnType<typeof createMockClient>,
 	room: ReturnType<typeof createMockRoom>,
-	event: ReturnType<typeof fakeEvent>,
+	event: ReturnType<typeof createFakeEvent>,
 ) {
 	const timeline = room.getLiveTimeline();
 	timeline.__append(
@@ -893,7 +893,7 @@ describe("useTimeline", () => {
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$2", "@bob:test", "live msg", 2000),
+				createFakeEvent("!roomA:test", "$2", "@bob:test", "live msg", 2000),
 			);
 
 			await flushPromises();
@@ -933,7 +933,13 @@ describe("useTimeline", () => {
 				appendLive(
 					client,
 					roomA,
-					fakeEvent("!roomA:test", `$${i}`, "@bob:test", `msg ${i}`, i * 1000),
+					createFakeEvent(
+						"!roomA:test",
+						`$${i}`,
+						"@bob:test",
+						`msg ${i}`,
+						i * 1000,
+					),
 				);
 			}
 
@@ -976,12 +982,12 @@ describe("useTimeline", () => {
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$2", "@bob:test", "withheld 1", 2000),
+				createFakeEvent("!roomA:test", "$2", "@bob:test", "withheld 1", 2000),
 			);
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$3", "@bob:test", "withheld 2", 3000),
+				createFakeEvent("!roomA:test", "$3", "@bob:test", "withheld 2", 3000),
 			);
 
 			await flushPromises();
@@ -1004,7 +1010,13 @@ describe("useTimeline", () => {
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$4", "@bob:test", "live after catchup", 4000),
+				createFakeEvent(
+					"!roomA:test",
+					"$4",
+					"@bob:test",
+					"live after catchup",
+					4000,
+				),
 			);
 
 			await flushPromises();
@@ -1035,7 +1047,7 @@ describe("useTimeline", () => {
 				appendLive(
 					client,
 					roomA,
-					fakeEvent(
+					createFakeEvent(
 						"!roomA:test",
 						`$new${i}`,
 						"@bob:test",
@@ -1082,19 +1094,19 @@ describe("useTimeline", () => {
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$2", "@bob:test", "msg 2", 2000),
+				createFakeEvent("!roomA:test", "$2", "@bob:test", "msg 2", 2000),
 			);
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$3", "@bob:test", "msg 3", 3000),
+				createFakeEvent("!roomA:test", "$3", "@bob:test", "msg 3", 3000),
 			);
 
 			// Append non-displayable: state event
 			appendLive(
 				client,
 				roomA,
-				fakeEvent(
+				createFakeEvent(
 					"!roomA:test",
 					"$s1",
 					"@alice:test",
@@ -1109,20 +1121,28 @@ describe("useTimeline", () => {
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$r1", "@bob:test", "", 3600, "m.reaction", {
-					"m.relates_to": {
-						rel_type: "m.annotation",
-						event_id: "$1",
-						key: "👍",
+				createFakeEvent(
+					"!roomA:test",
+					"$r1",
+					"@bob:test",
+					"",
+					3600,
+					"m.reaction",
+					{
+						"m.relates_to": {
+							rel_type: "m.annotation",
+							event_id: "$1",
+							key: "👍",
+						},
 					},
-				}),
+				),
 			);
 
 			// Append one more displayable
 			appendLive(
 				client,
 				roomA,
-				fakeEvent("!roomA:test", "$4", "@bob:test", "msg 4", 4000),
+				createFakeEvent("!roomA:test", "$4", "@bob:test", "msg 4", 4000),
 			);
 
 			await flushPromises();
