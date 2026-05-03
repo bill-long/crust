@@ -291,6 +291,27 @@ describe("filterDiscoverableRooms", () => {
 		expect(result[1].name).toBe("!room2:example.com");
 	});
 
+	it("treats empty or whitespace-only name as missing", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!empty:example.com",
+				name: "",
+				canonical_alias: "#fallback:example.com",
+				join_rule: JoinRule.Public,
+			}),
+			makeHierarchyRoom({
+				room_id: "!spaces:example.com",
+				name: "   ",
+				canonical_alias: undefined,
+				join_rule: JoinRule.Public,
+			}),
+		];
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
+		expect(result[0].name).toBe("#fallback:example.com");
+		expect(result[1].name).toBe("!spaces:example.com");
+	});
+
 	it("sets canJoin=true for public rooms", () => {
 		const rooms: HierarchyRoom[] = [
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),

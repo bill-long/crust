@@ -47,9 +47,9 @@ export function filterDiscoverableRooms(
 			const rule = room.join_rule as string | undefined;
 			return {
 				roomId: room.room_id,
-				name: room.name ?? room.canonical_alias ?? room.room_id,
+				name: room.name?.trim() || room.canonical_alias || room.room_id,
 				avatarUrl: room.avatar_url ? mxcToHttp(room.avatar_url) : null,
-				topic: room.topic ?? null,
+				topic: room.topic?.trim() || null,
 				memberCount: room.num_joined_members,
 				joinRule: rule ?? null,
 				canJoin: rule === "public" || rule === "restricted",
