@@ -7,6 +7,11 @@ import {
 	getOrphanRooms,
 	getSpaceRooms,
 } from "../../client/summaries-selectors";
+import {
+	type DiscoverableRoom,
+	type JoinState,
+	useSpaceHierarchy,
+} from "../space/useSpaceHierarchy";
 
 const RoomEntry: Component<{
 	room: RoomSummary;
@@ -62,6 +67,78 @@ const RoomEntry: Component<{
 	);
 };
 
+const DiscoverEntry: Component<{
+	room: DiscoverableRoom;
+	joinState: JoinState;
+	onJoin: () => void;
+}> = (props) => {
+	const isJoining = () => props.joinState === "joining";
+	const isJoined = () => props.joinState === "joined";
+	const isError = () => props.joinState === "error";
+
+	return (
+		<div class="flex w-full items-center gap-2 rounded px-3 py-2 text-neutral-400">
+			<div class="min-w-0 flex-1">
+				<div class="flex items-center gap-1">
+					<span class="truncate text-sm font-medium text-neutral-300">
+						{props.room.name}
+					</span>
+					<span class="shrink-0 text-[10px] text-neutral-600">
+						{props.room.memberCount} members
+					</span>
+				</div>
+				<Show when={props.room.topic}>
+					<p class="truncate text-xs text-neutral-600">{props.room.topic}</p>
+				</Show>
+			</div>
+
+			<Show
+				when={props.room.canJoin}
+				fallback={
+					<span
+						class="shrink-0 text-[10px] text-neutral-600"
+						title="This room requires an invitation"
+					>
+						Invite only
+					</span>
+				}
+			>
+				<button
+					type="button"
+					onClick={props.onJoin}
+					disabled={isJoining() || isJoined()}
+					aria-label={
+						isJoined()
+							? `Joined ${props.room.name}`
+							: isJoining()
+								? `Joining ${props.room.name}`
+								: isError()
+									? `Retry joining ${props.room.name}`
+									: `Join ${props.room.name}`
+					}
+					class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors ${
+						isJoined()
+							? "bg-green-900/50 text-green-400"
+							: isError()
+								? "bg-red-900/50 text-red-400 hover:bg-red-800/50"
+								: isJoining()
+									? "cursor-wait bg-neutral-700 text-neutral-400"
+									: "bg-pink-600/80 text-white hover:bg-pink-600"
+					}`}
+				>
+					{isJoined()
+						? "Joined"
+						: isJoining()
+							? "Joining…"
+							: isError()
+								? "Retry"
+								: "Join"}
+				</button>
+			</Show>
+		</div>
+	);
+};
+
 const RoomList: Component = () => {
 	const { summaries } = useClient();
 	const params = useParams<{ spaceId?: string; roomId?: string }>();
@@ -83,6 +160,8 @@ const RoomList: Component = () => {
 		const name = summaries[params.spaceId]?.name;
 		return name?.trim() ? name : "Space";
 	});
+
+	const hierarchy = useSpaceHierarchy(() => params.spaceId);
 
 	const navigateToRoom = (roomId: string): void => {
 		const room = summaries[roomId];
@@ -120,9 +199,60 @@ const RoomList: Component = () => {
 							/>
 						)}
 					</For>
-					<Show when={spaceRooms().length === 0}>
+					<Show
+						when={
+							spaceRooms().length === 0 &&
+							!hierarchy.loading &&
+							!hierarchy.error &&
+							hierarchy.discoverableRooms.length === 0 &&
+							!hierarchy.truncated
+						}
+					>
 						<p class="px-3 py-4 text-center text-xs text-neutral-600">
 							No rooms in this space
+						</p>
+					</Show>
+
+					{/* Discoverable rooms section */}
+					<Show when={hierarchy.loading}>
+						<div class="px-3 pb-1 pt-3">
+							<span class="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+								Discover
+							</span>
+						</div>
+						<div class="flex items-center justify-center py-4">
+							<div class="h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+						</div>
+					</Show>
+
+					<Show
+						when={!hierarchy.loading && hierarchy.discoverableRooms.length > 0}
+					>
+						<div class="px-3 pb-1 pt-3">
+							<span class="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+								Discover
+							</span>
+						</div>
+						<For each={hierarchy.discoverableRooms}>
+							{(room) => (
+								<DiscoverEntry
+									room={room}
+									joinState={hierarchy.joinState(room.roomId)}
+									onJoin={() => hierarchy.joinRoom(room.roomId)}
+								/>
+							)}
+						</For>
+					</Show>
+
+					<Show when={!hierarchy.loading && hierarchy.truncated}>
+						<p class="px-3 py-2 text-center text-[10px] text-neutral-600">
+							Some rooms not shown
+						</p>
+					</Show>
+
+					<Show when={!hierarchy.loading && hierarchy.error}>
+						<p class="px-3 py-2 text-center text-xs text-red-400/70">
+							Could not load discoverable rooms
 						</p>
 					</Show>
 				</Show>
