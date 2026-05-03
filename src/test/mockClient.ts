@@ -114,6 +114,24 @@ export function createMockRoom(
 			const m = memberState.find((m) => m.userId === userId);
 			if (m) m.typing = typing;
 		},
+		__addMember: (member: {
+			userId: string;
+			name: string;
+			typing?: boolean;
+			membership?: string;
+			powerLevel?: number;
+			avatarUrl?: string;
+		}) => {
+			memberState.push({
+				userId: member.userId,
+				name: member.name,
+				roomId,
+				typing: member.typing ?? false,
+				membership: member.membership ?? "join",
+				powerLevel: member.powerLevel ?? 0,
+				getMxcAvatarUrl: () => member.avatarUrl ?? undefined,
+			});
+		},
 		__setPaginationToken: (token: string | null, direction?: "b" | "f") => {
 			if (direction === "f") {
 				forwardPaginationToken = token;
