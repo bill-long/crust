@@ -30,6 +30,45 @@ function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Create a fake SDK-like event for live event emissions in tests */
+function fakeEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	body: string,
+	ts: number,
+	type = "m.room.message",
+	content?: Record<string, unknown>,
+) {
+	return {
+		getId: () => eventId,
+		getRoomId: () => roomId,
+		getSender: () => sender,
+		getType: () => type,
+		getContent: () => content ?? { msgtype: "m.text", body },
+		getTs: () => ts,
+		isEncrypted: () => false,
+		isDecryptionFailure: () => false,
+		replacingEventId: () => null,
+		event: { redacts: undefined },
+	};
+}
+
+/** Append event to mock timeline and emit as live event */
+function appendLive(
+	client: ReturnType<typeof createMockClient>,
+	room: ReturnType<typeof createMockRoom>,
+	event: ReturnType<typeof fakeEvent>,
+) {
+	const timeline = room.getLiveTimeline();
+	timeline.__append(
+		event as unknown as Parameters<typeof timeline.__append>[0],
+	);
+	client.__emit("Room.timeline", event, room, false, false, {
+		liveEvent: true,
+	});
+}
+
 describe("useTimeline", () => {
 	it("loads events for the initial room", async () => {
 		const roomA = createMockRoom("!roomA:test", [
@@ -851,32 +890,254 @@ describe("useTimeline", () => {
 			expect(canLoadNewer()).toBe(false);
 
 			// Now a live event should be handled normally
-			const liveEvent = {
-				getId: () => "$2",
-				getRoomId: () => "!roomA:test",
-				getSender: () => "@bob:test",
-				getType: () => "m.room.message",
-				getContent: () => ({ msgtype: "m.text", body: "live msg" }),
-				getTs: () => 2000,
-				isEncrypted: () => false,
-				isDecryptionFailure: () => false,
-				replacingEventId: () => null,
-				event: { redacts: undefined },
-			};
-			// Append to timeline for extend() to pick up
-			const timeline = roomA.getLiveTimeline();
-			timeline.__append(
-				liveEvent as unknown as Parameters<typeof timeline.__append>[0],
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$2", "@bob:test", "live msg", 2000),
 			);
-			client.__emit("Room.timeline", liveEvent, roomA, false, false, {
-				liveEvent: true,
-			});
 
 			await flushPromises();
 
 			// Event should be added normally
 			expect(events.length).toBe(2);
 			expect(events[1].body).toBe("live msg");
+		});
+	});
+
+	it("loadNewerMessages paginates forward and shows newer events", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "msg 1", 1000),
+			textMessage("!roomA:test", "$2", "@alice:test", "msg 2", 2000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const {
+				events,
+				canLoadNewer,
+				loadingNewer,
+				setFollowingLive,
+				loadNewerMessages,
+				getWindowEvents,
+			} = useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
+
+			await flushPromises();
+			expect(events.length).toBe(2);
+			expect(canLoadNewer()).toBe(false);
+
+			// Stop following live (user scrolled up)
+			setFollowingLive(false);
+
+			// Simulate 3 live events arriving while scrolled up
+			for (let i = 3; i <= 5; i++) {
+				appendLive(
+					client,
+					roomA,
+					fakeEvent("!roomA:test", `$${i}`, "@bob:test", `msg ${i}`, i * 1000),
+				);
+			}
+
+			await flushPromises();
+			expect(events.length).toBe(2); // withheld
+			expect(canLoadNewer()).toBe(true);
+
+			// Forward paginate to catch up
+			await loadNewerMessages();
+			await flushPromises();
+
+			// All 5 events should now be visible
+			expect(events.length).toBe(5);
+			expect(events[2].body).toBe("msg 3");
+			expect(events[3].body).toBe("msg 4");
+			expect(events[4].body).toBe("msg 5");
+			expect(loadingNewer()).toBe(false);
+			expect(canLoadNewer()).toBe(false);
+			// Window should contain all events
+			expect(getWindowEvents().length).toBe(5);
+		});
+	});
+
+	it("loadNewerMessages restores followingLive and resumes live events", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, setFollowingLive, loadNewerMessages } =
+				useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			setFollowingLive(false);
+
+			// 2 live events arrive while scrolled up
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$2", "@bob:test", "withheld 1", 2000),
+			);
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$3", "@bob:test", "withheld 2", 3000),
+			);
+
+			await flushPromises();
+			expect(canLoadNewer()).toBe(true);
+			expect(events.length).toBe(1);
+
+			// Catch up via forward pagination
+			await loadNewerMessages();
+			await flushPromises();
+
+			expect(canLoadNewer()).toBe(false);
+			expect(events.length).toBe(3);
+
+			// loadNewerMessages does NOT restore followingLive — the view
+			// drives that transition via the [atBottom, canLoadNewer] effect.
+			// Simulate the view re-enabling following after catch-up.
+			setFollowingLive(true);
+
+			// New live events should now appear immediately
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$4", "@bob:test", "live after catchup", 4000),
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(4);
+			expect(events[3].body).toBe("live after catchup");
+			expect(canLoadNewer()).toBe(false);
+		});
+	});
+
+	it("loadNewerMessages handles partial catch-up requiring multiple pages", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$0", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, canLoadNewer, setFollowingLive, loadNewerMessages } =
+				useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			setFollowingLive(false);
+
+			// Append 55 events (more than PAGINATION_SIZE=50 in useTimeline.ts)
+			for (let i = 1; i <= 55; i++) {
+				appendLive(
+					client,
+					roomA,
+					fakeEvent(
+						"!roomA:test",
+						`$new${i}`,
+						"@bob:test",
+						`new msg ${i}`,
+						2000 + i,
+					),
+				);
+			}
+
+			await flushPromises();
+			expect(canLoadNewer()).toBe(true);
+			expect(events.length).toBe(1);
+
+			// First forward pagination — picks up 50 of 55 withheld events
+			await loadNewerMessages();
+			await flushPromises();
+
+			expect(events.length).toBe(51); // 1 initial + 50 paginated
+			expect(canLoadNewer()).toBe(true); // 5 remaining
+
+			// Second forward pagination — picks up remaining 5
+			await loadNewerMessages();
+			await flushPromises();
+
+			expect(events.length).toBe(56); // 1 initial + 55 total
+			expect(canLoadNewer()).toBe(false); // fully caught up
+		});
+	});
+
+	it("loadNewerMessages only includes displayable events after forward pagination", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "initial", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, setFollowingLive, loadNewerMessages, getWindowEvents } =
+				useTimeline(client as unknown as MatrixClient, () => "!roomA:test");
+
+			await flushPromises();
+			setFollowingLive(false);
+
+			// Append displayable events
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$2", "@bob:test", "msg 2", 2000),
+			);
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$3", "@bob:test", "msg 3", 3000),
+			);
+
+			// Append non-displayable: state event
+			appendLive(
+				client,
+				roomA,
+				fakeEvent(
+					"!roomA:test",
+					"$s1",
+					"@alice:test",
+					"",
+					3500,
+					"m.room.member",
+					{ membership: "join" },
+				),
+			);
+
+			// Append non-displayable: reaction
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$r1", "@bob:test", "", 3600, "m.reaction", {
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$1",
+						key: "👍",
+					},
+				}),
+			);
+
+			// Append one more displayable
+			appendLive(
+				client,
+				roomA,
+				fakeEvent("!roomA:test", "$4", "@bob:test", "msg 4", 4000),
+			);
+
+			await flushPromises();
+
+			await loadNewerMessages();
+			await flushPromises();
+
+			// Window has all 6 events (initial + 3 messages + 1 state + 1 reaction)
+			expect(getWindowEvents().length).toBe(6);
+			// Store has only displayable events
+			expect(events.length).toBe(4);
+			expect(events[0].body).toBe("initial");
+			expect(events[1].body).toBe("msg 2");
+			expect(events[2].body).toBe("msg 3");
+			expect(events[3].body).toBe("msg 4");
 		});
 	});
 });
