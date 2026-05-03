@@ -610,8 +610,10 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						</Show>
 					</div>
 
-					{/* Scroll-to-bottom / Jump to latest button */}
-					<Show when={!atBottom()}>
+					{/* Scroll-to-bottom / Jump to latest button.
+					     Show when scrolled up OR when behind live (even at
+					     bottom of current slice, so jump-to-live is reachable). */}
+					<Show when={!atBottom() || canLoadNewer()}>
 						<button
 							type="button"
 							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-neutral-700 px-3 py-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
