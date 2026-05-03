@@ -224,6 +224,15 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		}),
 	);
 
+	// Send receipt when forward pagination catches up to live.
+	// The events.length effect misses the final page because
+	// canLoadNewer is still true when events rebuild.
+	createEffect(
+		on(canLoadNewer, (hasNewer) => {
+			if (!hasNewer) sendReadReceipt();
+		}),
+	);
+
 	// Send receipt when room first opens
 	createEffect(
 		on(
