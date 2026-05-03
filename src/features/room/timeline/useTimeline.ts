@@ -138,11 +138,16 @@ export function useTimeline(
 	roomId: () => string,
 	opts?: UseTimelineOptions,
 ) {
-	const windowLimit = Math.max(1, opts?.windowLimit ?? WINDOW_LIMIT);
-	const initialWindowSize = Math.max(
-		1,
-		Math.min(opts?.initialWindowSize ?? INITIAL_WINDOW_SIZE, windowLimit),
-	);
+	const rawLimit = opts?.windowLimit;
+	const windowLimit =
+		rawLimit != null && Number.isFinite(rawLimit) && rawLimit >= 1
+			? Math.floor(rawLimit)
+			: WINDOW_LIMIT;
+	const rawInitSize = opts?.initialWindowSize;
+	const initialWindowSize =
+		rawInitSize != null && Number.isFinite(rawInitSize) && rawInitSize >= 1
+			? Math.min(Math.floor(rawInitSize), windowLimit)
+			: Math.min(INITIAL_WINDOW_SIZE, windowLimit);
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
 	const [loadingOlder, setLoadingOlder] = createSignal(false);

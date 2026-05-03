@@ -1186,7 +1186,7 @@ describe("useTimeline", () => {
 			expect(events[0].body).toBe("msg 1");
 
 			// Emit non-displayable live events to trigger eviction.
-			// Each extends the window by 1 and evicts 1 from the back.
+			// Each extends the window by 1 and evicts 1 from the oldest end.
 			for (let i = 1; i <= 3; i++) {
 				appendLive(
 					client,
@@ -1282,7 +1282,7 @@ describe("useTimeline", () => {
 			expect(events.length).toBe(8);
 
 			// Mixed burst: 3 displayable + 5 non-displayable = 8 events
-			// Window evicts 8 from the back, replacing with new events.
+			// Window evicts 8 from the oldest end, replacing with new events.
 			for (let i = 1; i <= 5; i++) {
 				appendLive(
 					client,
