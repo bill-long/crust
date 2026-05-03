@@ -1160,4 +1160,172 @@ describe("useTimeline", () => {
 			expect(events[3].body).toBe("msg 4");
 		});
 	});
+
+	it("syncStoreEviction trims store events evicted from window", async () => {
+		// Use a small windowLimit to make eviction testable with few events.
+		// Initial events fill the window; non-displayable live events then
+		// trigger eviction, and the store must stay in sync.
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "msg 1", 1000),
+			textMessage("!roomA:test", "$2", "@alice:test", "msg 2", 2000),
+			textMessage("!roomA:test", "$3", "@alice:test", "msg 3", 3000),
+			textMessage("!roomA:test", "$4", "@alice:test", "msg 4", 4000),
+			textMessage("!roomA:test", "$5", "@alice:test", "msg 5", 5000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, getWindowEvents } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+				{ windowLimit: 5, initialWindowSize: 5 },
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(5);
+			expect(events[0].body).toBe("msg 1");
+
+			// Emit non-displayable live events to trigger eviction.
+			// Each extends the window by 1 and evicts 1 from the oldest end.
+			for (let i = 1; i <= 3; i++) {
+				appendLive(
+					client,
+					roomA,
+					createFakeEvent(
+						"!roomA:test",
+						`$s${i}`,
+						"@alice:test",
+						"",
+						6000 + i,
+						"m.room.member",
+						{ membership: "join" },
+					),
+				);
+			}
+
+			await flushPromises();
+
+			// Window evicted $1, $2, $3 (replaced by 3 state events).
+			// Store must also have trimmed those events.
+			expect(events[0].body).toBe("msg 4");
+			expect(events[1].body).toBe("msg 5");
+			expect(events.length).toBe(2);
+
+			// Every store event must exist in the window
+			const windowIds = new Set(getWindowEvents().map((e) => e.getId()));
+			for (let i = 0; i < events.length; i++) {
+				expect(windowIds.has(events[i].eventId)).toBe(true);
+			}
+		});
+	});
+
+	it("syncStoreEviction is a no-op below window capacity", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "msg 1", 1000),
+			textMessage("!roomA:test", "$2", "@alice:test", "msg 2", 2000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+				{ windowLimit: 10, initialWindowSize: 10 },
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(2);
+
+			// Add live events — window is well below capacity, no eviction
+			appendLive(
+				client,
+				roomA,
+				createFakeEvent("!roomA:test", "$3", "@bob:test", "msg 3", 3000),
+			);
+
+			await flushPromises();
+
+			// All events remain (no eviction, no trimming)
+			expect(events.length).toBe(3);
+			expect(events[0].body).toBe("msg 1");
+			expect(events[2].body).toBe("msg 3");
+		});
+	});
+
+	it("store event IDs match displayable window event IDs after mixed live traffic", async () => {
+		// Invariant test: after a burst of mixed displayable and non-displayable
+		// live events that trigger eviction, the store must exactly equal the
+		// displayable events in the window.
+		const initialEvents = [];
+		for (let i = 1; i <= 8; i++) {
+			initialEvents.push(
+				textMessage(
+					"!roomA:test",
+					`$${i}`,
+					"@alice:test",
+					`msg ${i}`,
+					i * 1000,
+				),
+			);
+		}
+		const roomA = createMockRoom("!roomA:test", initialEvents);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, getWindowEvents } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+				{ windowLimit: 8, initialWindowSize: 8 },
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(8);
+
+			// Mixed burst: 3 displayable + 5 non-displayable = 8 events
+			// Window evicts 8 from the oldest end, replacing with new events.
+			for (let i = 1; i <= 5; i++) {
+				appendLive(
+					client,
+					roomA,
+					createFakeEvent(
+						"!roomA:test",
+						`$state${i}`,
+						"@alice:test",
+						"",
+						10000 + i,
+						"m.room.member",
+						{ membership: "join" },
+					),
+				);
+			}
+			for (let i = 1; i <= 3; i++) {
+				appendLive(
+					client,
+					roomA,
+					createFakeEvent(
+						"!roomA:test",
+						`$new${i}`,
+						"@bob:test",
+						`new msg ${i}`,
+						20000 + i,
+					),
+				);
+			}
+
+			await flushPromises();
+
+			// Invariant: store IDs === displayable window IDs
+			const windowEvents = getWindowEvents();
+			const displayableWindowIds = windowEvents
+				.filter(
+					(e) => e.getType() === "m.room.message" && e.getContent()?.msgtype,
+				)
+				.map((e) => e.getId());
+			const storeIds = Array.from(
+				{ length: events.length },
+				(_, i) => events[i].eventId,
+			);
+			expect(storeIds).toEqual(displayableWindowIds);
+		});
+	});
 });
