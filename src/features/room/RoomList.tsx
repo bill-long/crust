@@ -1,5 +1,6 @@
-import { useNavigate, useParams } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { type Component, createMemo, For, Show } from "solid-js";
+import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import type { RoomSummary } from "../../client/summaries";
 import {
@@ -141,7 +142,7 @@ const DiscoverEntry: Component<{
 
 const RoomList: Component = () => {
 	const { summaries } = useClient();
-	const params = useParams<{ spaceId?: string; roomId?: string }>();
+	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
 
 	const isHome = () => !params.spaceId;

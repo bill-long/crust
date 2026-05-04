@@ -1,5 +1,6 @@
-import { useNavigate, useParams } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { type Component, createMemo, For, Show } from "solid-js";
+import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import {
 	getSpaces,
@@ -8,7 +9,7 @@ import {
 
 const SpacesSidebar: Component = () => {
 	const { summaries } = useClient();
-	const params = useParams<{ spaceId?: string }>();
+	const params = useDecodedParams<{ spaceId?: string }>();
 	const navigate = useNavigate();
 
 	const spaces = createMemo(() => getSpaces(summaries));
