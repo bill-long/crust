@@ -1,5 +1,5 @@
 import { useNavigate } from "@solidjs/router";
-import { type Component, createSignal, Show } from "solid-js";
+import { type Component, createMemo, createSignal, Show } from "solid-js";
 import { useClient } from "../client/client";
 import {
 	clamp,
@@ -9,10 +9,17 @@ import {
 	ResizableLayout,
 	ResizeDivider,
 } from "../components/ResizableLayout";
+import { UserBar } from "../components/UserBar";
+import {
+	type CryptoAction,
+	cryptoActionLabel,
+	deriveCryptoAction,
+} from "../features/crypto/CryptoStatusBanner";
 import { MemberList } from "../features/room/MemberList";
 import { RoomList } from "../features/room/RoomList";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
+import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import { useDecodedParams } from "./useDecodedParams";
@@ -51,7 +58,7 @@ function saveMembersWidth(w: number): void {
 }
 
 const Layout: Component = () => {
-	const { client, syncState, summaries } = useClient();
+	const { client, syncState, summaries, cryptoStatus } = useClient();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
@@ -67,9 +74,37 @@ const Layout: Component = () => {
 		navigate("/login", { replace: true });
 	};
 
-	const displayName = (): string => {
-		const userId = client.getUserId();
-		return userId ?? "User";
+	const userId = () => client.getUserId() ?? "";
+	const displayName = () => {
+		const uid = userId();
+		const localpart = uid.split(":")[0]?.replace("@", "").trim();
+		return localpart || uid || "User";
+	};
+	const initial = () => (displayName().trim() || "?").charAt(0).toUpperCase();
+
+	const cryptoAction = createMemo(
+		(): CryptoAction =>
+			deriveCryptoAction(
+				cryptoStatus.crossSigningReady(),
+				cryptoStatus.thisDeviceVerified(),
+				cryptoStatus.backupVersion(),
+			),
+	);
+
+	const needsCryptoAttention = () => {
+		const a = cryptoAction();
+		return (
+			a === "setup-cross-signing" ||
+			a === "verify-session" ||
+			a === "setup-backup"
+		);
+	};
+
+	const handleCryptoClick = (): void => {
+		const action = cryptoAction();
+		if (action !== "hidden" && action !== "loading") {
+			triggerCryptoAction(action);
+		}
 	};
 
 	const roomId = () => params.roomId;
@@ -100,27 +135,23 @@ const Layout: Component = () => {
 	};
 
 	return (
-		<div class="flex min-h-0 flex-1 flex-col bg-surface-0 text-text-primary">
-			{/* Top bar */}
-			<header class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
-				<span class="text-lg font-bold">Crust</span>
-				<div class="flex items-center gap-3">
-					<span class="text-sm text-text-muted">{displayName()}</span>
-					<span class="text-xs text-text-faint">{syncState()}</span>
-					<button
-						type="button"
-						onClick={handleLogout}
-						class="rounded px-2 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
-					>
-						Log out
-					</button>
-				</div>
-			</header>
-
-			{/* Three-column resizable layout */}
+		<div class="flex min-h-0 flex-1 bg-surface-0 text-text-primary">
+			{/* Resizable layout with user bar spanning left sidebar */}
 			<ResizableLayout
 				spaces={<SpacesSidebar />}
 				roomList={<RoomList />}
+				userBar={
+					<UserBar
+						displayName={displayName()}
+						userId={userId()}
+						initial={initial()}
+						needsCryptoAttention={needsCryptoAttention()}
+						cryptoLabel={cryptoActionLabel(cryptoAction())}
+						onCryptoClick={handleCryptoClick}
+						syncState={syncState()}
+						onLogout={handleLogout}
+					/>
+				}
 				main={
 					<Show
 						when={roomId()}

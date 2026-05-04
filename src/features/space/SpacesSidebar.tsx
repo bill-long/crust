@@ -15,7 +15,7 @@ const SpacesSidebar: Component = () => {
 	const spaces = createMemo(() => getSpaces(summaries));
 
 	return (
-		<aside class="flex h-full flex-col items-center gap-1 overflow-y-auto border-r border-border-subtle bg-surface-1 py-3">
+		<aside class="flex h-full flex-col items-center gap-1 overflow-y-auto bg-surface-1 py-3">
 			{/* Home button */}
 			<button
 				type="button"
