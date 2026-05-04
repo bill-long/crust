@@ -8,7 +8,9 @@ const [handler, setHandler] = createSignal<CryptoActionHandler | null>(null);
 /** Register the crypto action handler. Returns an unregister function for cleanup. */
 export function registerCryptoHandler(h: CryptoActionHandler): () => void {
 	setHandler(() => h);
-	return () => setHandler(null);
+	return () => {
+		if (handler() === h) setHandler(null);
+	};
 }
 
 /** Trigger a crypto setup flow from anywhere (called by user panel). */

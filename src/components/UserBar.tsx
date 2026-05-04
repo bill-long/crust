@@ -292,34 +292,50 @@ const UserBar: Component<UserBarProps> = (props) => {
 	return (
 		<div class="flex h-[52px] shrink-0 items-center gap-1 border-t border-border-subtle bg-surface-1 px-2">
 			{/* Avatar + user info */}
-			<button
-				type="button"
-				onClick={props.onCryptoClick}
-				class="group relative flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-surface-2"
-				title={props.needsCryptoAttention ? props.cryptoLabel : props.userId}
+			<Show
+				when={props.needsCryptoAttention}
+				fallback={
+					<div class="flex min-w-0 flex-1 items-center gap-2 px-1 py-1">
+						<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+							{props.initial}
+						</div>
+						<div class="min-w-0 flex-1">
+							<div class="truncate text-sm font-semibold leading-tight text-text-primary">
+								{props.displayName}
+							</div>
+							<div class="truncate text-xs leading-tight text-text-muted">
+								{props.userId}
+							</div>
+						</div>
+					</div>
+				}
 			>
-				{/* Avatar */}
-				<div class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-					{props.initial}
-					<Show when={props.needsCryptoAttention}>
+				<button
+					type="button"
+					onClick={props.onCryptoClick}
+					class="group relative flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-surface-2"
+					title={props.cryptoLabel}
+					aria-label={`${props.displayName} — ${props.cryptoLabel}`}
+				>
+					<div class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+						{props.initial}
 						<span
 							class="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-[8px] font-bold text-text-primary"
 							aria-hidden="true"
 						>
 							!
 						</span>
-					</Show>
-				</div>
-				{/* Name column */}
-				<div class="min-w-0 flex-1">
-					<div class="truncate text-sm font-semibold leading-tight text-text-primary">
-						{props.displayName}
 					</div>
-					<div class="truncate text-xs leading-tight text-text-muted">
-						{props.userId}
+					<div class="min-w-0 flex-1">
+						<div class="truncate text-sm font-semibold leading-tight text-text-primary">
+							{props.displayName}
+						</div>
+						<div class="truncate text-xs leading-tight text-text-muted">
+							{props.userId}
+						</div>
 					</div>
-				</div>
-			</button>
+				</button>
+			</Show>
 
 			{/* Mic split button */}
 			<SplitAudioButton
