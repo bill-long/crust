@@ -46,7 +46,7 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 						onInput={(e) => setPassword(e.currentTarget.value)}
 						placeholder="••••••••"
 						autocomplete="current-password"
-						class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
+						class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
 						autofocus
 						required
 					/>
