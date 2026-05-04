@@ -122,6 +122,7 @@ export const ResizableLayout: Component<{
 	spaces: JSX.Element;
 	roomList: JSX.Element;
 	main: JSX.Element;
+	userBar?: JSX.Element;
 }> = (props) => {
 	const initial = loadWidths();
 	const [spacesWidth, setSpacesWidth] = createSignal(initial.spaces);
@@ -134,30 +135,44 @@ export const ResizableLayout: Component<{
 		});
 	};
 
+	// Inner resize divider is w-1 (4px at default 16px root font size)
+	const DIVIDER_WIDTH = 4;
+	const sidebarWidth = () => spacesWidth() + roomListWidth() + DIVIDER_WIDTH;
+
 	return (
 		<div class="flex min-h-0 flex-1">
+			{/* Left sidebar: spaces + room list + user bar */}
 			<div
-				style={{ width: `${spacesWidth()}px` }}
-				class="shrink-0 overflow-hidden"
+				class="flex shrink-0 flex-col"
+				style={{ width: `${sidebarWidth()}px` }}
 			>
-				{props.spaces}
+				<div class="flex min-h-0 flex-1">
+					<div
+						style={{ width: `${spacesWidth()}px` }}
+						class="shrink-0 overflow-hidden"
+					>
+						{props.spaces}
+					</div>
+					<ResizeDivider
+						onDrag={(d) =>
+							setSpacesWidth((w) => clamp(w + d, MIN_SPACES, MAX_SPACES))
+						}
+						onDragEnd={persist}
+						value={spacesWidth()}
+						min={MIN_SPACES}
+						max={MAX_SPACES}
+						label="Resize spaces sidebar"
+					/>
+					<div
+						style={{ width: `${roomListWidth()}px` }}
+						class="shrink-0 overflow-hidden"
+					>
+						{props.roomList}
+					</div>
+				</div>
+				{props.userBar}
 			</div>
-			<ResizeDivider
-				onDrag={(d) =>
-					setSpacesWidth((w) => clamp(w + d, MIN_SPACES, MAX_SPACES))
-				}
-				onDragEnd={persist}
-				value={spacesWidth()}
-				min={MIN_SPACES}
-				max={MAX_SPACES}
-				label="Resize spaces sidebar"
-			/>
-			<div
-				style={{ width: `${roomListWidth()}px` }}
-				class="shrink-0 overflow-hidden"
-			>
-				{props.roomList}
-			</div>
+			{/* Resize divider between sidebar and main */}
 			<ResizeDivider
 				onDrag={(d) =>
 					setRoomListWidth((w) => clamp(w + d, MIN_ROOM_LIST, MAX_ROOM_LIST))
@@ -166,8 +181,9 @@ export const ResizableLayout: Component<{
 				value={roomListWidth()}
 				min={MIN_ROOM_LIST}
 				max={MAX_ROOM_LIST}
-				label="Resize room list"
+				label="Resize sidebar"
 			/>
+			{/* Main content area */}
 			<div class="min-w-0 flex-1">{props.main}</div>
 		</div>
 	);
