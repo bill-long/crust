@@ -110,15 +110,19 @@ const SplitAudioButton: Component<{
 	createEffect(
 		on(menuOpen, (open) => {
 			if (!open) return;
+			let active = true;
 			const handler = (e: MouseEvent): void => {
 				if (containerRef && !containerRef.contains(e.target as Node)) {
 					setMenuOpen(false);
 				}
 			};
 			requestAnimationFrame(() => {
-				document.addEventListener("mousedown", handler);
+				if (active) document.addEventListener("mousedown", handler);
 			});
-			onCleanup(() => document.removeEventListener("mousedown", handler));
+			onCleanup(() => {
+				active = false;
+				document.removeEventListener("mousedown", handler);
+			});
 		}),
 	);
 
@@ -209,15 +213,19 @@ const SettingsPopover: Component<{
 			() => props.open,
 			(open) => {
 				if (!open) return;
+				let active = true;
 				const handler = (e: MouseEvent): void => {
 					if (ref && !ref.contains(e.target as Node)) {
 						props.onClose();
 					}
 				};
 				requestAnimationFrame(() => {
-					document.addEventListener("mousedown", handler);
+					if (active) document.addEventListener("mousedown", handler);
 				});
-				onCleanup(() => document.removeEventListener("mousedown", handler));
+				onCleanup(() => {
+					active = false;
+					document.removeEventListener("mousedown", handler);
+				});
 			},
 		),
 	);
