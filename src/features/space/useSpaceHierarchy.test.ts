@@ -355,4 +355,187 @@ describe("useSpaceHierarchy", () => {
 			expect(hierarchy.joinState("!room:x")).toBe("idle");
 		});
 	});
+
+	it("loads additional pages via loadMore", async () => {
+		const { mockClient } = setupMockClient();
+		mockClient.getRoomHierarchy.mockResolvedValueOnce({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!room1:x"),
+			],
+			next_batch: "page2",
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			expect(hierarchy.discoverableRooms).toHaveLength(1);
+			expect(hierarchy.truncated).toBe(true);
+
+			// Set up page 2 response
+			mockClient.getRoomHierarchy.mockResolvedValueOnce({
+				rooms: [makeHierarchyRoom("!room2:x")],
+			});
+
+			await hierarchy.loadMore();
+			await flushPromises();
+
+			expect(hierarchy.discoverableRooms).toHaveLength(2);
+			expect(hierarchy.discoverableRooms[0].roomId).toBe("!room1:x");
+			expect(hierarchy.discoverableRooms[1].roomId).toBe("!room2:x");
+			expect(hierarchy.truncated).toBe(false);
+
+			// Verify pagination token was passed
+			expect(mockClient.getRoomHierarchy).toHaveBeenCalledWith(
+				"!space:x",
+				100,
+				1,
+				false,
+				"page2",
+			);
+		});
+	});
+
+	it("tracks loadingMore state during pagination", async () => {
+		const { mockClient } = setupMockClient();
+		mockClient.getRoomHierarchy.mockResolvedValueOnce({
+			rooms: [makeHierarchyRoom("!space:x", { room_type: "m.space" })],
+			next_batch: "page2",
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			expect(hierarchy.loadingMore).toBe(false);
+
+			let resolvePage2 = () => {};
+			mockClient.getRoomHierarchy.mockReturnValueOnce(
+				new Promise((r) => {
+					resolvePage2 = () => r({ rooms: [makeHierarchyRoom("!room:x")] });
+				}),
+			);
+
+			const loadDone = hierarchy.loadMore();
+			await flushPromises();
+			expect(hierarchy.loadingMore).toBe(true);
+
+			resolvePage2();
+			await loadDone;
+			await flushPromises();
+			expect(hierarchy.loadingMore).toBe(false);
+		});
+	});
+
+	it("resets pagination state on space switch", async () => {
+		const { mockClient } = setupMockClient();
+		mockClient.getRoomHierarchy.mockResolvedValueOnce({
+			rooms: [
+				makeHierarchyRoom("!space1:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!room1:x"),
+			],
+			next_batch: "page2",
+		});
+
+		await withRoot(async () => {
+			const [spaceId, setSpaceId] = createSignal<string | undefined>(
+				"!space1:x",
+			);
+			const hierarchy = useSpaceHierarchy(spaceId);
+			await flushPromises();
+
+			expect(hierarchy.discoverableRooms).toHaveLength(1);
+			expect(hierarchy.truncated).toBe(true);
+
+			// Load page 2
+			mockClient.getRoomHierarchy.mockResolvedValueOnce({
+				rooms: [makeHierarchyRoom("!room2:x")],
+			});
+			await hierarchy.loadMore();
+			await flushPromises();
+			expect(hierarchy.discoverableRooms).toHaveLength(2);
+
+			// Switch space — pagination should reset
+			mockClient.getRoomHierarchy.mockResolvedValueOnce({
+				rooms: [
+					makeHierarchyRoom("!space2:x", { room_type: "m.space" }),
+					makeHierarchyRoom("!room3:x"),
+				],
+			});
+			setSpaceId("!space2:x");
+			await flushPromises();
+
+			// Only the new space's rooms, no carryover
+			expect(hierarchy.discoverableRooms).toHaveLength(1);
+			expect(hierarchy.discoverableRooms[0].roomId).toBe("!room3:x");
+			expect(hierarchy.truncated).toBe(false);
+		});
+	});
+
+	it("guards loadMore against stale space switch", async () => {
+		const { mockClient } = setupMockClient();
+		mockClient.getRoomHierarchy.mockResolvedValueOnce({
+			rooms: [makeHierarchyRoom("!space:x", { room_type: "m.space" })],
+			next_batch: "page2",
+		});
+
+		await withRoot(async () => {
+			const [spaceId, setSpaceId] = createSignal<string | undefined>(
+				"!space:x",
+			);
+			const hierarchy = useSpaceHierarchy(spaceId);
+			await flushPromises();
+
+			// Start loading more
+			let resolvePage2 = () => {};
+			mockClient.getRoomHierarchy.mockReturnValueOnce(
+				new Promise((r) => {
+					resolvePage2 = () => r({ rooms: [makeHierarchyRoom("!room:x")] });
+				}),
+			);
+			const loadDone = hierarchy.loadMore();
+			await flushPromises();
+
+			// Switch space before loadMore resolves
+			mockClient.getRoomHierarchy.mockResolvedValueOnce({
+				rooms: [makeHierarchyRoom("!space2:x", { room_type: "m.space" })],
+			});
+			setSpaceId("!space2:x");
+			await flushPromises();
+
+			// Resolve stale loadMore
+			resolvePage2();
+			await loadDone;
+			await flushPromises();
+
+			// Should NOT have added rooms from stale page
+			expect(hierarchy.discoverableRooms).toHaveLength(0);
+		});
+	});
+
+	it("resets loadingMore after loadMore error", async () => {
+		const { mockClient } = setupMockClient();
+		mockClient.getRoomHierarchy.mockResolvedValueOnce({
+			rooms: [makeHierarchyRoom("!space:x", { room_type: "m.space" })],
+			next_batch: "page2",
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			// Page 2 fails
+			mockClient.getRoomHierarchy.mockRejectedValueOnce(
+				new Error("Server error"),
+			);
+
+			await hierarchy.loadMore();
+			await flushPromises();
+
+			// loadingMore should be reset, truncated still true (can retry)
+			expect(hierarchy.loadingMore).toBe(false);
+			expect(hierarchy.truncated).toBe(true);
+		});
+	});
 });

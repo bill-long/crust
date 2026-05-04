@@ -245,9 +245,16 @@ const RoomList: Component = () => {
 					</Show>
 
 					<Show when={!hierarchy.loading && hierarchy.truncated}>
-						<p class="px-3 py-2 text-center text-[10px] text-neutral-600">
-							Some rooms not shown
-						</p>
+						<div class="flex justify-center py-2">
+							<button
+								type="button"
+								onClick={() => hierarchy.loadMore()}
+								disabled={hierarchy.loadingMore}
+								class="rounded px-3 py-1 text-[10px] text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-wait disabled:opacity-50"
+							>
+								{hierarchy.loadingMore ? "Loading…" : "Load more rooms"}
+							</button>
+						</div>
 					</Show>
 
 					<Show when={!hierarchy.loading && hierarchy.error}>
