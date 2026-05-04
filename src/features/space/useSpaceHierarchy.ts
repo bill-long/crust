@@ -73,18 +73,28 @@ export function useSpaceHierarchy(
 	);
 	const [nextBatch, setNextBatch] = createSignal<string | null>(null);
 	const [loadingMore, setLoadingMore] = createSignal(false);
+	// Generation counter — increments on every space change. Async
+	// operations capture the current generation and bail if it changed
+	// (handles A→B→A where spaceId matches but the session is different).
+	let paginationGeneration = 0;
 
-	// Sync nextBatch from initial page and reset additional rooms
+	// Reset all pagination and join state when space changes
 	createEffect(() => {
-		if (hierarchy.error) {
-			setLoadingMore(false);
-			return;
-		}
+		spaceId();
+		paginationGeneration++;
+		setLoadingMore(false);
+		setAdditionalRooms([]);
+		setNextBatch(null);
+		setJoinStates({});
+	});
+
+	// Sync nextBatch from initial page when data arrives
+	createEffect(() => {
+		if (hierarchy.error) return;
 		const data = hierarchy();
 		if (data) {
 			setNextBatch(data.nextBatch);
 			setAdditionalRooms([]);
-			setLoadingMore(false);
 		}
 	});
 
@@ -110,12 +120,6 @@ export function useSpaceHierarchy(
 		{},
 	);
 
-	// Clear join states when navigating to a different space
-	createEffect(() => {
-		spaceId();
-		setJoinStates({});
-	});
-
 	const joinState = (roomId: string): JoinState =>
 		joinStates()[roomId] ?? "idle";
 
@@ -124,6 +128,7 @@ export function useSpaceHierarchy(
 		const sid = spaceId();
 		if (!token || !sid || loadingMore()) return;
 
+		const gen = paginationGeneration;
 		setLoadingMore(true);
 		try {
 			const result = await client.getRoomHierarchy(
@@ -133,16 +138,15 @@ export function useSpaceHierarchy(
 				false,
 				token,
 			);
-			// Stale guard — space may have changed during fetch
-			if (spaceId() !== sid) return;
+			// Generation guard — catches A→B→A where spaceId matches
+			// but paginationGeneration has advanced.
+			if (paginationGeneration !== gen) return;
 			setAdditionalRooms((prev) => [...prev, ...result.rooms]);
 			setNextBatch(result.next_batch ?? null);
 		} catch (err) {
 			console.error("Failed to load more hierarchy rooms:", err);
 		} finally {
-			// Only clear if still on the same space — a stale request's
-			// finally must not clobber the new space's loadingMore state.
-			if (spaceId() === sid) {
+			if (paginationGeneration === gen) {
 				setLoadingMore(false);
 			}
 		}
