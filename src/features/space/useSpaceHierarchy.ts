@@ -71,7 +71,9 @@ export function useSpaceHierarchy(
 	const [additionalRooms, setAdditionalRooms] = createSignal<HierarchyRoom[]>(
 		[],
 	);
-	const [nextBatch, setNextBatch] = createSignal<string | null>(null);
+	const [nextBatch, setNextBatch] = createSignal<string | null | undefined>(
+		undefined,
+	);
 	const [loadingMore, setLoadingMore] = createSignal(false);
 	const [joinStates, setJoinStates] = createSignal<Record<string, JoinState>>(
 		{},
@@ -87,7 +89,7 @@ export function useSpaceHierarchy(
 		paginationGeneration++;
 		setLoadingMore(false);
 		setAdditionalRooms([]);
-		setNextBatch(null);
+		setNextBatch(undefined);
 		setJoinStates({});
 	});
 
@@ -199,7 +201,11 @@ export function useSpaceHierarchy(
 		},
 		get truncated() {
 			if (hierarchy.error) return false;
-			return !!nextBatch();
+			// undefined = not yet synced from resource; derive directly.
+			// string|null = set by effect or loadMore; use signal value.
+			const nb = nextBatch();
+			if (nb !== undefined) return !!nb;
+			return !!hierarchy()?.nextBatch;
 		},
 		loadMore,
 		joinRoom,
