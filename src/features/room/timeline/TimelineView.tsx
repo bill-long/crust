@@ -366,6 +366,15 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				}
 			});
 		}
+
+		// Load newer messages when scrolled near the bottom
+		if (distFromBottom < 200 && canLoadNewer() && !loadingNewer()) {
+			// Clear stale atBottom so the followingLive and read-receipt
+			// effects don't fire prematurely when canLoadNewer flips to
+			// false on the final page. Recomputed on next scroll event.
+			setAtBottom(false);
+			loadNewerMessages();
+		}
 	};
 
 	const onReact = async (eventId: string, key: string): Promise<void> => {
