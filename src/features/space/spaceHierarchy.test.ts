@@ -338,7 +338,27 @@ describe("filterDiscoverableRooms", () => {
 		expect(result[0].canJoin).toBe(false);
 	});
 
-	it("sets canJoin=true for restricted rooms", () => {
+	it("sets canJoin=true for restricted rooms when joined to parent space", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!restricted:example.com",
+				join_rule: "restricted",
+			}),
+		];
+		const summaries: SummariesStore = {
+			[SPACE_ID]: makeSummary(SPACE_ID, "join", true),
+		};
+		const result = filterDiscoverableRooms(
+			rooms,
+			SPACE_ID,
+			summaries,
+			mockMxcToHttp,
+		);
+		expect(result[0].canJoin).toBe(true);
+	});
+
+	it("sets canJoin=false for restricted rooms when not joined to parent space", () => {
 		const rooms: HierarchyRoom[] = [
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
@@ -347,7 +367,59 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
+		expect(result[0].canJoin).toBe(false);
+	});
+
+	it("sets canJoin=false for restricted rooms when only invited to parent space", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!restricted:example.com",
+				join_rule: "restricted",
+			}),
+		];
+		const summaries: SummariesStore = {
+			[SPACE_ID]: makeSummary(SPACE_ID, "invite", true),
+		};
+		const result = filterDiscoverableRooms(
+			rooms,
+			SPACE_ID,
+			summaries,
+			mockMxcToHttp,
+		);
+		expect(result[0].canJoin).toBe(false);
+	});
+
+	it("sets canJoin=true for knock_restricted rooms when joined to parent space", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!knockrestricted:example.com",
+				join_rule: "knock_restricted" as string,
+			}),
+		];
+		const summaries: SummariesStore = {
+			[SPACE_ID]: makeSummary(SPACE_ID, "join", true),
+		};
+		const result = filterDiscoverableRooms(
+			rooms,
+			SPACE_ID,
+			summaries,
+			mockMxcToHttp,
+		);
 		expect(result[0].canJoin).toBe(true);
+	});
+
+	it("sets canJoin=false for knock_restricted rooms when not joined to parent space", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!knockrestricted:example.com",
+				join_rule: "knock_restricted" as string,
+			}),
+		];
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
+		expect(result[0].canJoin).toBe(false);
 	});
 
 	it("sets canJoin=false for invite-only rooms", () => {
