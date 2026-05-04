@@ -121,7 +121,7 @@ const LoginPage: Component = () => {
 							value={homeserver()}
 							onInput={(e) => setHomeserver(e.currentTarget.value)}
 							placeholder="no.strange.pizza"
-							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
+							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
 							required
 						/>
 					</div>
@@ -136,7 +136,7 @@ const LoginPage: Component = () => {
 							onInput={(e) => setUsername(e.currentTarget.value)}
 							placeholder="username"
 							autocomplete="username"
-							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
+							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
 							required
 						/>
 					</div>
@@ -151,7 +151,7 @@ const LoginPage: Component = () => {
 							onInput={(e) => setPassword(e.currentTarget.value)}
 							placeholder="••••••••"
 							autocomplete="current-password"
-							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
+							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
 							required
 						/>
 					</div>

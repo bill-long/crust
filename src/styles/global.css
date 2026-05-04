@@ -71,6 +71,26 @@
 	--message-code-bg: rgb(255 255 255 / 0.06);
 }
 
+/* ─── Global Focus Ring ─── */
+@layer base {
+	:focus-visible {
+		outline: 2px solid var(--color-border-focus);
+		outline-offset: 2px;
+	}
+}
+
+/* ─── Reduced Motion ─── */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
 /* Custom emoji inline in message text */
 .emoji-inline {
 	display: inline;
