@@ -161,7 +161,9 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 					<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
 						<div class="flex flex-col items-center gap-4">
 							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
-							<p class="text-sm text-text-secondary">Setting up cross-signing…</p>
+							<p class="text-sm text-text-secondary">
+								Setting up cross-signing…
+							</p>
 						</div>
 					</div>
 				</Match>
@@ -194,7 +196,9 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 
 				<Match when={step() === "error"}>
 					<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
-						<h2 class="mb-2 text-lg font-semibold text-text-primary">Setup failed</h2>
+						<h2 class="mb-2 text-lg font-semibold text-text-primary">
+							Setup failed
+						</h2>
 						<p class="mb-4 text-sm text-danger-text-bright">{errorMessage()}</p>
 						<div class="flex justify-end gap-2">
 							<button

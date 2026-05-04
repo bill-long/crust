@@ -109,7 +109,9 @@ const LoginPage: Component = () => {
 	return (
 		<div class="flex min-h-screen items-center justify-center bg-surface-0 p-4">
 			<div class="w-full max-w-sm">
-				<h1 class="mb-8 text-center text-3xl font-bold text-text-primary">Crust</h1>
+				<h1 class="mb-8 text-center text-3xl font-bold text-text-primary">
+					Crust
+				</h1>
 				<form onSubmit={handleSubmit} class="space-y-4">
 					<div>
 						<label for="homeserver" class="mb-1 block text-sm text-text-muted">

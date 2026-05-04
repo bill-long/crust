@@ -456,7 +456,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		<main class="flex h-full flex-col">
 			{/* Room header */}
 			<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
-				<span class="text-sm font-semibold text-text-emphasis">{roomName()}</span>
+				<span class="text-sm font-semibold text-text-emphasis">
+					{roomName()}
+				</span>
 				<div class="flex items-center gap-1">
 					<button
 						type="button"

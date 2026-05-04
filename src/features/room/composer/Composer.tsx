@@ -624,7 +624,9 @@ const Composer: Component<{
 							</div>
 							<div class="min-w-0 flex-1">
 								<span
-									class={highlighted ? "text-text-primary" : "text-text-secondary"}
+									class={
+										highlighted ? "text-text-primary" : "text-text-secondary"
+									}
 								>
 									{member.name?.trim() || member.userId}
 								</span>

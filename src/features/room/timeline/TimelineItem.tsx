@@ -2,7 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
-import { InlineGif, extractGifUrl } from "../../gif/InlineGif";
+import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
 import type { TimelineEvent } from "./useTimeline";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -67,7 +67,9 @@ const ReactionPills: Component<{
 							aria-pressed={isMine()}
 						>
 							{renderReactionKey(key)}
-							<span class={isMine() ? "text-accent-text" : "text-text-disabled"}>
+							<span
+								class={isMine() ? "text-accent-text" : "text-text-disabled"}
+							>
 								{count}
 							</span>
 						</button>

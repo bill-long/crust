@@ -55,7 +55,11 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 					when={props.device.isVerified}
 					fallback={
 						<>
-							<span class="text-warning-text" role="img" aria-label="Unverified">
+							<span
+								class="text-warning-text"
+								role="img"
+								aria-label="Unverified"
+							>
 								⚠
 							</span>
 							<Show when={!props.device.isCurrentDevice && props.onVerify}>

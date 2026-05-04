@@ -7,7 +7,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import { DeviceItem, type DeviceInfo } from "./DeviceItem";
+import { type DeviceInfo, DeviceItem } from "./DeviceItem";
 
 interface DeviceListProps {
 	onVerifyDevice?: (deviceId: string) => void;

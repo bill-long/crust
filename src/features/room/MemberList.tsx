@@ -1,12 +1,5 @@
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import {
-	type Component,
-	For,
-	Match,
-	Show,
-	Switch,
-	createMemo,
-} from "solid-js";
+import { type Component, createMemo, For, Match, Show, Switch } from "solid-js";
 import { useClient } from "../../client/client";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
