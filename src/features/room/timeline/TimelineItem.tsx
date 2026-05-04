@@ -223,7 +223,10 @@ const TimelineItem: Component<{
 				when={props.showHeader}
 				fallback={
 					<div class="flex w-8 shrink-0 items-start justify-center">
-						<span class="text-[10px] text-text-faint opacity-0 group-hover:opacity-100 transition-opacity select-none">
+						<span
+							class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+							aria-hidden="true"
+						>
 							{formatTime(ev.timestamp)}
 						</span>
 					</div>
@@ -237,7 +240,14 @@ const TimelineItem: Component<{
 
 			<div class="min-w-0 flex-1">
 				{/* Header: sender + time (only for first message in group) */}
-				<Show when={props.showHeader}>
+				<Show
+					when={props.showHeader}
+					fallback={
+						<span class="sr-only">
+							{ev.senderName.trim() || "Unknown"} at {formatTime(ev.timestamp)}
+						</span>
+					}
+				>
 					<div class="flex items-baseline gap-2">
 						<span class="text-sm font-semibold text-text-emphasis">
 							{ev.senderName.trim() || "Unknown"}
