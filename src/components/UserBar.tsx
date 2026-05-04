@@ -203,21 +203,24 @@ const SettingsPopover: Component<{
 	needsCryptoAttention: boolean;
 	cryptoLabel: string;
 	onCryptoClick: () => void;
+	containerRef?: HTMLDivElement;
 }> = (props) => {
 	let ref: HTMLDivElement | undefined;
 
 	// Persistent outside-click listener while open.
-	// Deferred by one frame so the opening click doesn't immediately close.
+	// Checks against containerRef (includes trigger button) to avoid toggle race.
 	createEffect(
 		on(
 			() => props.open,
 			(open) => {
 				if (!open) return;
 				let active = true;
+				const container = props.containerRef;
 				const handler = (e: MouseEvent): void => {
-					if (ref && !ref.contains(e.target as Node)) {
-						props.onClose();
-					}
+					const target = e.target as Node;
+					if (container?.contains(target)) return;
+					if (ref?.contains(target)) return;
+					props.onClose();
 				};
 				requestAnimationFrame(() => {
 					if (active) document.addEventListener("mousedown", handler);
@@ -284,6 +287,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 	const [micVolume, setMicVolume] = createSignal(100);
 	const [outputVolume, setOutputVolume] = createSignal(100);
 	const [settingsOpen, setSettingsOpen] = createSignal(false);
+	let settingsContainerRef: HTMLDivElement | undefined;
 
 	return (
 		<div class="flex h-[52px] shrink-0 items-center gap-1 border-t border-border-subtle bg-surface-1 px-2">
@@ -367,7 +371,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 			/>
 
 			{/* Settings gear */}
-			<div class="relative">
+			<div class="relative" ref={(el) => (settingsContainerRef = el)}>
 				<button
 					type="button"
 					onClick={() => setSettingsOpen((v) => !v)}
@@ -385,6 +389,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 					needsCryptoAttention={props.needsCryptoAttention}
 					cryptoLabel={props.cryptoLabel}
 					onCryptoClick={props.onCryptoClick}
+					containerRef={settingsContainerRef}
 				/>
 			</div>
 		</div>
