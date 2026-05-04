@@ -45,6 +45,13 @@ export function filterDiscoverableRooms(
 			// The SDK types join_rule as only Public | Knock, but the API
 			// can return any JoinRule value including "restricted".
 			const rule = room.join_rule as string | undefined;
+			// Restricted/knock_restricted rooms require membership in an
+			// allowed room (typically the parent space). The hierarchy API
+			// doesn't expose the allow conditions, so we use parent-space
+			// membership as a heuristic. If the join fails, the error
+			// state in useSpaceHierarchy handles it gracefully.
+			const isRestricted = rule === "restricted" || rule === "knock_restricted";
+			const isSpaceMember = summaries[spaceId]?.membership === "join";
 			return {
 				roomId: room.room_id,
 				name: room.name?.trim() || room.canonical_alias || room.room_id,
@@ -52,7 +59,7 @@ export function filterDiscoverableRooms(
 				topic: room.topic?.trim() || null,
 				memberCount: room.num_joined_members,
 				joinRule: rule ?? null,
-				canJoin: rule === "public" || rule === "restricted",
+				canJoin: rule === "public" || (isRestricted && isSpaceMember),
 			};
 		});
 }
