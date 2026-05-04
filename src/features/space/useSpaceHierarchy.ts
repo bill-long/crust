@@ -73,6 +73,9 @@ export function useSpaceHierarchy(
 	);
 	const [nextBatch, setNextBatch] = createSignal<string | null>(null);
 	const [loadingMore, setLoadingMore] = createSignal(false);
+	const [joinStates, setJoinStates] = createSignal<Record<string, JoinState>>(
+		{},
+	);
 	// Generation counter — increments on every space change. Async
 	// operations capture the current generation and bail if it changed
 	// (handles A→B→A where spaceId matches but the session is different).
@@ -115,10 +118,6 @@ export function useSpaceHierarchy(
 		if (!sid) return [];
 		return filterDiscoverableRooms(rooms, sid, summaries, mxcToHttp);
 	});
-
-	const [joinStates, setJoinStates] = createSignal<Record<string, JoinState>>(
-		{},
-	);
 
 	const joinState = (roomId: string): JoinState =>
 		joinStates()[roomId] ?? "idle";
