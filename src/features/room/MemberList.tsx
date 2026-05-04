@@ -131,9 +131,10 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 												ref={(el) => virtualizer.measureElement(el)}
 												style={{
 													position: "absolute",
-													top: `${vItem.start}px`,
+													top: 0,
 													left: 0,
 													width: "100%",
+													transform: `translateY(${vItem.start}px)`,
 												}}
 											>
 												<Switch>
