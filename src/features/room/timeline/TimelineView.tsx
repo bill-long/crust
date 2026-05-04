@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { EventType, ReceiptType, RelationType, RoomEvent } from "matrix-js-sdk";
 import {
@@ -11,6 +11,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { useDecodedParams } from "../../../app/useDecodedParams";
 import { useClient } from "../../../client/client";
 import { membersPaneVisible, toggleMembersPane } from "../../../stores/layout";
 import EmojiPicker from "../../emoji/EmojiPicker";
@@ -32,7 +33,7 @@ interface ReadReceiptEntry {
 const TimelineView: Component<{ roomId: string }> = (props) => {
 	const { client, summaries } = useClient();
 	const navigate = useNavigate();
-	const params = useParams<{ spaceId?: string }>();
+	const params = useDecodedParams<{ spaceId?: string }>();
 	const {
 		events,
 		loading,
@@ -196,9 +197,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		if (canLoadNewer()) return;
 		const lastEvent = events[events.length - 1];
 		if (!lastEvent || lastEvent.eventId === lastSentReceiptEventId) return;
-		const matrixEvent = getSourceEvent(lastEvent.eventId);
-		if (!matrixEvent) return;
 		const eventId = lastEvent.eventId;
+		// Skip local echo events — their temporary ~-prefixed IDs
+		// are rejected by the server with 400.
+		if (!eventId.startsWith("$")) return;
+		const matrixEvent = getSourceEvent(eventId);
+		if (!matrixEvent) return;
 		client
 			.sendReadReceipt(matrixEvent, ReceiptType.Read)
 			.then(() => {
@@ -209,10 +213,11 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			});
 	}
 
-	// Send receipt when new events arrive while at bottom
+	// Send receipt when new events arrive or last event ID changes
+	// (local echo replacement triggers the ID change without a length change)
 	createEffect(
 		on(
-			() => events.length,
+			() => events[events.length - 1]?.eventId,
 			() => sendReadReceipt(),
 		),
 	);

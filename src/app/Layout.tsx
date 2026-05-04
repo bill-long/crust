@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { type Component, Show } from "solid-js";
 import { useClient } from "../client/client";
 import { ResizableLayout } from "../components/ResizableLayout";
@@ -8,10 +8,11 @@ import TimelineView from "../features/room/timeline/TimelineView";
 import SpacesSidebar from "../features/space/SpacesSidebar";
 import { membersPaneVisible } from "../stores/layout";
 import { clearSession } from "../stores/session";
+import { useDecodedParams } from "./useDecodedParams";
 
 const Layout: Component = () => {
 	const { client, syncState } = useClient();
-	const params = useParams<{ roomId?: string }>();
+	const params = useDecodedParams<{ roomId?: string }>();
 	const navigate = useNavigate();
 
 	const handleLogout = async (): Promise<void> => {
