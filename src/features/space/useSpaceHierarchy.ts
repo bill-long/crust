@@ -137,7 +137,11 @@ export function useSpaceHierarchy(
 		} catch (err) {
 			console.error("Failed to load more hierarchy rooms:", err);
 		} finally {
-			setLoadingMore(false);
+			// Only clear if still on the same space — a stale request's
+			// finally must not clobber the new space's loadingMore state.
+			if (spaceId() === sid) {
+				setLoadingMore(false);
+			}
 		}
 	}
 
