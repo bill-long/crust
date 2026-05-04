@@ -549,21 +549,21 @@ const Composer: Component<{
 	};
 
 	return (
-		<div class="border-t border-neutral-800 px-4 py-3">
+		<div class="border-t border-border-subtle px-4 py-3">
 			<Show when={props.editingEvent}>
 				{(editing) => (
-					<div class="mb-2 flex items-center gap-2 rounded bg-neutral-800/50 px-3 py-1.5">
-						<div class="min-w-0 flex-1 border-l-2 border-blue-500 pl-2">
-							<p class="truncate text-xs font-medium text-blue-400">
+					<div class="mb-2 flex items-center gap-2 rounded bg-surface-2/50 px-3 py-1.5">
+						<div class="min-w-0 flex-1 border-l-2 border-info-border pl-2">
+							<p class="truncate text-xs font-medium text-info-text">
 								Editing message
 							</p>
-							<p class="truncate text-xs text-neutral-500">
+							<p class="truncate text-xs text-text-disabled">
 								{editing().body.trim() || "Message"}
 							</p>
 						</div>
 						<button
 							type="button"
-							class="shrink-0 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+							class="shrink-0 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
 							onClick={() => {
 								stopTyping();
 								setText("");
@@ -581,18 +581,18 @@ const Composer: Component<{
 			</Show>
 			<Show when={!props.editingEvent && props.replyTo}>
 				{(reply) => (
-					<div class="mb-2 flex items-center gap-2 rounded bg-neutral-800/50 px-3 py-1.5">
-						<div class="min-w-0 flex-1 border-l-2 border-pink-500 pl-2">
-							<p class="truncate text-xs font-medium text-neutral-400">
+					<div class="mb-2 flex items-center gap-2 rounded bg-surface-2/50 px-3 py-1.5">
+						<div class="min-w-0 flex-1 border-l-2 border-accent-hover pl-2">
+							<p class="truncate text-xs font-medium text-text-muted">
 								{reply().senderName.trim() || "Unknown"}
 							</p>
-							<p class="truncate text-xs text-neutral-500">
+							<p class="truncate text-xs text-text-disabled">
 								{reply().body.trim() || "Message"}
 							</p>
 						</div>
 						<button
 							type="button"
-							class="shrink-0 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+							class="shrink-0 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
 							onClick={() => props.onCancelReply?.()}
 							aria-label="Cancel reply"
 						>
@@ -603,7 +603,7 @@ const Composer: Component<{
 			</Show>
 			<Show when={error()}>
 				<div
-					class="mb-2 rounded bg-red-900/30 px-3 py-1.5 text-xs text-red-400"
+					class="mb-2 rounded bg-danger-bg/30 px-3 py-1.5 text-xs text-danger-text"
 					role="alert"
 				>
 					{error()}
@@ -619,16 +619,16 @@ const Composer: Component<{
 					filterFn={(_item, _q) => true}
 					renderItem={(member, highlighted) => (
 						<div class="flex items-center gap-2">
-							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-[10px] font-semibold text-neutral-300">
+							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">
 								{((member.name ?? "").trim() || "?").charAt(0).toUpperCase()}
 							</div>
 							<div class="min-w-0 flex-1">
 								<span
-									class={highlighted ? "text-neutral-100" : "text-neutral-300"}
+									class={highlighted ? "text-text-primary" : "text-text-secondary"}
 								>
 									{member.name?.trim() || member.userId}
 								</span>
-								<span class="ml-1 text-xs text-neutral-600">
+								<span class="ml-1 text-xs text-text-faint">
 									{member.userId}
 								</span>
 							</div>
@@ -665,7 +665,7 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class="w-full resize-none rounded-lg bg-neutral-800 px-4 py-2.5 pr-20 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-20 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
 					rows={1}
 				/>
 				{/* GIF picker button (only when GIF search is available and not editing) */}
@@ -675,7 +675,7 @@ const Composer: Component<{
 							gifButtonRef = el;
 						}}
 						type="button"
-						class="absolute bottom-2.5 right-9 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+						class="absolute bottom-2.5 right-9 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
 						onClick={() => {
 							setGifPickerOpen((v) => !v);
 							setEmojiPickerOpen(false);
@@ -692,7 +692,7 @@ const Composer: Component<{
 						emojiButtonRef = el;
 					}}
 					type="button"
-					class="absolute bottom-2.5 right-2 rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+					class="absolute bottom-2.5 right-2 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
 					onClick={() => {
 						setEmojiPickerOpen((v) => !v);
 						setGifPickerOpen(false);

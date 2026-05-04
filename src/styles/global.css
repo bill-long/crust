@@ -1,5 +1,76 @@
 @import "tailwindcss";
 
+/* ─── Design Tokens ─── */
+@theme {
+	/* Surface hierarchy (dark → light) */
+	--color-surface-0: #0a0a0a;
+	--color-surface-1: #171717;
+	--color-surface-2: #262626;
+	--color-surface-3: #404040;
+	--color-surface-4: #525252;
+
+	/* Text */
+	--color-text-primary: #ffffff;
+	--color-text-emphasis: #e5e5e5;
+	--color-text-secondary: #d4d4d4;
+	--color-text-muted: #a3a3a3;
+	--color-text-disabled: #737373;
+	--color-text-faint: #525252;
+
+	/* Borders */
+	--color-border-subtle: #262626;
+	--color-border-default: #404040;
+	--color-border-strong: #525252;
+	--color-border-focus: #ec4899;
+
+	/* Accent (pink) */
+	--color-accent: #db2777;
+	--color-accent-hover: #ec4899;
+	--color-accent-text: #f472b6;
+	--color-accent-text-bright: #f9a8d4;
+	--color-accent-foreground: #ffffff;
+	--color-accent-bg: #831843;
+
+	/* Success (green) */
+	--color-success: #15803d;
+	--color-success-hover: #16a34a;
+	--color-success-text: #4ade80;
+	--color-success-foreground: #ffffff;
+	--color-success-bg: #14532d;
+
+	/* Warning (amber) */
+	--color-warning: #b45309;
+	--color-warning-hover: #d97706;
+	--color-warning-text: #fbbf24;
+	--color-warning-text-bright: #fde68a;
+	--color-warning-foreground: #ffffff;
+	--color-warning-border: #92400e;
+	--color-warning-bg: #451a03;
+
+	/* Danger (red) */
+	--color-danger: #ef4444;
+	--color-danger-strong: #991b1b;
+	--color-danger-text: #f87171;
+	--color-danger-text-muted: #b91c1c;
+	--color-danger-text-bright: #fca5a5;
+	--color-danger-foreground: #ffffff;
+	--color-danger-bg: #7f1d1d;
+
+	/* Info (blue) */
+	--color-info-text: #60a5fa;
+	--color-info-border: #3b82f6;
+
+	/* Mention/highlight */
+	--color-mention-bg: #831843;
+
+	/* Indicators (badges, dots) */
+	--color-indicator: #737373;
+}
+
+:root {
+	--message-code-bg: rgb(255 255 255 / 0.06);
+}
+
 /* Custom emoji inline in message text */
 .emoji-inline {
 	display: inline;
@@ -12,7 +83,7 @@
 
 /* Message body HTML formatting */
 .message-body a {
-	color: #f472b6; /* pink-400 */
+	color: var(--color-accent-text);
 	text-decoration: underline;
 	text-decoration-color: transparent;
 	transition: text-decoration-color 150ms;
@@ -23,14 +94,14 @@
 .message-body code {
 	padding: 0.1em 0.3em;
 	border-radius: 0.25rem;
-	background: rgba(255, 255, 255, 0.06);
+	background: var(--message-code-bg);
 	font-size: 0.85em;
 }
 .message-body pre {
 	padding: 0.5rem 0.75rem;
 	margin: 0.25rem 0;
 	border-radius: 0.375rem;
-	background: rgba(255, 255, 255, 0.06);
+	background: var(--message-code-bg);
 	overflow-x: auto;
 }
 .message-body pre code {
@@ -38,17 +109,17 @@
 	background: none;
 }
 .message-body blockquote {
-	border-left: 3px solid #525252; /* neutral-600 */
+	border-left: 3px solid var(--color-text-faint);
 	padding-left: 0.75rem;
 	margin: 0.25rem 0;
-	color: #a3a3a3; /* neutral-400 */
+	color: var(--color-text-muted);
 }
 .message-body mx-reply {
 	display: block;
-	border-left: 3px solid #525252;
+	border-left: 3px solid var(--color-text-faint);
 	padding-left: 0.75rem;
 	margin-bottom: 0.25rem;
-	color: #a3a3a3;
+	color: var(--color-text-muted);
 	font-size: 0.85em;
 }
 .message-body mx-reply blockquote {

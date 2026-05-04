@@ -59,15 +59,15 @@ const ReactionPills: Component<{
 							type="button"
 							class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors ${
 								isMine()
-									? "bg-pink-900/40 text-pink-300 ring-1 ring-pink-500/50"
-									: "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+									? "bg-mention-bg/40 text-accent-text-bright ring-1 ring-accent-hover/50"
+									: "bg-surface-2 text-text-secondary hover:bg-surface-3"
 							}`}
 							onClick={() => props.onReact(key)}
 							aria-label={`${reactionLabel(key)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
 							aria-pressed={isMine()}
 						>
 							{renderReactionKey(key)}
-							<span class={isMine() ? "text-pink-400" : "text-neutral-500"}>
+							<span class={isMine() ? "text-accent-text" : "text-text-disabled"}>
 								{count}
 							</span>
 						</button>
@@ -76,7 +76,7 @@ const ReactionPills: Component<{
 			</For>
 			<button
 				type="button"
-				class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-neutral-800 text-xs text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-neutral-200"
+				class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface-2 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis"
 				onClick={() => setShowPicker((v) => !v)}
 				onKeyDown={(e) => {
 					if (e.key === "Escape" && showPicker()) setShowPicker(false);
@@ -100,7 +100,7 @@ const ReactionPills: Component<{
 						{(emoji) => (
 							<button
 								type="button"
-								class="rounded px-1 py-0.5 text-sm transition-colors hover:bg-neutral-700"
+								class="rounded px-1 py-0.5 text-sm transition-colors hover:bg-surface-3"
 								onClick={() => {
 									props.onReact(emoji);
 									setShowPicker(false);
@@ -114,7 +114,7 @@ const ReactionPills: Component<{
 					<Show when={props.onOpenFullPicker}>
 						<button
 							type="button"
-							class="rounded px-1 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+							class="rounded px-1 py-0.5 text-xs text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
 							onClick={() => {
 								setShowPicker(false);
 								props.onOpenFullPicker?.();
@@ -165,24 +165,24 @@ const TimelineItem: Component<{
 	const ev = props.event;
 
 	return (
-		<div class="group flex gap-3 px-4 py-1 hover:bg-neutral-900/50">
+		<div class="group flex gap-3 px-4 py-1 hover:bg-surface-1/50">
 			{/* Avatar placeholder */}
-			<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-neutral-700 text-xs font-semibold text-neutral-300">
+			<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
 				{(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
 			</div>
 
 			<div class="min-w-0 flex-1">
 				{/* Header: sender + time + actions */}
 				<div class="flex items-baseline gap-2">
-					<span class="text-sm font-semibold text-neutral-200">
+					<span class="text-sm font-semibold text-text-emphasis">
 						{ev.senderName.trim() || "Unknown"}
 					</span>
-					<span class="text-xs text-neutral-600">
+					<span class="text-xs text-text-faint">
 						{formatTime(ev.timestamp)}
 					</span>
 					<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
 						<span
-							class="text-xs text-green-600"
+							class="text-xs text-success-hover"
 							role="img"
 							aria-label="Encrypted"
 						>
@@ -192,7 +192,7 @@ const TimelineItem: Component<{
 					<span class="ml-auto flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
 						<button
 							type="button"
-							class="rounded px-1.5 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-300"
+							class="rounded px-1.5 py-0.5 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-secondary"
 							onClick={props.onReply}
 							aria-label="Reply"
 						>
@@ -201,7 +201,7 @@ const TimelineItem: Component<{
 						<Show when={props.isOwnMessage && ev.msgtype === "m.text"}>
 							<button
 								type="button"
-								class="rounded px-1.5 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-300"
+								class="rounded px-1.5 py-0.5 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-secondary"
 								onClick={props.onEdit}
 								aria-label="Edit"
 							>
@@ -211,7 +211,7 @@ const TimelineItem: Component<{
 						<Show when={props.isOwnMessage}>
 							<button
 								type="button"
-								class="rounded px-1.5 py-0.5 text-xs text-red-700 transition-colors hover:bg-red-900/30 hover:text-red-400"
+								class="rounded px-1.5 py-0.5 text-xs text-danger-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text"
 								onClick={props.onDelete}
 								aria-label="Delete"
 							>
@@ -225,7 +225,7 @@ const TimelineItem: Component<{
 				<Show
 					when={!ev.isDecryptionFailure}
 					fallback={
-						<p class="text-sm italic text-amber-500/80">
+						<p class="text-sm italic text-warning-text/80">
 							Unable to decrypt this message
 						</p>
 					}
@@ -233,7 +233,7 @@ const TimelineItem: Component<{
 					<Show
 						when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
 						fallback={
-							<p class="text-sm italic text-neutral-500">Decrypting…</p>
+							<p class="text-sm italic text-text-disabled">Decrypting…</p>
 						}
 					>
 						<Show
@@ -245,11 +245,11 @@ const TimelineItem: Component<{
 								<Show
 									when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
 									fallback={
-										<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
+										<p class="whitespace-pre-wrap break-words text-sm text-text-secondary">
 											{ev.body ||
 												(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
 											<Show when={ev.isEdited}>
-												<span class="ml-1 text-xs text-neutral-600">
+												<span class="ml-1 text-xs text-text-faint">
 													(edited)
 												</span>
 											</Show>
@@ -282,7 +282,7 @@ const TimelineItem: Component<{
 										return (
 											<>
 												<Show when={replyPreview}>
-													<div class="mb-1 border-l-2 border-neutral-600 pl-2 text-xs text-neutral-500">
+													<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
 														{replyPreview}
 													</div>
 												</Show>
@@ -292,7 +292,7 @@ const TimelineItem: Component<{
 													onSizeSettled={props.onImageLoad}
 												/>
 												<Show when={ev.isEdited}>
-													<span class="ml-1 text-xs text-neutral-600">
+													<span class="ml-1 text-xs text-text-faint">
 														(edited)
 													</span>
 												</Show>
@@ -328,7 +328,7 @@ const TimelineItem: Component<{
 						<For each={props.readReceipts}>
 							{(receipt) => (
 								<div
-									class="flex h-4 w-4 items-center justify-center rounded-full bg-neutral-700 text-[8px] font-semibold text-neutral-400"
+									class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-muted"
 									title={receipt.displayName}
 									role="img"
 									aria-label={`Read by ${receipt.displayName}`}

@@ -15,15 +15,15 @@ const SpacesSidebar: Component = () => {
 	const spaces = createMemo(() => getSpaces(summaries));
 
 	return (
-		<aside class="flex h-full flex-col items-center gap-1 overflow-y-auto border-r border-neutral-800 bg-neutral-900 py-3">
+		<aside class="flex h-full flex-col items-center gap-1 overflow-y-auto border-r border-border-subtle bg-surface-1 py-3">
 			{/* Home button */}
 			<button
 				type="button"
 				onClick={() => navigate("/home")}
 				class={`flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
 					!params.spaceId
-						? "rounded-xl bg-pink-600 text-white"
-						: "bg-neutral-700 text-neutral-300 hover:rounded-xl hover:bg-neutral-600"
+						? "rounded-xl bg-accent text-text-primary"
+						: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
 				}`}
 				title="Home"
 				aria-label="Home"
@@ -45,7 +45,7 @@ const SpacesSidebar: Component = () => {
 				</svg>
 			</button>
 
-			<div class="mx-auto my-1 h-px w-8 bg-neutral-700" />
+			<div class="mx-auto my-1 h-px w-8 bg-surface-3" />
 
 			{/* Space list */}
 			<For each={spaces()}>
@@ -63,8 +63,8 @@ const SpacesSidebar: Component = () => {
 							}
 							class={`relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
 								isSelected()
-									? "rounded-xl bg-pink-600 text-white"
-									: "bg-neutral-700 text-neutral-300 hover:rounded-xl hover:bg-neutral-600"
+									? "rounded-xl bg-accent text-text-primary"
+									: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
 							}`}
 							title={space.name.trim() || "Unnamed space"}
 							aria-label={space.name.trim() || "Unnamed space"}
@@ -88,8 +88,8 @@ const SpacesSidebar: Component = () => {
 							{/* Unread badge */}
 							<Show when={rollup().unread > 0}>
 								<span
-									class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${
-										rollup().highlight > 0 ? "bg-red-500" : "bg-neutral-500"
+									class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
+										rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
 									}`}
 									role="status"
 									aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}

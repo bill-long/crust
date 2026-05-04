@@ -24,10 +24,10 @@ export const ConfigProvider: ParentComponent = (props) => {
 		<Show
 			when={!config.error}
 			fallback={
-				<div class="flex h-screen items-center justify-center bg-neutral-950">
+				<div class="flex h-screen items-center justify-center bg-surface-0">
 					<div class="text-center">
-						<p class="text-red-400">Failed to load configuration</p>
-						<p class="mt-1 text-sm text-neutral-500">
+						<p class="text-danger-text">Failed to load configuration</p>
+						<p class="mt-1 text-sm text-text-disabled">
 							Check that config.json is accessible and try refreshing.
 						</p>
 					</div>
@@ -37,7 +37,7 @@ export const ConfigProvider: ParentComponent = (props) => {
 			<Show
 				when={config()}
 				fallback={
-					<div class="flex h-screen items-center justify-center bg-neutral-950 text-neutral-400">
+					<div class="flex h-screen items-center justify-center bg-surface-0 text-text-muted">
 						Loading…
 					</div>
 				}

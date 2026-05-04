@@ -68,16 +68,16 @@ const CryptoStatusBanner: Component = () => {
 		<>
 			<Show when={bannerState() !== "hidden" && bannerState() !== "loading"}>
 				<div
-					class="flex items-center justify-between border-b border-amber-800/50 bg-amber-950/40 px-4 py-2"
+					class="flex items-center justify-between border-b border-warning-border/50 bg-warning-bg/40 px-4 py-2"
 					role="status"
 				>
 					<Switch>
 						<Match when={bannerState() === "setup-cross-signing"}>
 							<div class="flex items-center gap-2">
-								<span class="text-amber-400" role="img" aria-label="Warning">
+								<span class="text-warning-text" role="img" aria-label="Warning">
 									⚠
 								</span>
-								<span class="text-sm text-amber-200">
+								<span class="text-sm text-warning-text-bright">
 									Set up secure messaging to verify your devices and protect
 									your messages.
 								</span>
@@ -85,7 +85,7 @@ const CryptoStatusBanner: Component = () => {
 							<button
 								type="button"
 								onClick={() => setShowSetup(true)}
-								class="shrink-0 rounded bg-amber-700 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+								class="shrink-0 rounded bg-warning px-3 py-1 text-sm font-medium text-text-primary transition-colors hover:bg-warning-hover"
 							>
 								Set up
 							</button>
@@ -93,10 +93,10 @@ const CryptoStatusBanner: Component = () => {
 
 						<Match when={bannerState() === "verify-session"}>
 							<div class="flex items-center gap-2">
-								<span class="text-amber-400" role="img" aria-label="Warning">
+								<span class="text-warning-text" role="img" aria-label="Warning">
 									⚠
 								</span>
-								<span class="text-sm text-amber-200">
+								<span class="text-sm text-warning-text-bright">
 									Verify this session to access encrypted messages from your
 									other devices.
 								</span>
@@ -104,7 +104,7 @@ const CryptoStatusBanner: Component = () => {
 							<button
 								type="button"
 								onClick={startSelfVerification}
-								class="shrink-0 rounded bg-amber-700 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+								class="shrink-0 rounded bg-warning px-3 py-1 text-sm font-medium text-text-primary transition-colors hover:bg-warning-hover"
 							>
 								Verify
 							</button>
@@ -112,17 +112,17 @@ const CryptoStatusBanner: Component = () => {
 
 						<Match when={bannerState() === "setup-backup"}>
 							<div class="flex items-center gap-2">
-								<span class="text-amber-400" role="img" aria-label="Warning">
+								<span class="text-warning-text" role="img" aria-label="Warning">
 									⚠
 								</span>
-								<span class="text-sm text-amber-200">
+								<span class="text-sm text-warning-text-bright">
 									Set up key backup to protect your message history.
 								</span>
 							</div>
 							<button
 								type="button"
 								onClick={() => setShowBackupSetup(true)}
-								class="shrink-0 rounded bg-amber-700 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-amber-600"
+								class="shrink-0 rounded bg-warning px-3 py-1 text-sm font-medium text-text-primary transition-colors hover:bg-warning-hover"
 							>
 								Set up backup
 							</button>

@@ -107,12 +107,12 @@ const LoginPage: Component = () => {
 	};
 
 	return (
-		<div class="flex min-h-screen items-center justify-center bg-neutral-950 p-4">
+		<div class="flex min-h-screen items-center justify-center bg-surface-0 p-4">
 			<div class="w-full max-w-sm">
-				<h1 class="mb-8 text-center text-3xl font-bold text-white">Crust</h1>
+				<h1 class="mb-8 text-center text-3xl font-bold text-text-primary">Crust</h1>
 				<form onSubmit={handleSubmit} class="space-y-4">
 					<div>
-						<label for="homeserver" class="mb-1 block text-sm text-neutral-400">
+						<label for="homeserver" class="mb-1 block text-sm text-text-muted">
 							Homeserver
 						</label>
 						<input
@@ -121,12 +121,12 @@ const LoginPage: Component = () => {
 							value={homeserver()}
 							onInput={(e) => setHomeserver(e.currentTarget.value)}
 							placeholder="no.strange.pizza"
-							class="w-full rounded bg-neutral-800 px-3 py-2 text-white placeholder-neutral-500 outline-none focus:ring-2 focus:ring-pink-500"
+							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
 							required
 						/>
 					</div>
 					<div>
-						<label for="username" class="mb-1 block text-sm text-neutral-400">
+						<label for="username" class="mb-1 block text-sm text-text-muted">
 							Username
 						</label>
 						<input
@@ -136,12 +136,12 @@ const LoginPage: Component = () => {
 							onInput={(e) => setUsername(e.currentTarget.value)}
 							placeholder="username"
 							autocomplete="username"
-							class="w-full rounded bg-neutral-800 px-3 py-2 text-white placeholder-neutral-500 outline-none focus:ring-2 focus:ring-pink-500"
+							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
 							required
 						/>
 					</div>
 					<div>
-						<label for="password" class="mb-1 block text-sm text-neutral-400">
+						<label for="password" class="mb-1 block text-sm text-text-muted">
 							Password
 						</label>
 						<input
@@ -151,13 +151,13 @@ const LoginPage: Component = () => {
 							onInput={(e) => setPassword(e.currentTarget.value)}
 							placeholder="••••••••"
 							autocomplete="current-password"
-							class="w-full rounded bg-neutral-800 px-3 py-2 text-white placeholder-neutral-500 outline-none focus:ring-2 focus:ring-pink-500"
+							class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
 							required
 						/>
 					</div>
 
 					<Show when={error()}>
-						<p class="rounded bg-red-900/50 px-3 py-2 text-sm text-red-300">
+						<p class="rounded bg-danger-bg/50 px-3 py-2 text-sm text-danger-text-bright">
 							{error()}
 						</p>
 					</Show>
@@ -165,7 +165,7 @@ const LoginPage: Component = () => {
 					<button
 						type="submit"
 						disabled={loading()}
-						class="w-full rounded bg-pink-600 py-2 font-semibold text-white transition-colors hover:bg-pink-500 disabled:opacity-50"
+						class="w-full rounded bg-accent py-2 font-semibold text-text-primary transition-colors hover:bg-accent-hover disabled:opacity-50"
 					>
 						<Switch>
 							<Match when={loading()}>Logging in…</Match>

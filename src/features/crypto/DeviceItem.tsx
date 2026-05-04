@@ -31,19 +31,19 @@ function formatLastSeen(ts: number | undefined): string {
 
 const DeviceItem: Component<DeviceItemProps> = (props) => {
 	return (
-		<div class="flex items-center justify-between rounded-lg bg-neutral-800/50 px-4 py-3">
+		<div class="flex items-center justify-between rounded-lg bg-surface-2/50 px-4 py-3">
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-2">
-					<span class="truncate text-sm font-medium text-white">
+					<span class="truncate text-sm font-medium text-text-primary">
 						{props.device.displayName || props.device.deviceId}
 					</span>
 					<Show when={props.device.isCurrentDevice}>
-						<span class="shrink-0 rounded bg-neutral-700 px-1.5 py-0.5 text-xs text-neutral-300">
+						<span class="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-xs text-text-secondary">
 							This device
 						</span>
 					</Show>
 				</div>
-				<div class="mt-0.5 flex items-center gap-2 text-xs text-neutral-500">
+				<div class="mt-0.5 flex items-center gap-2 text-xs text-text-disabled">
 					<span class="truncate">{props.device.deviceId}</span>
 					<span>·</span>
 					<span>{formatLastSeen(props.device.lastSeenTs)}</span>
@@ -55,14 +55,14 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 					when={props.device.isVerified}
 					fallback={
 						<>
-							<span class="text-amber-400" role="img" aria-label="Unverified">
+							<span class="text-warning-text" role="img" aria-label="Unverified">
 								⚠
 							</span>
 							<Show when={!props.device.isCurrentDevice && props.onVerify}>
 								<button
 									type="button"
 									onClick={() => props.onVerify?.(props.device.deviceId)}
-									class="rounded bg-neutral-700 px-2 py-1 text-xs text-white transition-colors hover:bg-neutral-600"
+									class="rounded bg-surface-3 px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-4"
 								>
 									Verify
 								</button>
@@ -70,10 +70,10 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 						</>
 					}
 				>
-					<span class="text-green-400" aria-hidden="true">
+					<span class="text-success-text" aria-hidden="true">
 						✓
 					</span>
-					<span class="text-xs text-green-400">Verified</span>
+					<span class="text-xs text-success-text">Verified</span>
 				</Show>
 			</div>
 		</div>

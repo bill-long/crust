@@ -91,28 +91,28 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 	return (
 		<Show when={pendingRequest()}>
 			<div
-				class="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-neutral-700 bg-neutral-900 p-4 shadow-xl"
+				class="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-border-default bg-surface-1 p-4 shadow-xl"
 				role="alert"
 				aria-live="assertive"
 			>
-				<h3 class="mb-1 text-sm font-semibold text-white">
+				<h3 class="mb-1 text-sm font-semibold text-text-primary">
 					Verification request
 				</h3>
-				<p class="mb-3 text-xs text-neutral-400">
+				<p class="mb-3 text-xs text-text-muted">
 					Another device wants to verify with you.
 				</p>
 				<div class="flex justify-end gap-2">
 					<button
 						type="button"
 						onClick={handleDecline}
-						class="rounded px-3 py-1.5 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+						class="rounded px-3 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
 					>
 						Decline
 					</button>
 					<button
 						type="button"
 						onClick={handleAccept}
-						class="rounded bg-green-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-green-600"
+						class="rounded bg-success px-3 py-1.5 text-xs font-semibold text-text-primary transition-colors hover:bg-success-hover"
 					>
 						Accept
 					</button>

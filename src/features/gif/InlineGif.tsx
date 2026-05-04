@@ -42,7 +42,7 @@ const InlineGif: Component<{
 			fallback={
 				<button
 					type="button"
-					class="mt-1 flex items-center gap-2 rounded bg-neutral-800 px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-neutral-300"
+					class="mt-1 flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-3 hover:text-text-secondary"
 					onClick={() => setManuallyLoaded(true)}
 					aria-label={`Load GIF: ${props.alt}`}
 				>
@@ -54,14 +54,14 @@ const InlineGif: Component<{
 			<Show
 				when={!loadError()}
 				fallback={
-					<div class="mt-1 flex items-center gap-2 rounded bg-neutral-800 px-3 py-2 text-sm text-neutral-400">
+					<div class="mt-1 flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm text-text-muted">
 						<span>Failed to load GIF</span>
 						<a
 							href={props.url}
 							target="_blank"
 							rel="noopener noreferrer"
 							referrerPolicy="no-referrer"
-							class="text-pink-400 underline hover:text-pink-300"
+							class="text-accent-text underline hover:text-accent-text-bright"
 						>
 							Open link
 						</a>

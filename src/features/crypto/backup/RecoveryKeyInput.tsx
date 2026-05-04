@@ -96,11 +96,11 @@ const RecoveryKeyInput: Component = () => {
 					if (e.key === "Escape") handleCancel();
 				}}
 			>
-				<div class="w-full max-w-md rounded-lg bg-neutral-900 p-6 shadow-xl">
-					<h2 class="mb-3 text-lg font-semibold text-white">
+				<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
+					<h2 class="mb-3 text-lg font-semibold text-text-primary">
 						Enter recovery key
 					</h2>
-					<p class="mb-4 text-sm text-neutral-400">
+					<p class="mb-4 text-sm text-text-muted">
 						Enter your recovery key to unlock your encrypted message history.
 					</p>
 
@@ -120,11 +120,11 @@ const RecoveryKeyInput: Component = () => {
 						autocomplete="off"
 						ref={(el) => el.focus()}
 						spellcheck={false}
-						class="mb-2 w-full rounded bg-neutral-800 px-3 py-2 font-mono text-sm text-white placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-pink-500"
+						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
 					/>
 
 					<Show when={errorText()}>
-						<p id={errorId} class="mb-2 text-sm text-red-400" role="alert">
+						<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
 							{errorText()}
 						</p>
 					</Show>
@@ -133,14 +133,14 @@ const RecoveryKeyInput: Component = () => {
 						<button
 							type="button"
 							onClick={handleCancel}
-							class="rounded px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
 						>
 							Cancel
 						</button>
 						<button
 							type="button"
 							onClick={handleSubmit}
-							class="rounded bg-pink-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-pink-500"
+							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 						>
 							Unlock
 						</button>

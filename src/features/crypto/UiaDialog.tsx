@@ -26,17 +26,17 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 	};
 
 	return (
-		<div class="w-full max-w-sm rounded-lg bg-neutral-900 p-6 shadow-xl">
-			<h2 class="mb-2 text-lg font-semibold text-white">
+		<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
+			<h2 class="mb-2 text-lg font-semibold text-text-primary">
 				Confirm your identity
 			</h2>
-			<p class="mb-4 text-sm text-neutral-400">
+			<p class="mb-4 text-sm text-text-muted">
 				Re-enter your password to continue with this security operation.
 			</p>
 
 			<form onSubmit={handleSubmit} class="space-y-4">
 				<div>
-					<label for="uia-password" class="mb-1 block text-sm text-neutral-400">
+					<label for="uia-password" class="mb-1 block text-sm text-text-muted">
 						Password
 					</label>
 					<input
@@ -46,7 +46,7 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 						onInput={(e) => setPassword(e.currentTarget.value)}
 						placeholder="••••••••"
 						autocomplete="current-password"
-						class="w-full rounded bg-neutral-800 px-3 py-2 text-white placeholder-neutral-500 outline-none focus:ring-2 focus:ring-pink-500"
+						class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder-text-disabled outline-none focus:ring-2 focus:ring-accent-hover"
 						autofocus
 						required
 					/>
@@ -58,14 +58,14 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 					<button
 						type="button"
 						onClick={props.onCancel}
-						class="rounded px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+						class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
 					>
 						Cancel
 					</button>
 					<button
 						type="submit"
 						disabled={password().length === 0}
-						class="rounded bg-pink-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-pink-500 disabled:opacity-50"
+						class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover disabled:opacity-50"
 					>
 						Continue
 					</button>
