@@ -45,6 +45,7 @@ export function createMockRoom(
 		powerLevel?: number;
 		avatarUrl?: string;
 	}[] = [],
+	options?: { name?: string },
 ) {
 	const matrixEvents = events.map(createMatrixEvent);
 	// Mutable member state for typing simulation
@@ -93,8 +94,34 @@ export function createMockRoom(
 		},
 	};
 
+	// State events storage for currentState mock
+	const stateEventStore = new Map<
+		string,
+		Map<
+			string,
+			{
+				getContent: () => Record<string, unknown>;
+				getStateKey: () => string;
+				getType: () => string;
+				getRoomId: () => string;
+			}
+		>
+	>();
+
+	const currentState = {
+		getStateEvents: (type: string, stateKey?: string) => {
+			const typeMap = stateEventStore.get(type);
+			if (stateKey !== undefined) {
+				return typeMap?.get(stateKey) ?? null;
+			}
+			return typeMap ? Array.from(typeMap.values()) : [];
+		},
+	};
+
 	return {
 		roomId,
+		name: options?.name ?? roomId,
+		currentState,
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
@@ -145,6 +172,24 @@ export function createMockRoom(
 				backwardPaginationToken = token;
 			}
 		},
+		__setStateEvent: (
+			type: string,
+			stateKey: string,
+			content: Record<string, unknown> | null,
+		) => {
+			if (content === null) {
+				stateEventStore.get(type)?.delete(stateKey);
+				return;
+			}
+			if (!stateEventStore.has(type)) stateEventStore.set(type, new Map());
+			const typeMap = stateEventStore.get(type);
+			typeMap?.set(stateKey, {
+				getContent: () => content,
+				getStateKey: () => stateKey,
+				getType: () => type,
+				getRoomId: () => roomId,
+			});
+		},
 	};
 }
 
@@ -152,6 +197,10 @@ export function createMockClient(
 	rooms: Map<string, ReturnType<typeof createMockRoom>> = new Map(),
 ) {
 	const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+	const accountData = new Map<
+		string,
+		{ getContent: () => Record<string, unknown>; getType: () => string }
+	>();
 
 	const client = {
 		getUserId: () => "@test:example.com",
@@ -174,7 +223,7 @@ export function createMockClient(
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
 		redactEvent: vi.fn().mockResolvedValue(undefined),
 		paginateEventTimeline: vi.fn().mockResolvedValue(false),
-		getAccountData: () => null,
+		getAccountData: (type: string) => accountData.get(type) ?? null,
 		getHomeserverUrl: () => "https://example.com",
 		on: (event: string, handler: (...args: unknown[]) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());
@@ -204,6 +253,21 @@ export function createMockClient(
 			// Update getRoom/getVisibleRooms closures
 			client.getRoom = (roomId: string) => rooms.get(roomId) ?? null;
 			client.getVisibleRooms = () => Array.from(rooms.values());
+		},
+
+		// Test helper: set or remove account data
+		__setAccountData: (
+			type: string,
+			content: Record<string, unknown> | null,
+		) => {
+			if (content === null) {
+				accountData.delete(type);
+			} else {
+				accountData.set(type, {
+					getContent: () => content,
+					getType: () => type,
+				});
+			}
 		},
 	};
 
