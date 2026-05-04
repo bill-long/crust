@@ -1,10 +1,18 @@
-import { type Component, For, Show } from "solid-js";
-import { useClient } from "../../client/client";
+import { createVirtualizer } from "@tanstack/solid-virtual";
 import {
-	type MemberEntry,
-	type MemberGroup,
-	useMemberList,
-} from "./useMemberList";
+	type Component,
+	For,
+	Match,
+	Show,
+	Switch,
+	createMemo,
+} from "solid-js";
+import { useClient } from "../../client/client";
+import { type MemberEntry, useMemberList } from "./useMemberList";
+
+type FlatItem =
+	| { type: "header"; role: string; count: number }
+	| { type: "member"; member: MemberEntry };
 
 /** Placeholder avatar for members without a profile image. */
 const AvatarFallback: Component<{ name: string }> = (props) => {
@@ -45,25 +53,48 @@ const MemberRow: Component<{ member: MemberEntry }> = (props) => {
 	);
 };
 
-const RoleGroupSection: Component<{ group: MemberGroup }> = (props) => {
-	return (
-		<div>
-			<div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-text-disabled">
-				{props.group.role} — {props.group.members.length}
-			</div>
-			<For each={props.group.members}>
-				{(member) => <MemberRow member={member} />}
-			</For>
-		</div>
-	);
-};
-
 const MemberList: Component<{ roomId: string }> = (props) => {
 	const { client } = useClient();
 	const { groups, memberCount, loading } = useMemberList(
 		client,
 		() => props.roomId,
 	);
+
+	const flatItems = createMemo(() => {
+		const items: FlatItem[] = [];
+		for (const group of groups()) {
+			items.push({
+				type: "header",
+				role: group.role,
+				count: group.members.length,
+			});
+			for (const member of group.members) {
+				items.push({ type: "member", member });
+			}
+		}
+		return items;
+	});
+
+	let scrollRef: HTMLDivElement | undefined;
+
+	const virtualizer = createVirtualizer({
+		get count() {
+			return flatItems().length;
+		},
+		getScrollElement: () => scrollRef ?? null,
+		estimateSize: (index: number) => {
+			const item = flatItems()[index];
+			return item?.type === "header" ? 30 : 44;
+		},
+		overscan: 10,
+		getItemKey: (index: number) => {
+			const item = flatItems()[index];
+			if (!item) return index;
+			return item.type === "header"
+				? `header:${item.role}`
+				: `member:${item.member.userId}`;
+		},
+	});
 
 	return (
 		<aside
@@ -80,8 +111,8 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 				</span>
 			</div>
 
-			{/* Member list */}
-			<div class="flex-1 overflow-y-auto">
+			{/* Virtualized member list */}
+			<div ref={scrollRef} class="flex-1 overflow-y-auto">
 				<Show
 					when={!loading()}
 					fallback={
@@ -90,9 +121,57 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 						</div>
 					}
 				>
-					<For each={groups()}>
-						{(group) => <RoleGroupSection group={group} />}
-					</For>
+					<div
+						style={{
+							height: `${virtualizer.getTotalSize()}px`,
+							position: "relative",
+						}}
+					>
+						<For each={virtualizer.getVirtualItems()}>
+							{(vItem) => {
+								const item = () => flatItems()[vItem.index];
+								return (
+									<Show when={item()}>
+										{(current) => (
+											<div
+												data-index={vItem.index}
+												ref={(el) => virtualizer.measureElement(el)}
+												style={{
+													position: "absolute",
+													top: `${vItem.start}px`,
+													left: 0,
+													width: "100%",
+												}}
+											>
+												<Switch>
+													<Match
+														when={
+															current().type === "header" &&
+															(current() as FlatItem & { type: "header" })
+														}
+													>
+														{(h) => (
+															<div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-text-disabled">
+																{h().role} — {h().count}
+															</div>
+														)}
+													</Match>
+													<Match
+														when={
+															current().type === "member" &&
+															(current() as FlatItem & { type: "member" })
+														}
+													>
+														{(m) => <MemberRow member={m().member} />}
+													</Match>
+												</Switch>
+											</div>
+										)}
+									</Show>
+								);
+							}}
+						</For>
+					</div>
 					<Show when={memberCount() === 0}>
 						<div class="px-3 py-4 text-sm text-text-disabled">
 							No members found
