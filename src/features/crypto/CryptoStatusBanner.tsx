@@ -8,9 +8,7 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import { BackupSetupDialog } from "./backup/BackupSetupDialog";
-import { BackupStatus } from "./backup/BackupStatus";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
-import { useKeyBackup } from "./backup/useKeyBackup";
 import { CrossSigningSetup } from "./CrossSigningSetup";
 import { IncomingVerificationToast } from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
@@ -43,7 +41,6 @@ const CryptoStatusBanner: Component = () => {
 	const [showBackupSetup, setShowBackupSetup] = createSignal(false);
 
 	const verification = useVerification(client);
-	const backupProgress = useKeyBackup(client);
 
 	const bannerState = createMemo(
 		(): BannerState =>
@@ -149,14 +146,6 @@ const CryptoStatusBanner: Component = () => {
 						cryptoStatus.refresh();
 					}}
 				/>
-			</Show>
-
-			<Show
-				when={
-					bannerState() === "hidden" && cryptoStatus.backupVersion() != null
-				}
-			>
-				<BackupStatus backup={backupProgress} />
 			</Show>
 
 			<RecoveryKeyInput />

@@ -1,21 +1,17 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import { type Component, createMemo, For, Show } from "solid-js";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
 import type { TimelineEvent } from "./useTimeline";
-
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
 
 const ReactionPills: Component<{
 	reactions: TimelineEvent["reactions"];
 	myReactions: TimelineEvent["myReactions"];
 	onReact: (key: string) => void;
 	emoteLookup: Map<string, ResolvedEmote>;
-	onOpenFullPicker?: () => void;
 }> = (props) => {
 	const entries = createMemo(() => Object.entries(props.reactions));
-	const [showPicker, setShowPicker] = createSignal(false);
 
 	const renderReactionKey = (key: string) => {
 		// Custom emoji: reaction key is an mxc:// URL
@@ -31,10 +27,10 @@ const ReactionPills: Component<{
 					/>
 				);
 			}
-			// Unknown pack — show placeholder instead of raw URL
+			// Unknown pack
 			return (
 				<span title={key} role="img" aria-label="custom emoji">
-					❓
+					?
 				</span>
 			);
 		}
@@ -50,85 +46,35 @@ const ReactionPills: Component<{
 	};
 
 	return (
-		<div class="mt-1 flex flex-wrap gap-1">
-			<For each={entries()}>
-				{([key, count]) => {
-					const isMine = () => Object.hasOwn(props.myReactions, key);
-					return (
-						<button
-							type="button"
-							class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors ${
-								isMine()
-									? "bg-mention-bg/40 text-accent-text-bright ring-1 ring-accent-hover/50"
-									: "bg-surface-2 text-text-secondary hover:bg-surface-3"
-							}`}
-							onClick={() => props.onReact(key)}
-							aria-label={`${reactionLabel(key)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
-							aria-pressed={isMine()}
-						>
-							{renderReactionKey(key)}
-							<span
-								class={isMine() ? "text-accent-text" : "text-text-disabled"}
-							>
-								{count}
-							</span>
-						</button>
-					);
-				}}
-			</For>
-			<button
-				type="button"
-				class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-surface-2 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis"
-				onClick={() => setShowPicker((v) => !v)}
-				onKeyDown={(e) => {
-					if (e.key === "Escape" && showPicker()) setShowPicker(false);
-				}}
-				aria-label="Add reaction"
-				aria-expanded={showPicker()}
-			>
-				+
-			</button>
-			<Show when={showPicker()}>
-				{/* biome-ignore lint/a11y/useSemanticElements: flex layout prevents fieldset use */}
-				<div
-					class="flex gap-1"
-					role="group"
-					aria-label="Quick reactions"
-					onKeyDown={(e) => {
-						if (e.key === "Escape") setShowPicker(false);
-					}}
-				>
-					<For each={QUICK_REACTIONS}>
-						{(emoji) => (
+		<Show when={entries().length > 0}>
+			<div class="mt-1 flex flex-wrap gap-1">
+				<For each={entries()}>
+					{([key, count]) => {
+						const isMine = () => Object.hasOwn(props.myReactions, key);
+						return (
 							<button
 								type="button"
-								class="rounded px-1 py-0.5 text-sm transition-colors hover:bg-surface-3"
-								onClick={() => {
-									props.onReact(emoji);
-									setShowPicker(false);
-								}}
-								aria-label={`React with ${emoji}`}
+								class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors ${
+									isMine()
+										? "bg-mention-bg/40 text-accent-text-bright ring-1 ring-accent-hover/50"
+										: "bg-surface-2 text-text-secondary hover:bg-surface-3"
+								}`}
+								onClick={() => props.onReact(key)}
+								aria-label={`${reactionLabel(key)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
+								aria-pressed={isMine()}
 							>
-								{emoji}
+								{renderReactionKey(key)}
+								<span
+									class={isMine() ? "text-accent-text" : "text-text-disabled"}
+								>
+									{count}
+								</span>
 							</button>
-						)}
-					</For>
-					<Show when={props.onOpenFullPicker}>
-						<button
-							type="button"
-							class="rounded px-1 py-0.5 text-xs text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-							onClick={() => {
-								setShowPicker(false);
-								props.onOpenFullPicker?.();
-							}}
-							aria-label="More reactions"
-						>
-							⋯
-						</button>
-					</Show>
-				</div>
-			</Show>
-		</div>
+						);
+					}}
+				</For>
+			</div>
+		</Show>
 	);
 };
 
@@ -150,8 +96,101 @@ function unsupportedLabel(msgtype: string): string {
 	}
 }
 
+const HoverToolbar: Component<{
+	isOwnMessage: boolean;
+	msgtype: string | undefined;
+	onReact: () => void;
+	onReply: () => void;
+	onEdit: () => void;
+	onDelete: () => void;
+}> = (props) => {
+	return (
+		<div class="pointer-events-none absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-md bg-surface-2 px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+			<button
+				type="button"
+				class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				onClick={props.onReact}
+				aria-label="Add reaction"
+			>
+				<svg
+					class="h-4 w-4"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					aria-hidden="true"
+				>
+					<circle cx="12" cy="12" r="10" />
+					<path d="M8 14s1.5 2 4 2 4-2 4-2" />
+					<line x1="9" y1="9" x2="9.01" y2="9" />
+					<line x1="15" y1="9" x2="15.01" y2="9" />
+				</svg>
+			</button>
+			<button
+				type="button"
+				class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				onClick={props.onReply}
+				aria-label="Reply"
+			>
+				<svg
+					class="h-4 w-4"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					aria-hidden="true"
+				>
+					<polyline points="9 17 4 12 9 7" />
+					<path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+				</svg>
+			</button>
+			<Show when={props.isOwnMessage && props.msgtype === "m.text"}>
+				<button
+					type="button"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					onClick={props.onEdit}
+					aria-label="Edit"
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						aria-hidden="true"
+					>
+						<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+						<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+					</svg>
+				</button>
+			</Show>
+			<Show when={props.isOwnMessage}>
+				<button
+					type="button"
+					class="rounded p-1 text-xs text-danger-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+					onClick={props.onDelete}
+					aria-label="Delete"
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						aria-hidden="true"
+					>
+						<polyline points="3 6 5 6 21 6" />
+						<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+					</svg>
+				</button>
+			</Show>
+		</div>
+	);
+};
+
 const TimelineItem: Component<{
 	event: TimelineEvent;
+	showHeader: boolean;
 	isOwnMessage: boolean;
 	onReact: (key: string) => void;
 	onReply: () => void;
@@ -167,61 +206,66 @@ const TimelineItem: Component<{
 	const ev = props.event;
 
 	return (
-		<div class="group flex gap-3 px-4 py-1 hover:bg-surface-1/50">
-			{/* Avatar placeholder */}
-			<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-				{(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
-			</div>
+		<div
+			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"}`}
+		>
+			{/* Hover toolbar */}
+			<HoverToolbar
+				isOwnMessage={props.isOwnMessage}
+				msgtype={ev.msgtype}
+				onReact={() => props.onOpenReactionPicker?.()}
+				onReply={props.onReply}
+				onEdit={props.onEdit}
+				onDelete={props.onDelete}
+			/>
+
+			<Show
+				when={props.showHeader}
+				fallback={
+					<div class="flex w-8 shrink-0 items-start justify-center">
+						<span
+							class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+							aria-hidden="true"
+						>
+							{formatTime(ev.timestamp)}
+						</span>
+					</div>
+				}
+			>
+				{/* Avatar */}
+				<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+					{(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
+				</div>
+			</Show>
 
 			<div class="min-w-0 flex-1">
-				{/* Header: sender + time + actions */}
-				<div class="flex items-baseline gap-2">
-					<span class="text-sm font-semibold text-text-emphasis">
-						{ev.senderName.trim() || "Unknown"}
-					</span>
-					<span class="text-xs text-text-faint">
-						{formatTime(ev.timestamp)}
-					</span>
-					<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
-						<span
-							class="text-xs text-success-hover"
-							role="img"
-							aria-label="Encrypted"
-						>
-							🔒
+				{/* Header: sender + time (only for first message in group) */}
+				<Show
+					when={props.showHeader}
+					fallback={
+						<span class="sr-only">
+							{ev.senderName.trim() || "Unknown"} at {formatTime(ev.timestamp)}
 						</span>
-					</Show>
-					<span class="ml-auto flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-						<button
-							type="button"
-							class="rounded px-1.5 py-0.5 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-secondary"
-							onClick={props.onReply}
-							aria-label="Reply"
-						>
-							↩
-						</button>
-						<Show when={props.isOwnMessage && ev.msgtype === "m.text"}>
-							<button
-								type="button"
-								class="rounded px-1.5 py-0.5 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-secondary"
-								onClick={props.onEdit}
-								aria-label="Edit"
+					}
+				>
+					<div class="flex items-baseline gap-2">
+						<span class="text-sm font-semibold text-text-emphasis">
+							{ev.senderName.trim() || "Unknown"}
+						</span>
+						<span class="text-xs text-text-faint">
+							{formatTime(ev.timestamp)}
+						</span>
+						<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
+							<span
+								class="text-xs text-success-hover"
+								role="img"
+								aria-label="Encrypted"
 							>
-								✏
-							</button>
+								🔒
+							</span>
 						</Show>
-						<Show when={props.isOwnMessage}>
-							<button
-								type="button"
-								class="rounded px-1.5 py-0.5 text-xs text-danger-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text"
-								onClick={props.onDelete}
-								aria-label="Delete"
-							>
-								🗑
-							</button>
-						</Show>
-					</span>
-				</div>
+					</div>
+				</Show>
 
 				{/* Body */}
 				<Show
@@ -321,7 +365,6 @@ const TimelineItem: Component<{
 					myReactions={ev.myReactions}
 					onReact={props.onReact}
 					emoteLookup={props.emoteLookup}
-					onOpenFullPicker={props.onOpenReactionPicker}
 				/>
 
 				{/* Read receipts */}
