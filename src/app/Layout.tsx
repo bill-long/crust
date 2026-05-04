@@ -2,10 +2,10 @@ import { useNavigate } from "@solidjs/router";
 import { type Component, Show } from "solid-js";
 import { useClient } from "../client/client";
 import { ResizableLayout } from "../components/ResizableLayout";
-import MemberList from "../features/room/MemberList";
-import RoomList from "../features/room/RoomList";
-import TimelineView from "../features/room/timeline/TimelineView";
-import SpacesSidebar from "../features/space/SpacesSidebar";
+import { MemberList } from "../features/room/MemberList";
+import { RoomList } from "../features/room/RoomList";
+import { TimelineView } from "../features/room/timeline/TimelineView";
+import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { membersPaneVisible } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import { useDecodedParams } from "./useDecodedParams";
@@ -79,4 +79,4 @@ const Layout: Component = () => {
 	);
 };
 
-export default Layout;
+export { Layout };

@@ -14,15 +14,15 @@ import {
 import { useDecodedParams } from "../../../app/useDecodedParams";
 import { useClient } from "../../../client/client";
 import { membersPaneVisible, toggleMembersPane } from "../../../stores/layout";
-import EmojiPicker from "../../emoji/EmojiPicker";
+import { EmojiPicker } from "../../emoji/EmojiPicker";
 import type { PickerEmoji } from "../../emoji/types";
 import {
 	buildEmoteLookup,
 	buildShortcodeLookup,
 	useImagePacks,
 } from "../../emoji/useImagePacks";
-import Composer from "../composer/Composer";
-import TimelineItem from "./TimelineItem";
+import { Composer } from "../composer/Composer";
+import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
 interface ReadReceiptEntry {
@@ -714,4 +714,4 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	);
 };
 
-export default TimelineView;
+export { TimelineView };

@@ -339,4 +339,4 @@ const MessageBody: Component<{
 	);
 };
 
-export default MessageBody;
+export { MessageBody };

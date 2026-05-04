@@ -104,4 +104,4 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 	);
 };
 
-export default MemberList;
+export { MemberList };

@@ -267,4 +267,4 @@ const GifPicker: Component<{
 	);
 };
 
-export default GifPicker;
+export { GifPicker };

@@ -295,4 +295,4 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 	);
 };
 
-export default BackupSetupDialog;
+export { BackupSetupDialog };

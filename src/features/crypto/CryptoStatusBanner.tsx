@@ -7,14 +7,14 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import BackupSetupDialog from "./backup/BackupSetupDialog";
-import BackupStatus from "./backup/BackupStatus";
-import RecoveryKeyInput from "./backup/RecoveryKeyInput";
+import { BackupSetupDialog } from "./backup/BackupSetupDialog";
+import { BackupStatus } from "./backup/BackupStatus";
+import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
 import { useKeyBackup } from "./backup/useKeyBackup";
 import { CrossSigningSetup } from "./CrossSigningSetup";
-import IncomingVerificationToast from "./verification/IncomingVerificationToast";
+import { IncomingVerificationToast } from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
-import VerificationDialog from "./verification/VerificationDialog";
+import { VerificationDialog } from "./verification/VerificationDialog";
 
 type BannerState =
 	| "loading"
@@ -172,4 +172,4 @@ const CryptoStatusBanner: Component = () => {
 	);
 };
 
-export default CryptoStatusBanner;
+export { CryptoStatusBanner };

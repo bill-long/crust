@@ -122,4 +122,4 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 	);
 };
 
-export default IncomingVerificationToast;
+export { IncomingVerificationToast };

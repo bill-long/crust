@@ -80,4 +80,4 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 	);
 };
 
-export default DeviceItem;
+export { DeviceItem };

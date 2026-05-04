@@ -178,4 +178,4 @@ const LoginPage: Component = () => {
 	);
 };
 
-export default LoginPage;
+export { LoginPage };

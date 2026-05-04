@@ -11,10 +11,10 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { createPicker } from "../../../components/picker/Picker";
-import EmojiPicker from "../../emoji/EmojiPicker";
+import { EmojiPicker } from "../../emoji/EmojiPicker";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { buildShortcodeLookup } from "../../emoji/useImagePacks";
-import GifPicker from "../../gif/GifPicker";
+import { GifPicker } from "../../gif/GifPicker";
 import { useGifConfig } from "../../gif/gifConfig";
 import type { GifItem } from "../../gif/types";
 import type { TimelineEvent } from "../timeline/useTimeline";
@@ -733,4 +733,4 @@ const Composer: Component<{
 	);
 };
 
-export default Composer;
+export { Composer };

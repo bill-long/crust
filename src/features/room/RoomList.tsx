@@ -313,4 +313,4 @@ const RoomList: Component = () => {
 	);
 };
 
-export default RoomList;
+export { RoomList };

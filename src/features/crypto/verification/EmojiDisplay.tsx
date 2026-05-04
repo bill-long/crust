@@ -26,4 +26,4 @@ const EmojiDisplay: Component<EmojiDisplayProps> = (props) => {
 	);
 };
 
-export default EmojiDisplay;
+export { EmojiDisplay };

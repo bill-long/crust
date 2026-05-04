@@ -50,4 +50,4 @@ const BackupStatus: Component<BackupStatusProps> = (props) => {
 	);
 };
 
-export default BackupStatus;
+export { BackupStatus };

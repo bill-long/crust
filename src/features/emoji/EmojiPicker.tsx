@@ -341,4 +341,4 @@ const EmojiPicker: Component<{
 	);
 };
 
-export default EmojiPicker;
+export { EmojiPicker };

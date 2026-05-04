@@ -1,8 +1,8 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
-import MessageBody from "../../emoji/MessageBody";
+import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
-import InlineGif, { extractGifUrl } from "../../gif/InlineGif";
+import { InlineGif, extractGifUrl } from "../../gif/InlineGif";
 import type { TimelineEvent } from "./useTimeline";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "🚀"];
@@ -344,4 +344,4 @@ const TimelineItem: Component<{
 	);
 };
 
-export default TimelineItem;
+export { TimelineItem };

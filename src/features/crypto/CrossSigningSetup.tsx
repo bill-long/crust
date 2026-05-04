@@ -1,7 +1,7 @@
 import { AuthType } from "matrix-js-sdk";
 import { type Component, createSignal, Match, Switch } from "solid-js";
 import { useClient } from "../../client/client";
-import UiaDialog from "./UiaDialog";
+import { UiaDialog } from "./UiaDialog";
 
 type SetupStep = "intro" | "uia" | "working" | "done" | "error";
 

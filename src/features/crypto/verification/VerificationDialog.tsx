@@ -1,5 +1,5 @@
 import { type Component, Match, Show, Switch } from "solid-js";
-import EmojiDisplay from "./EmojiDisplay";
+import { EmojiDisplay } from "./EmojiDisplay";
 import type { VerificationHandle } from "./useVerification";
 
 interface VerificationDialogProps {
@@ -193,4 +193,4 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	);
 };
 
-export default VerificationDialog;
+export { VerificationDialog };

@@ -75,4 +75,4 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 	);
 };
 
-export default UiaDialog;
+export { UiaDialog };

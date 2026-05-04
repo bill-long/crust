@@ -7,7 +7,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import DeviceItem, { type DeviceInfo } from "./DeviceItem";
+import { DeviceItem, type DeviceInfo } from "./DeviceItem";
 
 interface DeviceListProps {
 	onVerifyDevice?: (deviceId: string) => void;
@@ -100,4 +100,4 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 	);
 };
 
-export default DeviceList;
+export { DeviceList };

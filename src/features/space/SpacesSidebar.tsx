@@ -105,4 +105,4 @@ const SpacesSidebar: Component = () => {
 	);
 };
 
-export default SpacesSidebar;
+export { SpacesSidebar };

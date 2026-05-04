@@ -151,4 +151,4 @@ const RecoveryKeyInput: Component = () => {
 	);
 };
 
-export default RecoveryKeyInput;
+export { RecoveryKeyInput };

@@ -85,4 +85,4 @@ const InlineGif: Component<{
 	);
 };
 
-export default InlineGif;
+export { InlineGif };
