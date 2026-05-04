@@ -44,8 +44,8 @@ export function cryptoActionLabel(action: CryptoAction): string {
 
 /**
  * Global crypto overlays — modals, toasts, recovery key input.
- * Mount once at the app level. The banner is gone; the user panel
- * in the sidebar now drives the crypto setup flows via onAction.
+ * Mount once at the app level. The UserBar in the sidebar triggers
+ * crypto setup flows via registerCryptoHandler / triggerCryptoAction.
  */
 const CryptoStatusBanner: Component = () => {
 	const { client, cryptoStatus } = useClient();

@@ -135,8 +135,9 @@ export const ResizableLayout: Component<{
 		});
 	};
 
-	// 4px for the inner resize divider
-	const sidebarWidth = () => spacesWidth() + roomListWidth() + 4;
+	// Inner resize divider is w-1 (4px at default 16px root font size)
+	const DIVIDER_WIDTH = 4;
+	const sidebarWidth = () => spacesWidth() + roomListWidth() + DIVIDER_WIDTH;
 
 	return (
 		<div class="flex min-h-0 flex-1">

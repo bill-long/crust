@@ -356,8 +356,8 @@ const UserBar: Component<UserBarProps> = (props) => {
 						<div class="mt-2">
 							<button
 								type="button"
-								onClick={() => setMicMuted(false)}
-								class="w-full rounded px-2 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								disabled
+								class="w-full rounded px-2 py-1 text-xs text-text-disabled"
 							>
 								Push to Talk (coming soon)
 							</button>
