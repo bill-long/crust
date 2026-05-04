@@ -235,13 +235,9 @@ const SettingsPopover: Component<{
 
 	return (
 		<Show when={props.open}>
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: popover needs Escape key handling */}
 			<div
 				ref={ref}
 				class="absolute bottom-full right-0 z-30 mb-1 min-w-44 rounded-lg bg-surface-3 py-1.5 shadow-xl"
-				onKeyDown={(e) => {
-					if (e.key === "Escape") props.onClose();
-				}}
 			>
 				{/* Sync status */}
 				<div class="px-3 py-1.5 text-xs text-text-muted">
@@ -387,7 +383,16 @@ const UserBar: Component<UserBarProps> = (props) => {
 			/>
 
 			{/* Settings gear */}
-			<div class="relative" ref={(el) => (settingsContainerRef = el)}>
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: container handles Escape for popover */}
+			<div
+				class="relative"
+				ref={(el) => (settingsContainerRef = el)}
+				onKeyDown={(e) => {
+					if (e.key === "Escape" && settingsOpen()) {
+						setSettingsOpen(false);
+					}
+				}}
+			>
 				<button
 					type="button"
 					onClick={() => setSettingsOpen((v) => !v)}

@@ -1,19 +1,13 @@
 import { type Component, createSignal, onCleanup, Show } from "solid-js";
 import { useClient } from "../../client/client";
 import { registerCryptoHandler } from "../../stores/cryptoActions";
+import type { CryptoAction } from "../../types/crypto";
 import { BackupSetupDialog } from "./backup/BackupSetupDialog";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
 import { CrossSigningSetup } from "./CrossSigningSetup";
 import { IncomingVerificationToast } from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
 import { VerificationDialog } from "./verification/VerificationDialog";
-
-export type CryptoAction =
-	| "loading"
-	| "setup-cross-signing"
-	| "verify-session"
-	| "setup-backup"
-	| "hidden";
 
 export function deriveCryptoAction(
 	crossSigningReady: boolean | undefined,

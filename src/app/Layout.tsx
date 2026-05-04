@@ -11,7 +11,6 @@ import {
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
 import {
-	type CryptoAction,
 	cryptoActionLabel,
 	deriveCryptoAction,
 } from "../features/crypto/CryptoStatusBanner";
@@ -22,6 +21,7 @@ import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
+import type { CryptoAction } from "../types/crypto";
 import { useDecodedParams } from "./useDecodedParams";
 
 const MEMBERS_WIDTH_KEY = "crust_members_width";

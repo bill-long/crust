@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import type { CryptoAction } from "../features/crypto/CryptoStatusBanner";
+import type { CryptoAction } from "../types/crypto";
 
 type CryptoActionHandler = (action: CryptoAction) => void;
 
