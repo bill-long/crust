@@ -228,7 +228,7 @@ const GifPicker: Component<{
 										referrerPolicy="no-referrer"
 									/>
 									<Show when={gif.title}>
-										<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+										<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-surface-0/70 to-transparent px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
 											<p class="truncate text-[10px] text-text-primary">
 												{gif.title}
 											</p>
