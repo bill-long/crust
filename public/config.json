@@ -1,6 +1,6 @@
 {
-	"defaultHomeserver": "no.strange.pizza",
-	"homeserverList": ["no.strange.pizza", "matrix.org"],
+	"defaultHomeserver": "strange.pizza",
+	"homeserverList": ["strange.pizza", "matrix.org"],
 	"allowCustomHomeservers": true,
 	"elementCall": {
 		"url": "https://call.strange.pizza"

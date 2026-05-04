@@ -1,10 +1,4 @@
-import {
-	type Component,
-	createSignal,
-	type JSX,
-	onCleanup,
-	Show,
-} from "solid-js";
+import { type Component, createSignal, type JSX, onCleanup } from "solid-js";
 
 const STORAGE_KEY = "crust_pane_widths";
 
@@ -12,9 +6,9 @@ const MIN_SPACES = 48;
 const MAX_SPACES = 96;
 const MIN_ROOM_LIST = 180;
 const MAX_ROOM_LIST = 480;
-const MIN_MEMBERS = 200;
-const MAX_MEMBERS = 400;
-const DEFAULT_MEMBERS = 240;
+export const MIN_MEMBERS = 200;
+export const MAX_MEMBERS = 400;
+export const DEFAULT_MEMBERS = 240;
 
 interface PaneWidths {
 	spaces: number;
@@ -22,7 +16,7 @@ interface PaneWidths {
 	members: number;
 }
 
-function clamp(value: number, min: number, max: number): number {
+export function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
 }
 
@@ -61,7 +55,7 @@ function saveWidths(widths: PaneWidths): void {
 
 const STEP = 10;
 
-const ResizeDivider: Component<{
+export const ResizeDivider: Component<{
 	onDrag: (delta: number) => void;
 	onDragEnd: () => void;
 	value: number;
@@ -133,19 +127,16 @@ export const ResizableLayout: Component<{
 	spaces: JSX.Element;
 	roomList: JSX.Element;
 	main: JSX.Element;
-	members?: JSX.Element;
-	membersVisible?: boolean;
 }> = (props) => {
 	const initial = loadWidths();
 	const [spacesWidth, setSpacesWidth] = createSignal(initial.spaces);
 	const [roomListWidth, setRoomListWidth] = createSignal(initial.roomList);
-	const [membersWidth, setMembersWidth] = createSignal(initial.members);
 
 	const persist = (): void => {
 		saveWidths({
 			spaces: spacesWidth(),
 			roomList: roomListWidth(),
-			members: membersWidth(),
+			members: loadWidths().members,
 		});
 	};
 
@@ -184,24 +175,6 @@ export const ResizableLayout: Component<{
 				label="Resize room list"
 			/>
 			<div class="min-w-0 flex-1">{props.main}</div>
-			<Show when={props.membersVisible && props.members !== undefined}>
-				<ResizeDivider
-					onDrag={(d) =>
-						setMembersWidth((w) => clamp(w - d, MIN_MEMBERS, MAX_MEMBERS))
-					}
-					onDragEnd={persist}
-					value={membersWidth()}
-					min={MIN_MEMBERS}
-					max={MAX_MEMBERS}
-					label="Resize members panel"
-				/>
-				<div
-					style={{ width: `${membersWidth()}px` }}
-					class="shrink-0 overflow-hidden"
-				>
-					{props.members}
-				</div>
-			</Show>
 		</div>
 	);
 };

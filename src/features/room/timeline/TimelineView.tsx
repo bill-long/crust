@@ -1,4 +1,3 @@
-import { useNavigate } from "@solidjs/router";
 import { createVirtualizer } from "@tanstack/solid-virtual";
 import { EventType, ReceiptType, RelationType, RoomEvent } from "matrix-js-sdk";
 import {
@@ -11,9 +10,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
-import { useDecodedParams } from "../../../app/useDecodedParams";
 import { useClient } from "../../../client/client";
-import { membersPaneVisible, toggleMembersPane } from "../../../stores/layout";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import type { PickerEmoji } from "../../emoji/types";
 import {
@@ -25,15 +22,33 @@ import { Composer } from "../composer/Composer";
 import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
+const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
+
+/** Whether a message should show the full header (avatar + name + time). */
+function shouldShowHeader(
+	events: readonly TimelineEvent[],
+	index: number,
+): boolean {
+	if (index === 0) return true;
+	const prev = events[index - 1];
+	const curr = events[index];
+	if (!prev || !curr) return true;
+	if (prev.senderId !== curr.senderId) return true;
+	if (curr.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS) return true;
+	// Break group on day boundary
+	const prevDay = new Date(prev.timestamp).toDateString();
+	const currDay = new Date(curr.timestamp).toDateString();
+	if (prevDay !== currDay) return true;
+	return false;
+}
+
 interface ReadReceiptEntry {
 	userId: string;
 	displayName: string;
 }
 
 const TimelineView: Component<{ roomId: string }> = (props) => {
-	const { client, summaries } = useClient();
-	const navigate = useNavigate();
-	const params = useDecodedParams<{ spaceId?: string }>();
+	const { client } = useClient();
 	const {
 		events,
 		loading,
@@ -87,38 +102,37 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	const myUserId = client.getUserId() ?? "";
 
-	const roomName = () => {
-		const s = summaries[props.roomId];
-		return s?.name?.trim() || "Room";
-	};
-
-	const [leaving, setLeaving] = createSignal(false);
-	const handleLeave = async (): Promise<void> => {
-		if (leaving()) return;
-		setLeaving(true);
-		try {
-			await client.leave(props.roomId);
-			if (params.spaceId) {
-				navigate(`/space/${encodeURIComponent(params.spaceId)}`);
-			} else {
-				navigate("/home");
-			}
-		} catch (err) {
-			console.error("Failed to leave room:", err);
-		} finally {
-			setLeaving(false);
-		}
-	};
-
 	const virtualizer = createVirtualizer({
 		get count() {
 			return events.length;
 		},
 		getScrollElement: () => scrollRef ?? null,
-		estimateSize: () => 60,
+		estimateSize: () => 80,
 		overscan: 10,
 		getItemKey: (index: number) => events[index]?.eventId ?? index,
 	});
+
+	// The Solid adapter's createComputed calls virtualizer.measure() every time
+	// a reactive option (like count) changes, which clears all cached sizes.
+	// ResizeObserver won't re-fire since element dimensions haven't changed,
+	// so we must re-measure manually after every cache wipe.
+	const remeasureVisibleItems = (): void => {
+		if (!scrollRef) return;
+		const els = scrollRef.querySelectorAll<HTMLElement>("[data-index]");
+		for (const el of els) {
+			virtualizer.measureElement(el);
+		}
+	};
+
+	// Re-measure after events.length changes (triggers the adapter's measure())
+	createEffect(
+		on(
+			() => events.length,
+			() => {
+				queueMicrotask(remeasureVisibleItems);
+			},
+		),
+	);
 
 	// --- Read receipts ---
 	// Build a map: eventId → list of users who have read up to that event
@@ -262,6 +276,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				// Force the virtualizer to recalculate after the store updates
 				requestAnimationFrame(() => {
 					virtualizer.measure();
+					remeasureVisibleItems();
 					const el = scrollRef;
 					if (el) el.scrollTo({ top: el.scrollHeight });
 				});
@@ -363,6 +378,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				if (scrollRef && props.roomId === roomAtRequest) {
 					requestAnimationFrame(() => {
 						virtualizer.measure();
+						remeasureVisibleItems();
 						if (scrollRef) {
 							const newHeight = scrollRef.scrollHeight;
 							scrollRef.scrollTop += newHeight - prevHeight;
@@ -454,40 +470,6 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	return (
 		<main class="flex h-full flex-col">
-			{/* Room header */}
-			<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
-				<span class="text-sm font-semibold text-text-emphasis">
-					{roomName()}
-				</span>
-				<div class="flex items-center gap-1">
-					<button
-						type="button"
-						onClick={toggleMembersPane}
-						class="rounded px-2 py-1 text-xs transition-colors"
-						classList={{
-							"bg-surface-3 text-text-emphasis": membersPaneVisible(),
-							"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
-								!membersPaneVisible(),
-						}}
-						title={
-							membersPaneVisible() ? "Hide member list" : "Show member list"
-						}
-						aria-pressed={membersPaneVisible()}
-					>
-						Members
-					</button>
-					<button
-						type="button"
-						onClick={handleLeave}
-						disabled={leaving()}
-						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text"
-						title="Leave room"
-					>
-						{leaving() ? "Leaving…" : "Leave"}
-					</button>
-				</div>
-			</div>
-
 			{/* Timeline */}
 			<Show
 				when={!loading() || events.length > 0}
@@ -567,6 +549,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 											>
 												<TimelineItem
 													event={event()}
+													showHeader={shouldShowHeader(events, vItem.index)}
 													isOwnMessage={event().senderId === myUserId}
 													onReact={(key) => onReact(event().eventId, key)}
 													onReply={() => setReplyTo(event())}

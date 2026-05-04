@@ -1,19 +1,61 @@
 import { useNavigate } from "@solidjs/router";
-import { type Component, Show } from "solid-js";
+import { type Component, createSignal, Show } from "solid-js";
 import { useClient } from "../client/client";
-import { ResizableLayout } from "../components/ResizableLayout";
+import {
+	clamp,
+	DEFAULT_MEMBERS,
+	MAX_MEMBERS,
+	MIN_MEMBERS,
+	ResizableLayout,
+	ResizeDivider,
+} from "../components/ResizableLayout";
 import { MemberList } from "../features/room/MemberList";
 import { RoomList } from "../features/room/RoomList";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
-import { membersPaneVisible } from "../stores/layout";
+import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import { useDecodedParams } from "./useDecodedParams";
 
+const MEMBERS_WIDTH_KEY = "crust_members_width";
+
+function loadMembersWidth(): number {
+	try {
+		const raw = localStorage.getItem(MEMBERS_WIDTH_KEY);
+		if (raw) {
+			const n = Number(raw);
+			if (Number.isFinite(n)) return clamp(n, MIN_MEMBERS, MAX_MEMBERS);
+		}
+		// Migrate from old combined storage key
+		const legacy = localStorage.getItem("crust_pane_widths");
+		if (legacy) {
+			const parsed = JSON.parse(legacy);
+			if (typeof parsed.members === "number") {
+				const w = clamp(parsed.members, MIN_MEMBERS, MAX_MEMBERS);
+				saveMembersWidth(w);
+				return w;
+			}
+		}
+	} catch {
+		// ignore
+	}
+	return DEFAULT_MEMBERS;
+}
+
+function saveMembersWidth(w: number): void {
+	try {
+		localStorage.setItem(MEMBERS_WIDTH_KEY, String(w));
+	} catch {
+		// ignore
+	}
+}
+
 const Layout: Component = () => {
-	const { client, syncState } = useClient();
-	const params = useDecodedParams<{ roomId?: string }>();
+	const { client, syncState, summaries } = useClient();
+	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
+	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
+	const [leaving, setLeaving] = createSignal(false);
 
 	const handleLogout = async (): Promise<void> => {
 		try {
@@ -28,6 +70,33 @@ const Layout: Component = () => {
 	const displayName = (): string => {
 		const userId = client.getUserId();
 		return userId ?? "User";
+	};
+
+	const roomId = () => params.roomId;
+
+	const roomName = () => {
+		const rid = roomId();
+		if (!rid) return "";
+		const s = summaries[rid];
+		return s?.name?.trim() || "Room";
+	};
+
+	const handleLeave = async (): Promise<void> => {
+		const rid = roomId();
+		if (!rid || leaving()) return;
+		setLeaving(true);
+		try {
+			await client.leave(rid);
+			if (params.spaceId) {
+				navigate(`/space/${encodeURIComponent(params.spaceId)}`);
+			} else {
+				navigate("/home");
+			}
+		} catch (err) {
+			console.error("Failed to leave room:", err);
+		} finally {
+			setLeaving(false);
+		}
 	};
 
 	return (
@@ -48,15 +117,15 @@ const Layout: Component = () => {
 				</div>
 			</header>
 
-			{/* Three-column resizable layout (plus optional members pane) */}
+			{/* Three-column resizable layout */}
 			<ResizableLayout
 				spaces={<SpacesSidebar />}
 				roomList={<RoomList />}
 				main={
 					<Show
-						when={params.roomId}
+						when={roomId()}
 						fallback={
-							<main class="flex flex-1 flex-col">
+							<main class="flex h-full flex-col">
 								<div class="flex flex-1 items-center justify-center">
 									<p class="text-text-disabled">
 										Select a room to start chatting
@@ -65,13 +134,72 @@ const Layout: Component = () => {
 							</main>
 						}
 					>
-						{(roomId) => <TimelineView roomId={roomId()} />}
-					</Show>
-				}
-				membersVisible={!!params.roomId && membersPaneVisible()}
-				members={
-					<Show when={params.roomId}>
-						{(roomId) => <MemberList roomId={roomId()} />}
+						{(rid) => (
+							<div class="flex h-full flex-col">
+								{/* Room header — spans full width above timeline + members */}
+								<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
+									<span class="text-sm font-semibold text-text-emphasis">
+										{roomName()}
+									</span>
+									<div class="flex items-center gap-1">
+										<button
+											type="button"
+											onClick={toggleMembersPane}
+											class="rounded px-2 py-1 text-xs transition-colors"
+											classList={{
+												"bg-surface-3 text-text-emphasis": membersPaneVisible(),
+												"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
+													!membersPaneVisible(),
+											}}
+											title={
+												membersPaneVisible()
+													? "Hide member list"
+													: "Show member list"
+											}
+											aria-pressed={membersPaneVisible()}
+										>
+											Members
+										</button>
+										<button
+											type="button"
+											onClick={handleLeave}
+											disabled={leaving()}
+											class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text"
+											title="Leave room"
+										>
+											{leaving() ? "Leaving…" : "Leave"}
+										</button>
+									</div>
+								</div>
+
+								{/* Timeline + optional members panel side by side */}
+								<div class="flex min-h-0 flex-1">
+									<div class="min-w-0 flex-1">
+										<TimelineView roomId={rid()} />
+									</div>
+									<Show when={membersPaneVisible()}>
+										<ResizeDivider
+											onDrag={(d) =>
+												setMembersWidth((w) =>
+													clamp(w - d, MIN_MEMBERS, MAX_MEMBERS),
+												)
+											}
+											onDragEnd={() => saveMembersWidth(membersWidth())}
+											value={membersWidth()}
+											min={MIN_MEMBERS}
+											max={MAX_MEMBERS}
+											label="Resize members panel"
+										/>
+										<div
+											style={{ width: `${membersWidth()}px` }}
+											class="shrink-0 overflow-hidden"
+										>
+											<MemberList roomId={rid()} />
+										</div>
+									</Show>
+								</div>
+							</div>
+						)}
 					</Show>
 				}
 			/>
