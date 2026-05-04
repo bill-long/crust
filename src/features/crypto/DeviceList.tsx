@@ -7,7 +7,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import DeviceItem, { type DeviceInfo } from "./DeviceItem";
+import { type DeviceInfo, DeviceItem } from "./DeviceItem";
 
 interface DeviceListProps {
 	onVerifyDevice?: (deviceId: string) => void;
@@ -69,15 +69,15 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 
 	return (
 		<div class="space-y-2">
-			<h3 class="text-sm font-medium text-neutral-300">Your devices</h3>
+			<h3 class="text-sm font-medium text-text-secondary">Your devices</h3>
 			<Switch>
 				<Match when={devices.loading}>
-					<div class="py-4 text-center text-sm text-neutral-500">
+					<div class="py-4 text-center text-sm text-text-disabled">
 						Loading devices…
 					</div>
 				</Match>
 				<Match when={devices.error}>
-					<div class="py-4 text-center text-sm text-red-400">
+					<div class="py-4 text-center text-sm text-danger-text">
 						Failed to load devices
 					</div>
 				</Match>
@@ -90,7 +90,7 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 						</For>
 					</div>
 					<Show when={(devices()?.length ?? 0) === 0}>
-						<div class="py-4 text-center text-sm text-neutral-500">
+						<div class="py-4 text-center text-sm text-text-disabled">
 							No devices found
 						</div>
 					</Show>
@@ -100,4 +100,4 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 	);
 };
 
-export default DeviceList;
+export { DeviceList };

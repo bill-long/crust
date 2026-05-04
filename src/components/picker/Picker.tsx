@@ -115,7 +115,7 @@ export function createPicker<T>() {
 			<Show when={props.visible && filtered().length > 0}>
 				<div
 					id={listboxId}
-					class="absolute z-20 max-h-[216px] w-64 overflow-y-auto rounded-lg border border-neutral-700 bg-neutral-800 py-1 shadow-lg"
+					class="absolute z-20 max-h-[216px] w-64 overflow-y-auto rounded-lg border border-border-default bg-surface-2 py-1 shadow-lg"
 					style={{
 						bottom: props.position.bottom,
 						left: props.position.left,
@@ -135,8 +135,8 @@ export function createPicker<T>() {
 									tabIndex={-1}
 									class={`cursor-pointer px-3 py-1.5 text-sm ${
 										isHighlighted()
-											? "bg-pink-900/40 text-neutral-100"
-											: "text-neutral-300 hover:bg-neutral-700"
+											? "bg-mention-bg/40 text-text-primary"
+											: "text-text-secondary hover:bg-surface-3"
 									}`}
 									style={{ height: `${ITEM_HEIGHT}px` }}
 									onMouseDown={(e) => {

@@ -176,12 +176,12 @@ const GifPicker: Component<{
 	return (
 		<section
 			ref={pickerRef}
-			class="flex h-[400px] w-80 flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
+			class="flex h-[400px] w-80 flex-col overflow-hidden rounded-lg border border-border-default bg-surface-2 shadow-xl"
 			onKeyDown={onKeyDown}
 			aria-label="GIF picker"
 		>
 			{/* Search input */}
-			<div class="border-b border-neutral-700 p-2">
+			<div class="border-b border-border-default p-2">
 				<input
 					ref={searchRef}
 					type="text"
@@ -189,7 +189,7 @@ const GifPicker: Component<{
 					onInput={(e) => setQuery(e.currentTarget.value)}
 					placeholder={attr().searchPlaceholder}
 					aria-label={attr().searchPlaceholder}
-					class="w-full rounded bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+					class="w-full rounded bg-surface-1 px-3 py-1.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
 				/>
 			</div>
 
@@ -200,7 +200,7 @@ const GifPicker: Component<{
 				onScroll={onScroll}
 			>
 				<Show when={error()}>
-					<div class="p-4 text-center text-sm text-red-400">{error()}</div>
+					<div class="p-4 text-center text-sm text-danger-text">{error()}</div>
 				</Show>
 
 				<Show when={items().length > 0}>
@@ -209,7 +209,7 @@ const GifPicker: Component<{
 							{(gif) => (
 								<button
 									type="button"
-									class="group relative overflow-hidden rounded bg-neutral-900 transition-transform hover:scale-[1.02] focus:outline-none focus:ring-1 focus:ring-pink-500"
+									class="group relative overflow-hidden rounded bg-surface-1 transition-transform hover:scale-[1.02] focus:outline-none focus:ring-1 focus:ring-accent-hover"
 									style={{
 										"aspect-ratio": `${gif.width} / ${gif.height}`,
 									}}
@@ -228,8 +228,10 @@ const GifPicker: Component<{
 										referrerPolicy="no-referrer"
 									/>
 									<Show when={gif.title}>
-										<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-											<p class="truncate text-[10px] text-white">{gif.title}</p>
+										<div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-surface-0/70 to-transparent px-1 py-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+											<p class="truncate text-[10px] text-text-primary">
+												{gif.title}
+											</p>
 										</div>
 									</Show>
 								</button>
@@ -240,25 +242,25 @@ const GifPicker: Component<{
 
 				<Show when={loading()}>
 					<div class="flex justify-center py-4">
-						<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-600 border-t-pink-500" />
+						<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-strong border-t-accent-hover" />
 					</div>
 				</Show>
 
 				<Show when={!loading() && items().length === 0 && !error()}>
-					<p class="p-4 text-center text-sm text-neutral-500">
+					<p class="p-4 text-center text-sm text-text-disabled">
 						{query().trim() ? "No GIFs found" : "Search for GIFs"}
 					</p>
 				</Show>
 			</div>
 
 			{/* Attribution footer — required by provider TOS */}
-			<div class="flex items-center justify-center gap-1.5 border-t border-neutral-700 px-2 py-1.5">
-				<span class="text-[10px] text-neutral-500">Powered by</span>
+			<div class="flex items-center justify-center gap-1.5 border-t border-border-default px-2 py-1.5">
+				<span class="text-[10px] text-text-disabled">Powered by</span>
 				<a
 					href={attr().url}
 					target="_blank"
 					rel="noopener noreferrer"
-					class="text-xs font-semibold text-neutral-400 transition-colors hover:text-neutral-200"
+					class="text-xs font-semibold text-text-muted transition-colors hover:text-text-emphasis"
 				>
 					{attr().name}
 				</a>
@@ -267,4 +269,4 @@ const GifPicker: Component<{
 	);
 };
 
-export default GifPicker;
+export { GifPicker };

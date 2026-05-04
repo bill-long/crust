@@ -115,7 +115,7 @@ const ResizeDivider: Component<{
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: custom drag separator needs div for mouse handling
 		<div
-			class="w-1 shrink-0 cursor-col-resize bg-neutral-800 transition-colors hover:bg-pink-500 active:bg-pink-500"
+			class="w-1 shrink-0 cursor-col-resize bg-surface-2 transition-colors hover:bg-accent-hover active:bg-accent-hover"
 			onMouseDown={onMouseDown}
 			onKeyDown={onKeyDown}
 			role="separator"

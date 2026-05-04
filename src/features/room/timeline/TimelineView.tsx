@@ -14,15 +14,15 @@ import {
 import { useDecodedParams } from "../../../app/useDecodedParams";
 import { useClient } from "../../../client/client";
 import { membersPaneVisible, toggleMembersPane } from "../../../stores/layout";
-import EmojiPicker from "../../emoji/EmojiPicker";
+import { EmojiPicker } from "../../emoji/EmojiPicker";
 import type { PickerEmoji } from "../../emoji/types";
 import {
 	buildEmoteLookup,
 	buildShortcodeLookup,
 	useImagePacks,
 } from "../../emoji/useImagePacks";
-import Composer from "../composer/Composer";
-import TimelineItem from "./TimelineItem";
+import { Composer } from "../composer/Composer";
+import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
 interface ReadReceiptEntry {
@@ -455,16 +455,18 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	return (
 		<main class="flex h-full flex-col">
 			{/* Room header */}
-			<div class="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
-				<span class="text-sm font-semibold text-neutral-200">{roomName()}</span>
+			<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
+				<span class="text-sm font-semibold text-text-emphasis">
+					{roomName()}
+				</span>
 				<div class="flex items-center gap-1">
 					<button
 						type="button"
 						onClick={toggleMembersPane}
 						class="rounded px-2 py-1 text-xs transition-colors"
 						classList={{
-							"bg-neutral-700 text-neutral-200": membersPaneVisible(),
-							"text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300":
+							"bg-surface-3 text-text-emphasis": membersPaneVisible(),
+							"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
 								!membersPaneVisible(),
 						}}
 						title={
@@ -478,7 +480,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						type="button"
 						onClick={handleLeave}
 						disabled={leaving()}
-						class="rounded px-2 py-1 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-red-400"
+						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text"
 						title="Leave room"
 					>
 						{leaving() ? "Leaving…" : "Leave"}
@@ -491,7 +493,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				when={!loading() || events.length > 0}
 				fallback={
 					<div class="flex flex-1 items-center justify-center">
-						<div class="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+						<div class="mx-auto h-6 w-6 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
 					</div>
 				}
 			>
@@ -510,7 +512,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						{/* Loading older messages indicator */}
 						<Show when={loadingOlder()}>
 							<div class="flex justify-center py-3">
-								<div class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
+								<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
 							</div>
 						</Show>
 						{/* Manual load button when auto-pagination exhausted */}
@@ -524,7 +526,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							<div class="flex justify-center py-3">
 								<button
 									type="button"
-									class="rounded px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+									class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
 									onClick={() => loadOlderMessages()}
 								>
 									Load older messages
@@ -532,7 +534,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							</div>
 						</Show>
 						<Show when={!loading() && !canLoadOlder() && events.length > 0}>
-							<div class="py-3 text-center text-xs text-neutral-600">
+							<div class="py-3 text-center text-xs text-text-faint">
 								Beginning of conversation
 							</div>
 						</Show>
@@ -623,7 +625,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							>
 								<span class="sr-only">Loading newer messages</span>
 								<div
-									class="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500"
+									class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover"
 									aria-hidden="true"
 								/>
 							</div>
@@ -633,7 +635,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							<div class="flex justify-center py-3">
 								<button
 									type="button"
-									class="rounded px-3 py-1 text-xs text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+									class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
 									onClick={() => {
 										// Content will be appended below the user's current
 										// position, so they won't be at bottom after the load.
@@ -656,7 +658,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 					<Show when={!atBottom() || canLoadNewer()}>
 						<button
 							type="button"
-							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-neutral-700 px-3 py-2 text-neutral-300 shadow-lg transition-colors hover:bg-neutral-600"
+							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4"
 							onClick={() => {
 								if (canLoadNewer()) {
 									// Ensure atBottom is true so that when jumpToLive
@@ -690,7 +692,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			{/* Typing indicator */}
 			<Show when={typingText()}>
 				<div
-					class="shrink-0 px-4 py-1 text-xs text-neutral-500"
+					class="shrink-0 px-4 py-1 text-xs text-text-disabled"
 					aria-live="polite"
 				>
 					{typingText()}
@@ -714,4 +716,4 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	);
 };
 
-export default TimelineView;
+export { TimelineView };

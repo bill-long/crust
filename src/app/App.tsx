@@ -2,11 +2,11 @@ import type { RouteSectionProps } from "@solidjs/router";
 import { Route, Router, useNavigate } from "@solidjs/router";
 import { type Component, Match, onMount, Show, Switch } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
-import LoginPage from "../features/auth/LoginPage";
-import CryptoStatusBanner from "../features/crypto/CryptoStatusBanner";
+import { LoginPage } from "../features/auth/LoginPage";
+import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
-import Layout from "./Layout";
+import { Layout } from "./Layout";
 
 /** Auth guard — redirects to /login if no session, otherwise boots the Matrix client. */
 const AuthGuard: Component<RouteSectionProps> = (props) => {
@@ -31,10 +31,10 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	return (
 		<Switch>
 			<Match when={syncState() === "initial"}>
-				<div class="flex h-screen items-center justify-center bg-neutral-950">
+				<div class="flex h-screen items-center justify-center bg-surface-0">
 					<div class="text-center">
-						<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
-						<p class="text-neutral-400">
+						<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+						<p class="text-text-muted">
 							{cryptoState() === "loading"
 								? "Initializing encryption…"
 								: "Syncing…"}
@@ -43,19 +43,19 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				</div>
 			</Match>
 			<Match when={syncState() === "error"}>
-				<div class="flex h-screen items-center justify-center bg-neutral-950">
+				<div class="flex h-screen items-center justify-center bg-surface-0">
 					<div class="text-center">
-						<p class="text-red-400">Sync error</p>
-						<p class="mt-1 text-sm text-neutral-500">
+						<p class="text-danger-text">Sync error</p>
+						<p class="mt-1 text-sm text-text-disabled">
 							Check your connection and try refreshing.
 						</p>
 					</div>
 				</div>
 			</Match>
 			<Match when={true}>
-				<div class="flex h-screen flex-col bg-neutral-950 text-white">
+				<div class="flex h-screen flex-col bg-surface-0 text-text-primary">
 					<Show when={cryptoState() === "error"}>
-						<div class="shrink-0 border-b border-amber-800 bg-amber-950/50 px-4 py-2 text-center text-sm text-amber-300">
+						<div class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text">
 							Encryption initialization failed — encrypted messages may not be
 							readable.
 						</div>
@@ -89,4 +89,4 @@ const App: Component = () => {
 	);
 };
 
-export default App;
+export { App };

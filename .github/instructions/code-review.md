@@ -21,7 +21,10 @@ Do NOT call `git push` until step 5 says "push".
 4. **Fix loop** — if ANY pass found a substantive issue, fix it, go back to
    step 2. Do NOT push the unfixed code "to save time".
 5. **Push** — all 4 passes agree with no substantive findings → `git push`
-6. **Reply** — reply to any Copilot PR review comments referencing the commit
+6. **Reply** — reply to **every** Copilot PR review comment with the fix
+   commit SHA and a brief description of what changed. Do not leave any
+   thread without a reply — even outdated threads should get a reply so
+   the reviewer can see the fix was addressed.
 
 **Common failure mode:** "It's just a comment / one-liner / TODO, I'll push
 and review after." This is the #1 cause of wasted Copilot review round-trips.

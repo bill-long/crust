@@ -18,7 +18,7 @@ const EmojiDisplay: Component<EmojiDisplayProps> = (props) => {
 						<span class="text-3xl" aria-hidden="true">
 							{emojiChar}
 						</span>
-						<span class="text-center text-xs text-neutral-400">{name}</span>
+						<span class="text-center text-xs text-text-muted">{name}</span>
 					</li>
 				)}
 			</For>
@@ -26,4 +26,4 @@ const EmojiDisplay: Component<EmojiDisplayProps> = (props) => {
 	);
 };
 
-export default EmojiDisplay;
+export { EmojiDisplay };

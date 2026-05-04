@@ -319,19 +319,19 @@ const MessageBody: Component<{
 		<Show
 			when={renderedHtml()}
 			fallback={
-				<p class="whitespace-pre-wrap break-words text-sm text-neutral-300">
+				<p class="whitespace-pre-wrap break-words text-sm text-text-secondary">
 					{props.body}
 					<Show when={props.isEdited}>
-						<span class="ml-1 text-xs text-neutral-600">(edited)</span>
+						<span class="ml-1 text-xs text-text-faint">(edited)</span>
 					</Show>
 				</p>
 			}
 		>
 			{(html) => (
-				<div class="message-body break-words text-sm text-neutral-300">
+				<div class="message-body break-words text-sm text-text-secondary">
 					<div innerHTML={html()} />
 					<Show when={props.isEdited}>
-						<span class="ml-1 text-xs text-neutral-600">(edited)</span>
+						<span class="ml-1 text-xs text-text-faint">(edited)</span>
 					</Show>
 				</div>
 			)}
@@ -339,4 +339,4 @@ const MessageBody: Component<{
 	);
 };
 
-export default MessageBody;
+export { MessageBody };

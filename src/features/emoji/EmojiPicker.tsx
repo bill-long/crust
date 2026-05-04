@@ -218,7 +218,7 @@ const EmojiPicker: Component<{
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: picker is not a fieldset
 		<div
-			class="flex h-[360px] w-[352px] flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-800 shadow-xl"
+			class="flex h-[360px] w-[352px] flex-col overflow-hidden rounded-lg border border-border-default bg-surface-2 shadow-xl"
 			onKeyDown={handleKeyDown}
 			role="group"
 			aria-label="Emoji picker"
@@ -231,7 +231,7 @@ const EmojiPicker: Component<{
 					value={query()}
 					onInput={(e) => setQuery(e.currentTarget.value)}
 					placeholder="Search emoji…"
-					class="w-full rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-pink-500"
+					class="w-full rounded-md bg-surface-1 px-3 py-1.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
 					aria-label="Search emoji"
 				/>
 			</div>
@@ -239,7 +239,7 @@ const EmojiPicker: Component<{
 			{/* Category bar */}
 			<Show when={!query()}>
 				<nav
-					class="flex shrink-0 gap-0.5 overflow-x-auto border-b border-neutral-700 px-1 py-1"
+					class="flex shrink-0 gap-0.5 overflow-x-auto border-b border-border-default px-1 py-1"
 					aria-label="Emoji categories"
 				>
 					<For each={tabs()}>
@@ -259,8 +259,8 @@ const EmojiPicker: Component<{
 									aria-pressed={isActive()}
 									class={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-sm transition-colors ${
 										isActive()
-											? "bg-pink-900/40 text-neutral-100"
-											: "text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
+											? "bg-mention-bg/40 text-text-primary"
+											: "text-text-muted hover:bg-surface-3 hover:text-text-emphasis"
 									}`}
 									onClick={() => setActiveTab(tab.id)}
 									title={tab.label}
@@ -291,7 +291,7 @@ const EmojiPicker: Component<{
 				<Show
 					when={displayItems().length > 0}
 					fallback={
-						<div class="flex h-full items-center justify-center text-sm text-neutral-500">
+						<div class="flex h-full items-center justify-center text-sm text-text-disabled">
 							{query() ? "No emoji found" : "No recently used emoji"}
 						</div>
 					}
@@ -316,7 +316,7 @@ const EmojiPicker: Component<{
 								return (
 									<button
 										type="button"
-										class="flex h-9 w-9 items-center justify-center rounded text-xl transition-colors hover:bg-neutral-700"
+										class="flex h-9 w-9 items-center justify-center rounded text-xl transition-colors hover:bg-surface-3"
 										onClick={() => handleSelect(item)}
 										title={title}
 										aria-label={label}
@@ -341,4 +341,4 @@ const EmojiPicker: Component<{
 	);
 };
 
-export default EmojiPicker;
+export { EmojiPicker };

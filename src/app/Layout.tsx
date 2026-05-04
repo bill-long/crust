@@ -2,10 +2,10 @@ import { useNavigate } from "@solidjs/router";
 import { type Component, Show } from "solid-js";
 import { useClient } from "../client/client";
 import { ResizableLayout } from "../components/ResizableLayout";
-import MemberList from "../features/room/MemberList";
-import RoomList from "../features/room/RoomList";
-import TimelineView from "../features/room/timeline/TimelineView";
-import SpacesSidebar from "../features/space/SpacesSidebar";
+import { MemberList } from "../features/room/MemberList";
+import { RoomList } from "../features/room/RoomList";
+import { TimelineView } from "../features/room/timeline/TimelineView";
+import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { membersPaneVisible } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import { useDecodedParams } from "./useDecodedParams";
@@ -31,17 +31,17 @@ const Layout: Component = () => {
 	};
 
 	return (
-		<div class="flex min-h-0 flex-1 flex-col bg-neutral-950 text-white">
+		<div class="flex min-h-0 flex-1 flex-col bg-surface-0 text-text-primary">
 			{/* Top bar */}
-			<header class="flex h-12 shrink-0 items-center justify-between border-b border-neutral-800 px-4">
+			<header class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
 				<span class="text-lg font-bold">Crust</span>
 				<div class="flex items-center gap-3">
-					<span class="text-sm text-neutral-400">{displayName()}</span>
-					<span class="text-xs text-neutral-600">{syncState()}</span>
+					<span class="text-sm text-text-muted">{displayName()}</span>
+					<span class="text-xs text-text-faint">{syncState()}</span>
 					<button
 						type="button"
 						onClick={handleLogout}
-						class="rounded px-2 py-1 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+						class="rounded px-2 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
 					>
 						Log out
 					</button>
@@ -58,7 +58,7 @@ const Layout: Component = () => {
 						fallback={
 							<main class="flex flex-1 flex-col">
 								<div class="flex flex-1 items-center justify-center">
-									<p class="text-neutral-500">
+									<p class="text-text-disabled">
 										Select a room to start chatting
 									</p>
 								</div>
@@ -79,4 +79,4 @@ const Layout: Component = () => {
 	);
 };
 
-export default Layout;
+export { Layout };

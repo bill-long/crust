@@ -22,32 +22,32 @@ const BackupStatus: Component<BackupStatusProps> = (props) => {
 		<div class="flex items-center gap-2 text-xs" role="status">
 			<Switch>
 				<Match when={b.lastError()}>
-					<span class="text-red-400" role="img" aria-label="Error">
+					<span class="text-danger-text" role="img" aria-label="Error">
 						⚠
 					</span>
-					<span class="text-red-300">Backup error</span>
+					<span class="text-danger-text-bright">Backup error</span>
 				</Match>
 
 				<Match when={b.isBackingUp()}>
 					<span
-						class="inline-block h-3 w-3 animate-spin rounded-full border border-neutral-600 border-t-green-400"
+						class="inline-block h-3 w-3 animate-spin rounded-full border border-border-strong border-t-success-text"
 						role="img"
 						aria-label="Uploading"
 					/>
-					<span class="text-neutral-400">
+					<span class="text-text-muted">
 						Backing up… {b.sessionsRemaining()} remaining
 					</span>
 				</Match>
 
 				<Match when={!b.isBackingUp()}>
-					<span class="text-green-500" role="img" aria-label="Backed up">
+					<span class="text-success-text" role="img" aria-label="Backed up">
 						✓
 					</span>
-					<span class="text-neutral-500">Backup is up to date</span>
+					<span class="text-text-disabled">Backup is up to date</span>
 				</Match>
 			</Switch>
 		</div>
 	);
 };
 
-export default BackupStatus;
+export { BackupStatus };

@@ -1,5 +1,5 @@
 import { type Component, Match, Show, Switch } from "solid-js";
-import EmojiDisplay from "./EmojiDisplay";
+import { EmojiDisplay } from "./EmojiDisplay";
 import type { VerificationHandle } from "./useVerification";
 
 interface VerificationDialogProps {
@@ -43,16 +43,16 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 				if (e.key === "Escape") handleClose();
 			}}
 		>
-			<div class="w-full max-w-md rounded-lg bg-neutral-900 p-6 shadow-xl">
+			<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 				<Switch>
 					{/* Waiting for other side */}
 					<Match when={v.state() === "requested" || v.state() === "ready"}>
 						<div class="flex flex-col items-center gap-4">
-							<div class="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-pink-500" />
-							<h2 class="text-lg font-semibold text-white">
+							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+							<h2 class="text-lg font-semibold text-text-primary">
 								Waiting for the other device
 							</h2>
-							<p class="text-center text-sm text-neutral-400">
+							<p class="text-center text-sm text-text-muted">
 								<Show
 									when={v.isSelfVerification()}
 									fallback="Accept the verification request on the other device."
@@ -63,7 +63,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.cancel()}
-								class="mt-2 rounded px-3 py-2 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-white"
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
 							>
 								Cancel
 							</button>
@@ -72,17 +72,17 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 
 					{/* Emoji comparison */}
 					<Match when={v.state() === "sas-showing"}>
-						<h2 class="mb-4 text-center text-lg font-semibold text-white">
+						<h2 class="mb-4 text-center text-lg font-semibold text-text-primary">
 							Compare emoji
 						</h2>
-						<p class="mb-6 text-center text-sm text-neutral-400">
+						<p class="mb-6 text-center text-sm text-text-muted">
 							Verify that the following emoji appear on both devices, in the
 							same order.
 						</p>
 
 						<Show when={v.emoji()}>
 							{(emojiList) => (
-								<div class="mb-6 rounded-lg bg-neutral-800/50 p-4">
+								<div class="mb-6 rounded-lg bg-surface-2/50 p-4">
 									<EmojiDisplay emoji={emojiList()} />
 								</div>
 							)}
@@ -92,14 +92,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.rejectSas()}
-								class="rounded bg-red-900/50 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-900/70"
+								class="rounded bg-danger-bg/50 px-4 py-2 text-sm font-medium text-danger-text-bright transition-colors hover:bg-danger-bg/70"
 							>
 								They don't match
 							</button>
 							<button
 								type="button"
 								onClick={() => v.confirmSas()}
-								class="rounded bg-green-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-green-600"
+								class="rounded bg-success px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-success-hover"
 							>
 								They match
 							</button>
@@ -109,11 +109,11 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 					{/* Confirming */}
 					<Match when={v.state() === "sas-confirmed"}>
 						<div class="flex flex-col items-center gap-4">
-							<div class="h-8 w-8 animate-spin rounded-full border-2 border-neutral-700 border-t-green-500" />
-							<h2 class="text-lg font-semibold text-white">
+							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-success-text" />
+							<h2 class="text-lg font-semibold text-text-primary">
 								Waiting for confirmation
 							</h2>
-							<p class="text-sm text-neutral-400">
+							<p class="text-sm text-text-muted">
 								Confirm the emoji on your other device too.
 							</p>
 						</div>
@@ -125,10 +125,10 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<span class="text-4xl" role="img" aria-label="Verified">
 								✅
 							</span>
-							<h2 class="text-lg font-semibold text-white">
+							<h2 class="text-lg font-semibold text-text-primary">
 								Verification complete
 							</h2>
-							<p class="text-center text-sm text-neutral-400">
+							<p class="text-center text-sm text-text-muted">
 								<Show
 									when={v.isSelfVerification()}
 									fallback="The device has been verified."
@@ -139,7 +139,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-pink-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-pink-500"
+								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 							>
 								Done
 							</button>
@@ -152,16 +152,16 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<span class="text-4xl" role="img" aria-label="Cancelled">
 								❌
 							</span>
-							<h2 class="text-lg font-semibold text-white">
+							<h2 class="text-lg font-semibold text-text-primary">
 								Verification cancelled
 							</h2>
-							<p class="text-sm text-neutral-400">
+							<p class="text-sm text-text-muted">
 								The verification was cancelled.
 							</p>
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-neutral-700 px-3 py-2 text-sm text-white transition-colors hover:bg-neutral-600"
+								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
 							>
 								Close
 							</button>
@@ -174,14 +174,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<span class="text-4xl" role="img" aria-label="Error">
 								⚠️
 							</span>
-							<h2 class="text-lg font-semibold text-white">
+							<h2 class="text-lg font-semibold text-text-primary">
 								Verification failed
 							</h2>
-							<p class="text-sm text-red-300">{v.error()}</p>
+							<p class="text-sm text-danger-text-bright">{v.error()}</p>
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-neutral-700 px-3 py-2 text-sm text-white transition-colors hover:bg-neutral-600"
+								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
 							>
 								Close
 							</button>
@@ -193,4 +193,4 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	);
 };
 
-export default VerificationDialog;
+export { VerificationDialog };
