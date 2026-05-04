@@ -76,7 +76,10 @@ export function useSpaceHierarchy(
 
 	// Sync nextBatch from initial page and reset additional rooms
 	createEffect(() => {
-		if (hierarchy.error) return;
+		if (hierarchy.error) {
+			setLoadingMore(false);
+			return;
+		}
 		const data = hierarchy();
 		if (data) {
 			setNextBatch(data.nextBatch);
