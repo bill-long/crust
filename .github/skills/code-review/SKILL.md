@@ -1,3 +1,12 @@
+---
+name: code-review
+description: >
+  Enforces the mandatory 4-pass local code review workflow before every push.
+  Use this skill when performing code reviews, preparing to push code, creating
+  PRs, or completing any code change task. This skill must be invoked before
+  any git push operation.
+---
+
 # Code Review Prompt Guidelines
 
 When running local code reviews (via the code-review agent), use these prompt
