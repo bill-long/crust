@@ -13,7 +13,6 @@ export const DEFAULT_MEMBERS = 240;
 interface PaneWidths {
 	spaces: number;
 	roomList: number;
-	members: number;
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -32,17 +31,13 @@ function loadWidths(): PaneWidths {
 				return {
 					spaces: clamp(parsed.spaces, MIN_SPACES, MAX_SPACES),
 					roomList: clamp(parsed.roomList, MIN_ROOM_LIST, MAX_ROOM_LIST),
-					members:
-						typeof parsed.members === "number"
-							? clamp(parsed.members, MIN_MEMBERS, MAX_MEMBERS)
-							: DEFAULT_MEMBERS,
 				};
 			}
 		}
 	} catch {
 		// ignore
 	}
-	return { spaces: 64, roomList: 256, members: DEFAULT_MEMBERS };
+	return { spaces: 64, roomList: 256 };
 }
 
 function saveWidths(widths: PaneWidths): void {
@@ -136,7 +131,6 @@ export const ResizableLayout: Component<{
 		saveWidths({
 			spaces: spacesWidth(),
 			roomList: roomListWidth(),
-			members: loadWidths().members,
 		});
 	};
 
