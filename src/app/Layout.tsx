@@ -1,5 +1,13 @@
 import { useNavigate } from "@solidjs/router";
-import { type Component, createMemo, createSignal, Show } from "solid-js";
+import { UserEvent } from "matrix-js-sdk";
+import {
+	type Component,
+	createMemo,
+	createSignal,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
 import { useClient } from "../client/client";
 import {
 	clamp,
@@ -17,6 +25,7 @@ import {
 import { MemberList } from "../features/room/MemberList";
 import { RoomList } from "../features/room/RoomList";
 import { TimelineView } from "../features/room/timeline/TimelineView";
+import { SettingsOverlay } from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
@@ -58,11 +67,12 @@ function saveMembersWidth(w: number): void {
 }
 
 const Layout: Component = () => {
-	const { client, syncState, summaries, cryptoStatus } = useClient();
+	const { client, summaries, cryptoStatus } = useClient();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
+	const [settingsOpen, setSettingsOpen] = createSignal(false);
 
 	const handleLogout = async (): Promise<void> => {
 		try {
@@ -75,12 +85,52 @@ const Layout: Component = () => {
 	};
 
 	const userId = () => client.getUserId() ?? "";
+
+	// Current user profile — reactive via SDK events
+	const [profileName, setProfileName] = createSignal<string | undefined>();
+	const [profileAvatarMxc, setProfileAvatarMxc] = createSignal<
+		string | undefined
+	>();
+
+	onMount(() => {
+		const uid = client.getUserId();
+		if (!uid) return;
+		const user = client.getUser(uid);
+		if (!user) return;
+
+		setProfileName(user.displayName ?? undefined);
+		setProfileAvatarMxc(user.avatarUrl ?? undefined);
+
+		const onName = (): void => {
+			setProfileName(user.displayName ?? undefined);
+		};
+		const onAvatar = (): void => {
+			setProfileAvatarMxc(user.avatarUrl ?? undefined);
+		};
+
+		user.on(UserEvent.DisplayName, onName);
+		user.on(UserEvent.AvatarUrl, onAvatar);
+
+		onCleanup(() => {
+			user.removeListener(UserEvent.DisplayName, onName);
+			user.removeListener(UserEvent.AvatarUrl, onAvatar);
+		});
+	});
+
 	const displayName = () => {
+		const name = profileName();
+		if (name?.trim()) return name.trim();
 		const uid = userId();
 		const localpart = uid.split(":")[0]?.replace("@", "").trim();
 		return localpart || uid || "User";
 	};
 	const initial = () => (displayName().trim() || "?").charAt(0).toUpperCase();
+
+	const avatarUrl = (): string | null => {
+		const mxc = profileAvatarMxc();
+		if (!mxc) return null;
+		return client.mxcUrlToHttp(mxc, 80, 80, "crop") ?? null;
+	};
 
 	const cryptoAction = createMemo(
 		(): CryptoAction =>
@@ -145,11 +195,11 @@ const Layout: Component = () => {
 						displayName={displayName()}
 						userId={userId()}
 						initial={initial()}
+						avatarUrl={avatarUrl()}
 						needsCryptoAttention={needsCryptoAttention()}
 						cryptoLabel={cryptoActionLabel(cryptoAction())}
 						onCryptoClick={handleCryptoClick}
-						syncState={syncState()}
-						onLogout={handleLogout}
+						onSettingsClick={() => setSettingsOpen(true)}
 					/>
 				}
 				main={
@@ -234,6 +284,14 @@ const Layout: Component = () => {
 					</Show>
 				}
 			/>
+
+			{/* Settings overlay */}
+			<Show when={settingsOpen()}>
+				<SettingsOverlay
+					onClose={() => setSettingsOpen(false)}
+					onLogout={handleLogout}
+				/>
+			</Show>
 		</div>
 	);
 };
