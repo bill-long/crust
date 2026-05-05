@@ -187,7 +187,7 @@ the number of threads found.
 gh api graphql -f query='{
   repository(owner: "bill-long", name: "crust") {
     pullRequest(number: PR_NUMBER) {
-      reviewThreads(last: 50) {
+      reviewThreads(last: 100) {
         nodes {
           id
           isOutdated
@@ -209,6 +209,8 @@ gh api graphql -f query='{
 ] | .[] | {id, path, line, body: .comments.nodes[-1].body[0:120]}'
 ```
 
+- Uses `last: 100` to cover PRs with many threads. If a PR exceeds 100
+  threads, paginate with `before` cursor to ensure full coverage.
 - This query finds threads where: (a) not outdated, (b) not resolved,
   AND (c) the **last** comment is from Copilot (meaning we haven't replied).
 - If ANY results appear, address them before proceeding.
