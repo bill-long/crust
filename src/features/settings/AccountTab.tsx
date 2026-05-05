@@ -120,10 +120,12 @@ const AccountTab: Component = () => {
 		setIgnoredUsers(client.getIgnoredUsers() ?? []);
 	};
 
+	// Matrix user IDs: @localpart:server — localpart is [a-z0-9._=\-/]+
+	const MATRIX_USER_ID_RE = /^@[a-z0-9._=\-/]+:[a-z0-9._\-]+$/i;
+
 	const blockUser = async (): Promise<void> => {
 		const id = blockInput().trim();
-		const colonIdx = id.indexOf(":");
-		if (!id?.startsWith("@") || colonIdx < 2 || colonIdx === id.length - 1) {
+		if (!MATRIX_USER_ID_RE.test(id)) {
 			setBlockError("Enter a valid user ID (e.g. @user:server.com)");
 			return;
 		}
