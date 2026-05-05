@@ -9,6 +9,7 @@ import {
 	onMount,
 	Switch,
 } from "solid-js";
+import { userSettings } from "../../stores/settings";
 import { AccountTab } from "./AccountTab";
 import { DevicesTab } from "./DevicesTab";
 import { GeneralTab } from "./GeneralTab";
@@ -119,6 +120,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 		<div
 			ref={overlayRef}
 			class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+			style={{ zoom: `${100 / userSettings().zoomLevel}` }}
 			role="dialog"
 			aria-modal="true"
 			aria-label="Settings"

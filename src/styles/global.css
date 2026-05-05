@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+/* Zoom-aware viewport containment: html height compensates for CSS zoom
+   so that children using h-full fill exactly the visible viewport. */
+html {
+	height: calc(100vh / var(--app-zoom, 1));
+	overflow: hidden;
+}
+
+body {
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+}
+
+#root {
+	height: 100%;
+}
+
 /* ─── Design Tokens ─── */
 @theme {
 	/* Surface hierarchy (dark → light) */
