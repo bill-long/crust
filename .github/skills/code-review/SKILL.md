@@ -121,8 +121,23 @@ gh api /repos/bill-long/crust/pulls/PR_NUMBER/reviews \
 
 ### Step 2: Check the summary text
 
-- **"generated no new comments"** → review is clean, loop complete.
+- **"generated no new comments"** → review is clean, proceed to Step 4
+  verification scan, then loop complete.
 - **"generated N comment(s)"** → there are new comments to address.
+
+**The loop is NOT complete until a summary explicitly says "generated no
+new comments".** Addressing all visible threads and replying is not enough.
+You must push the fixes, re-request review, and wait for a NEW summary
+review on the NEW commit that says zero comments. Replying to threads
+without pushing code does not trigger a new review — Copilot only reviews
+new commits.
+
+**Common failure mode (violated in this project):** Got a summary saying
+"generated 1 comment", addressed the thread, replied, re-requested review
+on the same commit, then declared the review clean because no new summary
+appeared. The correct flow: fix → push new commit → wait for new summary →
+verify it says "no new comments". Without a clean summary, you don't know
+if there are additional findings.
 
 ### Step 3: Read new comments (if any)
 
@@ -159,6 +174,52 @@ summary review exists, GraphQL `reviewThreads` may not yet include newly
 created threads. Poll GraphQL **at least 3 times at 10-second intervals**
 after the summary review arrives. A single 0 immediately after REST
 confirmation is unreliable — threads can take 10-30 seconds to propagate.
+
+### Step 4: Verify ALL threads are addressed (mandatory)
+
+**After replying to threads and before declaring the review cycle complete,**
+run a comprehensive scan of ALL non-outdated threads to catch any that were
+missed. This step catches threads that arrived late due to eventual
+consistency, or that were overlooked when the summary count didn't match
+the number of threads found.
+
+```bash
+gh api graphql -f query='{
+  repository(owner: "bill-long", name: "crust") {
+    pullRequest(number: PR_NUMBER) {
+      reviewThreads(last: 50) {
+        nodes {
+          id
+          isOutdated
+          isResolved
+          path
+          line
+          comments(last: 1) {
+            nodes { author { login } body }
+          }
+        }
+      }
+    }
+  }
+}' --jq '[
+  .data.repository.pullRequest.reviewThreads.nodes[]
+  | select(.isOutdated == false)
+  | select(.isResolved == false)
+  | select(.comments.nodes[-1].author.login | test("copilot"))
+] | .[] | {id, path, line, body: .comments.nodes[-1].body[0:120]}'
+```
+
+- This query finds threads where: (a) not outdated, (b) not resolved,
+  AND (c) the **last** comment is from Copilot (meaning we haven't replied).
+- If ANY results appear, address them before proceeding.
+- **Run this after EVERY reply cycle**, not just the first one. A re-review
+  can generate new threads at any time.
+
+**Why this was added:** A review generated 2 comments but we only found 1
+on the initial GraphQL poll. The second thread (about `aria-pressed` vs
+`aria-current`) arrived later and was missed until the user pointed it out.
+The fix: always do a final verification scan that checks for unreplied
+Copilot threads, regardless of what the summary count said.
 
 ## Scoped Pass
 
@@ -600,3 +661,16 @@ additions at the end of the category list:
   HTML with `<br>` and `<p>` tags already handles line breaks.
   Applying `pre-wrap` double-spaces the content. Reserve `pre-wrap`
   for plain-text-only containers (like code blocks or raw body text).
+- **The Copilot review loop requires a clean summary, not just
+  addressed threads.** After addressing Copilot comments, you must
+  push a new commit, re-request review, and wait for a new summary
+  that says "generated no new comments". Replying to threads on the
+  same commit is not enough — Copilot won't re-review the same SHA.
+  Declaring the loop complete without a clean summary caused a missed
+  comment (aria-pressed vs aria-current) that the user had to catch.
+- **Always run a verification scan after replying to Copilot threads.**
+  Query ALL non-outdated, non-resolved threads where the last comment
+  is from Copilot. Eventual consistency means threads can appear after
+  the initial poll. A summary saying "generated 1 comment" may have 2
+  threads by the time you check — the second arrived late. Never trust
+  the summary count alone; always verify with a comprehensive scan.

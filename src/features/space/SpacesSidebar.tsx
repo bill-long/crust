@@ -95,7 +95,7 @@ const SpacesSidebar: Component = () => {
 								}`}
 								title={space.name.trim() || "Unnamed space"}
 								aria-label={space.name.trim() || "Unnamed space"}
-								aria-pressed={isSelected()}
+								aria-current={isSelected() ? "page" : undefined}
 							>
 								<Show
 									when={space.avatarUrl}
