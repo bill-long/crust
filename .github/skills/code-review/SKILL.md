@@ -147,9 +147,12 @@ Use this GraphQL query to find unaddressed threads:
 gh api graphql -f query='{
   repository(owner: "bill-long", name: "crust") {
     pullRequest(number: PR_NUMBER) {
-      reviewThreads(last: 50) {
+      reviewThreads(last: 100) {
+        pageInfo { hasPreviousPage startCursor }
         nodes {
+          id
           isOutdated
+          isResolved
           path
           line
           comments(last: 1) {
@@ -159,15 +162,25 @@ gh api graphql -f query='{
       }
     }
   }
-}' --jq '[
-  .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.isOutdated == false)
-  | select(.comments.nodes[-1].author.login | test("copilot"))
-] | length'
+}'
 ```
 
-- **>0** = unaddressed comments; pipe through the jq filter
-  `.[] | {path, line, body: .comments.nodes[-1].body[0:120]}` to see them
+Filter for unreplied Copilot threads (non-outdated, last comment from Copilot):
+
+```bash
+--jq '{
+  hasPreviousPage: .data.repository.pullRequest.reviewThreads.pageInfo.hasPreviousPage,
+  threads: [
+    .data.repository.pullRequest.reviewThreads.nodes[]
+    | select(.isOutdated == false)
+    | select(.comments.nodes[-1].author.login | test("copilot"))
+  ] | .[] | {id, path, line, body: .comments.nodes[-1].body[0:120]}
+}'
+```
+
+- **>0 threads** = unaddressed comments to fix.
+- If `hasPreviousPage` is true, re-run with `before: "<startCursor>"`
+  to fetch earlier pages.
 
 **IMPORTANT: GraphQL eventual consistency.** After the REST API confirms a
 summary review exists, GraphQL `reviewThreads` may not yet include newly
@@ -178,46 +191,16 @@ confirmation is unreliable — threads can take 10-30 seconds to propagate.
 ### Step 4: Verify ALL threads are addressed (mandatory)
 
 **After replying to threads and before declaring the review cycle complete,**
-run a comprehensive scan of ALL non-outdated threads to catch any that were
-missed. This step catches threads that arrived late due to eventual
-consistency, or that were overlooked when the summary count didn't match
-the number of threads found.
+run a verification scan to catch any threads missed by Step 3. This catches
+threads that arrived late due to eventual consistency, or that were
+overlooked when the summary count didn't match the thread count.
 
-```bash
-gh api graphql -f query='{
-  repository(owner: "bill-long", name: "crust") {
-    pullRequest(number: PR_NUMBER) {
-      reviewThreads(last: 100) {
-        pageInfo { hasPreviousPage startCursor }
-        nodes {
-          id
-          isOutdated
-          isResolved
-          path
-          line
-          comments(last: 1) {
-            nodes { author { login } body }
-          }
-        }
-      }
-    }
-  }
-}' --jq '[
-  .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.isOutdated == false)
-  | select(.isResolved == false)
-  | select(.comments.nodes[-1].author.login | test("copilot"))
-] | .[] | {id, path, line, body: .comments.nodes[-1].body[0:120]}'
-```
+**Run the same query from Step 3, poll 3 times at 10-second intervals,**
+and confirm zero unreplied threads. A single zero is not enough — eventual
+consistency means threads can still be arriving.
 
-- Uses `last: 100` to cover PRs with many threads. If `hasPreviousPage`
-  is true, re-run the query with `before: "<startCursor>"` to fetch
-  earlier pages until all threads are scanned.
-- This query finds threads where: (a) not outdated, (b) not resolved,
-  AND (c) the **last** comment is from Copilot (meaning we haven't replied).
 - If ANY results appear, address them before proceeding.
-- **Run this after EVERY reply cycle**, not just the first one. A re-review
-  can generate new threads at any time.
+- **Run this after EVERY reply cycle**, not just the first one.
 
 **Why this was added:** A review generated 2 comments but we only found 1
 on the initial GraphQL poll. The second thread (about `aria-pressed` vs
