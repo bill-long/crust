@@ -218,7 +218,7 @@ const AccountTab: Component = () => {
 							type="file"
 							accept="image/*"
 							class="hidden"
-							tabindex={-1}
+							tabIndex={-1}
 							onChange={onFileSelect}
 						/>
 						<button
