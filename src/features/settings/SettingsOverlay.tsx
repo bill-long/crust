@@ -141,7 +141,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 											"text-text-secondary hover:bg-surface-2/50 hover:text-text-primary":
 												activeTab() !== tab.id,
 										}}
-										aria-current={activeTab() === tab.id ? "page" : undefined}
+										aria-current={activeTab() === tab.id ? "true" : undefined}
 									>
 										{tab.label}
 									</button>

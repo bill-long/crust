@@ -216,7 +216,9 @@ const AccountTab: Component = () => {
 							Change avatar
 						</button>
 						<Show when={avatarError()}>
-							<div class="text-xs text-danger-text">{avatarError()}</div>
+							<div role="alert" class="text-xs text-danger-text">
+								{avatarError()}
+							</div>
 						</Show>
 					</div>
 
@@ -355,7 +357,9 @@ const AccountTab: Component = () => {
 					</div>
 				</Show>
 				<Show when={unblockError()}>
-					<div class="mt-2 text-xs text-danger-text">{unblockError()}</div>
+					<div role="alert" class="mt-2 text-xs text-danger-text">
+						{unblockError()}
+					</div>
 				</Show>
 			</section>
 		</div>
