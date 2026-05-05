@@ -1,10 +1,11 @@
 import type { Component } from "solid-js";
-import { Show } from "solid-js";
+import { createUniqueId, Show } from "solid-js";
 
 interface ToggleProps {
 	checked: boolean;
 	onChange: (checked: boolean) => void;
 	label: string;
+	describedBy?: string;
 }
 
 const Toggle: Component<ToggleProps> = (props) => (
@@ -13,6 +14,7 @@ const Toggle: Component<ToggleProps> = (props) => (
 		role="switch"
 		aria-checked={props.checked}
 		aria-label={props.label}
+		aria-describedby={props.describedBy}
 		onClick={() => props.onChange(!props.checked)}
 		class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 		classList={{
@@ -37,21 +39,28 @@ interface ToggleRowProps {
 	onChange: (checked: boolean) => void;
 }
 
-const ToggleRow: Component<ToggleRowProps> = (props) => (
-	<div class="flex items-center justify-between gap-4 py-2">
-		<div class="min-w-0 flex-1">
-			<div class="text-sm font-medium text-text-primary">{props.label}</div>
-			<Show when={props.description}>
-				<div class="text-xs text-text-muted">{props.description}</div>
-			</Show>
+const ToggleRow: Component<ToggleRowProps> = (props) => {
+	const descId = createUniqueId();
+
+	return (
+		<div class="flex items-center justify-between gap-4 py-2">
+			<div class="min-w-0 flex-1">
+				<div class="text-sm font-medium text-text-primary">{props.label}</div>
+				<Show when={props.description}>
+					<div id={descId} class="text-xs text-text-muted">
+						{props.description}
+					</div>
+				</Show>
+			</div>
+			<Toggle
+				checked={props.checked}
+				onChange={props.onChange}
+				label={props.label}
+				describedBy={props.description ? descId : undefined}
+			/>
 		</div>
-		<Toggle
-			checked={props.checked}
-			onChange={props.onChange}
-			label={props.label}
-		/>
-	</div>
-);
+	);
+};
 
 /** Section heading used across settings tabs. */
 const SectionHeading: Component<{ children: string }> = (props) => (

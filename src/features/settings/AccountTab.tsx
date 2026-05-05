@@ -121,7 +121,7 @@ const AccountTab: Component = () => {
 	};
 
 	// Matrix user IDs: @localpart:server — localpart is [a-z0-9._=\-/]+
-	const MATRIX_USER_ID_RE = /^@[a-z0-9._=\-/]+:[a-z0-9._\-]+$/i;
+	const MATRIX_USER_ID_RE = /^@[a-z0-9._=\-/]+:[a-z0-9._-]+$/i;
 
 	const blockUser = async (): Promise<void> => {
 		const id = blockInput().trim();
@@ -252,6 +252,7 @@ const AccountTab: Component = () => {
 									class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 									placeholder="Display name"
 									aria-label="Display name"
+									aria-describedby={nameError() ? "name-error" : undefined}
 								/>
 								<button
 									type="button"
@@ -271,7 +272,13 @@ const AccountTab: Component = () => {
 								</button>
 							</div>
 							<Show when={nameError()}>
-								<div class="mt-1 text-xs text-danger-text">{nameError()}</div>
+								<div
+									id="name-error"
+									role="alert"
+									class="mt-1 text-xs text-danger-text"
+								>
+									{nameError()}
+								</div>
 							</Show>
 						</Show>
 
@@ -298,6 +305,7 @@ const AccountTab: Component = () => {
 						class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 						placeholder="@user:server.com"
 						aria-label="User ID to block"
+						aria-describedby={blockError() ? "block-error" : undefined}
 					/>
 					<button
 						type="button"
@@ -308,7 +316,13 @@ const AccountTab: Component = () => {
 					</button>
 				</div>
 				<Show when={blockError()}>
-					<div class="mb-3 text-xs text-danger-text">{blockError()}</div>
+					<div
+						id="block-error"
+						role="alert"
+						class="mb-3 text-xs text-danger-text"
+					>
+						{blockError()}
+					</div>
 				</Show>
 
 				{/* List */}
