@@ -265,7 +265,11 @@ const AccountTab: Component = () => {
 						>
 							<div class="flex items-center gap-2">
 								<input
-									ref={(el) => requestAnimationFrame(() => el.focus())}
+									ref={(el) =>
+										requestAnimationFrame(() => {
+											if (el.isConnected && editingName()) el.focus();
+										})
+									}
 									type="text"
 									value={nameValue()}
 									onInput={(e) => {
