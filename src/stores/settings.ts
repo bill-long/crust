@@ -101,7 +101,8 @@ function save(s: UserSettings): void {
 function applyZoom(level: number): void {
 	if (
 		typeof document !== "undefined" &&
-		"zoom" in document.documentElement.style
+		typeof CSS !== "undefined" &&
+		CSS.supports?.("zoom", "1")
 	) {
 		const z = level / 100;
 		document.documentElement.style.zoom = `${z}`;
