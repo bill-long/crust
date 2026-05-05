@@ -170,11 +170,13 @@ Filter for unreplied Copilot threads (non-outdated, last comment from Copilot):
 ```bash
 --jq '{
   hasPreviousPage: .data.repository.pullRequest.reviewThreads.pageInfo.hasPreviousPage,
+  startCursor: .data.repository.pullRequest.reviewThreads.pageInfo.startCursor,
   threads: [
     .data.repository.pullRequest.reviewThreads.nodes[]
     | select(.isOutdated == false)
     | select(.comments.nodes[-1].author.login | test("copilot"))
-  ] | .[] | {id, path, line, body: .comments.nodes[-1].body[0:120]}
+    | {id, path, line, body: .comments.nodes[-1].body[0:120]}
+  ]
 }'
 ```
 
@@ -656,8 +658,9 @@ additions at the end of the category list:
   Declaring the loop complete without a clean summary caused a missed
   comment (aria-pressed vs aria-current) that the user had to catch.
 - **Always run a verification scan after replying to Copilot threads.**
-  Query ALL non-outdated, non-resolved threads where the last comment
-  is from Copilot. Eventual consistency means threads can appear after
-  the initial poll. A summary saying "generated 1 comment" may have 2
-  threads by the time you check — the second arrived late. Never trust
-  the summary count alone; always verify with a comprehensive scan.
+  Query ALL non-outdated threads where the last comment is from Copilot
+  (meaning we haven't replied yet). Eventual consistency means threads
+  can appear after the initial poll. A summary saying "generated 1
+  comment" may have 2 threads by the time you check — the second
+  arrived late. Never trust the summary count alone; always verify
+  with a comprehensive scan.
