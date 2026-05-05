@@ -1,8 +1,10 @@
 import {
 	type Component,
+	createEffect,
 	createSignal,
 	For,
 	Match,
+	on,
 	onCleanup,
 	onMount,
 	Switch,
@@ -65,6 +67,7 @@ const FOCUSABLE =
 const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 	const [activeTab, setActiveTab] = createSignal<SettingsTab>("general");
 	let overlayRef!: HTMLDivElement;
+	let contentRef!: HTMLDivElement;
 	let previousFocus: HTMLElement | null = null;
 
 	onMount(() => {
@@ -79,6 +82,11 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 			previousFocus.focus();
 		}
 	});
+
+	// Reset scroll position when switching tabs (skip initial mount)
+	createEffect(
+		on(activeTab, () => contentRef?.scrollTo(0, 0), { defer: true }),
+	);
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
 		if (e.key === "Escape") {
@@ -185,7 +193,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 					</div>
 
 					{/* Scrollable tab content */}
-					<div class="flex-1 overflow-y-auto px-8 py-6">
+					<div ref={contentRef} class="flex-1 overflow-y-auto px-8 py-6">
 						<div class="max-w-2xl">
 							<Switch>
 								<Match when={activeTab() === "general"}>
