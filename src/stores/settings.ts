@@ -122,10 +122,15 @@ export function updateSetting<K extends keyof UserSettings>(
 	key: K,
 	value: UserSettings[K],
 ): void {
+	if (key === "zoomLevel") {
+		const zoom = Math.round(Math.min(200, Math.max(50, value as number)));
+		const next = { ...settings(), zoomLevel: zoom };
+		setSettingsInternal(next as UserSettings);
+		save(next as UserSettings);
+		applyZoom(zoom);
+		return;
+	}
 	const next = { ...settings(), [key]: value };
 	setSettingsInternal(next);
 	save(next);
-	if (key === "zoomLevel") {
-		applyZoom(value as number);
-	}
 }

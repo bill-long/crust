@@ -45,7 +45,12 @@ const GeneralTab: Component = () => {
 							Choose between 12-hour and 24-hour clock
 						</div>
 					</div>
-					<div class="flex rounded-lg bg-surface-2 p-0.5">
+					{/* biome-ignore lint/a11y/useSemanticElements: fieldset adds unwanted border/padding; flex layout prevents fieldset use */}
+					<div
+						class="flex rounded-lg bg-surface-2 p-0.5"
+						role="group"
+						aria-label="Time format"
+					>
 						<button
 							type="button"
 							onClick={() => updateSetting("timeFormat", "12h")}
@@ -56,6 +61,7 @@ const GeneralTab: Component = () => {
 								"text-text-muted hover:text-text-secondary":
 									userSettings().timeFormat !== "12h",
 							}}
+							aria-pressed={userSettings().timeFormat === "12h"}
 						>
 							12h
 						</button>
@@ -69,6 +75,7 @@ const GeneralTab: Component = () => {
 								"text-text-muted hover:text-text-secondary":
 									userSettings().timeFormat !== "24h",
 							}}
+							aria-pressed={userSettings().timeFormat === "24h"}
 						>
 							24h
 						</button>

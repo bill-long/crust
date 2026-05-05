@@ -195,7 +195,6 @@ const DevicesTab: Component = () => {
 
 			{/* Devices */}
 			<section>
-				<SectionHeading>Your Devices</SectionHeading>
 				<DeviceList />
 			</section>
 		</div>
