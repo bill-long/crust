@@ -152,7 +152,6 @@ gh api graphql -f query='{
         nodes {
           id
           isOutdated
-          isResolved
           path
           line
           comments(last: 1) {
@@ -162,13 +161,7 @@ gh api graphql -f query='{
       }
     }
   }
-}'
-```
-
-Filter for unreplied Copilot threads (non-outdated, last comment from Copilot):
-
-```bash
---jq '{
+}' --jq '{
   hasPreviousPage: .data.repository.pullRequest.reviewThreads.pageInfo.hasPreviousPage,
   startCursor: .data.repository.pullRequest.reviewThreads.pageInfo.startCursor,
   threads: [
@@ -181,8 +174,9 @@ Filter for unreplied Copilot threads (non-outdated, last comment from Copilot):
 ```
 
 - **>0 threads** = unaddressed comments to fix.
-- If `hasPreviousPage` is true, re-run with `before: "<startCursor>"`
-  to fetch earlier pages.
+- If `hasPreviousPage` is true, re-run with
+  `reviewThreads(last: 100, before: "<startCursor>")` and repeat until
+  `hasPreviousPage` is false to ensure all pages are scanned.
 
 **IMPORTANT: GraphQL eventual consistency.** After the REST API confirms a
 summary review exists, GraphQL `reviewThreads` may not yet include newly
