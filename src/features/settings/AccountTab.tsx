@@ -74,7 +74,17 @@ const AccountTab: Component = () => {
 	const [avatarError, setAvatarError] = createSignal("");
 	let fileInputRef!: HTMLInputElement;
 
+	const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB
+
 	const handleAvatarFile = async (file: File): Promise<void> => {
+		if (!file.type.startsWith("image/")) {
+			setAvatarError("File must be an image");
+			return;
+		}
+		if (file.size > MAX_AVATAR_BYTES) {
+			setAvatarError("Image must be under 10 MB");
+			return;
+		}
 		setAvatarUploading(true);
 		setAvatarError("");
 		try {
