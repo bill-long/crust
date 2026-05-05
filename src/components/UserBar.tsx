@@ -12,11 +12,11 @@ interface UserBarProps {
 	displayName: string;
 	userId: string;
 	initial: string;
+	avatarUrl: string | null;
 	needsCryptoAttention: boolean;
 	cryptoLabel: string;
 	onCryptoClick: () => void;
-	syncState: string;
-	onLogout: () => void;
+	onSettingsClick: () => void;
 }
 
 // --- SVG icon helpers (inline, no deps) ---
@@ -193,88 +193,6 @@ const VolumeSlider: Component<{
 	</div>
 );
 
-// --- Settings popover ---
-
-const SettingsPopover: Component<{
-	open: boolean;
-	onClose: () => void;
-	onLogout: () => void;
-	syncState: string;
-	needsCryptoAttention: boolean;
-	cryptoLabel: string;
-	onCryptoClick: () => void;
-	containerRef?: HTMLDivElement;
-}> = (props) => {
-	let ref: HTMLDivElement | undefined;
-
-	// Persistent outside-click listener while open.
-	// Checks against containerRef (includes trigger button) to avoid toggle race.
-	createEffect(
-		on(
-			() => props.open,
-			(open) => {
-				if (!open) return;
-				let active = true;
-				const container = props.containerRef;
-				const handler = (e: MouseEvent): void => {
-					const target = e.target as Node;
-					if (container?.contains(target)) return;
-					if (ref?.contains(target)) return;
-					props.onClose();
-				};
-				requestAnimationFrame(() => {
-					if (active) document.addEventListener("mousedown", handler);
-				});
-				onCleanup(() => {
-					active = false;
-					document.removeEventListener("mousedown", handler);
-				});
-			},
-		),
-	);
-
-	return (
-		<Show when={props.open}>
-			<div
-				ref={ref}
-				class="absolute bottom-full right-0 z-30 mb-1 min-w-44 rounded-lg bg-surface-3 py-1.5 shadow-xl"
-			>
-				{/* Sync status */}
-				<div class="px-3 py-1.5 text-xs text-text-muted">
-					Status: {props.syncState}
-				</div>
-				<div class="mx-2 my-1 h-px bg-border-subtle" />
-
-				{/* Crypto action */}
-				<Show when={props.needsCryptoAttention}>
-					<button
-						type="button"
-						onClick={() => {
-							props.onCryptoClick();
-							props.onClose();
-						}}
-						class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-warning-text-bright transition-colors hover:bg-surface-2"
-					>
-						{props.cryptoLabel}
-					</button>
-				</Show>
-
-				{/* Logout */}
-				<button
-					type="button"
-					onClick={() => {
-						props.onLogout();
-						props.onClose();
-					}}
-					class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-danger-text transition-colors hover:bg-surface-2"
-				>
-					Log out
-				</button>
-			</div>
-		</Show>
-	);
-};
-
 // --- Main UserBar ---
 
 const UserBar: Component<UserBarProps> = (props) => {
@@ -282,8 +200,6 @@ const UserBar: Component<UserBarProps> = (props) => {
 	const [deafened, setDeafened] = createSignal(false);
 	const [micVolume, setMicVolume] = createSignal(100);
 	const [outputVolume, setOutputVolume] = createSignal(100);
-	const [settingsOpen, setSettingsOpen] = createSignal(false);
-	let settingsContainerRef: HTMLDivElement | undefined;
 
 	return (
 		<div class="flex h-[52px] shrink-0 items-center gap-1 border-t border-border-subtle bg-surface-1 px-2">
@@ -292,9 +208,22 @@ const UserBar: Component<UserBarProps> = (props) => {
 				when={props.needsCryptoAttention}
 				fallback={
 					<div class="flex min-w-0 flex-1 items-center gap-2 px-1 py-1">
-						<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-							{props.initial}
-						</div>
+						<Show
+							when={props.avatarUrl}
+							fallback={
+								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+									{props.initial}
+								</div>
+							}
+						>
+							{(url) => (
+								<img
+									src={url()}
+									alt=""
+									class="h-8 w-8 shrink-0 rounded-full object-cover"
+								/>
+							)}
+						</Show>
 						<div class="min-w-0 flex-1">
 							<div class="truncate text-sm font-semibold leading-tight text-text-primary">
 								{props.displayName}
@@ -313,8 +242,23 @@ const UserBar: Component<UserBarProps> = (props) => {
 					title={props.cryptoLabel}
 					aria-label={`${props.displayName} — ${props.cryptoLabel}`}
 				>
-					<div class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-						{props.initial}
+					<div class="relative">
+						<Show
+							when={props.avatarUrl}
+							fallback={
+								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+									{props.initial}
+								</div>
+							}
+						>
+							{(url) => (
+								<img
+									src={url()}
+									alt=""
+									class="h-8 w-8 shrink-0 rounded-full object-cover"
+								/>
+							)}
+						</Show>
 						<span
 							class="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-[8px] font-bold text-text-primary"
 							aria-hidden="true"
@@ -383,36 +327,14 @@ const UserBar: Component<UserBarProps> = (props) => {
 			/>
 
 			{/* Settings gear */}
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: container handles Escape for popover */}
-			<div
-				class="relative"
-				ref={(el) => (settingsContainerRef = el)}
-				onKeyDown={(e) => {
-					if (e.key === "Escape" && settingsOpen()) {
-						setSettingsOpen(false);
-					}
-				}}
+			<button
+				type="button"
+				onClick={props.onSettingsClick}
+				class="flex h-8 w-8 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				aria-label="User settings"
 			>
-				<button
-					type="button"
-					onClick={() => setSettingsOpen((v) => !v)}
-					class="flex h-8 w-8 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-					aria-label="User settings"
-					aria-expanded={settingsOpen()}
-				>
-					<GearIcon />
-				</button>
-				<SettingsPopover
-					open={settingsOpen()}
-					onClose={() => setSettingsOpen(false)}
-					onLogout={props.onLogout}
-					syncState={props.syncState}
-					needsCryptoAttention={props.needsCryptoAttention}
-					cryptoLabel={props.cryptoLabel}
-					onCryptoClick={props.onCryptoClick}
-					containerRef={settingsContainerRef}
-				/>
-			</div>
+				<GearIcon />
+			</button>
 		</div>
 	);
 };
