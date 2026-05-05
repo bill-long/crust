@@ -99,17 +99,25 @@ function save(s: UserSettings): void {
 }
 
 function applyZoom(level: number): void {
-	if (typeof document !== "undefined") {
-		document.documentElement.style.zoom = `${level / 100}`;
+	if (
+		typeof document !== "undefined" &&
+		"zoom" in document.documentElement.style
+	) {
+		const z = level / 100;
+		document.documentElement.style.zoom = `${z}`;
+		document.documentElement.style.setProperty("--app-zoom", `${z}`);
 	}
 }
 
 // Module-level singleton — one signal, shared by all consumers.
 const [settings, setSettingsInternal] = createSignal<UserSettings>(load());
 
-// Apply persisted zoom on module load
-if (settings().zoomLevel !== 100) {
-	applyZoom(settings().zoomLevel);
+/** Apply persisted zoom level. Call once during app bootstrap. */
+export function initZoom(): void {
+	const level = settings().zoomLevel;
+	if (level !== 100) {
+		applyZoom(level);
+	}
 }
 
 /** Read current user settings (reactive). */

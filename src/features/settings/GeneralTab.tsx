@@ -1,8 +1,14 @@
-import type { Component } from "solid-js";
+import { type Component, createEffect, createSignal } from "solid-js";
 import { updateSetting, userSettings } from "../../stores/settings";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 const GeneralTab: Component = () => {
+	// Local preview signal prevents a feedback loop: applying zoom resizes the
+	// slider, which shifts the thumb to a higher value, which zooms further.
+	// We show the preview number while dragging, but only apply zoom on release.
+	const [zoomPreview, setZoomPreview] = createSignal(userSettings().zoomLevel);
+	createEffect(() => setZoomPreview(userSettings().zoomLevel));
+
 	return (
 		<div class="space-y-8">
 			{/* Appearance */}
@@ -21,15 +27,16 @@ const GeneralTab: Component = () => {
 							min="50"
 							max="200"
 							step="10"
-							value={userSettings().zoomLevel}
-							onInput={(e) =>
+							value={zoomPreview()}
+							onInput={(e) => setZoomPreview(Number(e.currentTarget.value))}
+							onChange={(e) =>
 								updateSetting("zoomLevel", Number(e.currentTarget.value))
 							}
 							class="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-surface-2 accent-accent"
 							aria-label="Zoom level"
 						/>
 						<span class="w-12 text-right text-sm tabular-nums text-text-secondary">
-							{userSettings().zoomLevel}%
+							{zoomPreview()}%
 						</span>
 					</div>
 				</div>

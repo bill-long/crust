@@ -31,7 +31,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	return (
 		<Switch>
 			<Match when={syncState() === "initial"}>
-				<div class="flex h-screen items-center justify-center bg-surface-0">
+				<div class="flex h-full items-center justify-center bg-surface-0">
 					<div class="text-center">
 						<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
 						<p class="text-text-muted">
@@ -43,7 +43,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				</div>
 			</Match>
 			<Match when={syncState() === "error"}>
-				<div class="flex h-screen items-center justify-center bg-surface-0">
+				<div class="flex h-full items-center justify-center bg-surface-0">
 					<div class="text-center">
 						<p class="text-danger-text">Sync error</p>
 						<p class="mt-1 text-sm text-text-disabled">
@@ -53,7 +53,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				</div>
 			</Match>
 			<Match when={true}>
-				<div class="flex h-screen flex-col bg-surface-0 text-text-primary">
+				<div class="flex h-full flex-col bg-surface-0 text-text-primary">
 					<Show when={cryptoState() === "error"}>
 						<div class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text">
 							Encryption initialization failed — encrypted messages may not be

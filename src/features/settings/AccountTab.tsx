@@ -1,4 +1,11 @@
-import { type Component, createSignal, For, Show } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createSignal,
+	For,
+	on,
+	Show,
+} from "solid-js";
 import { useClient } from "../../client/client";
 import { SectionHeading } from "./SettingsControls";
 
@@ -23,8 +30,10 @@ const AccountTab: Component = () => {
 		return client.mxcUrlToHttp(mxc, 80, 80, "crop") ?? null;
 	};
 
-	const initial = (): string =>
-		(currentDisplayName().trim() || "?").charAt(0).toUpperCase();
+	const initial = (): string => {
+		const name = currentDisplayName().trim() || "?";
+		return name.replace(/^@/, "").charAt(0).toUpperCase() || "?";
+	};
 
 	// --- Display name editing ---
 	const [editingName, setEditingName] = createSignal(false);
@@ -72,6 +81,8 @@ const AccountTab: Component = () => {
 	// --- Avatar upload ---
 	const [avatarUploading, setAvatarUploading] = createSignal(false);
 	const [avatarError, setAvatarError] = createSignal("");
+	const [avatarImgFailed, setAvatarImgFailed] = createSignal(false);
+	createEffect(on(currentAvatarUrl, () => setAvatarImgFailed(false)));
 	let fileInputRef!: HTMLInputElement;
 
 	const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -181,9 +192,10 @@ const AccountTab: Component = () => {
 							disabled={avatarUploading()}
 							class="relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-2xl font-semibold text-text-secondary transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Change avatar"
+							aria-describedby={avatarError() ? "avatar-error" : undefined}
 						>
 							<Show
-								when={currentAvatarUrl()}
+								when={!avatarImgFailed() && currentAvatarUrl()}
 								fallback={<span>{initial()}</span>}
 							>
 								{(url) => (
@@ -191,6 +203,7 @@ const AccountTab: Component = () => {
 										src={url()}
 										alt="Avatar"
 										class="h-full w-full object-cover"
+										onError={() => setAvatarImgFailed(true)}
 									/>
 								)}
 							</Show>
@@ -205,6 +218,7 @@ const AccountTab: Component = () => {
 							type="file"
 							accept="image/*"
 							class="hidden"
+							tabindex={-1}
 							onChange={onFileSelect}
 						/>
 						<button
@@ -212,11 +226,16 @@ const AccountTab: Component = () => {
 							onClick={() => fileInputRef.click()}
 							disabled={avatarUploading()}
 							class="text-xs text-accent-text transition-colors hover:text-accent-text-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							aria-describedby={avatarError() ? "avatar-error" : undefined}
 						>
 							Change avatar
 						</button>
 						<Show when={avatarError()}>
-							<div role="alert" class="text-xs text-danger-text">
+							<div
+								id="avatar-error"
+								role="alert"
+								class="text-xs text-danger-text"
+							>
 								{avatarError()}
 							</div>
 						</Show>
@@ -246,6 +265,7 @@ const AccountTab: Component = () => {
 						>
 							<div class="flex items-center gap-2">
 								<input
+									ref={(el) => requestAnimationFrame(() => el.focus())}
 									type="text"
 									value={nameValue()}
 									onInput={(e) => {

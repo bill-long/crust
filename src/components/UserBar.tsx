@@ -7,6 +7,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { Avatar } from "./Avatar";
 
 interface UserBarProps {
 	displayName: string;
@@ -208,22 +209,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 				when={props.needsCryptoAttention}
 				fallback={
 					<div class="flex min-w-0 flex-1 items-center gap-2 px-1 py-1">
-						<Show
-							when={props.avatarUrl}
-							fallback={
-								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-									{props.initial}
-								</div>
-							}
-						>
-							{(url) => (
-								<img
-									src={url()}
-									alt=""
-									class="h-8 w-8 shrink-0 rounded-full object-cover"
-								/>
-							)}
-						</Show>
+						<Avatar url={props.avatarUrl} initial={props.initial} />
 						<div class="min-w-0 flex-1">
 							<div class="truncate text-sm font-semibold leading-tight text-text-primary">
 								{props.displayName}
@@ -243,22 +229,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 					aria-label={`${props.displayName} — ${props.cryptoLabel}`}
 				>
 					<div class="relative">
-						<Show
-							when={props.avatarUrl}
-							fallback={
-								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-									{props.initial}
-								</div>
-							}
-						>
-							{(url) => (
-								<img
-									src={url()}
-									alt=""
-									class="h-8 w-8 shrink-0 rounded-full object-cover"
-								/>
-							)}
-						</Show>
+						<Avatar url={props.avatarUrl} initial={props.initial} />
 						<span
 							class="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-[8px] font-bold text-text-primary"
 							aria-hidden="true"

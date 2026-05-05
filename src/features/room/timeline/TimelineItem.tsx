@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, For, Show } from "solid-js";
+import { userSettings } from "../../../stores/settings";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
@@ -78,9 +79,13 @@ const ReactionPills: Component<{
 	);
 };
 
-function formatTime(ts: number): string {
+function formatTime(ts: number, format: "12h" | "24h"): string {
 	const d = new Date(ts);
-	return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+	return d.toLocaleTimeString([], {
+		hour: "2-digit",
+		minute: "2-digit",
+		hour12: format === "12h",
+	});
 }
 
 function unsupportedLabel(msgtype: string): string {
@@ -204,6 +209,9 @@ const TimelineItem: Component<{
 	onOpenReactionPicker?: () => void;
 }> = (props) => {
 	const ev = props.event;
+	const formattedTime = createMemo(() =>
+		formatTime(ev.timestamp, userSettings().timeFormat),
+	);
 
 	return (
 		<div
@@ -227,7 +235,7 @@ const TimelineItem: Component<{
 							class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
 							aria-hidden="true"
 						>
-							{formatTime(ev.timestamp)}
+							{formattedTime()}
 						</span>
 					</div>
 				}
@@ -244,7 +252,7 @@ const TimelineItem: Component<{
 					when={props.showHeader}
 					fallback={
 						<span class="sr-only">
-							{ev.senderName.trim() || "Unknown"} at {formatTime(ev.timestamp)}
+							{ev.senderName.trim() || "Unknown"} at {formattedTime()}
 						</span>
 					}
 				>
@@ -252,9 +260,7 @@ const TimelineItem: Component<{
 						<span class="text-sm font-semibold text-text-emphasis">
 							{ev.senderName.trim() || "Unknown"}
 						</span>
-						<span class="text-xs text-text-faint">
-							{formatTime(ev.timestamp)}
-						</span>
+						<span class="text-xs text-text-faint">{formattedTime()}</span>
 						<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
 							<span
 								class="text-xs text-success-hover"
