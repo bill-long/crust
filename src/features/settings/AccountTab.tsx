@@ -12,7 +12,7 @@ const AccountTab: Component = () => {
 	const currentDisplayName = (): string => {
 		profileVersion(); // subscribe to refreshes
 		const user = client.getUser(userId());
-		return user?.displayName ?? userId();
+		return user?.displayName?.trim() || userId();
 	};
 
 	const currentAvatarUrl = (): string | null => {
