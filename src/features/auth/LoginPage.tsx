@@ -107,8 +107,8 @@ const LoginPage: Component = () => {
 	};
 
 	return (
-		<div class="flex h-full items-center justify-center overflow-y-auto bg-surface-0 p-4">
-			<div class="w-full max-w-sm">
+		<div class="flex h-full justify-center overflow-y-auto bg-surface-0 p-4">
+			<div class="my-auto w-full max-w-sm">
 				<h1 class="mb-8 text-center text-3xl font-bold text-text-primary">
 					Crust
 				</h1>
