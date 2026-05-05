@@ -248,7 +248,10 @@ const AccountTab: Component = () => {
 								<input
 									type="text"
 									value={nameValue()}
-									onInput={(e) => setNameValue(e.currentTarget.value)}
+									onInput={(e) => {
+										setNameValue(e.currentTarget.value);
+										setNameError("");
+									}}
 									onKeyDown={handleNameKeyDown}
 									disabled={nameSaving()}
 									class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
@@ -293,8 +296,8 @@ const AccountTab: Component = () => {
 			<section>
 				<SectionHeading>Blocked Users</SectionHeading>
 				<p class="mb-3 text-xs text-text-muted">
-					Blocked users cannot send you invites or messages. You won't see their
-					messages in rooms you share.
+					Blocked users cannot send you invites. Their messages will be hidden
+					once client-side filtering is implemented.
 				</p>
 
 				{/* Add block input */}
@@ -302,7 +305,10 @@ const AccountTab: Component = () => {
 					<input
 						type="text"
 						value={blockInput()}
-						onInput={(e) => setBlockInput(e.currentTarget.value)}
+						onInput={(e) => {
+							setBlockInput(e.currentTarget.value);
+							setBlockError("");
+						}}
 						onKeyDown={handleBlockKeyDown}
 						class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 						placeholder="@user:server.com"
@@ -348,6 +354,7 @@ const AccountTab: Component = () => {
 										onClick={() => unblockUser(blockedId)}
 										disabled={unblockingUser() === blockedId}
 										class="shrink-0 rounded px-2 py-1 text-xs text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										aria-label={`Unblock ${blockedId}`}
 									>
 										{unblockingUser() === blockedId ? "Unblocking…" : "Unblock"}
 									</button>
