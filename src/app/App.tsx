@@ -58,13 +58,15 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 
 	const handleForceLogout = async (): Promise<void> => {
 		client.stopClient();
+		// Clear session and navigate immediately so the user never sees
+		// the main app UI in the "stopped" state while clearStores() awaits.
+		clearSession();
+		navigate("/login", { replace: true });
 		try {
 			await client.clearStores();
 		} catch {
 			// best-effort
 		}
-		clearSession();
-		navigate("/login", { replace: true });
 	};
 
 	return (
