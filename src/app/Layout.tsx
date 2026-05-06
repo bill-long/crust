@@ -80,6 +80,11 @@ const Layout: Component = () => {
 		} catch {
 			client.stopClient();
 		}
+		try {
+			await client.clearStores();
+		} catch (e) {
+			console.warn("Failed to clear stores on logout:", e);
+		}
 		clearSession();
 		navigate("/login", { replace: true });
 	};

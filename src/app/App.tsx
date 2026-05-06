@@ -1,10 +1,17 @@
 import type { RouteSectionProps } from "@solidjs/router";
 import { Route, Router, useNavigate } from "@solidjs/router";
-import { type Component, Match, onMount, Show, Switch } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	Match,
+	onMount,
+	Show,
+	Switch,
+} from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
 import { LoginPage } from "../features/auth/LoginPage";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
-import { loadSession } from "../stores/session";
+import { clearSession, loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
 
@@ -26,7 +33,41 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 
 /** Loading gate — shows spinner until initial sync completes. */
 const SyncGate: Component<RouteSectionProps> = (props) => {
-	const { syncState, cryptoState } = useClient();
+	const { syncState, cryptoState, client } = useClient();
+	const navigate = useNavigate();
+
+	// Auto-redirect to login when session is expired
+	let cleaningUp = false;
+	createEffect(() => {
+		if (syncState() === "logged-out" && !cleaningUp) {
+			cleaningUp = true;
+			// Client is already stopped by onSessionLoggedOut handler
+			// (stopClient runs before setSyncState triggers this effect).
+			// Clear stores (best-effort async) then redirect.
+			client
+				.clearStores()
+				.catch((e: unknown) => {
+					console.warn("Failed to clear stores on session expiry:", e);
+				})
+				.finally(() => {
+					clearSession();
+					navigate("/login", { replace: true });
+				});
+		}
+	});
+
+	const handleForceLogout = async (): Promise<void> => {
+		client.stopClient();
+		// Clear session and navigate immediately so the user never sees
+		// the main app UI in the "stopped" state while clearStores() awaits.
+		clearSession();
+		navigate("/login", { replace: true });
+		try {
+			await client.clearStores();
+		} catch {
+			// best-effort
+		}
+	};
 
 	return (
 		<Switch>
@@ -49,6 +90,20 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 						<p class="mt-1 text-sm text-text-disabled">
 							Check your connection and try refreshing.
 						</p>
+						<button
+							type="button"
+							onClick={handleForceLogout}
+							class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary"
+						>
+							Log out
+						</button>
+					</div>
+				</div>
+			</Match>
+			<Match when={syncState() === "logged-out"}>
+				<div class="flex h-full items-center justify-center bg-surface-0">
+					<div class="text-center">
+						<p class="text-text-muted">Session expired, redirecting…</p>
 					</div>
 				</div>
 			</Match>
