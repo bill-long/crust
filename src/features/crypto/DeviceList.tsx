@@ -1,8 +1,10 @@
+import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Component,
 	createResource,
 	For,
 	Match,
+	onCleanup,
 	Show,
 	Switch,
 } from "solid-js";
@@ -20,51 +22,90 @@ interface DeviceListProps {
 const DeviceList: Component<DeviceListProps> = (props) => {
 	const { client } = useClient();
 
-	const [devices] = createResource(async (): Promise<DeviceInfo[]> => {
-		const crypto = client.getCrypto();
-		const userId = client.getUserId();
-		const currentDeviceId = client.getDeviceId();
+	const [devices, { refetch }] = createResource(
+		async (): Promise<DeviceInfo[]> => {
+			const crypto = client.getCrypto();
+			const userId = client.getUserId();
+			const currentDeviceId = client.getDeviceId();
 
-		if (!userId) return [];
+			if (!userId) return [];
 
-		// Fetch device list from server
-		const response = await client.getDevices();
-		if (!response?.devices) return [];
+			// Fetch device list from server
+			const response = await client.getDevices();
+			if (!response?.devices) return [];
 
-		// Get verification status for all devices in parallel
-		const results = await Promise.all(
-			response.devices.map(async (device): Promise<DeviceInfo> => {
-				let isVerified = false;
-				if (crypto && device.device_id) {
-					try {
-						const status = await crypto.getDeviceVerificationStatus(
-							userId,
-							device.device_id,
-						);
-						isVerified = status?.isVerified() ?? false;
-					} catch {
-						// Device may not have keys uploaded yet
+			// Get verification status for all devices in parallel
+			const results = await Promise.all(
+				response.devices.map(async (device): Promise<DeviceInfo> => {
+					let isVerified = false;
+					if (crypto && device.device_id) {
+						try {
+							const status = await crypto.getDeviceVerificationStatus(
+								userId,
+								device.device_id,
+							);
+							isVerified = status?.isVerified() ?? false;
+						} catch {
+							// Device may not have keys uploaded yet
+						}
 					}
-				}
 
-				return {
-					deviceId: device.device_id,
-					displayName: device.display_name ?? "",
-					lastSeenTs: device.last_seen_ts,
-					isVerified,
-					isCurrentDevice: device.device_id === currentDeviceId,
-				};
-			}),
-		);
+					return {
+						deviceId: device.device_id,
+						displayName: device.display_name ?? "",
+						lastSeenTs: device.last_seen_ts,
+						isVerified,
+						isCurrentDevice: device.device_id === currentDeviceId,
+					};
+				}),
+			);
 
-		// Sort: current device first, then by last seen (most recent first)
-		results.sort((a, b) => {
-			if (a.isCurrentDevice) return -1;
-			if (b.isCurrentDevice) return 1;
-			return (b.lastSeenTs ?? 0) - (a.lastSeenTs ?? 0);
+			// Sort: current device first, then by last seen (most recent first)
+			results.sort((a, b) => {
+				if (a.isCurrentDevice) return -1;
+				if (b.isCurrentDevice) return 1;
+				return (b.lastSeenTs ?? 0) - (a.lastSeenTs ?? 0);
+			});
+
+			return results;
+		},
+	);
+
+	// Refetch device list when crypto state changes (e.g. after verification
+	// or cross-signing setup). Coalesce rapid bursts via microtask.
+	let refetchQueued = false;
+	const triggerRefetch = (): void => {
+		if (refetchQueued) return;
+		refetchQueued = true;
+		queueMicrotask(() => {
+			refetchQueued = false;
+			void refetch();
 		});
+	};
 
-		return results;
+	const currentUserId = client.getUserId();
+
+	const onUserTrustChanged = (changedUserId: string): void => {
+		if (changedUserId === currentUserId) triggerRefetch();
+	};
+	const onDevicesUpdated = (users: string[]): void => {
+		if (currentUserId && users.includes(currentUserId)) triggerRefetch();
+	};
+	const onKeysChanged = (): void => {
+		triggerRefetch();
+	};
+
+	client.on(CryptoEvent.UserTrustStatusChanged, onUserTrustChanged);
+	client.on(CryptoEvent.DevicesUpdated, onDevicesUpdated);
+	client.on(CryptoEvent.KeysChanged, onKeysChanged);
+
+	onCleanup(() => {
+		client.removeListener(
+			CryptoEvent.UserTrustStatusChanged,
+			onUserTrustChanged,
+		);
+		client.removeListener(CryptoEvent.DevicesUpdated, onDevicesUpdated);
+		client.removeListener(CryptoEvent.KeysChanged, onKeysChanged);
 	});
 
 	return (
