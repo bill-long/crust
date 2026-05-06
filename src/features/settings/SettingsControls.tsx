@@ -6,6 +6,7 @@ interface ToggleProps {
 	onChange: (checked: boolean) => void;
 	label: string;
 	describedBy?: string;
+	disabled?: boolean;
 }
 
 const Toggle: Component<ToggleProps> = (props) => (
@@ -15,11 +16,16 @@ const Toggle: Component<ToggleProps> = (props) => (
 		aria-checked={props.checked}
 		aria-label={props.label}
 		aria-describedby={props.describedBy}
-		onClick={() => props.onChange(!props.checked)}
-		class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+		aria-disabled={props.disabled || undefined}
+		onClick={() => {
+			if (!props.disabled) props.onChange(!props.checked);
+		}}
+		class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 		classList={{
-			"bg-accent": props.checked,
-			"bg-surface-3": !props.checked,
+			"cursor-pointer": !props.disabled,
+			"cursor-not-allowed opacity-50": !!props.disabled,
+			"bg-accent": props.checked && !props.disabled,
+			"bg-surface-3": !props.checked || !!props.disabled,
 		}}
 	>
 		<span
@@ -37,13 +43,17 @@ interface ToggleRowProps {
 	description?: string;
 	checked: boolean;
 	onChange: (checked: boolean) => void;
+	disabled?: boolean;
 }
 
 const ToggleRow: Component<ToggleRowProps> = (props) => {
 	const descId = createUniqueId();
 
 	return (
-		<div class="flex items-center justify-between gap-4 py-2">
+		<div
+			class="flex items-center justify-between gap-4 py-2"
+			classList={{ "opacity-50": !!props.disabled }}
+		>
 			<div class="min-w-0 flex-1">
 				<div class="text-sm font-medium text-text-primary">{props.label}</div>
 				<Show when={props.description}>
@@ -57,6 +67,7 @@ const ToggleRow: Component<ToggleRowProps> = (props) => {
 				onChange={props.onChange}
 				label={props.label}
 				describedBy={props.description ? descId : undefined}
+				disabled={props.disabled}
 			/>
 		</div>
 	);

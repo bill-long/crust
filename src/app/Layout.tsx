@@ -24,8 +24,9 @@ import {
 } from "../features/crypto/CryptoStatusBanner";
 import { MemberList } from "../features/room/MemberList";
 import { RoomList } from "../features/room/RoomList";
+import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { TimelineView } from "../features/room/timeline/TimelineView";
-import { useDesktopNotifications } from "../features/room/useDesktopNotifications";
+import { useNotifications } from "../features/room/useNotifications";
 import { SettingsOverlay } from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
@@ -75,7 +76,7 @@ const Layout: Component = () => {
 	const [leaving, setLeaving] = createSignal(false);
 	const [settingsOpen, setSettingsOpen] = createSignal(false);
 
-	useDesktopNotifications(client, summaries);
+	useNotifications(client, summaries, () => params.roomId);
 
 	const handleLogout = async (): Promise<void> => {
 		try {
@@ -241,6 +242,7 @@ const Layout: Component = () => {
 										{roomName()}
 									</span>
 									<div class="flex items-center gap-1">
+										<RoomNotificationMenu client={client} roomId={rid()} />
 										<button
 											type="button"
 											onClick={toggleMembersPane}

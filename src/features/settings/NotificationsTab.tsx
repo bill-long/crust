@@ -1,14 +1,22 @@
-import type { Component } from "solid-js";
+import {
+	ClientEvent,
+	type MatrixEvent,
+	PushRuleKind,
+	RuleId,
+} from "matrix-js-sdk";
+import { type Component, createSignal, onCleanup, onMount } from "solid-js";
+import { useClient } from "../../client/client";
 import { updateSetting, userSettings } from "../../stores/settings";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 const NotificationsTab: Component = () => {
+	const { client } = useClient();
+
 	const notificationsSupported =
 		typeof window !== "undefined" && "Notification" in window;
 
 	const handleDesktopNotifToggle = (checked: boolean): void => {
 		if (!notificationsSupported) {
-			// Allow toggling off even when unsupported (clears persisted state)
 			if (!checked) updateSetting("desktopNotifications", false);
 			return;
 		}
@@ -32,6 +40,66 @@ const NotificationsTab: Component = () => {
 	const permissionDenied =
 		notificationsSupported && Notification.permission === "denied";
 
+	// @room mention suppression — reads from push rules, reactive to updates
+	const [suppressAtRoom, setSuppressAtRoom] = createSignal(false);
+	const [atRoomLoaded, setAtRoomLoaded] = createSignal(false);
+
+	function syncAtRoomState(): void {
+		const rules = client.pushRules;
+		if (!rules) return;
+		const overrides = rules.global?.override;
+		if (overrides) {
+			const roomMentionRule = overrides.find(
+				(r) => r.rule_id === RuleId.IsRoomMention,
+			);
+			const atRoomRule = overrides.find(
+				(r) => r.rule_id === RuleId.AtRoomNotification,
+			);
+			setSuppressAtRoom(
+				roomMentionRule?.enabled === false || atRoomRule?.enabled === false,
+			);
+		} else {
+			setSuppressAtRoom(false);
+		}
+		setAtRoomLoaded(true);
+	}
+
+	onMount(syncAtRoomState);
+
+	const onAccountData = (event: MatrixEvent): void => {
+		if (event.getType() === "m.push_rules") {
+			syncAtRoomState();
+		}
+	};
+	client.on(ClientEvent.AccountData, onAccountData);
+	onCleanup(() => {
+		client.off(ClientEvent.AccountData, onAccountData);
+	});
+
+	const handleAtRoomToggle = (suppress: boolean): void => {
+		const prev = suppressAtRoom();
+		setSuppressAtRoom(suppress);
+
+		// Disable both @room rules when suppressing
+		const enabled = !suppress;
+		Promise.all([
+			client.setPushRuleEnabled(
+				"global",
+				PushRuleKind.Override,
+				RuleId.IsRoomMention,
+				enabled,
+			),
+			client.setPushRuleEnabled(
+				"global",
+				PushRuleKind.Override,
+				RuleId.AtRoomNotification,
+				enabled,
+			),
+		]).catch(() => {
+			setSuppressAtRoom(prev);
+		});
+	};
+
 	return (
 		<div class="space-y-8">
 			{/* Desktop */}
@@ -43,40 +111,34 @@ const NotificationsTab: Component = () => {
 						permissionDenied
 							? "Permission denied — enable notifications in your browser settings"
 							: notificationsSupported
-								? "Show system notifications for new messages"
+								? "Show system notifications when the app is in the background"
 								: "Desktop notifications are not supported in this browser"
 					}
 					checked={userSettings().desktopNotifications}
 					onChange={handleDesktopNotifToggle}
 				/>
+			</section>
+
+			{/* Sounds */}
+			<section>
+				<SectionHeading>Sounds</SectionHeading>
 				<ToggleRow
 					label="Notification sound"
-					description="Play a sound when you receive a notification"
+					description="Play a sound for new messages in other rooms"
 					checked={userSettings().notificationSound}
 					onChange={(v) => updateSetting("notificationSound", v)}
 				/>
 			</section>
 
-			{/* Categories */}
+			{/* @room suppression */}
 			<section>
-				<SectionHeading>Notification Categories</SectionHeading>
+				<SectionHeading>Mentions</SectionHeading>
 				<ToggleRow
-					label="Mentions"
-					description="Notify when someone mentions you or replies to your message"
-					checked={userSettings().notifyMentions}
-					onChange={(v) => updateSetting("notifyMentions", v)}
-				/>
-				<ToggleRow
-					label="Direct messages"
-					description="Notify for new direct messages"
-					checked={userSettings().notifyDirectMessages}
-					onChange={(v) => updateSetting("notifyDirectMessages", v)}
-				/>
-				<ToggleRow
-					label="All messages"
-					description="Notify for every message in all rooms (can be noisy)"
-					checked={userSettings().notifyAllMessages}
-					onChange={(v) => updateSetting("notifyAllMessages", v)}
+					label="Suppress @room mentions"
+					description="Prevent @room mentions from triggering notifications"
+					checked={suppressAtRoom()}
+					onChange={handleAtRoomToggle}
+					disabled={!atRoomLoaded()}
 				/>
 			</section>
 		</div>
