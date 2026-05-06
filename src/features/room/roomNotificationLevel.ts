@@ -96,7 +96,7 @@ export async function setRoomNotificationLevel(
 	if (current === level) return;
 
 	// Clean up existing rules first
-	await cleanupRoomRules(client, roomId, current);
+	await cleanupRoomRules(client, roomId);
 
 	// Set new rules
 	switch (level) {
@@ -139,24 +139,23 @@ export async function setRoomNotificationLevel(
 async function cleanupRoomRules(
 	client: MatrixClient,
 	roomId: string,
-	current: RoomNotificationLevel,
 ): Promise<void> {
-	try {
-		if (current === "mute") {
-			await client.deletePushRule(
-				"global",
-				PushRuleKind.Override,
-				muteRuleId(roomId),
-			);
-		} else if (current === "all-messages" || current === "mentions-only") {
-			await client.deletePushRule("global", PushRuleKind.RoomSpecific, roomId);
-		}
-	} catch (err: unknown) {
-		// Rule may not exist server-side — ignore 404s during cleanup
-		const status =
-			err instanceof Object && "httpStatus" in err
-				? (err as { httpStatus: number }).httpStatus
-				: undefined;
-		if (status !== 404) throw err;
-	}
+	// Delete both rule kinds to converge to clean state, even if another
+	// client left stale rules in a different kind.
+	await Promise.all([
+		client
+			.deletePushRule("global", PushRuleKind.Override, muteRuleId(roomId))
+			.catch(ignore404),
+		client
+			.deletePushRule("global", PushRuleKind.RoomSpecific, roomId)
+			.catch(ignore404),
+	]);
+}
+
+function ignore404(err: unknown): void {
+	const status =
+		err instanceof Object && "httpStatus" in err
+			? (err as { httpStatus: number }).httpStatus
+			: undefined;
+	if (status !== 404) throw err;
 }

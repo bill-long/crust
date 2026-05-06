@@ -77,12 +77,11 @@ const NotificationsTab: Component = () => {
 	});
 
 	const handleAtRoomToggle = (suppress: boolean): void => {
-		const prev = suppressAtRoom();
 		setSuppressAtRoom(suppress);
 
 		// Disable both @room rules when suppressing
 		const enabled = !suppress;
-		Promise.all([
+		Promise.allSettled([
 			client.setPushRuleEnabled(
 				"global",
 				PushRuleKind.Override,
@@ -95,8 +94,11 @@ const NotificationsTab: Component = () => {
 				RuleId.AtRoomNotification,
 				enabled,
 			),
-		]).catch(() => {
-			setSuppressAtRoom(prev);
+		]).then((results) => {
+			if (results.some((r) => r.status === "rejected")) {
+				// Re-read server state on partial or full failure
+				syncAtRoomState();
+			}
 		});
 	};
 
