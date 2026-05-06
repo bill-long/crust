@@ -90,7 +90,7 @@ const RoomEntry: Component<{
 				</Show>
 			</div>
 
-			{/* Unread badge — dimmed when muted */}
+			{/* Unread badge — hidden when muted */}
 			<Show when={props.room.unreadCount > 0 && !props.isMuted}>
 				<span
 					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${

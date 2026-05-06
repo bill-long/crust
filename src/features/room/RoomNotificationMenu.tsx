@@ -179,7 +179,9 @@ const RoomNotificationMenu: Component<RoomNotificationMenuProps> = (props) => {
 								class="flex cursor-pointer flex-col rounded px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
 								classList={{
 									"bg-surface-2": level() === opt.value,
+									"pointer-events-none opacity-50": saving(),
 								}}
+								disabled={saving()}
 								onSelect={() => handleSelect(opt.value)}
 							>
 								<span class="text-xs font-medium text-text-primary">

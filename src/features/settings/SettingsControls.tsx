@@ -23,7 +23,7 @@ const Toggle: Component<ToggleProps> = (props) => (
 		class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 		classList={{
 			"cursor-pointer": !props.disabled,
-			"cursor-not-allowed opacity-50": !!props.disabled,
+			"cursor-not-allowed": !!props.disabled,
 			"bg-accent": props.checked && !props.disabled,
 			"bg-surface-3": !props.checked || !!props.disabled,
 		}}
