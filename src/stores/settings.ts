@@ -11,14 +11,8 @@ export interface UserSettings {
 	timeFormat: "12h" | "24h";
 	/** Whether desktop notifications are enabled. */
 	desktopNotifications: boolean;
-	/** Whether to play a sound on notification. */
+	/** Whether to play a sound for incoming messages in other rooms. */
 	notificationSound: boolean;
-	/** Notify on @-mentions. */
-	notifyMentions: boolean;
-	/** Notify on direct messages. */
-	notifyDirectMessages: boolean;
-	/** Notify on all room messages. */
-	notifyAllMessages: boolean;
 }
 
 const defaults: UserSettings = {
@@ -27,9 +21,6 @@ const defaults: UserSettings = {
 	timeFormat: "12h",
 	desktopNotifications: false,
 	notificationSound: true,
-	notifyMentions: true,
-	notifyDirectMessages: true,
-	notifyAllMessages: false,
 };
 
 function loadBool(
@@ -72,17 +63,6 @@ function load(): UserSettings {
 				obj,
 				"notificationSound",
 				defaults.notificationSound,
-			),
-			notifyMentions: loadBool(obj, "notifyMentions", defaults.notifyMentions),
-			notifyDirectMessages: loadBool(
-				obj,
-				"notifyDirectMessages",
-				defaults.notifyDirectMessages,
-			),
-			notifyAllMessages: loadBool(
-				obj,
-				"notifyAllMessages",
-				defaults.notifyAllMessages,
 			),
 		};
 	} catch {

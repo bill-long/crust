@@ -1,5 +1,17 @@
 import { useNavigate } from "@solidjs/router";
-import { type Component, createMemo, For, Show } from "solid-js";
+import {
+	ClientEvent,
+	type MatrixEvent,
+	PushRuleActionName,
+} from "matrix-js-sdk";
+import {
+	type Component,
+	createMemo,
+	createSignal,
+	For,
+	onCleanup,
+	Show,
+} from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import type { RoomSummary } from "../../client/summaries";
@@ -14,9 +26,30 @@ import {
 	useSpaceHierarchy,
 } from "../space/useSpaceHierarchy";
 
+/** Small bell-off icon for muted rooms. */
+const BellOffBadge: Component = () => (
+	<svg
+		aria-hidden="true"
+		width="12"
+		height="12"
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.5"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0 text-text-disabled"
+	>
+		<path d="M6 13a2 2 0 0 0 4 0" />
+		<path d="M12.5 10.5c-.7-.7-1.5-1.2-1.5-4.5a3 3 0 0 0-6 0c0 3.3-.8 3.8-1.5 4.5h9Z" />
+		<line x1="2" y1="2" x2="14" y2="14" />
+	</svg>
+);
+
 const RoomEntry: Component<{
 	room: RoomSummary;
 	isSelected: boolean;
+	isMuted: boolean;
 	onClick: () => void;
 }> = (props) => {
 	return (
@@ -41,9 +74,17 @@ const RoomEntry: Component<{
 							🔒
 						</span>
 					</Show>
-					<span class="truncate text-sm font-medium">
+					<span
+						class="truncate text-sm font-medium"
+						classList={{
+							"text-text-disabled": props.isMuted && !props.isSelected,
+						}}
+					>
 						{props.room.name.trim() || "Unnamed room"}
 					</span>
+					<Show when={props.isMuted}>
+						<BellOffBadge />
+					</Show>
 				</div>
 				<Show when={props.room.lastMessage}>
 					<p class="truncate text-xs text-text-disabled">
@@ -52,8 +93,8 @@ const RoomEntry: Component<{
 				</Show>
 			</div>
 
-			{/* Unread badge */}
-			<Show when={props.room.unreadCount > 0}>
+			{/* Unread badge — hidden when muted */}
+			<Show when={props.room.unreadCount > 0 && !props.isMuted}>
 				<span
 					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
 						props.room.highlightCount > 0 ? "bg-danger" : "bg-indicator"
@@ -141,9 +182,44 @@ const DiscoverEntry: Component<{
 };
 
 const RoomList: Component = () => {
-	const { summaries } = useClient();
+	const { client, summaries } = useClient();
 	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
+
+	// Tick signal that increments when push rules change, so mutedRooms recomputes
+	const [pushRulesTick, setPushRulesTick] = createSignal(0);
+	const onAccountData = (event: MatrixEvent): void => {
+		if (event.getType() === "m.push_rules") {
+			setPushRulesTick((n) => n + 1);
+		}
+	};
+	client.on(ClientEvent.AccountData, onAccountData);
+	onCleanup(() => {
+		client.off(ClientEvent.AccountData, onAccountData);
+	});
+
+	// Precompute muted room set for O(1) lookups per room entry
+	const mutedRooms = createMemo(() => {
+		pushRulesTick();
+		const muted = new Set<string>();
+		const rules = client.pushRules;
+		if (!rules) return muted;
+		const overrides = rules.global?.override;
+		if (overrides) {
+			for (const r of overrides) {
+				if (r.enabled === false) continue;
+				if (
+					r.rule_id.startsWith("crust.mute.") &&
+					r.actions.some((a) => a === PushRuleActionName.DontNotify)
+				) {
+					muted.add(r.rule_id.slice("crust.mute.".length));
+				}
+			}
+		}
+		return muted;
+	});
+
+	const isMuted = (roomId: string): boolean => mutedRooms().has(roomId);
 
 	const isHome = () => !params.spaceId;
 	const selectedRoomId = () => params.roomId;
@@ -196,6 +272,7 @@ const RoomList: Component = () => {
 							<RoomEntry
 								room={room}
 								isSelected={selectedRoomId() === room.roomId}
+								isMuted={isMuted(room.roomId)}
 								onClick={() => navigateToRoom(room.roomId)}
 							/>
 						)}
@@ -278,6 +355,7 @@ const RoomList: Component = () => {
 								<RoomEntry
 									room={room}
 									isSelected={selectedRoomId() === room.roomId}
+									isMuted={isMuted(room.roomId)}
 									onClick={() => navigateToRoom(room.roomId)}
 								/>
 							)}
@@ -296,6 +374,7 @@ const RoomList: Component = () => {
 								<RoomEntry
 									room={room}
 									isSelected={selectedRoomId() === room.roomId}
+									isMuted={isMuted(room.roomId)}
 									onClick={() => navigateToRoom(room.roomId)}
 								/>
 							)}

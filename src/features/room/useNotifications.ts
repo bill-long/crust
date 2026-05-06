@@ -9,20 +9,34 @@ import {
 import { onCleanup } from "solid-js";
 import type { SummariesStore } from "../../client/summaries";
 import { userSettings } from "../../stores/settings";
+import { playNotificationSound, primeAudioContext } from "./notificationSound";
 
 /**
- * Desktop notification delivery hook. Listens for new messages and
- * shows browser notifications when the app is not focused, respecting
- * the user's notification category preferences.
+ * Notification hook following the Discord model, driven by Matrix
+ * push rules:
+ *
+ * - **Push rules** decide per-event whether to alert.  Events with a
+ *   `sound` or `highlight` tweak trigger desktop notifications (when
+ *   unfocused) and/or sound.  Bare `notify` (ordinary group messages)
+ *   contributes to unread counts but does not pop up or chime.
+ * - **Sound** plays for qualifying events in rooms the user is NOT
+ *   currently viewing, even when the app is focused.  Independent of
+ *   the desktop-notification toggle.
+ * - **Desktop notifications** appear only when the app is NOT focused.
+ * - Global `desktopNotifications` / `notificationSound` settings act
+ *   as master kill switches.
  *
  * Must be called within the Router and ClientProvider context (e.g. Layout).
  */
-export function useDesktopNotifications(
+export function useNotifications(
 	client: MatrixClient,
 	summaries: SummariesStore,
+	activeRoomId: () => string | undefined,
 ): void {
 	// No-op in non-browser runtimes (SSR, tests, prerender)
 	if (typeof window === "undefined" || typeof document === "undefined") return;
+
+	primeAudioContext();
 
 	const navigate = useNavigate();
 
@@ -45,36 +59,19 @@ export function useDesktopNotifications(
 		) {
 			return false;
 		}
-		// Skip redacted messages (no msgtype) and edits
 		if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") return false;
 		return true;
 	}
 
-	function shouldNotify(event: MatrixEvent, room: Room): boolean {
+	function shouldShowDesktopNotification(): boolean {
 		const s = userSettings();
 		if (!s.desktopNotifications) return false;
 		if (!("Notification" in window)) return false;
 		if (Notification.permission !== "granted") return false;
 		if (isAppFocused()) return false;
-		const currentUserId = client.getUserId();
-		if (!currentUserId || event.getSender() === currentUserId) return false;
-
-		// Category filtering
-		if (s.notifyAllMessages) return true;
-
-		if (s.notifyDirectMessages && summaries[room.roomId]?.isDirect) {
-			return true;
-		}
-
-		if (s.notifyMentions) {
-			// Force recalculation so post-decryption content is evaluated
-			const actions = client.getPushActionsForEvent(event, true);
-			if (actions?.tweaks?.highlight === true) return true;
-		}
-
-		return false;
+		return true;
 	}
 
 	function buildBody(event: MatrixEvent, room: Room): string {
@@ -136,8 +133,25 @@ export function useDesktopNotifications(
 
 	function processEvent(event: MatrixEvent, room: Room): void {
 		if (!isNotifiableMessage(event)) return;
-		if (shouldNotify(event, room)) {
+
+		const currentUserId = client.getUserId();
+		if (!currentUserId || event.getSender() === currentUserId) return;
+		if (room.roomId === activeRoomId()) return;
+
+		// Push rules decide whether this event should alert
+		const actions = client.getPushActionsForEvent(event, true);
+		if (!actions?.notify) return;
+
+		// "Loud" events have sound or highlight tweaks.
+		// Bare notify (no tweaks) = badge only, no popup or chime.
+		const hasSound = !!actions.tweaks?.sound;
+		const hasHighlight = actions.tweaks?.highlight === true;
+
+		if ((hasSound || hasHighlight) && shouldShowDesktopNotification()) {
 			showNotification(event, room);
+		}
+		if (hasSound && userSettings().notificationSound) {
+			playNotificationSound();
 		}
 	}
 
@@ -150,21 +164,18 @@ export function useDesktopNotifications(
 	): void => {
 		if (!room || !data.liveEvent) return;
 
-		// Encrypted event still pending decryption — defer decision only
-		// when non-content guards pass (prevents notifying for events that
-		// arrived while the app was focused)
+		// Encrypted event pending decryption — defer and re-evaluate after
 		if (
 			event.getType() === "m.room.encrypted" &&
 			!event.isDecryptionFailure() &&
 			!event.getContent().msgtype
 		) {
-			const s = userSettings();
-			if (!s.desktopNotifications) return;
-			if (!("Notification" in window)) return;
-			if (Notification.permission !== "granted") return;
-			if (isAppFocused()) return;
 			const currentUserId = client.getUserId();
 			if (!currentUserId || event.getSender() === currentUserId) return;
+			if (room.roomId === activeRoomId()) return;
+
+			const s = userSettings();
+			if (!s.desktopNotifications && !s.notificationSound) return;
 
 			const eventId = event.getId();
 			if (eventId) pendingDecryption.add(eventId);
