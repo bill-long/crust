@@ -207,6 +207,10 @@ const Layout: Component = () => {
 						userId={userId()}
 						initial={initial()}
 						avatarUrl={avatarUrl()}
+						syncStatus={(() => {
+							const s = syncState();
+							return s === "catching-up" || s === "stopped" ? s : "live";
+						})()}
 						needsCryptoAttention={needsCryptoAttention()}
 						cryptoLabel={cryptoActionLabel(cryptoAction())}
 						onCryptoClick={handleCryptoClick}
