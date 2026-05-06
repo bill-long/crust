@@ -14,6 +14,7 @@ interface UserBarProps {
 	userId: string;
 	initial: string;
 	avatarUrl: string | null;
+	syncStatus: "live" | "catching-up" | "stopped";
 	needsCryptoAttention: boolean;
 	cryptoLabel: string;
 	onCryptoClick: () => void;
@@ -194,6 +195,37 @@ const VolumeSlider: Component<{
 	</div>
 );
 
+// --- Sync status subtitle (shared by both UserBar variants) ---
+
+const SyncStatusLine: Component<{
+	syncStatus: "live" | "catching-up" | "stopped";
+	userId: string;
+}> = (props) => (
+	<Show
+		when={props.syncStatus === "live"}
+		fallback={
+			<div
+				class="truncate text-xs leading-tight"
+				classList={{
+					"motion-safe:animate-pulse text-warning-text":
+						props.syncStatus === "catching-up",
+					"text-danger-text": props.syncStatus === "stopped",
+				}}
+				title={`${props.syncStatus === "catching-up" ? "Reconnecting to homeserver" : "Sync stopped"} \u00b7 ${props.userId}`}
+				role="status"
+			>
+				{props.syncStatus === "catching-up"
+					? "Reconnecting\u2026"
+					: "Disconnected"}
+			</div>
+		}
+	>
+		<div class="truncate text-xs leading-tight text-text-muted">
+			{props.userId}
+		</div>
+	</Show>
+);
+
 // --- Main UserBar ---
 
 const UserBar: Component<UserBarProps> = (props) => {
@@ -214,9 +246,10 @@ const UserBar: Component<UserBarProps> = (props) => {
 							<div class="truncate text-sm font-semibold leading-tight text-text-primary">
 								{props.displayName}
 							</div>
-							<div class="truncate text-xs leading-tight text-text-muted">
-								{props.userId}
-							</div>
+							<SyncStatusLine
+								syncStatus={props.syncStatus}
+								userId={props.userId}
+							/>
 						</div>
 					</div>
 				}
@@ -225,8 +258,12 @@ const UserBar: Component<UserBarProps> = (props) => {
 					type="button"
 					onClick={props.onCryptoClick}
 					class="group relative flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-surface-2"
-					title={props.cryptoLabel}
-					aria-label={`${props.displayName} — ${props.cryptoLabel}`}
+					title={
+						props.syncStatus === "live"
+							? props.cryptoLabel
+							: `${props.syncStatus === "catching-up" ? "Reconnecting" : "Disconnected"} \u00b7 ${props.cryptoLabel}`
+					}
+					aria-label={`${props.displayName} \u2014 ${props.syncStatus !== "live" ? `${props.syncStatus === "catching-up" ? "Reconnecting" : "Disconnected"} \u2014 ` : ""}${props.cryptoLabel}`}
 				>
 					<div class="relative">
 						<Avatar url={props.avatarUrl} initial={props.initial} />
@@ -241,9 +278,10 @@ const UserBar: Component<UserBarProps> = (props) => {
 						<div class="truncate text-sm font-semibold leading-tight text-text-primary">
 							{props.displayName}
 						</div>
-						<div class="truncate text-xs leading-tight text-text-muted">
-							{props.userId}
-						</div>
+						<SyncStatusLine
+							syncStatus={props.syncStatus}
+							userId={props.userId}
+						/>
 					</div>
 				</button>
 			</Show>
