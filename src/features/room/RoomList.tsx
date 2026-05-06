@@ -1,5 +1,9 @@
 import { useNavigate } from "@solidjs/router";
-import { ClientEvent, type MatrixEvent } from "matrix-js-sdk";
+import {
+	ClientEvent,
+	type MatrixEvent,
+	PushRuleActionName,
+} from "matrix-js-sdk";
 import {
 	type Component,
 	createMemo,
@@ -25,7 +29,7 @@ import {
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
 	<svg
-		aria-label="Muted"
+		aria-hidden="true"
 		width="12"
 		height="12"
 		viewBox="0 0 16 16"
@@ -206,7 +210,7 @@ const RoomList: Component = () => {
 				if (r.enabled === false) continue;
 				if (
 					r.rule_id.startsWith("crust.mute.") &&
-					r.actions.some((a) => a === "dont_notify")
+					r.actions.some((a) => a === PushRuleActionName.DontNotify)
 				) {
 					muted.add(r.rule_id.slice("crust.mute.".length));
 				}
