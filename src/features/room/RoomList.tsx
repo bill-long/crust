@@ -21,7 +21,6 @@ import {
 	type JoinState,
 	useSpaceHierarchy,
 } from "../space/useSpaceHierarchy";
-import { getRoomNotificationLevel } from "./roomNotificationLevel";
 
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
@@ -183,7 +182,7 @@ const RoomList: Component = () => {
 	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
 
-	// Tick signal that increments when push rules change, so isMuted recomputes
+	// Tick signal that increments when push rules change, so mutedRooms recomputes
 	const [pushRulesTick, setPushRulesTick] = createSignal(0);
 	const onAccountData = (event: MatrixEvent): void => {
 		if (event.getType() === "m.push_rules") {
@@ -195,10 +194,28 @@ const RoomList: Component = () => {
 		client.off(ClientEvent.AccountData, onAccountData);
 	});
 
-	const isMuted = (roomId: string): boolean => {
+	// Precompute muted room set for O(1) lookups per room entry
+	const mutedRooms = createMemo(() => {
 		pushRulesTick();
-		return getRoomNotificationLevel(client, roomId) === "mute";
-	};
+		const muted = new Set<string>();
+		const rules = client.pushRules;
+		if (!rules) return muted;
+		const overrides = rules.global?.override;
+		if (overrides) {
+			for (const r of overrides) {
+				if (r.enabled === false) continue;
+				if (
+					r.rule_id.startsWith("crust.mute.") &&
+					r.actions.some((a) => a === "dont_notify")
+				) {
+					muted.add(r.rule_id.slice("crust.mute.".length));
+				}
+			}
+		}
+		return muted;
+	});
+
+	const isMuted = (roomId: string): boolean => mutedRooms().has(roomId);
 
 	const isHome = () => !params.spaceId;
 	const selectedRoomId = () => params.roomId;

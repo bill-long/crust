@@ -16,7 +16,7 @@ const Toggle: Component<ToggleProps> = (props) => (
 		aria-checked={props.checked}
 		aria-label={props.label}
 		aria-describedby={props.describedBy}
-		aria-disabled={props.disabled || undefined}
+		disabled={props.disabled || undefined}
 		onClick={() => {
 			if (!props.disabled) props.onChange(!props.checked);
 		}}
@@ -24,8 +24,8 @@ const Toggle: Component<ToggleProps> = (props) => (
 		classList={{
 			"cursor-pointer": !props.disabled,
 			"cursor-not-allowed": !!props.disabled,
-			"bg-accent": props.checked && !props.disabled,
-			"bg-surface-3": !props.checked || !!props.disabled,
+			"bg-accent": props.checked,
+			"bg-surface-3": !props.checked,
 		}}
 	>
 		<span
