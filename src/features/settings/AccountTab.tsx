@@ -1,9 +1,11 @@
+import { UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
 	createSignal,
 	For,
 	on,
+	onCleanup,
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
@@ -13,8 +15,25 @@ const AccountTab: Component = () => {
 	const { client } = useClient();
 	const userId = () => client.getUserId() ?? "";
 
-	// Refresh counter — bump after profile mutations to force re-read
+	// Refresh counter — bump after profile mutations or SDK events to force re-read
 	const [profileVersion, setProfileVersion] = createSignal(0);
+
+	// Subscribe to SDK user events for external profile changes (e.g. from
+	// another session). Listens on the client (which re-emits User events)
+	// so we don't depend on getUser() being available at mount time.
+	const onProfileChange = (_event: unknown, user: { userId: string }): void => {
+		if (user.userId === userId()) {
+			setProfileVersion((v) => v + 1);
+		}
+	};
+
+	client.on(UserEvent.DisplayName, onProfileChange);
+	client.on(UserEvent.AvatarUrl, onProfileChange);
+
+	onCleanup(() => {
+		client.removeListener(UserEvent.DisplayName, onProfileChange);
+		client.removeListener(UserEvent.AvatarUrl, onProfileChange);
+	});
 
 	const currentDisplayName = (): string => {
 		profileVersion(); // subscribe to refreshes
