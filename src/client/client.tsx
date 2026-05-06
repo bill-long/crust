@@ -1,6 +1,7 @@
 import {
 	ClientEvent,
 	createClient,
+	HttpApiEvent,
 	type MatrixClient,
 	SyncState,
 } from "matrix-js-sdk";
@@ -25,6 +26,7 @@ export type AppSyncState =
 	| "catching-up"
 	| "live"
 	| "error"
+	| "logged-out"
 	| "stopped";
 
 export type CryptoState = "loading" | "ready" | "error";
@@ -148,6 +150,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	} = createSummariesStore(matrixClient);
 
 	const onSync = (state: SyncState): void => {
+		// "logged-out" is terminal — don't let later sync events overwrite it
+		if (syncState() === "logged-out") return;
+
 		switch (state) {
 			case SyncState.Prepared:
 				hasPrepared = true;
@@ -176,17 +181,42 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	matrixClient.on(ClientEvent.Sync, onSync);
 
+	const onSessionLoggedOut = (): void => {
+		matrixClient.stopClient();
+		setSyncState("logged-out");
+	};
+	matrixClient.on(HttpApiEvent.SessionLoggedOut, onSessionLoggedOut);
+
 	onMount(async () => {
 		try {
 			await matrixClient.initRustCrypto({ useIndexedDB: true });
-			if (disposed) return;
+			if (disposed || syncState() === "logged-out") return;
 			setCryptoState("ready");
 		} catch (e) {
-			console.error("Crypto init failed:", e);
-			if (disposed) return;
-			setCryptoState("error");
+			// Stale crypto store from a different user/device — clear and retry
+			if (
+				e instanceof Error &&
+				e.message.includes("account in the store doesn't match")
+			) {
+				console.warn("Stale crypto store detected, clearing and retrying");
+				try {
+					await matrixClient.clearStores();
+					if (disposed || syncState() === "logged-out") return;
+					await matrixClient.initRustCrypto({ useIndexedDB: true });
+					if (disposed || syncState() === "logged-out") return;
+					setCryptoState("ready");
+				} catch (retryErr) {
+					console.error("Crypto init retry failed:", retryErr);
+					if (disposed || syncState() === "logged-out") return;
+					setCryptoState("error");
+				}
+			} else {
+				console.error("Crypto init failed:", e);
+				if (disposed || syncState() === "logged-out") return;
+				setCryptoState("error");
+			}
 		}
-		if (disposed) return;
+		if (disposed || syncState() === "logged-out") return;
 		matrixClient.startClient({ initialSyncLimit: 20 });
 	});
 
@@ -199,6 +229,10 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		disposed = true;
 		cleanupSummaries();
 		matrixClient.removeListener(ClientEvent.Sync, onSync);
+		matrixClient.removeListener(
+			HttpApiEvent.SessionLoggedOut,
+			onSessionLoggedOut,
+		);
 		matrixClient.stopClient();
 	});
 
