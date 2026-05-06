@@ -28,7 +28,11 @@ export function useKeyBackup(client: MatrixClient): KeyBackupProgress {
 	const [lastError, setLastError] = createSignal<string | null>(null);
 	const [backupEnabled, setBackupEnabled] = createSignal(false);
 
+	let disposed = false;
+	let sawBackupStatusEvent = false;
+
 	const onBackupStatus = (enabled: boolean): void => {
+		sawBackupStatusEvent = true;
 		setBackupEnabled(enabled);
 		setLastError(null);
 		if (!enabled) {
@@ -57,6 +61,7 @@ export function useKeyBackup(client: MatrixClient): KeyBackupProgress {
 	client.on(CryptoEvent.KeyBackupFailed, onBackupFailed);
 
 	onCleanup(() => {
+		disposed = true;
 		client.removeListener(CryptoEvent.KeyBackupStatus, onBackupStatus);
 		client.removeListener(
 			CryptoEvent.KeyBackupSessionsRemaining,
@@ -64,6 +69,20 @@ export function useKeyBackup(client: MatrixClient): KeyBackupProgress {
 		);
 		client.removeListener(CryptoEvent.KeyBackupFailed, onBackupFailed);
 	});
+
+	// Seed backupEnabled from current state so it's accurate before any
+	// CryptoEvent fires. Guard against overwriting a newer event-driven value.
+	void client
+		.getCrypto()
+		?.getActiveSessionBackupVersion()
+		.then((version) => {
+			if (!disposed && !sawBackupStatusEvent) {
+				setBackupEnabled(version !== null);
+			}
+		})
+		.catch(() => {
+			// Event-driven updates will correct
+		});
 
 	return {
 		isBackingUp,
