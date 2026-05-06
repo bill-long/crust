@@ -25,6 +25,7 @@ import {
 import { MemberList } from "../features/room/MemberList";
 import { RoomList } from "../features/room/RoomList";
 import { TimelineView } from "../features/room/timeline/TimelineView";
+import { useDesktopNotifications } from "../features/room/useDesktopNotifications";
 import { SettingsOverlay } from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
@@ -73,6 +74,8 @@ const Layout: Component = () => {
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
 	const [settingsOpen, setSettingsOpen] = createSignal(false);
+
+	useDesktopNotifications(client, summaries);
 
 	const handleLogout = async (): Promise<void> => {
 		try {
