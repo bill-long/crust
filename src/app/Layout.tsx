@@ -2,10 +2,10 @@ import { useNavigate } from "@solidjs/router";
 import { UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	onCleanup,
-	onMount,
 	Show,
 } from "solid-js";
 import { useClient } from "../client/client";
@@ -67,7 +67,7 @@ function saveMembersWidth(w: number): void {
 }
 
 const Layout: Component = () => {
-	const { client, summaries, cryptoStatus } = useClient();
+	const { client, summaries, cryptoStatus, syncState } = useClient();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
@@ -91,13 +91,19 @@ const Layout: Component = () => {
 
 	const userId = () => client.getUserId() ?? "";
 
-	// Current user profile — reactive via SDK events
+	// Current user profile — reactive via SDK events.
+	// Uses createEffect (not onMount) so that if getUser() returns null
+	// on the first attempt, the subscription retries when syncState changes.
 	const [profileName, setProfileName] = createSignal<string | undefined>();
 	const [profileAvatarMxc, setProfileAvatarMxc] = createSignal<
 		string | undefined
 	>();
 
-	onMount(() => {
+	createEffect(() => {
+		const state = syncState();
+		if (state !== "live" && state !== "catching-up" && state !== "stopped")
+			return;
+
 		const uid = client.getUserId();
 		if (!uid) return;
 		const user = client.getUser(uid);
