@@ -15,7 +15,14 @@ import { DevicesTab } from "./DevicesTab";
 import { GeneralTab } from "./GeneralTab";
 import { NotificationsTab } from "./NotificationsTab";
 
-export type SettingsTab = "general" | "account" | "notifications" | "devices";
+export const tabMeta = [
+	{ id: "general", label: "General" },
+	{ id: "account", label: "Account" },
+	{ id: "notifications", label: "Notifications" },
+	{ id: "devices", label: "Devices & Security" },
+] as const;
+
+export type SettingsTab = (typeof tabMeta)[number]["id"];
 
 interface SettingsOverlayProps {
 	activeTab: SettingsTab;
@@ -23,13 +30,6 @@ interface SettingsOverlayProps {
 	onClose: () => void;
 	onLogout: () => void;
 }
-
-export const tabMeta: { id: SettingsTab; label: string }[] = [
-	{ id: "general", label: "General" },
-	{ id: "account", label: "Account" },
-	{ id: "notifications", label: "Notifications" },
-	{ id: "devices", label: "Devices & Security" },
-];
 
 const CloseIcon: Component = () => (
 	<svg

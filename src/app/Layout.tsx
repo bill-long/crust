@@ -90,8 +90,10 @@ const Layout: Component = () => {
 		return tabMeta.some((t) => t.id === seg) ? (seg as SettingsTab) : "general";
 	};
 
+	type SettingsState = { returnTo?: string; activeRoomId?: string };
+
 	const handleSettingsClose = (): void => {
-		const state = location.state as { returnTo?: string } | undefined;
+		const state = location.state as SettingsState | undefined;
 		if (state?.returnTo) {
 			// Came from an in-app page — pop the settings history entry
 			navigate(-1);
@@ -101,7 +103,16 @@ const Layout: Component = () => {
 		}
 	};
 
-	useNotifications(client, summaries, () => params.roomId);
+	// Preserve notification suppression for the room the user was viewing
+	// before opening settings (settings route clears params.roomId)
+	const activeRoomId = (): string | undefined => {
+		if (isSettingsRoute()) {
+			return (location.state as SettingsState | undefined)?.activeRoomId;
+		}
+		return params.roomId;
+	};
+
+	useNotifications(client, summaries, activeRoomId);
 
 	const handleLogout = async (): Promise<void> => {
 		try {
@@ -245,7 +256,10 @@ const Layout: Component = () => {
 						onCryptoClick={handleCryptoClick}
 						onSettingsClick={() =>
 							navigate("/settings", {
-								state: { returnTo: location.pathname },
+								state: {
+									returnTo: location.pathname + location.search + location.hash,
+									activeRoomId: params.roomId,
+								} satisfies SettingsState,
 							})
 						}
 					/>
