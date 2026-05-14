@@ -24,7 +24,7 @@ interface SettingsOverlayProps {
 	onLogout: () => void;
 }
 
-const tabMeta: { id: SettingsTab; label: string }[] = [
+export const tabMeta: { id: SettingsTab; label: string }[] = [
 	{ id: "general", label: "General" },
 	{ id: "account", label: "Account" },
 	{ id: "notifications", label: "Notifications" },

@@ -30,6 +30,7 @@ import { useNotifications } from "../features/room/useNotifications";
 import {
 	SettingsOverlay,
 	type SettingsTab,
+	tabMeta,
 } from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
@@ -84,17 +85,9 @@ const Layout: Component = () => {
 		location.pathname === "/settings" ||
 		location.pathname.startsWith("/settings/");
 
-	const validTabs: SettingsTab[] = [
-		"general",
-		"account",
-		"notifications",
-		"devices",
-	];
 	const settingsTab = (): SettingsTab => {
 		const seg = location.pathname.split("/")[2];
-		return validTabs.includes(seg as SettingsTab)
-			? (seg as SettingsTab)
-			: "general";
+		return tabMeta.some((t) => t.id === seg) ? (seg as SettingsTab) : "general";
 	};
 
 	const handleSettingsClose = (): void => {
