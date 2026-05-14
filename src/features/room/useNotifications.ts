@@ -9,11 +9,7 @@ import {
 import { onCleanup } from "solid-js";
 import type { SummariesStore } from "../../client/summaries";
 import { userSettings } from "../../stores/settings";
-import {
-	closeNotificationSound,
-	playNotificationSound,
-	primeAudioContext,
-} from "./notificationSound";
+import { playNotificationSound, primeAudioContext } from "./notificationSound";
 
 /**
  * Notification hook following the Discord model, driven by Matrix
@@ -212,6 +208,5 @@ export function useNotifications(
 			notif.close();
 		}
 		activeNotifications.clear();
-		closeNotificationSound();
 	});
 }
