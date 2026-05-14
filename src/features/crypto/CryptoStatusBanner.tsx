@@ -1,6 +1,16 @@
-import { type Component, createSignal, onCleanup, Show } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createSignal,
+	onCleanup,
+	Show,
+} from "solid-js";
 import { useClient } from "../../client/client";
-import { registerCryptoHandler } from "../../stores/cryptoActions";
+import {
+	registerCryptoHandler,
+	restoreCryptoTriggerFocus,
+	setCryptoDialogOpen,
+} from "../../stores/cryptoActions";
 import type { CryptoAction } from "../../types/crypto";
 import { BackupSetupDialog } from "./backup/BackupSetupDialog";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
@@ -47,14 +57,26 @@ const CryptoStatusBanner: Component = () => {
 	const [showVerification, setShowVerification] = createSignal(false);
 	const [showBackupSetup, setShowBackupSetup] = createSignal(false);
 
+	// Expose whether any crypto dialog is open (for inert on underlying content)
+	createEffect(() => {
+		setCryptoDialogOpen(showSetup() || showVerification() || showBackupSetup());
+	});
+
 	const verification = useVerification(client);
 
 	const handleVerificationClose = (): void => {
 		setShowVerification(false);
 		cryptoStatus.refresh();
+		restoreCryptoTriggerFocus();
 	};
 
 	// Register handler so the user panel can trigger crypto flows.
+	// Clear stale state if the banner unmounts while a dialog is open
+	onCleanup(() => {
+		setCryptoDialogOpen(false);
+		restoreCryptoTriggerFocus();
+	});
+
 	const unregister = registerCryptoHandler((a: CryptoAction) => {
 		switch (a) {
 			case "setup-cross-signing":
@@ -74,7 +96,12 @@ const CryptoStatusBanner: Component = () => {
 	return (
 		<>
 			<Show when={showSetup()}>
-				<CrossSigningSetup onClose={() => setShowSetup(false)} />
+				<CrossSigningSetup
+					onClose={() => {
+						setShowSetup(false);
+						restoreCryptoTriggerFocus();
+					}}
+				/>
 			</Show>
 
 			<Show when={showVerification()}>
@@ -89,6 +116,7 @@ const CryptoStatusBanner: Component = () => {
 					onClose={() => {
 						setShowBackupSetup(false);
 						cryptoStatus.refresh();
+						restoreCryptoTriggerFocus();
 					}}
 				/>
 			</Show>

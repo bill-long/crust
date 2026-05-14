@@ -107,22 +107,19 @@ const SplitAudioButton: Component<{
 	const [menuOpen, setMenuOpen] = createSignal(false);
 	let containerRef: HTMLDivElement | undefined;
 
-	// Persistent outside-click listener, managed by effect.
-	// Deferred by one frame so the opening click doesn't immediately close.
+	// Outside-click listener. Safe to attach synchronously because the
+	// opening mousedown fires before onClick → setMenuOpen(true), so
+	// the listener is never reached by the opening click's mousedown.
 	createEffect(
 		on(menuOpen, (open) => {
 			if (!open) return;
-			let active = true;
 			const handler = (e: MouseEvent): void => {
 				if (containerRef && !containerRef.contains(e.target as Node)) {
 					setMenuOpen(false);
 				}
 			};
-			requestAnimationFrame(() => {
-				if (active) document.addEventListener("mousedown", handler);
-			});
+			document.addEventListener("mousedown", handler);
 			onCleanup(() => {
-				active = false;
 				document.removeEventListener("mousedown", handler);
 			});
 		}),
