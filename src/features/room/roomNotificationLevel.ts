@@ -95,13 +95,10 @@ export async function setRoomNotificationLevel(
 	const current = getRoomNotificationLevel(client, roomId);
 	if (current === level) return;
 
-	// Clean up existing rules first
-	await cleanupRoomRules(client, roomId);
-
-	// Set new rules
+	// Add the new rule first so notifications never fall back to default
+	// during the transition (addPushRule replaces same-ID rules atomically).
 	switch (level) {
 		case "default":
-			// No rules needed — cleanup already removed them
 			break;
 
 		case "all-messages":
@@ -134,22 +131,32 @@ export async function setRoomNotificationLevel(
 			);
 			break;
 	}
+
+	// Then clean up rules from the previous level that don't belong
+	await cleanupStaleRules(client, roomId, level);
 }
 
-async function cleanupRoomRules(
+async function cleanupStaleRules(
 	client: MatrixClient,
 	roomId: string,
+	newLevel: RoomNotificationLevel,
 ): Promise<void> {
-	// Delete both rule kinds to converge to clean state, even if another
-	// client left stale rules in a different kind.
-	await Promise.all([
-		client
-			.deletePushRule("global", PushRuleKind.Override, muteRuleId(roomId))
-			.catch(ignore404),
-		client
-			.deletePushRule("global", PushRuleKind.RoomSpecific, roomId)
-			.catch(ignore404),
-	]);
+	const deletions: Promise<unknown>[] = [];
+	if (newLevel !== "mute") {
+		deletions.push(
+			client
+				.deletePushRule("global", PushRuleKind.Override, muteRuleId(roomId))
+				.catch(ignore404),
+		);
+	}
+	if (newLevel !== "all-messages" && newLevel !== "mentions-only") {
+		deletions.push(
+			client
+				.deletePushRule("global", PushRuleKind.RoomSpecific, roomId)
+				.catch(ignore404),
+		);
+	}
+	await Promise.all(deletions);
 }
 
 function ignore404(err: unknown): void {
