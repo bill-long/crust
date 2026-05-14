@@ -1,4 +1,4 @@
-import { useNavigate } from "@solidjs/router";
+import { useLocation, useNavigate } from "@solidjs/router";
 import { UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
@@ -27,7 +27,10 @@ import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { useNotifications } from "../features/room/useNotifications";
-import { SettingsOverlay } from "../features/settings/SettingsOverlay";
+import {
+	SettingsOverlay,
+	type SettingsTab,
+} from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
@@ -72,9 +75,34 @@ const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState } = useClient();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
+	const location = useLocation();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
-	const [settingsOpen, setSettingsOpen] = createSignal(false);
+
+	// Settings overlay is driven by the /settings/* route
+	const isSettingsRoute = () =>
+		location.pathname === "/settings" ||
+		location.pathname.startsWith("/settings/");
+
+	const validTabs: SettingsTab[] = [
+		"general",
+		"account",
+		"notifications",
+		"devices",
+	];
+	const settingsTab = (): SettingsTab => {
+		const seg = location.pathname.split("/")[2];
+		return validTabs.includes(seg as SettingsTab)
+			? (seg as SettingsTab)
+			: "general";
+	};
+
+	const handleSettingsClose = (): void => {
+		const returnTo =
+			(location.state as { returnTo?: string } | undefined)?.returnTo ??
+			"/home";
+		navigate(returnTo, { replace: true });
+	};
 
 	useNotifications(client, summaries, () => params.roomId);
 
@@ -218,7 +246,11 @@ const Layout: Component = () => {
 						needsCryptoAttention={needsCryptoAttention()}
 						cryptoLabel={cryptoActionLabel(cryptoAction())}
 						onCryptoClick={handleCryptoClick}
-						onSettingsClick={() => setSettingsOpen(true)}
+						onSettingsClick={() =>
+							navigate("/settings", {
+								state: { returnTo: location.pathname },
+							})
+						}
 					/>
 				}
 				main={
@@ -306,9 +338,16 @@ const Layout: Component = () => {
 			/>
 
 			{/* Settings overlay */}
-			<Show when={settingsOpen()}>
+			<Show when={isSettingsRoute()}>
 				<SettingsOverlay
-					onClose={() => setSettingsOpen(false)}
+					activeTab={settingsTab()}
+					onTabChange={(tab) =>
+						navigate(`/settings/${tab}`, {
+							replace: true,
+							state: location.state,
+						})
+					}
+					onClose={handleSettingsClose}
 					onLogout={handleLogout}
 				/>
 			</Show>
