@@ -98,10 +98,14 @@ const Layout: Component = () => {
 	};
 
 	const handleSettingsClose = (): void => {
-		const returnTo =
-			(location.state as { returnTo?: string } | undefined)?.returnTo ??
-			"/home";
-		navigate(returnTo, { replace: true });
+		const state = location.state as { returnTo?: string } | undefined;
+		if (state?.returnTo) {
+			// Came from an in-app page — pop the settings history entry
+			navigate(-1);
+		} else {
+			// Deep link with no prior context
+			navigate("/home", { replace: true });
+		}
 	};
 
 	useNotifications(client, summaries, () => params.roomId);
