@@ -1,4 +1,4 @@
-import { useNavigate } from "@solidjs/router";
+import { useLocation, useNavigate } from "@solidjs/router";
 import { UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
@@ -27,7 +27,11 @@ import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { useNotifications } from "../features/room/useNotifications";
-import { SettingsOverlay } from "../features/settings/SettingsOverlay";
+import {
+	SettingsOverlay,
+	type SettingsTab,
+	tabMeta,
+} from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
@@ -72,11 +76,43 @@ const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState } = useClient();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
+	const location = useLocation();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
-	const [settingsOpen, setSettingsOpen] = createSignal(false);
 
-	useNotifications(client, summaries, () => params.roomId);
+	// Settings overlay is driven by the /settings/* route
+	const isSettingsRoute = () =>
+		location.pathname === "/settings" ||
+		location.pathname.startsWith("/settings/");
+
+	const settingsTab = (): SettingsTab => {
+		const seg = location.pathname.split("/")[2];
+		return tabMeta.some((t) => t.id === seg) ? (seg as SettingsTab) : "general";
+	};
+
+	type SettingsState = { returnTo?: string; activeRoomId?: string };
+
+	const handleSettingsClose = (): void => {
+		const state = location.state as SettingsState | undefined;
+		if (state?.returnTo) {
+			// Came from an in-app page — pop the settings history entry
+			navigate(-1);
+		} else {
+			// Deep link with no prior context
+			navigate("/home", { replace: true });
+		}
+	};
+
+	// Preserve notification suppression for the room the user was viewing
+	// before opening settings (settings route clears params.roomId)
+	const activeRoomId = (): string | undefined => {
+		if (isSettingsRoute()) {
+			return (location.state as SettingsState | undefined)?.activeRoomId;
+		}
+		return params.roomId;
+	};
+
+	useNotifications(client, summaries, activeRoomId);
 
 	const handleLogout = async (): Promise<void> => {
 		try {
@@ -218,7 +254,14 @@ const Layout: Component = () => {
 						needsCryptoAttention={needsCryptoAttention()}
 						cryptoLabel={cryptoActionLabel(cryptoAction())}
 						onCryptoClick={handleCryptoClick}
-						onSettingsClick={() => setSettingsOpen(true)}
+						onSettingsClick={() =>
+							navigate("/settings", {
+								state: {
+									returnTo: location.pathname + location.search + location.hash,
+									activeRoomId: params.roomId,
+								} satisfies SettingsState,
+							})
+						}
 					/>
 				}
 				main={
@@ -306,9 +349,16 @@ const Layout: Component = () => {
 			/>
 
 			{/* Settings overlay */}
-			<Show when={settingsOpen()}>
+			<Show when={isSettingsRoute()}>
 				<SettingsOverlay
-					onClose={() => setSettingsOpen(false)}
+					activeTab={settingsTab()}
+					onTabChange={(tab) =>
+						navigate(`/settings/${tab}`, {
+							replace: true,
+							state: location.state,
+						})
+					}
+					onClose={handleSettingsClose}
 					onLogout={handleLogout}
 				/>
 			</Show>

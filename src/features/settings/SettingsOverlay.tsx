@@ -1,7 +1,6 @@
 import {
 	type Component,
 	createEffect,
-	createSignal,
 	For,
 	Match,
 	on,
@@ -16,19 +15,21 @@ import { DevicesTab } from "./DevicesTab";
 import { GeneralTab } from "./GeneralTab";
 import { NotificationsTab } from "./NotificationsTab";
 
-type SettingsTab = "general" | "account" | "notifications" | "devices";
-
-interface SettingsOverlayProps {
-	onClose: () => void;
-	onLogout: () => void;
-}
-
-const tabMeta: { id: SettingsTab; label: string }[] = [
+export const tabMeta = [
 	{ id: "general", label: "General" },
 	{ id: "account", label: "Account" },
 	{ id: "notifications", label: "Notifications" },
 	{ id: "devices", label: "Devices & Security" },
-];
+] as const;
+
+export type SettingsTab = (typeof tabMeta)[number]["id"];
+
+interface SettingsOverlayProps {
+	activeTab: SettingsTab;
+	onTabChange: (tab: SettingsTab) => void;
+	onClose: () => void;
+	onLogout: () => void;
+}
 
 const CloseIcon: Component = () => (
 	<svg
@@ -67,7 +68,6 @@ const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
-	const [activeTab, setActiveTab] = createSignal<SettingsTab>("general");
 	let overlayRef!: HTMLDivElement;
 	let contentRef!: HTMLDivElement;
 	let previousFocus: HTMLElement | null = null;
@@ -87,7 +87,11 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 
 	// Reset scroll position when switching tabs (skip initial mount)
 	createEffect(
-		on(activeTab, () => contentRef?.scrollTo(0, 0), { defer: true }),
+		on(
+			() => props.activeTab,
+			() => contentRef?.scrollTo(0, 0),
+			{ defer: true },
+		),
 	);
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
@@ -115,7 +119,8 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 		}
 	};
 
-	const tabTitle = () => tabMeta.find((t) => t.id === activeTab())?.label ?? "";
+	const tabTitle = () =>
+		tabMeta.find((t) => t.id === props.activeTab)?.label ?? "";
 
 	return (
 		<div
@@ -145,15 +150,17 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 								{(tab) => (
 									<button
 										type="button"
-										onClick={() => setActiveTab(tab.id)}
+										onClick={() => props.onTabChange(tab.id)}
 										class="w-full rounded px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 										classList={{
 											"bg-surface-2 text-text-primary font-medium":
-												activeTab() === tab.id,
+												props.activeTab === tab.id,
 											"text-text-secondary hover:bg-surface-2/50 hover:text-text-primary":
-												activeTab() !== tab.id,
+												props.activeTab !== tab.id,
 										}}
-										aria-current={activeTab() === tab.id ? "true" : undefined}
+										aria-current={
+											props.activeTab === tab.id ? "true" : undefined
+										}
 									>
 										{tab.label}
 									</button>
@@ -200,16 +207,16 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 					<div ref={contentRef} class="flex-1 overflow-y-auto px-8 py-6">
 						<div class="max-w-2xl">
 							<Switch>
-								<Match when={activeTab() === "general"}>
+								<Match when={props.activeTab === "general"}>
 									<GeneralTab />
 								</Match>
-								<Match when={activeTab() === "account"}>
+								<Match when={props.activeTab === "account"}>
 									<AccountTab />
 								</Match>
-								<Match when={activeTab() === "notifications"}>
+								<Match when={props.activeTab === "notifications"}>
 									<NotificationsTab />
 								</Match>
-								<Match when={activeTab() === "devices"}>
+								<Match when={props.activeTab === "devices"}>
 									<DevicesTab />
 								</Match>
 							</Switch>
