@@ -3,10 +3,11 @@
 A self-hosted, opinionated Matrix client for Discord-style communities.
 
 Built for [chat.strange.pizza](https://chat.strange.pizza); open-sourced
-under Apache-2.0. Public deploy at [crust.chat](https://crust.chat) coming soon.
+under Apache-2.0. Public deploy at
+[strange.pizza/crust](https://strange.pizza/crust).
 
-> **Status: Phase 6 — GIF search.** Phases 0–5 shipped. Cutover from Cinny
-> is planned but not yet scheduled.
+> **Status: Post-Phase 6 — polish and notifications.** Phases 0–6 shipped.
+> Cutover from Cinny is planned but not yet scheduled.
 
 ## Why Crust exists
 
@@ -24,6 +25,7 @@ calls) is table stakes for a chat client we'd actually use daily.
 - E2EE by default for DMs, with SAS verification and key backup
 - Custom emoji and image packs (MSC2545)
 - GIF search (Giphy / Klipy) — opt-in, TOS-compliant
+- Desktop notifications with per-room levels (default / all / mentions-only / mute)
 - Embedded MatrixRTC calls via self-hosted Element Call *(planned)*
 - Strict Content Security Policy from day one
 
