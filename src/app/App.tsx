@@ -11,6 +11,7 @@ import {
 import { ClientProvider, useClient } from "../client/client";
 import { LoginPage } from "../features/auth/LoginPage";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
+import { closeNotificationSound } from "../features/room/notificationSound";
 import { clearSession, loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
@@ -41,6 +42,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	createEffect(() => {
 		if (syncState() === "logged-out" && !cleaningUp) {
 			cleaningUp = true;
+			closeNotificationSound();
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
 			// Clear stores (best-effort async) then redirect.
@@ -57,6 +59,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	});
 
 	const handleForceLogout = async (): Promise<void> => {
+		closeNotificationSound();
 		client.stopClient();
 		// Clear session and navigate immediately so the user never sees
 		// the main app UI in the "stopped" state while clearStores() awaits.

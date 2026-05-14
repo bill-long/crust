@@ -43,6 +43,7 @@ const NotificationsTab: Component = () => {
 	// @room mention suppression — reads from push rules, reactive to updates
 	const [suppressAtRoom, setSuppressAtRoom] = createSignal(false);
 	const [atRoomLoaded, setAtRoomLoaded] = createSignal(false);
+	const [savingAtRoom, setSavingAtRoom] = createSignal(false);
 
 	function syncAtRoomState(): void {
 		const rules = client.pushRules;
@@ -77,7 +78,9 @@ const NotificationsTab: Component = () => {
 	});
 
 	const handleAtRoomToggle = (suppress: boolean): void => {
+		if (savingAtRoom()) return;
 		setSuppressAtRoom(suppress);
+		setSavingAtRoom(true);
 
 		// Disable both @room rules when suppressing
 		const enabled = !suppress;
@@ -94,12 +97,16 @@ const NotificationsTab: Component = () => {
 				RuleId.AtRoomNotification,
 				enabled,
 			),
-		]).then((results) => {
-			if (results.some((r) => r.status === "rejected")) {
-				// Re-read server state on partial or full failure
-				syncAtRoomState();
-			}
-		});
+		])
+			.then((results) => {
+				if (results.some((r) => r.status === "rejected")) {
+					// Re-read server state on partial or full failure
+					syncAtRoomState();
+				}
+			})
+			.finally(() => {
+				setSavingAtRoom(false);
+			});
 	};
 
 	return (
@@ -140,7 +147,7 @@ const NotificationsTab: Component = () => {
 					description="Prevent @room mentions from triggering notifications"
 					checked={suppressAtRoom()}
 					onChange={handleAtRoomToggle}
-					disabled={!atRoomLoaded()}
+					disabled={!atRoomLoaded() || savingAtRoom()}
 				/>
 			</section>
 		</div>

@@ -10,6 +10,7 @@
 let ctx: AudioContext | null = null;
 let primed = false;
 let lastPlayTime = 0;
+let primeHandler: (() => void) | null = null;
 
 /** Minimum gap between consecutive plays (ms). */
 const DEBOUNCE_MS = 500;
@@ -54,13 +55,33 @@ export function primeAudioContext(): void {
 		void ensureRunning();
 		window.removeEventListener("pointerdown", handler, true);
 		window.removeEventListener("keydown", handler, true);
+		primeHandler = null;
 	};
+	primeHandler = handler;
 
 	window.addEventListener("pointerdown", handler, {
 		capture: true,
 		once: true,
 	});
 	window.addEventListener("keydown", handler, { capture: true, once: true });
+}
+
+/**
+ * Close the AudioContext and release hardware audio resources.
+ * Call on logout or account switch.
+ */
+export function closeNotificationSound(): void {
+	if (primeHandler) {
+		window.removeEventListener("pointerdown", primeHandler, true);
+		window.removeEventListener("keydown", primeHandler, true);
+		primeHandler = null;
+	}
+	if (ctx) {
+		void ctx.close().catch(() => {});
+		ctx = null;
+	}
+	primed = false;
+	lastPlayTime = 0;
 }
 
 /**
@@ -114,4 +135,13 @@ function playTone(
 	gain.connect(c.destination);
 	osc.start(start);
 	osc.stop(start + duration);
+
+	osc.addEventListener(
+		"ended",
+		() => {
+			osc.disconnect();
+			gain.disconnect();
+		},
+		{ once: true },
+	);
 }

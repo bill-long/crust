@@ -23,6 +23,7 @@ import {
 	deriveCryptoAction,
 } from "../features/crypto/CryptoStatusBanner";
 import { MemberList } from "../features/room/MemberList";
+import { closeNotificationSound } from "../features/room/notificationSound";
 import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { TimelineView } from "../features/room/timeline/TimelineView";
@@ -115,6 +116,7 @@ const Layout: Component = () => {
 	useNotifications(client, summaries, activeRoomId);
 
 	const handleLogout = async (): Promise<void> => {
+		closeNotificationSound();
 		try {
 			await client.logout(true);
 		} catch {
