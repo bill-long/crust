@@ -81,6 +81,7 @@ export function closeNotificationSound(): void {
 		ctx = null;
 	}
 	primed = false;
+	lastPlayTime = 0;
 }
 
 /**
