@@ -101,7 +101,7 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 		if (!canAcceptVerificationRequest(request)) {
 			request.removeListener(VerificationRequestEvent.Change, onRequestChange);
 			setPendingRequest(null);
-			focusBeforeToast = null;
+			restoreCapturedFocus();
 			return;
 		}
 		request.removeListener(VerificationRequestEvent.Change, onRequestChange);
