@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createStore } from "solid-js/store";
 
 const SETTINGS_KEY = "crust:settings";
 
@@ -70,14 +70,6 @@ function load(): UserSettings {
 	}
 }
 
-function save(s: UserSettings): void {
-	try {
-		localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-	} catch {
-		// localStorage full or unavailable — best-effort
-	}
-}
-
 function applyZoom(level: number): void {
 	if (
 		typeof document !== "undefined" &&
@@ -90,20 +82,28 @@ function applyZoom(level: number): void {
 	}
 }
 
-// Module-level singleton — one signal, shared by all consumers.
-const [settings, setSettingsInternal] = createSignal<UserSettings>(load());
+// Module-level singleton store — property-level reactivity so consumers
+// reading e.g. settings.timeFormat don't re-render on zoomLevel changes.
+const [settings, setSettings] = createStore<UserSettings>(load());
 
-/** Apply persisted zoom level. Call once during app bootstrap. */
-export function initZoom(): void {
-	const level = settings().zoomLevel;
-	if (level !== 100) {
-		applyZoom(level);
+function save(): void {
+	try {
+		localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+	} catch {
+		// localStorage full or unavailable — best-effort
 	}
 }
 
-/** Read current user settings (reactive). */
+/** Apply persisted zoom level. Call once during app bootstrap. */
+export function initZoom(): void {
+	if (settings.zoomLevel !== 100) {
+		applyZoom(settings.zoomLevel);
+	}
+}
+
+/** Read current user settings (reactive at the property level). */
 export function userSettings(): UserSettings {
-	return settings();
+	return settings;
 }
 
 /** Update a single setting. Persists to localStorage immediately. */
@@ -113,13 +113,11 @@ export function updateSetting<K extends keyof UserSettings>(
 ): void {
 	if (key === "zoomLevel") {
 		const zoom = Math.round(Math.min(200, Math.max(50, value as number)));
-		const next = { ...settings(), zoomLevel: zoom };
-		setSettingsInternal(next as UserSettings);
-		save(next as UserSettings);
+		setSettings("zoomLevel", zoom);
+		save();
 		applyZoom(zoom);
 		return;
 	}
-	const next = { ...settings(), [key]: value };
-	setSettingsInternal(next);
-	save(next);
+	setSettings(key, value);
+	save();
 }
