@@ -31,13 +31,22 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 	// the toast unmounts before the dialog renders.
 	let focusBeforeToast: HTMLElement | null = null;
 
+	// Restore focus to the captured pre-toast element (if still attached)
+	// and clear the captured reference.
+	const restoreCapturedFocus = (): void => {
+		if (focusBeforeToast && document.body.contains(focusBeforeToast)) {
+			focusBeforeToast.focus();
+		}
+		focusBeforeToast = null;
+	};
+
 	// Dismiss toast if the request is no longer acceptable
 	const onRequestChange = (): void => {
 		const req = pendingRequest();
 		if (req && !canAcceptVerificationRequest(req)) {
 			req.removeListener(VerificationRequestEvent.Change, onRequestChange);
 			setPendingRequest(null);
-			focusBeforeToast = null;
+			restoreCapturedFocus();
 		}
 	};
 
@@ -98,7 +107,10 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 		request.removeListener(VerificationRequestEvent.Change, onRequestChange);
 		// Hand the focus restoration target to the crypto actions module so
 		// restoreCryptoTriggerFocus() can return focus when the dialog closes.
-		setCryptoTriggerElement(focusBeforeToast);
+		// Skip when null to avoid clobbering an existing trigger element.
+		if (focusBeforeToast) {
+			setCryptoTriggerElement(focusBeforeToast);
+		}
 		focusBeforeToast = null;
 		setPendingRequest(null);
 		props.onAccept(request);
@@ -112,12 +124,9 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 				request.cancel().catch(() => {});
 			}
 		}
-		// Restore focus directly since no dialog opens
-		if (focusBeforeToast && document.body.contains(focusBeforeToast)) {
-			focusBeforeToast.focus();
-		}
-		focusBeforeToast = null;
 		setPendingRequest(null);
+		// Restore focus directly since no dialog opens
+		restoreCapturedFocus();
 	};
 
 	return (

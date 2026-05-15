@@ -23,7 +23,7 @@ export function registerCryptoHandler(h: CryptoActionHandler): () => void {
 
 /** Trigger a crypto setup flow from anywhere (called by user panel). */
 export function triggerCryptoAction(action: CryptoAction): void {
-	triggerElement = document.activeElement as HTMLElement | null;
+	setCryptoTriggerElement(document.activeElement);
 	handler()?.(action);
 }
 
