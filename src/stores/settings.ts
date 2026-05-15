@@ -102,7 +102,7 @@ export function initZoom(): void {
 }
 
 /** Read current user settings (reactive at the property level). */
-export function userSettings(): UserSettings {
+export function userSettings(): Readonly<UserSettings> {
 	return settings;
 }
 
