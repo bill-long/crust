@@ -27,6 +27,20 @@ export function triggerCryptoAction(action: CryptoAction): void {
 	handler()?.(action);
 }
 
+/**
+ * Set the focus restoration target for paths that bypass triggerCryptoAction
+ * (e.g. accepting an incoming verification toast). Validates that the element
+ * is a meaningful focus target — rejects null, body, and detached elements.
+ */
+export function setCryptoTriggerElement(el: Element | null): void {
+	triggerElement =
+		el instanceof HTMLElement &&
+		el !== document.body &&
+		document.body.contains(el)
+			? el
+			: null;
+}
+
 /** Restore focus to the element that triggered the crypto dialog. */
 export function restoreCryptoTriggerFocus(): void {
 	if (triggerElement && document.body.contains(triggerElement)) {
