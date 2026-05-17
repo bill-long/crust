@@ -25,7 +25,7 @@ If a change makes the UI feel slower, heavier, or more "enterprise-y", it is wro
 Concrete, enforceable rules — not vibes:
 
 1. **Interaction latency budget: < 16 ms for any UI response to user input.**
-   No spinner unless the network round-trip exceeds 200 ms. Use optimistic UI for sends, reactions, edits, redactions, read markers, typing indicators.
+   No spinner unless the network round-trip exceeds 200 ms. Optimistic UI for sends, reactions, edits, redactions, read markers, and typing indicators is target state (see the Optimistic UI section below and #53); today the SDK's built-in local echo makes sends appear immediately, but there is no centralized status/retry story yet.
 2. **Scrolling stays at 60 fps even in 10k-message rooms.**
    Long lists must be virtualized (`@tanstack/solid-virtual` or hand-rolled). Never render an entire timeline.
 3. **No layout shift after content loads.**
