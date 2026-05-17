@@ -3,8 +3,12 @@
 Crust is a self-hosted, opinionated Matrix client targeting Discord-class polish.
 Stack: **TypeScript · SolidJS · Vite 8 · Tailwind CSS 4 · Kobalte · matrix-js-sdk · Biome · pnpm**.
 
-Read `.github/agents/ui-engineer.md` for the full UI/SolidJS/Matrix playbook — this file
-covers what you must know before touching code.
+Read `.github/agents/ui-engineer.md` for the full UI/SolidJS/Tailwind/Matrix
+playbook. **When that file and this one disagree, this file wins** — it has
+been audited against current code; a few sections of the playbook (notably the
+"no cross-feature imports" rule and the `Room.localEchoUpdated` reconciliation
+flow) are aspirational and not yet enforced/implemented. This file covers
+what you must know before touching code.
 
 ## Commands
 
@@ -82,12 +86,17 @@ Folder rules (`src/`):
   `ResizableLayout` persisted pane widths. Keep both bounds in sync if you touch it.
 - **User actions with a network round-trip** (send, react, edit, redact) are
   fired-and-awaited via `matrix-js-sdk` directly in the handler with a
-  try/catch; the timeline re-renders from sync events. There is no
-  centralized local-echo store today — match the surrounding pattern
+  try/catch. `matrix-js-sdk` itself inserts a local echo into the room timeline
+  immediately (temporary `~`-prefixed event ID, reconciled when the server
+  responds), so the new message *does* appear without waiting for the next
+  sync. What is **not** built yet is a centralized per-message
+  `sending|sent|failed` store with a retry affordance — handlers just surface
+  errors locally on failure. Match the surrounding pattern
   (`src/features/room/composer/Composer.tsx`,
-  `src/features/room/timeline/TimelineView.tsx`) rather than inventing one.
-  See `.github/agents/ui-engineer.md` for the Discord-polish targets
-  (sub-200ms = no spinner, optimistic feel) that constrain new handlers.
+  `src/features/room/timeline/TimelineView.tsx`) rather than inventing a new
+  echo store; see issue #53 for the planned optimistic-UI work.
+  `.github/agents/ui-engineer.md` describes the Discord-polish targets
+  (sub-200ms = no spinner) that constrain new handlers.
 - **Virtualize** any list that can exceed ~50 items (rooms, members, timeline,
   search). Use `@tanstack/solid-virtual`.
 - **Design tokens only** — no raw Tailwind palette colors (`bg-zinc-*`, `text-slate-*`)
@@ -133,6 +142,7 @@ Folder rules (`src/`):
 ## Reference
 
 - `.github/agents/ui-engineer.md` — full UI/SolidJS/Tailwind/Matrix playbook.
+  **This file overrides it on any conflict** (see the note at the top).
 - `.github/skills/code-review/SKILL.md` — mandatory local code-review workflow.
 - `CONTRIBUTING.md` — PR expectations.
 - `README.md` — product scope and self-hosting.
