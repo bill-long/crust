@@ -23,8 +23,22 @@ export function registerCryptoHandler(h: CryptoActionHandler): () => void {
 
 /** Trigger a crypto setup flow from anywhere (called by user panel). */
 export function triggerCryptoAction(action: CryptoAction): void {
-	triggerElement = document.activeElement as HTMLElement | null;
+	setCryptoTriggerElement(document.activeElement);
 	handler()?.(action);
+}
+
+/**
+ * Set the focus restoration target for paths that bypass triggerCryptoAction
+ * (e.g. accepting an incoming verification toast). Validates that the element
+ * is a meaningful focus target — rejects null, body, and detached elements.
+ */
+export function setCryptoTriggerElement(el: Element | null): void {
+	triggerElement =
+		el instanceof HTMLElement &&
+		el !== document.body &&
+		document.body.contains(el)
+			? el
+			: null;
 }
 
 /** Restore focus to the element that triggered the crypto dialog. */

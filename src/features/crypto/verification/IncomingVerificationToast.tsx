@@ -8,6 +8,7 @@ import {
 	type VerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api/verification";
 import { type Component, createSignal, onCleanup, Show } from "solid-js";
+import { setCryptoTriggerElement } from "../../../stores/cryptoActions";
 
 interface IncomingVerificationToastProps {
 	client: MatrixClient;
@@ -25,12 +26,27 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 	const [pendingRequest, setPendingRequest] =
 		createSignal<VerificationRequest | null>(null);
 
+	// Element focused before the toast appeared. Used as the focus
+	// restoration target after the verification dialog closes, since
+	// the toast unmounts before the dialog renders.
+	let focusBeforeToast: HTMLElement | null = null;
+
+	// Restore focus to the captured pre-toast element (if still attached)
+	// and clear the captured reference.
+	const restoreCapturedFocus = (): void => {
+		if (focusBeforeToast && document.body.contains(focusBeforeToast)) {
+			focusBeforeToast.focus();
+		}
+		focusBeforeToast = null;
+	};
+
 	// Dismiss toast if the request is no longer acceptable
 	const onRequestChange = (): void => {
 		const req = pendingRequest();
 		if (req && !canAcceptVerificationRequest(req)) {
 			req.removeListener(VerificationRequestEvent.Change, onRequestChange);
 			setPendingRequest(null);
+			restoreCapturedFocus();
 		}
 	};
 
@@ -41,6 +57,20 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 		const prev = pendingRequest();
 		if (prev) {
 			prev.removeListener(VerificationRequestEvent.Change, onRequestChange);
+		}
+
+		// Capture focus before the toast renders so we can restore it after
+		// the verification dialog closes. Only capture on first toast — when
+		// replacing an existing request, keep the original pre-toast focus
+		// to avoid capturing a toast button that's about to unmount.
+		if (!prev) {
+			const active = document.activeElement;
+			focusBeforeToast =
+				active instanceof HTMLElement &&
+				active !== document.body &&
+				document.body.contains(active)
+					? active
+					: null;
 		}
 
 		setPendingRequest(request);
@@ -61,6 +91,7 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 		if (req) {
 			req.removeListener(VerificationRequestEvent.Change, onRequestChange);
 		}
+		focusBeforeToast = null;
 	});
 
 	const handleAccept = (): void => {
@@ -70,9 +101,17 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 		if (!canAcceptVerificationRequest(request)) {
 			request.removeListener(VerificationRequestEvent.Change, onRequestChange);
 			setPendingRequest(null);
+			restoreCapturedFocus();
 			return;
 		}
 		request.removeListener(VerificationRequestEvent.Change, onRequestChange);
+		// Hand the focus restoration target to the crypto actions module so
+		// restoreCryptoTriggerFocus() can return focus when the dialog closes.
+		// Skip when null to avoid clobbering an existing trigger element.
+		if (focusBeforeToast) {
+			setCryptoTriggerElement(focusBeforeToast);
+		}
+		focusBeforeToast = null;
 		setPendingRequest(null);
 		props.onAccept(request);
 	};
@@ -86,6 +125,8 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 			}
 		}
 		setPendingRequest(null);
+		// Restore focus directly since no dialog opens
+		restoreCapturedFocus();
 	};
 
 	return (
