@@ -1,0 +1,138 @@
+# Copilot instructions for Crust
+
+Crust is a self-hosted, opinionated Matrix client targeting Discord-class polish.
+Stack: **TypeScript · SolidJS · Vite 8 · Tailwind CSS 4 · Kobalte · matrix-js-sdk · Biome · pnpm**.
+
+Read `.github/agents/ui-engineer.md` for the full UI/SolidJS/Matrix playbook — this file
+covers what you must know before touching code.
+
+## Commands
+
+```bash
+pnpm install
+pnpm dev          # Vite dev server
+pnpm lint         # Biome (format + lint + import order); use lint:fix to auto-write
+pnpm typecheck    # tsc --noEmit
+pnpm test         # Vitest, single run
+pnpm test:watch   # Vitest watch mode
+pnpm build        # Production build
+```
+
+Run a single test file: `pnpm test path/to/file.test.ts`
+Run a single test by name: `pnpm test -t "name pattern"`
+
+**Before declaring any task complete:** `pnpm lint && pnpm typecheck && pnpm build`
+(and `pnpm test` if you touched anything covered by tests).
+
+## Architecture
+
+Three-pane Discord-style layout driven by `@solidjs/router` routes in `src/app/App.tsx`:
+`/`, `/login`, `/home/:roomId?`, `/space/:spaceId/:roomId?`, `/dm/:roomId`,
+`/settings/*`.
+
+Boot flow: `App` → `ConfigProvider` (loads `/config.json` at runtime) →
+`AuthGuard` (redirects to `/login` if no session) → `ClientProvider` (owns the single
+`MatrixClient`, sync lifecycle, crypto bootstrap, and the `SummariesStore`) →
+`SyncGate` (renders spinner until initial sync) → `Layout`.
+
+`src/client/summaries.ts` maintains a `SummariesStore` (`Record<roomId, RoomSummary>`)
+that mirrors per-room state (name, avatar, last message, unread/highlight counts,
+encrypted/DM/space flags, space children) by subscribing to matrix-js-sdk events.
+**Room-list / sidebar / unread surfaces read from the summaries store** for cheap
+reactivity; in-room views (composer, timeline) still call `client.getRoom(...)`
+directly when they need member lists, receipts, or live timeline events. Unread
+/ highlight counts come from sync state, never `/v3/notifications`.
+
+Folder rules (`src/`):
+- `components/` — Matrix-agnostic presentational primitives.
+- `features/{auth,crypto,emoji,gif,room,settings,space}/` — feature-scoped UI +
+  hooks + local stores. Cross-feature imports exist (e.g. `settings` consumes
+  `crypto`, `room` consumes `space`, `room/timeline` consumes `emoji`/`gif`);
+  keep them shallow and one-directional, and prefer routing new shared logic
+  through `stores/` or `client/`.
+- `client/` — owns the long-lived `MatrixClient`, sync state, crypto
+  bootstrap, and the `SummariesStore`. `matrix-js-sdk` types and event enums
+  are imported throughout `features/` and `app/`, and a few specific paths
+  legitimately drive lifecycle outside `src/client/` (login probing in
+  `src/features/auth/LoginPage.tsx` creates a temporary client;
+  `src/app/Layout.tsx` and `src/app/App.tsx` call `logout` / `stopClient` /
+  `clearStores` on session end). Don't introduce a second long-lived sync
+  client; follow the existing patterns rather than refactoring opportunistically.
+  CONTRIBUTING.md's stricter "never import the SDK from UI" rule is aspirational.
+- `stores/` — app-wide Solid stores (`session`, `settings`, `layout`,
+  `cryptoActions`).
+- `app/` — shell, providers, routing, the `useDecodedParams` hook.
+
+## Conventions that bite if ignored
+
+- **Use `useDecodedParams()` from `src/app/useDecodedParams.ts`**, never
+  `useParams()` from `@solidjs/router`. Matrix IDs contain `:` and arrive
+  percent-encoded; raw params will not match room/space IDs.
+- **Navigation / route selection uses `aria-current`** (sidebar items,
+  room/space list, settings tabs). **Toggle buttons use `aria-pressed`**
+  (Members pane toggle in `Layout.tsx`, reaction pills in `TimelineItem.tsx`,
+  segmented choices in `GeneralTab.tsx`, emoji-picker category tabs). Pick
+  the one that matches the control's role; don't substitute one for the other.
+- **Trim user-visible room/space names before fallback**; treat whitespace-only
+  names as missing (see `src/app/Layout.tsx`, `src/features/space/spaceHierarchy.ts`).
+- **App zoom** is a CSS variable (`--app-zoom`) with `html { height: calc(100vh / var(--app-zoom)) }`
+  and an unbroken `h-full` chain — do not introduce `h-screen` anywhere in the tree
+  or you will break the zoom feature.
+- **Spaces sidebar** width is user-resizable 48–96px (default 64) via
+  `ResizableLayout` persisted pane widths. Keep both bounds in sync if you touch it.
+- **User actions with a network round-trip** (send, react, edit, redact) are
+  fired-and-awaited via `matrix-js-sdk` directly in the handler with a
+  try/catch; the timeline re-renders from sync events. There is no
+  centralized local-echo store today — match the surrounding pattern
+  (`src/features/room/composer/Composer.tsx`,
+  `src/features/room/timeline/TimelineView.tsx`) rather than inventing one.
+  See `.github/agents/ui-engineer.md` for the Discord-polish targets
+  (sub-200ms = no spinner, optimistic feel) that constrain new handlers.
+- **Virtualize** any list that can exceed ~50 items (rooms, members, timeline,
+  search). Use `@tanstack/solid-virtual`.
+- **Design tokens only** — no raw Tailwind palette colors (`bg-zinc-*`, `text-slate-*`)
+  in components. Tokens live in the `@theme` block of `src/styles/global.css`;
+  the namespaces are `surface-{0..4}`, `text-{primary,emphasis,secondary,muted,disabled,faint}`,
+  `border-{subtle,default,strong,focus}`, semantic colors (`accent`, `success`,
+  `warning`, `danger`, `info`), and the standalone tokens `mention-bg` and
+  `indicator`. Each semantic family defines a different subset of `-text` / `-text-bright` / `-text-muted` / `-bg` /
+  `-border` / `-foreground` / `-hover` / `-strong` variants — **grep `global.css`
+  before assuming a variant exists** (e.g. `info` has only `-text` and
+  `-border`). Tailwind v4 is configured in CSS; there is no `tailwind.config.ts`.
+- **SolidJS reactivity:** never destructure props or store results; use
+  `<Show>` / `<For>` / `<Index>` / `<Switch>` instead of `&&` / `.map()`; use
+  `createStore` (not nested signals) for nested state; `onMount`/`onCleanup` for
+  DOM/listener side effects and `createEffect` for reactive tracking — they are
+  not interchangeable.
+- **HTML message bodies** must be sanitized with DOMPurify before render.
+- **E2EE** uses the rust-crypto stack (`initRustCrypto()`); secret-storage key
+  prompts go through `ClientProvider.requestRecoveryKey` /
+  `setRecoveryKeyResolver`. Ask before touching the crypto init path.
+- **Conduwuity quirk:** the SDK throws 404 on `/_matrix/client/v3/voip/turnServer`.
+  Suppress it in logs — voice/video uses LiveKit via `org.matrix.msc4143.rtc_foci`.
+
+## Style
+
+- Biome owns formatting (**tabs, double quotes**) and import ordering — run
+  `pnpm lint:fix` rather than hand-formatting.
+- Function components, named exports, PascalCase filenames matching the component.
+- Props interfaces suffixed `Props`, declared inline or just above the component.
+- Refs: `let el!: HTMLDivElement; <div ref={el}>`.
+- No `// @ts-ignore` / `// biome-ignore` without an inline justification.
+- No emojis in comments, log messages, commit messages, or as code-level
+  decoration. Intentional emoji *icons* inside user-facing UI (e.g. 🔒 for
+  encryption, 😀 for the picker trigger) are fine.
+
+## Ask before
+
+- Adding a top-level dependency.
+- Changing the design-token palette or theme structure.
+- Touching the crypto/E2EE init path or the SDK client lifecycle
+  (login, logout, sync).
+
+## Reference
+
+- `.github/agents/ui-engineer.md` — full UI/SolidJS/Tailwind/Matrix playbook.
+- `.github/skills/code-review/SKILL.md` — mandatory local code-review workflow.
+- `CONTRIBUTING.md` — PR expectations.
+- `README.md` — product scope and self-hosting.
