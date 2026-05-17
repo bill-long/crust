@@ -25,8 +25,9 @@ pnpm build        # Production build
 Run a single test file: `pnpm test path/to/file.test.ts`
 Run a single test by name: `pnpm test -t "name pattern"`
 
-**Before declaring any task complete:** `pnpm lint && pnpm typecheck && pnpm build`
-(and `pnpm test` if you touched anything covered by tests).
+**Before declaring any task complete:** `pnpm typecheck && pnpm lint && pnpm build`
+(and `pnpm test` if you touched anything covered by tests). This order matches
+`.github/skills/code-review/SKILL.md`.
 
 ## Architecture
 
@@ -90,15 +91,21 @@ Folder rules (`src/`):
   immediately (temporary `~`-prefixed event ID, reconciled when the server
   responds), so the new message *does* appear without waiting for the next
   sync. What is **not** built yet is a centralized per-message
-  `sending|sent|failed` store with a retry affordance — handlers just surface
-  errors locally on failure. Match the surrounding pattern
-  (`src/features/room/composer/Composer.tsx`,
-  `src/features/room/timeline/TimelineView.tsx`) rather than inventing a new
-  echo store; see issue #53 for the planned optimistic-UI work.
-  `.github/agents/ui-engineer.md` describes the Discord-polish targets
+  `sending|sent|failed` store with a retry affordance. Failure UX is
+  inconsistent today: the composer (`src/features/room/composer/Composer.tsx`)
+  surfaces send/edit errors via a local `setError` inline alert (rendered
+  `role="alert"` in the composer), but reaction and
+  redaction failures in `src/features/room/timeline/TimelineView.tsx` only
+  `console.error` — fix the surrounding handler if you're adding a new one,
+  don't replicate the silent path. See issue #53 for the planned optimistic-UI
+  work. `.github/agents/ui-engineer.md` describes the Discord-polish targets
   (sub-200ms = no spinner) that constrain new handlers.
-- **Virtualize** any list that can exceed ~50 items (rooms, members, timeline,
-  search). Use `@tanstack/solid-virtual`.
+- **Virtualize** large lists with `@tanstack/solid-virtual`. Today only the
+  member list (`src/features/room/MemberList.tsx`) and the timeline
+  (`src/features/room/timeline/TimelineView.tsx`) are virtualized; the room
+  list (`RoomList.tsx`) and the GIF / emoji pickers still use plain `<For>`
+  and should be virtualized when they grow (forward-looking, not a blocker
+  on small instances).
 - **Design tokens only** — no raw Tailwind palette colors (`bg-zinc-*`, `text-slate-*`)
   in components. Tokens live in the `@theme` block of `src/styles/global.css`;
   the namespaces are `surface-{0..4}`, `text-{primary,emphasis,secondary,muted,disabled,faint}`,
@@ -108,11 +115,19 @@ Folder rules (`src/`):
   `-border` / `-foreground` / `-hover` / `-strong` variants — **grep `global.css`
   before assuming a variant exists** (e.g. `info` has only `-text` and
   `-border`). Tailwind v4 is configured in CSS; there is no `tailwind.config.ts`.
-- **SolidJS reactivity:** never destructure props or store results; use
-  `<Show>` / `<For>` / `<Index>` / `<Switch>` instead of `&&` / `.map()`; use
-  `createStore` (not nested signals) for nested state; `onMount`/`onCleanup` for
-  DOM/listener side effects and `createEffect` for reactive tracking — they are
-  not interchangeable.
+  Known existing exceptions: modal/dialog backdrops use `bg-black/40` or
+  `bg-black/60` (no semantic token defined yet), and the `SettingsControls`
+  toggle thumb uses `bg-white`. Match those when extending the same patterns;
+  otherwise use tokens.
+- **SolidJS reactivity:** never destructure `props` in a component signature
+  or destructure reactive *fields* off a Solid store (you lose reactivity).
+  Destructuring stable, non-reactive values off a hook return is fine and
+  routine (`const { client } = useClient()`). Render conditional JSX with
+  `<Show when={...}>` / `<For>` / `<Index>` / `<Switch>` rather than the
+  `{cond && <Component />}` pattern (booleans inside the `when=` expression
+  itself are fine). Use `createStore` (not nested signals) for nested state.
+  `onMount` / `onCleanup` are for DOM/listener side effects; `createEffect`
+  is for reactive tracking — they are not interchangeable.
 - **HTML message bodies** must be sanitized with DOMPurify before render.
 - **E2EE** uses the rust-crypto stack (`initRustCrypto()`); secret-storage key
   prompts go through `ClientProvider.requestRecoveryKey` /
