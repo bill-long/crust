@@ -207,7 +207,7 @@ Run `pnpm lint && pnpm typecheck` before declaring any task complete.
 
 ## Always do
 
-- Optimistic updates for any user action that has a network round-trip.
+- Optimistic updates for any user action that has a network round-trip (target; see the Optimistic UI section above and #53 — current handlers `await` the SDK; the SDK provides its own local echo).
 - Virtualize any list that can exceed ~50 items (rooms, members, timeline, search results).
 - Honor `prefers-reduced-motion` and `prefers-color-scheme`.
 - Use design tokens for color, spacing, radii, shadows.
