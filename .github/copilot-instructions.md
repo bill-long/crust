@@ -5,10 +5,11 @@ Stack: **TypeScript · SolidJS · Vite 8 · Tailwind CSS 4 · Kobalte · matrix-
 
 Read `.github/agents/ui-engineer.md` for the full UI/SolidJS/Tailwind/Matrix
 playbook. **When that file and this one disagree, this file wins** — it has
-been audited against current code; a few sections of the playbook (notably the
-"no cross-feature imports" rule and the `Room.localEchoUpdated` reconciliation
-flow) are aspirational and not yet enforced/implemented. This file covers
-what you must know before touching code.
+been audited against current code; a few sections of the playbook (notably
+"no cross-feature imports", the `Room.localEchoUpdated` reconciliation flow,
+and the "refs must use definite-assignment `!`" rule) are aspirational or
+stale and do not match the codebase. Issue #54 tracks reconciling them.
+This file covers what you must know before touching code.
 
 ## Commands
 
@@ -25,9 +26,10 @@ pnpm build        # Production build
 Run a single test file: `pnpm test path/to/file.test.ts`
 Run a single test by name: `pnpm test -t "name pattern"`
 
-**Before declaring any task complete:** `pnpm typecheck && pnpm lint && pnpm build`
-(and `pnpm test` if you touched anything covered by tests). This order matches
-`.github/skills/code-review/SKILL.md`.
+**Before declaring any task complete:** the build-gate from
+`.github/skills/code-review/SKILL.md` is `pnpm typecheck && pnpm lint && pnpm build`
+(all must pass, in that order). Also run `pnpm test` if you touched anything
+covered by tests.
 
 ## Architecture
 
@@ -56,10 +58,14 @@ Folder rules (`src/`):
   keep them shallow and one-directional, and prefer routing new shared logic
   through `stores/` or `client/`.
 - `client/` — owns the long-lived `MatrixClient`, sync state, crypto
-  bootstrap, and the `SummariesStore`. `matrix-js-sdk` types and event enums
-  are imported throughout `features/` and `app/`, and a few specific paths
-  legitimately drive lifecycle outside `src/client/` (login probing in
-  `src/features/auth/LoginPage.tsx` creates a temporary client;
+  bootstrap, and the `SummariesStore`. `matrix-js-sdk` is imported throughout
+  `features/` and `app/` — not just types and event enums but also runtime
+  helpers and classes (`TimelineWindow` / `Direction` in
+  `src/features/room/timeline/useTimeline.ts`; `decodeRecoveryKey` from
+  `matrix-js-sdk/lib/crypto-api/recovery-key` in
+  `src/features/crypto/backup/RecoveryKeyInput.tsx`; etc.) — and a few
+  specific paths legitimately drive lifecycle outside `src/client/` (login
+  probing in `src/features/auth/LoginPage.tsx` creates a temporary client;
   `src/app/Layout.tsx` and `src/app/App.tsx` call `logout` / `stopClient` /
   `clearStores` on session end). Don't introduce a second long-lived sync
   client; follow the existing patterns rather than refactoring opportunistically.
@@ -115,9 +121,10 @@ Folder rules (`src/`):
   `-border` / `-foreground` / `-hover` / `-strong` variants — **grep `global.css`
   before assuming a variant exists** (e.g. `info` has only `-text` and
   `-border`). Tailwind v4 is configured in CSS; there is no `tailwind.config.ts`.
-  Known existing exceptions: modal/dialog backdrops use `bg-black/40` or
-  `bg-black/60` (no semantic token defined yet), and the `SettingsControls`
-  toggle thumb uses `bg-white`. Match those when extending the same patterns;
+  Known existing exceptions: dialog backdrops use `bg-black/60`
+  (`SettingsOverlay`, crypto dialogs, etc.), the avatar-upload overlay in
+  `AccountTab.tsx` uses `bg-black/40`, and the `SettingsControls` toggle
+  thumb uses `bg-white`. Match those when extending the same patterns;
   otherwise use tokens.
 - **SolidJS reactivity:** never destructure `props` in a component signature
   or destructure reactive *fields* off a Solid store (you lose reactivity).
@@ -141,7 +148,13 @@ Folder rules (`src/`):
   `pnpm lint:fix` rather than hand-formatting.
 - Function components, named exports, PascalCase filenames matching the component.
 - Props interfaces suffixed `Props`, declared inline or just above the component.
-- Refs: `let el!: HTMLDivElement; <div ref={el}>`.
+- Refs default to `let el: HTMLDivElement | undefined; <div ref={el}>` (use
+  the specific element type for the element you're referencing) with
+  null/undefined checks at use sites — this is the dominant pattern
+  (`TimelineView.tsx`, `Composer.tsx`, `GifPicker.tsx`, `MemberList.tsx`,
+  etc.). The definite-assignment form `let el!: HTMLDivElement` is used in a
+  couple of places (`SettingsOverlay.tsx`, `AccountTab.tsx`) when the code
+  unconditionally needs the element after mount; match the surrounding file.
 - No `// @ts-ignore` / `// biome-ignore` without an inline justification.
 - No emojis in comments, log messages, commit messages, or as code-level
   decoration. Intentional emoji *icons* inside user-facing UI (e.g. 🔒 for
