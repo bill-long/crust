@@ -1,5 +1,11 @@
 import { createVirtualizer } from "@tanstack/solid-virtual";
-import { EventType, ReceiptType, RelationType, RoomEvent } from "matrix-js-sdk";
+import {
+	EventStatus,
+	EventType,
+	ReceiptType,
+	RelationType,
+	RoomEvent,
+} from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -63,6 +69,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		typingUsers,
 		getSourceEvent,
 		getWindowEvents,
+		pendingRedactions,
 	} = useTimeline(client, () => props.roomId);
 
 	// Custom emoji packs for this room
@@ -491,6 +498,49 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		}
 	};
 
+	/**
+	 * Retry a failed redaction. The pending-redactions map is keyed by
+	 * the *target* event ID and stores the redaction `MatrixEvent`
+	 * directly, so Retry works even when the user has scrolled away
+	 * from live (where the redaction echo lives).
+	 * Re-checks the event's status because a concurrent retry from
+	 * another path (or a quick succession of clicks) could have already
+	 * moved the event back to SENDING.
+	 */
+	const onRetryRedaction = async (targetId: string): Promise<void> => {
+		const pending = pendingRedactions[targetId];
+		if (!pending) return;
+		const room = client.getRoom(props.roomId);
+		if (!room) return;
+		if (pending.redactionEvent.status !== EventStatus.NOT_SENT) return;
+		const originalRoomId = props.roomId;
+		try {
+			await client.resendEvent(pending.redactionEvent, room);
+		} catch (e) {
+			console.error("resendEvent (redaction) failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
+	/**
+	 * Discard a failed redaction (target restores to normal). Cancelling
+	 * fires removed-Timeline on the redaction event, which the
+	 * useTimeline handler picks up to clear the pending-redaction entry.
+	 */
+	const onDiscardRedaction = (targetId: string): void => {
+		const pending = pendingRedactions[targetId];
+		if (!pending) return;
+		const originalRoomId = props.roomId;
+		try {
+			client.cancelPendingEvent(pending.redactionEvent);
+		} catch (e) {
+			console.error("cancelPendingEvent (redaction) failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
 	const onReactionPickerSelect = (
 		eventId: string,
 		item: PickerEmoji,
@@ -619,6 +669,15 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													onRetry={() => onRetry(event().eventId)}
 													onDiscard={() => cancelPending(event().eventId)}
 													onCancel={() => cancelPending(event().eventId)}
+													onRetryRedaction={() =>
+														onRetryRedaction(event().eventId)
+													}
+													onDiscardRedaction={() =>
+														onDiscardRedaction(event().eventId)
+													}
+													pendingRedactionStatus={
+														pendingRedactions[event().eventId]?.status
+													}
 													onImageLoad={() => {
 														if (itemRef) virtualizer.measureElement(itemRef);
 													}}

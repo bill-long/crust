@@ -1932,4 +1932,348 @@ describe("useTimeline", () => {
 			expect(events[0].isEdited).toBe(false);
 		});
 	});
+
+	// ─── Pending-redaction tracking (issue #58) ───────────────────────
+
+	it("pending redaction echo records SENDING status keyed by target", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"delete me",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, pendingRedactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			expect(pendingRedactions["$target"]).toBeUndefined();
+
+			const redactionEcho = createMatrixEvent({
+				eventId: "~local.red",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 2000,
+				status: EventStatus.SENDING,
+				redacts: "$target",
+			});
+			appendLive(client, roomA, redactionEcho);
+
+			const entry = pendingRedactions["$target"];
+			expect(entry).toBeDefined();
+			expect(entry?.status).toBe(EventStatus.SENDING);
+			expect(entry?.redactionEvent.getId()).toBe("~local.red");
+			// Target still in the store; the overlay is purely visual.
+			expect(events.length).toBe(1);
+		});
+	});
+
+	it("redaction echo transitioning to NOT_SENT updates pending status", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"delete me",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingRedactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const redactionEcho = createMatrixEvent({
+				eventId: "~local.red",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 2000,
+				status: EventStatus.SENDING,
+				redacts: "$target",
+			});
+			appendLive(client, roomA, redactionEcho);
+			expect(pendingRedactions["$target"]?.status).toBe(EventStatus.SENDING);
+
+			redactionEcho.__setStatus(EventStatus.NOT_SENT);
+			client.__emit(
+				"Room.localEchoUpdated",
+				redactionEcho,
+				roomA,
+				undefined,
+				EventStatus.SENDING,
+			);
+			expect(pendingRedactions["$target"]?.status).toBe(EventStatus.NOT_SENT);
+		});
+	});
+
+	it("cancelled redaction echo clears the pending overlay (target stays)", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"delete me",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, pendingRedactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const redactionEcho = createMatrixEvent({
+				eventId: "~local.red",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 2000,
+				status: EventStatus.SENDING,
+				redacts: "$target",
+			});
+			appendLive(client, roomA, redactionEcho);
+			expect(pendingRedactions["$target"]).toBeDefined();
+
+			// SDK fires removed-Timeline before LocalEchoUpdated(CANCELLED).
+			client.__emit("Room.timeline", redactionEcho, roomA, false, true, {
+				liveEvent: true,
+			});
+			expect(pendingRedactions["$target"]).toBeUndefined();
+			// Target stays — discard restores normal appearance.
+			expect(events.length).toBe(1);
+			expect(events[0].eventId).toBe("$target");
+		});
+	});
+
+	it("confirmed redaction (LocalEchoUpdated status=null) clears pending overlay and removes target", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target: import("../../../test/mockClient").MockEvent = {
+			eventId: "$target",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "delete me" },
+			ts: 1000,
+		};
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, pendingRedactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			const redactionEcho = createMatrixEvent({
+				eventId: "~local.red",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 2000,
+				status: EventStatus.SENDING,
+				redacts: "$target",
+			});
+			// Simulate SDK markLocallyRedacted on the target.
+			target.localRedaction = {
+				eventId: "~local.red",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 2000,
+				redacts: "$target",
+			};
+			appendLive(client, roomA, redactionEcho);
+			expect(pendingRedactions["$target"]).toBeDefined();
+
+			// Server confirms — SDK runs makeRedacted: clears
+			// _localRedactionEvent, marks the target truly redacted.
+			target.localRedaction = undefined;
+			target.redacted = true;
+			redactionEcho.__setStatus(null);
+			client.__emit(
+				"Room.localEchoUpdated",
+				redactionEcho,
+				roomA,
+				undefined,
+				EventStatus.SENDING,
+			);
+			expect(pendingRedactions["$target"]).toBeUndefined();
+			// Target removed from the store (the SDK reconciles remote
+			// echoes without re-firing Room.timeline, so this code path
+			// has to drive the removal).
+			expect(events.length).toBe(0);
+		});
+	});
+
+	it("cancelled redaction restores the target's body", async () => {
+		// After cancel, SDK's unmarkLocallyRedacted clears the local
+		// redaction state so getContent() returns the original content
+		// again. The target's TimelineEvent in the store must be
+		// recomputed so the body comes back; otherwise discarding a
+		// failed delete leaves the message blank.
+		const redactionEcho: import("../../../test/mockClient").MockEvent = {
+			eventId: "~local.red",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.redaction",
+			content: {},
+			ts: 2000,
+			redacts: "$target",
+		};
+		const target: import("../../../test/mockClient").MockEvent = {
+			eventId: "$target",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "delete me" },
+			ts: 1000,
+			localRedaction: redactionEcho,
+		};
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events, pendingRedactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			// Initially: target visible, body cleared by local redaction.
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("");
+
+			// SDK unmarks (simulated by clearing localRedaction on the
+			// mock target) then fires `Room.timeline(removed=true)` for
+			// the redaction event.
+			target.localRedaction = undefined;
+			const redactionWrapper = createMatrixEvent(redactionEcho);
+			client.__emit("Room.timeline", redactionWrapper, roomA, false, true, {
+				liveEvent: true,
+			});
+
+			expect(pendingRedactions["$target"]).toBeUndefined();
+			// Target's body restored from getContent().
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("delete me");
+		});
+	});
+
+	it("pending redactions are cleared on room switch", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"delete me",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const roomB = createMockRoom("!roomB:test", []);
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		const [roomId, setRoomId] = createSignal("!roomA:test");
+
+		await withRoot(async () => {
+			const { pendingRedactions } = useTimeline(
+				client as unknown as MatrixClient,
+				roomId,
+			);
+			await flushPromises();
+
+			const redactionEcho = createMatrixEvent({
+				eventId: "~local.red",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+				redacts: "$target",
+			});
+			appendLive(client, roomA, redactionEcho);
+			expect(pendingRedactions["$target"]).toBeDefined();
+
+			setRoomId("!roomB:test");
+			await flushPromises();
+
+			expect(pendingRedactions["$target"]).toBeUndefined();
+		});
+	});
+
+	it("locally-redacted-pending target stays in the store but with cleared content", async () => {
+		// Mirrors the real SDK: when the user sends a delete, the target
+		// event is immediately marked locally-redacted — `getContent()`
+		// and `getOriginalContent()` both return `{}`, and `isRedacted()`
+		// already returns true (markLocallyRedacted sets
+		// `unsigned.redacted_because`). The optimistic-redaction overlay
+		// rendered by TimelineItem carries the "Deleting…" semantics;
+		// here we just need the target to survive isDisplayable so the
+		// overlay has somewhere to attach.
+		const redactionEcho: import("../../../test/mockClient").MockEvent = {
+			eventId: "~local.red",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.redaction",
+			content: {},
+			ts: 2000,
+			redacts: "$target",
+		};
+		const target: import("../../../test/mockClient").MockEvent = {
+			eventId: "$target",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "delete me" },
+			ts: 1000,
+			localRedaction: redactionEcho,
+		};
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			// Target survives isDisplayable so the overlay has an anchor.
+			expect(events.length).toBe(1);
+			expect(events[0].eventId).toBe("$target");
+			// Body is empty — SDK cleared it via markLocallyRedacted.
+			// The "Deleting…" overlay (rendered by TimelineItem from the
+			// separate pendingRedactions store) is what the user sees.
+			expect(events[0].body).toBe("");
+		});
+	});
 });
