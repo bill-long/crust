@@ -434,10 +434,15 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	 * Move keyboard focus to the room's composer textarea. Used after
 	 * Retry / Discard since the failed-banner button the user activated
 	 * disappears and would otherwise strand focus on `document.body`.
+	 *
+	 * Re-checks the room ID inside the deferred callback because RAF
+	 * runs a frame later; a room switch between the caller's guard and
+	 * the actual focus call would otherwise steal focus into the wrong
+	 * room.
 	 */
-	const focusComposer = (): void => {
-		// Defer one frame so focus runs after the failed banner unmounts.
+	const focusComposer = (expectedRoomId: string): void => {
 		requestAnimationFrame(() => {
+			if (props.roomId !== expectedRoomId) return;
 			const textarea = document.querySelector<HTMLTextAreaElement>(
 				"textarea[data-composer-textarea]",
 			);
@@ -451,7 +456,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	 * `LocalEchoUpdated`, which `useTimeline` picks up to update status.
 	 */
 	const onRetry = async (eventId: string): Promise<void> => {
-		const room = client.getRoom(props.roomId);
+		const originalRoomId = props.roomId;
+		const room = client.getRoom(originalRoomId);
 		if (!room) return;
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
@@ -460,7 +466,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		} catch (e) {
 			console.error("Resend failed:", e);
 		} finally {
-			focusComposer();
+			focusComposer(originalRoomId);
 		}
 	};
 
@@ -472,12 +478,13 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	const onDiscard = (eventId: string): void => {
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
+		const originalRoomId = props.roomId;
 		try {
 			client.cancelPendingEvent(matrixEvent);
 		} catch (e) {
 			console.error("Discard failed:", e);
 		} finally {
-			focusComposer();
+			focusComposer(originalRoomId);
 		}
 	};
 

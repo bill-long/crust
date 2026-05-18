@@ -1851,4 +1851,85 @@ describe("useTimeline", () => {
 			expect(events[0].body).toBe("original body");
 		});
 	});
+
+	it("in-flight (SENDING) edit echoes apply optimistically", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const original: import("../../../test/mockClient").MockEvent = {
+			eventId: "$orig",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "original body" },
+			ts: 1000,
+			replacingEvent: {
+				eventId: "~local.edit",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.message",
+				content: {
+					"m.new_content": { msgtype: "m.text", body: "edited body" },
+					"m.relates_to": { rel_type: "m.replace", event_id: "$orig" },
+				},
+				ts: 2000,
+				status: EventStatus.SENDING,
+			},
+		};
+
+		const roomA = createMockRoom("!roomA:test", [original]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			// Optimistic: edited body visible while the SDK round-trips.
+			expect(events[0].body).toBe("edited body");
+			// And the (edited) indicator surfaces too.
+			expect(events[0].isEdited).toBe(true);
+		});
+	});
+
+	it("cancelled edit echoes restore the original message", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const original: import("../../../test/mockClient").MockEvent = {
+			eventId: "$orig",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "original body" },
+			ts: 1000,
+			replacingEvent: {
+				eventId: "~local.edit",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.message",
+				content: {
+					"m.new_content": { msgtype: "m.text", body: "edited body" },
+					"m.relates_to": { rel_type: "m.replace", event_id: "$orig" },
+				},
+				ts: 2000,
+				status: EventStatus.CANCELLED,
+			},
+		};
+
+		const roomA = createMockRoom("!roomA:test", [original]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			// Cancelled edit: treated the same as NOT_SENT — original body.
+			expect(events[0].body).toBe("original body");
+			expect(events[0].isEdited).toBe(false);
+		});
+	});
 });

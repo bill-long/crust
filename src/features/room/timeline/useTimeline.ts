@@ -47,27 +47,28 @@ function eventToTimelineEvent(
 	client: MatrixClient,
 ): TimelineEvent {
 	// `event.getContent()` auto-applies any replacing event's
-	// `m.new_content` regardless of that replacement's status. So a
-	// failed (NOT_SENT) or in-flight local-echo edit would overwrite
-	// the visible body even though we don't want it to apply until the
-	// server confirms. Pick the right content based on the replacement's
-	// status.
+	// `m.new_content` regardless of that replacement's status. For
+	// FAILED (NOT_SENT) or CANCELLED edit echoes, that would leave the
+	// timeline showing the failed edit's body forever — fall back to
+	// the original content in those cases. SENDING / QUEUED /
+	// ENCRYPTING in-flight edits stay optimistic and apply immediately;
+	// the user sees their edit land while the server confirms.
 	const replacementId = event.replacingEventId();
 	const replacement =
 		replacementId && typeof event.replacingEvent === "function"
 			? event.replacingEvent()
 			: null;
-	const replacementConfirmed =
-		!!replacementId && (!replacement || replacement.status === null);
-	const content =
-		replacementId && !replacementConfirmed
-			? // Replacement exists but is pending/failed — render the
-				// original, untouched content. Stripped test doubles may not
-				// implement getOriginalContent; fall back gracefully.
-				typeof event.getOriginalContent === "function"
-				? event.getOriginalContent()
-				: event.getContent()
-			: event.getContent();
+	const replacementFailed =
+		!!replacement &&
+		(replacement.status === EventStatus.NOT_SENT ||
+			replacement.status === EventStatus.CANCELLED);
+	const content = replacementFailed
+		? // Stripped test doubles may not implement getOriginalContent;
+			// fall back gracefully.
+			typeof event.getOriginalContent === "function"
+			? event.getOriginalContent()
+			: event.getContent()
+		: event.getContent();
 	const sender = event.getSender() ?? "";
 	const member = room.getMember(sender);
 
@@ -127,10 +128,12 @@ function eventToTimelineEvent(
 		// Relations API may not be available for all events
 	}
 
-	// `isEdited` reflects the same confirmation check used above to
-	// decide which content to render: only a server-confirmed
-	// replacement counts.
-	const isEdited = replacementConfirmed;
+	// `isEdited` reflects whether an edit is in effect on the rendered
+	// body. Mirrors the content selection above: failed/cancelled
+	// replacements aren't applied, so they don't count as edited.
+	// Server-confirmed and in-flight (SENDING / QUEUED / ENCRYPTING)
+	// replacements do.
+	const isEdited = !!replacementId && !replacementFailed;
 
 	return {
 		eventId: event.getId() ?? "",
