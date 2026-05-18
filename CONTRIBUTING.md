@@ -26,8 +26,9 @@ pnpm build        # Production build
 - Biome handles formatting and import ordering — run `pnpm lint:fix`.
 - Tabs, double quotes (Biome defaults).
 - Prefer Solid signals/stores over external state libraries.
-- Wrap matrix-js-sdk interactions in `src/client/` — never import the SDK
-  directly from UI components.
+- The long-lived sync `MatrixClient` lives in `src/client/`. Don't introduce
+  a second long-lived client. Importing `matrix-js-sdk` types, enums, and
+  runtime helpers from `features/` / `app/` is fine and common.
 
 ## Reporting issues
 

@@ -25,7 +25,7 @@ If a change makes the UI feel slower, heavier, or more "enterprise-y", it is wro
 Concrete, enforceable rules — not vibes:
 
 1. **Interaction latency budget: < 16 ms for any UI response to user input.**
-   No spinner unless the network round-trip exceeds 200 ms. Use optimistic UI for sends, reactions, edits, redactions, read markers, typing indicators.
+   No spinner unless the network round-trip exceeds 200 ms. Optimistic UI for sends, reactions, edits, redactions, read markers, and typing indicators is target state (see the Optimistic UI section below and #53); today the SDK's built-in local echo makes sends appear immediately, but there is no centralized status/retry story yet.
 2. **Scrolling stays at 60 fps even in 10k-message rooms.**
    Long lists must be virtualized (`@tanstack/solid-virtual` or hand-rolled). Never render an entire timeline.
 3. **No layout shift after content loads.**
@@ -60,7 +60,7 @@ SolidJS reactivity is unforgiving. These are the rules that prevent 90% of bugs:
 - Function components only, named exports, PascalCase files matching component name.
 - Props interfaces declared inline or just above the component. Suffix with `Props`: `interface MessageProps { ... }`.
 - Co-locate small subcomponents in the same file when only used by the parent. Promote to their own file when reused or > ~80 lines.
-- Refs: `let el!: HTMLDivElement;` then `<div ref={el}>`. The `!` is required.
+- Refs default to `let el: HTMLDivElement | undefined;` then `<div ref={el}>` (use whichever specific element type matches the referenced element — `HTMLTextAreaElement`, `HTMLInputElement`, etc.), with null/undefined checks at use sites. This is the dominant pattern (`TimelineView`, `Composer`, `GifPicker`, `EmojiPicker`, `MemberList`, `UserBar`). Use the definite-assignment form `let el!: HTMLDivElement` only when the element is unconditionally needed after mount (`SettingsOverlay`, `AccountTab`).
 
 ### Performance
 
@@ -125,8 +125,9 @@ Token namespace (define these in the config):
 
 ### Optimistic UI
 
-- Sending a message: insert a local echo with a temporary event ID and `status: 'sending'`. On `Room.localEchoUpdated`, reconcile by event ID. On failure, mark `status: 'failed'` with a retry affordance — do not remove.
-- Reactions, redactions, edits: same pattern. The UI updates first, the network confirms (or rolls back) second.
+Current behavior: handlers call the SDK directly and `await` the round-trip. `matrix-js-sdk` itself inserts a local echo into the room timeline immediately (temporary `~`-prefixed event ID, reconciled when the server responds), so sent messages appear without waiting for the next sync. There is **no** centralized per-message `sending | sent | failed` store today — the composer (`src/features/room/composer/Composer.tsx`) surfaces send/edit errors via a `setError` inline alert (`role="alert"`); reaction and redaction handlers in `src/features/room/timeline/TimelineView.tsx` only `console.error`. When you add a new handler, fix the silent path rather than replicating it.
+
+Target state (tracked in #53): a `sending | sent | failed` per-event status with retry affordance, reconciled via `Room.localEchoUpdated`. Until that lands, do not invent a parallel echo store — match the surrounding pattern.
 
 ### Rendering messages
 
@@ -163,7 +164,8 @@ src/
 
 Rules:
 - A component in `components/` knows nothing about Matrix.
-- A component in `features/` may use `client/`, `components/`, and `stores/` but not other features' internals — cross-feature comms via stores or events.
+- A component in `features/` may use `client/`, `components/`, and `stores/`. Cross-feature imports exist today (e.g. `settings` consumes `crypto`, `room` consumes `space`, `room/timeline` and `room/composer` consume `emoji` / `gif`); keep them shallow and one-directional, and prefer routing new shared logic through `stores/` or `client/`.
+- The long-lived sync `MatrixClient` is owned by `src/client/`. Importing `matrix-js-sdk` types, enums, and runtime helpers (e.g. `TimelineWindow`, `Direction`, `decodeRecoveryKey`, or `createClient` for a temporary login client) from `features/` / `app/` is fine; don't introduce a second long-lived client or drive the sync lifecycle from elsewhere.
 - Hooks colocated with the feature that owns them.
 
 ---
@@ -205,7 +207,7 @@ Run `pnpm lint && pnpm typecheck` before declaring any task complete.
 
 ## Always do
 
-- Optimistic updates for any user action that has a network round-trip.
+- Optimistic updates for any user action that has a network round-trip (target; see the Optimistic UI section above and #53 — current handlers `await` the SDK; the SDK provides its own local echo).
 - Virtualize any list that can exceed ~50 items (rooms, members, timeline, search results).
 - Honor `prefers-reduced-motion` and `prefers-color-scheme`.
 - Use design tokens for color, spacing, radii, shadows.
@@ -221,7 +223,7 @@ Run `pnpm lint && pnpm typecheck` before declaring any task complete.
 - Add a spinner for sub-200 ms operations.
 - Use `<h1>`-`<h6>` arbitrarily for visual size — they carry semantics. Use `text-*` utilities for size, semantic tags for structure.
 - Introduce a state-management library (Redux, Zustand, etc.). Solid stores + context cover everything we need.
-- Add emojis to source code, comments, or non-user-facing UI.
+- Add decorative emoji to comments, log messages, commit messages, or other non-user-facing surfaces. Intentional emoji *icons* in user-facing UI (e.g. encryption indicators, the emoji-picker trigger, dialog cancel buttons) are fine.
 - Suppress lint or TypeScript errors with `// @ts-ignore` / `// biome-ignore` without an inline justification comment.
 
 ## Ask first
