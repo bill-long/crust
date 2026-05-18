@@ -204,6 +204,7 @@ const TimelineItem: Component<{
 	onDelete: () => void;
 	onRetry?: () => void;
 	onDiscard?: () => void;
+	onCancel?: () => void;
 	onImageLoad?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
 	client: MatrixClient;
@@ -417,12 +418,25 @@ const TimelineItem: Component<{
 					</div>
 				</Show>
 
-				{/* Sending indicator: small, low-attention. The body itself
-				    is already dimmed via opacity-60 on the outer wrapper. */}
+				{/* Sending indicator + Cancel control. The body is dimmed
+				    via opacity-60 on the outer wrapper; this surfaces a
+				    way to back out of a stuck send. */}
 				<Show when={isPending()}>
-					<span class="sr-only" role="status">
-						Sending message
-					</span>
+					<div class="mt-1 flex items-center gap-2 text-xs text-text-muted">
+						<span class="sr-only" role="status">
+							Sending message
+						</span>
+						<span aria-hidden="true">Sending…</span>
+						<Show when={props.onCancel}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								onClick={props.onCancel}
+							>
+								Cancel
+							</button>
+						</Show>
+					</div>
 				</Show>
 
 				{/* Read receipts */}
