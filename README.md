@@ -99,6 +99,11 @@ strips the `/crust` prefix before forwarding to the container — for example
 with nginx:
 
 ```nginx
+# Redirect the bare mount point so /crust → /crust/ (nginx's location
+# match below only handles trailing-slash URLs).
+location = /crust {
+    return 301 /crust/;
+}
 location /crust/ {
     proxy_pass http://crust:80/;
 }
