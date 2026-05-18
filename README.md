@@ -84,6 +84,32 @@ docker run -p 8080:80 -v $(pwd)/config.json:/usr/share/nginx/html/config.json:ro
 Mount your own `config.json` to set the default homeserver, enable GIF search,
 etc.
 
+### Hosting under a sub-path
+
+To host the app at `https://example.com/crust/` instead of the domain root,
+build with the `VITE_BASE_PATH` Docker build arg (trailing slash required):
+
+```bash
+docker build --build-arg VITE_BASE_PATH=/crust/ -t crust .
+```
+
+This bakes `/crust/` into the asset URLs and the in-app router. The container
+still serves at its own root (`/`), so put a reverse proxy in front that
+strips the `/crust` prefix before forwarding to the container — for example
+with nginx:
+
+```nginx
+location /crust/ {
+    proxy_pass http://crust:80/;
+}
+```
+
+You can also override the base path for a local build outside Docker:
+
+```bash
+VITE_BASE_PATH=/crust/ pnpm build
+```
+
 **Crust itself is one container.** Voice/video calls require self-hosting
 [Element Call](https://github.com/element-hq/element-call) +
 [LiveKit](https://livekit.io/) (separate containers). Push notifications
