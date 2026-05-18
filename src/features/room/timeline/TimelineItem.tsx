@@ -205,6 +205,9 @@ const TimelineItem: Component<{
 	onRetry?: () => void;
 	onDiscard?: () => void;
 	onCancel?: () => void;
+	onRetryRedaction?: () => void;
+	onDiscardRedaction?: () => void;
+	pendingRedactionStatus?: EventStatus;
 	onImageLoad?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
 	client: MatrixClient;
@@ -223,14 +226,41 @@ const TimelineItem: Component<{
 			ev.status === EventStatus.QUEUED ||
 			ev.status === EventStatus.ENCRYPTING,
 	);
+	const isRedactionPending = createMemo(() => {
+		const s = props.pendingRedactionStatus;
+		// Anything non-null that isn't a failure / cancellation is
+		// pending UX. SENT specifically is a transient state between
+		// "server ack" and "remote echo processed by SDK"; during this
+		// window the target is still locally redacted (content cleared),
+		// so the overlay must persist or the user sees a blank row with
+		// full interactions re-enabled.
+		return (
+			s === EventStatus.SENDING ||
+			s === EventStatus.QUEUED ||
+			s === EventStatus.ENCRYPTING ||
+			s === EventStatus.SENT
+		);
+	});
+	const isRedactionFailed = createMemo(
+		() => props.pendingRedactionStatus === EventStatus.NOT_SENT,
+	);
 
 	return (
 		<div
-			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() ? "bg-danger-bg/20" : ""} ${isPending() ? "opacity-60" : ""}`}
+			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() || isRedactionFailed() ? "bg-danger-bg/20" : ""} ${isPending() || isRedactionPending() ? "opacity-60" : ""}`}
 		>
 			{/* Hover toolbar — hidden for failed/pending echoes (no remote
-			    event yet, so react/reply/edit/delete would have no target) */}
-			<Show when={!isFailed() && !isPending()}>
+			    event yet, so react/reply/edit/delete would have no target).
+			    Also hidden while a redaction is pending or failed on this
+			    target — the relevant action is Retry/Discard on the redaction. */}
+			<Show
+				when={
+					!isFailed() &&
+					!isPending() &&
+					!isRedactionPending() &&
+					!isRedactionFailed()
+				}
+			>
 				<HoverToolbar
 					isOwnMessage={props.isOwnMessage}
 					msgtype={ev.msgtype}
@@ -287,105 +317,113 @@ const TimelineItem: Component<{
 					</div>
 				</Show>
 
-				{/* Body */}
-				<Show
-					when={!ev.isDecryptionFailure}
-					fallback={
-						<p class="text-sm italic text-warning-text/80">
-							Unable to decrypt this message
-						</p>
-					}
-				>
+				{/* Body — suppressed during pending/failed redaction since
+				    the SDK's `markLocallyRedacted` clears the visible
+				    content; the overlay carries the meaning. */}
+				<Show when={!isRedactionPending() && !isRedactionFailed()}>
 					<Show
-						when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
+						when={!ev.isDecryptionFailure}
 						fallback={
-							<p class="text-sm italic text-text-disabled">Decrypting…</p>
+							<p class="text-sm italic text-warning-text/80">
+								Unable to decrypt this message
+							</p>
 						}
 					>
 						<Show
-							when={
-								(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
-								ev.imageUrl
-							}
+							when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
 							fallback={
-								<Show
-									when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
-									fallback={
-										<p class="whitespace-pre-wrap break-words text-sm text-text-secondary">
-											{ev.body ||
-												(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
-											<Show when={ev.isEdited}>
-												<span class="ml-1 text-xs text-text-faint">
-													(edited)
-												</span>
-											</Show>
-										</p>
-									}
-								>
-									{(() => {
-										const gifUrl =
-											ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
-										if (!gifUrl) {
-											return (
-												<MessageBody
-													body={ev.body}
-													format={ev.format}
-													formattedBody={ev.formattedBody}
-													isEdited={ev.isEdited}
-													client={props.client}
-													shortcodeLookup={props.shortcodeLookup}
-												/>
-											);
-										}
-										// Extract reply context from body prefix if present
-										const isReply = ev.body.startsWith("> ");
-										const replyPreview = isReply
-											? ev.body
-													.split("\n")[0]
-													.replace(/^> <([^>]+)> /, "$1: ")
-													.replace(/^> /, "")
-											: null;
-										return (
-											<>
-												<Show when={replyPreview}>
-													<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
-														{replyPreview}
-													</div>
-												</Show>
-												<InlineGif
-													url={gifUrl}
-													alt="GIF"
-													onSizeSettled={props.onImageLoad}
-												/>
+								<p class="text-sm italic text-text-disabled">Decrypting…</p>
+							}
+						>
+							<Show
+								when={
+									(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
+									ev.imageUrl
+								}
+								fallback={
+									<Show
+										when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
+										fallback={
+											<p class="whitespace-pre-wrap break-words text-sm text-text-secondary">
+												{ev.body ||
+													(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
 												<Show when={ev.isEdited}>
 													<span class="ml-1 text-xs text-text-faint">
 														(edited)
 													</span>
 												</Show>
-											</>
-										);
-									})()}
-								</Show>
-							}
-						>
-							<img
-								src={ev.imageUrl ?? ""}
-								alt={ev.body?.trim() || "Image"}
-								class="mt-1 max-h-64 max-w-sm rounded"
-								loading="lazy"
-								onLoad={() => props.onImageLoad?.()}
-							/>
+											</p>
+										}
+									>
+										{(() => {
+											const gifUrl =
+												ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
+											if (!gifUrl) {
+												return (
+													<MessageBody
+														body={ev.body}
+														format={ev.format}
+														formattedBody={ev.formattedBody}
+														isEdited={ev.isEdited}
+														client={props.client}
+														shortcodeLookup={props.shortcodeLookup}
+													/>
+												);
+											}
+											// Extract reply context from body prefix if present
+											const isReply = ev.body.startsWith("> ");
+											const replyPreview = isReply
+												? ev.body
+														.split("\n")[0]
+														.replace(/^> <([^>]+)> /, "$1: ")
+														.replace(/^> /, "")
+												: null;
+											return (
+												<>
+													<Show when={replyPreview}>
+														<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
+															{replyPreview}
+														</div>
+													</Show>
+													<InlineGif
+														url={gifUrl}
+														alt="GIF"
+														onSizeSettled={props.onImageLoad}
+													/>
+													<Show when={ev.isEdited}>
+														<span class="ml-1 text-xs text-text-faint">
+															(edited)
+														</span>
+													</Show>
+												</>
+											);
+										})()}
+									</Show>
+								}
+							>
+								<img
+									src={ev.imageUrl ?? ""}
+									alt={ev.body?.trim() || "Image"}
+									class="mt-1 max-h-64 max-w-sm rounded"
+									loading="lazy"
+									onLoad={() => props.onImageLoad?.()}
+								/>
+							</Show>
 						</Show>
 					</Show>
 				</Show>
 
-				{/* Reactions */}
-				<ReactionPills
-					reactions={ev.reactions}
-					myReactions={ev.myReactions}
-					onReact={props.onReact}
-					emoteLookup={props.emoteLookup}
-				/>
+				{/* Reactions — also hidden during pending/failed redaction
+				    so the message reads as "deleting" rather than fully
+				    interactive. */}
+				<Show when={!isRedactionPending() && !isRedactionFailed()}>
+					<ReactionPills
+						reactions={ev.reactions}
+						myReactions={ev.myReactions}
+						onReact={props.onReact}
+						emoteLookup={props.emoteLookup}
+					/>
+				</Show>
 
 				{/* Failed-send banner: visible when status is NOT_SENT, with
 				    Retry / Discard actions. Discard removes the local echo;
@@ -434,6 +472,46 @@ const TimelineItem: Component<{
 								onClick={props.onCancel}
 							>
 								Cancel
+							</button>
+						</Show>
+					</div>
+				</Show>
+
+				{/* Pending-redaction indicator. The body is dimmed via the
+				    outer wrapper; this announces the in-flight delete. */}
+				<Show when={isRedactionPending()}>
+					<div class="mt-1 text-xs text-text-muted" role="status">
+						Deleting…
+					</div>
+				</Show>
+
+				{/* Failed-redaction banner: Retry resends the m.room.redaction
+				    echo; Discard cancels it (target restores to normal). */}
+				<Show when={isRedactionFailed()}>
+					<div
+						class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
+						role="alert"
+					>
+						<span aria-hidden="true">⚠</span>
+						<span>Delete failed</span>
+						<Show when={props.onRetryRedaction}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onClick={props.onRetryRedaction}
+								aria-label="Retry deleting message"
+							>
+								Retry
+							</button>
+						</Show>
+						<Show when={props.onDiscardRedaction}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								onClick={props.onDiscardRedaction}
+								aria-label="Discard pending deletion"
+							>
+								Discard
 							</button>
 						</Show>
 					</div>

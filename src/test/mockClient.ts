@@ -26,6 +26,20 @@ export interface MockEvent {
 	 * replacement here to exercise the edit-status guards.
 	 */
 	replacingEvent?: MockEvent;
+	/**
+	 * Target event ID for `m.room.redaction` events (the raw SDK keeps
+	 * this on `event.event.redacts`). Tests use it to exercise the
+	 * pending-redaction overlay code paths.
+	 */
+	redacts?: string;
+	/**
+	 * Local pending redaction event targeting this event. Mirrors the
+	 * real SDK's `_localRedactionEvent` so `localRedactionEvent()`
+	 * returns truthy while a delete is in flight.
+	 */
+	localRedaction?: MockEvent;
+	/** True once the redaction is server-confirmed (sets `unsigned.redacted_because`). */
+	redacted?: boolean;
 }
 
 export function createMatrixEvent(evt: MockEvent) {
@@ -41,11 +55,18 @@ export function createMatrixEvent(evt: MockEvent) {
 		getType: () => evt.type,
 		/**
 		 * Mirrors matrix-js-sdk: when a replacement event exists, return
-		 * its `m.new_content` regardless of status. Tests for the edit-
-		 * confirmation guard rely on this so the projection layer is
-		 * what must filter pending/failed edits.
+		 * its `m.new_content` regardless of status. When the event is
+		 * locally redacted, return `{}` (the SDK's behavior; consumers
+		 * who care about pending vs confirmed redaction must read
+		 * `localRedactionEvent()` instead of trying to recover the body).
+		 * Tests for the edit-confirmation and pending-redaction guards
+		 * rely on this so the projection layer is what must filter
+		 * pending/failed edits and pending-locally-redacted events.
 		 */
 		getContent: () => {
+			if (evt.localRedaction || evt.redacted) {
+				return {};
+			}
 			if (evt.replacingEvent) {
 				const newContent = evt.replacingEvent.content?.["m.new_content"];
 				if (newContent && typeof newContent === "object") {
@@ -54,8 +75,23 @@ export function createMatrixEvent(evt: MockEvent) {
 			}
 			return evt.content;
 		},
-		/** Always returns the pre-edit content, ignoring any replacement. */
-		getOriginalContent: () => evt.content,
+		/**
+		 * Always returns the pre-edit content, ignoring any replacement.
+		 * Mirrors the SDK: returns `{}` when locally redacted, since the
+		 * SDK has no way to recover content from a locally-redacted event.
+		 */
+		getOriginalContent: () => (evt.localRedaction ? {} : evt.content),
+		/** Mirrors SDK `localRedactionEvent()`: the pending redaction MatrixEvent, or null. */
+		localRedactionEvent: () =>
+			evt.localRedaction ? createMatrixEvent(evt.localRedaction) : null,
+		/**
+		 * Mirrors SDK: true whenever `unsigned.redacted_because` is set,
+		 * which `markLocallyRedacted` does immediately for pending
+		 * local redactions as well as on server confirmation. Tests
+		 * distinguish via `localRedactionEvent()` (truthy for pending,
+		 * null after `makeRedacted` runs on server confirm).
+		 */
+		isRedacted: () => evt.redacted === true || !!evt.localRedaction,
 		getTs: () => evt.ts,
 		isEncrypted: () => evt.encrypted ?? false,
 		isDecryptionFailure: () => evt.decryptionFailure ?? false,
@@ -63,7 +99,7 @@ export function createMatrixEvent(evt: MockEvent) {
 			evt.replacingEvent?.eventId ?? evt.replacingEventId ?? null,
 		replacingEvent: () =>
 			evt.replacingEvent ? createMatrixEvent(evt.replacingEvent) : null,
-		event: { redacts: undefined },
+		event: { redacts: evt.redacts },
 		get status() {
 			return status;
 		},

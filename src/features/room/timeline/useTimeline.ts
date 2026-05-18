@@ -46,13 +46,12 @@ function eventToTimelineEvent(
 	room: Room,
 	client: MatrixClient,
 ): TimelineEvent {
-	// `event.getContent()` auto-applies any replacing event's
-	// `m.new_content` regardless of that replacement's status. For
-	// FAILED (NOT_SENT) or CANCELLED edit echoes, that would leave the
-	// timeline showing the failed edit's body forever — fall back to
-	// the original content in those cases. SENDING / QUEUED /
-	// ENCRYPTING in-flight edits stay optimistic and apply immediately;
-	// the user sees their edit land while the server confirms.
+	// `event.getContent()` auto-applies a replacing event's
+	// `m.new_content` regardless of the replacement's status. For
+	// FAILED (NOT_SENT) or CANCELLED edit echoes, fall back to the
+	// original content so the failed edit doesn't silently overwrite
+	// the body. SENDING / QUEUED / ENCRYPTING in-flight edits stay
+	// optimistic and apply immediately.
 	const replacementId = event.replacingEventId();
 	const replacement =
 		replacementId && typeof event.replacingEvent === "function"
@@ -170,6 +169,19 @@ function isDisplayable(event: MatrixEvent): boolean {
 	// Filter out message edits (m.replace) — they update existing events
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// Locally-redacted-pending events: matrix-js-sdk's `markLocallyRedacted`
+	// sets `unsigned.redacted_because` so `isRedacted()` is already true
+	// and `getContent()` / `getOriginalContent()` both return `{}` the
+	// moment the user clicks Delete. Detect via the presence of the
+	// pending redaction reference and keep the event displayable so the
+	// "Deleting…" / "Delete failed" overlay has somewhere to render.
+	// Once the server confirms, `makeRedacted` clears
+	// `_localRedactionEvent` and this branch stops matching, so the
+	// next msgtype check below filters the event out as normal.
+	const hasLocalRedaction =
+		typeof event.localRedactionEvent === "function" &&
+		!!event.localRedactionEvent();
+	if (hasLocalRedaction) return true;
 	// Filter out redacted events (content cleared by server)
 	if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 	return true;
@@ -207,6 +219,42 @@ export function useTimeline(
 	const [typingUsers, setTypingUsers] = createSignal<
 		{ userId: string; displayName: string }[]
 	>([]);
+
+	/**
+	 * Pending-redaction status keyed by *target* event ID. Surfaces a
+	 * "Deleting…" overlay on the target while the redaction round-trips,
+	 * and a "Delete failed — Retry / Discard" affordance when the
+	 * redaction echo transitions to NOT_SENT. Cleared when the
+	 * redaction confirms (the SDK's confirm path also removes the
+	 * target from `events`) or is cancelled.
+	 *
+	 * The redaction `MatrixEvent` reference is stored directly so
+	 * Retry/Discard work even when the user has scrolled away from
+	 * live; the SDK's TimelineWindow may not include the redaction
+	 * echo (it lives at the live end) once `followingLive` is false.
+	 */
+	interface PendingRedaction {
+		redactionEvent: MatrixEvent;
+		status: EventStatus;
+	}
+	const [pendingRedactions, setPendingRedactions] = createStore<
+		Record<string, PendingRedaction>
+	>({});
+
+	function recordPendingRedaction(redactionEvent: MatrixEvent): void {
+		const targetId = redactionEvent.event.redacts;
+		const status = redactionEvent.status;
+		if (typeof targetId !== "string" || !status) return;
+		setPendingRedactions(targetId, { redactionEvent, status });
+	}
+
+	function clearPendingRedaction(targetId: string): void {
+		setPendingRedactions(
+			produce((d) => {
+				delete d[targetId];
+			}),
+		);
+	}
 
 	let currentRoomId: string | null = null;
 	let backfillReloadAttempted = false;
@@ -288,6 +336,7 @@ export function useTimeline(
 		setCanLoadOlder(false);
 		setCanLoadNewer(false);
 		setTypingUsers([]);
+		setPendingRedactions(reconcile({}, { merge: false }));
 
 		const room = client.getRoom(rid);
 		if (!room) {
@@ -552,6 +601,33 @@ export function useTimeline(
 		if (removed) {
 			const eid = event.getId();
 			if (!eid) return;
+			// Cancelled redaction echo: clear the pending overlay and
+			// recompute the target so its body restores. The SDK's
+			// `unmarkLocallyRedacted` has already cleared the local
+			// redaction state by the time this fires, so
+			// `eventToTimelineEvent` will pick up the original content
+			// (which `getContent()` now returns again).
+			if (event.getType() === "m.room.redaction") {
+				const redactedId = event.event.redacts;
+				if (typeof redactedId === "string") {
+					clearPendingRedaction(redactedId);
+					const targetEvent = findWindowEvent(redactedId);
+					if (targetEvent) {
+						setEvents(
+							produce((draft) => {
+								const idx = draft.findIndex((e) => e.eventId === redactedId);
+								if (idx >= 0 && isDisplayable(targetEvent)) {
+									draft[idx] = eventToTimelineEvent(
+										targetEvent,
+										eventRoom,
+										client,
+									);
+								}
+							}),
+						);
+					}
+				}
+			}
 			setEvents(
 				produce((draft) => {
 					const idx = draft.findIndex((e) => e.eventId === eid);
@@ -639,6 +715,14 @@ export function useTimeline(
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {
+					// Pending redactions (status is non-null) get tracked so the
+					// target can render a "Deleting…" overlay. handleRedaction
+					// still runs for both pending and confirmed redactions —
+					// for pending, it's a no-op recompute since the SDK hasn't
+					// cleared the target's content yet.
+					if (event.status) {
+						recordPendingRedaction(event);
+					}
 					handleRedaction(room, redactedId);
 				}
 			}
@@ -811,6 +895,32 @@ export function useTimeline(
 			return;
 		}
 
+		// Redaction echo: update / clear the pending-redaction overlay.
+		// Confirmed (status null) clears the entry and triggers
+		// `handleRedaction` to remove the target — the SDK reconciles
+		// remote echoes via `handleRemoteEcho` which only fires
+		// `LocalEchoUpdated` (no second `Room.timeline`), so we can't
+		// rely on the existing onTimelineEvent path to remove the
+		// target on confirmation.
+		// CANCELLED normally arrives via the `_removed` path in
+		// `onTimelineEvent` (the SDK strips the event before firing
+		// LocalEchoUpdated), but treat it defensively here too in
+		// case the ordering varies.
+		if (event.getType() === "m.room.redaction") {
+			const targetId = event.event.redacts;
+			if (typeof targetId === "string") {
+				if (event.status === null) {
+					clearPendingRedaction(targetId);
+					handleRedaction(room, targetId);
+				} else if (event.status === EventStatus.CANCELLED) {
+					clearPendingRedaction(targetId);
+				} else {
+					recordPendingRedaction(event);
+				}
+			}
+			return;
+		}
+
 		// Edit relation (m.replace): recompute the original message so a
 		// failed edit no longer appears applied.
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
@@ -890,5 +1000,13 @@ export function useTimeline(
 			if (!currentTimelineWindow) return [];
 			return [...currentTimelineWindow.getEvents()];
 		},
+		/**
+		 * Pending-redaction status per *target* event ID. Reactive Solid
+		 * store; consumers can read `pendingRedactions[targetId]` to drive
+		 * a "Deleting…" overlay or a Retry/Discard affordance on the
+		 * target. Entries auto-clear when the redaction confirms or is
+		 * cancelled.
+		 */
+		pendingRedactions,
 	};
 }
