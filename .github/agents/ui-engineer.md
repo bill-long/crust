@@ -25,7 +25,7 @@ If a change makes the UI feel slower, heavier, or more "enterprise-y", it is wro
 Concrete, enforceable rules — not vibes:
 
 1. **Interaction latency budget: < 16 ms for any UI response to user input.**
-   No spinner unless the network round-trip exceeds 200 ms. Optimistic UI for sends, reactions, edits, redactions, read markers, and typing indicators is target state (see the Optimistic UI section below and #53); today the SDK's built-in local echo makes sends appear immediately, but there is no centralized status/retry story yet.
+   No spinner unless the network round-trip exceeds 200 ms. Sends, reactions, edits, and redactions all flow through the SDK's local-echo path with explicit `sending | sent | failed` tracking; failed sends and failed redactions surface a Retry / Discard affordance, in-flight sends can be Cancelled, and failed reaction / edit echoes are filtered from the rendered counts and content respectively (see the Optimistic UI section). Read markers and typing indicators still rely on the SDK's own immediate paths.
 2. **Scrolling stays at 60 fps even in 10k-message rooms.**
    Long lists must be virtualized (`@tanstack/solid-virtual` or hand-rolled). Never render an entire timeline.
 3. **No layout shift after content loads.**
@@ -125,9 +125,20 @@ Token namespace (define these in the config):
 
 ### Optimistic UI
 
-Current behavior: handlers call the SDK directly and `await` the round-trip. `matrix-js-sdk` itself inserts a local echo into the room timeline immediately (temporary `~`-prefixed event ID, reconciled when the server responds), so sent messages appear without waiting for the next sync. There is **no** centralized per-message `sending | sent | failed` store today — the composer (`src/features/room/composer/Composer.tsx`) surfaces send/edit errors via a `setError` inline alert (`role="alert"`); reaction and redaction handlers in `src/features/room/timeline/TimelineView.tsx` only `console.error`. When you add a new handler, fix the silent path rather than replicating it.
+`useTimeline` (`src/features/room/timeline/useTimeline.ts`) tracks SDK local-echo status on every event and exposes it on `TimelineEvent.status: EventStatus | null` and via the `pendingRedactions` store. Subscribers to `RoomEvent.LocalEchoUpdated` keep these in sync; `_removed` Timeline events drive cancellation cleanup; `LocalEchoUpdated(status=null)` for redactions explicitly drives `handleRedaction` to remove the target (the SDK's `handleRemoteEcho` reconciliation does not re-fire `Room.timeline`).
 
-Target state (tracked in #53): a `sending | sent | failed` per-event status with retry affordance, reconciled via `Room.localEchoUpdated`. Until that lands, do not invent a parallel echo store — match the surrounding pattern.
+Rendering rules in `TimelineItem`:
+- Send echo `SENDING / QUEUED / ENCRYPTING` → row dimmed, screen-reader `role="status"` announcement, visible "Sending…" label, and a Cancel button (which calls `client.cancelPendingEvent`). `SENT` is *not* a pending state for sends — the next event the SDK emits is the rekey to the server ID.
+- Send echo `NOT_SENT` → `bg-danger-bg/20` tint, `role="alert"` failed banner, Retry / Discard buttons.
+- Reaction echo `NOT_SENT` / `CANCELLED` → excluded from the parent's count and `myReactions` map in `eventToTimelineEvent` (no Retry/Discard UI today; the user simply re-clicks the pill).
+- Edit echo (`m.replace`) `NOT_SENT` / `CANCELLED` → original message content rendered via `getOriginalContent()`, `isEdited` flag cleared (failure path in the composer also surfaces a `setError` inline alert; no Retry on the edit echo today).
+- Pending or failed redaction (any status including `SENT`, which is a transient window where the target is still locally-redacted) → "Deleting…" or "Delete failed" overlay; body and reactions are hidden (SDK's `markLocallyRedacted` wipes content immediately so there's nothing to render). Failed redactions get Retry / Discard buttons. There's no in-flight Cancel for redactions today (sends have it via `client.cancelPendingEvent`; redactions could follow the same pattern if a stuck-delete UX is needed).
+- HoverToolbar (react / reply / edit / delete) is hidden for any non-server-confirmed event.
+
+When you add a new user-initiated handler:
+- Reuse `client.resendEvent` / `client.cancelPendingEvent` and the `focusComposer` pattern in `TimelineView.tsx` for any failure UX. Don't invent a parallel echo store.
+- For redactions specifically: pending state must persist through `SENT` (a transient window where the target is still locally redacted), and pending-redaction lookups must not depend on the current `TimelineWindow` — the redaction echo lives at the live end; store the `MatrixEvent` reference directly.
+- Where Retry / Discard for reactions or edits is desired, it would follow the redaction pattern (separate pending store keyed by target / replaced event) — not yet implemented.
 
 ### Rendering messages
 
@@ -207,7 +218,7 @@ Run `pnpm lint && pnpm typecheck` before declaring any task complete.
 
 ## Always do
 
-- Optimistic updates for any user action that has a network round-trip (target; see the Optimistic UI section above and #53 — current handlers `await` the SDK; the SDK provides its own local echo).
+- Optimistic updates for any user action that has a network round-trip — see the Optimistic UI section. Sends have full Retry / Discard / Cancel affordances; redactions have Retry / Discard on failure (no in-flight Cancel today); reactions and edits filter failed echoes from the rendered state but don't expose retry UI yet.
 - Virtualize any list that can exceed ~50 items (rooms, members, timeline, search results).
 - Honor `prefers-reduced-motion` and `prefers-color-scheme`.
 - Use design tokens for color, spacing, radii, shadows.
