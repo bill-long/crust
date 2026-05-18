@@ -430,6 +430,64 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		}
 	};
 
+	/**
+	 * Move keyboard focus to the room's composer textarea. Used after
+	 * Retry / Discard since the failed-banner button the user activated
+	 * disappears and would otherwise strand focus on `document.body`.
+	 *
+	 * Re-checks the room ID inside the deferred callback because RAF
+	 * runs a frame later; a room switch between the caller's guard and
+	 * the actual focus call would otherwise steal focus into the wrong
+	 * room.
+	 */
+	const focusComposer = (expectedRoomId: string): void => {
+		requestAnimationFrame(() => {
+			if (props.roomId !== expectedRoomId) return;
+			const textarea = document.querySelector<HTMLTextAreaElement>(
+				"textarea[data-composer-textarea]",
+			);
+			textarea?.focus();
+		});
+	};
+
+	/**
+	 * Resend a failed local echo through the SDK's pending-event queue.
+	 * The SDK will transition the event back to SENDING and re-fire
+	 * `LocalEchoUpdated`, which `useTimeline` picks up to update status.
+	 */
+	const onRetry = async (eventId: string): Promise<void> => {
+		const originalRoomId = props.roomId;
+		const room = client.getRoom(originalRoomId);
+		if (!room) return;
+		const matrixEvent = getSourceEvent(eventId);
+		if (!matrixEvent) return;
+		try {
+			await client.resendEvent(matrixEvent, room);
+		} catch (e) {
+			console.error("Resend failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
+	/**
+	 * Cancel a failed local echo. The SDK fires a removed-Timeline event
+	 * followed by `LocalEchoUpdated(CANCELLED)`; both paths drop the
+	 * event from the store idempotently.
+	 */
+	const onDiscard = (eventId: string): void => {
+		const matrixEvent = getSourceEvent(eventId);
+		if (!matrixEvent) return;
+		const originalRoomId = props.roomId;
+		try {
+			client.cancelPendingEvent(matrixEvent);
+		} catch (e) {
+			console.error("Discard failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
 	const onReactionPickerSelect = (
 		eventId: string,
 		item: PickerEmoji,
@@ -555,6 +613,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													onReply={() => setReplyTo(event())}
 													onEdit={() => onEdit(event())}
 													onDelete={() => onDelete(event().eventId)}
+													onRetry={() => onRetry(event().eventId)}
+													onDiscard={() => onDiscard(event().eventId)}
 													onImageLoad={() => {
 														if (itemRef) virtualizer.measureElement(itemRef);
 													}}

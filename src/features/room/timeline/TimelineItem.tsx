@@ -1,4 +1,5 @@
 import type { MatrixClient } from "matrix-js-sdk";
+import { EventStatus } from "matrix-js-sdk";
 import { type Component, createMemo, For, Show } from "solid-js";
 import { userSettings } from "../../../stores/settings";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -201,6 +202,8 @@ const TimelineItem: Component<{
 	onReply: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onRetry?: () => void;
+	onDiscard?: () => void;
 	onImageLoad?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
 	client: MatrixClient;
@@ -212,20 +215,30 @@ const TimelineItem: Component<{
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
 	);
+	const isFailed = createMemo(() => ev.status === EventStatus.NOT_SENT);
+	const isPending = createMemo(
+		() =>
+			ev.status === EventStatus.SENDING ||
+			ev.status === EventStatus.QUEUED ||
+			ev.status === EventStatus.ENCRYPTING,
+	);
 
 	return (
 		<div
-			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"}`}
+			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() ? "bg-danger-bg/20" : ""} ${isPending() ? "opacity-60" : ""}`}
 		>
-			{/* Hover toolbar */}
-			<HoverToolbar
-				isOwnMessage={props.isOwnMessage}
-				msgtype={ev.msgtype}
-				onReact={() => props.onOpenReactionPicker?.()}
-				onReply={props.onReply}
-				onEdit={props.onEdit}
-				onDelete={props.onDelete}
-			/>
+			{/* Hover toolbar — hidden for failed/pending echoes (no remote
+			    event yet, so react/reply/edit/delete would have no target) */}
+			<Show when={!isFailed() && !isPending()}>
+				<HoverToolbar
+					isOwnMessage={props.isOwnMessage}
+					msgtype={ev.msgtype}
+					onReact={() => props.onOpenReactionPicker?.()}
+					onReply={props.onReply}
+					onEdit={props.onEdit}
+					onDelete={props.onDelete}
+				/>
+			</Show>
 
 			<Show
 				when={props.showHeader}
@@ -372,6 +385,45 @@ const TimelineItem: Component<{
 					onReact={props.onReact}
 					emoteLookup={props.emoteLookup}
 				/>
+
+				{/* Failed-send banner: visible when status is NOT_SENT, with
+				    Retry / Discard actions. Discard removes the local echo;
+				    Retry resends through the SDK's pending-event queue. */}
+				<Show when={isFailed()}>
+					<div
+						class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
+						role="alert"
+					>
+						<span aria-hidden="true">⚠</span>
+						<span>Failed to send</span>
+						<Show when={props.onRetry}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onClick={props.onRetry}
+							>
+								Retry
+							</button>
+						</Show>
+						<Show when={props.onDiscard}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								onClick={props.onDiscard}
+							>
+								Discard
+							</button>
+						</Show>
+					</div>
+				</Show>
+
+				{/* Sending indicator: small, low-attention. The body itself
+				    is already dimmed via opacity-60 on the outer wrapper. */}
+				<Show when={isPending()}>
+					<span class="sr-only" role="status">
+						Sending message
+					</span>
+				</Show>
 
 				{/* Read receipts */}
 				<Show when={props.readReceipts && props.readReceipts.length > 0}>

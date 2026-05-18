@@ -4,6 +4,7 @@
  * Extend as needed for other test files.
  */
 
+import type { EventStatus } from "matrix-js-sdk";
 import { vi } from "vitest";
 
 /** Minimal MatrixEvent-like object for testing. */
@@ -17,21 +18,66 @@ export interface MockEvent {
 	encrypted?: boolean;
 	decryptionFailure?: boolean;
 	replacingEventId?: string;
+	/** SDK send status. null/undefined = server-confirmed (the default). */
+	status?: EventStatus | null;
+	/**
+	 * Replacement (edit) event for this event. The real SDK exposes
+	 * `replacingEvent()` returning a MatrixEvent; tests can attach a
+	 * replacement here to exercise the edit-status guards.
+	 */
+	replacingEvent?: MockEvent;
 }
 
 export function createMatrixEvent(evt: MockEvent) {
-	return {
-		getId: () => evt.eventId,
+	// Mutable status so tests can simulate the SDK lifecycle
+	// (SENDING -> SENT / NOT_SENT / CANCELLED) without re-creating
+	// the wrapper.
+	let status: EventStatus | null = evt.status ?? null;
+	let eventId = evt.eventId;
+	const wrapped = {
+		getId: () => eventId,
 		getRoomId: () => evt.roomId,
 		getSender: () => evt.sender,
 		getType: () => evt.type,
-		getContent: () => evt.content,
+		/**
+		 * Mirrors matrix-js-sdk: when a replacement event exists, return
+		 * its `m.new_content` regardless of status. Tests for the edit-
+		 * confirmation guard rely on this so the projection layer is
+		 * what must filter pending/failed edits.
+		 */
+		getContent: () => {
+			if (evt.replacingEvent) {
+				const newContent = evt.replacingEvent.content?.["m.new_content"];
+				if (newContent && typeof newContent === "object") {
+					return newContent as Record<string, unknown>;
+				}
+			}
+			return evt.content;
+		},
+		/** Always returns the pre-edit content, ignoring any replacement. */
+		getOriginalContent: () => evt.content,
 		getTs: () => evt.ts,
 		isEncrypted: () => evt.encrypted ?? false,
 		isDecryptionFailure: () => evt.decryptionFailure ?? false,
-		replacingEventId: () => evt.replacingEventId ?? null,
+		replacingEventId: () =>
+			evt.replacingEvent?.eventId ?? evt.replacingEventId ?? null,
+		replacingEvent: () =>
+			evt.replacingEvent ? createMatrixEvent(evt.replacingEvent) : null,
 		event: { redacts: undefined },
+		get status() {
+			return status;
+		},
+
+		/** Test helper: update status (does not emit; caller drives emissions). */
+		__setStatus: (next: EventStatus | null) => {
+			status = next;
+		},
+		/** Test helper: rewrite the event ID (simulates local-echo rekey). */
+		__setId: (next: string) => {
+			eventId = next;
+		},
 	};
+	return wrapped;
 }
 
 export function createMockRoom(
@@ -222,6 +268,8 @@ export function createMockClient(
 		sendTyping: vi.fn().mockResolvedValue(undefined),
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
 		redactEvent: vi.fn().mockResolvedValue(undefined),
+		resendEvent: vi.fn().mockResolvedValue(undefined),
+		cancelPendingEvent: vi.fn(),
 		paginateEventTimeline: vi.fn().mockResolvedValue(false),
 		getAccountData: (type: string) => accountData.get(type) ?? null,
 		getHomeserverUrl: () => "https://example.com",

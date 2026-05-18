@@ -1,6 +1,7 @@
 import {
 	ClientEvent,
 	Direction,
+	EventStatus,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -29,6 +30,15 @@ export interface TimelineEvent {
 	isEdited: boolean;
 	reactions: Record<string, number>;
 	myReactions: Record<string, string>;
+	/**
+	 * SDK send status for this event:
+	 * - null: server-confirmed (the normal case for received events).
+	 * - SENDING / QUEUED / ENCRYPTING: local echo in flight.
+	 * - NOT_SENT: send failed, awaiting retry or discard.
+	 * - CANCELLED: cancelled by user; usually removed from the store
+	 *   before render but kept here for completeness.
+	 */
+	status: EventStatus | null;
 }
 
 function eventToTimelineEvent(
@@ -36,7 +46,29 @@ function eventToTimelineEvent(
 	room: Room,
 	client: MatrixClient,
 ): TimelineEvent {
-	const content = event.getContent();
+	// `event.getContent()` auto-applies any replacing event's
+	// `m.new_content` regardless of that replacement's status. For
+	// FAILED (NOT_SENT) or CANCELLED edit echoes, that would leave the
+	// timeline showing the failed edit's body forever — fall back to
+	// the original content in those cases. SENDING / QUEUED /
+	// ENCRYPTING in-flight edits stay optimistic and apply immediately;
+	// the user sees their edit land while the server confirms.
+	const replacementId = event.replacingEventId();
+	const replacement =
+		replacementId && typeof event.replacingEvent === "function"
+			? event.replacingEvent()
+			: null;
+	const replacementFailed =
+		!!replacement &&
+		(replacement.status === EventStatus.NOT_SENT ||
+			replacement.status === EventStatus.CANCELLED);
+	const content = replacementFailed
+		? // Stripped test doubles may not implement getOriginalContent;
+			// fall back gracefully.
+			typeof event.getOriginalContent === "function"
+			? event.getOriginalContent()
+			: event.getContent()
+		: event.getContent();
 	const sender = event.getSender() ?? "";
 	const member = room.getMember(sender);
 
@@ -49,7 +81,10 @@ function eventToTimelineEvent(
 		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
 	}
 
-	// Aggregate reactions from SDK relations
+	// Aggregate reactions from SDK relations. Exclude failed (NOT_SENT)
+	// and cancelled relations so a failed local-echo reaction does not
+	// keep inflating the count or the user's pressed-state map. The SDK
+	// only auto-removes CANCELLED from relations, not NOT_SENT.
 	const reactions = Object.create(null) as TimelineEvent["reactions"];
 	const myReactions = Object.create(null) as TimelineEvent["myReactions"];
 	const myUserId = client.getUserId();
@@ -68,15 +103,22 @@ function eventToTimelineEvent(
 				if (sortedEntries) {
 					for (const [key, evSet] of sortedEntries) {
 						if (key && evSet) {
-							reactions[key] = evSet.size;
-							if (myUserId) {
-								for (const ev of evSet) {
-									if (ev.getSender() === myUserId) {
-										const id = ev.getId();
-										if (id) myReactions[key] = id;
-									}
+							let count = 0;
+							for (const ev of evSet) {
+								const evStatus = ev.status;
+								if (
+									evStatus === EventStatus.NOT_SENT ||
+									evStatus === EventStatus.CANCELLED
+								) {
+									continue;
+								}
+								count++;
+								if (myUserId && ev.getSender() === myUserId) {
+									const id = ev.getId();
+									if (id) myReactions[key] = id;
 								}
 							}
+							if (count > 0) reactions[key] = count;
 						}
 					}
 				}
@@ -85,6 +127,13 @@ function eventToTimelineEvent(
 	} catch {
 		// Relations API may not be available for all events
 	}
+
+	// `isEdited` reflects whether an edit is in effect on the rendered
+	// body. Mirrors the content selection above: failed/cancelled
+	// replacements aren't applied, so they don't count as edited.
+	// Server-confirmed and in-flight (SENDING / QUEUED / ENCRYPTING)
+	// replacements do.
+	const isEdited = !!replacementId && !replacementFailed;
 
 	return {
 		eventId: event.getId() ?? "",
@@ -102,9 +151,10 @@ function eventToTimelineEvent(
 		imageUrl,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
-		isEdited: !!event.replacingEventId(),
+		isEdited,
 		reactions,
 		myReactions,
+		status: event.status ?? null,
 	};
 }
 
@@ -489,10 +539,27 @@ export function useTimeline(
 		event: MatrixEvent,
 		eventRoom: Room | undefined,
 		_toStart: boolean | undefined,
-		_removed: boolean | undefined,
+		removed: boolean | undefined,
 		data: { liveEvent?: boolean },
 	): void {
 		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
+
+		// Removed events (e.g. cancelled local echoes the SDK strips from
+		// the timeline before firing LocalEchoUpdated(CANCELLED)) must be
+		// dropped from the store. The reaction-aggregation path is handled
+		// by the parent's recompute when the relation changes; for direct
+		// displayable events, we splice them out by ID.
+		if (removed) {
+			const eid = event.getId();
+			if (!eid) return;
+			setEvents(
+				produce((draft) => {
+					const idx = draft.findIndex((e) => e.eventId === eid);
+					if (idx >= 0) draft.splice(idx, 1);
+				}),
+			);
+			return;
+		}
 
 		// For non-live events (backfill/initial sync), reload the full
 		// timeline so we pick up historical events that weren't available
@@ -701,6 +768,82 @@ export function useTimeline(
 		setTypingUsers(typing);
 	}
 
+	/**
+	 * Handle SDK local-echo lifecycle transitions. Fires when an event's
+	 * status changes (SENDING -> SENT / NOT_SENT / CANCELLED) and when
+	 * the temporary `~local.N` event ID is replaced with the real
+	 * server ID.
+	 *
+	 * - In-place update by old or new ID so SolidJS keying stays stable.
+	 * - Recompute the parent's reactions when a reaction echo's status
+	 *   transitions, since the reaction count derives from relation
+	 *   events whose status this handler is updating.
+	 */
+	function onLocalEchoUpdated(
+		event: MatrixEvent,
+		eventRoom: Room,
+		oldEventId?: string,
+		_oldStatus?: EventStatus | null,
+	): void {
+		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
+		const room = client.getRoom(currentRoomId);
+		if (!room) return;
+		const newId = event.getId();
+		if (!newId) return;
+
+		// Reaction relation: recompute the parent so the count/myReactions
+		// reflect the new status (e.g. drop a NOT_SENT echo from the count).
+		if (event.getType() === "m.reaction") {
+			const targetId = event.getContent()?.["m.relates_to"]?.event_id;
+			if (typeof targetId === "string") {
+				setEvents(
+					produce((draft) => {
+						const idx = draft.findIndex((e) => e.eventId === targetId);
+						if (idx >= 0) {
+							const targetEvent = findWindowEvent(targetId);
+							if (targetEvent) {
+								draft[idx] = eventToTimelineEvent(targetEvent, room, client);
+							}
+						}
+					}),
+				);
+			}
+			return;
+		}
+
+		// Edit relation (m.replace): recompute the original message so a
+		// failed edit no longer appears applied.
+		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
+		if (relType === "m.replace") {
+			const targetId = event.getContent()?.["m.relates_to"]?.event_id;
+			if (typeof targetId === "string") {
+				handleEdit(room, targetId);
+			}
+			return;
+		}
+
+		// Direct displayable event (message send local echo).
+		setEvents(
+			produce((draft) => {
+				// Find by old ID (typical rekey case) or new ID (status-only
+				// change). Splice out a duplicate if both somehow exist.
+				const lookupId = oldEventId ?? newId;
+				const oldIdx = draft.findIndex((e) => e.eventId === lookupId);
+				if (oldIdx < 0) return;
+				const updated = eventToTimelineEvent(event, room, client);
+				draft[oldIdx] = updated;
+				if (oldEventId && oldEventId !== newId) {
+					// If a separate entry already exists under the new ID
+					// (race: remote echo arrived before local rekey), drop it.
+					const dupIdx = draft.findIndex(
+						(e, i) => i !== oldIdx && e.eventId === newId,
+					);
+					if (dupIdx >= 0) draft.splice(dupIdx, 1);
+				}
+			}),
+		);
+	}
+
 	/** Get the SDK MatrixEvent for edit prefill */
 	function getSourceEvent(eventId: string): MatrixEvent | undefined {
 		return findWindowEvent(eventId);
@@ -713,6 +856,7 @@ export function useTimeline(
 
 	client.on(RoomEvent.Timeline, onTimelineEvent);
 	client.on(RoomEvent.TimelineReset, onTimelineReset);
+	client.on(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
 	client.on(MatrixEventEvent.Replaced, onReplaced);
 	client.on(ClientEvent.Room, onRoomAppeared);
@@ -721,6 +865,7 @@ export function useTimeline(
 	onCleanup(() => {
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
+		client.off(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
 		client.off(MatrixEventEvent.Decrypted, onDecrypted);
 		client.off(MatrixEventEvent.Replaced, onReplaced);
 		client.off(ClientEvent.Room, onRoomAppeared);
