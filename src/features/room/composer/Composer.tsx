@@ -641,6 +641,7 @@ const Composer: Component<{
 				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}
 				<textarea
 					ref={textareaRef}
+					data-composer-textarea
 					value={text()}
 					onInput={(e) => {
 						const val = e.currentTarget.value;

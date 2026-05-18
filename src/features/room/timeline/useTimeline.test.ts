@@ -1584,4 +1584,271 @@ describe("useTimeline", () => {
 			expect(events.length).toBe(1);
 		});
 	});
+
+	// ─── Local-echo / status tracking (issue #53) ─────────────────────
+
+	it("local-echo sends appear with SENDING status, then transition to null on confirm", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const roomA = createMockRoom("!roomA:test", []);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createFakeEvent(
+				"!roomA:test",
+				"~local.1",
+				"@me:test",
+				"hello",
+				1000,
+			);
+			echo.__setStatus(EventStatus.SENDING);
+			appendLive(client, roomA, echo);
+
+			expect(events.length).toBe(1);
+			expect(events[0].status).toBe(EventStatus.SENDING);
+
+			// Server confirms: SDK rekeys event ID and clears status, then
+			// fires LocalEchoUpdated with the old ID for reconciliation.
+			echo.__setId("$server.1");
+			echo.__setStatus(null);
+			client.__emit(
+				"Room.localEchoUpdated",
+				echo,
+				roomA,
+				"~local.1",
+				EventStatus.SENDING,
+			);
+
+			expect(events.length).toBe(1);
+			expect(events[0].eventId).toBe("$server.1");
+			expect(events[0].status).toBe(null);
+		});
+	});
+
+	it("local-echo send transitioning to NOT_SENT keeps the event with failed status", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const roomA = createMockRoom("!roomA:test", []);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createFakeEvent(
+				"!roomA:test",
+				"~local.2",
+				"@me:test",
+				"oops",
+				1000,
+			);
+			echo.__setStatus(EventStatus.SENDING);
+			appendLive(client, roomA, echo);
+
+			echo.__setStatus(EventStatus.NOT_SENT);
+			client.__emit(
+				"Room.localEchoUpdated",
+				echo,
+				roomA,
+				undefined,
+				EventStatus.SENDING,
+			);
+
+			expect(events.length).toBe(1);
+			expect(events[0].status).toBe(EventStatus.NOT_SENT);
+		});
+	});
+
+	it("cancelled local echoes are removed via the _removed Timeline path", async () => {
+		const roomA = createMockRoom("!roomA:test", []);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createFakeEvent(
+				"!roomA:test",
+				"~local.3",
+				"@me:test",
+				"nope",
+				1000,
+			);
+			appendLive(client, roomA, echo);
+			expect(events.length).toBe(1);
+
+			// SDK fires a removed Timeline event before LocalEchoUpdated(CANCELLED).
+			client.__emit("Room.timeline", echo, roomA, false, true, {
+				liveEvent: true,
+			});
+			expect(events.length).toBe(0);
+		});
+	});
+
+	it("LocalEchoUpdated from other rooms does not mutate the current room's store", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$a1", "@alice:test", "in A", 1000),
+		]);
+		const roomB = createMockRoom("!roomB:test", []);
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			const otherEcho = createFakeEvent(
+				"!roomB:test",
+				"~local.B",
+				"@me:test",
+				"in B",
+				2000,
+			);
+			otherEcho.__setStatus(EventStatus.NOT_SENT);
+			// Wrong room — handler must ignore.
+			client.__emit(
+				"Room.localEchoUpdated",
+				otherEcho,
+				roomB,
+				undefined,
+				EventStatus.SENDING,
+			);
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("in A");
+		});
+	});
+
+	it("failed reaction echoes are excluded from the parent's reaction count", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Build two reaction events: one SENT, one NOT_SENT. Plant them
+		// in the room's relations so eventToTimelineEvent aggregates over
+		// both and filters the failed one.
+		const sentReaction = createMatrixEvent({
+			eventId: "$r1",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 2000,
+		});
+		const failedReaction = createMatrixEvent({
+			eventId: "~local.r2",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 3000,
+			status: EventStatus.NOT_SENT,
+		});
+
+		// Override the relations stub to return a sorted-annotations map
+		// containing both reactions for the "🚀" key.
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🚀", new Set([sentReaction, failedReaction])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			// Only the sent reaction should count.
+			expect(events[0].reactions["🚀"]).toBe(1);
+			// myReactions tracks the user's own pressed key. The user's
+			// own reaction failed (NOT_SENT), so myReactions must not
+			// include "🚀" — otherwise the pressed pill state lies.
+			expect(events[0].myReactions["🚀"]).toBeUndefined();
+		});
+	});
+
+	it("failed edit echoes do not mark the original message as edited", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const original: import("../../../test/mockClient").MockEvent = {
+			eventId: "$orig",
+			roomId: "!roomA:test",
+			sender: "@me:test",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "original body" },
+			ts: 1000,
+			replacingEvent: {
+				eventId: "~local.edit",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.message",
+				content: {
+					"m.new_content": { msgtype: "m.text", body: "edited body" },
+					"m.relates_to": { rel_type: "m.replace", event_id: "$orig" },
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			},
+		};
+
+		const roomA = createMockRoom("!roomA:test", [original]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			// Failed edit: must NOT appear edited.
+			expect(events[0].isEdited).toBe(false);
+			// Original body still visible.
+			expect(events[0].body).toBe("original body");
+		});
+	});
 });

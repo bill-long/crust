@@ -430,6 +430,57 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		}
 	};
 
+	/**
+	 * Move keyboard focus to the room's composer textarea. Used after
+	 * Retry / Discard since the failed-banner button the user activated
+	 * disappears and would otherwise strand focus on `document.body`.
+	 */
+	const focusComposer = (): void => {
+		// Defer one frame so focus runs after the failed banner unmounts.
+		requestAnimationFrame(() => {
+			const textarea = document.querySelector<HTMLTextAreaElement>(
+				"textarea[data-composer-textarea]",
+			);
+			textarea?.focus();
+		});
+	};
+
+	/**
+	 * Resend a failed local echo through the SDK's pending-event queue.
+	 * The SDK will transition the event back to SENDING and re-fire
+	 * `LocalEchoUpdated`, which `useTimeline` picks up to update status.
+	 */
+	const onRetry = async (eventId: string): Promise<void> => {
+		const room = client.getRoom(props.roomId);
+		if (!room) return;
+		const matrixEvent = getSourceEvent(eventId);
+		if (!matrixEvent) return;
+		try {
+			await client.resendEvent(matrixEvent, room);
+		} catch (e) {
+			console.error("Resend failed:", e);
+		} finally {
+			focusComposer();
+		}
+	};
+
+	/**
+	 * Cancel a failed local echo. The SDK fires a removed-Timeline event
+	 * followed by `LocalEchoUpdated(CANCELLED)`; both paths drop the
+	 * event from the store idempotently.
+	 */
+	const onDiscard = (eventId: string): void => {
+		const matrixEvent = getSourceEvent(eventId);
+		if (!matrixEvent) return;
+		try {
+			client.cancelPendingEvent(matrixEvent);
+		} catch (e) {
+			console.error("Discard failed:", e);
+		} finally {
+			focusComposer();
+		}
+	};
+
 	const onReactionPickerSelect = (
 		eventId: string,
 		item: PickerEmoji,
@@ -555,6 +606,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													onReply={() => setReplyTo(event())}
 													onEdit={() => onEdit(event())}
 													onDelete={() => onDelete(event().eventId)}
+													onRetry={() => onRetry(event().eventId)}
+													onDiscard={() => onDiscard(event().eventId)}
 													onImageLoad={() => {
 														if (itemRef) virtualizer.measureElement(itemRef);
 													}}
