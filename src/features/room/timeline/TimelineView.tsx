@@ -432,8 +432,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	/**
 	 * Move keyboard focus to the room's composer textarea. Used after
-	 * Retry / Discard since the failed-banner button the user activated
-	 * disappears and would otherwise strand focus on `document.body`.
+	 * Retry / Discard / Cancel since the failed- or pending-banner
+	 * button the user activated disappears and would otherwise strand
+	 * focus on `document.body`.
 	 *
 	 * Re-checks the room ID inside the deferred callback because RAF
 	 * runs a frame later; a room switch between the caller's guard and
