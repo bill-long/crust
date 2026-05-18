@@ -471,18 +471,20 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	};
 
 	/**
-	 * Cancel a failed local echo. The SDK fires a removed-Timeline event
+	 * Cancel a local echo. Used for both Discard (on `NOT_SENT` failed
+	 * sends) and Cancel (on in-flight `SENDING` / `QUEUED` / `ENCRYPTING`
+	 * sends). In both cases the SDK fires a removed-Timeline event
 	 * followed by `LocalEchoUpdated(CANCELLED)`; both paths drop the
 	 * event from the store idempotently.
 	 */
-	const onDiscard = (eventId: string): void => {
+	const cancelPending = (eventId: string): void => {
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
 		const originalRoomId = props.roomId;
 		try {
 			client.cancelPendingEvent(matrixEvent);
 		} catch (e) {
-			console.error("Discard failed:", e);
+			console.error("cancelPendingEvent failed:", e);
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -614,7 +616,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 													onEdit={() => onEdit(event())}
 													onDelete={() => onDelete(event().eventId)}
 													onRetry={() => onRetry(event().eventId)}
-													onDiscard={() => onDiscard(event().eventId)}
+													onDiscard={() => cancelPending(event().eventId)}
+													onCancel={() => cancelPending(event().eventId)}
 													onImageLoad={() => {
 														if (itemRef) virtualizer.measureElement(itemRef);
 													}}
