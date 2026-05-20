@@ -38,6 +38,7 @@ import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import type { CryptoAction } from "../types/crypto";
+import { stripBasePath } from "./basePath";
 import { useDecodedParams } from "./useDecodedParams";
 
 const MEMBERS_WIDTH_KEY = "crust_members_width";
@@ -81,13 +82,21 @@ const Layout: Component = () => {
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
 
+	// `location.pathname` is the full URL pathname including any Vite base
+	// (e.g. `/crust/settings/account`). Strip the base before comparing
+	// against route patterns the app defines.
+	const basePrefix = import.meta.env.BASE_URL.replace(/\/$/, "");
+	const relativePath = (): string =>
+		stripBasePath(location.pathname, basePrefix);
+
 	// Settings overlay is driven by the /settings/* route
-	const isSettingsRoute = () =>
-		location.pathname === "/settings" ||
-		location.pathname.startsWith("/settings/");
+	const isSettingsRoute = () => {
+		const p = relativePath();
+		return p === "/settings" || p.startsWith("/settings/");
+	};
 
 	const settingsTab = (): SettingsTab => {
-		const seg = location.pathname.split("/")[2];
+		const seg = relativePath().split("/")[2];
 		return tabMeta.some((t) => t.id === seg) ? (seg as SettingsTab) : "general";
 	};
 

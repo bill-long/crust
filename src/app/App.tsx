@@ -129,9 +129,14 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 const HomePage: Component = () => <Layout />;
 
 const App: Component = () => {
+	// `BASE_URL` is set by Vite from the `base` config option (default `/`,
+	// overridable via `VITE_BASE_PATH` at build time). The router wants the
+	// base without a trailing slash; "/" becomes "" which the router treats
+	// as root-hosted.
+	const routerBase = import.meta.env.BASE_URL.replace(/\/$/, "");
 	return (
 		<ConfigProvider>
-			<Router>
+			<Router base={routerBase}>
 				<Route path="/login" component={LoginPage} />
 				<Route path="/" component={AuthGuard}>
 					<Route path="/" component={SyncGate}>

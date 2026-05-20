@@ -11,7 +11,7 @@ import { normalizeConfig } from "../types/config";
 const ConfigContext = createContext<CrustConfig>();
 
 async function fetchConfig(): Promise<CrustConfig> {
-	const res = await fetch("/config.json");
+	const res = await fetch(`${import.meta.env.BASE_URL}config.json`);
 	if (!res.ok) throw new Error("Failed to load config.json");
 	const raw = await res.json();
 	return normalizeConfig(raw);

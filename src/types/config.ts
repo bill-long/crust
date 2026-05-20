@@ -67,13 +67,14 @@ function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
 }
 
 function normalizeBranding(raw: unknown): CrustConfig["branding"] {
+	const defaultLogoUrl = `${import.meta.env.BASE_URL}favicon.svg`;
 	if (typeof raw !== "object" || raw === null) {
-		return { name: "Crust", logoUrl: "/favicon.svg", primaryColor: "#e33e7f" };
+		return { name: "Crust", logoUrl: defaultLogoUrl, primaryColor: "#e33e7f" };
 	}
 	const obj = raw as Record<string, unknown>;
 	return {
 		name: typeof obj.name === "string" ? obj.name : "Crust",
-		logoUrl: typeof obj.logoUrl === "string" ? obj.logoUrl : "/favicon.svg",
+		logoUrl: typeof obj.logoUrl === "string" ? obj.logoUrl : defaultLogoUrl,
 		primaryColor:
 			typeof obj.primaryColor === "string" ? obj.primaryColor : "#e33e7f",
 	};
