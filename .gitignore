@@ -28,3 +28,6 @@ spike/
 # Debug
 npm-debug.log*
 pnpm-debug.log*
+
+.playwright-profile/
+investigate-*.mjs

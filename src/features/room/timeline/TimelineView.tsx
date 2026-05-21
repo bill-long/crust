@@ -158,10 +158,70 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		useAnimationFrameWithResizeObserver: true,
 	});
 
-	// The Solid adapter's createComputed calls virtualizer.measure() every time
-	// a reactive option (like count) changes, which clears all cached sizes.
-	// ResizeObserver won't re-fire since element dimensions haven't changed,
-	// so we must re-measure manually after every cache wipe.
+	// Override `virtualizer.measure()` to preserve `itemSizeCache`.
+	// The default behavior replaces it with an empty Map and then
+	// calls `notify(false)` — which synchronously runs the Solid
+	// adapter's `onChange`, which in turn calls `getVirtualItems`
+	// and re-derives positions from whatever sizes are in the cache
+	// at that moment. If we capture-then-restore around the default
+	// `measure()`, the restore happens *after* the layout has already
+	// been computed against an empty cache. So we must reimplement
+	// the reset directly: replace the Map reference (memo identity-
+	// invalidates so the `getMeasurements` memo re-derives), but
+	// seed the new Map with the previous entries.
+	//
+	// The Solid adapter calls `measure()` inside a createComputed on
+	// every reactive option change — including `count` — so without
+	// this every pagination prepend / append would wipe all measured
+	// row sizes and fall rows back to `estimateSize` (the brief
+	// gap/overlap reported in issue #75). Our cache is keyed by event
+	// ID via `getItemKey`, so cached measurements stay valid through
+	// index shifts.
+	//
+	// Cast: `itemSizeCache`, `laneAssignments`, and `notify` are
+	// marked private in @tanstack/virtual-core but are the only
+	// practical hooks for an in-place reset; the field shapes have
+	// been stable across recent versions.
+	const virtualizerInternal = virtualizer as unknown as {
+		itemSizeCache: Map<unknown, number>;
+		laneAssignments: Map<number, number>;
+		notify: (sync: boolean) => void;
+	};
+	virtualizer.measure = () => {
+		// Prune the preserved cache to only keys that still refer to a
+		// row in the current timeline window. Without this, entries for
+		// events evicted from the (bounded) window would accumulate
+		// indefinitely during a long session in one room. Pruning each
+		// time `measure()` is called keeps the cache size proportional
+		// to the current `events.length` (i.e. the timeline window).
+		//
+		// `getItemKey` returns the event ID when present and falls back
+		// to the numeric index for events the virtualizer asked about
+		// before the timeline store caught up. Both kinds of keys are
+		// preserved on their own terms: string keys must still refer to
+		// an event currently in the window; numeric keys must still be
+		// in range.
+		const currentIds = new Set<string>();
+		for (const ev of events) currentIds.add(ev.eventId);
+		const fresh = new Map<unknown, number>();
+		for (const [key, size] of virtualizerInternal.itemSizeCache) {
+			if (typeof key === "string") {
+				if (currentIds.has(key)) fresh.set(key, size);
+			} else if (typeof key === "number" && key >= 0 && key < events.length) {
+				fresh.set(key, size);
+			}
+		}
+		virtualizerInternal.itemSizeCache = fresh;
+		virtualizerInternal.laneAssignments = new Map();
+		virtualizerInternal.notify(false);
+	};
+
+	// Idempotent helper to remeasure currently rendered rows. With the
+	// `measure()` override above, the size cache is preserved across
+	// reactive option changes, so this is no longer strictly required
+	// for cache correctness. It's still useful as a belt-and-suspenders
+	// pass after pagination and similar events where row content may
+	// have settled in ways the ResizeObserver could miss.
 	const remeasureVisibleItems = (): void => {
 		if (!scrollRef) return;
 		const els = scrollRef.querySelectorAll<HTMLElement>("[data-index]");
@@ -679,83 +739,107 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						>
 							<For each={virtualizer.getVirtualItems()}>
 								{(vItem) => {
-									const event = () => events[vItem.index];
+									// `vItem` may briefly be undefined during the
+									// reconcile that fires when `events.length`
+									// changes (room switch, pagination) before
+									// Solid's For finishes disposing the old
+									// child; `events[vItem.index]` may also be
+									// undefined when the new events array is
+									// shorter than the old virtual-items array.
+									// The outer Show guards rendering against
+									// both; inside its callback we get a stable
+									// non-null accessor for the row's event.
 									let itemRef: HTMLDivElement | undefined;
 									return (
-										<Show when={event()}>
-											<div
-												style={{
-													position: "absolute",
-													top: 0,
-													left: 0,
-													width: "100%",
-													transform: `translateY(${vItem.start}px)`,
-												}}
-												data-index={vItem.index}
-												ref={(el) => {
-													itemRef = el;
-													virtualizer.measureElement(el);
-												}}
-											>
-												<TimelineItem
-													event={event()}
-													showHeader={shouldShowHeader(events, vItem.index)}
-													isOwnMessage={event().senderId === myUserId}
-													onReact={(key) => onReact(event().eventId, key)}
-													onReply={() => setReplyTo(event())}
-													onEdit={() => onEdit(event())}
-													onDelete={() => onDelete(event().eventId)}
-													onRetry={() => onRetry(event().eventId)}
-													onDiscard={() => cancelPending(event().eventId)}
-													onCancel={() => cancelPending(event().eventId)}
-													onRetryRedaction={() =>
-														onRetryRedaction(event().eventId)
-													}
-													onDiscardRedaction={() =>
-														onDiscardRedaction(event().eventId)
-													}
-													pendingRedactionStatus={
-														pendingRedactions[event().eventId]?.status
-													}
-													onImageLoad={() => {
-														if (itemRef) virtualizer.measureElement(itemRef);
+										<Show when={vItem ? events[vItem.index] : undefined}>
+											{(event) => (
+												<div
+													style={{
+														position: "absolute",
+														top: 0,
+														left: 0,
+														width: "100%",
+														transform: `translateY(${vItem.start}px)`,
 													}}
-													readReceipts={receipts()[event().eventId]}
-													client={client}
-													shortcodeLookup={shortcodeLookup()}
-													emoteLookup={emoteLookup()}
-													onOpenReactionPicker={() => {
-														setReactionPickerEventId(event().eventId);
-														requestAnimationFrame(() => {
-															if (itemRef) virtualizer.measureElement(itemRef);
-														});
+													data-index={vItem.index}
+													ref={(el) => {
+														itemRef = el;
+														// In Solid the JSX `data-index={vItem.index}`
+														// attribute is set via a reactive effect that
+														// runs *after* this ref callback, so at this
+														// point the element has no `data-index` yet.
+														// virtual-core's `indexFromElement` then
+														// returns -1 (silently) and every row in the
+														// same render batch collides on key=-1 in
+														// `elementsCache`, cascade-unobserving each
+														// other. Set the attribute synchronously here
+														// so `measureElement` reads the right index
+														// before invoking `observer.observe(el)`.
+														el.setAttribute("data-index", String(vItem.index));
+														virtualizer.measureElement(el);
 													}}
-												/>
-												<Show
-													when={reactionPickerEventId() === event().eventId}
 												>
-													<div class="ml-11 mt-1 mb-1">
-														<EmojiPicker
-															packs={packs()}
-															onSelect={(item) =>
-																onReactionPickerSelect(
-																	event().eventId,
-																	item,
-																	itemRef,
-																)
-															}
-															onClose={() => {
-																setReactionPickerEventId(null);
-																requestAnimationFrame(() => {
-																	if (itemRef)
-																		virtualizer.measureElement(itemRef);
-																	scrollRef?.focus();
-																});
-															}}
-														/>
-													</div>
-												</Show>
-											</div>
+													<TimelineItem
+														event={event()}
+														showHeader={shouldShowHeader(events, vItem.index)}
+														isOwnMessage={event().senderId === myUserId}
+														onReact={(key) => onReact(event().eventId, key)}
+														onReply={() => setReplyTo(event())}
+														onEdit={() => onEdit(event())}
+														onDelete={() => onDelete(event().eventId)}
+														onRetry={() => onRetry(event().eventId)}
+														onDiscard={() => cancelPending(event().eventId)}
+														onCancel={() => cancelPending(event().eventId)}
+														onRetryRedaction={() =>
+															onRetryRedaction(event().eventId)
+														}
+														onDiscardRedaction={() =>
+															onDiscardRedaction(event().eventId)
+														}
+														pendingRedactionStatus={
+															pendingRedactions[event().eventId]?.status
+														}
+														onImageLoad={() => {
+															if (itemRef) virtualizer.measureElement(itemRef);
+														}}
+														readReceipts={receipts()[event().eventId]}
+														client={client}
+														shortcodeLookup={shortcodeLookup()}
+														emoteLookup={emoteLookup()}
+														onOpenReactionPicker={() => {
+															setReactionPickerEventId(event().eventId);
+															requestAnimationFrame(() => {
+																if (itemRef)
+																	virtualizer.measureElement(itemRef);
+															});
+														}}
+													/>
+													<Show
+														when={reactionPickerEventId() === event().eventId}
+													>
+														<div class="ml-11 mt-1 mb-1">
+															<EmojiPicker
+																packs={packs()}
+																onSelect={(item) =>
+																	onReactionPickerSelect(
+																		event().eventId,
+																		item,
+																		itemRef,
+																	)
+																}
+																onClose={() => {
+																	setReactionPickerEventId(null);
+																	requestAnimationFrame(() => {
+																		if (itemRef)
+																			virtualizer.measureElement(itemRef);
+																		scrollRef?.focus();
+																	});
+																}}
+															/>
+														</div>
+													</Show>
+												</div>
+											)}
 										</Show>
 									);
 								}}
