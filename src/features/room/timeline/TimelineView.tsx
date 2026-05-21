@@ -379,12 +379,23 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				setReplyTo(null);
 				setEditingEvent(null);
 				setReactionPickerEventId(null);
-				// Force the virtualizer to recalculate after the store updates
+				// Force the virtualizer to recalculate after the store updates.
+				// `scrollToIndex(last, { align: 'end' })` uses the
+				// virtualizer's scroll-reconcile loop, which keeps re-
+				// scrolling across subsequent frames as row measurements
+				// settle. Plain `scrollTo({ top: scrollHeight })` fires
+				// too early and gets overtaken by post-measurement
+				// scrollHeight growth — the visible symptom is landing
+				// mid-timeline with a large gap above the messages after
+				// space-switch round-trips (#77).
 				requestAnimationFrame(() => {
 					virtualizer.measure();
 					remeasureVisibleItems();
-					const el = scrollRef;
-					if (el) el.scrollTo({ top: el.scrollHeight });
+					if (events.length > 0) {
+						virtualizer.scrollToIndex(events.length - 1, {
+							align: "end",
+						});
+					}
 				});
 			},
 		),
@@ -393,14 +404,27 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	// Auto-scroll to bottom when new messages arrive and user is at bottom.
 	// Suppressed when behind live (canLoadNewer) so that forward pagination
 	// via "Load newer messages" doesn't jump past the loaded page.
+	// Tracks `totalSize` in addition to `events.length` so the scroll keeps
+	// up as row sizes settle from estimates into measured values.
+	let bottomScrollRafPending = false;
 	createEffect(
 		on(
-			() => events.length,
+			() => [events.length, virtualizer.getTotalSize()] as const,
 			() => {
-				if (atBottom() && !canLoadNewer() && scrollRef) {
+				if (atBottom() && !canLoadNewer() && events.length > 0) {
+					if (bottomScrollRafPending) return;
+					bottomScrollRafPending = true;
 					requestAnimationFrame(() => {
-						const el = scrollRef;
-						if (el) el.scrollTo({ top: el.scrollHeight });
+						bottomScrollRafPending = false;
+						// Re-check `atBottom` inside the RAF — the user may
+						// have scrolled away between the effect firing and
+						// the frame running, in which case yanking them
+						// back to the bottom would be hostile.
+						if (!atBottom() || canLoadNewer()) return;
+						if (events.length === 0) return;
+						virtualizer.scrollToIndex(events.length - 1, {
+							align: "end",
+						});
 					});
 				}
 			},
