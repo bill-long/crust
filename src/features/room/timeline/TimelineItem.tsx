@@ -245,6 +245,26 @@ const TimelineItem: Component<{
 		() => props.pendingRedactionStatus === EventStatus.NOT_SENT,
 	);
 
+	// Maximum rendered dimensions for image / sticker messages. The
+	// browser combines the `width` / `height` HTML attributes (intrinsic
+	// aspect-ratio) with CSS `max-w-[min(100%,24rem)]` + `max-h-64` to
+	// reserve the *correct* layout box before the image decodes — this
+	// is what prevents the virtualizer overlap from #67. We pass the raw
+	// intrinsic dims (not pre-scaled) so the reserved box and the
+	// post-decode rendered box agree under the same CSS constraints.
+	// Fallback to a 3:2 box when intrinsic dims are missing so we
+	// reserve *something* instead of zero height.
+	const IMAGE_FALLBACK_W = 384;
+	const IMAGE_FALLBACK_H = 256;
+	const imageReserveDims = createMemo<{ w: number; h: number }>(() => {
+		const w = ev.imageWidth;
+		const h = ev.imageHeight;
+		if (w === null || h === null) {
+			return { w: IMAGE_FALLBACK_W, h: IMAGE_FALLBACK_H };
+		}
+		return { w, h };
+	});
+
 	return (
 		<div
 			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() || isRedactionFailed() ? "bg-danger-bg/20" : ""} ${isPending() || isRedactionPending() ? "opacity-60" : ""}`}
@@ -344,7 +364,7 @@ const TimelineItem: Component<{
 									<Show
 										when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
 										fallback={
-											<p class="whitespace-pre-wrap break-words text-sm text-text-secondary">
+											<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
 												{ev.body ||
 													(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
 												<Show when={ev.isEdited}>
@@ -404,7 +424,9 @@ const TimelineItem: Component<{
 								<img
 									src={ev.imageUrl ?? ""}
 									alt={ev.body?.trim() || "Image"}
-									class="mt-1 max-h-64 max-w-sm rounded"
+									width={imageReserveDims().w}
+									height={imageReserveDims().h}
+									class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
 									loading="lazy"
 									onLoad={() => props.onImageLoad?.()}
 								/>

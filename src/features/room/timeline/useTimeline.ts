@@ -25,6 +25,17 @@ export interface TimelineEvent {
 	format: string | null;
 	formattedBody: string | null;
 	imageUrl: string | null;
+	/**
+	 * Intrinsic pixel dimensions of `imageUrl`, parsed from
+	 * `content.info.w` / `content.info.h` for `m.image` / `m.sticker`
+	 * events. Used by the renderer to reserve layout space *before*
+	 * the image loads — eliminates the "row grows on image load" jump
+	 * that confuses the virtualizer on hard refresh.
+	 * Null when either dimension is missing, non-numeric, non-finite,
+	 * or non-positive.
+	 */
+	imageWidth: number | null;
+	imageHeight: number | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -79,6 +90,22 @@ function eventToTimelineEvent(
 	if (mxcUrl) {
 		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
 	}
+
+	// Image / sticker intrinsic dimensions, used by `TimelineItem` to
+	// reserve the layout box before the image decodes. Gated on
+	// msgtype / type so non-image events with an `info` block (e.g. an
+	// uncommon m.file payload that happens to carry a `w`/`h`) don't
+	// produce misleading non-null values on the event projection.
+	const isImageLike =
+		content.msgtype === "m.image" || event.getType() === "m.sticker";
+	const rawW = isImageLike ? content.info?.w : undefined;
+	const rawH = isImageLike ? content.info?.h : undefined;
+	const validW = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0;
+	const validH = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0;
+	// All-or-nothing: a single dimension can't reserve a usable
+	// aspect-ratio box, so only expose dims when both are valid.
+	const imageWidth = validW && validH ? rawW : null;
+	const imageHeight = validW && validH ? rawH : null;
 
 	// Aggregate reactions from SDK relations. Exclude failed (NOT_SENT)
 	// and cancelled relations so a failed local-echo reaction does not
@@ -148,6 +175,8 @@ function eventToTimelineEvent(
 				? content.formatted_body
 				: null,
 		imageUrl,
+		imageWidth,
+		imageHeight,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,

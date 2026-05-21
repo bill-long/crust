@@ -319,7 +319,7 @@ const MessageBody: Component<{
 		<Show
 			when={renderedHtml()}
 			fallback={
-				<p class="whitespace-pre-wrap break-words text-sm text-text-secondary">
+				<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
 					{props.body}
 					<Show when={props.isEdited}>
 						<span class="ml-1 text-xs text-text-faint">(edited)</span>
@@ -328,7 +328,7 @@ const MessageBody: Component<{
 			}
 		>
 			{(html) => (
-				<div class="message-body break-words text-sm text-text-secondary">
+				<div class="message-body break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
 					<div innerHTML={html()} />
 					<Show when={props.isEdited}>
 						<span class="ml-1 text-xs text-text-faint">(edited)</span>

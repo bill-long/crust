@@ -109,14 +109,53 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	const myUserId = client.getUserId() ?? "";
 
+	// Initial size estimate per row, used before measureElement has run
+	// against the mounted DOM node. The Solid adapter wipes cached sizes
+	// when `count` changes (e.g. on initial events arrival, pagination,
+	// or room switch), so a realistic per-event estimate dramatically
+	// reduces the gap between estimated and final positions and
+	// prevents the visual stack-up reported in #67 when image rows
+	// are still rendering above the viewport.
+	//
+	// Intentionally cheaper than `shouldShowHeader`: skips the Date
+	// allocation + `toDateString` day-boundary check. Being off by ~28px
+	// on day boundaries is negligible for a fallback estimate and keeps
+	// this hot path allocation-free.
+	const estimateRowSize = (index: number): number => {
+		const ev = events[index];
+		if (!ev) return 80;
+		const prev = index > 0 ? events[index - 1] : null;
+		const showsHeader =
+			!prev ||
+			prev.senderId !== ev.senderId ||
+			ev.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS;
+		const headerExtra = showsHeader ? 28 : 0;
+		if (ev.msgtype === "m.image" || ev.type === "m.sticker") {
+			return 280 + headerExtra;
+		}
+		if (ev.formattedBody) {
+			return 96 + headerExtra;
+		}
+		return 48 + headerExtra;
+	};
+
 	const virtualizer = createVirtualizer({
 		get count() {
 			return events.length;
 		},
 		getScrollElement: () => scrollRef ?? null,
-		estimateSize: () => 80,
+		estimateSize: estimateRowSize,
 		overscan: 10,
 		getItemKey: (index: number) => events[index]?.eventId ?? index,
+		// Defer ResizeObserver callbacks to the next animation frame.
+		// Without this, RO fires its initial measurement synchronously
+		// during the same tick the element mounts — which often coincides
+		// with the auto-scroll-to-bottom kicked off on room entry, at
+		// which point virtual-core treats the ResizeObserver fire as
+		// "during scroll" and skips the cache update entirely. The RAF
+		// wrap pushes the measurement out one frame, by which time the
+		// scroll has settled enough for the cache to update reliably.
+		useAnimationFrameWithResizeObserver: true,
 	});
 
 	// The Solid adapter's createComputed calls virtualizer.measure() every time
