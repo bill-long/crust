@@ -325,6 +325,22 @@ describe("useTimeline", () => {
 				},
 				ts: 5000,
 			},
+			// Only one dimension valid → all-or-nothing pairing means both
+			// fields must be null (can't reserve a useful aspect ratio
+			// from a single dim).
+			{
+				eventId: "$img5",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "half-dims.png",
+					url: "mxc://test/half",
+					info: { w: 800 },
+				},
+				ts: 6000,
+			},
 		]);
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
@@ -337,7 +353,7 @@ describe("useTimeline", () => {
 
 			await flushPromises();
 
-			expect(events.length).toBe(5);
+			expect(events.length).toBe(6);
 			expect(events[0].imageWidth).toBe(1920);
 			expect(events[0].imageHeight).toBe(1080);
 			expect(events[1].imageWidth).toBe(128);
@@ -350,6 +366,9 @@ describe("useTimeline", () => {
 			// NaN and negative both rejected.
 			expect(events[4].imageWidth).toBeNull();
 			expect(events[4].imageHeight).toBeNull();
+			// Half-valid: missing one dim ⇒ both null (all-or-nothing).
+			expect(events[5].imageWidth).toBeNull();
+			expect(events[5].imageHeight).toBeNull();
 		});
 	});
 

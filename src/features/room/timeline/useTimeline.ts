@@ -93,10 +93,12 @@ function eventToTimelineEvent(
 
 	const rawW = content.info?.w;
 	const rawH = content.info?.h;
-	const imageWidth =
-		typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : null;
-	const imageHeight =
-		typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : null;
+	const validW = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0;
+	const validH = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0;
+	// All-or-nothing: a single dimension can't reserve a usable
+	// aspect-ratio box, so only expose dims when both are valid.
+	const imageWidth = validW && validH ? rawW : null;
+	const imageHeight = validW && validH ? rawH : null;
 
 	// Aggregate reactions from SDK relations. Exclude failed (NOT_SENT)
 	// and cancelled relations so a failed local-echo reaction does not
