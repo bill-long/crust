@@ -14,7 +14,6 @@ import {
 	For,
 	on,
 	onCleanup,
-	onMount,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
@@ -517,9 +516,6 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
 		const isAtBottom = distFromBottom < threshold;
 		setAtBottom(isAtBottom);
-		// If the user (or a settle loop) lands back at the bottom,
-		// re-arm the "stay anchored at live end" intent.
-		if (isAtBottom) setWantsBottom(true);
 
 		// Load older messages when scrolled near the top
 		if (scrollRef.scrollTop < 200 && canLoadOlder() && !loadingOlder()) {
@@ -552,30 +548,32 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	};
 
 	// Detect deliberate upward user gestures to clear `wantsBottom`.
-	// Listeners are attached imperatively rather than via JSX `onWheel` /
-	// `onKeyDown` so the scroll-container div stays semantically passive
-	// (avoiding `lint/a11y/noStaticElementInteractions`). We can't infer
-	// "user wants to scroll up" from `onScroll`'s `distFromBottom` alone
-	// because the room-switch settle loop transiently inflates that value
-	// too, and treating that as user intent would defeat the loop.
-	onMount(() => {
-		const el = scrollRef;
-		if (!el) return;
-		const onWheel = (e: WheelEvent): void => {
-			if (e.deltaY < 0) setWantsBottom(false);
-		};
-		const onKeyDown = (e: KeyboardEvent): void => {
-			if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") {
-				setWantsBottom(false);
-			}
-		};
-		el.addEventListener("wheel", onWheel, { passive: true });
-		el.addEventListener("keydown", onKeyDown);
-		onCleanup(() => {
-			el.removeEventListener("wheel", onWheel);
-			el.removeEventListener("keydown", onKeyDown);
-		});
-	});
+	// We can't infer "user wants to scroll up" from `onScroll`'s
+	// `distFromBottom` alone because the room-switch settle loop
+	// transiently inflates that value too. These handlers are bound
+	// via Solid's `on:wheel` / `on:keydown` namespace on the scroll
+	// container below; the namespace attaches directly via
+	// `addEventListener` (bypassing `lint/a11y/noStaticElementInter
+	// actions` that fires for `onWheel`/`onKeyDown` JSX props on a
+	// non-button element) and is wired up whenever Solid mounts the
+	// element — including the case where the scroll div lives inside
+	// a `<Show>` that flips truthy after events load.
+	const onUserWheel = (e: WheelEvent): void => {
+		if (e.deltaY < 0) {
+			setWantsBottom(false);
+		} else if (e.deltaY > 0) {
+			// Wheel-down all the way back to the live end re-arms intent.
+			if (!scrollRef) return;
+			const dist =
+				scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
+			if (dist < 50) setWantsBottom(true);
+		}
+	};
+	const onUserKeyDown = (e: KeyboardEvent): void => {
+		if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") {
+			setWantsBottom(false);
+		}
+	};
 
 	const onReact = async (eventId: string, key: string): Promise<void> => {
 		const ev = events.find((e) => e.eventId === eventId);
@@ -772,6 +770,8 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						class="absolute inset-0 overflow-y-auto"
 						style={{ "overflow-anchor": "none" }}
 						onScroll={onScroll}
+						on:wheel={onUserWheel}
+						on:keydown={onUserKeyDown}
 						tabIndex={-1}
 					>
 						{/* Loading older messages indicator */}
@@ -962,6 +962,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							type="button"
 							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4"
 							onClick={() => {
+								setWantsBottom(true);
 								if (canLoadNewer()) {
 									// Ensure atBottom is true so that when jumpToLive
 									// clears canLoadNewer, the followingLive effect
