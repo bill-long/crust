@@ -96,6 +96,60 @@ body {
 	}
 }
 
+/* ─── Subtle scrollbars ───
+ * Thin track-less scrollbar that's near-invisible by default and fades in
+ * to text-disabled when the user hovers OR keyboard-focuses inside the
+ * scroll container; the actively-pointed thumb brightens to text-muted
+ * (WebKit only — Firefox `scrollbar-color` can't distinguish "hover
+ * container" from "hover thumb", so Firefox users stay at text-disabled
+ * for both states). The `:focus-within` half is what lets a keyboard-only
+ * user discover that a region is scrollable as they tab into it — not a
+ * specific WCAG requirement, but a meaningful keyboard-affordance win.
+ *
+ * Applies to every scrollable element via the universal selector so
+ * room list, member list, timeline, pickers, and settings all stay
+ * consistent.
+ *
+ * Firefox: `scrollbar-width` + `scrollbar-color`.
+ * Chromium/WebKit: `::-webkit-scrollbar*` pseudo-elements (only painted
+ * on elements that actually have a visible scrollbar, so the universal
+ * selector cost is paint-time, not selector-match cost).
+ */
+@layer base {
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: transparent transparent;
+	}
+	*:hover,
+	*:focus-within {
+		scrollbar-color: var(--color-text-disabled) transparent;
+	}
+	*::-webkit-scrollbar {
+		width: 8px;
+		height: 8px;
+	}
+	*::-webkit-scrollbar-track {
+		background: transparent;
+	}
+	*::-webkit-scrollbar-thumb {
+		background-color: transparent;
+		border-radius: 4px;
+		border: 2px solid transparent;
+		background-clip: padding-box;
+		/* Animate the appear/disappear so it's an actual fade, not a snap.
+		 * Globally short-circuited under prefers-reduced-motion by the
+		 * universal transition-duration override below. */
+		transition: background-color 150ms ease-out;
+	}
+	*:hover::-webkit-scrollbar-thumb,
+	*:focus-within::-webkit-scrollbar-thumb {
+		background-color: var(--color-text-disabled);
+	}
+	*::-webkit-scrollbar-thumb:hover {
+		background-color: var(--color-text-muted);
+	}
+}
+
 /* ─── Reduced Motion ─── */
 @media (prefers-reduced-motion: reduce) {
 	*,
@@ -109,6 +163,14 @@ body {
 		transition-duration: 0.01ms !important;
 		/* biome-ignore lint/complexity/noImportantStyles: must override all animation styles for a11y */
 		scroll-behavior: auto !important;
+	}
+	/* Split into its own rule: putting a vendor-prefixed pseudo-element in
+	 * the same comma-separated selector list above would invalidate the
+	 * entire rule in browsers that don't recognize the selector (notably
+	 * Firefox), silently regressing the reduced-motion override. */
+	*::-webkit-scrollbar-thumb {
+		/* biome-ignore lint/complexity/noImportantStyles: must override all animation styles for a11y */
+		transition-duration: 0.01ms !important;
 	}
 }
 
