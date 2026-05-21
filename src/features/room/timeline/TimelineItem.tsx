@@ -245,31 +245,24 @@ const TimelineItem: Component<{
 		() => props.pendingRedactionStatus === EventStatus.NOT_SENT,
 	);
 
-	// Reserved layout dimensions for image / sticker messages. The browser
-	// uses the `width` / `height` attributes to allocate the right amount
-	// of vertical space *before* the image decodes, which keeps the
-	// virtualizer's first-pass measurement honest and prevents the
-	// "row grows on image load" stack-up that produces visual overlap.
-	//
-	// We scale the intrinsic dimensions to fit the 384x256 display box
-	// while preserving aspect ratio; CSS (max-h-64 + max-w-full) is what
-	// actually constrains the rendered pixels, the attributes only set
-	// the aspect-ratio reserve. When intrinsic dimensions are missing
-	// (older / stripped uploads), we fall back to the full box so we
-	// reserve *something* rather than zero height.
-	const IMAGE_MAX_W = 384;
-	const IMAGE_MAX_H = 256;
-	const imageDisplayDims = createMemo<{ w: number; h: number }>(() => {
+	// Maximum rendered dimensions for image / sticker messages. The
+	// browser combines the `width` / `height` HTML attributes (intrinsic
+	// aspect-ratio) with CSS `max-w-[min(100%,24rem)]` + `max-h-64` to
+	// reserve the *correct* layout box before the image decodes — this
+	// is what prevents the virtualizer overlap from #67. We pass the raw
+	// intrinsic dims (not pre-scaled) so the reserved box and the
+	// post-decode rendered box agree under the same CSS constraints.
+	// Fallback to a 3:2 box when intrinsic dims are missing so we
+	// reserve *something* instead of zero height.
+	const IMAGE_FALLBACK_W = 384;
+	const IMAGE_FALLBACK_H = 256;
+	const imageReserveDims = createMemo<{ w: number; h: number }>(() => {
 		const w = ev.imageWidth;
 		const h = ev.imageHeight;
 		if (w === null || h === null) {
-			return { w: IMAGE_MAX_W, h: IMAGE_MAX_H };
+			return { w: IMAGE_FALLBACK_W, h: IMAGE_FALLBACK_H };
 		}
-		const scale = Math.min(IMAGE_MAX_W / w, IMAGE_MAX_H / h, 1);
-		return {
-			w: Math.max(1, Math.round(w * scale)),
-			h: Math.max(1, Math.round(h * scale)),
-		};
+		return { w, h };
 	});
 
 	return (
@@ -431,9 +424,9 @@ const TimelineItem: Component<{
 								<img
 									src={ev.imageUrl ?? ""}
 									alt={ev.body?.trim() || "Image"}
-									width={imageDisplayDims().w}
-									height={imageDisplayDims().h}
-									class="mt-1 block h-auto max-h-64 w-auto max-w-full rounded object-contain"
+									width={imageReserveDims().w}
+									height={imageReserveDims().h}
+									class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
 									loading="lazy"
 									onLoad={() => props.onImageLoad?.()}
 								/>

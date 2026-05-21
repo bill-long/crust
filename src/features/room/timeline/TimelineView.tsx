@@ -116,10 +116,20 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	// reduces the gap between estimated and final positions and
 	// prevents the visual stack-up reported in #67 when image rows
 	// are still rendering above the viewport.
+	//
+	// Intentionally cheaper than `shouldShowHeader`: skips the Date
+	// allocation + `toDateString` day-boundary check. Being off by ~28px
+	// on day boundaries is negligible for a fallback estimate and keeps
+	// this hot path allocation-free.
 	const estimateRowSize = (index: number): number => {
 		const ev = events[index];
 		if (!ev) return 80;
-		const headerExtra = shouldShowHeader(events, index) ? 28 : 0;
+		const prev = index > 0 ? events[index - 1] : null;
+		const showsHeader =
+			!prev ||
+			prev.senderId !== ev.senderId ||
+			ev.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS;
+		const headerExtra = showsHeader ? 28 : 0;
 		if (ev.msgtype === "m.image" || ev.type === "m.sticker") {
 			return 280 + headerExtra;
 		}
