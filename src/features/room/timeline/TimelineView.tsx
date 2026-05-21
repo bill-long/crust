@@ -147,33 +147,16 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		estimateSize: estimateRowSize,
 		overscan: 10,
 		getItemKey: (index: number) => events[index]?.eventId ?? index,
+		// Defer ResizeObserver callbacks to the next animation frame.
+		// Without this, RO fires its initial measurement synchronously
+		// during the same tick the element mounts — which often coincides
+		// with the auto-scroll-to-bottom kicked off on room entry, at
+		// which point virtual-core treats the ResizeObserver fire as
+		// "during scroll" and skips the cache update entirely. The RAF
+		// wrap pushes the measurement out one frame, by which time the
+		// scroll has settled enough for the cache to update reliably.
+		useAnimationFrameWithResizeObserver: true,
 	});
-
-	// Anchor scroll-position adjustments to the topmost visible row so
-	// when an above-anchor row's measured size diverges from its estimate
-	// (the most common cause of visible jumps when scrolling up through
-	// previously-unmeasured rows), the user's current reading position
-	// holds in place. Items at or below the anchor reflow normally so
-	// the cause of the shift remains visible. This matches Discord /
-	// Cinny / Virtuoso behavior; the virtualizer's default rule only
-	// catches resizes whose start is above `scrollOffset`, which misses
-	// in-viewport-but-above-eye-level remeasures and produces the
-	// gap reported in #67's follow-up.
-	//
-	// `shouldAdjustScrollPositionOnItemSizeChange` is a public field on
-	// the Virtualizer class but is missing from `VirtualizerOptions`
-	// (tanstack/virtual gap), so we assign it post-construction.
-	const topmostVisibleIndex = (): number => {
-		if (!scrollRef) return 0;
-		const offset = scrollRef.scrollTop;
-		const items = virtualizer.getVirtualItems();
-		for (const it of items) {
-			if (it.end > offset) return it.index;
-		}
-		return 0;
-	};
-	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
-		item.index < topmostVisibleIndex();
 
 	// The Solid adapter's createComputed calls virtualizer.measure() every time
 	// a reactive option (like count) changes, which clears all cached sizes.
