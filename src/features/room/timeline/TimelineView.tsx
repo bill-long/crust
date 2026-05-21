@@ -149,6 +149,32 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		getItemKey: (index: number) => events[index]?.eventId ?? index,
 	});
 
+	// Anchor scroll-position adjustments to the topmost visible row so
+	// when an above-anchor row's measured size diverges from its estimate
+	// (the most common cause of visible jumps when scrolling up through
+	// previously-unmeasured rows), the user's current reading position
+	// holds in place. Items at or below the anchor reflow normally so
+	// the cause of the shift remains visible. This matches Discord /
+	// Cinny / Virtuoso behavior; the virtualizer's default rule only
+	// catches resizes whose start is above `scrollOffset`, which misses
+	// in-viewport-but-above-eye-level remeasures and produces the
+	// gap reported in #67's follow-up.
+	//
+	// `shouldAdjustScrollPositionOnItemSizeChange` is a public field on
+	// the Virtualizer class but is missing from `VirtualizerOptions`
+	// (tanstack/virtual gap), so we assign it post-construction.
+	const topmostVisibleIndex = (): number => {
+		if (!scrollRef) return 0;
+		const offset = scrollRef.scrollTop;
+		const items = virtualizer.getVirtualItems();
+		for (const it of items) {
+			if (it.end > offset) return it.index;
+		}
+		return 0;
+	};
+	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
+		item.index < topmostVisibleIndex();
+
 	// The Solid adapter's createComputed calls virtualizer.measure() every time
 	// a reactive option (like count) changes, which clears all cached sizes.
 	// ResizeObserver won't re-fire since element dimensions haven't changed,
