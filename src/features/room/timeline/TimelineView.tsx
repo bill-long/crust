@@ -14,6 +14,7 @@ import {
 	For,
 	on,
 	onCleanup,
+	onMount,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
@@ -79,6 +80,14 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	let scrollRef: HTMLDivElement | undefined;
 	const [atBottom, setAtBottom] = createSignal(true);
+	// `wantsBottom` is the user's *intent* to stay anchored at the live
+	// end, independent of the transient `atBottom` state. Programmatic
+	// scrolls fire scroll events whose `distFromBottom` can be briefly
+	// large while measurements settle, which would flip `atBottom`
+	// false mid-settle and cause the auto-scroll effect to bail (#77
+	// symptoms). `wantsBottom` defaults true and is only cleared by a
+	// deliberate upward user gesture.
+	const [wantsBottom, setWantsBottom] = createSignal(true);
 	const [replyTo, setReplyTo] = createSignal<TimelineEvent | null>(null);
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
@@ -376,55 +385,65 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			() => props.roomId,
 			() => {
 				setAtBottom(true);
+				setWantsBottom(true);
 				setReplyTo(null);
 				setEditingEvent(null);
 				setReactionPickerEventId(null);
-				// Force the virtualizer to recalculate after the store updates.
-				// `scrollToIndex(last, { align: 'end' })` uses the
-				// virtualizer's scroll-reconcile loop, which keeps re-
-				// scrolling across subsequent frames as row measurements
-				// settle. Plain `scrollTo({ top: scrollHeight })` fires
-				// too early and gets overtaken by post-measurement
-				// scrollHeight growth — the visible symptom is landing
-				// mid-timeline with a large gap above the messages after
-				// space-switch round-trips (#77).
-				requestAnimationFrame(() => {
+				// Bypass the virtualizer's scrollToIndex reconcile loop — it
+				// exits as soon as one frame matches the (then-current)
+				// target offset, but post-room-switch the target keeps
+				// shifting for many frames as text rows mount and shrink
+				// from estimate to measured. We instead poll a settle loop
+				// for up to ~30 frames, setting scrollTop = scrollHeight on
+				// each tick. The browser clamps, so once layout settles
+				// scrollTop sticks at the max and `distFromBottom` reaches
+				// 0. The loop stops early if `wantsBottom` is cleared
+				// (user scrolled up) or if we've been stable at the bottom
+				// for several frames.
+				let stableFrames = 0;
+				let frameCount = 0;
+				const MAX_FRAMES = 60;
+				const STABLE_REQUIRED = 4;
+				const tick = () => {
+					if (!scrollRef) return;
+					if (!wantsBottom()) return;
 					virtualizer.measure();
-					remeasureVisibleItems();
-					if (events.length > 0) {
-						virtualizer.scrollToIndex(events.length - 1, {
-							align: "end",
-						});
+					const el = scrollRef;
+					const before = el.scrollTop;
+					el.scrollTo({ top: el.scrollHeight });
+					const after = el.scrollTop;
+					const dist = el.scrollHeight - after - el.clientHeight;
+					if (dist < 1 && Math.abs(after - before) < 1) {
+						stableFrames++;
+						if (stableFrames >= STABLE_REQUIRED) return;
+					} else {
+						stableFrames = 0;
 					}
-				});
+					if (++frameCount < MAX_FRAMES) requestAnimationFrame(tick);
+				};
+				requestAnimationFrame(tick);
 			},
 		),
 	);
 
-	// Auto-scroll to bottom when new messages arrive and user is at bottom.
-	// Suppressed when behind live (canLoadNewer) so that forward pagination
-	// via "Load newer messages" doesn't jump past the loaded page.
-	// Tracks `totalSize` in addition to `events.length` so the scroll keeps
-	// up as row sizes settle from estimates into measured values.
+	// Auto-scroll to bottom when new messages arrive and user wants to
+	// stay at the live end. Uses `wantsBottom` rather than `atBottom`
+	// because the latter is transiently flipped false during programmatic
+	// scroll settling. Suppressed when behind live (`canLoadNewer`) so
+	// forward pagination doesn't jump past the loaded page.
 	let bottomScrollRafPending = false;
 	createEffect(
 		on(
-			() => [events.length, virtualizer.getTotalSize()] as const,
+			() => events.length,
 			() => {
-				if (atBottom() && !canLoadNewer() && events.length > 0) {
+				if (wantsBottom() && !canLoadNewer() && events.length > 0) {
 					if (bottomScrollRafPending) return;
 					bottomScrollRafPending = true;
 					requestAnimationFrame(() => {
 						bottomScrollRafPending = false;
-						// Re-check `atBottom` inside the RAF — the user may
-						// have scrolled away between the effect firing and
-						// the frame running, in which case yanking them
-						// back to the bottom would be hostile.
-						if (!atBottom() || canLoadNewer()) return;
-						if (events.length === 0) return;
-						virtualizer.scrollToIndex(events.length - 1, {
-							align: "end",
-						});
+						if (!wantsBottom() || canLoadNewer()) return;
+						if (events.length === 0 || !scrollRef) return;
+						scrollRef.scrollTo({ top: scrollRef.scrollHeight });
 					});
 				}
 			},
@@ -496,7 +515,11 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		const threshold = 50;
 		const distFromBottom =
 			scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
-		setAtBottom(distFromBottom < threshold);
+		const isAtBottom = distFromBottom < threshold;
+		setAtBottom(isAtBottom);
+		// If the user (or a settle loop) lands back at the bottom,
+		// re-arm the "stay anchored at live end" intent.
+		if (isAtBottom) setWantsBottom(true);
 
 		// Load older messages when scrolled near the top
 		if (scrollRef.scrollTop < 200 && canLoadOlder() && !loadingOlder()) {
@@ -527,6 +550,32 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			loadNewerMessages();
 		}
 	};
+
+	// Detect deliberate upward user gestures to clear `wantsBottom`.
+	// Listeners are attached imperatively rather than via JSX `onWheel` /
+	// `onKeyDown` so the scroll-container div stays semantically passive
+	// (avoiding `lint/a11y/noStaticElementInteractions`). We can't infer
+	// "user wants to scroll up" from `onScroll`'s `distFromBottom` alone
+	// because the room-switch settle loop transiently inflates that value
+	// too, and treating that as user intent would defeat the loop.
+	onMount(() => {
+		const el = scrollRef;
+		if (!el) return;
+		const onWheel = (e: WheelEvent): void => {
+			if (e.deltaY < 0) setWantsBottom(false);
+		};
+		const onKeyDown = (e: KeyboardEvent): void => {
+			if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") {
+				setWantsBottom(false);
+			}
+		};
+		el.addEventListener("wheel", onWheel, { passive: true });
+		el.addEventListener("keydown", onKeyDown);
+		onCleanup(() => {
+			el.removeEventListener("wheel", onWheel);
+			el.removeEventListener("keydown", onKeyDown);
+		});
+	});
 
 	const onReact = async (eventId: string, key: string): Promise<void> => {
 		const ev = events.find((e) => e.eventId === eventId);
