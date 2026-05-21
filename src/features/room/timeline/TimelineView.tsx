@@ -188,17 +188,26 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		notify: (sync: boolean) => void;
 	};
 	virtualizer.measure = () => {
-		// Prune the preserved cache to only event IDs that are currently
-		// in the timeline window. Without this, entries for events
-		// evicted from the (bounded) window would accumulate
+		// Prune the preserved cache to only keys that still refer to a
+		// row in the current timeline window. Without this, entries for
+		// events evicted from the (bounded) window would accumulate
 		// indefinitely during a long session in one room. Pruning each
 		// time `measure()` is called keeps the cache size proportional
-		// to `events.length` (≤ `WINDOW_LIMIT`).
+		// to the current `events.length` (i.e. the timeline window).
+		//
+		// `getItemKey` returns the event ID when present and falls back
+		// to the numeric index for events the virtualizer asked about
+		// before the timeline store caught up. Both kinds of keys are
+		// preserved on their own terms: string keys must still refer to
+		// an event currently in the window; numeric keys must still be
+		// in range.
 		const currentIds = new Set<string>();
 		for (const ev of events) currentIds.add(ev.eventId);
 		const fresh = new Map<unknown, number>();
 		for (const [key, size] of virtualizerInternal.itemSizeCache) {
-			if (typeof key === "string" && currentIds.has(key)) {
+			if (typeof key === "string") {
+				if (currentIds.has(key)) fresh.set(key, size);
+			} else if (typeof key === "number" && key >= 0 && key < events.length) {
 				fresh.set(key, size);
 			}
 		}
