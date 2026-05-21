@@ -25,6 +25,17 @@ export interface TimelineEvent {
 	format: string | null;
 	formattedBody: string | null;
 	imageUrl: string | null;
+	/**
+	 * Intrinsic pixel dimensions of `imageUrl`, parsed from
+	 * `content.info.w` / `content.info.h` for `m.image` / `m.sticker`
+	 * events. Used by the renderer to reserve layout space *before*
+	 * the image loads — eliminates the "row grows on image load" jump
+	 * that confuses the virtualizer on hard refresh.
+	 * Null when either dimension is missing, non-numeric, non-finite,
+	 * or non-positive.
+	 */
+	imageWidth: number | null;
+	imageHeight: number | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -79,6 +90,13 @@ function eventToTimelineEvent(
 	if (mxcUrl) {
 		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
 	}
+
+	const rawW = content.info?.w;
+	const rawH = content.info?.h;
+	const imageWidth =
+		typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0 ? rawW : null;
+	const imageHeight =
+		typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0 ? rawH : null;
 
 	// Aggregate reactions from SDK relations. Exclude failed (NOT_SENT)
 	// and cancelled relations so a failed local-echo reaction does not
@@ -148,6 +166,8 @@ function eventToTimelineEvent(
 				? content.formatted_body
 				: null,
 		imageUrl,
+		imageWidth,
+		imageHeight,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,

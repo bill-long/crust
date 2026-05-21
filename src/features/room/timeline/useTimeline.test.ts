@@ -257,6 +257,102 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("extracts intrinsic image dimensions from m.image content.info", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$img1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "screenshot.png",
+					url: "mxc://test/abc",
+					info: { w: 1920, h: 1080, mimetype: "image/png", size: 12345 },
+				},
+				ts: 1000,
+			},
+			// Sticker (uses m.sticker type, not msgtype)
+			{
+				eventId: "$st1",
+				roomId: "!roomA:test",
+				sender: "@bob:test",
+				type: "m.sticker",
+				content: {
+					body: "sticker",
+					url: "mxc://test/xyz",
+					info: { w: 128, h: 256 },
+				},
+				ts: 2000,
+			},
+			// Missing info entirely
+			{
+				eventId: "$img2",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "no-dims.png",
+					url: "mxc://test/none",
+				},
+				ts: 3000,
+			},
+			// Garbage / non-numeric / zero / NaN values must not poison the field
+			{
+				eventId: "$img3",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "bad-dims.png",
+					url: "mxc://test/bad",
+					info: { w: "640", h: 0 },
+				},
+				ts: 4000,
+			},
+			{
+				eventId: "$img4",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "nan-dims.png",
+					url: "mxc://test/nan",
+					info: { w: Number.NaN, h: -10 },
+				},
+				ts: 5000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(5);
+			expect(events[0].imageWidth).toBe(1920);
+			expect(events[0].imageHeight).toBe(1080);
+			expect(events[1].imageWidth).toBe(128);
+			expect(events[1].imageHeight).toBe(256);
+			expect(events[2].imageWidth).toBeNull();
+			expect(events[2].imageHeight).toBeNull();
+			// "640" is a string, not a number → rejected. h=0 is non-positive.
+			expect(events[3].imageWidth).toBeNull();
+			expect(events[3].imageHeight).toBeNull();
+			// NaN and negative both rejected.
+			expect(events[4].imageWidth).toBeNull();
+			expect(events[4].imageHeight).toBeNull();
+		});
+	});
+
 	it("loads events when room appears after initial empty load", async () => {
 		// Room doesn't exist initially
 		const client = createMockClient(new Map());

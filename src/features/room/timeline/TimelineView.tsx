@@ -109,12 +109,32 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	const myUserId = client.getUserId() ?? "";
 
+	// Initial size estimate per row, used before measureElement has run
+	// against the mounted DOM node. The Solid adapter wipes cached sizes
+	// when `count` changes (e.g. on initial events arrival, pagination,
+	// or room switch), so a realistic per-event estimate dramatically
+	// reduces the gap between estimated and final positions and
+	// prevents the visual stack-up reported in #67 when image rows
+	// are still rendering above the viewport.
+	const estimateRowSize = (index: number): number => {
+		const ev = events[index];
+		if (!ev) return 80;
+		const headerExtra = shouldShowHeader(events, index) ? 28 : 0;
+		if (ev.msgtype === "m.image" || ev.type === "m.sticker") {
+			return 280 + headerExtra;
+		}
+		if (ev.formattedBody) {
+			return 96 + headerExtra;
+		}
+		return 48 + headerExtra;
+	};
+
 	const virtualizer = createVirtualizer({
 		get count() {
 			return events.length;
 		},
 		getScrollElement: () => scrollRef ?? null,
-		estimateSize: () => 80,
+		estimateSize: estimateRowSize,
 		overscan: 10,
 		getItemKey: (index: number) => events[index]?.eventId ?? index,
 	});
