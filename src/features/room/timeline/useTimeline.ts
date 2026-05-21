@@ -91,8 +91,15 @@ function eventToTimelineEvent(
 		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
 	}
 
-	const rawW = content.info?.w;
-	const rawH = content.info?.h;
+	// Image / sticker intrinsic dimensions, used by `TimelineItem` to
+	// reserve the layout box before the image decodes. Gated on
+	// msgtype / type so non-image events with an `info` block (e.g. an
+	// uncommon m.file payload that happens to carry a `w`/`h`) don't
+	// produce misleading non-null values on the event projection.
+	const isImageLike =
+		content.msgtype === "m.image" || event.getType() === "m.sticker";
+	const rawW = isImageLike ? content.info?.w : undefined;
+	const rawH = isImageLike ? content.info?.h : undefined;
 	const validW = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0;
 	const validH = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0;
 	// All-or-nothing: a single dimension can't reserve a usable

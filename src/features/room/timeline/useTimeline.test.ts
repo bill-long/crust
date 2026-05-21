@@ -372,6 +372,55 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("ignores info.w/h on non-image / non-sticker events", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			// m.file with a stray info.w/h — should NOT populate image dims
+			{
+				eventId: "$f1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.file",
+					body: "doc.pdf",
+					url: "mxc://test/file",
+					info: { w: 1024, h: 768 },
+				},
+				ts: 1000,
+			},
+			// m.text with bogus info block — must also be ignored
+			{
+				eventId: "$t1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "hello",
+					info: { w: 200, h: 100 },
+				},
+				ts: 2000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(2);
+			expect(events[0].imageWidth).toBeNull();
+			expect(events[0].imageHeight).toBeNull();
+			expect(events[1].imageWidth).toBeNull();
+			expect(events[1].imageHeight).toBeNull();
+		});
+	});
+
 	it("loads events when room appears after initial empty load", async () => {
 		// Room doesn't exist initially
 		const client = createMockClient(new Map());
