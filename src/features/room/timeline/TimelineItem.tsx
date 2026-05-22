@@ -208,7 +208,6 @@ const TimelineItem: Component<{
 	onRetryRedaction?: () => void;
 	onDiscardRedaction?: () => void;
 	pendingRedactionStatus?: EventStatus;
-	onImageLoad?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
 	client: MatrixClient;
 	shortcodeLookup: Map<string, ResolvedEmote>;
@@ -405,11 +404,7 @@ const TimelineItem: Component<{
 															{replyPreview}
 														</div>
 													</Show>
-													<InlineGif
-														url={gifUrl}
-														alt="GIF"
-														onSizeSettled={props.onImageLoad}
-													/>
+													<InlineGif url={gifUrl} alt="GIF" />
 													<Show when={ev.isEdited}>
 														<span class="ml-1 text-xs text-text-faint">
 															(edited)
@@ -428,7 +423,6 @@ const TimelineItem: Component<{
 									height={imageReserveDims().h}
 									class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
 									loading="lazy"
-									onLoad={() => props.onImageLoad?.()}
 								/>
 							</Show>
 						</Show>

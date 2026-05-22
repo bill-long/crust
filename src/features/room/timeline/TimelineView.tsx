@@ -859,9 +859,6 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 										pendingRedactionStatus={
 											pendingRedactions[event.eventId]?.status
 										}
-										onImageLoad={() => {
-											// Virtua auto-measures via ResizeObserver; no-op.
-										}}
 										readReceipts={receipts()[event.eventId]}
 										client={client}
 										shortcodeLookup={shortcodeLookup()}
