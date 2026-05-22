@@ -411,6 +411,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				for (const node of Array.from(mut.addedNodes)) {
 					if (node instanceof HTMLElement) ro.observe(node);
 				}
+				for (const node of Array.from(mut.removedNodes)) {
+					if (node instanceof HTMLElement) ro.unobserve(node);
+				}
 			}
 		});
 		mo.observe(el, { childList: true });
