@@ -359,10 +359,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		const tick = (): void => {
 			if (!wantsBottom()) return;
 			const el = scrollEl();
-			if (!el) {
+			if (!el?.isConnected) {
 				// Scroller not mounted yet (parent <Show> still rendering its
-				// loading fallback). Retry up to MAX_MOUNT_FRAMES so the
-				// room-entry pin survives a slow initial sync.
+				// loading fallback) — or briefly detached during a room
+				// switch that unmounts and remounts the scroller. Retry up
+				// to MAX_MOUNT_FRAMES so the room-entry pin survives a slow
+				// initial sync.
 				if (++mountFrames < MAX_MOUNT_FRAMES) requestAnimationFrame(tick);
 				return;
 			}
@@ -773,8 +775,19 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 					</div>
 					<div
 						ref={(el) => {
+							// Solid's ref callbacks are not invoked with null on
+							// unmount, so a `let` ref or signal would otherwise
+							// retain a stale reference to a detached element
+							// after the parent <Show> unmounts the scroller.
+							// Clear both on cleanup so reactive effects re-run
+							// and the settle loop's `.isConnected` check stays
+							// in sync with reality.
 							scrollRef = el;
 							setScrollEl(el);
+							onCleanup(() => {
+								if (scrollRef === el) scrollRef = undefined;
+								setScrollEl(undefined);
+							});
 						}}
 						class="absolute inset-0 overflow-y-auto"
 						style={{ "overflow-anchor": "none" }}
@@ -786,7 +799,12 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						{/* Content above the Virtualizer must be measured so its
 						    height feeds Virtua's startMargin — otherwise Virtua's
 						    scrollTop math is offset by this region's height. */}
-						<div ref={setTopAreaEl}>
+						<div
+							ref={(el) => {
+								setTopAreaEl(el);
+								onCleanup(() => setTopAreaEl(undefined));
+							}}
+						>
 							{/* Loading older messages indicator */}
 							<Show when={loadingOlder()}>
 								<div class="flex justify-center py-3">
