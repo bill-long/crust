@@ -21,6 +21,8 @@ Thumbs.db
 coverage/
 test-results/
 playwright-report/
+.vitest-attachments/
+**/__screenshots__/
 
 # Spike (throwaway testing)
 spike/

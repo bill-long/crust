@@ -120,6 +120,20 @@ VITE_BASE_PATH=/crust/ pnpm build
 [LiveKit](https://livekit.io/) (separate containers). Push notifications
 require a Web Push gateway (also separate). All optional.
 
+## Tests
+
+```bash
+pnpm test              # full suite (jsdom + browser projects)
+pnpm test:watch        # vitest in watch mode
+pnpm test:browser      # browser-mode only (headless Chromium via Playwright)
+```
+
+Most tests run in jsdom. Layout-dependent tests live in `*.browser.test.tsx`
+files and run inside a real headless Chromium so `ResizeObserver`, RAF
+cadence, and scroll math behave like a real browser. The browser project
+requires Playwright's Chromium download (`pnpm exec playwright install
+chromium`) on first run.
+
 ## License
 
 [Apache-2.0](LICENSE)
