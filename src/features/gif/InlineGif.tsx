@@ -18,21 +18,21 @@ export { extractGifUrl, isGifUrl } from "./gifUrl";
 const InlineGif: Component<{
 	url: string;
 	alt: string;
-	onSizeSettled?: () => void;
 }> = (props) => {
 	const autoDownload = createMemo(() => userSettings().autoDownloadGifs);
 	const [manuallyLoaded, setManuallyLoaded] = createSignal(false);
 	const [loadError, setLoadError] = createSignal(false);
 
-	// Reset state when URL changes; notify virtualizer after DOM swap
+	// Reset transient state when the URL changes (e.g. a message edit
+	// rewrites the GIF URL while the component instance is reused).
 	createEffect(
 		on(
 			() => props.url,
 			() => {
 				setManuallyLoaded(false);
 				setLoadError(false);
-				queueMicrotask(() => props.onSizeSettled?.());
 			},
+			{ defer: true },
 		),
 	);
 
@@ -74,11 +74,7 @@ const InlineGif: Component<{
 					class="mt-1 block max-h-64 max-w-sm rounded"
 					loading="lazy"
 					referrerPolicy="no-referrer"
-					onLoad={() => props.onSizeSettled?.()}
-					onError={() => {
-						setLoadError(true);
-						props.onSizeSettled?.();
-					}}
+					onError={() => setLoadError(true)}
 				/>
 			</Show>
 		</Show>
