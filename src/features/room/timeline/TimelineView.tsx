@@ -1,4 +1,3 @@
-import { createVirtualizer } from "@tanstack/solid-virtual";
 import {
 	EventStatus,
 	EventType,
@@ -11,11 +10,11 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
-	For,
 	on,
 	onCleanup,
 	Show,
 } from "solid-js";
+import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../../client/client";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import type { PickerEmoji } from "../../emoji/types";
@@ -78,7 +77,20 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	const emoteLookup = createMemo(() => buildEmoteLookup(packs()));
 
 	let scrollRef: HTMLDivElement | undefined;
+	// Signal mirror of scrollRef so effects depending on the element's
+	// existence (e.g. the row-growth re-anchor RO below) can attach when
+	// the parent <Show> finally mounts the scroller, rather than running
+	// once during the loading fallback and bailing forever.
+	const [scrollEl, setScrollEl] = createSignal<HTMLDivElement>();
 	const [atBottom, setAtBottom] = createSignal(true);
+	// `wantsBottom` is the user's *intent* to stay anchored at the live
+	// end, independent of the transient `atBottom` state. Programmatic
+	// scrolls fire scroll events whose `distFromBottom` can be briefly
+	// large while measurements settle, which would flip `atBottom` false
+	// mid-settle and cause the auto-scroll effect to bail (#77 symptoms).
+	// `wantsBottom` defaults true and is only cleared by a deliberate
+	// upward user gesture (wheel up, ArrowUp/PageUp/Home).
+	const [wantsBottom, setWantsBottom] = createSignal(true);
 	const [replyTo, setReplyTo] = createSignal<TimelineEvent | null>(null);
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
@@ -109,136 +121,62 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 
 	const myUserId = client.getUserId() ?? "";
 
-	// Initial size estimate per row, used before measureElement has run
-	// against the mounted DOM node. The Solid adapter wipes cached sizes
-	// when `count` changes (e.g. on initial events arrival, pagination,
-	// or room switch), so a realistic per-event estimate dramatically
-	// reduces the gap between estimated and final positions and
-	// prevents the visual stack-up reported in #67 when image rows
-	// are still rendering above the viewport.
-	//
-	// Intentionally cheaper than `shouldShowHeader`: skips the Date
-	// allocation + `toDateString` day-boundary check. Being off by ~28px
-	// on day boundaries is negligible for a fallback estimate and keeps
-	// this hot path allocation-free.
-	const estimateRowSize = (index: number): number => {
-		const ev = events[index];
-		if (!ev) return 80;
-		const prev = index > 0 ? events[index - 1] : null;
-		const showsHeader =
-			!prev ||
-			prev.senderId !== ev.senderId ||
-			ev.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS;
-		const headerExtra = showsHeader ? 28 : 0;
-		if (ev.msgtype === "m.image" || ev.type === "m.sticker") {
-			return 280 + headerExtra;
-		}
-		if (ev.formattedBody) {
-			return 96 + headerExtra;
-		}
-		return 48 + headerExtra;
-	};
+	// Virtua auto-measures rows via ResizeObserver and caches sizes by
+	// data identity, so we no longer need estimate functions, manual
+	// measure overrides, or the data-index ref hack. Backward-pagination
+	// scroll preservation is handled by toggling the `shift` prop while
+	// a load is in flight; live-end pinning is handled by the
+	// `wantsBottom` settle loop driving the scroller directly.
+	const [pagingOlder, setPagingOlder] = createSignal(false);
 
-	const virtualizer = createVirtualizer({
-		get count() {
-			return events.length;
-		},
-		getScrollElement: () => scrollRef ?? null,
-		estimateSize: estimateRowSize,
-		overscan: 10,
-		getItemKey: (index: number) => events[index]?.eventId ?? index,
-		// Defer ResizeObserver callbacks to the next animation frame.
-		// Without this, RO fires its initial measurement synchronously
-		// during the same tick the element mounts — which often coincides
-		// with the auto-scroll-to-bottom kicked off on room entry, at
-		// which point virtual-core treats the ResizeObserver fire as
-		// "during scroll" and skips the cache update entirely. The RAF
-		// wrap pushes the measurement out one frame, by which time the
-		// scroll has settled enough for the cache to update reliably.
-		useAnimationFrameWithResizeObserver: true,
+	// `startMargin` keeps Virtua's index/offset math correct when content
+	// is rendered above it inside the same scroller (loading-older
+	// spinner, "Load older messages" button, "Beginning of conversation"
+	// marker). Without this, Virtua treats scrollTop=0 as the start of
+	// its own item list — but actually scrollTop=0 is the top of the
+	// above content, which shifts every item Virtua thinks it sees by
+	// that height. The height is measured live via ResizeObserver so
+	// transitions of the above content (e.g. spinner appearing during
+	// back-pagination) stay in sync. The ref is signal-backed because
+	// the parent <Show> may render its loading fallback on first run —
+	// a non-reactive `let` ref would leave the observer permanently
+	// detached after the scroll area finally mounts.
+	const [topAreaEl, setTopAreaEl] = createSignal<HTMLDivElement>();
+	const [topAreaHeight, setTopAreaHeight] = createSignal(0);
+	createEffect(() => {
+		const el = topAreaEl();
+		if (!el) return;
+		// Synchronous initial read so Virtua doesn't get one frame of
+		// startMargin=0 before the ResizeObserver callback runs.
+		setTopAreaHeight(el.getBoundingClientRect().height);
+		const ro = new ResizeObserver((entries) => {
+			for (const entry of entries) {
+				setTopAreaHeight(entry.contentRect.height);
+			}
+		});
+		ro.observe(el);
+		onCleanup(() => ro.disconnect());
 	});
 
-	// Override `virtualizer.measure()` to preserve `itemSizeCache`.
-	// The default behavior replaces it with an empty Map and then
-	// calls `notify(false)` — which synchronously runs the Solid
-	// adapter's `onChange`, which in turn calls `getVirtualItems`
-	// and re-derives positions from whatever sizes are in the cache
-	// at that moment. If we capture-then-restore around the default
-	// `measure()`, the restore happens *after* the layout has already
-	// been computed against an empty cache. So we must reimplement
-	// the reset directly: replace the Map reference (memo identity-
-	// invalidates so the `getMeasurements` memo re-derives), but
-	// seed the new Map with the previous entries.
-	//
-	// The Solid adapter calls `measure()` inside a createComputed on
-	// every reactive option change — including `count` — so without
-	// this every pagination prepend / append would wipe all measured
-	// row sizes and fall rows back to `estimateSize` (the brief
-	// gap/overlap reported in issue #75). Our cache is keyed by event
-	// ID via `getItemKey`, so cached measurements stay valid through
-	// index shifts.
-	//
-	// Cast: `itemSizeCache`, `laneAssignments`, and `notify` are
-	// marked private in @tanstack/virtual-core but are the only
-	// practical hooks for an in-place reset; the field shapes have
-	// been stable across recent versions.
-	const virtualizerInternal = virtualizer as unknown as {
-		itemSizeCache: Map<unknown, number>;
-		laneAssignments: Map<number, number>;
-		notify: (sync: boolean) => void;
-	};
-	virtualizer.measure = () => {
-		// Prune the preserved cache to only keys that still refer to a
-		// row in the current timeline window. Without this, entries for
-		// events evicted from the (bounded) window would accumulate
-		// indefinitely during a long session in one room. Pruning each
-		// time `measure()` is called keeps the cache size proportional
-		// to the current `events.length` (i.e. the timeline window).
-		//
-		// `getItemKey` returns the event ID when present and falls back
-		// to the numeric index for events the virtualizer asked about
-		// before the timeline store caught up. Both kinds of keys are
-		// preserved on their own terms: string keys must still refer to
-		// an event currently in the window; numeric keys must still be
-		// in range.
-		const currentIds = new Set<string>();
-		for (const ev of events) currentIds.add(ev.eventId);
-		const fresh = new Map<unknown, number>();
-		for (const [key, size] of virtualizerInternal.itemSizeCache) {
-			if (typeof key === "string") {
-				if (currentIds.has(key)) fresh.set(key, size);
-			} else if (typeof key === "number" && key >= 0 && key < events.length) {
-				fresh.set(key, size);
-			}
-		}
-		virtualizerInternal.itemSizeCache = fresh;
-		virtualizerInternal.laneAssignments = new Map();
-		virtualizerInternal.notify(false);
-	};
+	// Generation token for backward-pagination requests. Incremented on
+	// every call and on room change so a stale `.finally()` from a prior
+	// request (e.g. surviving an A→B→A switch) cannot clear pagingOlder
+	// during a newer request still in flight, which would disable Virtua's
+	// shift mid-prepend and cause a scroll jump.
+	let pagingOlderToken = 0;
 
-	// Idempotent helper to remeasure currently rendered rows. With the
-	// `measure()` override above, the size cache is preserved across
-	// reactive option changes, so this is no longer strictly required
-	// for cache correctness. It's still useful as a belt-and-suspenders
-	// pass after pagination and similar events where row content may
-	// have settled in ways the ResizeObserver could miss.
-	const remeasureVisibleItems = (): void => {
-		if (!scrollRef) return;
-		const els = scrollRef.querySelectorAll<HTMLElement>("[data-index]");
-		for (const el of els) {
-			virtualizer.measureElement(el);
-		}
+	// Wraps loadOlderMessages with the pagingOlder toggle Virtua's `shift`
+	// prop reads to preserve scroll position when items are prepended.
+	// All backward-pagination entry points (onScroll, auto-pagination,
+	// manual button) must route through here — calling loadOlderMessages
+	// directly bypasses the shift and re-introduces the scroll-jump bug.
+	const paginateOlder = (): Promise<void> => {
+		const token = ++pagingOlderToken;
+		setPagingOlder(true);
+		return loadOlderMessages().finally(() => {
+			if (token === pagingOlderToken) setPagingOlder(false);
+		});
 	};
-
-	// Re-measure after events.length changes (triggers the adapter's measure())
-	createEffect(
-		on(
-			() => events.length,
-			() => {
-				queueMicrotask(remeasureVisibleItems);
-			},
-		),
-	);
 
 	// --- Read receipts ---
 	// Build a map: eventId → list of users who have read up to that event
@@ -370,39 +308,145 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		),
 	);
 
-	// Reset scroll position and reply/edit state when switching rooms
+	// Programmatic-scroll grace window. The settle loop, new-message
+	// pin RAF, and re-anchor RO all call scrollTo. Each one fires an
+	// `onScroll` event whose distFromBottom is briefly large during the
+	// transient before layout catches up. Without a grace window,
+	// onScroll's "user scrolled away → clear wantsBottom" path would
+	// fire on our own programmatic scrolls and immediately disable the
+	// pin we just applied. Grace must cover smooth-scroll animations
+	// (the bottom button uses behavior: "smooth") so the value is set
+	// high enough to span the smooth animation duration.
+	const PROGRAMMATIC_SCROLL_GRACE_MS = 250;
+	let lastProgrammaticScrollAt = 0;
+	const markProgrammaticScroll = (): void => {
+		lastProgrammaticScrollAt = performance.now();
+	};
+	const inProgrammaticScrollGrace = (): boolean =>
+		performance.now() - lastProgrammaticScrollAt < PROGRAMMATIC_SCROLL_GRACE_MS;
+
+	// Pin the scroller to the live end via a settle loop that re-applies
+	// scrollTop = scrollHeight each frame until layout stabilises (or
+	// until the user clears `wantsBottom` by scrolling up). Direct
+	// scrollTo on the scrollRef is preferred over imperative
+	// scrollToIndex calls for the settle pattern because:
+	//
+	//  - the browser clamps scrollTop to scrollHeight − clientHeight, so
+	//    "scroll to a number bigger than possible" is a self-correcting
+	//    no-op once layout is final;
+	//  - Virtua's scrollToIndex computes against currently-measured
+	//    sizes, so when rows grow after their first paint (avatars
+	//    decoding, image loads, custom emoji metrics) "end" alignment
+	//    lands short and would need a separate re-anchor mechanism;
+	//  - the loop honours messages arriving during the settle (each
+	//    tick re-reads scrollHeight), so late events still get pinned.
+	//
+	// The loop exits early when the user clears `wantsBottom`, or after
+	// being stable at the bottom for STABLE_REQUIRED frames, or after
+	// MAX_FRAMES if measurements keep shifting (defensive bound — avoids
+	// pinning the main thread on a pathological room).
+	const MAX_SETTLE_FRAMES = 60;
+	const STABLE_FRAMES_REQUIRED = 4;
+	const settleAtBottom = (): void => {
+		let stableFrames = 0;
+		let frameCount = 0;
+		const tick = (): void => {
+			if (!scrollRef) return;
+			if (!wantsBottom()) return;
+			const el = scrollRef;
+			const before = el.scrollTop;
+			markProgrammaticScroll();
+			el.scrollTo({ top: el.scrollHeight });
+			const after = el.scrollTop;
+			const dist = el.scrollHeight - after - el.clientHeight;
+			if (dist < 1 && Math.abs(after - before) < 1) {
+				stableFrames++;
+				if (stableFrames >= STABLE_FRAMES_REQUIRED) return;
+			} else {
+				stableFrames = 0;
+			}
+			if (++frameCount < MAX_SETTLE_FRAMES) requestAnimationFrame(tick);
+		};
+		requestAnimationFrame(tick);
+	};
+
+	// Re-anchor to the bottom when content above grows while the user
+	// wants to be at the live end. Virtua auto-measures rows via its own
+	// ResizeObserver; when a row grows (a late image decode without
+	// info.w/h, a custom emoji whose font metrics settle, an embed that
+	// expands) Virtua's totalSize grows, the scroller's scrollHeight
+	// grows, and — with overflow-anchor disabled — the user would drift
+	// up by that amount. We observe direct children of the scroller so
+	// any of them resizing re-pins us if intent says we belong at the
+	// bottom. MutationObserver picks up later-added children (loading
+	// spinners, manual newer/older buttons) so they don't escape the RO.
+	createEffect(() => {
+		const el = scrollEl();
+		if (!el) return;
+		const reanchor = (): void => {
+			if (!wantsBottom() || canLoadNewer()) return;
+			markProgrammaticScroll();
+			el.scrollTo({ top: el.scrollHeight });
+		};
+		const ro = new ResizeObserver(reanchor);
+		for (const child of Array.from(el.children)) {
+			if (child instanceof HTMLElement) ro.observe(child);
+		}
+		const mo = new MutationObserver((mutations) => {
+			for (const mut of mutations) {
+				for (const node of Array.from(mut.addedNodes)) {
+					if (node instanceof HTMLElement) ro.observe(node);
+				}
+			}
+		});
+		mo.observe(el, { childList: true });
+		onCleanup(() => {
+			ro.disconnect();
+			mo.disconnect();
+		});
+	});
+
+	// Reset scroll position and reply/edit state when switching rooms.
+	// Bumping pagingOlderToken invalidates any in-flight backward
+	// pagination from the previous room so its .finally() becomes a
+	// no-op for pagingOlder cleanup (otherwise it could clear shift
+	// during the new room's first prepend and cause a scroll jump).
 	createEffect(
 		on(
 			() => props.roomId,
 			() => {
 				setAtBottom(true);
+				setWantsBottom(true);
 				setReplyTo(null);
 				setEditingEvent(null);
 				setReactionPickerEventId(null);
-				// Force the virtualizer to recalculate after the store updates
-				requestAnimationFrame(() => {
-					virtualizer.measure();
-					remeasureVisibleItems();
-					const el = scrollRef;
-					if (el) el.scrollTo({ top: el.scrollHeight });
-				});
+				pagingOlderToken++;
+				setPagingOlder(false);
+				settleAtBottom();
 			},
 		),
 	);
 
-	// Auto-scroll to bottom when new messages arrive and user is at bottom.
-	// Suppressed when behind live (canLoadNewer) so that forward pagination
-	// via "Load newer messages" doesn't jump past the loaded page.
+	// Auto-scroll to bottom when new messages arrive and the user wants
+	// to stay at the live end. Uses `wantsBottom` rather than `atBottom`
+	// because the latter is transiently flipped false during programmatic
+	// scroll settling. Suppressed when behind live (`canLoadNewer`) so
+	// forward pagination via "Load newer messages" doesn't jump past the
+	// loaded page.
+	let bottomScrollRafPending = false;
 	createEffect(
 		on(
 			() => events.length,
-			() => {
-				if (atBottom() && !canLoadNewer() && scrollRef) {
-					requestAnimationFrame(() => {
-						const el = scrollRef;
-						if (el) el.scrollTo({ top: el.scrollHeight });
-					});
-				}
+			(len) => {
+				if (!wantsBottom() || canLoadNewer() || len === 0) return;
+				if (bottomScrollRafPending) return;
+				bottomScrollRafPending = true;
+				requestAnimationFrame(() => {
+					bottomScrollRafPending = false;
+					if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
+					markProgrammaticScroll();
+					scrollRef.scrollTo({ top: scrollRef.scrollHeight });
+				});
 			},
 		),
 	);
@@ -460,7 +504,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 					}
 					if (canLoadOlder() && !loadingOlder()) {
 						setAutoPageCount((c) => c + 1);
-						loadOlderMessages();
+						paginateOlder();
 					}
 				});
 			},
@@ -474,24 +518,23 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
 		setAtBottom(distFromBottom < threshold);
 
-		// Load older messages when scrolled near the top
+		// Reflect non-gesture user scrolling (touch, scrollbar drag) into
+		// `wantsBottom`. Wheel and keyboard arrow gestures are handled
+		// instantly by their own handlers; this path catches everything
+		// else by treating any scroll-away-from-bottom outside the
+		// programmatic grace as user intent. The grace window prevents
+		// the settle loop and the bottom-pin RAF from clobbering their
+		// own pins (each tick fires onScroll whose distFromBottom is
+		// briefly large before layout catches up).
+		if (!inProgrammaticScrollGrace()) {
+			setWantsBottom(distFromBottom < threshold);
+		}
+
+		// Load older messages when scrolled near the top. Virtua's `shift`
+		// prop preserves the user's viewport position when items prepend;
+		// the paginateOlder() helper toggles it for the duration of the load.
 		if (scrollRef.scrollTop < 200 && canLoadOlder() && !loadingOlder()) {
-			const prevHeight = scrollRef.scrollHeight;
-			const roomAtRequest = props.roomId;
-			loadOlderMessages().then(() => {
-				// Preserve scroll position after prepending older messages
-				// Only if we're still in the same room
-				if (scrollRef && props.roomId === roomAtRequest) {
-					requestAnimationFrame(() => {
-						virtualizer.measure();
-						remeasureVisibleItems();
-						if (scrollRef) {
-							const newHeight = scrollRef.scrollHeight;
-							scrollRef.scrollTop += newHeight - prevHeight;
-						}
-					});
-				}
-			});
+			paginateOlder();
 		}
 
 		// Load newer messages when scrolled near the bottom
@@ -501,6 +544,31 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			// false on the final page. Recomputed on next scroll event.
 			setAtBottom(false);
 			loadNewerMessages();
+		}
+	};
+
+	// Detect deliberate upward user gestures to clear `wantsBottom`. We
+	// can't infer "user wants to scroll up" from `onScroll`'s
+	// `distFromBottom` alone because the room-switch settle loop
+	// transiently inflates that value too. These handlers are wired via
+	// Solid's `on:wheel` / `on:keydown` namespace on the scroll container
+	// below; that namespace attaches directly via addEventListener
+	// (bypassing lint/a11y/noStaticElementInteractions, which fires on
+	// onWheel/onKeyDown JSX props for non-button elements).
+	const onUserWheel = (e: WheelEvent): void => {
+		if (e.deltaY < 0) {
+			setWantsBottom(false);
+		} else if (e.deltaY > 0) {
+			// Wheel-down all the way back to the live end re-arms intent.
+			if (!scrollRef) return;
+			const dist =
+				scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
+			if (dist < 50) setWantsBottom(true);
+		}
+	};
+	const onUserKeyDown = (e: KeyboardEvent): void => {
+		if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") {
+			setWantsBottom(false);
 		}
 	};
 
@@ -643,14 +711,11 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	const onReactionPickerSelect = (
 		eventId: string,
 		item: PickerEmoji,
-		itemRef: HTMLDivElement | undefined,
+		_itemRef: HTMLDivElement | undefined,
 	): void => {
 		const key = item.kind === "custom" ? item.emote.mxcUrl : item.emoji.unicode;
 		onReact(eventId, key);
 		setReactionPickerEventId(null);
-		requestAnimationFrame(() => {
-			if (itemRef) virtualizer.measureElement(itemRef);
-		});
 	};
 
 	const onEdit = (ev: TimelineEvent): void => {
@@ -695,156 +760,105 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						{paginationStatus()}
 					</div>
 					<div
-						ref={scrollRef}
+						ref={(el) => {
+							scrollRef = el;
+							setScrollEl(el);
+						}}
 						class="absolute inset-0 overflow-y-auto"
 						style={{ "overflow-anchor": "none" }}
 						onScroll={onScroll}
+						on:wheel={onUserWheel}
+						on:keydown={onUserKeyDown}
 						tabIndex={-1}
 					>
-						{/* Loading older messages indicator */}
-						<Show when={loadingOlder()}>
-							<div class="flex justify-center py-3">
-								<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
-							</div>
-						</Show>
-						{/* Manual load button when auto-pagination exhausted */}
-						<Show
-							when={
-								!loadingOlder() &&
-								canLoadOlder() &&
-								autoPageCount() >= MAX_AUTO_PAGES
-							}
-						>
-							<div class="flex justify-center py-3">
-								<button
-									type="button"
-									class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
-									onClick={() => loadOlderMessages()}
-								>
-									Load older messages
-								</button>
-							</div>
-						</Show>
-						<Show when={!loading() && !canLoadOlder() && events.length > 0}>
-							<div class="py-3 text-center text-xs text-text-faint">
-								Beginning of conversation
-							</div>
-						</Show>
-						<div
-							style={{
-								height: `${virtualizer.getTotalSize()}px`,
-								position: "relative",
-								width: "100%",
-							}}
-						>
-							<For each={virtualizer.getVirtualItems()}>
-								{(vItem) => {
-									// `vItem` may briefly be undefined during the
-									// reconcile that fires when `events.length`
-									// changes (room switch, pagination) before
-									// Solid's For finishes disposing the old
-									// child; `events[vItem.index]` may also be
-									// undefined when the new events array is
-									// shorter than the old virtual-items array.
-									// The outer Show guards rendering against
-									// both; inside its callback we get a stable
-									// non-null accessor for the row's event.
-									let itemRef: HTMLDivElement | undefined;
-									return (
-										<Show when={vItem ? events[vItem.index] : undefined}>
-											{(event) => (
-												<div
-													style={{
-														position: "absolute",
-														top: 0,
-														left: 0,
-														width: "100%",
-														transform: `translateY(${vItem.start}px)`,
-													}}
-													data-index={vItem.index}
-													ref={(el) => {
-														itemRef = el;
-														// In Solid the JSX `data-index={vItem.index}`
-														// attribute is set via a reactive effect that
-														// runs *after* this ref callback, so at this
-														// point the element has no `data-index` yet.
-														// virtual-core's `indexFromElement` then
-														// returns -1 (silently) and every row in the
-														// same render batch collides on key=-1 in
-														// `elementsCache`, cascade-unobserving each
-														// other. Set the attribute synchronously here
-														// so `measureElement` reads the right index
-														// before invoking `observer.observe(el)`.
-														el.setAttribute("data-index", String(vItem.index));
-														virtualizer.measureElement(el);
-													}}
-												>
-													<TimelineItem
-														event={event()}
-														showHeader={shouldShowHeader(events, vItem.index)}
-														isOwnMessage={event().senderId === myUserId}
-														onReact={(key) => onReact(event().eventId, key)}
-														onReply={() => setReplyTo(event())}
-														onEdit={() => onEdit(event())}
-														onDelete={() => onDelete(event().eventId)}
-														onRetry={() => onRetry(event().eventId)}
-														onDiscard={() => cancelPending(event().eventId)}
-														onCancel={() => cancelPending(event().eventId)}
-														onRetryRedaction={() =>
-															onRetryRedaction(event().eventId)
-														}
-														onDiscardRedaction={() =>
-															onDiscardRedaction(event().eventId)
-														}
-														pendingRedactionStatus={
-															pendingRedactions[event().eventId]?.status
-														}
-														onImageLoad={() => {
-															if (itemRef) virtualizer.measureElement(itemRef);
-														}}
-														readReceipts={receipts()[event().eventId]}
-														client={client}
-														shortcodeLookup={shortcodeLookup()}
-														emoteLookup={emoteLookup()}
-														onOpenReactionPicker={() => {
-															setReactionPickerEventId(event().eventId);
-															requestAnimationFrame(() => {
-																if (itemRef)
-																	virtualizer.measureElement(itemRef);
-															});
-														}}
-													/>
-													<Show
-														when={reactionPickerEventId() === event().eventId}
-													>
-														<div class="ml-11 mt-1 mb-1">
-															<EmojiPicker
-																packs={packs()}
-																onSelect={(item) =>
-																	onReactionPickerSelect(
-																		event().eventId,
-																		item,
-																		itemRef,
-																	)
-																}
-																onClose={() => {
-																	setReactionPickerEventId(null);
-																	requestAnimationFrame(() => {
-																		if (itemRef)
-																			virtualizer.measureElement(itemRef);
-																		scrollRef?.focus();
-																	});
-																}}
-															/>
-														</div>
-													</Show>
-												</div>
-											)}
-										</Show>
-									);
-								}}
-							</For>
+						{/* Content above the Virtualizer must be measured so its
+						    height feeds Virtua's startMargin — otherwise Virtua's
+						    scrollTop math is offset by this region's height. */}
+						<div ref={setTopAreaEl}>
+							{/* Loading older messages indicator */}
+							<Show when={loadingOlder()}>
+								<div class="flex justify-center py-3">
+									<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+								</div>
+							</Show>
+							{/* Manual load button when auto-pagination exhausted */}
+							<Show
+								when={
+									!loadingOlder() &&
+									canLoadOlder() &&
+									autoPageCount() >= MAX_AUTO_PAGES
+								}
+							>
+								<div class="flex justify-center py-3">
+									<button
+										type="button"
+										class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
+										onClick={() => paginateOlder()}
+									>
+										Load older messages
+									</button>
+								</div>
+							</Show>
+							<Show when={!loading() && !canLoadOlder() && events.length > 0}>
+								<div class="py-3 text-center text-xs text-text-faint">
+									Beginning of conversation
+								</div>
+							</Show>
 						</div>
+						<Virtualizer
+							scrollRef={scrollRef}
+							data={events}
+							shift={pagingOlder()}
+							startMargin={topAreaHeight()}
+						>
+							{(event, indexAcc) => (
+								<div>
+									<TimelineItem
+										event={event}
+										showHeader={shouldShowHeader(events, indexAcc())}
+										isOwnMessage={event.senderId === myUserId}
+										onReact={(key) => onReact(event.eventId, key)}
+										onReply={() => setReplyTo(event)}
+										onEdit={() => onEdit(event)}
+										onDelete={() => onDelete(event.eventId)}
+										onRetry={() => onRetry(event.eventId)}
+										onDiscard={() => cancelPending(event.eventId)}
+										onCancel={() => cancelPending(event.eventId)}
+										onRetryRedaction={() => onRetryRedaction(event.eventId)}
+										onDiscardRedaction={() => onDiscardRedaction(event.eventId)}
+										pendingRedactionStatus={
+											pendingRedactions[event.eventId]?.status
+										}
+										onImageLoad={() => {
+											// Virtua auto-measures via ResizeObserver; no-op.
+										}}
+										readReceipts={receipts()[event.eventId]}
+										client={client}
+										shortcodeLookup={shortcodeLookup()}
+										emoteLookup={emoteLookup()}
+										onOpenReactionPicker={() => {
+											setReactionPickerEventId(event.eventId);
+										}}
+									/>
+									<Show when={reactionPickerEventId() === event.eventId}>
+										<div class="ml-11 mt-1 mb-1">
+											<EmojiPicker
+												packs={packs()}
+												onSelect={(item) =>
+													onReactionPickerSelect(event.eventId, item, undefined)
+												}
+												onClose={() => {
+													setReactionPickerEventId(null);
+													requestAnimationFrame(() => {
+														scrollRef?.focus();
+													});
+												}}
+											/>
+										</div>
+									</Show>
+								</div>
+							)}
+						</Virtualizer>
 						{/* Loading newer messages indicator */}
 						<Show when={loadingNewer()}>
 							<div
@@ -889,6 +903,10 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							type="button"
 							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4"
 							onClick={() => {
+								// User-initiated jump back to the live end re-arms
+								// `wantsBottom` so the settle loop + new-message
+								// effect resume pinning when fresh events arrive.
+								setWantsBottom(true);
 								if (canLoadNewer()) {
 									// Ensure atBottom is true so that when jumpToLive
 									// clears canLoadNewer, the followingLive effect
@@ -898,11 +916,13 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 									jumpToLive();
 								} else {
 									const el = scrollRef;
-									if (el)
+									if (el) {
+										markProgrammaticScroll();
 										el.scrollTo({
 											top: el.scrollHeight,
 											behavior: "smooth",
 										});
+									}
 								}
 							}}
 							aria-label={
