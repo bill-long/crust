@@ -346,14 +346,26 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	// MAX_FRAMES if measurements keep shifting (defensive bound — avoids
 	// pinning the main thread on a pathological room).
 	const MAX_SETTLE_FRAMES = 60;
+	// Separate budget for the pre-mount wait so a slow initial sync
+	// doesn't eat into the settle budget once the scroller appears.
+	// 30 frames (~500ms at 60fps) is generous — if the parent <Show>
+	// takes longer than that to mount, layout has bigger problems.
+	const MAX_MOUNT_FRAMES = 30;
 	const STABLE_FRAMES_REQUIRED = 4;
 	const settleAtBottom = (): void => {
 		let stableFrames = 0;
-		let frameCount = 0;
+		let mountFrames = 0;
+		let settleFrames = 0;
 		const tick = (): void => {
-			if (!scrollRef) return;
 			if (!wantsBottom()) return;
-			const el = scrollRef;
+			const el = scrollEl();
+			if (!el) {
+				// Scroller not mounted yet (parent <Show> still rendering its
+				// loading fallback). Retry up to MAX_MOUNT_FRAMES so the
+				// room-entry pin survives a slow initial sync.
+				if (++mountFrames < MAX_MOUNT_FRAMES) requestAnimationFrame(tick);
+				return;
+			}
 			const before = el.scrollTop;
 			markProgrammaticScroll();
 			el.scrollTo({ top: el.scrollHeight });
@@ -365,7 +377,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			} else {
 				stableFrames = 0;
 			}
-			if (++frameCount < MAX_SETTLE_FRAMES) requestAnimationFrame(tick);
+			if (++settleFrames < MAX_SETTLE_FRAMES) requestAnimationFrame(tick);
 		};
 		requestAnimationFrame(tick);
 	};
