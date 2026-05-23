@@ -56,7 +56,8 @@ providing a provider API key. Content rating defaults to `g`.
 For local development, copy `.env.example` to `.env.local` and set
 `VITE_GIF_API_KEY` (and `VITE_GIF_ENABLED=true`) there instead of editing
 `config.json` — `.env.local` is gitignored so your key won't be committed.
-Any `VITE_GIF_*` variable overrides the matching field in `config.json`.
+Any valid `VITE_GIF_*` value overrides the matching field in `config.json`;
+unset, empty, or otherwise invalid values are ignored.
 
 ## What Crust is not
 

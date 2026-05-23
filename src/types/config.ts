@@ -43,7 +43,7 @@ function applyGifEnvOverrides(base: GifConfig): GifConfig {
 		result.apiKey = apiKey.trim();
 	}
 
-	const provider = env.VITE_GIF_PROVIDER;
+	const provider = env.VITE_GIF_PROVIDER?.trim();
 	if (typeof provider === "string" && GIF_PROVIDERS.includes(provider)) {
 		result.provider = provider as GifProvider;
 	}
@@ -54,7 +54,7 @@ function applyGifEnvOverrides(base: GifConfig): GifConfig {
 	const trending = parseEnvBool(env.VITE_GIF_TRENDING_ON_OPEN);
 	if (trending !== undefined) result.trendingOnOpen = trending;
 
-	const maxRating = env.VITE_GIF_MAX_RATING;
+	const maxRating = env.VITE_GIF_MAX_RATING?.trim();
 	if (typeof maxRating === "string" && GIF_RATINGS.includes(maxRating)) {
 		result.maxRating = maxRating as GifRating;
 	}

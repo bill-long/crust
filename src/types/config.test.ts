@@ -65,6 +65,14 @@ describe("normalizeConfig gif env overrides", () => {
 		expect(normalizeConfig({ gif: { ...baseGif } }).gif.provider).toBe("giphy");
 	});
 
+	it("trims surrounding whitespace from VITE_GIF_PROVIDER and VITE_GIF_MAX_RATING", () => {
+		vi.stubEnv("VITE_GIF_PROVIDER", "  klipy  ");
+		vi.stubEnv("VITE_GIF_MAX_RATING", "  pg  ");
+		const cfg = normalizeConfig({ gif: { ...baseGif } });
+		expect(cfg.gif.provider).toBe("klipy");
+		expect(cfg.gif.maxRating).toBe("pg");
+	});
+
 	it("overrides maxRating only when value is in the allowlist", () => {
 		vi.stubEnv("VITE_GIF_MAX_RATING", "pg-13");
 		expect(normalizeConfig({ gif: { ...baseGif } }).gif.maxRating).toBe(
