@@ -53,6 +53,11 @@ Crust resolves this honestly:
 GIF search is **off by default**. The operator enables it in `config.json` by
 providing a provider API key. Content rating defaults to `g`.
 
+For local development, copy `.env.example` to `.env.local` and set
+`VITE_GIF_API_KEY` (and `VITE_GIF_ENABLED=true`) there instead of editing
+`config.json` — `.env.local` is gitignored so your key won't be committed.
+Any `VITE_GIF_*` variable overrides the matching field in `config.json`.
+
 ## What Crust is not
 
 - A mobile app (responsive enough to use, not optimized)
