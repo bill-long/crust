@@ -404,7 +404,12 @@ const TimelineItem: Component<{
 															{replyPreview}
 														</div>
 													</Show>
-													<InlineGif url={gifUrl} alt="GIF" />
+													<InlineGif
+														url={gifUrl}
+														alt="GIF"
+														width={ev.imageWidth}
+														height={ev.imageHeight}
+													/>
 													<Show when={ev.isEdited}>
 														<span class="ml-1 text-xs text-text-faint">
 															(edited)
