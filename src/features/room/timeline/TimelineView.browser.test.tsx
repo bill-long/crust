@@ -74,7 +74,7 @@ function manyEvents(n: number, prefix = "$evt"): TimelineEvent[] {
 
 function getScroller(container: HTMLElement): HTMLElement {
 	const el = container.querySelector<HTMLElement>(
-		"div.absolute.inset-0.overflow-y-auto",
+		'[data-testid="timeline-scroller"]',
 	);
 	if (!el) throw new Error("scroller not found");
 	return el;
@@ -140,6 +140,10 @@ function mount(initialRoomId: string) {
 
 const frame = (): Promise<void> =>
 	new Promise((r) => requestAnimationFrame(() => r()));
+// Fixed sleep, used ONLY for "verify a snap did NOT happen" assertions.
+// You can't poll for a non-event, so we give the bottom-pin RAF a bounded
+// window to (not) fire, then assert position is unchanged. Do not use for
+// "wait until X is true" — use expect.poll for those.
 const wait = (ms: number): Promise<void> =>
 	new Promise((r) => setTimeout(r, ms));
 
@@ -320,8 +324,15 @@ describe("TimelineView (browser)", () => {
 				interval: 50,
 			})
 			.toBeGreaterThan(0);
-		// Wait for prepend + relayout.
-		await wait(150);
+		// Wait for the prepended rows to land in the DOM and Virtua to
+		// relayout (rather than a fixed sleep).
+		await expect
+			.poll(
+				() =>
+					scroller.querySelectorAll<HTMLElement>(":scope > div > div").length,
+				{ timeout: 2000, interval: 50 },
+			)
+			.toBeGreaterThan(items.length);
 		// Re-find the anchor row in the (now larger) item list.
 		const refoundItems = Array.from(
 			scroller.querySelectorAll<HTMLElement>(":scope > div > div"),
@@ -436,6 +447,16 @@ describe("TimelineView (browser)", () => {
 		// Scroll up to surface the bottom button.
 		scroller.scrollTop = 0;
 		scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+		// Confirm the scroll-up actually committed before clicking the
+		// button — otherwise the "wait for distFromBottom < 2" poll
+		// below could pass immediately on a stale read, and we'd append
+		// while jumpToLive's smooth scroll is still in flight.
+		await expect
+			.poll(() => distFromBottom(scroller), {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toBeGreaterThan(100);
 		await expect
 			.poll(
 				() =>
@@ -449,7 +470,15 @@ describe("TimelineView (browser)", () => {
 			'button[aria-label="Scroll to bottom"]',
 		);
 		btn?.click();
-		await wait(400);
+		// Wait for jumpToLive's scroll animation to settle at the bottom
+		// before appending — otherwise the append could race the in-
+		// flight scroll and mask the rearm assertion.
+		await expect
+			.poll(() => distFromBottom(scroller), {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toBeLessThan(2);
 		// Append — with intent re-armed, scroller should snap back.
 		harness.appendEvents(roomId, [
 			mkEvent("$after-jump", "after jump", 1700000999999),

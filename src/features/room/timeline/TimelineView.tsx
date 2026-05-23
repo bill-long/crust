@@ -798,6 +798,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 						on:wheel={onUserWheel}
 						on:keydown={onUserKeyDown}
 						tabIndex={-1}
+						data-testid="timeline-scroller"
 					>
 						{/* Content above the Virtualizer must be measured so its
 						    height feeds Virtua's startMargin — otherwise Virtua's

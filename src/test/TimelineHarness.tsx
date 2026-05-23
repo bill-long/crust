@@ -107,6 +107,10 @@ export function makeTimelineHarnessRef(): TimelineHarness {
 			snapshots.clear();
 			loadOlderHandlers.clear();
 			loadOlderCounts.clear();
+			// Clear listeners too — if a previous test threw before Solid's
+			// onCleanup ran, its listener would otherwise leak into later
+			// tests and fire sync() on a disposed reactive owner.
+			listeners.clear();
 		},
 		__build() {
 			const useTimelineMock = ((
