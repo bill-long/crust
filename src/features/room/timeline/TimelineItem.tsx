@@ -264,6 +264,29 @@ const TimelineItem: Component<{
 		return { w, h };
 	});
 
+	// Cap visible read-receipt avatars and roll the rest into a "+N"
+	// chip so busy rooms don't render a sprawling row of small circles.
+	// Memoized so the slice/string-join work only re-runs when the
+	// receipt list actually changes — not on every reactive read.
+	const MAX_VISIBLE_RECEIPTS = 5;
+	const MAX_NAMED_OVERFLOW = 10;
+	const receiptDisplay = createMemo(() => {
+		const all = props.readReceipts ?? [];
+		const visible = all.slice(0, MAX_VISIBLE_RECEIPTS);
+		const overflow = all.slice(MAX_VISIBLE_RECEIPTS);
+		if (overflow.length === 0) {
+			return { visible, overflowCount: 0, overflowLabel: "" };
+		}
+		const namedOverflow = overflow.slice(0, MAX_NAMED_OVERFLOW);
+		const unnamedCount = overflow.length - namedOverflow.length;
+		const namesPart = namedOverflow.map((r) => r.displayName).join(", ");
+		const overflowLabel =
+			unnamedCount > 0
+				? `Also read by ${namesPart}, and ${unnamedCount} more`
+				: `Also read by ${namesPart}`;
+		return { visible, overflowCount: overflow.length, overflowLabel };
+	});
+
 	return (
 		<div
 			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() || isRedactionFailed() ? "bg-danger-bg/20" : ""} ${isPending() || isRedactionPending() ? "opacity-60" : ""}`}
@@ -538,10 +561,13 @@ const TimelineItem: Component<{
 					</div>
 				</Show>
 
-				{/* Read receipts */}
+				{/* Read receipts — cap visible avatars and overflow to "+N"
+				    so multi-hundred-member rooms don't render a sprawling
+				    row of small circles. Cap is intentionally small (5);
+				    the chip's aria-label exposes the remaining names. */}
 				<Show when={props.readReceipts && props.readReceipts.length > 0}>
 					<div class="mt-0.5 flex gap-0.5">
-						<For each={props.readReceipts}>
+						<For each={receiptDisplay().visible}>
 							{(receipt) => (
 								<div
 									class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-muted"
@@ -553,6 +579,16 @@ const TimelineItem: Component<{
 								</div>
 							)}
 						</For>
+						<Show when={receiptDisplay().overflowCount > 0}>
+							<div
+								class="flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-3 px-1 text-[8px] font-semibold text-text-muted"
+								title={receiptDisplay().overflowLabel}
+								role="img"
+								aria-label={receiptDisplay().overflowLabel}
+							>
+								+{receiptDisplay().overflowCount}
+							</div>
+						</Show>
 					</div>
 				</Show>
 			</div>
