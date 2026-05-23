@@ -20,27 +20,76 @@ const defaultGifConfig: GifConfig = {
 	maxRating: "g",
 };
 
+function parseEnvBool(raw: string | undefined): boolean | undefined {
+	if (typeof raw !== "string") return undefined;
+	const v = raw.trim().toLowerCase();
+	if (v === "true" || v === "1") return true;
+	if (v === "false" || v === "0") return false;
+	return undefined;
+}
+
+/**
+ * Apply VITE_GIF_* env var overrides on top of the operator's config.json.
+ * Intended for local development: put VITE_GIF_API_KEY=... in .env.local
+ * (gitignored) instead of editing config.json. Vite inlines these at build
+ * time, so setting them during `pnpm build` will bake values into the bundle.
+ */
+function applyGifEnvOverrides(base: GifConfig): GifConfig {
+	const env = import.meta.env as Record<string, string | undefined>;
+	const result: GifConfig = { ...base };
+
+	const apiKey = env.VITE_GIF_API_KEY;
+	if (typeof apiKey === "string" && apiKey.trim().length > 0) {
+		result.apiKey = apiKey.trim();
+	}
+
+	const provider = env.VITE_GIF_PROVIDER?.trim();
+	if (typeof provider === "string" && GIF_PROVIDERS.includes(provider)) {
+		result.provider = provider as GifProvider;
+	}
+
+	const enabled = parseEnvBool(env.VITE_GIF_ENABLED);
+	if (enabled !== undefined) result.enabled = enabled;
+
+	const trending = parseEnvBool(env.VITE_GIF_TRENDING_ON_OPEN);
+	if (trending !== undefined) result.trendingOnOpen = trending;
+
+	const maxRating = env.VITE_GIF_MAX_RATING?.trim();
+	if (typeof maxRating === "string" && GIF_RATINGS.includes(maxRating)) {
+		result.maxRating = maxRating as GifRating;
+	}
+
+	return result;
+}
+
 function normalizeGifConfig(raw: unknown): GifConfig {
-	if (typeof raw !== "object" || raw === null) return { ...defaultGifConfig };
-	const obj = raw as Record<string, unknown>;
-	return {
-		enabled:
-			typeof obj.enabled === "boolean" ? obj.enabled : defaultGifConfig.enabled,
-		provider: GIF_PROVIDERS.includes(obj.provider as string)
-			? (obj.provider as GifProvider)
-			: defaultGifConfig.provider,
-		apiKey:
-			typeof obj.apiKey === "string"
-				? obj.apiKey.trim()
-				: defaultGifConfig.apiKey,
-		trendingOnOpen:
-			typeof obj.trendingOnOpen === "boolean"
-				? obj.trendingOnOpen
-				: defaultGifConfig.trendingOnOpen,
-		maxRating: GIF_RATINGS.includes(obj.maxRating as string)
-			? (obj.maxRating as GifRating)
-			: defaultGifConfig.maxRating,
-	};
+	const base: GifConfig =
+		typeof raw !== "object" || raw === null
+			? { ...defaultGifConfig }
+			: (() => {
+					const obj = raw as Record<string, unknown>;
+					return {
+						enabled:
+							typeof obj.enabled === "boolean"
+								? obj.enabled
+								: defaultGifConfig.enabled,
+						provider: GIF_PROVIDERS.includes(obj.provider as string)
+							? (obj.provider as GifProvider)
+							: defaultGifConfig.provider,
+						apiKey:
+							typeof obj.apiKey === "string"
+								? obj.apiKey.trim()
+								: defaultGifConfig.apiKey,
+						trendingOnOpen:
+							typeof obj.trendingOnOpen === "boolean"
+								? obj.trendingOnOpen
+								: defaultGifConfig.trendingOnOpen,
+						maxRating: GIF_RATINGS.includes(obj.maxRating as string)
+							? (obj.maxRating as GifRating)
+							: defaultGifConfig.maxRating,
+					};
+				})();
+	return applyGifEnvOverrides(base);
 }
 
 export interface CrustConfig {
