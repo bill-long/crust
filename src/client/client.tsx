@@ -53,6 +53,13 @@ interface ClientContextValue {
 
 const ClientContext = createContext<ClientContextValue>();
 
+/**
+ * Exported for the browser-mode test harness in `src/test/`. Production
+ * code must continue to use `<ClientProvider>` and `useClient()` —
+ * importing the context directly bypasses the SDK / crypto lifecycle.
+ */
+export { ClientContext };
+
 export const ClientProvider: ParentComponent<{ session: Session }> = (
 	props,
 ) => {

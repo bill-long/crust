@@ -1,4 +1,5 @@
 import tailwindcss from "@tailwindcss/vite";
+import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
@@ -18,7 +19,31 @@ export default defineConfig({
 	base: basePath,
 	plugins: [solid(), tailwindcss()],
 	test: {
-		environment: "jsdom",
 		globals: true,
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: "unit",
+					environment: "jsdom",
+					include: ["src/**/*.test.{ts,tsx}"],
+					exclude: ["src/**/*.browser.test.{ts,tsx}"],
+				},
+			},
+			{
+				extends: true,
+				test: {
+					name: "browser",
+					include: ["src/**/*.browser.test.{ts,tsx}"],
+					setupFiles: ["src/test/browserSetup.ts"],
+					browser: {
+						enabled: true,
+						provider: playwright(),
+						headless: true,
+						instances: [{ browser: "chromium" }],
+					},
+				},
+			},
+		],
 	},
 });

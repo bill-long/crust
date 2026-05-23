@@ -12,7 +12,8 @@
 		"lint:fix": "biome check --write .",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"test:browser": "vitest run --project browser"
 	},
 	"dependencies": {
 		"@kobalte/core": "^0.13.11",
@@ -28,11 +29,14 @@
 		"@biomejs/biome": "^2.4.13",
 		"@solidjs/testing-library": "^0.8.10",
 		"@tailwindcss/vite": "^4.2.4",
+		"@vitest/browser": "^4.1.7",
+		"@vitest/browser-playwright": "^4.1.7",
 		"jsdom": "^26.0.0",
+		"playwright": "^1.60.0",
 		"tailwindcss": "^4.2.4",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.10",
 		"vite-plugin-solid": "^2.11.12",
-		"vitest": "^4.1.5"
+		"vitest": "^4.1.7"
 	}
 }
