@@ -241,6 +241,13 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 				displayName: member.name?.trim() || member.userId,
 			});
 		}
+		// Sort each per-event receipt list by userId for stable ordering.
+		// Per-event lists are typically <10 entries, so this is far cheaper
+		// than sorting the full room member list (which can be 1000s) on
+		// every receipt tick.
+		for (const id in map) {
+			map[id].sort((a, b) => a.userId.localeCompare(b.userId));
+		}
 		return map;
 	});
 
