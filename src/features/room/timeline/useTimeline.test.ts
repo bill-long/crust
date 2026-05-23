@@ -421,6 +421,88 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("extracts intrinsic dimensions from m.text GIF messages with info block", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			// Composer-sent GIF: m.text body with recognized provider URL
+			// and info.w/h attached so the receiver can reserve the box.
+			{
+				eventId: "$g1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "https://media.giphy.com/media/abc/giphy.gif",
+					info: { w: 480, h: 270, mimetype: "image/gif" },
+				},
+				ts: 1000,
+			},
+			// Reply-prefixed GIF: the reply fallback prefix must still be
+			// stripped before the GIF URL check, otherwise the row would
+			// miss its dimensions on every reply.
+			{
+				eventId: "$g2",
+				roomId: "!roomA:test",
+				sender: "@bob:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "> <@alice:test> hi\n\nhttps://static.klipy.com/gifs/x.gif",
+					info: { w: 320, h: 240 },
+				},
+				ts: 2000,
+			},
+			// Inbound foreign GIF without dims: behaviour must be unchanged
+			// (dims remain null; scroller RO handles re-anchor on load).
+			{
+				eventId: "$g3",
+				roomId: "!roomA:test",
+				sender: "@bob:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "https://media.tenor.com/y.gif",
+				},
+				ts: 3000,
+			},
+			// m.text with info but body is NOT a GIF URL → dims ignored
+			// (guards against the gating widening too far).
+			{
+				eventId: "$g4",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "just a regular message",
+					info: { w: 999, h: 999 },
+				},
+				ts: 4000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(4);
+			expect(events[0].imageWidth).toBe(480);
+			expect(events[0].imageHeight).toBe(270);
+			expect(events[1].imageWidth).toBe(320);
+			expect(events[1].imageHeight).toBe(240);
+			expect(events[2].imageWidth).toBeNull();
+			expect(events[2].imageHeight).toBeNull();
+			expect(events[3].imageWidth).toBeNull();
+			expect(events[3].imageHeight).toBeNull();
+		});
+	});
+
 	it("loads events when room appears after initial empty load", async () => {
 		// Room doesn't exist initially
 		const client = createMockClient(new Map());

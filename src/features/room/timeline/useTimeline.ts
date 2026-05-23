@@ -13,6 +13,7 @@ import {
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
+import { extractGifUrl } from "../../gif/gifUrl";
 
 export interface TimelineEvent {
 	eventId: string;
@@ -96,8 +97,16 @@ function eventToTimelineEvent(
 	// msgtype / type so non-image events with an `info` block (e.g. an
 	// uncommon m.file payload that happens to carry a `w`/`h`) don't
 	// produce misleading non-null values on the event projection.
+	// Also accept m.text messages whose entire body is a recognized
+	// GIF provider URL (our Composer attaches `info.w/h` to those so
+	// the GIF row can reserve its box exactly like m.image does).
+	const bodyForGifCheck = typeof content.body === "string" ? content.body : "";
+	const isGifText =
+		content.msgtype === "m.text" && extractGifUrl(bodyForGifCheck) !== null;
 	const isImageLike =
-		content.msgtype === "m.image" || event.getType() === "m.sticker";
+		content.msgtype === "m.image" ||
+		event.getType() === "m.sticker" ||
+		isGifText;
 	const rawW = isImageLike ? content.info?.w : undefined;
 	const rawH = isImageLike ? content.info?.h : undefined;
 	const validW = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0;

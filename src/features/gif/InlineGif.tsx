@@ -18,6 +18,17 @@ export { extractGifUrl, isGifUrl } from "./gifUrl";
 const InlineGif: Component<{
 	url: string;
 	alt: string;
+	/**
+	 * Intrinsic pixel dimensions of the GIF, when known (sender-side
+	 * Composer attaches these via `info.w/h`). When provided, the img
+	 * is rendered with `width`/`height` attributes so the browser
+	 * reserves the correct aspect-ratio box before the GIF decodes,
+	 * eliminating the row-grows-on-load shift. When null/undefined,
+	 * the img renders without dims and the timeline scroller's
+	 * row-growth ResizeObserver handles late re-anchoring instead.
+	 */
+	width?: number | null;
+	height?: number | null;
 }> = (props) => {
 	const autoDownload = createMemo(() => userSettings().autoDownloadGifs);
 	const [manuallyLoaded, setManuallyLoaded] = createSignal(false);
@@ -71,7 +82,9 @@ const InlineGif: Component<{
 				<img
 					src={props.url}
 					alt={props.alt}
-					class="mt-1 block max-h-64 max-w-sm rounded"
+					width={props.width ?? undefined}
+					height={props.height ?? undefined}
+					class="mt-1 block h-auto w-auto max-h-64 max-w-sm rounded"
 					loading="lazy"
 					referrerPolicy="no-referrer"
 					onError={() => setLoadError(true)}

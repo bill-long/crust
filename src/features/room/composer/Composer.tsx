@@ -260,10 +260,20 @@ const Composer: Component<{
 	async function onGifSelect(gif: GifItem): Promise<void> {
 		setGifPickerOpen(false);
 
-		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting)
+		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting).
+		// Attach an `info` block carrying intrinsic width/height (and mimetype)
+		// so receivers can reserve the layout box before the GIF decodes,
+		// eliminating the visible expand-on-load that confuses the virtualizer.
+		// Other clients silently ignore `info` on m.text and still render the
+		// URL the same way they do today.
 		const content: Record<string, unknown> = {
 			msgtype: "m.text",
 			body: gif.url,
+			info: {
+				w: gif.width,
+				h: gif.height,
+				mimetype: "image/gif",
+			},
 		};
 
 		// Attach reply fallback + metadata if replying (same format as normal sends)
