@@ -117,6 +117,11 @@ const Layout: Component = () => {
 			clearTimeout(copyResetTimer);
 			copyResetTimer = undefined;
 		}
+		// Reset to idle synchronously so any prior "Copied!"/"Copy failed"
+		// label and aria-live announcement clear before either path runs.
+		// Important for the no-clipboard branch below, which only opens the
+		// fallback dialog and never otherwise touches copyState.
+		setCopyState("idle");
 
 		const clipboard =
 			typeof navigator !== "undefined" ? navigator.clipboard : undefined;
