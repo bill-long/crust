@@ -53,17 +53,54 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 		() => props.roomId,
 	);
 
+	// Cache flat-item wrappers so item references stay stable across refreshes
+	// when the underlying data hasn't changed. Virtua + Solid's <For> keys by
+	// reference identity, so without this every typing/membership event would
+	// remount every visible row.
+	type HeaderItem = FlatItem & { type: "header" };
+	type MemberItem = FlatItem & { type: "member" };
+	const headerCache = new Map<string, HeaderItem>();
+	const memberCache = new Map<string, MemberItem>();
+
 	const flatItems = createMemo(() => {
 		const items: FlatItem[] = [];
+		const seenHeaders = new Set<string>();
+		const seenMembers = new Set<string>();
 		for (const group of groups()) {
-			items.push({
-				type: "header",
-				role: group.role,
-				count: group.members.length,
-			});
-			for (const member of group.members) {
-				items.push({ type: "member", member });
+			seenHeaders.add(group.role);
+			let header = headerCache.get(group.role);
+			if (!header || header.count !== group.members.length) {
+				header = {
+					type: "header",
+					role: group.role,
+					count: group.members.length,
+				};
+				headerCache.set(group.role, header);
 			}
+			items.push(header);
+			for (const member of group.members) {
+				seenMembers.add(member.userId);
+				const cached = memberCache.get(member.userId);
+				if (
+					cached &&
+					cached.member.displayName === member.displayName &&
+					cached.member.avatarUrl === member.avatarUrl &&
+					cached.member.powerLevel === member.powerLevel &&
+					cached.member.isTyping === member.isTyping
+				) {
+					items.push(cached);
+				} else {
+					const next: MemberItem = { type: "member", member };
+					memberCache.set(member.userId, next);
+					items.push(next);
+				}
+			}
+		}
+		for (const role of headerCache.keys()) {
+			if (!seenHeaders.has(role)) headerCache.delete(role);
+		}
+		for (const id of memberCache.keys()) {
+			if (!seenMembers.has(id)) memberCache.delete(id);
 		}
 		return items;
 	});
