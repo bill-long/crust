@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "@solidjs/router";
-import { UserEvent } from "matrix-js-sdk";
+import { RoomStateEvent, UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -22,6 +22,7 @@ import {
 	cryptoActionLabel,
 	deriveCryptoAction,
 } from "../features/crypto/CryptoStatusBanner";
+import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { RoomList } from "../features/room/RoomList";
@@ -81,6 +82,7 @@ const Layout: Component = () => {
 	const location = useLocation();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
+	const [inviteRoomId, setInviteRoomId] = createSignal<string | null>(null);
 
 	// `location.pathname` is the full URL pathname including any Vite base
 	// (e.g. `/crust/settings/account`). Strip the base before comparing
@@ -246,6 +248,37 @@ const Layout: Component = () => {
 		}
 	};
 
+	// Reactive "can the current user invite to the active room?"
+	// Recomputed when roomId changes OR when room state events fire (power
+	// levels / membership / join rules can affect canInvite).
+	const [canInviteBump, setCanInviteBump] = createSignal(0);
+	createEffect(() => {
+		// Track syncState so this effect retries once the SDK has loaded
+		// rooms (e.g. deep link before initial sync completes).
+		syncState();
+		const rid = roomId();
+		if (!rid) return;
+		const room = client.getRoom(rid);
+		if (!room) return;
+		const onStateUpdate = (): void => {
+			setCanInviteBump((n) => n + 1);
+		};
+		room.on(RoomStateEvent.Update, onStateUpdate);
+		onCleanup(() => {
+			room.removeListener(RoomStateEvent.Update, onStateUpdate);
+		});
+	});
+	const canInviteHere = createMemo(() => {
+		canInviteBump();
+		syncState();
+		const rid = roomId();
+		if (!rid) return false;
+		const room = client.getRoom(rid);
+		const uid = client.getUserId();
+		if (!room || !uid) return false;
+		return room.canInvite(uid);
+	});
+
 	return (
 		<div class="flex min-h-0 flex-1 bg-surface-0 text-text-primary">
 			{/* Resizable layout with user bar spanning left sidebar */}
@@ -297,6 +330,16 @@ const Layout: Component = () => {
 									</span>
 									<div class="flex items-center gap-1">
 										<RoomNotificationMenu client={client} roomId={rid()} />
+										<Show when={canInviteHere()}>
+											<button
+												type="button"
+												onClick={() => setInviteRoomId(rid())}
+												class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+												title="Invite a user to this room"
+											>
+												Invite
+											</button>
+										</Show>
 										<button
 											type="button"
 											onClick={toggleMembersPane}
@@ -358,6 +401,20 @@ const Layout: Component = () => {
 					</Show>
 				}
 			/>
+
+			{/* Invite dialog — roomId is snapshotted at open time so an
+				in-flight invite still targets the original room if the user
+				navigates away. */}
+			<Show when={inviteRoomId()}>
+				{(rid) => (
+					<InviteDialog
+						client={client}
+						roomId={rid()}
+						open={() => inviteRoomId() !== null}
+						onClose={() => setInviteRoomId(null)}
+					/>
+				)}
+			</Show>
 
 			{/* Settings overlay */}
 			<Show when={isSettingsRoute()}>
