@@ -124,6 +124,7 @@ const PinnedMessageRow: Component<{
 			}}
 			class="group flex flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 transition-colors hover:bg-surface-2 focus-within:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 			tabIndex={props.tabIndex}
+			aria-current={props.tabIndex === 0 ? "true" : undefined}
 			onFocus={() => props.onFocus?.()}
 			aria-label={
 				resolved()

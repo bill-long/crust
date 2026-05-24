@@ -64,6 +64,14 @@ interface OverlayState {
 	gen: number;
 }
 
+function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
+	if (a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) return false;
+	}
+	return true;
+}
+
 export function usePinnedEvents(
 	client: MatrixClient,
 	roomId: Accessor<string | undefined>,
@@ -88,6 +96,11 @@ export function usePinnedEvents(
 	// in the server out of order. The overlay still updates immediately
 	// for snappy UI; only the network round-trips queue.
 	let writeChain: Promise<void> = Promise.resolve();
+	// Number of optimistic writes whose sendStateEvent hasn't resolved
+	// yet. Used by onRoomState to distinguish "a newer write of mine is
+	// pending — keep overlay" from "no pending writes — server state is
+	// authoritative even if it doesn't match my overlay".
+	let inFlightWrites = 0;
 
 	const readServerPinned = (): string[] => {
 		const rid = roomId();
@@ -148,13 +161,28 @@ export function usePinnedEvents(
 
 	// Subscribe to client-level RoomStateEvent.Events for this room
 	// (mirrors the useImagePacks pattern). Bumps serverTick so the
-	// reactive readers re-evaluate, and clears the optimistic overlay
-	// unconditionally — the server state is now authoritative.
+	// reactive readers re-evaluate. Overlay clearing rules:
+	//  - If the server's pinned content matches the overlay, clear it
+	//    (our write has been confirmed).
+	//  - If they differ and no optimistic writes are in flight, clear
+	//    it — the server is authoritative (concurrent edit from another
+	//    client, conflict resolution, etc.).
+	//  - If they differ and writes ARE in flight, keep the overlay so
+	//    the UI doesn't flicker back to a server state that's about to
+	//    be superseded by our pending write.
 	const onRoomState = (event: MatrixEvent): void => {
 		if (event.getType() !== PINNED_TYPE) return;
 		if (event.getRoomId() !== roomId()) return;
 		setServerTick((n) => n + 1);
-		setOverlay(null);
+		const ov = overlay();
+		if (!ov) return;
+		const content = event.getContent?.() as { pinned?: unknown } | undefined;
+		const serverPins = Array.isArray(content?.pinned)
+			? content.pinned.filter((id): id is string => typeof id === "string")
+			: [];
+		if (arraysEqual(serverPins, ov.pinned) || inFlightWrites === 0) {
+			setOverlay(null);
+		}
 	};
 	client.on(RoomStateEvent.Events, onRoomState);
 	onCleanup(() => {
@@ -215,6 +243,7 @@ export function usePinnedEvents(
 		setOverlay({ pinned: nextPinned, gen });
 		setPending(true);
 		setLastError(null);
+		inFlightWrites++;
 		const myWrite = writeChain.then(async () => {
 			try {
 				await client.sendStateEvent(
@@ -237,6 +266,7 @@ export function usePinnedEvents(
 					setLastError(msg);
 				}
 			} finally {
+				inFlightWrites--;
 				if (opGen === gen) setPending(false);
 			}
 		});

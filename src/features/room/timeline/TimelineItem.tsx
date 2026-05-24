@@ -180,6 +180,7 @@ const HoverToolbar: Component<{
 					classList={{ "text-accent": props.isPinned }}
 					onClick={props.onTogglePin}
 					aria-label={props.isPinned ? "Unpin message" : "Pin message"}
+					aria-pressed={props.isPinned}
 					title={props.isPinned ? "Unpin message" : "Pin message"}
 				>
 					<svg

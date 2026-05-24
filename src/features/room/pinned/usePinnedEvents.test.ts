@@ -120,7 +120,7 @@ describe("usePinnedEvents", () => {
 		});
 	});
 
-	it("clears the optimistic overlay on any subsequent RoomStateEvent.Events for this room/type", async () => {
+	it("clears the optimistic overlay when a server echo matches the latest intent", async () => {
 		const room = createMockRoom("!r:x");
 		room.__setStateEvent(PINNED_TYPE, "", { pinned: ["$a"] });
 		const client = createMockClient(new Map([["!r:x", room]]));
@@ -132,13 +132,75 @@ describe("usePinnedEvents", () => {
 			await pins.pin("$new");
 			expect(pins.pinnedIds()).toEqual(["$a", "$new"]);
 
-			// Server confirms with a different array (e.g. concurrent edit).
+			// Server confirms our intent verbatim.
+			room.__setStateEvent(PINNED_TYPE, "", { pinned: ["$a", "$new"] });
+			client.__emit(
+				RoomStateEvent.Events,
+				makeStateEvent("!r:x", { pinned: ["$a", "$new"] }),
+			);
+
+			// Overlay cleared, server view active.
+			expect(pins.pinnedIds()).toEqual(["$a", "$new"]);
+		});
+	});
+
+	it("keeps overlay when a server echo for an earlier write arrives mid newer write", async () => {
+		// Models rapid pin(A) → pin(B) where the server's echo for the
+		// first state-event arrives while the second sendStateEvent is
+		// still pending. The overlay must reflect the latest intent
+		// [A,B], not flicker back to [A].
+		const room = createMockRoom("!r:x");
+		room.__setStateEvent(PINNED_TYPE, "", { pinned: [] });
+		const client = createMockClient(new Map([["!r:x", room]]));
+		await withRoot(async () => {
+			const pins = usePinnedEvents(
+				client as unknown as MatrixClient,
+				() => "!r:x",
+			);
+			void pins.pin("$a");
+			void pins.pin("$b");
+			expect(pins.pinnedIds()).toEqual(["$a", "$b"]);
+
+			// Server echo for the first write arrives.
+			client.__emit(
+				RoomStateEvent.Events,
+				makeStateEvent("!r:x", { pinned: ["$a"] }),
+			);
+			expect(pins.pinnedIds()).toEqual(["$a", "$b"]);
+
+			// Then the second echo arrives and matches latest intent.
+			room.__setStateEvent(PINNED_TYPE, "", { pinned: ["$a", "$b"] });
+			client.__emit(
+				RoomStateEvent.Events,
+				makeStateEvent("!r:x", { pinned: ["$a", "$b"] }),
+			);
+			await flushPromises();
+			expect(pins.pinnedIds()).toEqual(["$a", "$b"]);
+		});
+	});
+
+	it("clears overlay on diverging server echo when no writes are in flight", async () => {
+		// Concurrent edit from another client: our overlay says [A,$new]
+		// but the server is authoritative as [A,$other]. With no pending
+		// writes of our own, the overlay must yield to the server.
+		const room = createMockRoom("!r:x");
+		room.__setStateEvent(PINNED_TYPE, "", { pinned: ["$a"] });
+		const client = createMockClient(new Map([["!r:x", room]]));
+		await withRoot(async () => {
+			const pins = usePinnedEvents(
+				client as unknown as MatrixClient,
+				() => "!r:x",
+			);
+			await pins.pin("$new");
+			// All our writes have resolved.
+			expect(pins.pinnedIds()).toEqual(["$a", "$new"]);
+
+			// Now a diverging server state arrives.
 			room.__setStateEvent(PINNED_TYPE, "", { pinned: ["$a", "$other"] });
 			client.__emit(
 				RoomStateEvent.Events,
 				makeStateEvent("!r:x", { pinned: ["$a", "$other"] }),
 			);
-
 			expect(pins.pinnedIds()).toEqual(["$a", "$other"]);
 		});
 	});

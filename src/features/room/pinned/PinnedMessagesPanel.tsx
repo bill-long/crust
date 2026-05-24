@@ -72,9 +72,21 @@ const PinnedMessagesPanel: Component<{
 		}
 	};
 	onCleanup(cancelOpenFocusRaf);
+	// Same pattern for the per-keystroke focus rAF used by focusIndex
+	// (arrow/Home/End nav). Track and cancel so a late frame can't
+	// focus a detached row after the panel closes or unmounts.
+	let focusIndexRaf: number | undefined;
+	const cancelFocusIndexRaf = (): void => {
+		if (focusIndexRaf !== undefined) {
+			cancelAnimationFrame(focusIndexRaf);
+			focusIndexRaf = undefined;
+		}
+	};
+	onCleanup(cancelFocusIndexRaf);
 	createEffect(
 		on(open, (isOpen) => {
 			cancelOpenFocusRaf();
+			cancelFocusIndexRaf();
 			if (!isOpen) return;
 			openFocusRaf = requestAnimationFrame(() => {
 				openFocusRaf = undefined;
@@ -104,7 +116,10 @@ const PinnedMessagesPanel: Component<{
 		if (!id) return;
 		setFocusedId(id);
 		virtRef?.scrollToIndex(clamped, { align: "nearest" });
-		requestAnimationFrame(() => {
+		cancelFocusIndexRaf();
+		focusIndexRaf = requestAnimationFrame(() => {
+			focusIndexRaf = undefined;
+			if (!open()) return;
 			rowEls.get(id)?.focus();
 		});
 	};
