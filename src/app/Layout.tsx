@@ -22,11 +22,13 @@ import {
 	cryptoActionLabel,
 	deriveCryptoAction,
 } from "../features/crypto/CryptoStatusBanner";
+import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
+import { buildRoomLink } from "../features/room/roomLink";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { useNotifications } from "../features/room/useNotifications";
 import {
@@ -83,6 +85,63 @@ const Layout: Component = () => {
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
 	const [inviteRoomId, setInviteRoomId] = createSignal<string | null>(null);
+	const [copyState, setCopyState] = createSignal<"idle" | "copied" | "error">(
+		"idle",
+	);
+	const [fallbackLink, setFallbackLink] = createSignal<string | null>(null);
+	let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+	// Monotonic generation counter for copy operations. Each click bumps it;
+	// awaited results (and the auto-reset timer they schedule) must verify
+	// they are still the current generation before mutating state. Without
+	// this guard a slow first request could overwrite the result of a faster
+	// second request, or an unmount could leave the success continuation
+	// scheduling a timer that outlives the component.
+	let copyGen = 0;
+	let copyDisposed = false;
+	onCleanup(() => {
+		copyDisposed = true;
+		copyGen++;
+		if (copyResetTimer !== undefined) {
+			clearTimeout(copyResetTimer);
+			copyResetTimer = undefined;
+		}
+	});
+
+	const handleCopyRoomLink = async (rid: string): Promise<void> => {
+		const room = client.getRoom(rid);
+		if (!room) return;
+		const { url } = buildRoomLink(room);
+
+		const gen = ++copyGen;
+		if (copyResetTimer !== undefined) {
+			clearTimeout(copyResetTimer);
+			copyResetTimer = undefined;
+		}
+
+		const clipboard =
+			typeof navigator !== "undefined" ? navigator.clipboard : undefined;
+		if (!clipboard?.writeText) {
+			setFallbackLink(url);
+			return;
+		}
+		try {
+			await clipboard.writeText(url);
+			if (copyDisposed || gen !== copyGen) return;
+			setCopyState("copied");
+			// If a prior failed attempt left the fallback dialog open and the
+			// retry succeeded, close it so the user isn't asked to copy by hand.
+			setFallbackLink(null);
+			copyResetTimer = setTimeout(() => {
+				copyResetTimer = undefined;
+				if (copyDisposed || gen !== copyGen) return;
+				setCopyState("idle");
+			}, 2000);
+		} catch {
+			if (copyDisposed || gen !== copyGen) return;
+			setCopyState("error");
+			setFallbackLink(url);
+		}
+	};
 
 	// `location.pathname` is the full URL pathname including any Vite base
 	// (e.g. `/crust/settings/account`). Strip the base before comparing
@@ -223,6 +282,19 @@ const Layout: Component = () => {
 
 	const roomId = () => params.roomId;
 
+	// Reset Copy-link feedback whenever the active room changes so a "Copied!"
+	// (or fallback dialog) from room A doesn't leak into room B's header.
+	createEffect(() => {
+		roomId();
+		copyGen++;
+		if (copyResetTimer !== undefined) {
+			clearTimeout(copyResetTimer);
+			copyResetTimer = undefined;
+		}
+		setCopyState("idle");
+		setFallbackLink(null);
+	});
+
 	const roomName = () => {
 		const rid = roomId();
 		if (!rid) return "";
@@ -342,6 +414,25 @@ const Layout: Component = () => {
 										</Show>
 										<button
 											type="button"
+											onClick={() => handleCopyRoomLink(rid())}
+											class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+											title="Copy a shareable link to this room"
+										>
+											{copyState() === "copied"
+												? "Copied!"
+												: copyState() === "error"
+													? "Copy failed"
+													: "Copy link"}
+										</button>
+										<span aria-live="polite" role="status" class="sr-only">
+											{copyState() === "copied"
+												? "Room link copied to clipboard"
+												: copyState() === "error"
+													? "Failed to copy room link"
+													: ""}
+										</span>
+										<button
+											type="button"
 											onClick={toggleMembersPane}
 											class="rounded px-2 py-1 text-xs transition-colors"
 											classList={{
@@ -412,6 +503,21 @@ const Layout: Component = () => {
 						roomId={rid()}
 						open={() => inviteRoomId() !== null}
 						onClose={() => setInviteRoomId(null)}
+					/>
+				)}
+			</Show>
+
+			{/* Clipboard-unavailable fallback for "Copy room link". The URL is
+				captured at open time so it survives subsequent room switches. */}
+			<Show when={fallbackLink()}>
+				{(url) => (
+					<CopyLinkFallbackDialog
+						url={url()}
+						open={() => fallbackLink() !== null}
+						onClose={() => {
+							setFallbackLink(null);
+							setCopyState("idle");
+						}}
 					/>
 				)}
 			</Show>
