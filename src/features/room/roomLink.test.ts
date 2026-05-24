@@ -2,7 +2,7 @@ import type { Room, RoomMember } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import { buildRoomLink, pickViaServers } from "./roomLink";
 
-function mkMember(userId: string, powerLevel: number): RoomMember {
+function mkMember(userId: string, powerLevel: number | undefined): RoomMember {
 	return { userId, powerLevel } as unknown as RoomMember;
 }
 
@@ -153,5 +153,24 @@ describe("pickViaServers", () => {
 
 	it("returns an empty list for an empty room", () => {
 		expect(pickViaServers(mkRoom({ members: [] }))).toEqual([]);
+	});
+
+	it("treats missing powerLevel as 0 without producing NaN ordering", () => {
+		// A member whose state event predates a power-level event has
+		// powerLevel === undefined. Without normalization the subtraction
+		// would be NaN and the sort would be unstable, potentially
+		// swallowing the ranked members entirely.
+		const r = mkRoom({
+			members: [
+				mkMember("@noplevel:hs-x.example", undefined),
+				mkMember("@admin:hs-a.example", 100),
+				mkMember("@mod:hs-b.example", 50),
+			],
+		});
+		expect(pickViaServers(r, 3)).toEqual([
+			"hs-a.example",
+			"hs-b.example",
+			"hs-x.example",
+		]);
 	});
 });

@@ -117,18 +117,39 @@ const Layout: Component = () => {
 			clearTimeout(copyResetTimer);
 			copyResetTimer = undefined;
 		}
-		// Reset to idle synchronously so any prior "Copied!"/"Copy failed"
-		// label and aria-live announcement clear before either path runs.
-		// Important for the no-clipboard branch below, which only opens the
-		// fallback dialog and never otherwise touches copyState.
-		setCopyState("idle");
+
+		// Schedule the 2s auto-reset that returns the button label back to
+		// the neutral "Copy link" state. Used by both the success and the
+		// error paths so the visible status doesn't strand indefinitely.
+		const scheduleReset = (): void => {
+			copyResetTimer = setTimeout(() => {
+				copyResetTimer = undefined;
+				if (copyDisposed || gen !== copyGen) return;
+				setCopyState("idle");
+			}, 2000);
+		};
 
 		const clipboard =
 			typeof navigator !== "undefined" ? navigator.clipboard : undefined;
 		if (!clipboard?.writeText) {
+			// Force an aria-live re-announcement when the prior state was
+			// already "error": two synchronous setCopyState calls in the
+			// same event handler batch collapse to a single render, leaving
+			// the polite region silent. setTimeout(..., 0) lets the browser
+			// commit the "idle" render before the "error" render lands.
+			setCopyState("idle");
+			setTimeout(() => {
+				if (copyDisposed || gen !== copyGen) return;
+				setCopyState("error");
+				scheduleReset();
+			}, 0);
 			setFallbackLink(url);
 			return;
 		}
+		// Reset to idle synchronously so any prior "Copied!"/"Copy failed"
+		// label and aria-live announcement clear before the async clipboard
+		// result lands.
+		setCopyState("idle");
 		try {
 			await clipboard.writeText(url);
 			if (copyDisposed || gen !== copyGen) return;
@@ -136,15 +157,12 @@ const Layout: Component = () => {
 			// If a prior failed attempt left the fallback dialog open and the
 			// retry succeeded, close it so the user isn't asked to copy by hand.
 			setFallbackLink(null);
-			copyResetTimer = setTimeout(() => {
-				copyResetTimer = undefined;
-				if (copyDisposed || gen !== copyGen) return;
-				setCopyState("idle");
-			}, 2000);
+			scheduleReset();
 		} catch {
 			if (copyDisposed || gen !== copyGen) return;
 			setCopyState("error");
 			setFallbackLink(url);
+			scheduleReset();
 		}
 	};
 

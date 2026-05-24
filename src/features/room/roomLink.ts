@@ -60,7 +60,12 @@ export function pickViaServers(
 ): string[] {
 	if (limit <= 0) return [];
 	const members = room.getJoinedMembers();
-	const sorted = [...members].sort((a, b) => b.powerLevel - a.powerLevel);
+	// Normalize powerLevel to 0 before subtracting: RoomMember.powerLevel can
+	// be undefined for members whose m.room.member event predates a power
+	// level event, which would produce NaN comparisons and unstable ordering.
+	const sorted = [...members].sort(
+		(a, b) => (b.powerLevel ?? 0) - (a.powerLevel ?? 0),
+	);
 	const seen = new Set<string>();
 	const result: string[] = [];
 	for (const m of sorted) {
