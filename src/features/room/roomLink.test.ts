@@ -1,6 +1,6 @@
 import type { Room, RoomMember } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
-import { buildRoomLink, pickViaServers } from "./roomLink";
+import { buildRoomLink, buildRoomLinkById, pickViaServers } from "./roomLink";
 
 function mkMember(userId: string, powerLevel: number | undefined): RoomMember {
 	return { userId, powerLevel } as unknown as RoomMember;
@@ -172,5 +172,21 @@ describe("pickViaServers", () => {
 			"hs-b.example",
 			"hs-x.example",
 		]);
+	});
+});
+
+describe("buildRoomLinkById", () => {
+	it("builds a minimal matrix.to link from a room ID", () => {
+		expect(buildRoomLinkById("!abc:matrix.org")).toEqual({
+			url: "https://matrix.to/#/!abc%3Amatrix.org",
+			displayLabel: "!abc:matrix.org",
+		});
+	});
+
+	it("builds a minimal matrix.to link from an alias", () => {
+		expect(buildRoomLinkById("#general:matrix.org")).toEqual({
+			url: "https://matrix.to/#/%23general%3Amatrix.org",
+			displayLabel: "#general:matrix.org",
+		});
 	});
 });

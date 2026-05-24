@@ -28,7 +28,7 @@ import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
-import { buildRoomLink } from "../features/room/roomLink";
+import { buildRoomLink, buildRoomLinkById } from "../features/room/roomLink";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { useNotifications } from "../features/room/useNotifications";
 import {
@@ -109,8 +109,10 @@ const Layout: Component = () => {
 
 	const handleCopyRoomLink = async (rid: string): Promise<void> => {
 		const room = client.getRoom(rid);
-		if (!room) return;
-		const { url } = buildRoomLink(room);
+		// During initial sync or on deep links the Room object may not be
+		// loaded yet. Fall back to a minimal matrix.to link built from the
+		// route param so the button doesn't silently no-op.
+		const { url } = room ? buildRoomLink(room) : buildRoomLinkById(rid);
 
 		const gen = ++copyGen;
 		if (copyResetTimer !== undefined) {

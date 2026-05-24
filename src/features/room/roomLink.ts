@@ -78,6 +78,21 @@ export function pickViaServers(
 	return result;
 }
 
+/**
+ * Build a minimal matrix.to link from a room ID or alias when the SDK
+ * Room object isn't available yet (initial sync, deep links). The
+ * resulting link has no `?via=` hints, so it relies on the alias's
+ * homeserver (for aliases) or the target client's federation reach
+ * (for raw room IDs). Use `buildRoomLink(room)` whenever a Room is
+ * available — it produces a more robust link with via hints.
+ */
+export function buildRoomLinkById(idOrAlias: string): RoomLink {
+	return {
+		url: `${MATRIX_TO_BASE}${encodeURIComponent(idOrAlias)}`,
+		displayLabel: idOrAlias,
+	};
+}
+
 function extractServer(userId: string): string | null {
 	// userId format: @localpart:server. The first ":" after "@" splits
 	// localpart from server; the server may itself contain ":" for ports
