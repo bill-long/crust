@@ -14,7 +14,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
-import { Virtualizer } from "virtua/solid";
+import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { useClient } from "../../../client/client";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import type { PickerEmoji } from "../../emoji/types";
@@ -52,7 +52,14 @@ interface ReadReceiptEntry {
 	displayName: string;
 }
 
-const TimelineView: Component<{ roomId: string }> = (props) => {
+const TimelineView: Component<{
+	roomId: string;
+	canPin?: boolean;
+	isPinned?: (eventId: string) => boolean;
+	onTogglePin?: (eventId: string) => void;
+	jumpRequest?: () => string | null;
+	onJumpHandled?: () => void;
+}> = (props) => {
 	const { client } = useClient();
 	const {
 		events,
@@ -64,6 +71,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 		loadOlderMessages,
 		loadNewerMessages,
 		jumpToLive,
+		jumpToEvent,
+		pendingScrollToId,
+		consumePendingScrollToId,
 		setFollowingLive,
 		typingUsers,
 		getSourceEvent,
@@ -77,6 +87,7 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 	const emoteLookup = createMemo(() => buildEmoteLookup(packs()));
 
 	let scrollRef: HTMLDivElement | undefined;
+	let virtHandle: VirtualizerHandle | undefined;
 	// Signal mirror of scrollRef so effects depending on the element's
 	// existence (e.g. the row-growth re-anchor RO below) can attach when
 	// the parent <Show> finally mounts the scroller, rather than running
@@ -450,6 +461,128 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 			},
 		),
 	);
+
+	// Jump-to-event integration with the pinned-messages panel (and any
+	// other deep-link-style navigation). The parent (`Layout`) owns the
+	// request signal so the panel — which lives in the header — can
+	// drive the timeline below it.
+	createEffect(
+		on(
+			() => props.jumpRequest?.(),
+			(id) => {
+				if (!id) return;
+				// User wants to anchor on a historical message — cancel any
+				// pending bottom pin so the settle loop doesn't fight the
+				// scroll, then run the load.
+				setWantsBottom(false);
+				void jumpToEvent(id);
+				props.onJumpHandled?.();
+			},
+		),
+	);
+
+	// When useTimeline reports a pending scroll target, find the row in
+	// the events store, scrollToIndex on Virtua, then flash + focus the
+	// DOM row. Runs on every events update so a late-arriving event
+	// from the anchored window still lands the scroll.
+	// Tracks the pending flash-pin removal timer so back-to-back jumps
+	// (or unmount mid-flash) cancel the prior timer instead of leaving
+	// it to fire on a detached node.
+	let flashTimeoutId: number | undefined;
+	let flashRaf1: number | undefined;
+	let flashRaf2: number | undefined;
+	// Track the element currently displaying the flash-pin class so we
+	// can strip it when a new jump starts (otherwise the prior row's
+	// class lingers indefinitely because the new jump clears the old
+	// removal timeout before scheduling its own).
+	let currentFlashEl: HTMLElement | undefined;
+	const clearFlashClass = () => {
+		if (currentFlashEl) {
+			currentFlashEl.classList.remove("flash-pin");
+			currentFlashEl = undefined;
+		}
+		if (flashTimeoutId !== undefined) {
+			window.clearTimeout(flashTimeoutId);
+			flashTimeoutId = undefined;
+		}
+	};
+	const cancelPendingFlash = () => {
+		if (flashRaf1 !== undefined) {
+			cancelAnimationFrame(flashRaf1);
+			flashRaf1 = undefined;
+		}
+		if (flashRaf2 !== undefined) {
+			cancelAnimationFrame(flashRaf2);
+			flashRaf2 = undefined;
+		}
+	};
+	onCleanup(() => {
+		clearFlashClass();
+		cancelPendingFlash();
+	});
+	createEffect(() => {
+		const id = pendingScrollToId();
+		if (!id) return;
+		// Cancel any prior in-flight rAF chain and strip the previous
+		// row's flash-pin class *before* the early returns: a stale
+		// chain could otherwise fire and consume a newer pending ID,
+		// and the old row's class would linger because the timeout we
+		// scheduled to remove it gets cancelled by the new jump.
+		cancelPendingFlash();
+		clearFlashClass();
+		const idx = events.findIndex((e) => e.eventId === id);
+		if (idx < 0) return;
+		const handle = virtHandle;
+		if (!handle) return;
+		markProgrammaticScroll();
+		handle.scrollToIndex(idx, { align: "center" });
+		// Wait two frames so Virtua has measured + scrolled the row
+		// before we look it up in the DOM.
+		flashRaf1 = requestAnimationFrame(() => {
+			flashRaf1 = undefined;
+			flashRaf2 = requestAnimationFrame(() => {
+				flashRaf2 = undefined;
+				const el = scrollRef?.querySelector<HTMLElement>(
+					`[data-event-id="${CSS.escape(id)}"]`,
+				);
+				if (el) {
+					el.classList.remove("flash-pin");
+					// Force reflow so the animation restarts if the row was
+					// already flashed once this session.
+					void el.offsetWidth;
+					el.classList.add("flash-pin");
+					currentFlashEl = el;
+					el.setAttribute("tabindex", "-1");
+					// Don't steal focus from an interactive control the user
+					// has since moved to (composer, another button, etc.).
+					// Only grab focus if it's on body/null or still inside
+					// the timeline scroll region.
+					const active = document.activeElement;
+					const safeToFocus =
+						!active ||
+						active === document.body ||
+						(scrollRef ? scrollRef.contains(active) : false);
+					if (safeToFocus) {
+						el.focus({ preventScroll: true });
+					}
+					if (flashTimeoutId !== undefined) {
+						window.clearTimeout(flashTimeoutId);
+					}
+					flashTimeoutId = window.setTimeout(() => {
+						flashTimeoutId = undefined;
+						el.classList.remove("flash-pin");
+						if (currentFlashEl === el) currentFlashEl = undefined;
+					}, 1800);
+				}
+				// Only consume if the pending ID is still ours; a newer
+				// jumpToEvent may have set a different target while our
+				// rAF chain was queued.
+				if (pendingScrollToId() === id) {
+					consumePendingScrollToId();
+				}
+			});
+		});
+	});
 
 	// Auto-scroll to bottom when new messages arrive and the user wants
 	// to stay at the live end. Uses `wantsBottom` rather than `atBottom`
@@ -847,6 +980,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 							</Show>
 						</div>
 						<Virtualizer
+							ref={(h) => {
+								virtHandle = h ?? undefined;
+							}}
 							scrollRef={scrollRef}
 							data={events}
 							shift={pagingOlder()}
@@ -858,6 +994,9 @@ const TimelineView: Component<{ roomId: string }> = (props) => {
 										event={event}
 										showHeader={shouldShowHeader(events, indexAcc())}
 										isOwnMessage={event.senderId === myUserId}
+										canPin={props.canPin}
+										isPinned={props.isPinned?.(event.eventId) ?? false}
+										onTogglePin={() => props.onTogglePin?.(event.eventId)}
 										onReact={(key) => onReact(event.eventId, key)}
 										onReply={() => setReplyTo(event)}
 										onEdit={() => onEdit(event)}

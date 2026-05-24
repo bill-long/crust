@@ -238,3 +238,20 @@ body {
 	list-style: decimal;
 	padding-left: 1.5em;
 }
+
+/* Pinned-message jump flash — applied to the row when the user clicks
+   "Jump to" in the pinned-messages panel. A short, low-intensity
+   highlight that pulls the eye without being distracting. The
+   global prefers-reduced-motion override above reduces this to
+   0.01ms, effectively skipping the flash. */
+@keyframes flash-pin {
+	0% {
+		background-color: color-mix(in srgb, var(--color-accent) 25%, transparent);
+	}
+	100% {
+		background-color: transparent;
+	}
+}
+.flash-pin {
+	animation: flash-pin 1.6s ease-out 1;
+}
