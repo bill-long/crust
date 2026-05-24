@@ -1,5 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeConfig } from "./config";
+
+const GIF_ENV_VARS = [
+	"VITE_GIF_API_KEY",
+	"VITE_GIF_PROVIDER",
+	"VITE_GIF_ENABLED",
+	"VITE_GIF_TRENDING_ON_OPEN",
+	"VITE_GIF_MAX_RATING",
+] as const;
 
 const baseGif = {
 	enabled: false,
@@ -10,6 +18,15 @@ const baseGif = {
 };
 
 describe("normalizeConfig gif env overrides", () => {
+	// Clear any VITE_GIF_* values inherited from the developer's shell so
+	// these tests behave the same in CI and local dev. Empty strings are
+	// treated as "no override" by applyGifEnvOverrides.
+	beforeEach(() => {
+		for (const name of GIF_ENV_VARS) {
+			vi.stubEnv(name, "");
+		}
+	});
+
 	afterEach(() => {
 		vi.unstubAllEnvs();
 	});
