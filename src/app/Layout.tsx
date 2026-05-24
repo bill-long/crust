@@ -145,7 +145,6 @@ const RoomPane: Component<{
 					</span>
 					<PinnedMessagesPanel
 						client={props.client}
-						roomId={props.rid}
 						pins={pins}
 						shortcodeLookup={shortcodeLookup()}
 						onJump={(eventId) => setJumpRequest(eventId)}

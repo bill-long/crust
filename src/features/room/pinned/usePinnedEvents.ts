@@ -25,15 +25,27 @@ import {
  *     them. So callers who want optimistic UI for a state edit must own
  *     it.
  *
- * Overlay reconciliation:
- *   - Any subsequent `RoomStateEvent.Events` for this type/room arriving
- *     *after* an optimistic op starts clears the overlay — the server
- *     copy is now authoritative regardless of whether its content
- *     equals our optimistic guess. Content-equality clearing would
- *     leave the overlay masking authoritative state indefinitely if a
- *     concurrent client made a different change mid-flight.
- *   - An op-generation counter guards against a late failure rolling
- *     back over a newer server state event.
+ * Overlay clearing happens at exactly three sites:
+ *   1. Reconciliation in `onRoomState` (when the server echoes a state
+ *      event for this room/type — see rules below).
+ *   2. The room-change effect (resets overlay on roomId switch).
+ *   3. Send-failure rollback in `applyOptimistic`'s catch block (only
+ *      if `opGen === gen`, i.e. no newer write has since started).
+ *
+ * Reconciliation rules (site 1, evaluated on each
+ * `RoomStateEvent.Events` for this type/room):
+ *   - If the server's `pinned` array equals our overlay, the write
+ *     we sent has been echoed back — clear the overlay.
+ *   - Else if `inFlightWrites === 0` (no pending writes of our own),
+ *     yield to the server unconditionally — it is authoritative and
+ *     the event represents a concurrent edit from another client.
+ *   - Else (echo differs AND we still have pending writes), keep the
+ *     overlay so a stale earlier echo cannot un-render a newer
+ *     in-flight intent. A later matching echo, or any echo received
+ *     once `inFlightWrites` has returned to zero, will clear it.
+ *
+ * An op-generation counter (`opGen`) guards site 3 against a late
+ * failure rolling back over a newer in-flight intent.
  */
 export interface UsePinnedEvents {
 	/** Pinned event IDs in the order stored on the state event

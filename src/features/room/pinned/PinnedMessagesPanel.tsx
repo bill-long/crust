@@ -22,7 +22,6 @@ const VIRTUALIZE_THRESHOLD = 50;
 
 const PinnedMessagesPanel: Component<{
 	client: MatrixClient;
-	roomId: string;
 	pins: UsePinnedEvents;
 	shortcodeLookup: Map<string, ResolvedEmote>;
 	onJump: (eventId: string) => void;
