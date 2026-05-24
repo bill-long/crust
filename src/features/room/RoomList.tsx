@@ -46,6 +46,51 @@ const BellOffBadge: Component = () => (
 	</svg>
 );
 
+/** Channel-type icon: # for text rooms, speaker for voice/video rooms. */
+const ChannelTypeIcon: Component<{ kind: "text" | "voice" }> = (props) => (
+	<Show
+		when={props.kind === "voice"}
+		fallback={
+			<svg
+				aria-label="Text channel"
+				role="img"
+				width="14"
+				height="14"
+				viewBox="0 0 16 16"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="1.5"
+				stroke-linecap="round"
+				stroke-linejoin="round"
+				class="shrink-0 text-text-muted"
+			>
+				<line x1="3" y1="6" x2="13" y2="6" />
+				<line x1="3" y1="10" x2="13" y2="10" />
+				<line x1="7" y1="2.5" x2="5.5" y2="13.5" />
+				<line x1="10.5" y1="2.5" x2="9" y2="13.5" />
+			</svg>
+		}
+	>
+		<svg
+			aria-label="Voice channel"
+			role="img"
+			width="14"
+			height="14"
+			viewBox="0 0 16 16"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="1.5"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			class="shrink-0 text-text-muted"
+		>
+			<path d="M3 6h2.5L9 3v10L5.5 10H3Z" />
+			<path d="M11.5 5.5a3.5 3.5 0 0 1 0 5" />
+			<path d="M13 3.5a6 6 0 0 1 0 9" />
+		</svg>
+	</Show>
+);
+
 const RoomEntry: Component<{
 	room: RoomSummary;
 	isSelected: boolean;
@@ -65,6 +110,9 @@ const RoomEntry: Component<{
 		>
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-1">
+					<Show when={!props.room.isDirect}>
+						<ChannelTypeIcon kind={props.room.kind} />
+					</Show>
 					<Show when={props.room.isEncrypted}>
 						<span
 							class="text-xs text-success-text"

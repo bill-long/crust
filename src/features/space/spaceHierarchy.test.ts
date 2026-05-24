@@ -41,6 +41,7 @@ function makeSummary(
 		isEncrypted: false,
 		isDirect: false,
 		isSpace,
+		kind: "text",
 		children: [],
 	};
 }
