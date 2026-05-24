@@ -1,5 +1,5 @@
-import { createVirtualizer } from "@tanstack/solid-virtual";
-import { type Component, createMemo, For, Match, Show, Switch } from "solid-js";
+import { type Component, createMemo, Match, Show, Switch } from "solid-js";
+import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
@@ -70,25 +70,6 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 
 	let scrollRef: HTMLDivElement | undefined;
 
-	const virtualizer = createVirtualizer({
-		get count() {
-			return flatItems().length;
-		},
-		getScrollElement: () => scrollRef ?? null,
-		estimateSize: (index: number) => {
-			const item = flatItems()[index];
-			return item?.type === "header" ? 30 : 44;
-		},
-		overscan: 10,
-		getItemKey: (index: number) => {
-			const item = flatItems()[index];
-			if (!item) return index;
-			return item.type === "header"
-				? `header:${item.role}`
-				: `member:${item.member.userId}`;
-		},
-	});
-
 	return (
 		<aside
 			class="flex h-full flex-col bg-surface-1/50"
@@ -114,62 +95,30 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 						</div>
 					}
 				>
-					<div
-						style={{
-							height: `${virtualizer.getTotalSize()}px`,
-							position: "relative",
-						}}
+					<Show
+						when={memberCount() > 0}
+						fallback={
+							<div class="px-3 py-4 text-sm text-text-disabled">
+								No members found
+							</div>
+						}
 					>
-						<For each={virtualizer.getVirtualItems()}>
-							{(vItem) => {
-								const item = () => flatItems()[vItem.index];
-								return (
-									<Show when={item()}>
-										{(current) => (
-											<div
-												data-index={vItem.index}
-												ref={(el) => virtualizer.measureElement(el)}
-												style={{
-													position: "absolute",
-													top: 0,
-													left: 0,
-													width: "100%",
-													transform: `translateY(${vItem.start}px)`,
-												}}
-											>
-												<Switch>
-													<Match
-														when={
-															current().type === "header" &&
-															(current() as FlatItem & { type: "header" })
-														}
-													>
-														{(h) => (
-															<div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-text-disabled">
-																{h().role} — {h().count}
-															</div>
-														)}
-													</Match>
-													<Match
-														when={
-															current().type === "member" &&
-															(current() as FlatItem & { type: "member" })
-														}
-													>
-														{(m) => <MemberRow member={m().member} />}
-													</Match>
-												</Switch>
+						<Virtualizer scrollRef={scrollRef} data={flatItems()}>
+							{(item) => (
+								<Switch>
+									<Match when={item.type === "header" && item}>
+										{(h) => (
+											<div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-text-disabled">
+												{h().role} — {h().count}
 											</div>
 										)}
-									</Show>
-								);
-							}}
-						</For>
-					</div>
-					<Show when={memberCount() === 0}>
-						<div class="px-3 py-4 text-sm text-text-disabled">
-							No members found
-						</div>
+									</Match>
+									<Match when={item.type === "member" && item}>
+										{(m) => <MemberRow member={m().member} />}
+									</Match>
+								</Switch>
+							)}
+						</Virtualizer>
 					</Show>
 				</Show>
 			</div>
