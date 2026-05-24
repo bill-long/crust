@@ -1,5 +1,5 @@
-import { createVirtualizer } from "@tanstack/solid-virtual";
-import { type Component, createMemo, For, Match, Show, Switch } from "solid-js";
+import { type Component, createMemo, Match, Show, Switch } from "solid-js";
+import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
@@ -53,41 +53,59 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 		() => props.roomId,
 	);
 
+	// Cache flat-item wrappers so item references stay stable across refreshes
+	// when the underlying data hasn't changed. Virtua + Solid's <For> keys by
+	// reference identity, so without this every typing/membership event would
+	// remount every visible row.
+	type HeaderItem = FlatItem & { type: "header" };
+	type MemberItem = FlatItem & { type: "member" };
+	const headerCache = new Map<string, HeaderItem>();
+	const memberCache = new Map<string, MemberItem>();
+
 	const flatItems = createMemo(() => {
 		const items: FlatItem[] = [];
+		const seenHeaders = new Set<string>();
+		const seenMembers = new Set<string>();
 		for (const group of groups()) {
-			items.push({
-				type: "header",
-				role: group.role,
-				count: group.members.length,
-			});
-			for (const member of group.members) {
-				items.push({ type: "member", member });
+			seenHeaders.add(group.role);
+			let header = headerCache.get(group.role);
+			if (!header || header.count !== group.members.length) {
+				header = {
+					type: "header",
+					role: group.role,
+					count: group.members.length,
+				};
+				headerCache.set(group.role, header);
 			}
+			items.push(header);
+			for (const member of group.members) {
+				seenMembers.add(member.userId);
+				const cached = memberCache.get(member.userId);
+				if (
+					cached &&
+					cached.member.displayName === member.displayName &&
+					cached.member.avatarUrl === member.avatarUrl &&
+					cached.member.powerLevel === member.powerLevel &&
+					cached.member.isTyping === member.isTyping
+				) {
+					items.push(cached);
+				} else {
+					const next: MemberItem = { type: "member", member };
+					memberCache.set(member.userId, next);
+					items.push(next);
+				}
+			}
+		}
+		for (const role of headerCache.keys()) {
+			if (!seenHeaders.has(role)) headerCache.delete(role);
+		}
+		for (const id of memberCache.keys()) {
+			if (!seenMembers.has(id)) memberCache.delete(id);
 		}
 		return items;
 	});
 
 	let scrollRef: HTMLDivElement | undefined;
-
-	const virtualizer = createVirtualizer({
-		get count() {
-			return flatItems().length;
-		},
-		getScrollElement: () => scrollRef ?? null,
-		estimateSize: (index: number) => {
-			const item = flatItems()[index];
-			return item?.type === "header" ? 30 : 44;
-		},
-		overscan: 10,
-		getItemKey: (index: number) => {
-			const item = flatItems()[index];
-			if (!item) return index;
-			return item.type === "header"
-				? `header:${item.role}`
-				: `member:${item.member.userId}`;
-		},
-	});
 
 	return (
 		<aside
@@ -114,62 +132,30 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 						</div>
 					}
 				>
-					<div
-						style={{
-							height: `${virtualizer.getTotalSize()}px`,
-							position: "relative",
-						}}
+					<Show
+						when={memberCount() > 0}
+						fallback={
+							<div class="px-3 py-4 text-sm text-text-disabled">
+								No members found
+							</div>
+						}
 					>
-						<For each={virtualizer.getVirtualItems()}>
-							{(vItem) => {
-								const item = () => flatItems()[vItem.index];
-								return (
-									<Show when={item()}>
-										{(current) => (
-											<div
-												data-index={vItem.index}
-												ref={(el) => virtualizer.measureElement(el)}
-												style={{
-													position: "absolute",
-													top: 0,
-													left: 0,
-													width: "100%",
-													transform: `translateY(${vItem.start}px)`,
-												}}
-											>
-												<Switch>
-													<Match
-														when={
-															current().type === "header" &&
-															(current() as FlatItem & { type: "header" })
-														}
-													>
-														{(h) => (
-															<div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-text-disabled">
-																{h().role} — {h().count}
-															</div>
-														)}
-													</Match>
-													<Match
-														when={
-															current().type === "member" &&
-															(current() as FlatItem & { type: "member" })
-														}
-													>
-														{(m) => <MemberRow member={m().member} />}
-													</Match>
-												</Switch>
+						<Virtualizer scrollRef={scrollRef} data={flatItems()}>
+							{(item) => (
+								<Switch>
+									<Match when={item.type === "header" && item}>
+										{(h) => (
+											<div class="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-text-disabled">
+												{h().role} — {h().count}
 											</div>
 										)}
-									</Show>
-								);
-							}}
-						</For>
-					</div>
-					<Show when={memberCount() === 0}>
-						<div class="px-3 py-4 text-sm text-text-disabled">
-							No members found
-						</div>
+									</Match>
+									<Match when={item.type === "member" && item}>
+										{(m) => <MemberRow member={m().member} />}
+									</Match>
+								</Switch>
+							)}
+						</Virtualizer>
 					</Show>
 				</Show>
 			</div>
