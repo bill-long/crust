@@ -17,7 +17,7 @@ import {
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { useClient } from "../../../client/client";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
-import type { PickerEmoji } from "../../emoji/types";
+import type { ImagePack, PickerEmoji } from "../../emoji/types";
 import {
 	buildEmoteLookup,
 	buildShortcodeLookup,
@@ -59,6 +59,12 @@ const TimelineView: Component<{
 	onTogglePin?: (eventId: string) => void;
 	jumpRequest?: () => string | null;
 	onJumpHandled?: () => void;
+	/** Optional shared image packs accessor. When provided, TimelineView
+	 *  reuses it instead of spinning up its own `useImagePacks` instance.
+	 *  Lifting to the parent avoids duplicate SDK event subscriptions
+	 *  (ClientEvent.AccountData + RoomStateEvent.Events) when sibling
+	 *  components (e.g. PinnedMessagesPanel) also need the packs. */
+	packs?: () => ImagePack[];
 }> = (props) => {
 	const { client } = useClient();
 	const {
@@ -81,8 +87,17 @@ const TimelineView: Component<{
 		pendingRedactions,
 	} = useTimeline(client, () => props.roomId);
 
-	// Custom emoji packs for this room
-	const packs = useImagePacks(client, () => props.roomId);
+	// Custom emoji packs for this room. When the parent passes a shared
+	// `packs` accessor (Layout does — same accessor also feeds the
+	// pinned-messages panel), reuse it to avoid a duplicate
+	// `useImagePacks` subscription per room. Tests render TimelineView
+	// in isolation and rely on the fallback.
+	const localPacks = props.packs
+		? null
+		: useImagePacks(client, () => props.roomId);
+	const packs = createMemo(() =>
+		props.packs ? props.packs() : (localPacks?.() ?? []),
+	);
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 	const emoteLookup = createMemo(() => buildEmoteLookup(packs()));
 

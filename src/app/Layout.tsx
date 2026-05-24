@@ -189,6 +189,7 @@ const RoomPane: Component<{
 						}}
 						jumpRequest={jumpRequest}
 						onJumpHandled={() => setJumpRequest(null)}
+						packs={packs}
 					/>
 				</div>
 				<Show when={props.membersVisible()}>
