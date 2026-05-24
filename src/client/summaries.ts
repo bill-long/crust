@@ -21,6 +21,8 @@ export interface RoomSummary {
 	isEncrypted: boolean;
 	isDirect: boolean;
 	isSpace: boolean;
+	/** Whether this room is a voice/video room (MSC3401 or Element video) vs a text room. */
+	kind: "text" | "voice";
 	children: string[];
 }
 
@@ -56,6 +58,8 @@ function buildSummary(
 
 	const createEvent = room.currentState.getStateEvents("m.room.create", "");
 	const isSpace = createEvent?.getContent()?.type === "m.space";
+	const kind: RoomSummary["kind"] =
+		room.isCallRoom() || room.isElementVideoRoom() ? "voice" : "text";
 
 	return {
 		roomId: room.roomId,
@@ -70,6 +74,7 @@ function buildSummary(
 		isEncrypted: room.hasEncryptionStateEvent(),
 		isDirect: dmRoomIds.has(room.roomId),
 		isSpace,
+		kind,
 		children: isSpace ? getSpaceChildren(room) : [],
 	};
 }
