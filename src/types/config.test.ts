@@ -158,6 +158,10 @@ describe("normalizeConfig elementCall url validation", () => {
 		expect(callUrl("http://localhost.evil.com")).toBe("");
 		// IPv4 outside 127/8
 		expect(callUrl("http://128.0.0.1")).toBe("");
+		// Octets out of 0-255 range — these can be reinterpreted by URL
+		// parsers as non-loopback hostnames, so reject them.
+		expect(callUrl("http://127.999.999.999")).toBe("");
+		expect(callUrl("http://127.0.0.256")).toBe("");
 		// IPv6 non-loopback
 		expect(callUrl("http://[::2]")).toBe("");
 	});

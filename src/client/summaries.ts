@@ -117,8 +117,8 @@ export function isCallActive(room: Room): boolean {
 		// Mirror SDK `checkSessionsMembershipData`: if `created_ts`, `scope`,
 		// or `m.call.intent` are present they must be of the expected type;
 		// otherwise the SDK rejects the event entirely. (The SDK does NOT
-		// type-check `expires`, so we don't either — a non-numeric `expires`
-		// just falls back to the default.)
+		// type-check `expires` — see the longer note at the expiry-calc step
+		// below for what happens with non-numeric `expires`.)
 		if (
 			content.created_ts !== undefined &&
 			typeof content.created_ts !== "number"

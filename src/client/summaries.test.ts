@@ -233,7 +233,7 @@ describe("isCallActive", () => {
 		}
 	});
 
-	it("falls back to default expiry when content.expires is non-numeric (matches SDK)", () => {
+	it("treats non-numeric content.expires as not-expired (matches SDK NaN semantics)", () => {
 		const room = createMockRoom("!r:x");
 		room.__addMember({ userId: "@a:x", name: "a" });
 		room.__setStateEvent(
@@ -245,7 +245,30 @@ describe("isCallActive", () => {
 			},
 			{ sender: "@a:x" },
 		);
-		// Default 4h expiry from 1h ago → still live.
+		// The SDK does not type-check `expires`. A non-numeric value flows
+		// through arithmetic and the resulting `<= now` comparison coerces
+		// to NaN, which is always false — so the membership is treated as
+		// not-expired (live), regardless of how much wall-clock time has
+		// passed. We mirror that behavior here.
+		expect(isCallActive(room as unknown as Room)).toBe(true);
+	});
+
+	it("also treats non-numeric content.expires as not-expired when created_ts is ancient", () => {
+		// Stronger assertion: prove it's NOT just "default 4h from 1h ago".
+		// With createdTs 10 years ago, a real 4h default would be expired —
+		// but NaN comparison stays false, so we still get `true`.
+		const room = createMockRoom("!r:x");
+		room.__addMember({ userId: "@a:x", name: "a" });
+		const TEN_YEARS_MS = 10 * 365 * 24 * HOUR;
+		room.__setStateEvent(
+			CALL_TYPE,
+			"_@a:x_DEV_m.call",
+			{
+				...modernMembership({ createdTs: NOW - TEN_YEARS_MS }),
+				expires: "garbage",
+			},
+			{ sender: "@a:x" },
+		);
 		expect(isCallActive(room as unknown as Room)).toBe(true);
 	});
 

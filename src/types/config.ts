@@ -136,8 +136,17 @@ function isSecureCallUrl(url: string): boolean {
 	if (parsed.protocol !== "http:") return false;
 	const host = parsed.hostname.toLowerCase();
 	if (host === "localhost" || host === "[::1]") return true;
-	// Allow the full IPv4 127.0.0.0/8 loopback range.
-	return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+	// Allow the full IPv4 127.0.0.0/8 loopback range. Validate octet ranges
+	// (0–255) so strings like `127.999.999.999` are rejected — URL parsers
+	// can treat those as hostnames rather than loopback IPs, which would
+	// defeat the loopback-HTTP secure-context exception.
+	const m = host.match(/^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+	if (!m) return false;
+	for (let i = 1; i <= 3; i++) {
+		const oct = Number(m[i]);
+		if (oct < 0 || oct > 255) return false;
+	}
+	return true;
 }
 
 function normalizeBranding(raw: unknown): CrustConfig["branding"] {
