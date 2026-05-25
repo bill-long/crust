@@ -103,7 +103,11 @@ const NON_PREVIEWABLE_HOSTS = new Set(["matrix.to"]);
  */
 export function isPreviewableUrl(canonical: string): boolean {
 	try {
-		const host = new URL(canonical).hostname.toLowerCase();
+		const parsed = new URL(canonical);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return false;
+		}
+		const host = parsed.hostname.toLowerCase();
 		return !NON_PREVIEWABLE_HOSTS.has(host);
 	} catch {
 		return false;

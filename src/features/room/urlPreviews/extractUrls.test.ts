@@ -272,4 +272,11 @@ describe("isPreviewableUrl", () => {
 	it("returns false for malformed input (defense in depth)", () => {
 		expect(isPreviewableUrl("not a url")).toBe(false);
 	});
+
+	it("returns false for non-http(s) schemes (defense in depth)", () => {
+		expect(isPreviewableUrl("javascript:alert(1)")).toBe(false);
+		expect(isPreviewableUrl("file:///etc/passwd")).toBe(false);
+		expect(isPreviewableUrl("mailto:a@b.com")).toBe(false);
+		expect(isPreviewableUrl("matrix:r/foo:example.com")).toBe(false);
+	});
 });
