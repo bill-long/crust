@@ -101,14 +101,22 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 			switch (action.kind) {
 				case "promote-mod":
 					if (!perms.canChangePowerLevel(action.userId, 50)) {
-						setActionError("You can't promote above your own power level.");
+						setActionError(
+							perms.canSetPowerLevels()
+								? "You can't promote above your own power level."
+								: "You don't have permission to change power levels.",
+						);
 						return;
 					}
 					await writePowerLevel(action.userId, 50);
 					break;
 				case "promote-admin":
 					if (!perms.canChangePowerLevel(action.userId, 100)) {
-						setActionError("You can't promote above your own power level.");
+						setActionError(
+							perms.canSetPowerLevels()
+								? "You can't promote above your own power level."
+								: "You don't have permission to change power levels.",
+						);
 						return;
 					}
 					await writePowerLevel(action.userId, 100);
@@ -116,7 +124,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 				case "demote": {
 					const demote = levelForDemote(plContent());
 					if (!perms.canChangePowerLevel(action.userId, demote.level ?? 0)) {
-						setActionError("You can't change this member's power level.");
+						setActionError(
+							perms.canSetPowerLevels()
+								? "You can't change this member's power level."
+								: "You don't have permission to change power levels.",
+						);
 						return;
 					}
 					await writePowerLevel(action.userId, demote.level);

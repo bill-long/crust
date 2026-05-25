@@ -308,7 +308,11 @@ const GeneralTab: Component<GeneralTabProps> = (props) => {
 				>
 					Name
 				</label>
-				<Tooltip content={nameTooltip()} disabled={perms.canSetName()}>
+				<Tooltip
+					content={nameTooltip()}
+					disabled={perms.canSetName()}
+					triggerClass="flex w-full"
+				>
 					<input
 						id="room-name-input"
 						type="text"
@@ -374,7 +378,11 @@ const GeneralTab: Component<GeneralTabProps> = (props) => {
 				>
 					Topic
 				</label>
-				<Tooltip content={topicTooltip()} disabled={perms.canSetTopic()}>
+				<Tooltip
+					content={topicTooltip()}
+					disabled={perms.canSetTopic()}
+					triggerClass="flex w-full"
+				>
 					<textarea
 						id="room-topic-input"
 						rows="3"

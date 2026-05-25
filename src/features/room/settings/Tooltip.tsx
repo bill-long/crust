@@ -12,6 +12,13 @@ interface TooltipProps {
 	openDelay?: number;
 	/** Disable the tooltip entirely (renders children alone). */
 	disabled?: boolean;
+	/**
+	 * Tailwind class(es) applied to the underlying Trigger wrapper.
+	 * Defaults to `inline-flex` (shrink-to-fit, inline). Pass
+	 * `flex w-full` for full-width controls such as form inputs so
+	 * the child's `w-full` actually fills the section.
+	 */
+	triggerClass?: string;
 }
 
 /**
@@ -31,7 +38,7 @@ const Tooltip: Component<TooltipProps> = (props) => {
 				openDelay={props.openDelay ?? 200}
 				placement={props.placement ?? "top"}
 			>
-				<KTooltip.Trigger as="div" class="inline-flex">
+				<KTooltip.Trigger as="div" class={props.triggerClass ?? "inline-flex"}>
 					{props.children}
 				</KTooltip.Trigger>
 				<KTooltip.Portal>
