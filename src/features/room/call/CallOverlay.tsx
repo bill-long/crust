@@ -107,11 +107,56 @@ export const CallOverlay: Component<CallOverlayProps> = (props) => {
 				</button>
 			</div>
 
+			{/*
+			 * Sandbox tokens (defense in depth — operator-deployed Element Call
+			 * origin is already trusted via CSP `frame-src`):
+			 *   allow-scripts                  — Element Call is a SPA
+			 *   allow-same-origin              — preserves the iframe's OWN
+			 *                                    origin (vs. forcing an opaque
+			 *                                    one) so it can use IndexedDB
+			 *                                    / SW / localStorage for crypto
+			 *                                    state. Element Call requires
+			 *                                    this to function.
+			 *                                    CAVEAT: combined with
+			 *                                    allow-scripts, this provides
+			 *                                    meaningful isolation ONLY when
+			 *                                    `elementCall.url` is on a
+			 *                                    different origin than this
+			 *                                    app. config.ts does not
+			 *                                    enforce that; operators who
+			 *                                    deploy Element Call at the
+			 *                                    same origin as the client
+			 *                                    will get effectively NO
+			 *                                    sandbox isolation (the framed
+			 *                                    page can reach parent.document,
+			 *                                    remove the iframe's sandbox
+			 *                                    attribute, and reload itself
+			 *                                    unsandboxed, as MDN warns).
+			 *                                    Such an operator already
+			 *                                    trusts both surfaces (they
+			 *                                    deployed both), so this is an
+			 *                                    accepted deployment caveat:
+			 *                                    the defense-in-depth gain
+			 *                                    here is reserved for the
+			 *                                    typical separate-origin
+			 *                                    deployment.
+			 *   allow-popups + allow-popups-to-escape-sandbox
+			 *                                  — SSO / external-auth popups
+			 *   allow-forms                    — login form submission
+			 * Intentionally omitted: allow-top-navigation (the primary risk
+			 * this sandbox is mitigating), allow-modals, allow-downloads,
+			 * allow-pointer-lock, allow-presentation (the Presentation API
+			 * is for casting via navigator.presentation; screen sharing uses
+			 * getDisplayMedia which is gated by the `display-capture`
+			 * Permissions Policy in the `allow=` attribute above). Add only
+			 * if a documented Element Call flow is observed breaking.
+			 */}
 			<iframe
 				title={`Element Call — ${props.roomName}`}
 				src={callSrc()}
 				class="min-h-0 flex-1 border-0 bg-surface-0"
 				allow="camera; microphone; autoplay; clipboard-write; display-capture; fullscreen; screen-wake-lock"
+				sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
 				referrerPolicy="no-referrer"
 			/>
 
