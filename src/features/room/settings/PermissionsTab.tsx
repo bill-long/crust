@@ -64,7 +64,12 @@ const PermissionsTab: Component<PermissionsTabProps> = (props) => {
 	const opt = useOptimisticState<PowerLevelContent>({
 		serverValue: serverPl,
 		equals: (a, b) => {
-			// Compare only the gated keys + events map for echo matching.
+			// Compare only the gated top-level keys for echo matching.
+			// effectiveLevel reads the specific gated key (events_default,
+			// state_default, invite, redact, kick, ban) or falls back to its
+			// spec default. The per-user `users` map and per-type `events`
+			// map are preserved verbatim on write but are orthogonal to the
+			// preset-driven rows shown here.
 			for (const r of ROWS) {
 				if (effectiveLevel(a, r.key) !== effectiveLevel(b, r.key)) return false;
 			}

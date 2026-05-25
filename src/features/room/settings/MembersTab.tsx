@@ -1,6 +1,7 @@
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { EventType, type MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import { Virtualizer } from "virtua/solid";
 import { useMemberList } from "../useMemberList";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteByUserIdForm } from "./InviteByUserIdForm";
@@ -46,12 +47,17 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 	} | null>(null);
 	const [revoking, setRevoking] = createSignal<string | null>(null);
 
-	const allMembers = createMemo(() =>
-		memberList
-			.groups()
-			.flatMap((g) => g.members)
-			.sort((a, b) => b.powerLevel - a.powerLevel),
-	);
+	// Groups from useMemberList are pre-bucketed Admin > Moderator > Member
+	// and alphabetized within each role. Sort by power level descending so
+	// that within a role bucket (e.g. two Moderators at PL 80 vs PL 50) the
+	// higher-privilege user appears first; ties keep the alphabetical
+	// ordering from useMemberList because Array.prototype.sort is stable.
+	const allMembers = createMemo(() => {
+		const flat = memberList.groups().flatMap((g) => g.members);
+		return [...flat].sort((a, b) => b.powerLevel - a.powerLevel);
+	});
+
+	let scrollRef!: HTMLDivElement;
 
 	// Serialize PL writes so rapid consecutive promote/demote actions
 	// can't race against each other. The chain not only awaits prior
@@ -253,8 +259,13 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 						{actionError()}
 					</p>
 				</Show>
-				<ul class="space-y-1">
-					<For each={allMembers()}>
+				{/* biome-ignore lint/a11y/useSemanticElements: virtua's Virtualizer emits a <div> wrapper, so we cannot use a real <ul>/<li> structure here; ARIA role keeps list semantics for assistive tech. */}
+				<div
+					ref={scrollRef}
+					role="list"
+					class="max-h-[60vh] min-h-[200px] overflow-y-auto rounded border border-border-subtle"
+				>
+					<Virtualizer scrollRef={scrollRef} data={allMembers()}>
 						{(m) => {
 							const canPromoteMod = createMemo(() =>
 								perms.canChangePowerLevel(m.userId, 50),
@@ -283,7 +294,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 									canBanTarget(),
 							);
 							return (
-								<li class="flex items-center justify-between gap-3 rounded px-2 py-1.5 hover:bg-surface-1">
+								// biome-ignore lint/a11y/useSemanticElements: parent uses role="list" on a <div> for the same Virtualizer reason; matching <li> isn't usable here.
+								<div
+									role="listitem"
+									class="flex items-center justify-between gap-3 px-2 py-1.5 hover:bg-surface-1"
+								>
 									<div class="flex min-w-0 items-center gap-3">
 										<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2 text-xs font-semibold text-text-secondary">
 											<Show
@@ -395,11 +410,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 											</DropdownMenu.Portal>
 										</DropdownMenu>
 									</Show>
-								</li>
+								</div>
 							);
 						}}
-					</For>
-				</ul>
+					</Virtualizer>
+				</div>
 			</section>
 
 			<ConfirmDialog

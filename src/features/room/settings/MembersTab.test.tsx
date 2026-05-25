@@ -6,9 +6,31 @@ import {
 	waitFor,
 } from "@solidjs/testing-library";
 import { EventType, type MatrixClient, RoomStateEvent } from "matrix-js-sdk";
+import type { Accessor, JSX } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { MembersTab } from "./MembersTab";
+
+// virtua's Virtualizer requires real layout measurements (ResizeObserver +
+// non-zero element sizes) that jsdom doesn't provide. Tests here exercise
+// business logic (actions, gating, sorting) — not the virtualizer itself —
+// so we substitute a transparent renderer that mounts every row.
+vi.mock("virtua/solid", async () => {
+	const solid = await import("solid-js");
+	return {
+		Virtualizer: <T,>(props: {
+			data: T[];
+			children: (item: T, index: number) => unknown;
+		}) =>
+			solid.createComponent(solid.For, {
+				get each() {
+					return props.data;
+				},
+				children: (item: T, idx: Accessor<number>) =>
+					props.children(item, idx()) as JSX.Element,
+			}),
+	};
+});
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -112,16 +134,14 @@ afterEach(cleanup);
 describe("MembersTab", () => {
 	it("renders joined members sorted by power level descending", () => {
 		setup();
-		const text = screen.getByText("@admin:example.com · PL 100");
-		const list = text.closest("ul");
-		if (!list) throw new Error("member list not found");
-		const content = Array.from(list.querySelectorAll("li")).map(
-			(li) => li.textContent ?? "",
-		);
-		expect(content[0]).toContain("Admin");
-		expect(content[1]).toContain("Me");
-		expect(content[2]).toContain("Mod");
-		expect(content[3]).toContain("Alice");
+		const rows = screen.getAllByText(/^@.+ · PL \d+$/);
+		const labels = rows.map((r) => r.textContent ?? "");
+		expect(labels).toEqual([
+			"@admin:example.com · PL 100",
+			"@test:example.com · PL 100",
+			"@mod:example.com · PL 50",
+			"@alice:example.com · PL 0",
+		]);
 	});
 
 	it("promotes a member to Moderator by merging users into power levels", async () => {

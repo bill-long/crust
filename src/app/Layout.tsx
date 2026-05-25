@@ -696,14 +696,13 @@ const Layout: Component = () => {
 									activeTab={target().tab}
 									onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
 									onClose={() => setRoomSettings(null)}
-									onLeft={(leftRid) => {
+									onLeft={() => {
 										setRoomSettings(null);
 										if (spaceIdAtOpen) {
 											navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
 										} else {
 											navigate("/home");
 										}
-										void leftRid;
 									}}
 								/>
 							);
