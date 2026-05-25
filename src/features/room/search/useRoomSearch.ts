@@ -174,6 +174,7 @@ export function useRoomSearch(
 		setLoading(false);
 		setError(null);
 		setHighlights([]);
+		setMode(isEncrypted() ? "local" : "server");
 	};
 
 	// Reset when the active room changes (component reuse across rid).
@@ -282,7 +283,9 @@ export function useRoomSearch(
 		setHasMore(false);
 		setLoading(true);
 		setStatus("searching");
-		if (isEncrypted()) {
+		const encrypted = isEncrypted();
+		setMode(encrypted ? "local" : "server");
+		if (encrypted) {
 			// Server doesn't index encrypted bodies; go straight to local.
 			runLocal(q, myGen);
 		} else {

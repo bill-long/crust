@@ -1,9 +1,11 @@
 import type { MatrixEvent, Room, RoomMember } from "matrix-js-sdk";
-import { describe, expect, it } from "vitest";
+import { createRoot } from "solid-js";
+import { describe, expect, it, vi } from "vitest";
 import {
 	matchesAllTokens,
 	projectEvent,
 	splitQueryTokens,
+	useRoomSearch,
 } from "./useRoomSearch";
 
 interface FakeEventInit {
@@ -199,5 +201,141 @@ describe("matchesAllTokens", () => {
 
 	it("matches body that is exactly the token, case-insensitively", () => {
 		expect(matchesAllTokens("HELLO", ["hello"])).toBe(true);
+	});
+});
+
+interface FakeRoomOpts {
+	encrypted?: boolean;
+	timelineEvents?: MatrixEvent[];
+}
+
+function makeHookRoom(roomId: string, opts: FakeRoomOpts = {}): Room {
+	const events = opts.timelineEvents ?? [];
+	return {
+		roomId,
+		hasEncryptionStateEvent: () => opts.encrypted ?? false,
+		getMember: () => null,
+		getUnfilteredTimelineSet: () => ({
+			getTimelines: () => [
+				{
+					getEvents: () => events,
+				},
+			],
+		}),
+	} as unknown as Room;
+}
+
+function makeHookClient(
+	rooms: Map<string, Room>,
+	searchImpl?: () => Promise<unknown>,
+) {
+	const client = {
+		getRoom: (id: string) => rooms.get(id) ?? null,
+		on: vi.fn(),
+		off: vi.fn(),
+		searchRoomEvents:
+			searchImpl ??
+			vi.fn().mockResolvedValue({
+				results: [],
+				highlights: [],
+				next_batch: undefined,
+			}),
+		backPaginateRoomEventsSearch: vi.fn(),
+	};
+	return client;
+}
+
+describe("useRoomSearch (hook)", () => {
+	it("starts in 'server' mode", () => {
+		createRoot((dispose) => {
+			const rooms = new Map<string, Room>();
+			rooms.set("!r:test", makeHookRoom("!r:test"));
+			const client = makeHookClient(rooms);
+			const hook = useRoomSearch(
+				client as unknown as Parameters<typeof useRoomSearch>[0],
+				() => "!r:test",
+			);
+			expect(hook.mode()).toBe("server");
+			expect(hook.isEncrypted()).toBe(false);
+			dispose();
+		});
+	});
+
+	it("submit() pre-sets mode to 'local' for an encrypted room", () => {
+		createRoot((dispose) => {
+			const rooms = new Map<string, Room>();
+			rooms.set("!enc:test", makeHookRoom("!enc:test", { encrypted: true }));
+			const client = makeHookClient(rooms);
+			const hook = useRoomSearch(
+				client as unknown as Parameters<typeof useRoomSearch>[0],
+				() => "!enc:test",
+			);
+			hook.submit("hello");
+			expect(hook.mode()).toBe("local");
+			expect(client.searchRoomEvents).not.toHaveBeenCalled();
+			dispose();
+		});
+	});
+
+	it("submit() pre-sets mode to 'server' for an unencrypted room", () => {
+		createRoot((dispose) => {
+			const rooms = new Map<string, Room>();
+			rooms.set("!plain:test", makeHookRoom("!plain:test"));
+			// Never-resolving promise so we can observe the pre-set mode
+			// before runServer overwrites it.
+			const client = makeHookClient(
+				rooms,
+				() => new Promise(() => {}) as Promise<never>,
+			);
+			const hook = useRoomSearch(
+				client as unknown as Parameters<typeof useRoomSearch>[0],
+				() => "!plain:test",
+			);
+			hook.submit("hello");
+			expect(hook.mode()).toBe("server");
+			expect(hook.status()).toBe("searching");
+			dispose();
+		});
+	});
+
+	it("reset() restores mode to 'server' for an unencrypted room after a local fallback", async () => {
+		await new Promise<void>((resolveTest) => {
+			createRoot((dispose) => {
+				const rooms = new Map<string, Room>();
+				rooms.set("!plain:test", makeHookRoom("!plain:test"));
+				// searchRoomEvents rejects -> runLocal fallback -> mode becomes "local".
+				const client = makeHookClient(rooms, () =>
+					Promise.reject(new Error("server search unavailable")),
+				);
+				const hook = useRoomSearch(
+					client as unknown as Parameters<typeof useRoomSearch>[0],
+					() => "!plain:test",
+				);
+				hook.submit("hello");
+				// Wait a microtask for the rejected promise to flush.
+				queueMicrotask(() => {
+					expect(hook.mode()).toBe("local");
+					hook.reset();
+					expect(hook.mode()).toBe("server");
+					dispose();
+					resolveTest();
+				});
+			});
+		});
+	});
+
+	it("reset() restores mode to 'local' for an encrypted room (avoids 'server' on an encrypted room)", () => {
+		createRoot((dispose) => {
+			const rooms = new Map<string, Room>();
+			rooms.set("!enc:test", makeHookRoom("!enc:test", { encrypted: true }));
+			const client = makeHookClient(rooms);
+			const hook = useRoomSearch(
+				client as unknown as Parameters<typeof useRoomSearch>[0],
+				() => "!enc:test",
+			);
+			hook.reset();
+			expect(hook.mode()).toBe("local");
+			dispose();
+		});
 	});
 });
