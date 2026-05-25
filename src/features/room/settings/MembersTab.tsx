@@ -103,7 +103,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 					if (!perms.canChangePowerLevel(action.userId, 50)) {
 						setActionError(
 							perms.canSetPowerLevels()
-								? "You can't promote above your own power level."
+								? "You can't change this member's power level."
 								: "You don't have permission to change power levels.",
 						);
 						return;
@@ -114,7 +114,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 					if (!perms.canChangePowerLevel(action.userId, 100)) {
 						setActionError(
 							perms.canSetPowerLevels()
-								? "You can't promote above your own power level."
+								? "You can't change this member's power level."
 								: "You don't have permission to change power levels.",
 						);
 						return;
