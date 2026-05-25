@@ -31,7 +31,7 @@ const Tooltip: Component<TooltipProps> = (props) => {
 				openDelay={props.openDelay ?? 200}
 				placement={props.placement ?? "top"}
 			>
-				<KTooltip.Trigger as="span" class="inline-flex">
+				<KTooltip.Trigger as="div" class="inline-flex">
 					{props.children}
 				</KTooltip.Trigger>
 				<KTooltip.Portal>

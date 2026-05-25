@@ -8,6 +8,7 @@ import {
 	createSignal,
 	onCleanup,
 	Show,
+	untrack,
 } from "solid-js";
 import { useClient } from "../client/client";
 import {
@@ -683,12 +684,11 @@ const Layout: Component = () => {
 						{(rid) => {
 							// Snapshot the route's spaceId at the moment the
 							// overlay is rendered (and re-snapshot whenever
-							// roomId changes, via the keyed Show). Reading
-							// it inside `onLeft` would happen AFTER
-							// client.leave() resolved, by which point the
-							// router may have navigated us off the room and
-							// out of the space.
-							const spaceIdAtOpen = params.spaceId;
+							// roomId changes, via the keyed Show). Read via
+							// untrack so subsequent router updates to
+							// params.spaceId during the async leave cannot
+							// re-run this child and overwrite the snapshot.
+							const spaceIdAtOpen = untrack(() => params.spaceId);
 							return (
 								<RoomSettingsOverlay
 									client={client}

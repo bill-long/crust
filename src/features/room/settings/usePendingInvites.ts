@@ -5,7 +5,13 @@ import {
 	type RoomState,
 	RoomStateEvent,
 } from "matrix-js-sdk";
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import {
+	type Accessor,
+	createEffect,
+	createSignal,
+	on,
+	onCleanup,
+} from "solid-js";
 
 export interface PendingInvite {
 	userId: string;
@@ -70,13 +76,19 @@ export function usePendingInvites(
 
 	refresh();
 
-	// React to roomId changes (e.g. overlay re-targets a different room
-	// before the new room delivers a Members event). Without this the
-	// list would stay stale until the next membership update.
-	createEffect(() => {
-		roomId();
-		refresh();
-	});
+	// Re-refresh on roomId changes (e.g. overlay re-targets a different
+	// room before the new room delivers a Members event). `on(..., { defer: true })`
+	// skips the initial run since the eager refresh() above already
+	// populated for the current roomId.
+	createEffect(
+		on(
+			roomId,
+			() => {
+				refresh();
+			},
+			{ defer: true },
+		),
+	);
 
 	const onMembers = (
 		_event: MatrixEvent,
