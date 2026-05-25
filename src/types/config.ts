@@ -114,10 +114,15 @@ function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
 	// Element Call's media APIs (camera, microphone, display-capture) only
 	// work in a secure context. Allow https:// and loopback http:// (which
 	// browsers treat as secure per the W3C Secure Contexts spec, so local
-	// EC dev setups still work). Reject everything else.
+	// EC dev setups still work). Reject everything else, plus any URL that
+	// carries a query string or fragment — callSrc() builds the iframe URL
+	// by appending `/room/#?roomId=...` to this base, and either a preset
+	// search or hash would corrupt that concatenation (e.g. `?foo=bar` keeps
+	// `/room/` inside `search` rather than `pathname`, and a `#frag` nests
+	// the roomId fragment inside the existing one).
 	if (rawUrl && !isSecureCallUrl(rawUrl)) {
 		console.warn(
-			"config.elementCall.url must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]); ignoring:",
+			"config.elementCall.url must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]) with no query string or fragment; ignoring:",
 			rawUrl,
 		);
 		return { url: "" };
@@ -132,6 +137,12 @@ function isSecureCallUrl(url: string): boolean {
 	} catch {
 		return false;
 	}
+	// Reject any URL containing `?` or `#`. callSrc() appends
+	// `/room/#?roomId=...` to this base, so a query string or fragment
+	// (including a bare trailing `?` or `#`, which the URL parser
+	// normalizes to empty `search`/`hash`) would corrupt the resulting
+	// URL.
+	if (url.includes("?") || url.includes("#")) return false;
 	if (parsed.protocol === "https:") return true;
 	if (parsed.protocol !== "http:") return false;
 	const host = parsed.hostname.toLowerCase();
