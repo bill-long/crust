@@ -1,4 +1,4 @@
-import { type Component, Show } from "solid-js";
+import type { Component } from "solid-js";
 import { buildSnippetHtml } from "./highlightSnippet";
 import type { SearchHit } from "./useRoomSearch";
 
@@ -55,17 +55,10 @@ const SearchResultRow: Component<{
 					{formatHitTime(props.hit.timestamp)}
 				</span>
 			</div>
-			<Show
-				when={props.hit.body}
-				fallback={
-					<span class="italic text-xs text-text-muted">(non-text message)</span>
-				}
-			>
-				<div
-					class="line-clamp-3 text-xs text-text-secondary [&_mark]:rounded-sm [&_mark]:bg-accent/30 [&_mark]:px-0.5 [&_mark]:text-text-emphasis"
-					innerHTML={buildSnippetHtml(props.hit.body, props.terms)}
-				/>
-			</Show>
+			<div
+				class="line-clamp-3 text-xs text-text-secondary [&_mark]:rounded-sm [&_mark]:bg-accent/30 [&_mark]:px-0.5 [&_mark]:text-text-emphasis"
+				innerHTML={buildSnippetHtml(props.hit.body, props.terms)}
+			/>
 		</div>
 	);
 };

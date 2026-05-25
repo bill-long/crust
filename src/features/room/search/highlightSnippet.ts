@@ -5,9 +5,6 @@ import { stripReplyFallback } from "../urlPreviews/replyFallback";
 const WINDOW_BEFORE = 60;
 const WINDOW_AFTER = 180;
 
-/** Maximum total snippet length before truncation kicks in. */
-const MAX_SNIPPET_LEN = WINDOW_BEFORE + WINDOW_AFTER + 40;
-
 const HTML_ESCAPE: Record<string, string> = {
 	"&": "&amp;",
 	"<": "&lt;",
@@ -61,10 +58,7 @@ export function buildSnippetHtml(body: string, terms: string[]): string {
 	const center = firstMatch === -1 ? 0 : firstMatch;
 	const start = Math.max(0, center - WINDOW_BEFORE);
 	const end = Math.min(stripped.length, center + WINDOW_AFTER);
-	let slice = stripped.slice(start, end);
-	if (slice.length > MAX_SNIPPET_LEN) {
-		slice = `${slice.slice(0, MAX_SNIPPET_LEN)}…`;
-	}
+	const slice = stripped.slice(start, end);
 	const prefix = start > 0 ? "…" : "";
 	const suffix = end < stripped.length ? "…" : "";
 

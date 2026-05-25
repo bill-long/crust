@@ -58,7 +58,11 @@ const MAX_QUERY_LEN = 256;
 
 export { MAX_QUERY_LEN };
 
-function projectEvent(room: Room | null, ev: MatrixEvent): SearchHit | null {
+/** @internal Exported for tests. */
+export function projectEvent(
+	room: Room | null,
+	ev: MatrixEvent,
+): SearchHit | null {
 	const id = ev.getId();
 	if (!id) return null;
 	if (ev.isRedacted()) return null;

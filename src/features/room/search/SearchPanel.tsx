@@ -18,9 +18,10 @@ import { MAX_QUERY_LEN, useRoomSearch } from "./useRoomSearch";
 const VIRTUALIZE_THRESHOLD = 50;
 
 /**
- * Focus the active room composer textarea, if one exists. Mirrors the
- * pattern from TimelineView.focusComposer so closing the search panel
- * lands the keyboard user back on the input they were typing in.
+ * Focus the active room composer textarea, if one exists. Lets a keyboard
+ * user who jumps to a search result land back on the input they were typing
+ * in without an extra Tab. We rely on the singleton `data-composer-textarea`
+ * marker rendered by Composer; if no composer is mounted this is a no-op.
  */
 function focusComposer(): void {
 	const textarea = document.querySelector<HTMLTextAreaElement>(
