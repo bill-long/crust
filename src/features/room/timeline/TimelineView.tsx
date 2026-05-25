@@ -880,6 +880,27 @@ const TimelineView: Component<{
 		}
 	};
 
+	/**
+	 * Cancel an in-flight redaction (QUEUED / ENCRYPTING).
+	 * Identical to Discard on a failed redaction — both call
+	 * `cancelPendingEvent` on the redaction echo; the SDK's
+	 * `unmarkLocallyRedacted` restores the target's content, and the
+	 * `_removed` Timeline handler in `useTimeline` clears the pending
+	 * overlay and re-renders the row.
+	 */
+	const onCancelRedaction = (targetId: string): void => {
+		const pending = pendingRedactions[targetId];
+		if (!pending) return;
+		const originalRoomId = props.roomId;
+		try {
+			client.cancelPendingEvent(pending.redactionEvent);
+		} catch (e) {
+			console.error("cancelPendingEvent (redaction in-flight) failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
 	const onReactionPickerSelect = (
 		eventId: string,
 		item: PickerEmoji,
@@ -1021,6 +1042,7 @@ const TimelineView: Component<{
 										onCancel={() => cancelPending(event.eventId)}
 										onRetryRedaction={() => onRetryRedaction(event.eventId)}
 										onDiscardRedaction={() => onDiscardRedaction(event.eventId)}
+										onCancelRedaction={() => onCancelRedaction(event.eventId)}
 										pendingRedactionStatus={
 											pendingRedactions[event.eventId]?.status
 										}
