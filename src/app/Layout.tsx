@@ -29,6 +29,8 @@ import {
 	useImagePacks,
 } from "../features/emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
+import { CallButton } from "../features/room/call/CallButton";
+import { CallOverlay } from "../features/room/call/CallOverlay";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
@@ -56,6 +58,7 @@ import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import type { CryptoAction } from "../types/crypto";
 import { stripBasePath } from "./basePath";
+import { useConfig } from "./ConfigProvider";
 import { useDecodedParams } from "./useDecodedParams";
 
 const MEMBERS_WIDTH_KEY = "crust_members_width";
@@ -95,6 +98,8 @@ const RoomPane: Component<{
 	client: MatrixClient;
 	rid: string;
 	roomName: string;
+	callActive: () => boolean;
+	elementCallUrl: string;
 	copyState: () => "idle" | "copied" | "error";
 	onCopyLink: () => void;
 	canInvite: () => boolean;
@@ -113,14 +118,21 @@ const RoomPane: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
+	const [callOpen, setCallOpen] = createSignal(false);
 
 	return (
-		<div class="flex h-full flex-col">
+		<div class="relative flex h-full flex-col">
 			<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-4">
 				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 					{props.roomName}
 				</span>
 				<div class="flex shrink-0 items-center gap-1">
+					<CallButton
+						roomId={props.rid}
+						callActive={props.callActive}
+						elementCallUrl={props.elementCallUrl}
+						onStart={() => setCallOpen(true)}
+					/>
 					<RoomNotificationMenu client={props.client} roomId={props.rid} />
 					<Show when={props.canInvite()}>
 						<button
@@ -247,12 +259,22 @@ const RoomPane: Component<{
 					</div>
 				</Show>
 			</div>
+
+			<Show when={callOpen()}>
+				<CallOverlay
+					elementCallUrl={props.elementCallUrl}
+					roomId={props.rid}
+					roomName={props.roomName}
+					onClose={() => setCallOpen(false)}
+				/>
+			</Show>
 		</div>
 	);
 };
 
 const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState } = useClient();
+	const config = useConfig();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
 	const location = useLocation();
@@ -508,6 +530,12 @@ const Layout: Component = () => {
 		return s?.name?.trim() || "Room";
 	};
 
+	const callActive = (): boolean => {
+		const rid = roomId();
+		if (!rid) return false;
+		return summaries[rid]?.callActive ?? false;
+	};
+
 	const handleLeave = (): void => {
 		const rid = roomId();
 		if (!rid || leaving()) return;
@@ -625,6 +653,8 @@ const Layout: Component = () => {
 								client={client}
 								rid={rid}
 								roomName={roomName()}
+								callActive={callActive}
+								elementCallUrl={config.elementCall.url}
 								copyState={copyState}
 								onCopyLink={() => handleCopyRoomLink(rid)}
 								canInvite={canInviteHere}

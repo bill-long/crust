@@ -23,7 +23,47 @@ export interface RoomSummary {
 	isSpace: boolean;
 	/** Whether this room is a voice/video room (MSC3401 or Element video) vs a text room. */
 	kind: "text" | "voice";
+	/** Whether the room currently has an in-progress MatrixRTC call (any non-expired call-member). */
+	callActive: boolean;
 	children: string[];
+}
+
+/** State event type that MatrixRTC / Element Call use today (legacy MSC3401). */
+const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
+
+/**
+ * Whether `room` has any non-expired `org.matrix.msc3401.call.member` event
+ * with non-empty membership content. Derived directly from room state rather
+ * than via `client.matrixRTC` so it is robust to SDK startup ordering and
+ * membership expiry edge cases.
+ */
+function isCallActive(room: Room): boolean {
+	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);
+	if (events.length === 0) return false;
+	const now = Date.now();
+	for (const ev of events) {
+		const content = ev.getContent() as {
+			memberships?: Array<{ expires_ts?: number; expires?: number }>;
+			[k: string]: unknown;
+		};
+		// Per-device shape: { memberships: [{ ..., expires_ts }] }
+		if (Array.isArray(content.memberships)) {
+			for (const m of content.memberships) {
+				const expiresTs =
+					typeof m.expires_ts === "number"
+						? m.expires_ts
+						: typeof m.expires === "number"
+							? ev.getTs() + m.expires
+							: undefined;
+				if (expiresTs === undefined || expiresTs > now) return true;
+			}
+			continue;
+		}
+		// Empty / tombstone events have no other meaningful keys.
+		const keys = Object.keys(content);
+		if (keys.length > 0) return true;
+	}
+	return false;
 }
 
 export type SummariesStore = Record<string, RoomSummary>;
@@ -75,6 +115,7 @@ function buildSummary(
 		isDirect: dmRoomIds.has(room.roomId),
 		isSpace,
 		kind,
+		callActive: isCallActive(room),
 		children: isSpace ? getSpaceChildren(room) : [],
 	};
 }
@@ -267,6 +308,11 @@ export function createSummariesStore(client: MatrixClient): {
 			const createEv = room.currentState.getStateEvents("m.room.create", "");
 			if (createEv?.getContent()?.type === "m.space") {
 				setSummaries(room.roomId, "children", getSpaceChildren(room));
+			}
+		} else if (type === CALL_MEMBER_EVENT_TYPE) {
+			const active = isCallActive(room);
+			if (summaries[room.roomId].callActive !== active) {
+				setSummaries(room.roomId, "callActive", active);
 			}
 		}
 	}

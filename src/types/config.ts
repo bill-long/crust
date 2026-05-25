@@ -110,9 +110,15 @@ export interface CrustConfig {
 function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
 	if (typeof raw !== "object" || raw === null) return { url: "" };
 	const obj = raw as Record<string, unknown>;
-	return {
-		url: typeof obj.url === "string" ? obj.url : "",
-	};
+	const rawUrl = typeof obj.url === "string" ? obj.url.trim() : "";
+	// Element Call's media APIs (camera, microphone, display-capture) only
+	// work over a secure context. Reject non-HTTPS so we don't silently
+	// embed something that will break inside the iframe.
+	if (rawUrl && !/^https:\/\//i.test(rawUrl)) {
+		console.warn("config.elementCall.url must use https://; ignoring:", rawUrl);
+		return { url: "" };
+	}
+	return { url: rawUrl };
 }
 
 function normalizeBranding(raw: unknown): CrustConfig["branding"] {
