@@ -8,7 +8,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
-import { validateMatrixUserId } from "./inviteValidation";
+import { InviteByUserIdForm } from "./settings/InviteByUserIdForm";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -25,47 +25,22 @@ interface InviteDialogProps {
 	onClose: () => void;
 }
 
-function describeInviteError(err: unknown): string {
-	const code =
-		err && typeof err === "object" && "errcode" in err
-			? (err as { errcode?: unknown }).errcode
-			: undefined;
-	if (code === "M_FORBIDDEN") {
-		return "You don't have permission to invite to this room.";
-	}
-	if (code === "M_LIMIT_EXCEEDED") {
-		return "You're being rate-limited. Wait a moment, then try again.";
-	}
-	if (code === "M_NOT_FOUND") {
-		return "This room no longer exists or you can't access it.";
-	}
-	if (err instanceof Error && err.message) return err.message;
-	return "Couldn't send the invite. Please try again.";
-}
-
 const InviteDialog: Component<InviteDialogProps> = (props) => {
 	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 
-	const [inputValue, setInputValue] = createSignal("");
-	const [errorText, setErrorText] = createSignal("");
-	const [successText, setSuccessText] = createSignal("");
 	const [submitting, setSubmitting] = createSignal(false);
+	const [resetTick, setResetTick] = createSignal(0);
 
 	const titleId = createUniqueId();
-	const errorId = createUniqueId();
-	const statusId = createUniqueId();
 
 	// React to open/close: capture focus on open; restore + reset on close.
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
 				previousFocus = document.activeElement as HTMLElement | null;
-				setInputValue("");
-				setErrorText("");
-				setSuccessText("");
-				setSubmitting(false);
+				setResetTick((n) => n + 1);
 				// Focus input after the panel mounts.
 				queueMicrotask(() => inputRef?.focus());
 			} else if (!isOpen && wasOpen) {
@@ -112,69 +87,6 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 		}
 	};
 
-	const handleSubmit = async (e: Event): Promise<void> => {
-		e.preventDefault();
-		if (submitting()) return;
-
-		const validation = validateMatrixUserId(inputValue());
-		if (!validation.ok) {
-			setErrorText(validation.error);
-			setSuccessText("");
-			return;
-		}
-		const userId = validation.userId;
-
-		// Client-side pre-checks for nicer UX (server is the source of truth).
-		if (userId === props.client.getUserId()) {
-			setErrorText("You can't invite yourself.");
-			setSuccessText("");
-			return;
-		}
-		const room = props.client.getRoom(props.roomId);
-		const existing = room?.getMember(userId);
-		if (existing?.membership === "join") {
-			setErrorText(`${userId} is already in this room.`);
-			setSuccessText("");
-			return;
-		}
-		if (existing?.membership === "invite") {
-			setErrorText(`${userId} has already been invited.`);
-			setSuccessText("");
-			return;
-		}
-
-		// Snapshot for the success message; clear the input immediately.
-		const inviteTarget = userId;
-		setInputValue("");
-		setErrorText("");
-		setSuccessText("");
-		setSubmitting(true);
-		try {
-			await props.client.invite(props.roomId, inviteTarget);
-			setSuccessText(`Invited ${inviteTarget}.`);
-			// Re-focus input for another invite, but only if focus is still
-			// inside the dialog — don't yank focus if the user has moved on.
-			if (
-				document.activeElement &&
-				overlayRef.contains(document.activeElement)
-			) {
-				inputRef?.focus();
-			}
-		} catch (err) {
-			setErrorText(describeInviteError(err));
-			// Restore the typed value so the user can correct typos.
-			setInputValue(inviteTarget);
-			if (
-				document.activeElement &&
-				overlayRef.contains(document.activeElement)
-			) {
-				inputRef?.focus();
-			}
-		} finally {
-			setSubmitting(false);
-		}
-	};
-
 	return (
 		<Show when={props.open()}>
 			<div
@@ -189,10 +101,7 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 					if (e.target === e.currentTarget) tryClose();
 				}}
 			>
-				<form
-					class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl"
-					onSubmit={handleSubmit}
-				>
+				<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 					<h2 id={titleId} class="mb-3 text-lg font-semibold text-text-primary">
 						Invite to room
 					</h2>
@@ -200,49 +109,18 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 						Enter a Matrix user ID to invite.
 					</p>
 
-					<label
-						for={`${titleId}-input`}
-						class="mb-1 block text-xs font-medium text-text-secondary"
-					>
-						User ID
-					</label>
-					<input
-						id={`${titleId}-input`}
-						ref={inputRef}
-						type="text"
-						value={inputValue()}
-						onInput={(e) => {
-							setInputValue(e.currentTarget.value);
-							if (errorText()) setErrorText("");
-							if (successText()) setSuccessText("");
+					<InviteByUserIdForm
+						client={props.client}
+						roomId={props.roomId}
+						resetSignal={resetTick}
+						onSubmittingChange={setSubmitting}
+						onInputRef={(el) => {
+							inputRef = el;
 						}}
-						placeholder="@alice:server"
-						autocomplete="off"
-						spellcheck={false}
-						disabled={submitting()}
-						aria-describedby={
-							errorText() ? errorId : successText() ? statusId : undefined
-						}
-						aria-invalid={errorText() ? true : undefined}
-						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						focusScope={() => overlayRef}
 					/>
 
-					<Show when={errorText()}>
-						<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
-							{errorText()}
-						</p>
-					</Show>
-					<Show when={successText()}>
-						<p
-							id={statusId}
-							class="mb-2 text-sm text-text-secondary"
-							role="status"
-						>
-							{successText()}
-						</p>
-					</Show>
-
-					<div class="mt-4 flex justify-end gap-2">
+					<div class="mt-2 flex justify-end">
 						<button
 							type="button"
 							onClick={tryClose}
@@ -251,15 +129,8 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 						>
 							Close
 						</button>
-						<button
-							type="submit"
-							disabled={submitting()}
-							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							{submitting() ? "Inviting…" : "Invite"}
-						</button>
 					</div>
-				</form>
+				</div>
 			</div>
 		</Show>
 	);
