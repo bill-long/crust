@@ -180,6 +180,22 @@ describe("normalizeConfig elementCall url validation", () => {
 		expect(callUrl("https://")).toBe("");
 	});
 
+	it("rejects URLs with a query string or fragment", () => {
+		// callSrc() appends `/room/#?roomId=...`; a preset search or hash
+		// would corrupt the concatenation (see issue #112).
+		expect(callUrl("https://call.example.com?foo=bar")).toBe("");
+		expect(callUrl("https://call.example.com/path?foo=bar")).toBe("");
+		expect(callUrl("https://call.example.com#frag")).toBe("");
+		expect(callUrl("https://call.example.com/path#frag")).toBe("");
+		expect(callUrl("http://localhost?x=1")).toBe("");
+		expect(callUrl("http://localhost#y")).toBe("");
+		// Bare trailing `?` or `#` also corrupts concatenation in
+		// callSrc() — the URL parser normalizes these to empty
+		// search/hash but the raw string still breaks `${base}/room/...`.
+		expect(callUrl("https://call.example.com?")).toBe("");
+		expect(callUrl("https://call.example.com#")).toBe("");
+	});
+
 	it("treats missing or empty url as no element-call config", () => {
 		expect(normalizeConfig({}).elementCall.url).toBe("");
 		expect(callUrl("")).toBe("");
