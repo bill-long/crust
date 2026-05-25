@@ -1085,6 +1085,12 @@ const TimelineView: Component<{
 								</button>
 							</div>
 						</Show>
+						{/* Bottom sentinel spacer so the last message's descenders
+						    and media don't touch the composer's top divider.
+						    Lives inside the scroller so scrollHeight-based
+						    bottom-pin math (scrollTo({ top: scrollHeight }))
+						    keeps working unchanged. */}
+						<div class="h-2" aria-hidden="true" />
 					</div>
 
 					{/* Scroll-to-bottom / Jump to latest button.
