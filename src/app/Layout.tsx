@@ -36,6 +36,7 @@ import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { buildRoomLink, buildRoomLinkById } from "../features/room/roomLink";
+import { SearchPanel } from "../features/room/search/SearchPanel";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { useNotifications } from "../features/room/useNotifications";
 import {
@@ -108,11 +109,11 @@ const RoomPane: Component<{
 
 	return (
 		<div class="flex h-full flex-col">
-			<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
-				<span class="text-sm font-semibold text-text-emphasis">
+			<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-4">
+				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 					{props.roomName}
 				</span>
-				<div class="flex items-center gap-1">
+				<div class="flex shrink-0 items-center gap-1">
 					<RoomNotificationMenu client={props.client} roomId={props.rid} />
 					<Show when={props.canInvite()}>
 						<button
@@ -147,6 +148,11 @@ const RoomPane: Component<{
 						client={props.client}
 						pins={pins}
 						shortcodeLookup={shortcodeLookup()}
+						onJump={(eventId) => setJumpRequest(eventId)}
+					/>
+					<SearchPanel
+						client={props.client}
+						roomId={props.rid}
 						onJump={(eventId) => setJumpRequest(eventId)}
 					/>
 					<button
