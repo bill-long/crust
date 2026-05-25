@@ -190,6 +190,7 @@ export function createMockRoom(
 		>
 	>();
 
+	const canSendStateByType = new Map<string, boolean>();
 	const currentState = {
 		getStateEvents: (type: string, stateKey?: string) => {
 			const typeMap = stateEventStore.get(type);
@@ -198,7 +199,11 @@ export function createMockRoom(
 			}
 			return typeMap ? Array.from(typeMap.values()) : [];
 		},
+		maySendStateEvent: (type: string, _userId: string) =>
+			canSendStateByType.has(type) ? !!canSendStateByType.get(type) : true,
 	};
+
+	const roomListeners = new Map<string, Set<(...args: unknown[]) => void>>();
 
 	return {
 		roomId,
@@ -214,8 +219,29 @@ export function createMockRoom(
 		},
 		getJoinedMembers: () => memberState.filter((m) => m.membership === "join"),
 		getMembers: () => [...memberState],
+		findEventById: (eventId: string) =>
+			matrixEvents.find((e) => e.getId() === eventId) ?? null,
+		on: (event: string, handler: (...args: unknown[]) => void) => {
+			if (!roomListeners.has(event)) roomListeners.set(event, new Set());
+			roomListeners.get(event)?.add(handler);
+		},
+		off: (event: string, handler: (...args: unknown[]) => void) => {
+			roomListeners.get(event)?.delete(handler);
+		},
+		removeListener: (event: string, handler: (...args: unknown[]) => void) => {
+			roomListeners.get(event)?.delete(handler);
+		},
 
 		// Test helpers
+		__emit: (event: string, ...args: unknown[]) => {
+			const handlers = roomListeners.get(event);
+			if (handlers) {
+				for (const handler of handlers) handler(...args);
+			}
+		},
+		__setCanSendStateEvent: (type: string, allowed: boolean) => {
+			canSendStateByType.set(type, allowed);
+		},
 		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);
 		},
@@ -301,6 +327,7 @@ export function createMockClient(
 			),
 		sendMessage: vi.fn().mockResolvedValue({ event_id: "$sent" }),
 		sendEvent: vi.fn().mockResolvedValue({ event_id: "$sent" }),
+		sendStateEvent: vi.fn().mockResolvedValue({ event_id: "$state" }),
 		sendTyping: vi.fn().mockResolvedValue(undefined),
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
 		redactEvent: vi.fn().mockResolvedValue(undefined),

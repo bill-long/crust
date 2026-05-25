@@ -2201,7 +2201,7 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			expect(pendingRedactions["$target"]).toBeUndefined();
+			expect(pendingRedactions.$target).toBeUndefined();
 
 			const redactionEcho = createMatrixEvent({
 				eventId: "~local.red",
@@ -2215,7 +2215,7 @@ describe("useTimeline", () => {
 			});
 			appendLive(client, roomA, redactionEcho);
 
-			const entry = pendingRedactions["$target"];
+			const entry = pendingRedactions.$target;
 			expect(entry).toBeDefined();
 			expect(entry?.status).toBe(EventStatus.SENDING);
 			expect(entry?.redactionEvent.getId()).toBe("~local.red");
@@ -2254,7 +2254,7 @@ describe("useTimeline", () => {
 				redacts: "$target",
 			});
 			appendLive(client, roomA, redactionEcho);
-			expect(pendingRedactions["$target"]?.status).toBe(EventStatus.SENDING);
+			expect(pendingRedactions.$target?.status).toBe(EventStatus.SENDING);
 
 			redactionEcho.__setStatus(EventStatus.NOT_SENT);
 			client.__emit(
@@ -2264,7 +2264,7 @@ describe("useTimeline", () => {
 				undefined,
 				EventStatus.SENDING,
 			);
-			expect(pendingRedactions["$target"]?.status).toBe(EventStatus.NOT_SENT);
+			expect(pendingRedactions.$target?.status).toBe(EventStatus.NOT_SENT);
 		});
 	});
 
@@ -2298,13 +2298,13 @@ describe("useTimeline", () => {
 				redacts: "$target",
 			});
 			appendLive(client, roomA, redactionEcho);
-			expect(pendingRedactions["$target"]).toBeDefined();
+			expect(pendingRedactions.$target).toBeDefined();
 
 			// SDK fires removed-Timeline before LocalEchoUpdated(CANCELLED).
 			client.__emit("Room.timeline", redactionEcho, roomA, false, true, {
 				liveEvent: true,
 			});
-			expect(pendingRedactions["$target"]).toBeUndefined();
+			expect(pendingRedactions.$target).toBeUndefined();
 			// Target stays — discard restores normal appearance.
 			expect(events.length).toBe(1);
 			expect(events[0].eventId).toBe("$target");
@@ -2353,7 +2353,7 @@ describe("useTimeline", () => {
 				redacts: "$target",
 			};
 			appendLive(client, roomA, redactionEcho);
-			expect(pendingRedactions["$target"]).toBeDefined();
+			expect(pendingRedactions.$target).toBeDefined();
 
 			// Server confirms — SDK runs makeRedacted: clears
 			// _localRedactionEvent, marks the target truly redacted.
@@ -2367,7 +2367,7 @@ describe("useTimeline", () => {
 				undefined,
 				EventStatus.SENDING,
 			);
-			expect(pendingRedactions["$target"]).toBeUndefined();
+			expect(pendingRedactions.$target).toBeUndefined();
 			// Target removed from the store (the SDK reconciles remote
 			// echoes without re-firing Room.timeline, so this code path
 			// has to drive the removal).
@@ -2422,7 +2422,7 @@ describe("useTimeline", () => {
 				liveEvent: true,
 			});
 
-			expect(pendingRedactions["$target"]).toBeUndefined();
+			expect(pendingRedactions.$target).toBeUndefined();
 			// Target's body restored from getContent().
 			expect(events.length).toBe(1);
 			expect(events[0].body).toBe("delete me");
@@ -2467,12 +2467,12 @@ describe("useTimeline", () => {
 				redacts: "$target",
 			});
 			appendLive(client, roomA, redactionEcho);
-			expect(pendingRedactions["$target"]).toBeDefined();
+			expect(pendingRedactions.$target).toBeDefined();
 
 			setRoomId("!roomB:test");
 			await flushPromises();
 
-			expect(pendingRedactions["$target"]).toBeUndefined();
+			expect(pendingRedactions.$target).toBeUndefined();
 		});
 	});
 

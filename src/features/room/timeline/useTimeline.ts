@@ -546,6 +546,87 @@ export function useTimeline(
 		loadRoom(currentRoomId);
 	}
 
+	// ID of an event the view layer should scroll to (and flash) once
+	// it appears in the events store. Set by `jumpToEvent` and cleared
+	// by the consumer after handling. `equals: false` so rapid re-jumps
+	// to the same eventId still fire the consumer effect (so the row
+	// re-flashes on repeated clicks of the same pinned message).
+	const [pendingScrollToId, setPendingScrollToId] = createSignal<string | null>(
+		null,
+		{ equals: false },
+	);
+
+	/** Load a fresh TimelineWindow anchored on `eventId` and signal the
+	 *  view to scroll there. Used for the pinned-messages "Jump to"
+	 *  action and any other deep-link-style navigation.
+	 *
+	 *  Lifecycle parallels loadRoom — bumps roomGeneration so in-flight
+	 *  paginations bail, switches off followingLive (we're anchored at
+	 *  a historical point), and resets deferredLiveCount (live catch-up
+	 *  must not apply to an anchored window). After load the view's
+	 *  [atBottom, canLoadNewer] effect will re-derive followingLive
+	 *  based on whether the anchor happens to be at the live end. */
+	async function jumpToEvent(eventId: string): Promise<void> {
+		const rid = currentRoomId;
+		if (!rid) return;
+		const room = client.getRoom(rid);
+		if (!room) return;
+
+		// Fast path: event is already in the window. Just nudge the view.
+		if (currentTimelineWindow) {
+			const existing = currentTimelineWindow
+				.getEvents()
+				.find((e) => e.getId() === eventId);
+			if (existing) {
+				// Anchor on the historical row even if it sits inside the
+				// current live window. Without this, new live events keep
+				// auto-scrolling the view away from the row the user just
+				// jumped to. The [atBottom, canLoadNewer] effect will
+				// re-enable followingLive if the anchor happens to be at
+				// the live end already.
+				followingLive = false;
+				setPendingScrollToId(eventId);
+				return;
+			}
+		}
+
+		roomGeneration++;
+		const gen = roomGeneration;
+		const timelineSet = room.getUnfilteredTimelineSet();
+		const tw = new TimelineWindow(client, timelineSet, {
+			windowLimit: windowLimit,
+		});
+		currentTimelineWindow = null;
+		deferredLiveCount = 0;
+		followingLive = false;
+		setLoading(true);
+		setLoadingOlder(false);
+		setLoadingNewer(false);
+		setCanLoadOlder(false);
+		setCanLoadNewer(false);
+
+		try {
+			await tw.load(eventId, initialWindowSize);
+			if (gen !== roomGeneration) return;
+			currentTimelineWindow = tw;
+			rebuildEventsFromWindow(room);
+			setCanLoadOlder(tw.canPaginate(Direction.Backward));
+			setCanLoadNewer(tw.canPaginate(Direction.Forward));
+			setLoading(false);
+			setPendingScrollToId(eventId);
+		} catch {
+			if (gen !== roomGeneration) return;
+			// Fall back to a fresh live load so we don't strand the user
+			// on a blank timeline.
+			setLoading(false);
+			loadRoom(rid);
+		}
+	}
+
+	function consumePendingScrollToId(): void {
+		setPendingScrollToId(null);
+	}
+
 	function handleRedaction(room: Room, redactedId: string): void {
 		setEvents(
 			produce((draft) => {
@@ -1030,6 +1111,9 @@ export function useTimeline(
 		loadOlderMessages,
 		loadNewerMessages,
 		jumpToLive,
+		jumpToEvent,
+		pendingScrollToId,
+		consumePendingScrollToId,
 		setFollowingLive,
 		typingUsers,
 		getSourceEvent,

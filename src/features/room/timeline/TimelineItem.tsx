@@ -105,10 +105,13 @@ function unsupportedLabel(msgtype: string): string {
 const HoverToolbar: Component<{
 	isOwnMessage: boolean;
 	msgtype: string | undefined;
+	canPin: boolean;
+	isPinned: boolean;
 	onReact: () => void;
 	onReply: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onTogglePin: () => void;
 }> = (props) => {
 	return (
 		<div class="pointer-events-none absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-md bg-surface-2 px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
@@ -170,6 +173,30 @@ const HoverToolbar: Component<{
 					</svg>
 				</button>
 			</Show>
+			<Show when={props.canPin}>
+				<button
+					type="button"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					classList={{ "text-accent": props.isPinned }}
+					onClick={props.onTogglePin}
+					aria-label={props.isPinned ? "Unpin message" : "Pin message"}
+					aria-pressed={props.isPinned}
+					title={props.isPinned ? "Unpin message" : "Pin message"}
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill={props.isPinned ? "currentColor" : "none"}
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M15 3l6 6-3 1.5-2 2 1.5 5.5-6-4-5 5-1.5-1.5 5-5-4-6 5.5 1.5 2-2L15 3z" />
+					</svg>
+				</button>
+			</Show>
 			<Show when={props.isOwnMessage}>
 				<button
 					type="button"
@@ -202,6 +229,9 @@ const TimelineItem: Component<{
 	onReply: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	onTogglePin?: () => void;
+	canPin?: boolean;
+	isPinned?: boolean;
 	onRetry?: () => void;
 	onDiscard?: () => void;
 	onCancel?: () => void;
@@ -289,6 +319,7 @@ const TimelineItem: Component<{
 
 	return (
 		<div
+			data-event-id={ev.eventId}
 			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() || isRedactionFailed() ? "bg-danger-bg/20" : ""} ${isPending() || isRedactionPending() ? "opacity-60" : ""}`}
 		>
 			{/* Hover toolbar — hidden for failed/pending echoes (no remote
@@ -306,10 +337,13 @@ const TimelineItem: Component<{
 				<HoverToolbar
 					isOwnMessage={props.isOwnMessage}
 					msgtype={ev.msgtype}
+					canPin={props.canPin ?? false}
+					isPinned={props.isPinned ?? false}
 					onReact={() => props.onOpenReactionPicker?.()}
 					onReply={props.onReply}
 					onEdit={props.onEdit}
 					onDelete={props.onDelete}
+					onTogglePin={() => props.onTogglePin?.()}
 				/>
 			</Show>
 

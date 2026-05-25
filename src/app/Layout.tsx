@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from "@solidjs/router";
+import type { MatrixClient } from "matrix-js-sdk";
 import { RoomStateEvent, UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
@@ -22,10 +23,16 @@ import {
 	cryptoActionLabel,
 	deriveCryptoAction,
 } from "../features/crypto/CryptoStatusBanner";
+import {
+	buildShortcodeLookup,
+	useImagePacks,
+} from "../features/emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
+import { PinnedMessagesPanel } from "../features/room/pinned/PinnedMessagesPanel";
+import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { buildRoomLink, buildRoomLinkById } from "../features/room/roomLink";
@@ -76,6 +83,139 @@ function saveMembersWidth(w: number): void {
 		// ignore
 	}
 }
+
+const RoomPane: Component<{
+	client: MatrixClient;
+	rid: string;
+	roomName: string;
+	copyState: () => "idle" | "copied" | "error";
+	onCopyLink: () => void;
+	canInvite: () => boolean;
+	onInvite: () => void;
+	leaving: () => boolean;
+	onLeave: () => void;
+	membersVisible: () => boolean;
+	onToggleMembers: () => void;
+	membersWidth: () => number;
+	onMembersWidthChange: (next: number) => void;
+	onMembersWidthCommit: () => void;
+}> = (props) => {
+	const pins = usePinnedEvents(props.client, () => props.rid);
+	const packs = useImagePacks(props.client, () => props.rid);
+	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
+
+	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
+
+	return (
+		<div class="flex h-full flex-col">
+			<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
+				<span class="text-sm font-semibold text-text-emphasis">
+					{props.roomName}
+				</span>
+				<div class="flex items-center gap-1">
+					<RoomNotificationMenu client={props.client} roomId={props.rid} />
+					<Show when={props.canInvite()}>
+						<button
+							type="button"
+							onClick={() => props.onInvite()}
+							class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							title="Invite a user to this room"
+						>
+							Invite
+						</button>
+					</Show>
+					<button
+						type="button"
+						onClick={() => props.onCopyLink()}
+						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						title="Copy a shareable link to this room"
+					>
+						{props.copyState() === "copied"
+							? "Copied!"
+							: props.copyState() === "error"
+								? "Copy failed"
+								: "Copy link"}
+					</button>
+					<span aria-live="polite" role="status" class="sr-only">
+						{props.copyState() === "copied"
+							? "Room link copied to clipboard"
+							: props.copyState() === "error"
+								? "Failed to copy room link"
+								: ""}
+					</span>
+					<PinnedMessagesPanel
+						client={props.client}
+						pins={pins}
+						shortcodeLookup={shortcodeLookup()}
+						onJump={(eventId) => setJumpRequest(eventId)}
+					/>
+					<button
+						type="button"
+						onClick={() => props.onToggleMembers()}
+						class="rounded px-2 py-1 text-xs transition-colors"
+						classList={{
+							"bg-surface-3 text-text-emphasis": props.membersVisible(),
+							"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
+								!props.membersVisible(),
+						}}
+						title={
+							props.membersVisible() ? "Hide member list" : "Show member list"
+						}
+						aria-pressed={props.membersVisible()}
+					>
+						Members
+					</button>
+					<button
+						type="button"
+						onClick={() => props.onLeave()}
+						disabled={props.leaving()}
+						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text"
+						title="Leave room"
+					>
+						{props.leaving() ? "Leaving…" : "Leave"}
+					</button>
+				</div>
+			</div>
+
+			<div class="flex min-h-0 flex-1">
+				<div class="min-w-0 flex-1">
+					<TimelineView
+						roomId={props.rid}
+						canPin={pins.canPin()}
+						isPinned={(id) => pins.isPinned(id)}
+						onTogglePin={(id) => {
+							if (pins.isPinned(id)) void pins.unpin(id);
+							else void pins.pin(id);
+						}}
+						jumpRequest={jumpRequest}
+						onJumpHandled={() => setJumpRequest(null)}
+						packs={packs}
+					/>
+				</div>
+				<Show when={props.membersVisible()}>
+					<ResizeDivider
+						onDrag={(d) =>
+							props.onMembersWidthChange(
+								clamp(props.membersWidth() - d, MIN_MEMBERS, MAX_MEMBERS),
+							)
+						}
+						onDragEnd={() => props.onMembersWidthCommit()}
+						value={props.membersWidth()}
+						min={MIN_MEMBERS}
+						max={MAX_MEMBERS}
+						label="Resize members panel"
+					/>
+					<div
+						style={{ width: `${props.membersWidth()}px` }}
+						class="shrink-0 overflow-hidden"
+					>
+						<MemberList roomId={props.rid} />
+					</div>
+				</Show>
+			</div>
+		</div>
+	);
+};
 
 const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState } = useClient();
@@ -408,6 +548,7 @@ const Layout: Component = () => {
 				main={
 					<Show
 						when={roomId()}
+						keyed
 						fallback={
 							<main class="flex h-full flex-col">
 								<div class="flex flex-1 items-center justify-center">
@@ -419,100 +560,22 @@ const Layout: Component = () => {
 						}
 					>
 						{(rid) => (
-							<div class="flex h-full flex-col">
-								{/* Room header — spans full width above timeline + members */}
-								<div class="flex h-12 shrink-0 items-center justify-between border-b border-border-subtle px-4">
-									<span class="text-sm font-semibold text-text-emphasis">
-										{roomName()}
-									</span>
-									<div class="flex items-center gap-1">
-										<RoomNotificationMenu client={client} roomId={rid()} />
-										<Show when={canInviteHere()}>
-											<button
-												type="button"
-												onClick={() => setInviteRoomId(rid())}
-												class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-												title="Invite a user to this room"
-											>
-												Invite
-											</button>
-										</Show>
-										<button
-											type="button"
-											onClick={() => handleCopyRoomLink(rid())}
-											class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-											title="Copy a shareable link to this room"
-										>
-											{copyState() === "copied"
-												? "Copied!"
-												: copyState() === "error"
-													? "Copy failed"
-													: "Copy link"}
-										</button>
-										<span aria-live="polite" role="status" class="sr-only">
-											{copyState() === "copied"
-												? "Room link copied to clipboard"
-												: copyState() === "error"
-													? "Failed to copy room link"
-													: ""}
-										</span>
-										<button
-											type="button"
-											onClick={toggleMembersPane}
-											class="rounded px-2 py-1 text-xs transition-colors"
-											classList={{
-												"bg-surface-3 text-text-emphasis": membersPaneVisible(),
-												"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
-													!membersPaneVisible(),
-											}}
-											title={
-												membersPaneVisible()
-													? "Hide member list"
-													: "Show member list"
-											}
-											aria-pressed={membersPaneVisible()}
-										>
-											Members
-										</button>
-										<button
-											type="button"
-											onClick={handleLeave}
-											disabled={leaving()}
-											class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text"
-											title="Leave room"
-										>
-											{leaving() ? "Leaving…" : "Leave"}
-										</button>
-									</div>
-								</div>
-
-								{/* Timeline + optional members panel side by side */}
-								<div class="flex min-h-0 flex-1">
-									<div class="min-w-0 flex-1">
-										<TimelineView roomId={rid()} />
-									</div>
-									<Show when={membersPaneVisible()}>
-										<ResizeDivider
-											onDrag={(d) =>
-												setMembersWidth((w) =>
-													clamp(w - d, MIN_MEMBERS, MAX_MEMBERS),
-												)
-											}
-											onDragEnd={() => saveMembersWidth(membersWidth())}
-											value={membersWidth()}
-											min={MIN_MEMBERS}
-											max={MAX_MEMBERS}
-											label="Resize members panel"
-										/>
-										<div
-											style={{ width: `${membersWidth()}px` }}
-											class="shrink-0 overflow-hidden"
-										>
-											<MemberList roomId={rid()} />
-										</div>
-									</Show>
-								</div>
-							</div>
+							<RoomPane
+								client={client}
+								rid={rid}
+								roomName={roomName()}
+								copyState={copyState}
+								onCopyLink={() => handleCopyRoomLink(rid)}
+								canInvite={canInviteHere}
+								onInvite={() => setInviteRoomId(rid)}
+								leaving={leaving}
+								onLeave={handleLeave}
+								membersVisible={membersPaneVisible}
+								onToggleMembers={toggleMembersPane}
+								membersWidth={membersWidth}
+								onMembersWidthChange={(next) => setMembersWidth(next)}
+								onMembersWidthCommit={() => saveMembersWidth(membersWidth())}
+							/>
 						)}
 					</Show>
 				}
