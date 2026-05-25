@@ -1,7 +1,11 @@
-import type { Room } from "matrix-js-sdk";
+import type { MatrixClient, Room } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockRoom } from "../test/mockClient";
-import { isCallActive } from "./summaries";
+import { createMockClient, createMockRoom } from "../test/mockClient";
+import {
+	createSummariesStore,
+	getNextCallExpiry,
+	isCallActive,
+} from "./summaries";
 
 const CALL_TYPE = "org.matrix.msc3401.call.member";
 const NOW = 1_780_000_000_000;
@@ -376,5 +380,191 @@ describe("isCallActive", () => {
 			{ sender: "@live:x" },
 		);
 		expect(isCallActive(room as unknown as Room)).toBe(true);
+	});
+});
+
+describe("getNextCallExpiry", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(NOW);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("returns null when no live memberships exist", () => {
+		const room = createMockRoom("!r:x");
+		expect(getNextCallExpiry(room as unknown as Room, NOW)).toBeNull();
+	});
+
+	it("returns the absolute expiry of a single live membership", () => {
+		const room = createMockRoom("!r:x");
+		room.__addMember({ userId: "@a:x", name: "a" });
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@a:x_DEV_m.call",
+			modernMembership({ createdTs: NOW - HOUR, expires: 4 * HOUR }),
+			{ sender: "@a:x" },
+		);
+		expect(getNextCallExpiry(room as unknown as Room, NOW)).toBe(
+			NOW - HOUR + 4 * HOUR,
+		);
+	});
+
+	it("returns the minimum expiry across multiple live memberships", () => {
+		const room = createMockRoom("!r:x");
+		room.__addMember({ userId: "@a:x", name: "a" });
+		room.__addMember({ userId: "@b:x", name: "b" });
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@a:x_D1_m.call",
+			modernMembership({
+				createdTs: NOW - 30 * 60 * 1000,
+				expires: 4 * HOUR,
+				deviceId: "D1",
+			}),
+			{ sender: "@a:x" },
+		);
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@b:x_D2_m.call",
+			modernMembership({
+				createdTs: NOW - HOUR,
+				expires: 4 * HOUR,
+				deviceId: "D2",
+			}),
+			{ sender: "@b:x" },
+		);
+		expect(getNextCallExpiry(room as unknown as Room, NOW)).toBe(
+			NOW - HOUR + 4 * HOUR,
+		);
+	});
+
+	it("returns null when the only live memberships have non-finite expiry", () => {
+		const room = createMockRoom("!r:x");
+		room.__addMember({ userId: "@a:x", name: "a" });
+		const content = modernMembership({ createdTs: NOW - HOUR }) as Record<
+			string,
+			unknown
+		>;
+		content.expires = "garbage" as unknown as number;
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@a:x_DEV_m.call",
+			content,
+			{ sender: "@a:x" },
+		);
+		expect(isCallActive(room as unknown as Room)).toBe(true);
+		expect(getNextCallExpiry(room as unknown as Room, NOW)).toBeNull();
+	});
+});
+
+describe("createSummariesStore call expiry timer", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(NOW);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function stubRoomForStore(room: ReturnType<typeof createMockRoom>) {
+		const r = room as unknown as Record<string, unknown>;
+		r.isCallRoom = () => false;
+		r.isElementVideoRoom = () => false;
+		r.getAvatarUrl = () => null;
+		r.getUnreadNotificationCount = () => 0;
+		r.getMyMembership = () => "join";
+		r.hasEncryptionStateEvent = () => false;
+		return room;
+	}
+
+	function makeRoomWithActiveCall(roomId: string, expiresAt: number) {
+		const room = stubRoomForStore(createMockRoom(roomId));
+		room.__addMember({ userId: "@a:x", name: "a" });
+		const createdTs = NOW - 60_000;
+		const expires = expiresAt - createdTs;
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@a:x_DEV_m.call",
+			modernMembership({ createdTs, expires }),
+			{ sender: "@a:x" },
+		);
+		return room;
+	}
+
+	it("flips callActive to false when the earliest expiry elapses", () => {
+		const expiresAt = NOW + 60_000; // 60s from now
+		const room = makeRoomWithActiveCall("!r:x", expiresAt);
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries[room.roomId].callActive).toBe(true);
+
+		vi.advanceTimersByTime(60_000 + 100);
+
+		expect(store.summaries[room.roomId].callActive).toBe(false);
+
+		store.cleanup();
+	});
+
+	it("does not schedule a timer when the only memberships have non-finite expiry", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		room.__addMember({ userId: "@a:x", name: "a" });
+		const content = modernMembership({ createdTs: NOW - HOUR }) as Record<
+			string,
+			unknown
+		>;
+		content.expires = "garbage" as unknown as number;
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@a:x_DEV_m.call",
+			content,
+			{ sender: "@a:x" },
+		);
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries[room.roomId].callActive).toBe(true);
+		expect(vi.getTimerCount()).toBe(0);
+
+		store.cleanup();
+	});
+
+	it("cleanup clears any pending expiry timers", () => {
+		const expiresAt = NOW + 60_000;
+		const room = makeRoomWithActiveCall("!r:x", expiresAt);
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+		store.cleanup();
+
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("clears the timer when the room is deleted", () => {
+		const expiresAt = NOW + 60_000;
+		const room = makeRoomWithActiveCall("!r:x", expiresAt);
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(vi.getTimerCount()).toBe(1);
+
+		client.__emit("deleteRoom", room.roomId);
+
+		expect(vi.getTimerCount()).toBe(0);
+		expect(store.summaries[room.roomId]).toBeUndefined();
+
+		store.cleanup();
 	});
 });

@@ -53,14 +53,49 @@ const DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS = 4 * 60 * 60 * 1000;
  * Derived directly from room state rather than via `client.matrixRTC` so it is
  * robust to SDK startup ordering.
  *
- * Note: `callActive` is only recomputed when a new call-member state event
- * arrives. Memberships that lapse via `expires` without a follow-up event
- * leave the flag stuck on until the next state update. Tracked as #98.
+ * A stuck-active indicator caused by silently-expiring memberships (no
+ * follow-up state event) is mitigated by the per-room expiry timer in
+ * `createSummariesStore`, which re-evaluates this function when the
+ * earliest known membership expires.
  */
 export function isCallActive(room: Room): boolean {
-	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);
-	if (events.length === 0) return false;
 	const now = Date.now();
+	for (const _ of iterValidCallMemberships(room, now)) return true;
+	return false;
+}
+
+/**
+ * The earliest absolute timestamp (ms since epoch) at which a currently-valid
+ * MatrixRTC membership in `room` will expire. Returns `null` when no live
+ * membership exists, or when the only live memberships have non-numeric
+ * `expires` values (which the SDK treats as never-expiring — see the note in
+ * `iterValidCallMemberships`). Used by `createSummariesStore` to schedule
+ * a re-evaluation of `callActive` for the room.
+ */
+export function getNextCallExpiry(room: Room, now: number): number | null {
+	let earliest: number | null = null;
+	for (const { expiresAt } of iterValidCallMemberships(room, now)) {
+		if (!Number.isFinite(expiresAt)) continue;
+		if (earliest === null || expiresAt < earliest) earliest = expiresAt;
+	}
+	return earliest;
+}
+
+/**
+ * Iterate the call-member events in `room` that the SDK would consider live
+ * relative to `now`, yielding each one's absolute expiry timestamp
+ * (`created_ts + (expires ?? 4h)`). Shared by `isCallActive` (which only
+ * needs the existence check) and `getNextCallExpiry` (which needs the
+ * minimum). All validation rules — content shape, required fields, sender
+ * still joined — are kept in this single iterator to prevent the two
+ * consumers from drifting.
+ */
+function* iterValidCallMemberships(
+	room: Room,
+	now: number,
+): Generator<{ expiresAt: number }> {
+	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);
+	if (events.length === 0) return;
 	for (const ev of events) {
 		const content = ev.getContent() as {
 			application?: unknown;
@@ -143,15 +178,15 @@ export function isCallActive(room: Room): boolean {
 		// because the SDK's `isExpired()` uses the same arithmetic on the
 		// same untyped value and arrives at the same result.
 		const expires = content.expires ?? DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS;
-		if ((createdTs as number) + (expires as number) <= now) continue;
+		const expiresAt = (createdTs as number) + (expires as number);
+		if ((expiresAt as unknown as number) <= now) continue;
 		// Skip memberships from users who are no longer joined to the room.
 		// Also skip events with no sender (SDK rejects these in
 		// `CallMembership.membershipDataFromMatrixEvent`).
 		const sender = ev.getSender();
 		if (!sender || room.getMember(sender)?.membership !== "join") continue;
-		return true;
+		yield { expiresAt: expiresAt as unknown as number };
 	}
-	return false;
 }
 
 export type SummariesStore = Record<string, RoomSummary>;
@@ -264,12 +299,58 @@ export function createSummariesStore(client: MatrixClient): {
 
 	let dmRoomIds = new Set<string>();
 
+	// Per-room expiry timers. When `callActive` is true for a room, we
+	// schedule a setTimeout that fires shortly after the earliest known
+	// membership expiry so a stale-true `callActive` flips off even when no
+	// follow-up call-member state event arrives. Re-armed on every relevant
+	// state change, cleared on cleanup / room deletion.
+	const callExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	// `setTimeout` delays must fit in a signed 32-bit int. Memberships near
+	// the cap (4-hour default) are well under it, but clamp defensively.
+	const MAX_TIMEOUT_DELAY = 2_147_483_647;
+	// Small grace so the timer fires after `now > expiresAt`, not exactly at
+	// it, and re-evaluation reliably sees the membership as expired.
+	const CALL_EXPIRY_GRACE_MS = 50;
+
+	function clearCallExpiryTimer(roomId: string): void {
+		const existing = callExpiryTimers.get(roomId);
+		if (existing !== undefined) {
+			clearTimeout(existing);
+			callExpiryTimers.delete(roomId);
+		}
+	}
+
+	function scheduleCallExpiryRefresh(room: Room): void {
+		clearCallExpiryTimer(room.roomId);
+		const now = Date.now();
+		const next = getNextCallExpiry(room, now);
+		if (next === null) return;
+		const delay = Math.min(
+			Math.max(0, next - now + CALL_EXPIRY_GRACE_MS),
+			MAX_TIMEOUT_DELAY,
+		);
+		const id = setTimeout(() => {
+			callExpiryTimers.delete(room.roomId);
+			if (!summaries[room.roomId]) return;
+			const active = isCallActive(room);
+			if (summaries[room.roomId].callActive !== active) {
+				setSummaries(room.roomId, "callActive", active);
+			}
+			// Re-arm if the room is still considered active (e.g. another
+			// membership in the same room has a later expiry, or the value
+			// flipped back to true while we were waiting).
+			if (active) scheduleCallExpiryRefresh(room);
+		}, delay);
+		callExpiryTimers.set(room.roomId, id);
+	}
+
 	function upsertRoom(room: Room): void {
 		setSummaries(
 			produce((s) => {
 				s[room.roomId] = buildSummary(room, baseUrl, dmRoomIds);
 			}),
 		);
+		scheduleCallExpiryRefresh(room);
 	}
 
 	// --- Client-level event handlers ---
@@ -279,6 +360,7 @@ export function createSummariesStore(client: MatrixClient): {
 	}
 
 	function onDeleteRoom(roomId: string): void {
+		clearCallExpiryTimer(roomId);
 		setSummaries(
 			produce((s) => {
 				delete s[roomId];
@@ -402,6 +484,10 @@ export function createSummariesStore(client: MatrixClient): {
 			if (summaries[room.roomId].callActive !== active) {
 				setSummaries(room.roomId, "callActive", active);
 			}
+			// Always re-arm: even when the boolean is unchanged, the earliest
+			// known expiry may have shifted (new membership, renewal, etc.),
+			// so the previously-scheduled timer needs to be replaced.
+			scheduleCallExpiryRefresh(room);
 		}
 	}
 
@@ -423,6 +509,8 @@ export function createSummariesStore(client: MatrixClient): {
 	}
 
 	function cleanup(): void {
+		for (const id of callExpiryTimers.values()) clearTimeout(id);
+		callExpiryTimers.clear();
 		client.off(ClientEvent.Room, onNewRoom);
 		client.off(ClientEvent.DeleteRoom, onDeleteRoom);
 		client.off(RoomEvent.Name, onRoomName);
