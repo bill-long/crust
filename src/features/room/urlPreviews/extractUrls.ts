@@ -96,18 +96,21 @@ export function canonicalizeUrl(url: string): string | null {
 const NON_PREVIEWABLE_HOSTS = new Set(["matrix.to"]);
 
 /**
- * True iff a (canonicalized) URL is eligible for OpenGraph preview
- * fetching. Filters Matrix permalink hosts so mentions and reply
- * permalinks don't produce preview cards. The URL must already be
- * canonical (i.e. result of `canonicalizeUrl`).
+ * True iff a URL is eligible for OpenGraph preview fetching. Returns
+ * false for non-http(s) schemes, malformed input, and Matrix permalink
+ * hosts (so mentions and reply permalinks don't produce preview cards).
+ *
+ * Hostname comparison is case-insensitive. Production callers pass the
+ * result of `canonicalizeUrl` (which also strips trailing-dot FQDNs and
+ * fragments), but the helper is robust against any URL-parseable input.
  */
-export function isPreviewableUrl(canonical: string): boolean {
+export function isPreviewableUrl(url: string): boolean {
 	try {
-		const parsed = new URL(canonical);
+		const parsed = new URL(url);
 		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
 			return false;
 		}
-		const host = parsed.hostname.toLowerCase();
+		const host = parsed.hostname.toLowerCase().replace(/\.+$/, "");
 		return !NON_PREVIEWABLE_HOSTS.has(host);
 	} catch {
 		return false;

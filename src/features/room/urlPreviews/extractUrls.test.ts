@@ -262,6 +262,12 @@ describe("isPreviewableUrl", () => {
 		expect(isPreviewableUrl(canonical as string)).toBe(false);
 	});
 
+	it("blocks matrix.to with trailing dot directly (without canonicalizeUrl)", () => {
+		expect(isPreviewableUrl("https://matrix.to./#/@alice:example.com")).toBe(
+			false,
+		);
+	});
+
 	it("does not block subdomains of matrix.to (matrix.to only)", () => {
 		// Defensive: there is no spec use of subdomains, but if someone
 		// runs a fake "evil.matrix.to" we still preview it (treating it as
