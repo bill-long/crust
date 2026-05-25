@@ -18,6 +18,7 @@ import {
 	type CryptoStatus,
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
+import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
 import type { Session } from "../stores/session";
 import { createSummariesStore, type SummariesStore } from "./summaries";
 
@@ -149,6 +150,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	const [cryptoState, setCryptoState] = createSignal<CryptoState>("loading");
 	let hasPrepared = false;
 	let disposed = false;
+	let detachUrlPreviewSync: (() => void) | null = null;
 
 	const {
 		summaries,
@@ -164,6 +166,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			case SyncState.Prepared:
 				hasPrepared = true;
 				initSummaries();
+				if (!detachUrlPreviewSync && !disposed) {
+					detachUrlPreviewSync = attachUrlPreviewAccountDataSync(matrixClient);
+				}
 				setSyncState("live");
 				break;
 			case SyncState.Syncing:
@@ -234,6 +239,8 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	onCleanup(() => {
 		disposed = true;
+		detachUrlPreviewSync?.();
+		detachUrlPreviewSync = null;
 		cleanupSummaries();
 		matrixClient.removeListener(ClientEvent.Sync, onSync);
 		matrixClient.removeListener(

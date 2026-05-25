@@ -1,8 +1,11 @@
 import { type Component, createEffect, createSignal } from "solid-js";
+import { useClient } from "../../client/client";
 import { updateSetting, userSettings } from "../../stores/settings";
+import { pushLocalUrlPreviewSetting } from "../room/urlPreviews/accountDataSync";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 const GeneralTab: Component = () => {
+	const { client } = useClient();
 	// Local preview signal prevents a feedback loop: applying zoom resizes the
 	// slider, which shifts the thumb to a higher value, which zooms further.
 	// We show the preview number while dragging, but only apply zoom on release.
@@ -98,6 +101,15 @@ const GeneralTab: Component = () => {
 					description="Automatically download and display GIF images from external sources"
 					checked={userSettings().autoDownloadGifs}
 					onChange={(v) => updateSetting("autoDownloadGifs", v)}
+				/>
+				<ToggleRow
+					label="Show link previews"
+					description="Fetch link previews via your homeserver for messages containing URLs"
+					checked={userSettings().urlPreviews}
+					onChange={(v) => {
+						updateSetting("urlPreviews", v);
+						void pushLocalUrlPreviewSetting(client, v);
+					}}
 				/>
 			</section>
 		</div>

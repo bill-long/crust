@@ -5,6 +5,11 @@ import { userSettings } from "../../../stores/settings";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
+import {
+	extractUrlsFromHtml,
+	extractUrlsFromText,
+} from "../urlPreviews/extractUrls";
+import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import type { TimelineEvent } from "./useTimeline";
 
 const ReactionPills: Component<{
@@ -294,6 +299,17 @@ const TimelineItem: Component<{
 		return { w, h };
 	});
 
+	// Memoize URL extraction at the component top level (not inside a
+	// JSX IIFE) so the reactive primitive is created exactly once for
+	// the lifetime of this TimelineItem instance.
+	const previewUrls = createMemo<string[]>(() => {
+		if (!userSettings().urlPreviews) return [];
+		if (ev.msgtype !== "m.text" && ev.msgtype !== "m.emote") return [];
+		return ev.format === "org.matrix.custom.html" && ev.formattedBody
+			? extractUrlsFromHtml(ev.formattedBody)
+			: extractUrlsFromText(ev.body);
+	});
+
 	// Cap visible read-receipt avatars and roll the rest into a "+N"
 	// chip so busy rooms don't render a sprawling row of small circles.
 	// Memoized so the slice/string-join work only re-runs when the
@@ -436,14 +452,22 @@ const TimelineItem: Component<{
 												ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
 											if (!gifUrl) {
 												return (
-													<MessageBody
-														body={ev.body}
-														format={ev.format}
-														formattedBody={ev.formattedBody}
-														isEdited={ev.isEdited}
-														client={props.client}
-														shortcodeLookup={props.shortcodeLookup}
-													/>
+													<>
+														<MessageBody
+															body={ev.body}
+															format={ev.format}
+															formattedBody={ev.formattedBody}
+															isEdited={ev.isEdited}
+															client={props.client}
+															shortcodeLookup={props.shortcodeLookup}
+														/>
+														<UrlPreviewList
+															client={props.client}
+															urls={previewUrls}
+															ts={() => ev.timestamp}
+															disabled={() => previewUrls().length === 0}
+														/>
+													</>
 												);
 											}
 											// Extract reply context from body prefix if present
