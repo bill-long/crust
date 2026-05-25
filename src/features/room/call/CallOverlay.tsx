@@ -1,4 +1,5 @@
 import { type Component, createSignal, onCleanup, onMount } from "solid-js";
+import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
 
 interface CallOverlayProps {
@@ -70,6 +71,7 @@ export const CallOverlay: Component<CallOverlayProps> = (props) => {
 			role="dialog"
 			aria-modal="true"
 			aria-label={`Call in ${props.roomName}`}
+			inert={cryptoDialogOpen() || undefined}
 		>
 			<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface-1 px-4">
 				<div class="flex min-w-0 items-center gap-2">
