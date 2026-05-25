@@ -1,6 +1,10 @@
 import type { MatrixEvent, Room, RoomMember } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
-import { projectEvent } from "./useRoomSearch";
+import {
+	matchesAllTokens,
+	projectEvent,
+	splitQueryTokens,
+} from "./useRoomSearch";
 
 interface FakeEventInit {
 	id?: string | null;
@@ -143,5 +147,57 @@ describe("projectEvent", () => {
 		});
 		const hit = projectEvent(null, ev);
 		expect(hit?.senderName).toBe("@alice:test");
+	});
+});
+
+describe("splitQueryTokens", () => {
+	it("returns lowercase tokens split on whitespace", () => {
+		expect(splitQueryTokens("Hello World")).toEqual(["hello", "world"]);
+	});
+
+	it("collapses runs of whitespace", () => {
+		expect(splitQueryTokens("foo   bar\t\nbaz")).toEqual(["foo", "bar", "baz"]);
+	});
+
+	it("trims leading/trailing whitespace", () => {
+		expect(splitQueryTokens("  hello  ")).toEqual(["hello"]);
+	});
+
+	it("returns empty array for an empty or whitespace-only string", () => {
+		expect(splitQueryTokens("")).toEqual([]);
+		expect(splitQueryTokens("   ")).toEqual([]);
+	});
+
+	it("preserves single-token queries", () => {
+		expect(splitQueryTokens("solo")).toEqual(["solo"]);
+	});
+});
+
+describe("matchesAllTokens", () => {
+	it("returns true when every token appears (case-insensitive)", () => {
+		expect(matchesAllTokens("Hello brave new World", ["hello", "world"])).toBe(
+			true,
+		);
+	});
+
+	it("ignores token order", () => {
+		expect(matchesAllTokens("world of hello", ["hello", "world"])).toBe(true);
+	});
+
+	it("returns false when one token is missing (AND semantics, not OR)", () => {
+		expect(matchesAllTokens("hello there", ["hello", "world"])).toBe(false);
+	});
+
+	it("returns false for an empty token list (no positive match)", () => {
+		expect(matchesAllTokens("anything", [])).toBe(false);
+	});
+
+	it("treats a single token as a substring search", () => {
+		expect(matchesAllTokens("alphabet", ["pha"])).toBe(true);
+		expect(matchesAllTokens("alphabet", ["zzz"])).toBe(false);
+	});
+
+	it("matches body that is exactly the token, case-insensitively", () => {
+		expect(matchesAllTokens("HELLO", ["hello"])).toBe(true);
 	});
 });

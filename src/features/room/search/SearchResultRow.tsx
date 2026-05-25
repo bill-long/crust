@@ -45,8 +45,10 @@ const SearchResultRow: Component<{
 			}}
 			onFocus={() => props.onFocus()}
 			class="group flex w-full cursor-pointer flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-			aria-label={`Search result from ${props.hit.senderName}, jump to message`}
 		>
+			<span class="sr-only">
+				Search result, press Enter to jump to message:{" "}
+			</span>
 			<div class="flex items-baseline gap-2">
 				<span class="truncate text-xs font-semibold text-text-emphasis">
 					{props.hit.senderName}

@@ -58,6 +58,22 @@ const MAX_QUERY_LEN = 256;
 
 export { MAX_QUERY_LEN };
 
+/** @internal Exported for tests. Splits a query into trimmed lowercase tokens. */
+export function splitQueryTokens(q: string): string[] {
+	return q
+		.toLowerCase()
+		.split(/\s+/)
+		.map((t) => t.trim())
+		.filter((t) => t.length > 0);
+}
+
+/** @internal Exported for tests. True iff `body` contains every token (case-insensitive). */
+export function matchesAllTokens(body: string, tokens: string[]): boolean {
+	if (tokens.length === 0) return false;
+	const haystack = body.toLowerCase();
+	return tokens.every((n) => haystack.includes(n));
+}
+
 /** @internal Exported for tests. */
 export function projectEvent(
 	room: Room | null,
@@ -184,27 +200,18 @@ export function useRoomSearch(
 			return;
 		}
 		const events = collectLocalEvents(r);
-		const needle = q.toLowerCase();
+		const needles = splitQueryTokens(q);
 		const hits: SearchHit[] = [];
 		for (let i = events.length - 1; i >= 0; i--) {
 			const proj = projectEvent(r, events[i]);
 			if (!proj) continue;
-			if (proj.body.toLowerCase().includes(needle)) hits.push(proj);
+			if (matchesAllTokens(proj.body, needles)) hits.push(proj);
 		}
 		if (myGen !== gen) return;
 		localAll = hits;
 		localCursor = Math.min(LOCAL_PAGE_SIZE, hits.length);
 		setMode("local");
-		setHighlights(
-			Array.from(
-				new Set(
-					q
-						.split(/\s+/)
-						.map((t) => t.trim())
-						.filter((t) => t.length > 0),
-				),
-			),
-		);
+		setHighlights(Array.from(new Set(needles)));
 		setResults(hits.slice(0, localCursor));
 		setHasMore(localCursor < hits.length);
 		setStatus(hits.length === 0 ? "empty" : "results");
@@ -239,14 +246,7 @@ export function useRoomSearch(
 			setHighlights(
 				sr.highlights.length > 0
 					? Array.from(new Set(sr.highlights))
-					: Array.from(
-							new Set(
-								q
-									.split(/\s+/)
-									.map((t) => t.trim())
-									.filter((t) => t.length > 0),
-							),
-						),
+					: Array.from(new Set(splitQueryTokens(q))),
 			);
 			const hits = projectServerResults(sr);
 			setResults(hits);
