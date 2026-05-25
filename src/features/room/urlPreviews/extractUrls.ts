@@ -28,7 +28,8 @@ export function urlRegex(): RegExp {
  *   2. Unbalanced closing paren: `https://en.wikipedia.org/wiki/Foo_(bar)`
  *      keeps its `)`, but `(see https://example.com).` drops `).`.
  *
- * Iterates until the URL is balanced and free of leading trailing punct.
+ * Iterates until the URL is balanced and free of trailing prose
+ * punctuation.
  */
 export function trimUrlTail(url: string): string {
 	let s = url;
@@ -159,15 +160,19 @@ function hasExcludedAncestor(node: Node): boolean {
 }
 
 /**
- * Extract URLs from sanitized Matrix HTML (a `formatted_body` that has
- * already been through DOMPurify).
+ * Extract URLs from a Matrix `formatted_body`. Called on the raw
+ * (pre-sanitization) HTML so previews stay aligned with what the user
+ * authored; the `EXCLUDED_HTML_ANCESTORS` list mirrors the "not
+ * rendered after sanitization" set (script/style/template/iframe/
+ * object/embed) plus the always-skipped link/code/mx-reply subtrees.
  *
  * Collects URLs from two sources:
  *   1. `<a href>` attributes — these are author-anchored links.
  *   2. Bare URLs found in text nodes outside excluded subtrees.
  *
- * Excluded subtrees: `<code>`, `<pre>`, `<mx-reply>`, `<blockquote>`,
- * and any nested `<a>` (so a URL inside link text isn't double-counted).
+ * Excluded subtrees: see `EXCLUDED_HTML_ANCESTORS`. Note that generic
+ * `<blockquote>` is intentionally NOT excluded — user-authored quotes
+ * preview just like normal content (matches `linkifyTextNodes`).
  *
  * Same dedup + cap semantics as `extractUrlsFromText`.
  */
