@@ -113,3 +113,77 @@ describe("normalizeConfig gif env overrides", () => {
 		expect(cfg.gif.enabled).toBe(true);
 	});
 });
+
+describe("normalizeConfig elementCall url validation", () => {
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warnSpy.mockRestore();
+	});
+
+	function callUrl(url: string): string {
+		return normalizeConfig({ elementCall: { url } }).elementCall.url;
+	}
+
+	it("accepts https:// URLs", () => {
+		expect(callUrl("https://call.example.com")).toBe(
+			"https://call.example.com",
+		);
+		expect(callUrl("https://call.example.com:8443/path")).toBe(
+			"https://call.example.com:8443/path",
+		);
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("accepts loopback http:// URLs (localhost, 127/8, [::1])", () => {
+		expect(callUrl("http://localhost")).toBe("http://localhost");
+		expect(callUrl("http://localhost:8080/")).toBe("http://localhost:8080/");
+		expect(callUrl("http://127.0.0.1")).toBe("http://127.0.0.1");
+		expect(callUrl("http://127.0.0.2:3000")).toBe("http://127.0.0.2:3000");
+		expect(callUrl("http://127.1.2.3")).toBe("http://127.1.2.3");
+		expect(callUrl("http://[::1]")).toBe("http://[::1]");
+		expect(callUrl("http://[::1]:8080")).toBe("http://[::1]:8080");
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("rejects non-loopback http:// URLs", () => {
+		expect(callUrl("http://call.example.com")).toBe("");
+		expect(callUrl("http://10.0.0.1")).toBe("");
+		expect(callUrl("http://192.168.1.1")).toBe("");
+		// Hostname containing 'localhost' but not equal to it
+		expect(callUrl("http://localhost.evil.com")).toBe("");
+		// IPv4 outside 127/8
+		expect(callUrl("http://128.0.0.1")).toBe("");
+		// Octets out of 0-255 range — these can be reinterpreted by URL
+		// parsers as non-loopback hostnames, so reject them.
+		expect(callUrl("http://127.999.999.999")).toBe("");
+		expect(callUrl("http://127.0.0.256")).toBe("");
+		// IPv6 non-loopback
+		expect(callUrl("http://[::2]")).toBe("");
+	});
+
+	it("rejects dangerous schemes", () => {
+		expect(callUrl("javascript:alert(1)")).toBe("");
+		expect(callUrl("data:text/html,<script>alert(1)</script>")).toBe("");
+		expect(callUrl("file:///etc/passwd")).toBe("");
+		expect(callUrl("ws://localhost")).toBe("");
+		expect(callUrl("ftp://example.com")).toBe("");
+	});
+
+	it("rejects malformed URLs", () => {
+		expect(callUrl("not a url")).toBe("");
+		expect(callUrl("://broken")).toBe("");
+		expect(callUrl("https://")).toBe("");
+	});
+
+	it("treats missing or empty url as no element-call config", () => {
+		expect(normalizeConfig({}).elementCall.url).toBe("");
+		expect(callUrl("")).toBe("");
+		expect(callUrl("   ")).toBe("");
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+});

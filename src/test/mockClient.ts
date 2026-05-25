@@ -186,6 +186,8 @@ export function createMockRoom(
 				getStateKey: () => string;
 				getType: () => string;
 				getRoomId: () => string;
+				getTs: () => number;
+				getSender: () => string | null;
 			}
 		>
 	>();
@@ -284,6 +286,7 @@ export function createMockRoom(
 			type: string,
 			stateKey: string,
 			content: Record<string, unknown> | null,
+			options?: { ts?: number; sender?: string | null },
 		) => {
 			if (content === null) {
 				stateEventStore.get(type)?.delete(stateKey);
@@ -291,11 +294,15 @@ export function createMockRoom(
 			}
 			if (!stateEventStore.has(type)) stateEventStore.set(type, new Map());
 			const typeMap = stateEventStore.get(type);
+			const ts = options?.ts ?? 0;
+			const sender = options?.sender ?? null;
 			typeMap?.set(stateKey, {
 				getContent: () => content,
 				getStateKey: () => stateKey,
 				getType: () => type,
 				getRoomId: () => roomId,
+				getTs: () => ts,
+				getSender: () => sender,
 			});
 		},
 	};

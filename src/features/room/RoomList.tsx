@@ -91,6 +91,16 @@ const ChannelTypeIcon: Component<{ kind: "text" | "voice" }> = (props) => (
 	</Show>
 );
 
+/** Static green dot indicating an in-progress call in this room. */
+const ActiveCallDot: Component = () => (
+	<span
+		role="img"
+		aria-label="Call in progress"
+		title="Call in progress"
+		class="inline-block h-2 w-2 shrink-0 rounded-full bg-success"
+	/>
+);
+
 const RoomEntry: Component<{
 	room: RoomSummary;
 	isSelected: boolean;
@@ -112,6 +122,9 @@ const RoomEntry: Component<{
 				<div class="flex items-center gap-1">
 					<Show when={!props.room.isDirect}>
 						<ChannelTypeIcon kind={props.room.kind} />
+					</Show>
+					<Show when={props.room.callActive}>
+						<ActiveCallDot />
 					</Show>
 					<Show when={props.room.isEncrypted}>
 						<span

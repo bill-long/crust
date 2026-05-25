@@ -42,6 +42,7 @@ function makeSummary(
 		isDirect: false,
 		isSpace,
 		kind: "text",
+		callActive: false,
 		children: [],
 	};
 }

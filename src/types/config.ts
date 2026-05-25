@@ -110,9 +110,43 @@ export interface CrustConfig {
 function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
 	if (typeof raw !== "object" || raw === null) return { url: "" };
 	const obj = raw as Record<string, unknown>;
-	return {
-		url: typeof obj.url === "string" ? obj.url : "",
-	};
+	const rawUrl = typeof obj.url === "string" ? obj.url.trim() : "";
+	// Element Call's media APIs (camera, microphone, display-capture) only
+	// work in a secure context. Allow https:// and loopback http:// (which
+	// browsers treat as secure per the W3C Secure Contexts spec, so local
+	// EC dev setups still work). Reject everything else.
+	if (rawUrl && !isSecureCallUrl(rawUrl)) {
+		console.warn(
+			"config.elementCall.url must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]); ignoring:",
+			rawUrl,
+		);
+		return { url: "" };
+	}
+	return { url: rawUrl };
+}
+
+function isSecureCallUrl(url: string): boolean {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol === "https:") return true;
+	if (parsed.protocol !== "http:") return false;
+	const host = parsed.hostname.toLowerCase();
+	if (host === "localhost" || host === "[::1]") return true;
+	// Allow the full IPv4 127.0.0.0/8 loopback range. Validate octet ranges
+	// (0–255) so strings like `127.999.999.999` are rejected — URL parsers
+	// can treat those as hostnames rather than loopback IPs, which would
+	// defeat the loopback-HTTP secure-context exception.
+	const m = host.match(/^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+	if (!m) return false;
+	for (let i = 1; i <= 3; i++) {
+		const oct = Number(m[i]);
+		if (oct < 0 || oct > 255) return false;
+	}
+	return true;
 }
 
 function normalizeBranding(raw: unknown): CrustConfig["branding"] {

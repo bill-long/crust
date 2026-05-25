@@ -23,7 +23,135 @@ export interface RoomSummary {
 	isSpace: boolean;
 	/** Whether this room is a voice/video room (MSC3401 or Element video) vs a text room. */
 	kind: "text" | "voice";
+	/** Whether the room currently has an in-progress MatrixRTC call (any non-expired call-member). */
+	callActive: boolean;
 	children: string[];
+}
+
+/** State event type that MatrixRTC / Element Call use today (legacy MSC3401). */
+const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
+
+/**
+ * Default membership expiry used when a MatrixRTC per-device membership omits
+ * `expires`. Mirrors `DEFAULT_EXPIRE_DURATION` in matrix-js-sdk's
+ * `CallMembership` (4 hours).
+ */
+const DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS = 4 * 60 * 60 * 1000;
+
+/**
+ * Whether `room` has any live MatrixRTC per-device membership. Mirrors the
+ * filtering applied by matrix-js-sdk's `MatrixRTCSession`:
+ *  - empty content → user left, ignore.
+ *  - modern MSC4143 per-device shape (flat content with `application`) →
+ *    live if `created_ts + (expires ?? 4h)` has not yet passed (and the user
+ *    is still joined to the room).
+ *  - legacy `{ memberships: [...] }` shape → deprecated, ignored (matches
+ *    matrix-js-sdk's `quickFilterNonRelevantContents`). Stale events of this
+ *    shape commonly linger in room state and would otherwise produce a
+ *    permanent "call active" indicator.
+ *
+ * Derived directly from room state rather than via `client.matrixRTC` so it is
+ * robust to SDK startup ordering.
+ *
+ * Note: `callActive` is only recomputed when a new call-member state event
+ * arrives. Memberships that lapse via `expires` without a follow-up event
+ * leave the flag stuck on until the next state update. Tracked as #98.
+ */
+export function isCallActive(room: Room): boolean {
+	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);
+	if (events.length === 0) return false;
+	const now = Date.now();
+	for (const ev of events) {
+		const content = ev.getContent() as {
+			application?: unknown;
+			call_id?: unknown;
+			device_id?: unknown;
+			focus_active?: { type?: unknown };
+			foci_preferred?: unknown;
+			created_ts?: number;
+			expires?: number;
+			[k: string]: unknown;
+		};
+		const keys = Object.keys(content);
+		// Empty / tombstone events mean "left the call".
+		if (keys.length === 0) continue;
+		// Only the modern flat per-device MSC4143 shape (application + flat
+		// keys) is considered. The deprecated `{ memberships: [...] }` shape
+		// is intentionally ignored to match matrix-js-sdk behavior; stale
+		// events of that shape commonly linger in room state.
+		if (keys.length <= 1 || content.application !== "m.call") continue;
+		// Mirror matrix-js-sdk's `checkSessionsMembershipData`: require the
+		// fields the SDK treats as mandatory so malformed events don't light
+		// the indicator.
+		if (
+			typeof content.call_id !== "string" ||
+			typeof content.device_id !== "string" ||
+			typeof content.focus_active?.type !== "string"
+		) {
+			continue;
+		}
+		// Only count memberships for the default room call slot. The SDK's
+		// `MatrixRTCSessionManager` filters by `slotDescription.id === "ROOM"`,
+		// with a back-compat shim that treats empty-string `call_id` as
+		// `"ROOM"` (see `CallMembership.slotId`). Memberships with any other
+		// `call_id` (e.g. nested breakout sessions) are ignored — they belong
+		// to a different RTC session, not the room's primary call.
+		if (content.call_id !== "" && content.call_id !== "ROOM") continue;
+		// `foci_preferred` is optional, but if present must be an array of
+		// `{ type: string, ... }` transport objects (matches SDK).
+		if (content.foci_preferred !== undefined) {
+			if (!Array.isArray(content.foci_preferred)) continue;
+			let fociValid = true;
+			for (const f of content.foci_preferred) {
+				if (
+					typeof f !== "object" ||
+					f === null ||
+					typeof (f as { type?: unknown }).type !== "string"
+				) {
+					fociValid = false;
+					break;
+				}
+			}
+			if (!fociValid) continue;
+		}
+		// Mirror SDK `checkSessionsMembershipData`: if `created_ts`, `scope`,
+		// or `m.call.intent` are present they must be of the expected type;
+		// otherwise the SDK rejects the event entirely. (The SDK does NOT
+		// type-check `expires` — see the longer note at the expiry-calc step
+		// below for what happens with non-numeric `expires`.)
+		if (
+			content.created_ts !== undefined &&
+			typeof content.created_ts !== "number"
+		) {
+			continue;
+		}
+		if (content.scope !== undefined && typeof content.scope !== "string") {
+			continue;
+		}
+		const callIntent = (content as Record<string, unknown>)["m.call.intent"];
+		if (callIntent !== undefined && typeof callIntent !== "string") {
+			continue;
+		}
+		const createdTs = content.created_ts ?? ev.getTs();
+		// Mirror SDK exactly: `data.expires ?? DEFAULT_EXPIRE_DURATION`. The
+		// SDK does NOT type-check `expires`, so a non-numeric runtime value
+		// (e.g. `"garbage"`, `{}`) flows through. When that happens
+		// `createdTs + expires` produces a string via JS coercion; the
+		// subsequent `<= now` comparison coerces that string to a number
+		// (typically NaN), and any NaN comparison is `false` — so the
+		// membership is treated as not-expired. This matches SDK behavior
+		// because the SDK's `isExpired()` uses the same arithmetic on the
+		// same untyped value and arrives at the same result.
+		const expires = content.expires ?? DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS;
+		if ((createdTs as number) + (expires as number) <= now) continue;
+		// Skip memberships from users who are no longer joined to the room.
+		// Also skip events with no sender (SDK rejects these in
+		// `CallMembership.membershipDataFromMatrixEvent`).
+		const sender = ev.getSender();
+		if (!sender || room.getMember(sender)?.membership !== "join") continue;
+		return true;
+	}
+	return false;
 }
 
 export type SummariesStore = Record<string, RoomSummary>;
@@ -75,6 +203,7 @@ function buildSummary(
 		isDirect: dmRoomIds.has(room.roomId),
 		isSpace,
 		kind,
+		callActive: isCallActive(room),
 		children: isSpace ? getSpaceChildren(room) : [],
 	};
 }
@@ -267,6 +396,11 @@ export function createSummariesStore(client: MatrixClient): {
 			const createEv = room.currentState.getStateEvents("m.room.create", "");
 			if (createEv?.getContent()?.type === "m.space") {
 				setSummaries(room.roomId, "children", getSpaceChildren(room));
+			}
+		} else if (type === CALL_MEMBER_EVENT_TYPE) {
+			const active = isCallActive(room);
+			if (summaries[room.roomId].callActive !== active) {
+				setSummaries(room.roomId, "callActive", active);
 			}
 		}
 	}
