@@ -174,10 +174,11 @@ describe("GeneralTab", () => {
 			/>
 		));
 
-		expect(nameInput().disabled).toBe(true);
-		expect(
-			(screen.getByLabelText("Topic") as HTMLTextAreaElement).disabled,
-		).toBe(true);
+		expect(nameInput().getAttribute("aria-disabled")).toBe("true");
+		expect(nameInput().readOnly).toBe(true);
+		const topicEl = screen.getByLabelText("Topic") as HTMLTextAreaElement;
+		expect(topicEl.getAttribute("aria-disabled")).toBe("true");
+		expect(topicEl.readOnly).toBe(true);
 		expect(
 			screen
 				.getByRole("button", { name: "Upload image" })

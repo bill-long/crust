@@ -214,6 +214,47 @@ describe("useRoomPermissions", () => {
 		});
 	});
 
+	it("falls back to defaults when events/users contain non-finite numbers", async () => {
+		const room = createMockRoom(
+			"!r:x",
+			[],
+			[
+				{
+					userId: "@test:example.com",
+					name: "Me",
+					membership: "join",
+					powerLevel: 50,
+				},
+			],
+		);
+		room.__setStateEvent("m.room.power_levels", "", {
+			state_default: 50,
+			users_default: 0,
+			events: {
+				"m.room.name": Number.NaN,
+				"m.room.topic": Number.POSITIVE_INFINITY,
+			},
+			users: {
+				"@bad:x": Number.NaN,
+				"@worse:x": Number.NEGATIVE_INFINITY,
+			},
+		});
+		const client = createMockClient(new Map([["!r:x", room]]));
+		await withRoot(async () => {
+			const perms = useRoomPermissions(
+				client as unknown as MatrixClient,
+				() => "!r:x",
+			);
+			// requiredPowerLevel rejects NaN/Infinity and falls back to state_default.
+			expect(perms.requiredPowerLevel("m.room.name")).toBe(50);
+			expect(perms.requiredPowerLevel("m.room.topic")).toBe(50);
+			// targetPowerLevel rejects NaN/Infinity and falls back to users_default.
+			// Caller PL = 50, so @bad/@worse should appear kickable (target PL = 0).
+			expect(perms.canKickTarget("@bad:x")).toBe(true);
+			expect(perms.canKickTarget("@worse:x")).toBe(true);
+		});
+	});
+
 	it("re-derives when own m.room.member event arrives (PL change)", async () => {
 		const room = createMockRoom(
 			"!r:x",

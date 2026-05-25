@@ -287,6 +287,29 @@ describe("MembersTab", () => {
 		);
 	});
 
+	it("disables Revoke when caller PL does not exceed the invitee's PL", () => {
+		// myPower 50, kick 50: canKick() true (50 >= 50), but invite target also
+		// at PL 50 fails the strict caller-PL-greater-than-target-PL check.
+		setup({
+			includeInvite: true,
+			myPower: 50,
+			powerLevels: {
+				users: {
+					"@test:example.com": 50,
+					"@admin:example.com": 100,
+					"@mod:example.com": 50,
+					"@bob:example.com": 50,
+				},
+				users_default: 0,
+				kick: 50,
+				ban: 50,
+				invite: 0,
+			},
+		});
+		const revoke = screen.getByRole("button", { name: "Revoke" });
+		expect((revoke as HTMLButtonElement).disabled).toBe(true);
+	});
+
 	it("hides the invite form when the user cannot invite", () => {
 		setup({ myPower: 0, powerLevels: { invite: 50 } });
 		expect(screen.queryByLabelText("User ID")).toBeNull();

@@ -115,7 +115,8 @@ export function useRoomPermissions(
 	const requiredPowerLevel = (type: string): number => {
 		const pl = plContent();
 		const events = pl.events;
-		if (events && typeof events[type] === "number") return events[type];
+		const raw = events?.[type];
+		if (typeof raw === "number" && Number.isFinite(raw)) return raw;
 		return effectiveLevel(pl, "state_default");
 	};
 
@@ -133,9 +134,9 @@ export function useRoomPermissions(
 
 	const targetPowerLevel = (targetUserId: string): number => {
 		const pl = plContent();
-		return pl.users && typeof pl.users[targetUserId] === "number"
-			? pl.users[targetUserId]
-			: effectiveUsersDefault(pl);
+		const raw = pl.users?.[targetUserId];
+		if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+		return effectiveUsersDefault(pl);
 	};
 
 	const canModerateTarget = (

@@ -313,15 +313,17 @@ const GeneralTab: Component<GeneralTabProps> = (props) => {
 						id="room-name-input"
 						type="text"
 						value={nameDraft()}
-						disabled={!perms.canSetName()}
+						aria-disabled={!perms.canSetName() ? "true" : undefined}
+						readOnly={!perms.canSetName()}
 						onInput={(e) => {
+							if (!perms.canSetName()) return;
 							setNameDraft(e.currentTarget.value);
 							setNameDirty(true);
 						}}
 						onKeyDown={(e) => {
 							if (e.key === "Escape") cancelName();
 						}}
-						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
 					/>
 				</Tooltip>
 				<Show when={nameConflict() !== null}>
@@ -377,15 +379,17 @@ const GeneralTab: Component<GeneralTabProps> = (props) => {
 						id="room-topic-input"
 						rows="3"
 						value={topicDraft()}
-						disabled={!perms.canSetTopic()}
+						aria-disabled={!perms.canSetTopic() ? "true" : undefined}
+						readOnly={!perms.canSetTopic()}
 						onInput={(e) => {
+							if (!perms.canSetTopic()) return;
 							setTopicDraft(e.currentTarget.value);
 							setTopicDirty(true);
 						}}
 						onKeyDown={(e) => {
 							if (e.key === "Escape") cancelTopic();
 						}}
-						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
 					/>
 				</Tooltip>
 				<Show when={topicConflict() !== null}>

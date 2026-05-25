@@ -233,7 +233,10 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 										<button
 											type="button"
 											onClick={() => revokeInvite(inv.userId)}
-											disabled={revoking() === inv.userId || !perms.canKick()}
+											disabled={
+												revoking() === inv.userId ||
+												!perms.canKickTarget(inv.userId)
+											}
 											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{revoking() === inv.userId ? "Revoking…" : "Revoke"}
