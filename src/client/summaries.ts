@@ -34,8 +34,12 @@ const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
 /**
  * Whether `room` has any non-expired `org.matrix.msc3401.call.member` event
  * with non-empty membership content. Derived directly from room state rather
- * than via `client.matrixRTC` so it is robust to SDK startup ordering and
- * membership expiry edge cases.
+ * than via `client.matrixRTC` so it is robust to SDK startup ordering.
+ *
+ * Note: `callActive` is only recomputed when a new call-member state event
+ * arrives. Memberships that lapse via `expires` / `expires_ts` without a
+ * follow-up event leave the flag stuck on until the next state update.
+ * Tracked as #98.
  */
 function isCallActive(room: Room): boolean {
 	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);

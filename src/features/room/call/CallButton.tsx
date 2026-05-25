@@ -72,7 +72,11 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		const room = client.getRoom(props.roomId);
 		const uid = client.getUserId();
 		if (!room || !uid) return false;
-		return room.currentState.maySendStateEvent(CALL_MEMBER_EVENT_TYPE, uid);
+		try {
+			return room.currentState.maySendStateEvent(CALL_MEMBER_EVENT_TYPE, uid);
+		} catch {
+			return false;
+		}
 	});
 
 	const visible = (): boolean =>

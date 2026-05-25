@@ -112,7 +112,7 @@ export const CallOverlay: Component<CallOverlayProps> = (props) => {
 				src={callSrc()}
 				class="min-h-0 flex-1 border-0 bg-surface-0"
 				allow="camera; microphone; autoplay; clipboard-write; display-capture; fullscreen; screen-wake-lock"
-				referrerpolicy="no-referrer"
+				referrerPolicy="no-referrer"
 			/>
 
 			<ConfirmDialog
