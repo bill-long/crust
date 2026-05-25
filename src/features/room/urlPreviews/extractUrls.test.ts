@@ -3,6 +3,7 @@ import {
 	canonicalizeUrl,
 	extractUrlsFromHtml,
 	extractUrlsFromText,
+	isPreviewableUrl,
 	MAX_PREVIEWS_PER_MESSAGE,
 	trimUrlTail,
 } from "./extractUrls";
@@ -44,6 +45,15 @@ describe("canonicalizeUrl", () => {
 	it("drops fragments", () => {
 		expect(canonicalizeUrl("https://example.com/p#section")).toBe(
 			"https://example.com/p",
+		);
+	});
+
+	it("strips trailing dots from hostname (FQDN dedup)", () => {
+		expect(canonicalizeUrl("https://example.com./")).toBe(
+			"https://example.com/",
+		);
+		expect(canonicalizeUrl("https://matrix.to./#/@a:b")).toBe(
+			"https://matrix.to/",
 		);
 	});
 
@@ -122,6 +132,12 @@ describe("extractUrlsFromText", () => {
 		expect(extractUrlsFromText("javascript:alert(1)")).toEqual([]);
 		expect(extractUrlsFromText("matrix:r/foo:example.com")).toEqual([]);
 	});
+
+	it("skips bare matrix.to URLs", () => {
+		expect(
+			extractUrlsFromText("see https://matrix.to/#/@alice:example.com"),
+		).toEqual([]);
+	});
 });
 
 describe("extractUrlsFromHtml", () => {
@@ -175,5 +191,85 @@ describe("extractUrlsFromHtml", () => {
 		expect(
 			extractUrlsFromHtml('<a href="javascript:alert(1)">click</a>'),
 		).toEqual([]);
+	});
+
+	it("skips matrix.to mention anchors (no preview cards for mentions)", () => {
+		expect(
+			extractUrlsFromHtml(
+				'<a href="https://matrix.to/#/@alice:example.com">@alice</a> hi',
+			),
+		).toEqual([]);
+	});
+
+	it("skips matrix.to room and event permalinks", () => {
+		expect(
+			extractUrlsFromHtml(
+				'see <a href="https://matrix.to/#/!abc:example.com">#room</a> ' +
+					'and <a href="https://matrix.to/#/!abc:example.com/$ev:example.com">message</a>',
+			),
+		).toEqual([]);
+	});
+
+	it("still extracts non-matrix.to anchors alongside mentions", () => {
+		expect(
+			extractUrlsFromHtml(
+				'hi <a href="https://matrix.to/#/@alice:example.com">@alice</a> ' +
+					'see <a href="https://example.com/article">article</a>',
+			),
+		).toEqual(["https://example.com/article"]);
+	});
+
+	it("skips bare matrix.to URLs in text nodes", () => {
+		expect(
+			extractUrlsFromHtml("<p>see https://matrix.to/#/@alice:example.com</p>"),
+		).toEqual([]);
+	});
+
+	it("skips bare matrix.to URL in text node but keeps real URL alongside", () => {
+		expect(
+			extractUrlsFromHtml(
+				"<p>https://matrix.to/#/@alice:example.com and https://example.com/article</p>",
+			),
+		).toEqual(["https://example.com/article"]);
+	});
+});
+
+describe("isPreviewableUrl", () => {
+	it("returns true for normal http(s) URLs", () => {
+		expect(isPreviewableUrl("https://example.com/")).toBe(true);
+		expect(isPreviewableUrl("http://example.com/foo")).toBe(true);
+	});
+
+	it("returns false for matrix.to (Matrix permalink host)", () => {
+		expect(isPreviewableUrl("https://matrix.to/")).toBe(false);
+		expect(isPreviewableUrl("https://matrix.to/#/@alice:example.com")).toBe(
+			false,
+		);
+		expect(isPreviewableUrl("https://matrix.to/#/!room:example.com")).toBe(
+			false,
+		);
+	});
+
+	it("is case-insensitive on host", () => {
+		expect(isPreviewableUrl("https://Matrix.To/#/@a:b")).toBe(false);
+	});
+
+	it("blocks matrix.to with trailing dot (FQDN form, via canonicalizeUrl)", () => {
+		const canonical = canonicalizeUrl(
+			"https://matrix.to./#/@alice:example.com",
+		);
+		expect(canonical).not.toBeNull();
+		expect(isPreviewableUrl(canonical as string)).toBe(false);
+	});
+
+	it("does not block subdomains of matrix.to (matrix.to only)", () => {
+		// Defensive: there is no spec use of subdomains, but if someone
+		// runs a fake "evil.matrix.to" we still preview it (treating it as
+		// any other untrusted host).
+		expect(isPreviewableUrl("https://evil.matrix.to/")).toBe(true);
+	});
+
+	it("returns false for malformed input (defense in depth)", () => {
+		expect(isPreviewableUrl("not a url")).toBe(false);
 	});
 });

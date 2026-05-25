@@ -74,9 +74,39 @@ export function canonicalizeUrl(url: string): string | null {
 			return null;
 		}
 		parsed.hash = "";
+		parsed.hostname = parsed.hostname.replace(/\.+$/, "");
 		return parsed.toString();
 	} catch {
 		return null;
+	}
+}
+
+/**
+ * Hosts whose URLs are Matrix permalinks (mentions, room links, event
+ * links) rather than third-party content. We must never generate
+ * OpenGraph preview cards for these — every user mention in
+ * `formatted_body` is rendered as an `<a href="https://matrix.to/#/...">`
+ * by the SDK, so fetching previews would spam each message with a
+ * generic "You're invited to talk on Matrix" card per mention.
+ *
+ * Matches the bare hostname only (no subdomain wildcarding); matrix.to
+ * is the spec-defined permalink host. Both Element and Cinny apply the
+ * same exclusion.
+ */
+const NON_PREVIEWABLE_HOSTS = new Set(["matrix.to"]);
+
+/**
+ * True iff a (canonicalized) URL is eligible for OpenGraph preview
+ * fetching. Filters Matrix permalink hosts so mentions and reply
+ * permalinks don't produce preview cards. The URL must already be
+ * canonical (i.e. result of `canonicalizeUrl`).
+ */
+export function isPreviewableUrl(canonical: string): boolean {
+	try {
+		const host = new URL(canonical).hostname.toLowerCase();
+		return !NON_PREVIEWABLE_HOSTS.has(host);
+	} catch {
+		return false;
 	}
 }
 
@@ -114,6 +144,7 @@ export function extractUrlsFromText(body: string): string[] {
 		const trimmed = trimUrlTail(match[0]);
 		const canonical = canonicalizeUrl(trimmed);
 		if (!canonical) continue;
+		if (!isPreviewableUrl(canonical)) continue;
 		if (seen.has(canonical)) continue;
 		seen.add(canonical);
 		out.push(trimmed);
@@ -192,6 +223,7 @@ export function extractUrlsFromHtml(html: string): string[] {
 		if (!href) continue;
 		const canonical = canonicalizeUrl(href);
 		if (!canonical) continue;
+		if (!isPreviewableUrl(canonical)) continue;
 		if (seen.has(canonical)) continue;
 		seen.add(canonical);
 		out.push(href);
@@ -212,6 +244,7 @@ export function extractUrlsFromHtml(html: string): string[] {
 			const trimmed = trimUrlTail(match[0]);
 			const canonical = canonicalizeUrl(trimmed);
 			if (!canonical) continue;
+			if (!isPreviewableUrl(canonical)) continue;
 			if (seen.has(canonical)) continue;
 			seen.add(canonical);
 			out.push(trimmed);
