@@ -1,6 +1,13 @@
 import DOMPurify from "dompurify";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, Show } from "solid-js";
+import {
+	canonicalizeUrl,
+	trimUrlTail,
+	urlRegex,
+} from "../room/urlPreviews/extractUrls";
+import { linkifyTextNodes } from "../room/urlPreviews/linkify";
+import { stripReplyFallback } from "../room/urlPreviews/replyFallback";
 import type { ResolvedEmote } from "./types";
 
 // Configure DOMPurify once with Matrix-safe allowlist
@@ -126,6 +133,12 @@ function sanitizeMatrixHtml(
 		a.setAttribute("rel", "noopener noreferrer");
 	}
 
+	// Linkify bare URLs in text nodes (Crust's markdown layer doesn't
+	// auto-anchor them). Done before shortcode replacement so that the
+	// shortcode walker's existing skip-inside-`<a>` rule prevents emoji
+	// substitution inside URL anchors.
+	linkifyTextNodes(div);
+
 	// Replace :shortcode: in text nodes only (not attributes)
 	if (shortcodeLookup.size > 0) {
 		replaceShortcodesInTextNodes(div, shortcodeLookup, client);
@@ -220,48 +233,101 @@ function replaceShortcodesInTextNodes(
 }
 
 /**
- * Full plain-text-to-HTML conversion: escape HTML entities, convert newlines
- * to <br>, then apply shortcode replacement.
+ * Convert plain text body to inline HTML. Performs (in order):
+ *   1. Strip Matrix reply-fallback (leading `> ` lines).
+ *   2. Protect fenced/inline code regions with a sentinel placeholder.
+ *   3. Linkify bare http(s) URLs (placeholder-protected so neither HTML
+ *      escaping nor shortcode replacement re-enters them).
+ *   4. Escape HTML in remaining text and apply `:shortcode:` emoji
+ *      replacement.
+ *   5. Restore code blocks (escaped) and anchors (raw HTML).
+ *   6. Convert `\n` to `<br>`.
+ *
+ * Returns `null` when nothing was rewritten so callers can fall back to
+ * a plain `<p>` render that preserves whitespace and avoids the
+ * additional DOM wrapping.
  */
 function plainTextToHtml(
 	text: string,
 	shortcodeLookup: Map<string, ResolvedEmote>,
 ): string | null {
-	if (shortcodeLookup.size === 0) return null;
+	const stripped = stripReplyFallback(text);
+	const wasStripped = stripped !== text;
 
-	// Protect code blocks
+	// Strip any pre-existing sentinel characters from user input before
+	// inserting our own. Without this, a message like "a\uFFFF0\uFFFFb"
+	// could collide with a code-block placeholder.
+	let processed = stripped.replace(/[\uFFFE\uFFFF]/g, "");
+
+	const CODE_SENT = "\uFFFF";
+	const ANCHOR_SENT = "\uFFFE";
+
 	const codeBlocks: string[] = [];
-	const SENTINEL = "\uFFFF";
-	let processed = text.replace(/\uFFFF/g, "");
-
 	processed = processed.replace(/```[\s\S]*?```|`[^`\n]+`/g, (match) => {
 		const idx = codeBlocks.length;
 		codeBlocks.push(match);
-		return `${SENTINEL}${idx}${SENTINEL}`;
+		return `${CODE_SENT}${idx}${CODE_SENT}`;
 	});
 
-	// Check if any shortcodes would match before doing the full conversion
-	const testRe = shortcodeRegex();
-	if (!testRe.test(processed)) return null;
+	const anchors: string[] = [];
+	processed = processed.replace(urlRegex(), (match) => {
+		const trimmed = trimUrlTail(match);
+		if (!trimmed) return match;
+		const canonical = canonicalizeUrl(trimmed);
+		if (!canonical) return match;
+		const idx = anchors.length;
+		// `canonical` validates the URL and rejects non-http(s) schemes,
+		// but we render `trimmed` in both href and visible text so we
+		// preserve user fragments (`#section`) and the rendered form
+		// matches what the user typed.
+		anchors.push(
+			`<a href="${escapeAttr(trimmed)}" target="_blank" rel="noreferrer noopener">${escapeHtml(trimmed)}</a>`,
+		);
+		const trailing = match.slice(trimmed.length);
+		return `${ANCHOR_SENT}${idx}${ANCHOR_SENT}${trailing}`;
+	});
 
-	// Escape HTML in the non-code parts, then replace shortcodes
-	const parts = processed.split(
-		new RegExp(`(${SENTINEL}\\d+${SENTINEL})`, "g"),
+	const hasAnchors = anchors.length > 0;
+	const hasShortcodeMatch =
+		shortcodeLookup.size > 0 && shortcodeRegex().test(processed);
+	if (!hasAnchors && !hasShortcodeMatch) {
+		// If the reply fallback was stripped, we must still render the
+		// stripped body — otherwise the `<Show fallback>` path would
+		// render `props.body` and re-expose the quote preamble. For
+		// messages that weren't stripped, return null so the caller's
+		// `whitespace-pre-wrap` fallback handles whitespace exactly.
+		if (!wasStripped) return null;
+		return escapeHtml(stripped).replace(/\n/g, "<br>");
+	}
+
+	const splitRe = new RegExp(
+		`(${CODE_SENT}\\d+${CODE_SENT}|${ANCHOR_SENT}\\d+${ANCHOR_SENT})`,
+		"g",
 	);
+	const codeOnlyRe = new RegExp(`^${CODE_SENT}(\\d+)${CODE_SENT}$`);
+	const anchorOnlyRe = new RegExp(`^${ANCHOR_SENT}(\\d+)${ANCHOR_SENT}$`);
+
+	const parts = processed.split(splitRe);
 	const result: string[] = [];
 
 	for (const part of parts) {
-		const sentinelMatch = part.match(
-			new RegExp(`^${SENTINEL}(\\d+)${SENTINEL}$`),
-		);
-		if (sentinelMatch) {
-			const idx = Number.parseInt(sentinelMatch[1], 10);
+		const codeMatch = part.match(codeOnlyRe);
+		if (codeMatch) {
+			const idx = Number.parseInt(codeMatch[1], 10);
 			result.push(idx < codeBlocks.length ? escapeHtml(codeBlocks[idx]) : "");
-		} else {
-			let escaped = escapeHtml(part);
-			const re = shortcodeRegex();
+			continue;
+		}
+		const anchorMatch = part.match(anchorOnlyRe);
+		if (anchorMatch) {
+			const idx = Number.parseInt(anchorMatch[1], 10);
+			result.push(idx < anchors.length ? anchors[idx] : "");
+			continue;
+		}
+
+		let escaped = escapeHtml(part);
+		if (hasShortcodeMatch) {
 			escaped = escaped.replace(
-				re,
+				shortcodeRegex(),
 				(match, prefix: string, shortcode: string) => {
 					const emote = shortcodeLookup.get(shortcode);
 					if (emote) {
@@ -270,8 +336,8 @@ function plainTextToHtml(
 					return match;
 				},
 			);
-			result.push(escaped);
 		}
+		result.push(escaped);
 	}
 
 	return result.join("").replace(/\n/g, "<br>");

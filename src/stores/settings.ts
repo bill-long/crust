@@ -13,6 +13,12 @@ export interface UserSettings {
 	desktopNotifications: boolean;
 	/** Whether to play a sound for incoming messages in other rooms. */
 	notificationSound: boolean;
+	/**
+	 * Whether to fetch and render OpenGraph preview cards for links in
+	 * messages. Mirrors the Matrix `m.room.preview_urls` account-data
+	 * `disable` flag (inverted).
+	 */
+	urlPreviews: boolean;
 }
 
 const defaults: UserSettings = {
@@ -21,6 +27,7 @@ const defaults: UserSettings = {
 	timeFormat: "12h",
 	desktopNotifications: false,
 	notificationSound: true,
+	urlPreviews: true,
 };
 
 function loadBool(
@@ -64,6 +71,7 @@ function load(): UserSettings {
 				"notificationSound",
 				defaults.notificationSound,
 			),
+			urlPreviews: loadBool(obj, "urlPreviews", defaults.urlPreviews),
 		};
 	} catch {
 		return { ...defaults };
