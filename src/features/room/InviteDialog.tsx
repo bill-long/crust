@@ -8,6 +8,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { InviteByUserIdForm } from "./settings/InviteByUserIdForm";
 
 const FOCUSABLE =
@@ -95,6 +96,7 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 				role="dialog"
 				aria-modal="true"
 				aria-labelledby={titleId}
+				inert={cryptoDialogOpen() || undefined}
 				tabIndex={-1}
 				onKeyDown={handleKeyDown}
 				onClick={(e) => {

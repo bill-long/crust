@@ -8,6 +8,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -125,6 +126,7 @@ const ConfirmDialog: Component<ConfirmDialogProps> = (props) => {
 				aria-modal="true"
 				aria-labelledby={titleId}
 				aria-describedby={bodyId}
+				inert={cryptoDialogOpen() || undefined}
 				tabIndex={-1}
 				onKeyDown={handleKeyDown}
 				onClick={(e) => {

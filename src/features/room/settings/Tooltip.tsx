@@ -2,7 +2,7 @@ import { Tooltip as KTooltip } from "@kobalte/core/tooltip";
 import { type Component, type JSX, Show } from "solid-js";
 
 interface TooltipProps {
-	/** Tooltip text. When omitted/empty no tooltip is shown. */
+	/** Tooltip text. When empty no tooltip is shown. */
 	content: string;
 	/** Element that receives the tooltip — usually a button or label. */
 	children: JSX.Element;

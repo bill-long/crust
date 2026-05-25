@@ -9,6 +9,7 @@ import {
 	onMount,
 	Switch,
 } from "solid-js";
+import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { userSettings } from "../../../stores/settings";
 import { AdvancedTab } from "./AdvancedTab";
 import { GeneralTab } from "./GeneralTab";
@@ -118,6 +119,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 			role="dialog"
 			aria-modal="true"
 			aria-label={`Room settings — ${roomName()}`}
+			inert={cryptoDialogOpen() || undefined}
 			tabIndex={-1}
 			onKeyDown={handleKeyDown}
 			onClick={(e) => {
