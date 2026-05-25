@@ -22,17 +22,16 @@ import {
 const BellIcon: Component = () => (
 	<svg
 		aria-hidden="true"
-		width="16"
-		height="16"
-		viewBox="0 0 16 16"
+		class="h-4 w-4"
+		viewBox="0 0 24 24"
 		fill="none"
 		stroke="currentColor"
-		stroke-width="1.5"
+		stroke-width="2"
 		stroke-linecap="round"
 		stroke-linejoin="round"
 	>
-		<path d="M6 13a2 2 0 0 0 4 0" />
-		<path d="M12.5 10.5c-.7-.7-1.5-1.2-1.5-4.5a3 3 0 0 0-6 0c0 3.3-.8 3.8-1.5 4.5h9Z" />
+		<path d="M10 20a2 2 0 0 0 4 0" />
+		<path d="M18 16c-1-1-2-2-2-7a4 4 0 0 0-8 0c0 5-1 6-2 7h12Z" />
 	</svg>
 );
 
@@ -40,18 +39,17 @@ const BellIcon: Component = () => (
 const BellMutedIcon: Component = () => (
 	<svg
 		aria-hidden="true"
-		width="16"
-		height="16"
-		viewBox="0 0 16 16"
+		class="h-4 w-4"
+		viewBox="0 0 24 24"
 		fill="none"
 		stroke="currentColor"
-		stroke-width="1.5"
+		stroke-width="2"
 		stroke-linecap="round"
 		stroke-linejoin="round"
 	>
-		<path d="M6 13a2 2 0 0 0 4 0" />
-		<path d="M12.5 10.5c-.7-.7-1.5-1.2-1.5-4.5a3 3 0 0 0-6 0c0 3.3-.8 3.8-1.5 4.5h9Z" />
-		<line x1="2" y1="2" x2="14" y2="14" />
+		<path d="M10 20a2 2 0 0 0 4 0" />
+		<path d="M18 16c-1-1-2-2-2-7a4 4 0 0 0-8 0c0 5-1 6-2 7h12Z" />
+		<line x1="3" y1="3" x2="21" y2="21" />
 	</svg>
 );
 
@@ -59,18 +57,17 @@ const BellMutedIcon: Component = () => (
 const BellActiveIcon: Component = () => (
 	<svg
 		aria-hidden="true"
-		width="16"
-		height="16"
-		viewBox="0 0 16 16"
+		class="h-4 w-4"
+		viewBox="0 0 24 24"
 		fill="none"
 		stroke="currentColor"
-		stroke-width="1.5"
+		stroke-width="2"
 		stroke-linecap="round"
 		stroke-linejoin="round"
 	>
-		<path d="M6 13a2 2 0 0 0 4 0" />
-		<path d="M12.5 10.5c-.7-.7-1.5-1.2-1.5-4.5a3 3 0 0 0-6 0c0 3.3-.8 3.8-1.5 4.5h9Z" />
-		<circle cx="12" cy="4" r="2.5" fill="currentColor" stroke="none" />
+		<path d="M10 20a2 2 0 0 0 4 0" />
+		<path d="M18 16c-1-1-2-2-2-7a4 4 0 0 0-8 0c0 5-1 6-2 7h12Z" />
+		<circle cx="18" cy="6" r="3" fill="currentColor" stroke="none" />
 	</svg>
 );
 
@@ -156,10 +153,10 @@ const RoomNotificationMenu: Component<RoomNotificationMenuProps> = (props) => {
 	return (
 		<DropdownMenu>
 			<DropdownMenu.Trigger
-				class="rounded px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 				classList={{
 					"text-accent": isNonDefault(),
-					"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
+					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
 						!isNonDefault(),
 				}}
 				title="Notification settings"

@@ -138,16 +138,31 @@ const RoomPane: Component<{
 						<button
 							type="button"
 							onClick={() => props.onInvite()}
-							class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							title="Invite a user to this room"
+							aria-label="Invite a user to this room"
 						>
-							Invite
+							<svg
+								class="h-4 w-4"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+								<circle cx="9" cy="7" r="4" />
+								<line x1="19" y1="8" x2="19" y2="14" />
+								<line x1="22" y1="11" x2="16" y2="11" />
+							</svg>
 						</button>
 					</Show>
 					<button
 						type="button"
 						onClick={() => props.onOpenSettings()}
-						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 						title="Room settings"
 						aria-label="Room settings"
 					>
@@ -168,14 +183,59 @@ const RoomPane: Component<{
 					<button
 						type="button"
 						onClick={() => props.onCopyLink()}
-						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-						title="Copy a shareable link to this room"
+						class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						classList={{
+							"text-success-text": props.copyState() === "copied",
+							"text-danger-text": props.copyState() === "error",
+							"text-text-disabled hover:text-text-primary":
+								props.copyState() === "idle",
+						}}
+						title={
+							props.copyState() === "copied"
+								? "Copied!"
+								: props.copyState() === "error"
+									? "Copy failed"
+									: "Copy a shareable link to this room"
+						}
+						aria-label={
+							props.copyState() === "copied"
+								? "Room link copied"
+								: props.copyState() === "error"
+									? "Failed to copy room link"
+									: "Copy a shareable link to this room"
+						}
 					>
-						{props.copyState() === "copied"
-							? "Copied!"
-							: props.copyState() === "error"
-								? "Copy failed"
-								: "Copy link"}
+						<Show
+							when={props.copyState() === "copied"}
+							fallback={
+								<svg
+									class="h-4 w-4"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+									<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+								</svg>
+							}
+						>
+							<svg
+								class="h-4 w-4"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<polyline points="20 6 9 17 4 12" />
+							</svg>
+						</Show>
 					</button>
 					<span aria-live="polite" role="status" class="sr-only">
 						{props.copyState() === "copied"
@@ -198,27 +258,59 @@ const RoomPane: Component<{
 					<button
 						type="button"
 						onClick={() => props.onToggleMembers()}
-						class="rounded px-2 py-1 text-xs transition-colors"
+						class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 						classList={{
 							"bg-surface-3 text-text-emphasis": props.membersVisible(),
-							"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
+							"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
 								!props.membersVisible(),
 						}}
 						title={
 							props.membersVisible() ? "Hide member list" : "Show member list"
 						}
+						aria-label={
+							props.membersVisible() ? "Hide member list" : "Show member list"
+						}
 						aria-pressed={props.membersVisible()}
 					>
-						Members
+						<svg
+							class="h-4 w-4"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+							<circle cx="9" cy="7" r="4" />
+							<path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+							<path d="M16 3.13a4 4 0 0 1 0 7.75" />
+						</svg>
 					</button>
 					<button
 						type="button"
 						onClick={() => props.onLeave()}
 						disabled={props.leaving()}
-						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text"
-						title="Leave room"
+						aria-busy={props.leaving()}
+						class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+						title={props.leaving() ? "Leaving…" : "Leave room"}
+						aria-label={props.leaving() ? "Leaving room" : "Leave room"}
 					>
-						{props.leaving() ? "Leaving…" : "Leave"}
+						<svg
+							class="h-4 w-4"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+							<polyline points="16 17 21 12 16 7" />
+							<line x1="21" y1="12" x2="9" y2="12" />
+						</svg>
 					</button>
 				</div>
 			</div>
