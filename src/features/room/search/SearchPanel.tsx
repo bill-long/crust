@@ -13,7 +13,7 @@ import {
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { SearchResultRow } from "./SearchResultRow";
-import { useRoomSearch } from "./useRoomSearch";
+import { MAX_QUERY_LEN, useRoomSearch } from "./useRoomSearch";
 
 const VIRTUALIZE_THRESHOLD = 50;
 
@@ -270,7 +270,7 @@ const SearchPanel: Component<{
 				}}
 				title={triggerLabel}
 				aria-label={triggerLabel}
-				aria-pressed={open()}
+				aria-expanded={open()}
 				aria-controls={open() ? panelId : undefined}
 			>
 				<SearchIcon />
@@ -317,7 +317,7 @@ const SearchPanel: Component<{
 								onInput={(e) => setDraft(e.currentTarget.value)}
 								onKeyDown={onInputKeyDown}
 								placeholder="Search this room…"
-								maxLength={256}
+								maxLength={MAX_QUERY_LEN}
 								autocomplete="off"
 								aria-controls={results().length > 0 ? listboxId : undefined}
 								aria-activedescendant={activeDescendantId()}

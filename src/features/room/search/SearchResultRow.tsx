@@ -29,16 +29,22 @@ const SearchResultRow: Component<{
 	rowRef?: (el: HTMLElement | null) => void;
 }> = (props) => {
 	return (
-		<button
-			type="button"
+		<div
 			id={props.rowId}
 			role="option"
 			aria-selected={props.focused}
 			tabIndex={props.focused ? 0 : -1}
 			ref={(el) => props.rowRef?.(el)}
 			onClick={() => props.onJump()}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					e.stopPropagation();
+					props.onJump();
+				}
+			}}
 			onFocus={() => props.onFocus()}
-			class="group flex w-full flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+			class="group flex w-full cursor-pointer flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 			aria-label={`Search result from ${props.hit.senderName}, jump to message`}
 		>
 			<div class="flex items-baseline gap-2">
@@ -60,7 +66,7 @@ const SearchResultRow: Component<{
 					innerHTML={buildSnippetHtml(props.hit.body, props.terms)}
 				/>
 			</Show>
-		</button>
+		</div>
 	);
 };
 

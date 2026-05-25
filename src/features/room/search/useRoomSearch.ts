@@ -54,8 +54,9 @@ export interface UseRoomSearch {
 }
 
 const LOCAL_PAGE_SIZE = 25;
-const SERVER_PAGE_SIZE = 25; // implicit; server controls actual page size
 const MAX_QUERY_LEN = 256;
+
+export { MAX_QUERY_LEN };
 
 function projectEvent(room: Room | null, ev: MatrixEvent): SearchHit | null {
 	const id = ev.getId();
@@ -316,8 +317,6 @@ export function useRoomSearch(
 				if (myGen === gen) setLoading(false);
 			});
 	};
-
-	void SERVER_PAGE_SIZE; // reserved for future use
 
 	return {
 		query,
