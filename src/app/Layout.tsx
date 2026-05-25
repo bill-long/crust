@@ -8,6 +8,7 @@ import {
 	createSignal,
 	onCleanup,
 	Show,
+	untrack,
 } from "solid-js";
 import { useClient } from "../client/client";
 import {
@@ -37,6 +38,11 @@ import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { buildRoomLink, buildRoomLinkById } from "../features/room/roomLink";
 import { SearchPanel } from "../features/room/search/SearchPanel";
+import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
+import {
+	RoomSettingsOverlay,
+	type RoomSettingsTab,
+} from "../features/room/settings/RoomSettingsOverlay";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { useNotifications } from "../features/room/useNotifications";
 import {
@@ -95,6 +101,7 @@ const RoomPane: Component<{
 	onInvite: () => void;
 	leaving: () => boolean;
 	onLeave: () => void;
+	onOpenSettings: () => void;
 	membersVisible: () => boolean;
 	onToggleMembers: () => void;
 	membersWidth: () => number;
@@ -125,6 +132,27 @@ const RoomPane: Component<{
 							Invite
 						</button>
 					</Show>
+					<button
+						type="button"
+						onClick={() => props.onOpenSettings()}
+						class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						title="Room settings"
+						aria-label="Room settings"
+					>
+						<svg
+							class="h-4 w-4"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<circle cx="12" cy="12" r="3" />
+							<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+						</svg>
+					</button>
 					<button
 						type="button"
 						onClick={() => props.onCopyLink()}
@@ -230,6 +258,13 @@ const Layout: Component = () => {
 	const location = useLocation();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
 	const [leaving, setLeaving] = createSignal(false);
+	const [leaveConfirmRoomId, setLeaveConfirmRoomId] = createSignal<
+		string | null
+	>(null);
+	const [roomSettings, setRoomSettings] = createSignal<{
+		roomId: string;
+		tab: RoomSettingsTab;
+	} | null>(null);
 	const [inviteRoomId, setInviteRoomId] = createSignal<string | null>(null);
 	const [copyState, setCopyState] = createSignal<"idle" | "copied" | "error">(
 		"idle",
@@ -473,23 +508,43 @@ const Layout: Component = () => {
 		return s?.name?.trim() || "Room";
 	};
 
-	const handleLeave = async (): Promise<void> => {
+	const handleLeave = (): void => {
 		const rid = roomId();
 		if (!rid || leaving()) return;
+		setLeaveConfirmRoomId(rid);
+	};
+
+	const performLeave = async (rid: string): Promise<void> => {
+		if (leaving()) return;
+		// Snapshot route params BEFORE the async leave call so a router
+		// update during the await (e.g., the SDK forcing us out of the
+		// room first) doesn't push the post-leave navigation into the
+		// wrong space.
+		const spaceId = params.spaceId;
 		setLeaving(true);
 		try {
 			await client.leave(rid);
-			if (params.spaceId) {
-				navigate(`/space/${encodeURIComponent(params.spaceId)}`);
+			// Close any open overlays that target this room.
+			if (roomSettings()?.roomId === rid) setRoomSettings(null);
+			setLeaveConfirmRoomId(null);
+			if (spaceId) {
+				navigate(`/space/${encodeURIComponent(spaceId)}`);
 			} else {
 				navigate("/home");
 			}
 		} catch (err) {
 			console.error("Failed to leave room:", err);
+			throw err;
 		} finally {
 			setLeaving(false);
 		}
 	};
+
+	const leaveConfirmRoomName = createMemo(() => {
+		const rid = leaveConfirmRoomId();
+		if (!rid) return "";
+		return summaries[rid]?.name?.trim() || "this room";
+	});
 
 	// Reactive "can the current user invite to the active room?"
 	// Recomputed when roomId changes OR when room state events fire (power
@@ -576,6 +631,9 @@ const Layout: Component = () => {
 								onInvite={() => setInviteRoomId(rid)}
 								leaving={leaving}
 								onLeave={handleLeave}
+								onOpenSettings={() =>
+									setRoomSettings({ roomId: rid, tab: "general" })
+								}
 								membersVisible={membersPaneVisible}
 								onToggleMembers={toggleMembersPane}
 								membersWidth={membersWidth}
@@ -615,6 +673,60 @@ const Layout: Component = () => {
 					/>
 				)}
 			</Show>
+
+			{/* Room settings overlay (per-room). The inner keyed <Show>
+				remounts the overlay when the target roomId changes so
+				per-tab local edit state (drafts, errors, in-flight
+				writes) cannot leak between rooms. */}
+			<Show when={roomSettings()}>
+				{(target) => (
+					<Show when={target().roomId} keyed>
+						{(rid) => {
+							// Snapshot the route's spaceId at the moment the
+							// overlay is rendered (and re-snapshot whenever
+							// roomId changes, via the keyed Show). Read via
+							// untrack so subsequent router updates to
+							// params.spaceId during the async leave cannot
+							// re-run this child and overwrite the snapshot.
+							const spaceIdAtOpen = untrack(() => params.spaceId);
+							return (
+								<RoomSettingsOverlay
+									client={client}
+									roomId={rid}
+									activeTab={target().tab}
+									onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
+									onClose={() => setRoomSettings(null)}
+									onLeft={() => {
+										setRoomSettings(null);
+										if (spaceIdAtOpen) {
+											navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
+										} else {
+											navigate("/home");
+										}
+									}}
+								/>
+							);
+						}}
+					</Show>
+				)}
+			</Show>
+
+			{/* Header "Leave" confirm — routed through the same modal as the
+				Advanced tab's Leave so both entry points are consistent. */}
+			<ConfirmDialog
+				open={() => leaveConfirmRoomId() !== null}
+				onClose={() => setLeaveConfirmRoomId(null)}
+				title={`Leave ${leaveConfirmRoomName()}?`}
+				body="You will stop receiving messages from this room. If the room is invite-only you may not be able to rejoin without a new invite."
+				confirmLabel="Leave"
+				destructive
+				pendingLabel="Leaving…"
+				onConfirm={async () => {
+					const rid = leaveConfirmRoomId();
+					if (!rid) return;
+					await performLeave(rid);
+				}}
+			/>
 
 			{/* Settings overlay */}
 			<Show when={isSettingsRoute()}>
