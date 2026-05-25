@@ -263,7 +263,7 @@ const SearchPanel: Component<{
 			gutter={6}
 		>
 			<Popover.Trigger
-				class="rounded px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 				classList={{
 					"bg-surface-3 text-text-emphasis": open(),
 					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":

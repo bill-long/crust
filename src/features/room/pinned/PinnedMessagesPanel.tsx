@@ -235,10 +235,10 @@ const PinnedMessagesPanel: Component<{
 				ref={(el: HTMLButtonElement) => {
 					triggerEl = el;
 				}}
-				class="relative rounded px-2 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 				classList={{
 					"bg-surface-3 text-text-emphasis": open(),
-					"text-text-disabled hover:bg-surface-2 hover:text-text-secondary":
+					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
 						!open(),
 				}}
 				title={triggerLabel()}
@@ -246,14 +246,12 @@ const PinnedMessagesPanel: Component<{
 				aria-expanded={open()}
 				aria-controls={open() ? panelId : undefined}
 			>
-				<span class="inline-flex items-center gap-1">
-					<PinIcon filled={count() > 0} />
-					<Show when={count() > 0}>
-						<span class="rounded-full bg-accent px-1.5 py-0 text-[10px] font-semibold leading-4 text-accent-foreground">
-							{count()}
-						</span>
-					</Show>
-				</span>
+				<PinIcon filled={count() > 0} />
+				<Show when={count() > 0}>
+					<span class="rounded-full bg-accent px-1.5 py-0 text-[10px] font-semibold leading-4 text-accent-foreground">
+						{count()}
+					</span>
+				</Show>
 			</Popover.Trigger>
 			<Popover.Portal>
 				<Popover.Content
