@@ -112,13 +112,32 @@ function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
 	const obj = raw as Record<string, unknown>;
 	const rawUrl = typeof obj.url === "string" ? obj.url.trim() : "";
 	// Element Call's media APIs (camera, microphone, display-capture) only
-	// work over a secure context. Reject non-HTTPS so we don't silently
-	// embed something that will break inside the iframe.
-	if (rawUrl && !/^https:\/\//i.test(rawUrl)) {
-		console.warn("config.elementCall.url must use https://; ignoring:", rawUrl);
+	// work in a secure context. Allow https:// and loopback http:// (which
+	// browsers treat as secure per the W3C Secure Contexts spec, so local
+	// EC dev setups still work). Reject everything else.
+	if (rawUrl && !isSecureCallUrl(rawUrl)) {
+		console.warn(
+			"config.elementCall.url must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]); ignoring:",
+			rawUrl,
+		);
 		return { url: "" };
 	}
 	return { url: rawUrl };
+}
+
+function isSecureCallUrl(url: string): boolean {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol === "https:") return true;
+	if (parsed.protocol !== "http:") return false;
+	const host = parsed.hostname.toLowerCase();
+	if (host === "localhost" || host === "[::1]") return true;
+	// Allow the full IPv4 127.0.0.0/8 loopback range.
+	return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
 function normalizeBranding(raw: unknown): CrustConfig["branding"] {
