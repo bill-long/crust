@@ -172,7 +172,7 @@ export function eventOverrideCount(
 	if (!events || typeof events !== "object") return 0;
 	let n = 0;
 	for (const v of Object.values(events)) {
-		if (typeof v === "number") n++;
+		if (Number.isFinite(v)) n++;
 	}
 	return n;
 }

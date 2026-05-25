@@ -71,12 +71,15 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	const setJoinRule = async (next: JoinRuleValue): Promise<void> => {
 		const existingAllow = joinAllowList();
 		await joinOpt.apply(next, async () => {
+			const content: {
+				join_rule: JoinRuleValue;
+				allow?: typeof existingAllow;
+			} = { join_rule: next };
+			if (existingAllow.length > 0) content.allow = existingAllow;
 			await props.client.sendStateEvent(
 				props.roomId,
 				EventType.RoomJoinRules,
-				next === JoinRule.Restricted
-					? { join_rule: next, allow: existingAllow }
-					: { join_rule: next },
+				content,
 				"",
 			);
 		});
@@ -162,13 +165,16 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 							{(opt) => {
 								const disabled = (): boolean => {
 									if (!perms.canSetJoinRules()) return true;
-									if (opt.value === "restricted" && !canSelectRestricted())
+									if (
+										opt.value === JoinRule.Restricted &&
+										!canSelectRestricted()
+									)
 										return true;
 									return false;
 								};
 								const tooltipText = (): string => {
 									if (
-										opt.value === "restricted" &&
+										opt.value === JoinRule.Restricted &&
 										!canSelectRestricted() &&
 										perms.canSetJoinRules()
 									)

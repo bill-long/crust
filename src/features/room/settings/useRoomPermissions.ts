@@ -75,7 +75,11 @@ export function useRoomPermissions(
 	const onRoomState = (event: MatrixEvent): void => {
 		if (event.getRoomId() !== roomId()) return;
 		const t = event.getType();
-		if (t === POWER_LEVELS_TYPE || t === MEMBER_TYPE) {
+		if (t === POWER_LEVELS_TYPE) {
+			setTick((n) => n + 1);
+			return;
+		}
+		if (t === MEMBER_TYPE && event.getStateKey() === client.getUserId()) {
 			setTick((n) => n + 1);
 		}
 	};

@@ -172,5 +172,18 @@ describe("powerLevelPresets", () => {
 				}),
 			).toBe(1);
 		});
+
+		it("ignores non-finite numeric overrides (NaN, Infinity)", () => {
+			expect(
+				eventOverrideCount({
+					events: {
+						"m.reaction": 0,
+						"m.nan": Number.NaN,
+						"m.posinf": Number.POSITIVE_INFINITY,
+						"m.neginf": Number.NEGATIVE_INFINITY,
+					},
+				}),
+			).toBe(1);
+		});
 	});
 });

@@ -289,4 +289,41 @@ describe("useRoomPermissions", () => {
 			expect(perms.myPowerLevel()).toBe(100);
 		});
 	});
+
+	it("ignores m.room.member events for other users", async () => {
+		const room = createMockRoom(
+			"!r:x",
+			[],
+			[
+				{
+					userId: "@test:example.com",
+					name: "Me",
+					membership: "join",
+					powerLevel: 0,
+				},
+			],
+		);
+		const client = createMockClient(new Map([["!r:x", room]]));
+		await withRoot(async () => {
+			const perms = useRoomPermissions(
+				client as unknown as MatrixClient,
+				() => "!r:x",
+			);
+			expect(perms.myPowerLevel()).toBe(0);
+			// Mutate underlying member data without telling the hook, then emit a
+			// member event for *another* user. The hook should not retick, so the
+			// memo should still report the cached value.
+			room.__addMember({
+				userId: "@test:example.com",
+				name: "Me",
+				membership: "join",
+				powerLevel: 100,
+			});
+			client.__emit(
+				RoomStateEvent.Events,
+				fakeStateEvent("!r:x", "m.room.member", "@other:example.com"),
+			);
+			expect(perms.myPowerLevel()).toBe(0);
+		});
+	});
 });
