@@ -74,3 +74,35 @@ describe("CallOverlay focus-trap sentinels", () => {
 		expect(focusSpy).toHaveBeenCalledTimes(1);
 	});
 });
+
+describe("CallOverlay native RTC flag gating", () => {
+	afterEach(() => {
+		cleanup();
+		vi.resetModules();
+		vi.doUnmock("./rtc/nativeRtcEnabled");
+		vi.doUnmock("./rtc/NativeCallView");
+	});
+
+	it("renders NativeCallView and not the iframe when NATIVE_RTC_ENABLED is true", async () => {
+		vi.resetModules();
+		vi.doMock("./rtc/nativeRtcEnabled", () => ({ NATIVE_RTC_ENABLED: true }));
+		vi.doMock("./rtc/NativeCallView", () => ({
+			NativeCallView: (props: { roomName: string }) => (
+				<div data-testid="native-call-view">native:{props.roomName}</div>
+			),
+		}));
+		const { CallOverlay: CallOverlayReloaded } = await import("./CallOverlay");
+		render(() => (
+			<CallOverlayReloaded
+				elementCallUrl="https://call.example.com"
+				roomId="!room:example.com"
+				roomName="Alpha"
+				onClose={() => undefined}
+			/>
+		));
+		const view = screen.getByTestId("native-call-view");
+		expect(view.textContent).toBe("native:Alpha");
+		expect(screen.queryByTitle("Element Call — Alpha")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Close call" })).toBeNull();
+	});
+});
