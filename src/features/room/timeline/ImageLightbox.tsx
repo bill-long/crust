@@ -312,13 +312,21 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		restoreFocus();
 	});
 
-	// Window resize tracking.
+	// Window resize tracking — only while the lightbox is open. Avoids
+	// recomputing `viewport` / `fitScale` for an unmounted overlay.
 	const onResize = (): void => {
 		setViewport({ w: window.innerWidth, h: window.innerHeight });
 	};
 	if (typeof window !== "undefined") {
-		window.addEventListener("resize", onResize);
-		onCleanup(() => window.removeEventListener("resize", onResize));
+		createEffect(
+			on(props.open, (isOpen) => {
+				if (!isOpen) return;
+				// Sync viewport on (re-)open in case it changed while closed.
+				onResize();
+				window.addEventListener("resize", onResize);
+				onCleanup(() => window.removeEventListener("resize", onResize));
+			}),
+		);
 	}
 
 	const tryClose = (): void => {

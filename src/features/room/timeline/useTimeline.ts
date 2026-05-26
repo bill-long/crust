@@ -79,6 +79,18 @@ export interface TimelineEvent {
 	status: EventStatus | null;
 }
 
+// Reject any ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F).
+// Used to guard user-controlled strings that flow into UI labels (filenames,
+// the lightbox header, download attributes, etc.) so a CR/LF/NUL/etc. can't
+// corrupt rendering or downstream consumers.
+function hasControlChar(s: string): boolean {
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c < 0x20 || c === 0x7f) return true;
+	}
+	return false;
+}
+
 function eventToTimelineEvent(
 	event: MatrixEvent,
 	room: Room,
@@ -147,12 +159,16 @@ function eventToTimelineEvent(
 			: isPlainImage && typeof content.body === "string"
 				? content.body
 				: null;
-	// Treat whitespace-only or multi-line bodies as "no filename" —
-	// `m.image` events often carry a caption-style body that isn't
-	// actually a filename.
+	// Treat whitespace-only, multi-line, or otherwise control-char-bearing
+	// bodies as "no filename" — `m.image` events often carry a caption-style
+	// body that isn't actually a filename, and any ASCII control char
+	// (LF, CR, NUL, DEL, etc.) would corrupt UI labels / the lightbox header
+	// if used directly.
 	const trimmedFilename = rawFilename?.trim();
 	const imageFilename =
-		trimmedFilename && !trimmedFilename.includes("\n") ? trimmedFilename : null;
+		trimmedFilename && !hasControlChar(trimmedFilename)
+			? trimmedFilename
+			: null;
 
 	// Image / sticker intrinsic dimensions, used by `TimelineItem` to
 	// reserve the layout box before the image decodes. Gated on
