@@ -132,13 +132,13 @@ Rendering rules in `TimelineItem`:
 - Send echo `NOT_SENT` → `bg-danger-bg/20` tint, `role="alert"` failed banner, Retry / Discard buttons.
 - Reaction echo `NOT_SENT` / `CANCELLED` → excluded from the parent's count and `myReactions` map in `eventToTimelineEvent`. A separate `pendingReactions` store (keyed by target event ID then reaction key) drives a red-tinted failed-pill row with per-key Retry / Discard. Retry resends the most-recent failed echo for that key through the SDK's pending queue; Discard cancels every stacked failed echo for that key.
 - Edit echo (`m.replace`) `NOT_SENT` / `CANCELLED` → original message content rendered via `getOriginalContent()`, `isEdited` flag cleared. A separate `pendingEdits` store (keyed by target event ID) drives a "Edit failed: <attempted text>" banner with Retry / Discard. The composer also still surfaces `setError` inline for the in-context failure case.
-- Pending or failed redaction (any status including `SENT`, which is a transient window where the target is still locally-redacted) → "Deleting…" or "Delete failed" overlay; body and reactions are hidden (SDK's `markLocallyRedacted` wipes content immediately so there's nothing to render). Failed redactions get Retry / Discard buttons. There's no in-flight Cancel for redactions today (sends have it via `client.cancelPendingEvent`; redactions could follow the same pattern if a stuck-delete UX is needed).
+- Pending or failed redaction (any status including `SENT`, which is a transient window where the target is still locally-redacted) → "Deleting…" or "Delete failed" overlay; body and reactions are hidden (SDK's `markLocallyRedacted` wipes content immediately so there's nothing to render). Failed redactions get Retry / Discard buttons. Pending redactions in a cancellable status (`QUEUED` / `ENCRYPTING`) also surface a Cancel button that calls `client.cancelPendingEvent`.
 - HoverToolbar (react / reply / edit / delete) is hidden for any non-server-confirmed event.
 
 When you add a new user-initiated handler:
 - Reuse `client.resendEvent` / `client.cancelPendingEvent` and the `focusComposer` pattern in `TimelineView.tsx` for any failure UX. Don't invent a parallel echo store.
 - For redactions specifically: pending state must persist through `SENT` (a transient window where the target is still locally redacted), and pending-redaction lookups must not depend on the current `TimelineWindow` — the redaction echo lives at the live end; store the `MatrixEvent` reference directly.
-- Where Retry / Discard for reactions or edits is desired, it would follow the redaction pattern (separate pending store keyed by target / replaced event) — not yet implemented.
+- Retry / Discard for reactions and edits follows the redaction pattern: a separate pending store keyed by target (and reaction key for reactions) that survives `TimelineWindow` paging because it stores `MatrixEvent` references directly. See `pendingReactions` / `pendingEdits` in `useTimeline.ts`.
 
 ### Rendering messages
 
@@ -218,7 +218,7 @@ Run `pnpm lint && pnpm typecheck` before declaring any task complete.
 
 ## Always do
 
-- Optimistic updates for any user action that has a network round-trip — see the Optimistic UI section. Sends have full Retry / Discard / Cancel affordances; redactions have Retry / Discard on failure (no in-flight Cancel today); reactions and edits filter failed echoes from the rendered state but don't expose retry UI yet.
+- Optimistic updates for any user action that has a network round-trip — see the Optimistic UI section. Sends, reactions, edits, and redactions all surface failure-state Retry / Discard affordances. In-flight Cancel is wired for sends and for redactions in cancellable statuses (`QUEUED` / `ENCRYPTING`).
 - Virtualize any list that can exceed ~50 items (rooms, members, timeline, search results).
 - Honor `prefers-reduced-motion` and `prefers-color-scheme`.
 - Use design tokens for color, spacing, radii, shadows.
