@@ -27,7 +27,33 @@ interface CallOverlayProps {
 export const CallOverlay: Component<CallOverlayProps> = (props) => {
 	const [confirmClose, setConfirmClose] = createSignal(false);
 	let closeButtonRef: HTMLButtonElement | undefined;
+	let iframeRef: HTMLIFrameElement | undefined;
 	let previousFocus: HTMLElement | null = null;
+
+	// Focus-trap sentinels. Every other dialog in this codebase
+	// (ConfirmDialog, InviteDialog, ImageLightbox, etc.) traps focus with
+	// an onKeyDown handler on the dialog root that intercepts Tab/Shift+Tab
+	// and cycles focus through queryable focusables. That pattern cannot
+	// work here: a cross-origin iframe swallows key events when focus is
+	// inside it, so the parent never sees Tab from EC's last focusable.
+	//
+	// Instead we place focusable zero-size divs at the dialog's tab
+	// boundaries that bounce focus back into the dialog when reached:
+	//   - leading sentinel: Shift+Tab past the start → focus iframe (cycle end)
+	//   - trailing sentinel: Tab past the end → focus close button (cycle start)
+	// Tab order inside the dialog therefore stays: close → iframe → close → ...
+	//
+	// The sentinels are visually hidden via `sr-only` but intentionally
+	// remain in the accessibility tree (no aria-hidden) — combining
+	// tabIndex={0} with aria-hidden is a WCAG 4.1.2 antipattern. They have
+	// no name/role, so screen readers announce nothing meaningful, and
+	// focus is redirected synchronously before any announcement completes.
+	const focusIframe = (): void => {
+		iframeRef?.focus();
+	};
+	const focusCloseButton = (): void => {
+		closeButtonRef?.focus();
+	};
 
 	const callSrc = (): string => {
 		const base = props.elementCallUrl.replace(/\/+$/, "");
@@ -73,6 +99,10 @@ export const CallOverlay: Component<CallOverlayProps> = (props) => {
 			aria-label={`Call in ${props.roomName}`}
 			inert={cryptoDialogOpen() || undefined}
 		>
+			{/* Leading focus-trap sentinel — see focusIframe comment above. */}
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: focus-trap sentinel — no semantic content, focus is redirected immediately by onFocus. See comment on focusIframe. */}
+			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus-trap sentinel — intentionally tabbable so it can catch focus escaping the iframe. */}
+			<div tabIndex={0} onFocus={focusIframe} class="sr-only" />
 			<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface-1 px-4">
 				<div class="flex min-w-0 items-center gap-2">
 					<span
@@ -153,12 +183,18 @@ export const CallOverlay: Component<CallOverlayProps> = (props) => {
 			 */}
 			<iframe
 				title={`Element Call — ${props.roomName}`}
+				ref={iframeRef}
 				src={callSrc()}
 				class="min-h-0 flex-1 border-0 bg-surface-0"
 				allow="camera; microphone; autoplay; clipboard-write; display-capture; fullscreen; screen-wake-lock"
 				sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-forms"
 				referrerPolicy="no-referrer"
 			/>
+
+			{/* Trailing focus-trap sentinel — see focusCloseButton comment above. */}
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: focus-trap sentinel — no semantic content, focus is redirected immediately by onFocus. See comment on focusCloseButton. */}
+			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: focus-trap sentinel — intentionally tabbable so it can catch focus escaping the iframe. */}
+			<div tabIndex={0} onFocus={focusCloseButton} class="sr-only" />
 
 			<ConfirmDialog
 				open={confirmClose}
