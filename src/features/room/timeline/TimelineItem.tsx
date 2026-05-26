@@ -242,6 +242,7 @@ const TimelineItem: Component<{
 	onCancel?: () => void;
 	onRetryRedaction?: () => void;
 	onDiscardRedaction?: () => void;
+	onCancelRedaction?: () => void;
 	pendingRedactionStatus?: EventStatus;
 	readReceipts?: { userId: string; displayName: string }[];
 	client: MatrixClient;
@@ -278,6 +279,18 @@ const TimelineItem: Component<{
 	const isRedactionFailed = createMemo(
 		() => props.pendingRedactionStatus === EventStatus.NOT_SENT,
 	);
+	// The SDK's `cancelPendingEvent` accepts QUEUED / NOT_SENT / ENCRYPTING
+	// (matrix-js-sdk client.js whitelist). We expose Cancel only for the
+	// in-flight subset: QUEUED / ENCRYPTING.
+	// SENDING is excluded because the HTTP request is already in flight —
+	// the SDK throws "cannot cancel an event with status sending" if asked.
+	// SENT is excluded because the server has acknowledged the redaction.
+	// NOT_SENT (failed) is excluded because the failed banner already
+	// renders Retry / Discard, where Discard performs the same cancel.
+	const isRedactionCancellable = createMemo(() => {
+		const s = props.pendingRedactionStatus;
+		return s === EventStatus.QUEUED || s === EventStatus.ENCRYPTING;
+	});
 
 	// Maximum rendered dimensions for image / sticker messages. The
 	// browser combines the `width` / `height` HTML attributes (intrinsic
@@ -572,6 +585,7 @@ const TimelineItem: Component<{
 								type="button"
 								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
 								onClick={props.onCancel}
+								aria-label="Cancel sending message"
 							>
 								Cancel
 							</button>
@@ -579,11 +593,27 @@ const TimelineItem: Component<{
 					</div>
 				</Show>
 
-				{/* Pending-redaction indicator. The body is dimmed via the
-				    outer wrapper; this announces the in-flight delete. */}
+				{/* Pending-redaction indicator + Cancel control. The body is
+				    dimmed via the outer wrapper; Cancel calls
+				    `client.cancelPendingEvent` on the in-flight redaction
+				    (only QUEUED / ENCRYPTING are SDK-cancellable; SENDING
+				    is in-flight HTTP and SENT is post-ack). */}
 				<Show when={isRedactionPending()}>
-					<div class="mt-1 text-xs text-text-muted" role="status">
-						Deleting…
+					<div class="mt-1 flex items-center gap-2 text-xs text-text-muted">
+						<span class="sr-only" role="status">
+							Deleting message
+						</span>
+						<span aria-hidden="true">Deleting…</span>
+						<Show when={isRedactionCancellable() && props.onCancelRedaction}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								onClick={props.onCancelRedaction}
+								aria-label="Cancel deleting message"
+							>
+								Cancel
+							</button>
+						</Show>
 					</div>
 				</Show>
 

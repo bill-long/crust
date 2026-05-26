@@ -863,11 +863,14 @@ const TimelineView: Component<{
 	};
 
 	/**
-	 * Discard a failed redaction (target restores to normal). Cancelling
-	 * fires removed-Timeline on the redaction event, which the
-	 * useTimeline handler picks up to clear the pending-redaction entry.
+	 * Abort a pending redaction echo (whether in-flight QUEUED /
+	 * ENCRYPTING or failed NOT_SENT). Both Cancel (in-flight overlay)
+	 * and Discard (failed banner) call this — `cancelPendingEvent`
+	 * triggers the SDK's `unmarkLocallyRedacted`, which restores the
+	 * target's content, and the `_removed` Timeline handler in
+	 * `useTimeline` clears the pending overlay and re-renders the row.
 	 */
-	const onDiscardRedaction = (targetId: string): void => {
+	const abortPendingRedaction = (targetId: string): void => {
 		const pending = pendingRedactions[targetId];
 		if (!pending) return;
 		const originalRoomId = props.roomId;
@@ -1020,7 +1023,12 @@ const TimelineView: Component<{
 										onDiscard={() => cancelPending(event.eventId)}
 										onCancel={() => cancelPending(event.eventId)}
 										onRetryRedaction={() => onRetryRedaction(event.eventId)}
-										onDiscardRedaction={() => onDiscardRedaction(event.eventId)}
+										onDiscardRedaction={() =>
+											abortPendingRedaction(event.eventId)
+										}
+										onCancelRedaction={() =>
+											abortPendingRedaction(event.eventId)
+										}
 										pendingRedactionStatus={
 											pendingRedactions[event.eventId]?.status
 										}
