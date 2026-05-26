@@ -45,6 +45,10 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	let previousFocus: HTMLElement | null = null;
 
 	const requestClose = (): void => {
+		// While a leave is in flight, ignore close requests. If the leave
+		// fails server-side and the SDK reports we're still joined, the user
+		// needs the overlay (and its error surface) to retry.
+		if (rtc.status() === "leaving") return;
 		if (rtc.status() === "joined" || rtc.status() === "joining") {
 			setConfirmClose(true);
 			return;
@@ -111,15 +115,16 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		previousFocus = null;
 	});
 
-
 	const statusLabel = (): string => {
 		switch (rtc.status()) {
 			case "idle":
 				return "Not joined";
 			case "joining":
 				return "Joining…";
-			case "joined":
-				return "Joined";
+			case "joined": {
+				const err = rtc.error();
+				return err ? `Joined (error: ${err.message})` : "Joined";
+			}
 			case "leaving":
 				return "Leaving…";
 			case "error":
@@ -155,7 +160,8 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 					type="button"
 					ref={closeButtonRef}
 					onClick={requestClose}
-					class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+					disabled={rtc.status() === "leaving"}
+					class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50 any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					title="Close call"
 					aria-label="Close call"
 				>

@@ -103,6 +103,12 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			});
 		};
 		const onManagerError = (err: unknown): void => {
+			// If a leave is in flight, defer to leave()'s try/catch which is
+			// the authoritative driver of error/status during the leave. An
+			// asynchronous manager error fired mid-leave (e.g. transient retry)
+			// would otherwise leave a stale error after a successful leave
+			// settles status to "idle".
+			if (leavePending) return;
 			setError(err instanceof Error ? err : new Error(String(err)));
 			// Keep status aligned with actual joined state so the UI doesn't
 			// hide the Leave button while the session is still joined.
@@ -174,6 +180,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			return;
 		}
 		leavePending = true;
+		setError(null);
 		setStatus("leaving");
 		try {
 			await s.leaveRoomSession(5_000);

@@ -174,6 +174,54 @@ describe("useRtcSession", () => {
 		expect(rtc.error()?.message).toBe("transient");
 	});
 
+	it("clears a prior error when a new leave attempt starts", async () => {
+		const { rtc, session } = renderRtc();
+		await rtc.join();
+		session.emit(
+			MatrixRTCSessionEvent.MembershipManagerError,
+			new Error("transient"),
+		);
+		expect(rtc.error()?.message).toBe("transient");
+		await rtc.leave();
+		expect(rtc.status()).toBe("idle");
+		expect(rtc.error()).toBeNull();
+	});
+
+	it("keeps status leaving when a MembershipManagerError fires mid-leave", async () => {
+		const session = createFakeSession();
+		let resolveLeave: (() => void) | undefined;
+		session.leaveRoomSession.mockImplementation(
+			() =>
+				new Promise<boolean>((res) => {
+					resolveLeave = () => {
+						session._joined = false;
+						res(true);
+					};
+				}),
+		);
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+			}),
+		);
+		await result.join();
+		const leavePromise = result.leave();
+		expect(result.status()).toBe("leaving");
+		session.emit(
+			MatrixRTCSessionEvent.MembershipManagerError,
+			new Error("transient mid-leave"),
+		);
+		// Status must remain "leaving" so UI close-suppression isn't bypassed.
+		expect(result.status()).toBe("leaving");
+		resolveLeave?.();
+		await leavePromise;
+		expect(result.status()).toBe("idle");
+		expect(result.error()).toBeNull();
+	});
+
 	it("does not invoke leaveRoomSession a second time on unmount when an explicit leave is in flight", async () => {
 		const session = createFakeSession();
 		let resolveLeave: (() => void) | undefined;
