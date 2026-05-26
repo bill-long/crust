@@ -235,7 +235,7 @@ const PinnedMessagesPanel: Component<{
 				ref={(el: HTMLButtonElement) => {
 					triggerEl = el;
 				}}
-				class="relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="relative inline-flex h-11 min-w-11 items-center justify-center gap-1 rounded px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:h-8 sm:min-w-8"
 				classList={{
 					"bg-surface-3 text-text-emphasis": open(),
 					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
