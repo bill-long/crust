@@ -126,7 +126,7 @@ const RoomPane: Component<{
 				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 					{props.roomName}
 				</span>
-				<div class="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 sm:min-w-fit sm:shrink-0 sm:overflow-visible">
+				<div class="flex min-w-0 items-center gap-1 overflow-x-auto [&>*]:shrink-0 sm:min-w-fit sm:shrink-0 sm:overflow-visible">
 					<CallButton
 						roomId={props.rid}
 						callActive={props.callActive}
