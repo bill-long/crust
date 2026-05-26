@@ -37,6 +37,32 @@ export interface TimelineEvent {
 	 */
 	imageWidth: number | null;
 	imageHeight: number | null;
+	/**
+	 * Full-resolution http URL for the image, suitable for the lightbox.
+	 * Built from the same mxc URI as `imageUrl` but without scale/thumb
+	 * params. Only populated for `m.image` (not `m.sticker`, not GIF
+	 * text) so the lightbox gallery doesn't accidentally include
+	 * sticker-only or third-party gif rows. Null when the content has
+	 * no usable mxc URL.
+	 */
+	imageFullUrl: string | null;
+	/** Mimetype from `content.info.mimetype`, e.g. `"image/png"`. */
+	imageMimetype: string | null;
+	/** Byte size from `content.info.size`, when present. */
+	imageSize: number | null;
+	/**
+	 * User-facing filename: prefers `content.filename` (newer Matrix
+	 * spec), falls back to `content.body` when it looks like a filename
+	 * (non-empty, contains no newlines). Null otherwise.
+	 */
+	imageFilename: string | null;
+	/**
+	 * True when the image is an encrypted attachment (source was
+	 * `content.file`, not `content.url`). The lightbox uses this to
+	 * show an unsupported-decryption placeholder rather than a broken
+	 * `<img>` of ciphertext.
+	 */
+	imageIsEncrypted: boolean;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -51,6 +77,18 @@ export interface TimelineEvent {
 	 *   before render but kept here for completeness.
 	 */
 	status: EventStatus | null;
+}
+
+// Reject any ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F).
+// Used to guard user-controlled strings that flow into UI labels (filenames,
+// the lightbox header, download attributes, etc.) so a CR/LF/NUL/etc. can't
+// corrupt rendering or downstream consumers.
+function hasControlChar(s: string): boolean {
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c < 0x20 || c === 0x7f) return true;
+	}
+	return false;
 }
 
 function eventToTimelineEvent(
@@ -84,13 +122,59 @@ function eventToTimelineEvent(
 	const member = room.getMember(sender);
 
 	let imageUrl: string | null = null;
-	const mxcUrl =
-		(typeof content.url === "string" && content.url) ||
-		(typeof content.file?.url === "string" && content.file.url) ||
-		null;
+	let imageFullUrl: string | null = null;
+	const encryptedMxc =
+		typeof content.file?.url === "string" && content.file.url.length > 0
+			? content.file.url
+			: null;
+	const plainMxc =
+		typeof content.url === "string" && content.url.length > 0
+			? content.url
+			: null;
+	const mxcUrl = plainMxc || encryptedMxc;
+	const imageIsEncrypted = !plainMxc && encryptedMxc !== null;
 	if (mxcUrl) {
 		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
+		imageFullUrl = client.mxcUrlToHttp(mxcUrl) ?? null;
 	}
+
+	// Image metadata used by the lightbox. Only meaningful for true
+	// m.image events — sticker/GIF rows aren't part of the gallery so
+	// we don't bother populating these fields for them.
+	const isPlainImage = content.msgtype === "m.image";
+	const infoMime =
+		isPlainImage && typeof content.info?.mimetype === "string"
+			? content.info.mimetype
+			: null;
+	const infoSize =
+		isPlainImage &&
+		typeof content.info?.size === "number" &&
+		Number.isFinite(content.info.size) &&
+		content.info.size >= 0
+			? content.info.size
+			: null;
+	// Prefer `content.filename` only when it's a non-empty, non-whitespace
+	// string — an empty/whitespace `filename` would otherwise block the
+	// fallback to `content.body` even though the latter may carry a
+	// usable filename.
+	const rawFilename =
+		isPlainImage &&
+		typeof content.filename === "string" &&
+		content.filename.trim().length > 0
+			? content.filename
+			: isPlainImage && typeof content.body === "string"
+				? content.body
+				: null;
+	// Treat whitespace-only, multi-line, or otherwise control-char-bearing
+	// bodies as "no filename" — `m.image` events often carry a caption-style
+	// body that isn't actually a filename, and any ASCII control char
+	// (LF, CR, NUL, DEL, etc.) would corrupt UI labels / the lightbox header
+	// if used directly.
+	const trimmedFilename = rawFilename?.trim();
+	const imageFilename =
+		trimmedFilename && !hasControlChar(trimmedFilename)
+			? trimmedFilename
+			: null;
 
 	// Image / sticker intrinsic dimensions, used by `TimelineItem` to
 	// reserve the layout box before the image decodes. Gated on
@@ -186,6 +270,11 @@ function eventToTimelineEvent(
 		imageUrl,
 		imageWidth,
 		imageHeight,
+		imageFullUrl: isPlainImage ? imageFullUrl : null,
+		imageMimetype: infoMime,
+		imageSize: infoSize,
+		imageFilename,
+		imageIsEncrypted: isPlainImage && imageIsEncrypted,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,

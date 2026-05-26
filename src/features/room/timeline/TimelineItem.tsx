@@ -328,6 +328,11 @@ const TimelineItem: Component<{
 	shortcodeLookup: Map<string, ResolvedEmote>;
 	emoteLookup: Map<string, ResolvedEmote>;
 	onOpenReactionPicker?: () => void;
+	/**
+	 * Invoked when the user clicks an `m.image` thumbnail. Only wired
+	 * for server-confirmed (non-pending, non-failed) image events.
+	 */
+	onOpenImage?: (eventId: string) => void;
 }> = (props) => {
 	const ev = props.event;
 	const formattedTime = createMemo(() =>
@@ -594,14 +599,42 @@ const TimelineItem: Component<{
 									</Show>
 								}
 							>
-								<img
-									src={ev.imageUrl ?? ""}
-									alt={ev.body?.trim() || "Image"}
-									width={imageReserveDims().w}
-									height={imageReserveDims().h}
-									class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
-									loading="lazy"
-								/>
+								{(() => {
+									// Only m.image (not stickers) is openable in the
+									// lightbox, and only when the send has confirmed —
+									// pending / failed local echoes shouldn't be navigable
+									// because their event id can rekey on confirmation.
+									// Also require a usable full URL: without it the
+									// lightbox would open and immediately auto-close
+									// (no matching gallery entry), which reads as a
+									// dead click.
+									const isOpenableImage =
+										ev.msgtype === "m.image" &&
+										ev.status === null &&
+										!!ev.imageFullUrl &&
+										!!props.onOpenImage;
+									const imgEl = (
+										<img
+											src={ev.imageUrl ?? ""}
+											alt={ev.body?.trim() || "Image"}
+											width={imageReserveDims().w}
+											height={imageReserveDims().h}
+											class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
+											loading="lazy"
+										/>
+									);
+									if (!isOpenableImage) return imgEl;
+									return (
+										<button
+											type="button"
+											onClick={() => props.onOpenImage?.(ev.eventId)}
+											aria-label={`Open image${ev.imageFilename ? `: ${ev.imageFilename}` : ""} in full-screen viewer`}
+											class="inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 align-top focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0"
+										>
+											{imgEl}
+										</button>
+									);
+								})()}
 							</Show>
 						</Show>
 					</Show>

@@ -421,6 +421,205 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("treats empty-string content.url / content.file.url as missing for m.image", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			// Empty plain url — should not project as a usable image and
+			// must not be flagged as encrypted.
+			{
+				eventId: "$e1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "empty.png",
+					url: "",
+				},
+				ts: 1000,
+			},
+			// Empty encrypted file.url — same rule applies.
+			{
+				eventId: "$e2",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "empty-enc.png",
+					file: { url: "", key: { k: "x" } },
+				},
+				ts: 2000,
+			},
+			// Empty plain url with a valid encrypted url — falls back to the
+			// encrypted source and is correctly flagged as encrypted.
+			{
+				eventId: "$e3",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "mixed.png",
+					url: "",
+					file: { url: "mxc://test/enc", key: { k: "x" } },
+				},
+				ts: 3000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(3);
+			expect(events[0].imageUrl).toBeNull();
+			expect(events[0].imageFullUrl).toBeNull();
+			expect(events[0].imageIsEncrypted).toBe(false);
+			expect(events[1].imageUrl).toBeNull();
+			expect(events[1].imageFullUrl).toBeNull();
+			expect(events[1].imageIsEncrypted).toBe(false);
+			expect(events[2].imageUrl).not.toBeNull();
+			expect(events[2].imageFullUrl).not.toBeNull();
+			expect(events[2].imageIsEncrypted).toBe(true);
+		});
+	});
+
+	it("falls back to content.body when content.filename is empty/whitespace", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$empty",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					filename: "",
+					body: "photo.png",
+					url: "mxc://test/empty",
+				},
+				ts: 1000,
+			},
+			{
+				eventId: "$ws",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					filename: "   ",
+					body: "shot.jpg",
+					url: "mxc://test/ws",
+				},
+				ts: 2000,
+			},
+			{
+				eventId: "$real",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					filename: "real.png",
+					body: "ignored caption",
+					url: "mxc://test/real",
+				},
+				ts: 3000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(3);
+			expect(events[0].imageFilename).toBe("photo.png");
+			expect(events[1].imageFilename).toBe("shot.jpg");
+			expect(events[2].imageFilename).toBe("real.png");
+		});
+	});
+
+	it("rejects filenames containing ASCII control chars (CR, NUL, etc.)", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$cr",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "evil\rname.png",
+					url: "mxc://test/cr",
+				},
+				ts: 1000,
+			},
+			{
+				eventId: "$nul",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "evil\u0000name.png",
+					url: "mxc://test/nul",
+				},
+				ts: 2000,
+			},
+			{
+				eventId: "$del",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "evil\u007fname.png",
+					url: "mxc://test/del",
+				},
+				ts: 3000,
+			},
+			{
+				eventId: "$ok",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "fine name.png",
+					url: "mxc://test/ok",
+				},
+				ts: 4000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(4);
+			expect(events[0].imageFilename).toBeNull();
+			expect(events[1].imageFilename).toBeNull();
+			expect(events[2].imageFilename).toBeNull();
+			expect(events[3].imageFilename).toBe("fine name.png");
+		});
+	});
+
 	it("extracts intrinsic dimensions from m.text GIF messages with info block", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			// Composer-sent GIF: m.text body with recognized provider URL

@@ -24,6 +24,7 @@ import {
 	useImagePacks,
 } from "../../emoji/useImagePacks";
 import { Composer } from "../composer/Composer";
+import { ImageLightbox, type LightboxImage } from "./ImageLightbox";
 import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
@@ -1008,6 +1009,67 @@ const TimelineView: Component<{
 		return "Several people are typing…";
 	});
 
+	// ─── Image lightbox ─────────────────────────────────────────────
+	// Gallery is built from confirmed (status === null) m.image events
+	// only. Pending / failed local echoes are excluded because their
+	// event id can re-key on confirmation, which would orphan the open
+	// lightbox descriptor.
+	const [lightboxEventId, setLightboxEventId] = createSignal<string | null>(
+		null,
+	);
+	const imageGallery = createMemo<TimelineEvent[]>(() =>
+		events.filter(
+			(e) => e.msgtype === "m.image" && e.status === null && !!e.imageFullUrl,
+		),
+	);
+	const lightboxIndex = createMemo<number>(() => {
+		const id = lightboxEventId();
+		if (!id) return -1;
+		return imageGallery().findIndex((e) => e.eventId === id);
+	});
+	const lightboxOpen = (): boolean => lightboxEventId() !== null;
+	// Auto-close if the currently open image disappears from the list
+	// (redacted, paged out, room switched, status flipped, etc.).
+	createEffect(() => {
+		if (lightboxEventId() !== null && lightboxIndex() === -1) {
+			setLightboxEventId(null);
+		}
+	});
+	const currentLightboxImage = createMemo<LightboxImage | null>(() => {
+		const idx = lightboxIndex();
+		if (idx < 0) return null;
+		const e = imageGallery()[idx];
+		if (!e?.imageFullUrl) return null;
+		return {
+			eventId: e.eventId,
+			fullUrl: e.imageFullUrl,
+			mimetype: e.imageMimetype,
+			size: e.imageSize,
+			filename: e.imageFilename,
+			width: e.imageWidth,
+			height: e.imageHeight,
+			senderName: e.senderName,
+			timestamp: e.timestamp,
+			isEncrypted: e.imageIsEncrypted,
+		};
+	});
+	const hasPrev = (): boolean => lightboxIndex() > 0;
+	const hasNext = (): boolean => {
+		const idx = lightboxIndex();
+		return idx >= 0 && idx < imageGallery().length - 1;
+	};
+	const goPrev = (): void => {
+		const idx = lightboxIndex();
+		if (idx > 0) setLightboxEventId(imageGallery()[idx - 1].eventId);
+	};
+	const goNext = (): void => {
+		const idx = lightboxIndex();
+		const g = imageGallery();
+		if (idx >= 0 && idx < g.length - 1) {
+			setLightboxEventId(g[idx + 1].eventId);
+		}
+	};
+
 	return (
 		<main class="flex h-full flex-col">
 			{/* Timeline */}
@@ -1157,6 +1219,7 @@ const TimelineView: Component<{
 										onOpenReactionPicker={() => {
 											setReactionPickerEventId(event.eventId);
 										}}
+										onOpenImage={setLightboxEventId}
 									/>
 									<Show when={reactionPickerEventId() === event.eventId}>
 										<div class="ml-11 mt-1 mb-1">
@@ -1284,6 +1347,17 @@ const TimelineView: Component<{
 					setEditingEvent(null);
 				}}
 				packs={packs()}
+			/>
+
+			<ImageLightbox
+				open={lightboxOpen}
+				onClose={() => setLightboxEventId(null)}
+				image={currentLightboxImage}
+				onPrev={goPrev}
+				onNext={goNext}
+				hasPrev={hasPrev}
+				hasNext={hasNext}
+				fallbackFocus={() => scrollRef ?? null}
 			/>
 		</main>
 	);
