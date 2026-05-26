@@ -9,6 +9,11 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
+import {
+	createServerTimeTracker,
+	MATERIAL_OFFSET_CHANGE_MS,
+	type ServerTimeTracker,
+} from "./serverTime";
 
 export interface RoomSummary {
 	roomId: string;
@@ -57,9 +62,12 @@ const DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS = 4 * 60 * 60 * 1000;
  * follow-up state event) is mitigated by the per-room expiry timer in
  * `createSummariesStore`, which re-evaluates this function when the
  * earliest known membership expires.
+ *
+ * `now` defaults to `Date.now()` for backward compatibility. Callers that
+ * have a server-time-corrected clock (see `createServerTimeTracker`) should
+ * pass it explicitly so this check is robust to client clock skew.
  */
-export function isCallActive(room: Room): boolean {
-	const now = Date.now();
+export function isCallActive(room: Room, now: number = Date.now()): boolean {
 	for (const _ of iterValidCallMemberships(room, now)) return true;
 	return false;
 }
@@ -207,6 +215,7 @@ function buildSummary(
 	room: Room,
 	baseUrl: string,
 	dmRoomIds: Set<string>,
+	now: number,
 ): RoomSummary {
 	// Find the most recent displayable event for the lastMessage preview
 	let lastMessage: RoomSummary["lastMessage"] = null;
@@ -238,7 +247,7 @@ function buildSummary(
 		isDirect: dmRoomIds.has(room.roomId),
 		isSpace,
 		kind,
-		callActive: isCallActive(room),
+		callActive: isCallActive(room, now),
 		children: isSpace ? getSpaceChildren(room) : [],
 	};
 }
@@ -296,6 +305,7 @@ export function createSummariesStore(client: MatrixClient): {
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const baseUrl = client.getHomeserverUrl();
+	const serverTime: ServerTimeTracker = createServerTimeTracker();
 
 	let dmRoomIds = new Set<string>();
 
@@ -322,9 +332,12 @@ export function createSummariesStore(client: MatrixClient): {
 
 	function scheduleCallExpiryRefresh(room: Room): void {
 		clearCallExpiryTimer(room.roomId);
-		const now = Date.now();
+		const now = serverTime.now();
 		const next = getNextCallExpiry(room, now);
 		if (next === null) return;
+		// Both `next` and `now` are server-clock values; their difference
+		// is the same number of milliseconds on the client clock that
+		// `setTimeout` measures against, so the delay is correct.
 		const delay = Math.min(
 			Math.max(0, next - now + CALL_EXPIRY_GRACE_MS),
 			MAX_TIMEOUT_DELAY,
@@ -332,7 +345,7 @@ export function createSummariesStore(client: MatrixClient): {
 		const id = setTimeout(() => {
 			callExpiryTimers.delete(room.roomId);
 			if (!summaries[room.roomId]) return;
-			const active = isCallActive(room);
+			const active = isCallActive(room, serverTime.now());
 			if (summaries[room.roomId].callActive !== active) {
 				setSummaries(room.roomId, "callActive", active);
 			}
@@ -347,10 +360,35 @@ export function createSummariesStore(client: MatrixClient): {
 	function upsertRoom(room: Room): void {
 		setSummaries(
 			produce((s) => {
-				s[room.roomId] = buildSummary(room, baseUrl, dmRoomIds);
+				s[room.roomId] = buildSummary(
+					room,
+					baseUrl,
+					dmRoomIds,
+					serverTime.now(),
+				);
 			}),
 		);
 		scheduleCallExpiryRefresh(room);
+	}
+
+	/**
+	 * Recompute `callActive` for every room in the store and re-arm any
+	 * expiry timers. Invoked when the server-time offset shifts materially
+	 * so previously-scheduled timers and previously-computed `callActive`
+	 * booleans are corrected against the new offset. Pass `skipRoomId` to
+	 * exclude a room that was just recomputed in the calling handler.
+	 */
+	function refreshAllCallActive(skipRoomId?: string): void {
+		for (const roomId of Object.keys(summaries)) {
+			if (roomId === skipRoomId) continue;
+			const room = client.getRoom(roomId);
+			if (!room) continue;
+			const active = isCallActive(room, serverTime.now());
+			if (summaries[roomId].callActive !== active) {
+				setSummaries(roomId, "callActive", active);
+			}
+			scheduleCallExpiryRefresh(room);
+		}
 	}
 
 	// --- Client-level event handlers ---
@@ -384,6 +422,19 @@ export function createSummariesStore(client: MatrixClient): {
 		data: { liveEvent?: boolean },
 	): void {
 		if (!room || !data.liveEvent) return;
+
+		// Sample server-time offset from every live event before any other
+		// processing so subsequent calls in this handler use the freshest
+		// possible offset. If the offset shifted materially, re-evaluate
+		// every room's `callActive` and re-arm timers.
+		const prevOffset = serverTime.getOffsetMs();
+		if (
+			serverTime.sampleFromEvent(event) &&
+			Math.abs(serverTime.getOffsetMs() - prevOffset) >=
+				MATERIAL_OFFSET_CHANGE_MS
+		) {
+			refreshAllCallActive();
+		}
 
 		// Ensure room exists in store before field-level updates
 		if (!summaries[room.roomId]) {
@@ -460,12 +511,23 @@ export function createSummariesStore(client: MatrixClient): {
 		if (!roomId) return;
 		const room = client.getRoom(roomId);
 		if (!room) return;
+		// State events also carry `unsigned.age`; sample before any
+		// `isCallActive` recomputation below so the call-member fast-path
+		// uses the freshest offset.
+		const prevOffset = serverTime.getOffsetMs();
+		const offsetChanged =
+			serverTime.sampleFromEvent(event) &&
+			Math.abs(serverTime.getOffsetMs() - prevOffset) >=
+				MATERIAL_OFFSET_CHANGE_MS;
 		if (!summaries[room.roomId]) {
 			upsertRoom(room);
+			// upsertRoom computed callActive with the fresh offset, so skip it.
+			if (offsetChanged) refreshAllCallActive(room.roomId);
 			return;
 		}
 		const type = event.getType();
 
+		let currentRoomRefreshed = false;
 		if (type === "m.room.encryption") {
 			setSummaries(room.roomId, "isEncrypted", room.hasEncryptionStateEvent());
 		} else if (type === "m.room.avatar") {
@@ -480,7 +542,7 @@ export function createSummariesStore(client: MatrixClient): {
 				setSummaries(room.roomId, "children", getSpaceChildren(room));
 			}
 		} else if (type === CALL_MEMBER_EVENT_TYPE) {
-			const active = isCallActive(room);
+			const active = isCallActive(room, serverTime.now());
 			if (summaries[room.roomId].callActive !== active) {
 				setSummaries(room.roomId, "callActive", active);
 			}
@@ -488,13 +550,42 @@ export function createSummariesStore(client: MatrixClient): {
 			// known expiry may have shifted (new membership, renewal, etc.),
 			// so the previously-scheduled timer needs to be replaced.
 			scheduleCallExpiryRefresh(room);
+			currentRoomRefreshed = true;
+		}
+
+		// If the offset shifted while handling this event, propagate to all
+		// other rooms. Skip the current room only when the branch above
+		// already recomputed it with the fresh offset.
+		if (offsetChanged) {
+			refreshAllCallActive(currentRoomRefreshed ? room.roomId : undefined);
 		}
 	}
 
 	function init(): void {
 		dmRoomIds = getDmRoomIds(client);
 
-		for (const room of client.getVisibleRooms()) {
+		// Seed the server-time tracker from existing room state before
+		// building any room summaries, so `callActive` is computed against
+		// the corrected clock on first paint. Walk each visible room's
+		// most recent live event and its call-member state events; either
+		// kind carries `unsigned.age` for server-delivered events.
+		const rooms = client.getVisibleRooms();
+		for (const room of rooms) {
+			const timeline = room.getLiveTimeline().getEvents();
+			for (let i = timeline.length - 1; i >= 0; i--) {
+				if (serverTime.sampleFromEvent(timeline[i])) break;
+				// Stop scanning this room after a few events to avoid
+				// O(N) work on large timelines; one sample per room is
+				// enough to seed.
+				if (timeline.length - i > 5) break;
+			}
+			const callMembers = room.currentState.getStateEvents(
+				CALL_MEMBER_EVENT_TYPE,
+			);
+			for (const ev of callMembers) serverTime.sampleFromEvent(ev);
+		}
+
+		for (const room of rooms) {
 			upsertRoom(room);
 		}
 
