@@ -1,4 +1,4 @@
-import type { MatrixClient, Room } from "matrix-js-sdk";
+import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../test/mockClient";
 import {
@@ -564,6 +564,53 @@ describe("createSummariesStore call expiry timer", () => {
 
 		expect(vi.getTimerCount()).toBe(0);
 		expect(store.summaries[room.roomId]).toBeUndefined();
+
+		store.cleanup();
+	});
+
+	it("recomputes callActive when a live event reveals server clock skew", () => {
+		// Membership whose server-clock expiry is 1h30m before NOW.
+		// With offset 0 (default), the client thinks it's expired.
+		// But the server clock is actually 2h *behind* the client clock,
+		// so on server time the membership still has 30 minutes to live.
+		const createdTs = NOW - 2 * HOUR - 30 * 60_000;
+		const expires = HOUR;
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		room.__addMember({ userId: "@a:x", name: "a" });
+		room.__setStateEvent(
+			"org.matrix.msc3401.call.member",
+			"_@a:x_DEV_m.call",
+			modernMembership({ createdTs, expires }),
+			{ sender: "@a:x" },
+		);
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		// Without any server-time sample yet, the client clock wins and
+		// the membership is treated as expired.
+		expect(store.summaries[room.roomId].callActive).toBe(false);
+
+		// Live event whose origin_server_ts implies server time is 2h
+		// behind the client clock. `unsigned.age = 0` => localTimestamp
+		// equals Date.now() => offset = ts - localTimestamp = -2h.
+		const originServerTs = NOW - 2 * HOUR;
+		const liveEvent = {
+			event: { unsigned: { age: 0 } },
+			getTs: () => originServerTs,
+			localTimestamp: NOW,
+			getContent: () => ({}),
+			getType: () => "m.room.message",
+			getSender: () => "@a:x",
+		} as unknown as MatrixEvent;
+		client.__emit("Room.timeline", liveEvent, room, undefined, false, {
+			liveEvent: true,
+		});
+
+		// callActive should flip to true now that the offset-corrected
+		// "now" is before the membership expiry.
+		expect(store.summaries[room.roomId].callActive).toBe(true);
 
 		store.cleanup();
 	});
