@@ -574,10 +574,10 @@ export function createSummariesStore(client: MatrixClient): {
 			const timeline = room.getLiveTimeline().getEvents();
 			for (let i = timeline.length - 1; i >= 0; i--) {
 				if (serverTime.sampleFromEvent(timeline[i])) break;
-				// Stop scanning this room after a few events to avoid
+				// Stop scanning this room after at most 5 events to avoid
 				// O(N) work on large timelines; one sample per room is
 				// enough to seed.
-				if (timeline.length - i > 5) break;
+				if (timeline.length - i >= 5) break;
 			}
 			const callMembers = room.currentState.getStateEvents(
 				CALL_MEMBER_EVENT_TYPE,

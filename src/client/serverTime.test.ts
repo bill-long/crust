@@ -44,9 +44,9 @@ describe("createServerTimeTracker", () => {
 
 	it("computes offset from a server-delivered event", () => {
 		const t = createServerTimeTracker();
-		// Server says event happened 30 minutes ago; client time at receipt
-		// is NOW. localTimestamp = NOW - age. originServerTs is 30 minutes
-		// *ahead* of our local clock (server clock is ahead by 30m).
+		// Server says event happened 1 minute ago (age=60s); the server's
+		// clock at receipt is 30 minutes ahead of our local clock, so the
+		// computed offset should be +30 minutes.
 		const age = 60_000; // event is 1 minute old per server
 		const serverNowAtReceipt = NOW + 30 * 60_000; // server is 30m ahead
 		const originServerTs = serverNowAtReceipt - age;
@@ -90,6 +90,16 @@ describe("createServerTimeTracker", () => {
 		expect(
 			t.sampleFromEvent(
 				makeEvent({ originServerTs: NOW + 999_999, age: "garbage" }),
+			),
+		).toBe(false);
+		expect(t.getOffsetMs()).toBe(0);
+	});
+
+	it("ignores events with negative age (malformed unsigned.age)", () => {
+		const t = createServerTimeTracker();
+		expect(
+			t.sampleFromEvent(
+				makeEvent({ originServerTs: NOW + 999_999, age: -1000 }),
 			),
 		).toBe(false);
 		expect(t.getOffsetMs()).toBe(0);

@@ -52,7 +52,8 @@ export function createServerTimeTracker(): ServerTimeTracker {
 
 	function sampleFromEvent(event: MatrixEvent): boolean {
 		const age = event.event?.unsigned?.age;
-		if (typeof age !== "number" || !Number.isFinite(age)) return false;
+		if (typeof age !== "number" || !Number.isFinite(age) || age < 0)
+			return false;
 		const ts = event.getTs();
 		const local = event.localTimestamp;
 		if (!Number.isFinite(ts) || !Number.isFinite(local)) return false;
