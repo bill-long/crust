@@ -25,7 +25,7 @@ If a change makes the UI feel slower, heavier, or more "enterprise-y", it is wro
 Concrete, enforceable rules — not vibes:
 
 1. **Interaction latency budget: < 16 ms for any UI response to user input.**
-   No spinner unless the network round-trip exceeds 200 ms. Sends, reactions, edits, and redactions all flow through the SDK's local-echo path with explicit `sending | sent | failed` tracking; failed sends and failed redactions surface a Retry / Discard affordance, in-flight sends can be Cancelled, and failed reaction / edit echoes are filtered from the rendered counts and content respectively (see the Optimistic UI section). Read markers and typing indicators still rely on the SDK's own immediate paths.
+   No spinner unless the network round-trip exceeds 200 ms. Sends, reactions, edits, and redactions all flow through the SDK's local-echo path with explicit `sending | sent | failed` tracking; failed sends, failed reactions, failed edits, and failed redactions each surface their own Retry / Discard affordance, and in-flight sends can be Cancelled (see the Optimistic UI section). Read markers and typing indicators still rely on the SDK's own immediate paths.
 2. **Scrolling stays at 60 fps even in 10k-message rooms.**
    Long lists must be virtualized (`@tanstack/solid-virtual` or hand-rolled). Never render an entire timeline.
 3. **No layout shift after content loads.**
@@ -130,8 +130,8 @@ Token namespace (define these in the config):
 Rendering rules in `TimelineItem`:
 - Send echo `SENDING / QUEUED / ENCRYPTING` → row dimmed, screen-reader `role="status"` announcement, visible "Sending…" label, and a Cancel button (which calls `client.cancelPendingEvent`). `SENT` is *not* a pending state for sends — the next event the SDK emits is the rekey to the server ID.
 - Send echo `NOT_SENT` → `bg-danger-bg/20` tint, `role="alert"` failed banner, Retry / Discard buttons.
-- Reaction echo `NOT_SENT` / `CANCELLED` → excluded from the parent's count and `myReactions` map in `eventToTimelineEvent` (no Retry/Discard UI today; the user simply re-clicks the pill).
-- Edit echo (`m.replace`) `NOT_SENT` / `CANCELLED` → original message content rendered via `getOriginalContent()`, `isEdited` flag cleared (failure path in the composer also surfaces a `setError` inline alert; no Retry on the edit echo today).
+- Reaction echo `NOT_SENT` / `CANCELLED` → excluded from the parent's count and `myReactions` map in `eventToTimelineEvent`. A separate `pendingReactions` store (keyed by target event ID then reaction key) drives a red-tinted failed-pill row with per-key Retry / Discard. Retry resends through the SDK's pending queue; Discard cancels every stacked failed echo for that key.
+- Edit echo (`m.replace`) `NOT_SENT` / `CANCELLED` → original message content rendered via `getOriginalContent()`, `isEdited` flag cleared. A separate `pendingEdits` store (keyed by target event ID) drives a "Edit failed: <attempted text>" banner with Retry / Discard. The composer also still surfaces `setError` inline for the in-context failure case.
 - Pending or failed redaction (any status including `SENT`, which is a transient window where the target is still locally-redacted) → "Deleting…" or "Delete failed" overlay; body and reactions are hidden (SDK's `markLocallyRedacted` wipes content immediately so there's nothing to render). Failed redactions get Retry / Discard buttons. There's no in-flight Cancel for redactions today (sends have it via `client.cancelPendingEvent`; redactions could follow the same pattern if a stuck-delete UX is needed).
 - HoverToolbar (react / reply / edit / delete) is hidden for any non-server-confirmed event.
 

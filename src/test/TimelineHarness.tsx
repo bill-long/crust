@@ -174,6 +174,8 @@ export function makeTimelineHarnessRef(): TimelineHarness {
 					getSourceEvent: () => null,
 					getWindowEvents: () => [],
 					pendingRedactions: {} as Record<string, never>,
+					pendingReactions: {} as Record<string, never>,
+					pendingEdits: {} as Record<string, never>,
 				};
 				// biome-ignore lint/suspicious/noExplicitAny: shape-matched to the real useTimeline return type
 			}) as any as typeof RealUseTimeline;

@@ -2522,4 +2522,425 @@ describe("useTimeline", () => {
 			expect(events[0].body).toBe("");
 		});
 	});
+
+	// ─── Pending reactions / edits (issue #106) ───────────────────────
+
+	it("failed reaction echo records pendingReactions by target and key", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@alice:test",
+			"hi",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingReactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(pendingReactions.$target).toBeUndefined();
+
+			const failedReaction = createMatrixEvent({
+				eventId: "~local.r",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.reaction",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$target",
+						key: "🚀",
+					},
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, failedReaction);
+
+			expect(pendingReactions.$target?.["🚀"]?.length).toBe(1);
+			expect(pendingReactions.$target?.["🚀"]?.[0]?.getId()).toBe("~local.r");
+		});
+	});
+
+	it("reaction retry transition (SENDING) removes the failed entry", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@alice:test",
+			"hi",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingReactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				eventId: "~local.r",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.reaction",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$target",
+						key: "🚀",
+					},
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, echo);
+			expect(pendingReactions.$target?.["🚀"]?.length).toBe(1);
+
+			echo.__setStatus(EventStatus.SENDING);
+			client.__emit(
+				"Room.localEchoUpdated",
+				echo,
+				roomA,
+				undefined,
+				EventStatus.NOT_SENT,
+			);
+			// Entry removed and target key pruned along with the outer key.
+			expect(pendingReactions.$target).toBeUndefined();
+		});
+	});
+
+	it("duplicate NOT_SENT for same reaction event does not stack", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@alice:test",
+			"hi",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingReactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				eventId: "~local.r",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.reaction",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$target",
+						key: "🚀",
+					},
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, echo);
+			client.__emit(
+				"Room.localEchoUpdated",
+				echo,
+				roomA,
+				undefined,
+				EventStatus.NOT_SENT,
+			);
+			expect(pendingReactions.$target?.["🚀"]?.length).toBe(1);
+		});
+	});
+
+	it("cancelled reaction echo removes the pending entry", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@alice:test",
+			"hi",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingReactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				eventId: "~local.r",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.reaction",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$target",
+						key: "🚀",
+					},
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, echo);
+			expect(pendingReactions.$target?.["🚀"]?.length).toBe(1);
+
+			echo.__setStatus(EventStatus.CANCELLED);
+			client.__emit(
+				"Room.localEchoUpdated",
+				echo,
+				roomA,
+				undefined,
+				EventStatus.NOT_SENT,
+			);
+			expect(pendingReactions.$target).toBeUndefined();
+		});
+	});
+
+	it("pending reactions survive when target is outside the rendered window", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		// Create a room with two messages; the failed reaction targets
+		// the older one. The store is keyed by target event ID, so it
+		// should not depend on the target being in `events` either way.
+		const older = textMessage(
+			"!roomA:test",
+			"$older",
+			"@alice:test",
+			"old",
+			500,
+		);
+		const newer = textMessage(
+			"!roomA:test",
+			"$newer",
+			"@alice:test",
+			"new",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [older, newer]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingReactions } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				eventId: "~local.r",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.reaction",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.annotation",
+						event_id: "$older",
+						key: "🚀",
+					},
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, echo);
+
+			// Pending entry recorded against $older even though the
+			// reaction-aggregation recompute is a no-op when the target
+			// is missing from the visible window.
+			expect(pendingReactions.$older?.["🚀"]?.length).toBe(1);
+		});
+	});
+
+	it("failed edit echo records pendingEdits keyed by target", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"original",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingEdits } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const editEcho = createMatrixEvent({
+				eventId: "~local.e",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.message",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.replace",
+						event_id: "$target",
+					},
+					"m.new_content": {
+						msgtype: "m.text",
+						body: "edited text",
+					},
+					msgtype: "m.text",
+					body: "* edited text",
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, editEcho);
+
+			expect(pendingEdits.$target?.length).toBe(1);
+			expect(pendingEdits.$target?.[0]?.getId()).toBe("~local.e");
+		});
+	});
+
+	it("edit retry transition removes the failed entry", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"original",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { pendingEdits } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				eventId: "~local.e",
+				roomId: "!roomA:test",
+				sender: "@me:test",
+				type: "m.room.message",
+				content: {
+					"m.relates_to": {
+						rel_type: "m.replace",
+						event_id: "$target",
+					},
+					"m.new_content": {
+						msgtype: "m.text",
+						body: "edited",
+					},
+					msgtype: "m.text",
+					body: "* edited",
+				},
+				ts: 2000,
+				status: EventStatus.NOT_SENT,
+			});
+			appendLive(client, roomA, echo);
+			expect(pendingEdits.$target?.length).toBe(1);
+
+			echo.__setStatus(EventStatus.SENDING);
+			client.__emit(
+				"Room.localEchoUpdated",
+				echo,
+				roomA,
+				undefined,
+				EventStatus.NOT_SENT,
+			);
+			expect(pendingEdits.$target).toBeUndefined();
+		});
+	});
+
+	it("pendingReactions and pendingEdits are cleared on room switch", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const target = textMessage(
+			"!roomA:test",
+			"$target",
+			"@me:test",
+			"hi",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [target]);
+		const roomB = createMockRoom("!roomB:test", []);
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		const [roomId, setRoomId] = createSignal("!roomA:test");
+
+		await withRoot(async () => {
+			const { pendingReactions, pendingEdits } = useTimeline(
+				client as unknown as MatrixClient,
+				roomId,
+			);
+			await flushPromises();
+
+			appendLive(
+				client,
+				roomA,
+				createMatrixEvent({
+					eventId: "~local.r",
+					roomId: "!roomA:test",
+					sender: "@me:test",
+					type: "m.reaction",
+					content: {
+						"m.relates_to": {
+							rel_type: "m.annotation",
+							event_id: "$target",
+							key: "🚀",
+						},
+					},
+					ts: 2000,
+					status: EventStatus.NOT_SENT,
+				}),
+			);
+			appendLive(
+				client,
+				roomA,
+				createMatrixEvent({
+					eventId: "~local.e",
+					roomId: "!roomA:test",
+					sender: "@me:test",
+					type: "m.room.message",
+					content: {
+						"m.relates_to": {
+							rel_type: "m.replace",
+							event_id: "$target",
+						},
+						"m.new_content": { msgtype: "m.text", body: "edited" },
+						msgtype: "m.text",
+						body: "* edited",
+					},
+					ts: 2500,
+					status: EventStatus.NOT_SENT,
+				}),
+			);
+			expect(pendingReactions.$target).toBeDefined();
+			expect(pendingEdits.$target).toBeDefined();
+
+			setRoomId("!roomB:test");
+			await flushPromises();
+
+			expect(pendingReactions.$target).toBeUndefined();
+			expect(pendingEdits.$target).toBeUndefined();
+		});
+	});
 });

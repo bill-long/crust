@@ -12,6 +12,44 @@ import {
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import type { TimelineEvent } from "./useTimeline";
 
+function reactionLabel(
+	key: string,
+	emoteLookup: Map<string, ResolvedEmote>,
+): string {
+	if (key.startsWith("mxc://")) {
+		const emote = emoteLookup.get(key);
+		return emote ? `:${emote.shortcode}:` : "custom emoji";
+	}
+	return key;
+}
+
+const ReactionKey: Component<{
+	reactionKey: string;
+	emoteLookup: Map<string, ResolvedEmote>;
+}> = (props) => {
+	// Custom emoji: reaction key is an mxc:// URL
+	if (props.reactionKey.startsWith("mxc://")) {
+		const emote = props.emoteLookup.get(props.reactionKey);
+		if (emote) {
+			return (
+				<img
+					src={emote.httpUrl}
+					alt={`:${emote.shortcode}:`}
+					title={`:${emote.shortcode}:`}
+					class="inline h-4 w-4 object-contain"
+				/>
+			);
+		}
+		// Unknown pack
+		return (
+			<span title={props.reactionKey} role="img" aria-label="custom emoji">
+				?
+			</span>
+		);
+	}
+	return <span>{props.reactionKey}</span>;
+};
+
 const ReactionPills: Component<{
 	reactions: TimelineEvent["reactions"];
 	myReactions: TimelineEvent["myReactions"];
@@ -19,38 +57,6 @@ const ReactionPills: Component<{
 	emoteLookup: Map<string, ResolvedEmote>;
 }> = (props) => {
 	const entries = createMemo(() => Object.entries(props.reactions));
-
-	const renderReactionKey = (key: string) => {
-		// Custom emoji: reaction key is an mxc:// URL
-		if (key.startsWith("mxc://")) {
-			const emote = props.emoteLookup.get(key);
-			if (emote) {
-				return (
-					<img
-						src={emote.httpUrl}
-						alt={`:${emote.shortcode}:`}
-						title={`:${emote.shortcode}:`}
-						class="inline h-4 w-4 object-contain"
-					/>
-				);
-			}
-			// Unknown pack
-			return (
-				<span title={key} role="img" aria-label="custom emoji">
-					?
-				</span>
-			);
-		}
-		return <span>{key}</span>;
-	};
-
-	const reactionLabel = (key: string): string => {
-		if (key.startsWith("mxc://")) {
-			const emote = props.emoteLookup.get(key);
-			return emote ? `:${emote.shortcode}:` : "custom emoji";
-		}
-		return key;
-	};
 
 	return (
 		<Show when={entries().length > 0}>
@@ -67,10 +73,13 @@ const ReactionPills: Component<{
 										: "bg-surface-2 text-text-secondary hover:bg-surface-3"
 								}`}
 								onClick={() => props.onReact(key)}
-								aria-label={`${reactionLabel(key)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
+								aria-label={`${reactionLabel(key, props.emoteLookup)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
 								aria-pressed={isMine()}
 							>
-								{renderReactionKey(key)}
+								<ReactionKey
+									reactionKey={key}
+									emoteLookup={props.emoteLookup}
+								/>
 								<span
 									class={isMine() ? "text-accent-text" : "text-text-disabled"}
 								>
@@ -79,6 +88,61 @@ const ReactionPills: Component<{
 							</button>
 						);
 					}}
+				</For>
+			</div>
+		</Show>
+	);
+};
+
+/**
+ * Failed-reaction row. One entry per failed key for the message; each
+ * entry shows the reaction key (mxc-rendered when custom) with a ⚠
+ * marker and inline Retry / Discard buttons. Rendered in red tint so
+ * the failure is unambiguous against the normal pill row.
+ *
+ * Issue #106: AC requires per-pill Retry / Discard with the failed
+ * pill visible. Each row is `role="alert"` so screen readers announce
+ * the failure when it appears.
+ */
+const FailedReactionPills: Component<{
+	keys: string[];
+	emoteLookup: Map<string, ResolvedEmote>;
+	onRetry: (key: string) => void;
+	onDiscard: (key: string) => void;
+}> = (props) => {
+	return (
+		<Show when={props.keys.length > 0}>
+			<div
+				class="mt-1 flex flex-wrap items-center gap-1"
+				role="alert"
+				aria-label="Failed reactions"
+			>
+				<For each={props.keys}>
+					{(key) => (
+						<div class="inline-flex items-center gap-1 rounded-full bg-danger-bg/20 px-2 py-0.5 text-xs text-danger-text ring-1 ring-danger/40">
+							<span aria-hidden="true">⚠</span>
+							<ReactionKey reactionKey={key} emoteLookup={props.emoteLookup} />
+							<span class="sr-only">
+								{`Reaction ${reactionLabel(key, props.emoteLookup)} failed to send`}
+							</span>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-1.5 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onClick={() => props.onRetry(key)}
+								aria-label={`Retry sending reaction ${reactionLabel(key, props.emoteLookup)}`}
+							>
+								Retry
+							</button>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-1.5 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								onClick={() => props.onDiscard(key)}
+								aria-label={`Discard failed reaction ${reactionLabel(key, props.emoteLookup)}`}
+							>
+								Discard
+							</button>
+						</div>
+					)}
 				</For>
 			</div>
 		</Show>
@@ -244,6 +308,21 @@ const TimelineItem: Component<{
 	onDiscardRedaction?: () => void;
 	onCancelRedaction?: () => void;
 	pendingRedactionStatus?: EventStatus;
+	/** Reaction keys whose latest local echo is NOT_SENT for this event. */
+	failedReactionKeys?: string[];
+	/** Retry the last failed reaction echo for `(this event, key)`. */
+	onRetryReaction?: (key: string) => void;
+	/** Discard every failed reaction echo for `(this event, key)`. */
+	onDiscardReaction?: (key: string) => void;
+	/**
+	 * Body text the user attempted to send as an edit, if the latest
+	 * edit echo for this event is NOT_SENT. Undefined when no edit has
+	 * failed. Empty string is rendered as "(empty)" so the surface
+	 * stays discoverable.
+	 */
+	failedEditAttempt?: string;
+	onRetryEdit?: () => void;
+	onDiscardEdit?: () => void;
 	readReceipts?: { userId: string; displayName: string }[];
 	client: MatrixClient;
 	shortcodeLookup: Map<string, ResolvedEmote>;
@@ -538,6 +617,20 @@ const TimelineItem: Component<{
 						onReact={props.onReact}
 						emoteLookup={props.emoteLookup}
 					/>
+					<Show
+						when={
+							(props.failedReactionKeys?.length ?? 0) > 0 &&
+							props.onRetryReaction &&
+							props.onDiscardReaction
+						}
+					>
+						<FailedReactionPills
+							keys={props.failedReactionKeys ?? []}
+							emoteLookup={props.emoteLookup}
+							onRetry={(key) => props.onRetryReaction?.(key)}
+							onDiscard={(key) => props.onDiscardReaction?.(key)}
+						/>
+					</Show>
 				</Show>
 
 				{/* Failed-send banner: visible when status is NOT_SENT, with
@@ -642,6 +735,54 @@ const TimelineItem: Component<{
 								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
 								onClick={props.onDiscardRedaction}
 								aria-label="Discard pending deletion"
+							>
+								Discard
+							</button>
+						</Show>
+					</div>
+				</Show>
+
+				{/* Failed-edit banner: visible when the latest edit echo is
+				    NOT_SENT. Shows the attempted edit body so the user can
+				    decide whether to retry without retyping. Gated below
+				    failed-send and failed-redaction states so we don't
+				    stack three failure banners. */}
+				<Show
+					when={
+						!isFailed() &&
+						!isRedactionPending() &&
+						!isRedactionFailed() &&
+						props.failedEditAttempt !== undefined
+					}
+				>
+					<div
+						class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
+						role="alert"
+					>
+						<span aria-hidden="true">⚠</span>
+						<span>Edit failed:</span>
+						<span
+							class="max-w-[24rem] truncate rounded bg-danger-bg/15 px-1.5 py-0.5 text-text-emphasis"
+							title={props.failedEditAttempt || "(empty)"}
+						>
+							{props.failedEditAttempt || "(empty)"}
+						</span>
+						<Show when={props.onRetryEdit}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onClick={props.onRetryEdit}
+								aria-label="Retry sending edit"
+							>
+								Retry
+							</button>
+						</Show>
+						<Show when={props.onDiscardEdit}>
+							<button
+								type="button"
+								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								onClick={props.onDiscardEdit}
+								aria-label="Discard pending edit"
 							>
 								Discard
 							</button>
