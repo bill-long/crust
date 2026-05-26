@@ -145,7 +145,9 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		return clamp(s, MIN_ABS_SCALE, MAX_ABS_SCALE);
 	});
 
-	const minScale = createMemo(() => Math.min(fitScale() * 0.5, fitScale()));
+	// Floor at MIN_ABS_SCALE so very-large images (where fitScale already
+	// clamps to MIN_ABS_SCALE) can't be zoomed below the absolute floor.
+	const minScale = createMemo(() => Math.max(MIN_ABS_SCALE, fitScale() * 0.5));
 	const isFitted = createMemo(() => Math.abs(scale() - fitScale()) < 1e-4);
 
 	// Clamp pan so at least 64px of the image stays visible on every
