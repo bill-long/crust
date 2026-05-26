@@ -122,11 +122,11 @@ const RoomPane: Component<{
 
 	return (
 		<div class="relative flex h-full flex-col">
-			<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-4">
+			<div class="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-4">
 				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 					{props.roomName}
 				</span>
-				<div class="flex shrink-0 items-center gap-1">
+				<div class="flex min-w-0 items-center gap-1 overflow-x-auto [&>*]:shrink-0">
 					<CallButton
 						roomId={props.rid}
 						callActive={props.callActive}
@@ -138,7 +138,7 @@ const RoomPane: Component<{
 						<button
 							type="button"
 							onClick={() => props.onInvite()}
-							class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 							title="Invite a user to this room"
 							aria-label="Invite a user to this room"
 						>
@@ -162,7 +162,7 @@ const RoomPane: Component<{
 					<button
 						type="button"
 						onClick={() => props.onOpenSettings()}
-						class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 						title="Room settings"
 						aria-label="Room settings"
 					>
@@ -183,7 +183,7 @@ const RoomPane: Component<{
 					<button
 						type="button"
 						onClick={() => props.onCopyLink()}
-						class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 						classList={{
 							"text-success-text": props.copyState() === "copied",
 							"text-danger-text": props.copyState() === "error",
@@ -258,7 +258,7 @@ const RoomPane: Component<{
 					<button
 						type="button"
 						onClick={() => props.onToggleMembers()}
-						class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 						classList={{
 							"bg-surface-3 text-text-emphasis": props.membersVisible(),
 							"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
@@ -293,7 +293,7 @@ const RoomPane: Component<{
 						onClick={() => props.onLeave()}
 						disabled={props.leaving()}
 						aria-busy={props.leaving()}
-						class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+						class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50 any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 						title={props.leaving() ? "Leaving…" : "Leave room"}
 						aria-label={props.leaving() ? "Leaving room" : "Leave room"}
 					>

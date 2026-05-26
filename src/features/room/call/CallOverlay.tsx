@@ -87,7 +87,7 @@ export const CallOverlay: Component<CallOverlayProps> = (props) => {
 					type="button"
 					ref={closeButtonRef}
 					onClick={requestClose}
-					class="rounded px-2 py-1 text-xs text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					title="Close call"
 					aria-label="Close call"
 				>
