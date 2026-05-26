@@ -87,7 +87,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 			<button
 				type="button"
 				onClick={() => props.onStart()}
-				class="relative inline-flex h-11 w-11 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:h-8 sm:w-8"
+				class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 				title={props.callActive() ? "Join call" : "Start a call"}
 				aria-label={props.callActive() ? "Join call" : "Start a call"}
 			>
