@@ -23,7 +23,7 @@ function renderOverlay(onClose: () => void = () => undefined) {
 }
 
 describe("CallOverlay focus-trap sentinels", () => {
-	afterEach(() => cleanup());
+	afterEach(cleanup);
 
 	it("renders a focusable leading sentinel before the iframe and a trailing one after", () => {
 		renderOverlay();
