@@ -294,6 +294,118 @@ export function useTimeline(
 		);
 	}
 
+	/**
+	 * Failed reaction echoes keyed by target event ID, then by reaction
+	 * key (unicode emoji or `mxc://` URL for custom emotes). Each entry
+	 * is the array of failed `MatrixEvent`s — multiple clicks during an
+	 * outage can stack failures for the same key.
+	 *
+	 * Lifecycle (per-event-ID): NOT_SENT upserts; SENDING / QUEUED /
+	 * ENCRYPTING (retry in-flight) removes; null (confirmed) / CANCELLED
+	 * removes. Empty inner records are pruned, then empty outer keys.
+	 *
+	 * Stores `MatrixEvent` directly so Retry / Discard work even when
+	 * the user has scrolled away from live; the SDK's TimelineWindow
+	 * may not include the failed reaction echo once `followingLive` is
+	 * false.
+	 */
+	const [pendingReactions, setPendingReactions] = createStore<
+		Record<string, Record<string, MatrixEvent[]>>
+	>(Object.create(null));
+
+	/**
+	 * Failed edit (m.replace) echoes keyed by target event ID. Same
+	 * stacking semantics as `pendingReactions`: each entry is an array
+	 * of failed `MatrixEvent`s so repeated retries during an outage
+	 * remain discoverable / discardable. Retry uses the most-recent
+	 * entry; Discard cancels all.
+	 */
+	const [pendingEdits, setPendingEdits] = createStore<
+		Record<string, MatrixEvent[]>
+	>(Object.create(null));
+
+	function upsertPendingReaction(reactionEvent: MatrixEvent): void {
+		const content = reactionEvent.getContent();
+		const targetId = content?.["m.relates_to"]?.event_id;
+		const key = content?.["m.relates_to"]?.key;
+		const eid = reactionEvent.getId();
+		if (typeof targetId !== "string" || typeof key !== "string" || !eid) {
+			return;
+		}
+		setPendingReactions(
+			produce((d) => {
+				let byKey = d[targetId];
+				if (!byKey) {
+					byKey = Object.create(null);
+					d[targetId] = byKey;
+				}
+				let arr = byKey[key];
+				if (!arr) {
+					arr = [];
+					byKey[key] = arr;
+				}
+				if (!arr.some((e) => e.getId() === eid)) {
+					arr.push(reactionEvent);
+				}
+			}),
+		);
+	}
+
+	function removePendingReaction(reactionEvent: MatrixEvent): void {
+		const content = reactionEvent.getContent();
+		const targetId = content?.["m.relates_to"]?.event_id;
+		const key = content?.["m.relates_to"]?.key;
+		const eid = reactionEvent.getId();
+		if (typeof targetId !== "string" || typeof key !== "string" || !eid) {
+			return;
+		}
+		setPendingReactions(
+			produce((d) => {
+				const byKey = d[targetId];
+				if (!byKey) return;
+				const arr = byKey[key];
+				if (!arr) return;
+				const idx = arr.findIndex((e) => e.getId() === eid);
+				if (idx >= 0) arr.splice(idx, 1);
+				if (arr.length === 0) delete byKey[key];
+				if (Object.keys(byKey).length === 0) delete d[targetId];
+			}),
+		);
+	}
+
+	function upsertPendingEdit(editEvent: MatrixEvent): void {
+		const targetId = editEvent.getContent()?.["m.relates_to"]?.event_id;
+		const eid = editEvent.getId();
+		if (typeof targetId !== "string" || !eid) return;
+		setPendingEdits(
+			produce((d) => {
+				let arr = d[targetId];
+				if (!arr) {
+					arr = [];
+					d[targetId] = arr;
+				}
+				if (!arr.some((e) => e.getId() === eid)) {
+					arr.push(editEvent);
+				}
+			}),
+		);
+	}
+
+	function removePendingEdit(editEvent: MatrixEvent): void {
+		const targetId = editEvent.getContent()?.["m.relates_to"]?.event_id;
+		const eid = editEvent.getId();
+		if (typeof targetId !== "string" || !eid) return;
+		setPendingEdits(
+			produce((d) => {
+				const arr = d[targetId];
+				if (!arr) return;
+				const idx = arr.findIndex((e) => e.getId() === eid);
+				if (idx >= 0) arr.splice(idx, 1);
+				if (arr.length === 0) delete d[targetId];
+			}),
+		);
+	}
+
 	let currentRoomId: string | null = null;
 	let backfillReloadAttempted = false;
 	// Generation counter — increments on every room load. Async operations
@@ -375,6 +487,8 @@ export function useTimeline(
 		setCanLoadNewer(false);
 		setTypingUsers([]);
 		setPendingRedactions(reconcile({}, { merge: false }));
+		setPendingReactions(reconcile(Object.create(null), { merge: false }));
+		setPendingEdits(reconcile(Object.create(null), { merge: false }));
 
 		const room = client.getRoom(rid);
 		if (!room) {
@@ -747,6 +861,17 @@ export function useTimeline(
 					}
 				}
 			}
+			// Defensive cleanup for reaction / edit pending stores. The
+			// primary lifecycle path is LocalEchoUpdated(CANCELLED), but
+			// the SDK strips events from the timeline before firing it,
+			// so the `_removed` path can race ahead in some orderings.
+			if (event.getType() === "m.reaction") {
+				removePendingReaction(event);
+			} else if (
+				event.getContent()?.["m.relates_to"]?.rel_type === "m.replace"
+			) {
+				removePendingEdit(event);
+			}
 			setEvents(
 				produce((draft) => {
 					const idx = draft.findIndex((e) => e.eventId === eid);
@@ -802,6 +927,13 @@ export function useTimeline(
 
 		// Handle reaction events by updating the target message's reactions
 		if (event.getType() === "m.reaction") {
+			// Track failed echoes for the Retry/Discard UI. Confirmed
+			// reactions flow through the relation aggregation only;
+			// other transient statuses (SENDING, QUEUED, ENCRYPTING) are
+			// not surfaced as failures.
+			if (event.status === EventStatus.NOT_SENT) {
+				upsertPendingReaction(event);
+			}
 			const relatesTo = event.getContent()?.["m.relates_to"];
 			if (relatesTo?.event_id) {
 				const targetId = relatesTo.event_id as string;
@@ -820,9 +952,13 @@ export function useTimeline(
 			return;
 		}
 
-		// Handle edit events — update the original message in place
+		// Handle edit events — update the original message in place,
+		// and track failed echoes so the UI can offer Retry/Discard.
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") {
+			if (event.status === EventStatus.NOT_SENT) {
+				upsertPendingEdit(event);
+			}
 			const targetId = event.getContent()?.["m.relates_to"]?.event_id;
 			if (typeof targetId === "string") {
 				handleEdit(room, targetId);
@@ -847,6 +983,9 @@ export function useTimeline(
 			}
 			return;
 		}
+
+		// Displayable failed edit echoes are tracked above via the
+		// existing m.replace branch — no extra handling needed here.
 
 		if (!event.getId()) return;
 
@@ -995,9 +1134,21 @@ export function useTimeline(
 		if (!newId) return;
 
 		// Reaction relation: recompute the parent so the count/myReactions
-		// reflect the new status (e.g. drop a NOT_SENT echo from the count).
+		// reflect the new status (e.g. drop a NOT_SENT echo from the count),
+		// and maintain the pendingReactions store so the UI can surface
+		// Retry / Discard for failed reaction echoes.
 		if (event.getType() === "m.reaction") {
 			const targetId = event.getContent()?.["m.relates_to"]?.event_id;
+			// Lifecycle: NOT_SENT upserts; a retry transition (SENDING /
+			// QUEUED / ENCRYPTING), confirmation (null), or cancellation
+			// (CANCELLED) removes the entry. Server-confirmed reactions
+			// are tracked through normal aggregation; we only carry the
+			// failure surface here.
+			if (event.status === EventStatus.NOT_SENT) {
+				upsertPendingReaction(event);
+			} else {
+				removePendingReaction(event);
+			}
 			if (typeof targetId === "string") {
 				setEvents(
 					produce((draft) => {
@@ -1041,10 +1192,16 @@ export function useTimeline(
 		}
 
 		// Edit relation (m.replace): recompute the original message so a
-		// failed edit no longer appears applied.
+		// failed edit no longer appears applied, and maintain the
+		// pendingEdits store so the UI can surface Retry / Discard.
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") {
 			const targetId = event.getContent()?.["m.relates_to"]?.event_id;
+			if (event.status === EventStatus.NOT_SENT) {
+				upsertPendingEdit(event);
+			} else {
+				removePendingEdit(event);
+			}
 			if (typeof targetId === "string") {
 				handleEdit(room, targetId);
 			}
@@ -1130,5 +1287,19 @@ export function useTimeline(
 		 * cancelled.
 		 */
 		pendingRedactions,
+		/**
+		 * Failed reaction echoes per target event ID, then per reaction
+		 * key. Each entry is the array of failed `MatrixEvent`s for that
+		 * (target, key) pair so repeated retries during an outage stay
+		 * discoverable. Entries auto-clear on retry, confirmation, or
+		 * cancellation.
+		 */
+		pendingReactions,
+		/**
+		 * Failed edit (m.replace) echoes per target event ID. Same array
+		 * semantics as `pendingReactions`. Consumers typically retry the
+		 * most-recent entry and discard the whole list.
+		 */
+		pendingEdits,
 	};
 }

@@ -85,6 +85,8 @@ const TimelineView: Component<{
 		getSourceEvent,
 		getWindowEvents,
 		pendingRedactions,
+		pendingReactions,
+		pendingEdits,
 	} = useTimeline(client, () => props.roomId);
 
 	// Custom emoji packs for this room. When the parent passes a shared
@@ -883,6 +885,94 @@ const TimelineView: Component<{
 		}
 	};
 
+	/**
+	 * Retry the most-recent failed reaction echo for `(targetId, key)`.
+	 * Earlier failed echoes for the same key stay in the pending store
+	 * until the user discards (or their own retry/cancel transitions
+	 * clean them up). Resending replays the SDK's pending-event queue,
+	 * which fires `LocalEchoUpdated(SENDING)` and pops the echo out of
+	 * `pendingReactions` via the per-event lifecycle.
+	 */
+	const onRetryReaction = async (
+		targetId: string,
+		key: string,
+	): Promise<void> => {
+		const arr = pendingReactions[targetId]?.[key];
+		if (!arr || arr.length === 0) return;
+		const room = client.getRoom(props.roomId);
+		if (!room) return;
+		const last = arr[arr.length - 1];
+		if (last.status !== EventStatus.NOT_SENT) return;
+		const originalRoomId = props.roomId;
+		try {
+			await client.resendEvent(last, room);
+		} catch (e) {
+			console.error("resendEvent (reaction) failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
+	/**
+	 * Discard every failed reaction echo for `(targetId, key)`. Each
+	 * cancel is wrapped in its own try/catch + status guard so one
+	 * SDK throw (e.g. an echo whose status raced past NOT_SENT) does
+	 * not strand the rest. The SDK's `_removed` Timeline path and
+	 * `LocalEchoUpdated(CANCELLED)` both clear the store entries.
+	 */
+	const onDiscardReaction = (targetId: string, key: string): void => {
+		const arr = pendingReactions[targetId]?.[key];
+		if (!arr || arr.length === 0) return;
+		const originalRoomId = props.roomId;
+		// Snapshot before iterating — the store mutates underneath us as
+		// each cancel fires its synchronous lifecycle events.
+		const snapshot = [...arr];
+		for (const ev of snapshot) {
+			if (ev.status !== EventStatus.NOT_SENT) continue;
+			try {
+				client.cancelPendingEvent(ev);
+			} catch (e) {
+				console.error("cancelPendingEvent (reaction) failed:", e);
+			}
+		}
+		focusComposer(originalRoomId);
+	};
+
+	/** Retry the most-recent failed edit echo for `targetId`. */
+	const onRetryEdit = async (targetId: string): Promise<void> => {
+		const arr = pendingEdits[targetId];
+		if (!arr || arr.length === 0) return;
+		const room = client.getRoom(props.roomId);
+		if (!room) return;
+		const last = arr[arr.length - 1];
+		if (last.status !== EventStatus.NOT_SENT) return;
+		const originalRoomId = props.roomId;
+		try {
+			await client.resendEvent(last, room);
+		} catch (e) {
+			console.error("resendEvent (edit) failed:", e);
+		} finally {
+			focusComposer(originalRoomId);
+		}
+	};
+
+	/** Discard every failed edit echo for `targetId`. */
+	const onDiscardEdit = (targetId: string): void => {
+		const arr = pendingEdits[targetId];
+		if (!arr || arr.length === 0) return;
+		const originalRoomId = props.roomId;
+		const snapshot = [...arr];
+		for (const ev of snapshot) {
+			if (ev.status !== EventStatus.NOT_SENT) continue;
+			try {
+				client.cancelPendingEvent(ev);
+			} catch (e) {
+				console.error("cancelPendingEvent (edit) failed:", e);
+			}
+		}
+		focusComposer(originalRoomId);
+	};
+
 	const onReactionPickerSelect = (
 		eventId: string,
 		item: PickerEmoji,
@@ -1032,6 +1122,34 @@ const TimelineView: Component<{
 										pendingRedactionStatus={
 											pendingRedactions[event.eventId]?.status
 										}
+										failedReactionKeys={Object.keys(
+											pendingReactions[event.eventId] ?? {},
+										)}
+										onRetryReaction={(key) =>
+											onRetryReaction(event.eventId, key)
+										}
+										onDiscardReaction={(key) =>
+											onDiscardReaction(event.eventId, key)
+										}
+										failedEditAttempt={(() => {
+											const arr = pendingEdits[event.eventId];
+											if (!arr || arr.length === 0) return undefined;
+											const last = arr[arr.length - 1];
+											const newContent = last.getContent()?.["m.new_content"] as
+												| { body?: unknown }
+												| undefined;
+											const body =
+												typeof newContent?.body === "string"
+													? newContent.body
+													: "";
+											// Replacement bodies sent by the composer carry
+											// the "* " prefix on the wrapper `body` (Matrix
+											// reply-fallback convention); `m.new_content`
+											// carries the unprefixed text we want to show.
+											return body;
+										})()}
+										onRetryEdit={() => onRetryEdit(event.eventId)}
+										onDiscardEdit={() => onDiscardEdit(event.eventId)}
 										readReceipts={receipts()[event.eventId]}
 										client={client}
 										shortcodeLookup={shortcodeLookup()}
