@@ -421,6 +421,75 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("treats empty-string content.url / content.file.url as missing for m.image", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			// Empty plain url — should not project as a usable image and
+			// must not be flagged as encrypted.
+			{
+				eventId: "$e1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "empty.png",
+					url: "",
+				},
+				ts: 1000,
+			},
+			// Empty encrypted file.url — same rule applies.
+			{
+				eventId: "$e2",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "empty-enc.png",
+					file: { url: "", key: { k: "x" } },
+				},
+				ts: 2000,
+			},
+			// Empty plain url with a valid encrypted url — falls back to the
+			// encrypted source and is correctly flagged as encrypted.
+			{
+				eventId: "$e3",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "mixed.png",
+					url: "",
+					file: { url: "mxc://test/enc", key: { k: "x" } },
+				},
+				ts: 3000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(3);
+			expect(events[0].imageUrl).toBeNull();
+			expect(events[0].imageFullUrl).toBeNull();
+			expect(events[0].imageIsEncrypted).toBe(false);
+			expect(events[1].imageUrl).toBeNull();
+			expect(events[1].imageFullUrl).toBeNull();
+			expect(events[1].imageIsEncrypted).toBe(false);
+			expect(events[2].imageUrl).not.toBeNull();
+			expect(events[2].imageFullUrl).not.toBeNull();
+			expect(events[2].imageIsEncrypted).toBe(true);
+		});
+	});
+
 	it("extracts intrinsic dimensions from m.text GIF messages with info block", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			// Composer-sent GIF: m.text body with recognized provider URL

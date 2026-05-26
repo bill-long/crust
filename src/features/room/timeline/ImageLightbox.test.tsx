@@ -154,4 +154,9 @@ describe("ImageLightbox", () => {
 		expect(a.getAttribute("rel")).toBe("noopener noreferrer");
 		expect(a.getAttribute("target")).toBe("_blank");
 	});
+
+	it("Open-in-new-tab is hidden for encrypted images", () => {
+		setup({ image: mkImage({ isEncrypted: true }) });
+		expect(screen.queryByLabelText("Open in new tab")).toBeNull();
+	});
 });

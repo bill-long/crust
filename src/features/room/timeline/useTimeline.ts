@@ -112,8 +112,13 @@ function eventToTimelineEvent(
 	let imageUrl: string | null = null;
 	let imageFullUrl: string | null = null;
 	const encryptedMxc =
-		typeof content.file?.url === "string" ? content.file.url : null;
-	const plainMxc = typeof content.url === "string" ? content.url : null;
+		typeof content.file?.url === "string" && content.file.url.length > 0
+			? content.file.url
+			: null;
+	const plainMxc =
+		typeof content.url === "string" && content.url.length > 0
+			? content.url
+			: null;
 	const mxcUrl = plainMxc || encryptedMxc;
 	const imageIsEncrypted = !plainMxc && encryptedMxc !== null;
 	if (mxcUrl) {

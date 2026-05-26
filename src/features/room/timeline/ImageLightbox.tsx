@@ -470,8 +470,9 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		tryClose();
 	};
 
-	// Download via fetch -> blob. Falls back to opening the URL in a
-	// new tab if fetch fails (CORS, network).
+	// Download via fetch -> blob with sanitized filename. On failure,
+	// surface an inline error; the user can still use "Open in new tab"
+	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
 		if (!img) return;
@@ -667,27 +668,29 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 											<line x1="12" y1="15" x2="12" y2="3" />
 										</svg>
 									</button>
-									<a
-										href={img().fullUrl}
-										target="_blank"
-										rel="noopener noreferrer"
-										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-										aria-label="Open in new tab"
-									>
-										<span class="sr-only">Open in new tab</span>
-										<svg
-											class="h-5 w-5"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2"
-											aria-hidden="true"
+									<Show when={!img().isEncrypted}>
+										<a
+											href={img().fullUrl}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+											aria-label="Open in new tab"
 										>
-											<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-											<polyline points="15 3 21 3 21 9" />
-											<line x1="10" y1="14" x2="21" y2="3" />
-										</svg>
-									</a>
+											<span class="sr-only">Open in new tab</span>
+											<svg
+												class="h-5 w-5"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												aria-hidden="true"
+											>
+												<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+												<polyline points="15 3 21 3 21 9" />
+												<line x1="10" y1="14" x2="21" y2="3" />
+											</svg>
+										</a>
+									</Show>
 								</>
 							)}
 						</Show>
@@ -726,7 +729,11 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						cursor: scale() > fitScale() + 1e-4 ? "grab" : "zoom-in",
 						"touch-action": "none",
 					}}
-					onWheel={handleWheel}
+					// Non-passive wheel listener so preventDefault() actually
+					// stops page scroll while zooming. Solid's onWheel attaches
+					// via addEventListener, which defaults to passive: true for
+					// wheel events; the on: namespace lets us override that.
+					on:wheel={{ handleEvent: handleWheel, passive: false }}
 					onPointerDown={onPointerDown}
 					onPointerMove={onPointerMove}
 					onPointerUp={onPointerUp}
