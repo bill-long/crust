@@ -617,7 +617,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 							onClick={resetToFit}
 							class="rounded px-2 py-1 text-xs text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Fit to viewport"
-							aria-pressed={isFitted()}
+							aria-current={isFitted() ? "true" : undefined}
 						>
 							Fit
 						</button>

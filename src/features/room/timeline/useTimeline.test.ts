@@ -490,6 +490,66 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("falls back to content.body when content.filename is empty/whitespace", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$empty",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					filename: "",
+					body: "photo.png",
+					url: "mxc://test/empty",
+				},
+				ts: 1000,
+			},
+			{
+				eventId: "$ws",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					filename: "   ",
+					body: "shot.jpg",
+					url: "mxc://test/ws",
+				},
+				ts: 2000,
+			},
+			{
+				eventId: "$real",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					filename: "real.png",
+					body: "ignored caption",
+					url: "mxc://test/real",
+				},
+				ts: 3000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events.length).toBe(3);
+			expect(events[0].imageFilename).toBe("photo.png");
+			expect(events[1].imageFilename).toBe("shot.jpg");
+			expect(events[2].imageFilename).toBe("real.png");
+		});
+	});
+
 	it("rejects filenames containing ASCII control chars (CR, NUL, etc.)", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			{

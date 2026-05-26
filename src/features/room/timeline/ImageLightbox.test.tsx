@@ -143,9 +143,9 @@ describe("ImageLightbox", () => {
 		expect(screen.getByLabelText("Zoom to 100%").textContent).toBe("100%");
 		// '0' resets to fit
 		fireEvent.keyDown(dialog, { key: "0" });
-		// Fit button is now aria-pressed
+		// Fit button reflects the active mode via aria-current
 		const fitBtn = screen.getByLabelText("Fit to viewport");
-		expect(fitBtn.getAttribute("aria-pressed")).toBe("true");
+		expect(fitBtn.getAttribute("aria-current")).toBe("true");
 	});
 
 	it("Open-in-new-tab anchor has rel=noopener noreferrer", () => {

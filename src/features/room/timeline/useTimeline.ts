@@ -153,8 +153,14 @@ function eventToTimelineEvent(
 		content.info.size >= 0
 			? content.info.size
 			: null;
+	// Prefer `content.filename` only when it's a non-empty, non-whitespace
+	// string — an empty/whitespace `filename` would otherwise block the
+	// fallback to `content.body` even though the latter may carry a
+	// usable filename.
 	const rawFilename =
-		isPlainImage && typeof content.filename === "string"
+		isPlainImage &&
+		typeof content.filename === "string" &&
+		content.filename.trim().length > 0
 			? content.filename
 			: isPlainImage && typeof content.body === "string"
 				? content.body

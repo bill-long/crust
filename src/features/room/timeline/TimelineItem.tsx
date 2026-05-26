@@ -604,9 +604,14 @@ const TimelineItem: Component<{
 									// lightbox, and only when the send has confirmed —
 									// pending / failed local echoes shouldn't be navigable
 									// because their event id can rekey on confirmation.
+									// Also require a usable full URL: without it the
+									// lightbox would open and immediately auto-close
+									// (no matching gallery entry), which reads as a
+									// dead click.
 									const isOpenableImage =
 										ev.msgtype === "m.image" &&
 										ev.status === null &&
+										!!ev.imageFullUrl &&
 										!!props.onOpenImage;
 									const imgEl = (
 										<img
