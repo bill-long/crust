@@ -782,7 +782,7 @@ const TimelineItem: Component<{
 								type="button"
 								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
 								onClick={props.onDiscardEdit}
-								aria-label="Discard pending edit"
+								aria-label="Discard failed edit"
 							>
 								Discard
 							</button>
