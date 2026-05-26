@@ -122,7 +122,7 @@ const RoomPane: Component<{
 
 	return (
 		<div class="relative flex h-full flex-col">
-			<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-4">
+			<div class="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-4">
 				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 					{props.roomName}
 				</span>
