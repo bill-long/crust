@@ -1,4 +1,5 @@
-import type { MatrixClient } from "matrix-js-sdk";
+import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
+import { RoomStateEvent } from "matrix-js-sdk";
 import type {
 	CallMembership,
 	LivekitTransport,
@@ -73,12 +74,33 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 
 	const room = opts.client.getRoom(opts.roomId);
 	const foci = buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId);
-	const isEncrypted = room?.hasEncryptionStateEvent() ?? false;
 	let leavePending = false;
+
+	// Reactive view of the room's encryption status. We subscribe to
+	// `RoomStateEvent.Events` on the MatrixClient (per repo convention) and
+	// flip to `true` when an `m.room.encryption` state event arrives for our
+	// room. The signal feeds `joinBlockReason`, so `canJoin()` and the
+	// pre-publish check in `join()` both see the latest value — preventing a
+	// late-arriving encryption event from bypassing the unencrypted-only gate.
+	const [isEncrypted, setIsEncrypted] = createSignal(
+		room?.hasEncryptionStateEvent() ?? false,
+	);
+	const onRoomStateEvent = (event: MatrixEvent): void => {
+		if (event.getRoomId() !== opts.roomId) return;
+		if (event.getType() !== "m.room.encryption") return;
+		// Matrix encryption is one-way: once enabled, it stays enabled.
+		// Re-query the room rather than assuming the event itself flips it
+		// (defends against redacted/edge-case events).
+		setIsEncrypted(room?.hasEncryptionStateEvent() ?? true);
+	};
+	opts.client.on(RoomStateEvent.Events, onRoomStateEvent);
+	onCleanup(() => {
+		opts.client.off(RoomStateEvent.Events, onRoomStateEvent);
+	});
 
 	const joinBlockReason = createMemo((): string | null => {
 		if (!room) return `Room ${opts.roomId} not found in client store`;
-		if (isEncrypted) {
+		if (isEncrypted()) {
 			return "Native RTC audio currently supports unencrypted rooms only.";
 		}
 		if (foci.length === 0) {
@@ -87,7 +109,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		return null;
 	});
 
-	const [canJoin, setCanJoin] = createSignal(joinBlockReason() === null);
+	const canJoin = createMemo(() => joinBlockReason() === null);
 
 	const activeFocus = createMemo((): LivekitTransport | null => {
 		if (status() !== "joined") return null;
@@ -118,7 +140,6 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		setSession(s);
 		setMemberships([...s.memberships]);
 		setStatus(s.isJoined() ? "joined" : "idle");
-		setCanJoin(joinBlockReason() === null);
 	});
 
 	createEffect(() => {
@@ -177,6 +198,11 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			return;
 		}
 		if (s.isJoined()) return;
+		// Re-check immediately before publishing so the encryption gate
+		// can't be bypassed by an `m.room.encryption` event arriving
+		// between mount and the click on "Join". The encryption signal
+		// is wired to `RoomStateEvent.Events`, so this read sees the
+		// latest value rather than a stale hook-init snapshot.
 		const blockReason = joinBlockReason();
 		if (blockReason !== null) {
 			setError(new Error(blockReason));

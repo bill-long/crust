@@ -1,4 +1,5 @@
 import { renderHook } from "@solidjs/testing-library";
+import { RoomStateEvent } from "matrix-js-sdk";
 import type { CallMembership } from "matrix-js-sdk/lib/matrixrtc";
 import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +59,7 @@ function createClient(opts: {
 	client: ReturnType<typeof makeClient>;
 } {
 	function makeClient() {
+		const clientListeners = new Map<string, Set<Listener>>();
 		return {
 			getRoom: vi.fn(() =>
 				opts.roomFound === false
@@ -68,6 +70,20 @@ function createClient(opts: {
 			),
 			matrixRTC: {
 				getRoomSession: vi.fn(() => opts.session),
+			},
+			on: vi.fn((event: string, cb: Listener) => {
+				let set = clientListeners.get(event);
+				if (!set) {
+					set = new Set();
+					clientListeners.set(event, set);
+				}
+				set.add(cb);
+			}),
+			off: vi.fn((event: string, cb: Listener) => {
+				clientListeners.get(event)?.delete(cb);
+			}),
+			__emit: (event: string, ...args: unknown[]): void => {
+				for (const cb of clientListeners.get(event) ?? []) cb(...args);
 			},
 		};
 	}
@@ -329,6 +345,72 @@ describe("useRtcSession", () => {
 		await rtc.join();
 		expect(session.joinRoomSession).not.toHaveBeenCalled();
 		expect(rtc.status()).toBe("error");
+	});
+
+	it("flips canJoin to false when an m.room.encryption state event arrives after mount", async () => {
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		// Mutable flag so the room reports encrypted=true only after we emit
+		// the state event (mirrors the late-arrival race the Phase 2 gate
+		// must defend against).
+		let nowEncrypted = false;
+		client.getRoom = vi.fn(
+			() =>
+				({
+					hasEncryptionStateEvent: () => nowEncrypted,
+				}) as never,
+		);
+		const { result: rtc } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+			}),
+		);
+		expect(rtc.canJoin()).toBe(true);
+		nowEncrypted = true;
+		client.__emit(RoomStateEvent.Events, {
+			getRoomId: () => "!room:example.com",
+			getType: () => "m.room.encryption",
+		} as never);
+		expect(rtc.canJoin()).toBe(false);
+		expect(rtc.joinBlockReason()).toContain("unencrypted");
+		await rtc.join();
+		expect(session.joinRoomSession).not.toHaveBeenCalled();
+		expect(rtc.status()).toBe("error");
+	});
+
+	it("ignores RoomState.events for unrelated rooms or types", async () => {
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		let encrypted = false;
+		client.getRoom = vi.fn(
+			() =>
+				({
+					hasEncryptionStateEvent: () => encrypted,
+				}) as never,
+		);
+		const { result: rtc } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+			}),
+		);
+		expect(rtc.canJoin()).toBe(true);
+		// Unrelated room.
+		encrypted = true;
+		client.__emit(RoomStateEvent.Events, {
+			getRoomId: () => "!other:example.com",
+			getType: () => "m.room.encryption",
+		} as never);
+		expect(rtc.canJoin()).toBe(true);
+		// Right room, wrong type.
+		client.__emit(RoomStateEvent.Events, {
+			getRoomId: () => "!room:example.com",
+			getType: () => "m.room.topic",
+		} as never);
+		expect(rtc.canJoin()).toBe(true);
 	});
 
 	it("exposes a null activeFocus until joined", () => {

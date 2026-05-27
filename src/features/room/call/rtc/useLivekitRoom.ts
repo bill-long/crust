@@ -208,9 +208,20 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		attachments.delete(sid);
 	};
 
+	// Reset call-derived UI state. Called from both `teardown()` (intentional
+	// disconnects) and the `Disconnected` event handler (unsolicited drops)
+	// so the participant list doesn't outlive the call. NOTE: `localMuted` is
+	// treated as a persistent user preference (mute carries across calls and
+	// retries) and is intentionally NOT reset here — clearing it on connect
+	// errors would silently flip a pre-muted user back to unmuted on retry.
+	const resetCallDerivedState = (): void => {
+		setParticipants([]);
+		setAudioBlocked(false);
+	};
+
 	const teardown = async (): Promise<void> => {
 		detachAll();
-		setAudioBlocked(false);
+		resetCallDerivedState();
 		const r = room;
 		room = null;
 		if (r) {
@@ -248,47 +259,87 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// participant/track events for a call already in progress.
 			// Register listeners BEFORE connect so we don't miss the initial
 			// participant/track events for a call already in progress.
-			r.on(lk.RoomEvent.ParticipantConnected, () => snapshotParticipants(r));
-			r.on(lk.RoomEvent.ParticipantDisconnected, () => snapshotParticipants(r));
-			r.on(lk.RoomEvent.ActiveSpeakersChanged, () => snapshotParticipants(r));
-			r.on(lk.RoomEvent.TrackMuted, () => snapshotParticipants(r));
-			r.on(lk.RoomEvent.TrackUnmuted, () => snapshotParticipants(r));
-			r.on(lk.RoomEvent.LocalTrackPublished, () => {
-				setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
-				snapshotParticipants(r);
-			});
+			// All handlers below capture `myAttempt` and bail when this
+			// attempt is no longer live (stale connect superseded, or
+			// teardown/dispose has begun). LiveKit can still emit events
+			// from a disconnecting room, so without this guard a late
+			// event could re-attach audio or re-populate participants
+			// after `detachAll()` / `setParticipants([])`.
+			const ifLive = <Args extends unknown[]>(
+				fn: (...args: Args) => void,
+			): ((...args: Args) => void) => {
+				return (...args: Args): void => {
+					if (disposed || myAttempt !== attempt) return;
+					fn(...args);
+				};
+			};
+			r.on(
+				lk.RoomEvent.ParticipantConnected,
+				ifLive(() => snapshotParticipants(r)),
+			);
+			r.on(
+				lk.RoomEvent.ParticipantDisconnected,
+				ifLive(() => snapshotParticipants(r)),
+			);
+			r.on(
+				lk.RoomEvent.ActiveSpeakersChanged,
+				ifLive(() => snapshotParticipants(r)),
+			);
+			r.on(
+				lk.RoomEvent.TrackMuted,
+				ifLive(() => snapshotParticipants(r)),
+			);
+			r.on(
+				lk.RoomEvent.TrackUnmuted,
+				ifLive(() => snapshotParticipants(r)),
+			);
+			r.on(
+				lk.RoomEvent.LocalTrackPublished,
+				ifLive(() => {
+					setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
+					snapshotParticipants(r);
+				}),
+			);
 			r.on(
 				lk.RoomEvent.TrackSubscribed,
-				(track: RemoteTrack, publication: RemoteTrackPublication) => {
+				ifLive((track: RemoteTrack, publication: RemoteTrackPublication) => {
 					if (track.kind === lk.Track.Kind.Audio) {
 						attachAudioTrack(track as RemoteAudioTrack, publication);
 					}
 					snapshotParticipants(r);
-				},
+				}),
 			);
 			r.on(
 				lk.RoomEvent.TrackUnsubscribed,
-				(_t: RemoteTrack, publication: RemoteTrackPublication) => {
+				ifLive((_t: RemoteTrack, publication: RemoteTrackPublication) => {
 					detachAudioTrack(publication.trackSid);
 					snapshotParticipants(r);
-				},
+				}),
 			);
-			r.on(lk.RoomEvent.Disconnected, () => {
-				// Only react if this is still the live attempt — otherwise the
-				// teardown loop is already running.
-				if (myAttempt !== attempt) return;
-				detachAll();
-				// Audio is no longer playable — clear any stale autoplay banner
-				// so it doesn't outlive the call.
-				setAudioBlocked(false);
-				// Preserve terminal/intentional states so an unsolicited
-				// Disconnected event doesn't clobber the user-visible error
-				// or override an in-flight explicit disconnect.
-				const s = status();
-				if (s !== "error" && s !== "disconnecting") {
-					setStatus("idle");
-				}
-			});
+			r.on(
+				lk.RoomEvent.Disconnected,
+				ifLive(() => {
+					// Bump the attempt counter so any subsequent track/participant
+					// events from this disconnecting room bail via `ifLive`. Without
+					// this, late events could re-populate `participants` or re-attach
+					// audio after we've reset state below.
+					attempt++;
+					detachAll();
+					// Clear call-derived UI (participants, autoplay banner) so a
+					// stale roster doesn't survive an unsolicited drop. The
+					// module-level `room` handle is also cleared so a later
+					// `setLocalMuted` doesn't invoke SDK methods on a dead room.
+					resetCallDerivedState();
+					room = null;
+					// Preserve terminal/intentional states so an unsolicited
+					// Disconnected event doesn't clobber the user-visible error
+					// or override an in-flight explicit disconnect.
+					const s = status();
+					if (s !== "error" && s !== "disconnecting") {
+						setStatus("idle");
+					}
+				}),
+			);
 
 			await r.connect(url, jwt);
 			if (disposed || myAttempt !== attempt) {
@@ -298,13 +349,22 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 			room = r;
 
-			// Publish default mic. If the user pre-muted, publish then disable.
-			await r.localParticipant.setMicrophoneEnabled(true);
+			// Honour the user's pre-mute preference: if they toggled mute
+			// before we connected (via `setLocalMuted`), publish disabled so
+			// the LiveKit publication starts muted. Otherwise enable the mic
+			// for the common "click join, talk immediately" flow.
+			//
+			// We deliberately do NOT write `setLocalMutedSignal(desiredMuted)`
+			// after the await: the signal already holds `desiredMuted`, and if
+			// the user toggles mute concurrently during the SDK round-trip
+			// their write should win. `LocalTrackPublished` will reconcile the
+			// signal to the actual SDK state once the publication settles.
+			const desiredMuted = localMuted();
+			await r.localParticipant.setMicrophoneEnabled(!desiredMuted);
 			if (disposed || myAttempt !== attempt) {
 				await teardown();
 				return;
 			}
-			setLocalMutedSignal(false);
 
 			// Scan already-subscribed audio publications that arrived before our
 			// TrackSubscribed listener fired (race window between connect resolve
