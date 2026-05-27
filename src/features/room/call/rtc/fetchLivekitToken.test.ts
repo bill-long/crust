@@ -51,7 +51,7 @@ describe("fetchLivekitToken", () => {
 		});
 	});
 
-	it("appends /sfu/get when the service URL omits it", async () => {
+	it("appends /livekit/sfu/get when the service URL is just the base", async () => {
 		const { fetchImpl } = mockOk();
 		await fetchLivekitToken(
 			livekitFocus({ livekit_service_url: "https://call.example.com" }),
@@ -59,7 +59,21 @@ describe("fetchLivekitToken", () => {
 			{ fetchImpl: asFetch(fetchImpl) },
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
-			"https://call.example.com/sfu/get",
+			"https://call.example.com/livekit/sfu/get",
+		);
+	});
+
+	it("appends /sfu/get when the service URL is base + /livekit", async () => {
+		const { fetchImpl } = mockOk();
+		await fetchLivekitToken(
+			livekitFocus({
+				livekit_service_url: "https://call.example.com/livekit",
+			}),
+			fakeToken,
+			{ fetchImpl: asFetch(fetchImpl) },
+		);
+		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
+			"https://call.example.com/livekit/sfu/get",
 		);
 	});
 

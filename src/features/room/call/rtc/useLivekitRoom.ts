@@ -118,14 +118,25 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		attachments.clear();
 	};
 
-	const tryPlayAll = (): void => {
-		let blocked = false;
-		for (const a of attachments.values()) {
-			a.element.play().catch(() => {
-				blocked = true;
-			});
+	const tryPlayAll = async (): Promise<boolean> => {
+		// Returns true if every play() resolved; false if at least one was
+		// blocked (e.g. autoplay policy). Each catch sets audioBlocked
+		// directly so the UI flips even if the caller doesn't await us.
+		// Captures `attempt` so a late-arriving rejection from a torn-down
+		// session can't resurrect the banner after we've left the call.
+		const myAttempt = attempt;
+		const results = await Promise.allSettled(
+			Array.from(attachments.values()).map((a) => a.element.play()),
+		);
+		if (disposed || myAttempt !== attempt) return false;
+		let allOk = true;
+		for (const r of results) {
+			if (r.status === "rejected") {
+				allOk = false;
+				setAudioBlocked(true);
+			}
 		}
-		if (blocked) setAudioBlocked(true);
+		return allOk;
 	};
 
 	const resolveDisplayName = (identity: string): string => {
@@ -176,7 +187,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		el.style.display = "none";
 		document.body.appendChild(el);
 		attachments.set(sid, { element: el, track });
-		el.play().catch(() => setAudioBlocked(true));
+		const myAttempt = attempt;
+		el.play().catch(() => {
+			// Don't resurrect the banner if the session was torn down before
+			// this rejection settled.
+			if (disposed || myAttempt !== attempt) return;
+			setAudioBlocked(true);
+		});
 	};
 
 	const detachAudioTrack = (sid: string): void => {
@@ -193,6 +210,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 	const teardown = async (): Promise<void> => {
 		detachAll();
+		setAudioBlocked(false);
 		const r = room;
 		room = null;
 		if (r) {
@@ -260,7 +278,16 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				// teardown loop is already running.
 				if (myAttempt !== attempt) return;
 				detachAll();
-				setStatus("idle");
+				// Audio is no longer playable — clear any stale autoplay banner
+				// so it doesn't outlive the call.
+				setAudioBlocked(false);
+				// Preserve terminal/intentional states so an unsolicited
+				// Disconnected event doesn't clobber the user-visible error
+				// or override an in-flight explicit disconnect.
+				const s = status();
+				if (s !== "error" && s !== "disconnecting") {
+					setStatus("idle");
+				}
 			});
 
 			await r.connect(url, jwt);
@@ -365,15 +392,22 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 	const resumeAudio = async (): Promise<void> => {
 		const r = room;
+		let startAudioOk = false;
 		if (r) {
 			try {
 				await r.startAudio();
+				startAudioOk = true;
 			} catch {
 				/* ignore — fallback below */
 			}
 		}
-		tryPlayAll();
-		setAudioBlocked(false);
+		const allPlayed = await tryPlayAll();
+		// Only clear the blocked banner once we've actually unblocked audio.
+		// If no tracks are attached yet, fall back to startAudio's outcome
+		// (LiveKit considers the room unblocked once startAudio resolves).
+		if (allPlayed && (attachments.size > 0 || startAudioOk)) {
+			setAudioBlocked(false);
+		}
 	};
 
 	onCleanup(() => {

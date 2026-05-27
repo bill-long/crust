@@ -3,6 +3,7 @@ import {
 	createEffect,
 	createSignal,
 	For,
+	onCleanup,
 	onMount,
 	Show,
 } from "solid-js";
@@ -43,10 +44,14 @@ function MicDeviceSelect(): ReturnType<Component> {
 	onMount(() => {
 		void refresh();
 		if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+			const md = navigator.mediaDevices;
 			const onChange = (): void => {
 				void refresh();
 			};
-			navigator.mediaDevices.addEventListener("devicechange", onChange);
+			md.addEventListener("devicechange", onChange);
+			onCleanup(() => {
+				md.removeEventListener("devicechange", onChange);
+			});
 		}
 	});
 

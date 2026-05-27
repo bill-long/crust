@@ -384,6 +384,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 												stroke-width="2"
 												stroke-linecap="round"
 												stroke-linejoin="round"
+												role="img"
 												aria-label="Microphone muted"
 											>
 												<line x1="1" y1="1" x2="23" y2="23" />
