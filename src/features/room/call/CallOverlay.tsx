@@ -1,6 +1,8 @@
 import { type Component, createSignal, onCleanup, onMount } from "solid-js";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
+import { NativeCallView } from "./rtc/NativeCallView";
+import { NATIVE_RTC_ENABLED } from "./rtc/nativeRtcEnabled";
 
 interface CallOverlayProps {
 	/** Operator-deployed Element Call instance URL (e.g. https://call.example.com). */
@@ -25,6 +27,17 @@ interface CallOverlayProps {
  * the caller's keyed <Show>, matching the v1 "no mini call widget" decision.
  */
 export const CallOverlay: Component<CallOverlayProps> = (props) => {
+	if (NATIVE_RTC_ENABLED) {
+		return (
+			<NativeCallView
+				elementCallUrl={props.elementCallUrl}
+				roomId={props.roomId}
+				roomName={props.roomName}
+				onClose={props.onClose}
+			/>
+		);
+	}
+
 	const [confirmClose, setConfirmClose] = createSignal(false);
 	let closeButtonRef: HTMLButtonElement | undefined;
 	let iframeRef: HTMLIFrameElement | undefined;
