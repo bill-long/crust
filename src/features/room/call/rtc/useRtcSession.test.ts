@@ -50,12 +50,22 @@ function createFakeSession(): FakeSession {
 	return session;
 }
 
-function createClient(opts: { roomFound?: boolean; session: FakeSession }): {
+function createClient(opts: {
+	roomFound?: boolean;
+	session: FakeSession;
+	encrypted?: boolean;
+}): {
 	client: ReturnType<typeof makeClient>;
 } {
 	function makeClient() {
 		return {
-			getRoom: vi.fn(() => (opts.roomFound === false ? null : ({} as never))),
+			getRoom: vi.fn(() =>
+				opts.roomFound === false
+					? null
+					: ({
+							hasEncryptionStateEvent: () => opts.encrypted === true,
+						} as never),
+			),
 			matrixRTC: {
 				getRoomSession: vi.fn(() => opts.session),
 			},
@@ -68,11 +78,13 @@ const renderRtc = (overrides?: {
 	roomFound?: boolean;
 	session?: FakeSession;
 	elementCallUrl?: string;
+	encrypted?: boolean;
 }) => {
 	const session = overrides?.session ?? createFakeSession();
 	const { client } = createClient({
 		roomFound: overrides?.roomFound,
 		session,
+		encrypted: overrides?.encrypted,
 	});
 	const { result } = renderHook(() =>
 		useRtcSession({
@@ -308,5 +320,57 @@ describe("useRtcSession", () => {
 		expect(session.leaveRoomSession).not.toHaveBeenCalled();
 		cleanup();
 		expect(session.leaveRoomSession).toHaveBeenCalledTimes(1);
+	});
+
+	it("blocks join in encrypted rooms with a clear reason (Phase 2)", async () => {
+		const { rtc, session } = renderRtc({ encrypted: true });
+		expect(rtc.canJoin()).toBe(false);
+		expect(rtc.joinBlockReason()).toContain("unencrypted");
+		await rtc.join();
+		expect(session.joinRoomSession).not.toHaveBeenCalled();
+		expect(rtc.status()).toBe("error");
+	});
+
+	it("exposes a null activeFocus until joined", () => {
+		const { rtc } = renderRtc();
+		expect(rtc.activeFocus()).toBeNull();
+	});
+
+	it("activeFocus falls back to the offered focus when no oldest member exists", async () => {
+		const { rtc } = renderRtc();
+		await rtc.join();
+		expect(rtc.activeFocus()).toEqual({
+			type: "livekit",
+			livekit_service_url: "https://call.example.com/livekit/sfu/get",
+			livekit_alias: "!room:example.com",
+		});
+	});
+
+	it("activeFocus uses the oldest member's LiveKit transport when present", async () => {
+		const { rtc, session } = renderRtc();
+		await rtc.join();
+		const oldestTransport = {
+			type: "livekit" as const,
+			livekit_service_url: "https://other-sfu.example.com/livekit/sfu/get",
+			livekit_alias: "!room:example.com",
+		};
+		const oldest = {
+			userId: "@alice:example.com",
+			deviceId: "AAA",
+			createdTs: () => 1000,
+			getTransport: () => oldestTransport,
+		} as unknown as CallMembership;
+		const younger = {
+			userId: "@bob:example.com",
+			deviceId: "BBB",
+			createdTs: () => 5000,
+			getTransport: () => undefined,
+		} as unknown as CallMembership;
+		session.emit(
+			MatrixRTCSessionEvent.MembershipsChanged,
+			[],
+			[younger, oldest],
+		);
+		expect(rtc.activeFocus()).toEqual(oldestTransport);
 	});
 });

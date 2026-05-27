@@ -1,8 +1,100 @@
-import { type Component, createEffect, createSignal } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createSignal,
+	For,
+	onMount,
+	Show,
+} from "solid-js";
 import { useClient } from "../../client/client";
 import { updateSetting, userSettings } from "../../stores/settings";
 import { pushLocalUrlPreviewSetting } from "../room/urlPreviews/accountDataSync";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
+
+function MicDeviceSelect(): ReturnType<Component> {
+	const [devices, setDevices] = createSignal<MediaDeviceInfo[]>([]);
+	const [error, setError] = createSignal<string | null>(null);
+
+	const refresh = async (): Promise<void> => {
+		if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+			setError("MediaDevices API not available in this browser.");
+			return;
+		}
+		try {
+			const list = await navigator.mediaDevices.enumerateDevices();
+			setDevices(list.filter((d) => d.kind === "audioinput"));
+			setError(null);
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+	};
+
+	const grantAccess = async (): Promise<void> => {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			// We only needed the permission grant — release the tracks immediately.
+			for (const track of stream.getTracks()) track.stop();
+			await refresh();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		}
+	};
+
+	onMount(() => {
+		void refresh();
+		if (typeof navigator !== "undefined" && navigator.mediaDevices) {
+			const onChange = (): void => {
+				void refresh();
+			};
+			navigator.mediaDevices.addEventListener("devicechange", onChange);
+		}
+	});
+
+	const labelsHidden = (): boolean =>
+		devices().length > 0 && devices().every((d) => d.label === "");
+
+	return (
+		<div class="flex items-center justify-between gap-4 py-2">
+			<div class="min-w-0 flex-1">
+				<div class="text-sm font-medium text-text-primary">Microphone</div>
+				<div class="text-xs text-text-muted">
+					Input device used for native voice calls (preview).
+				</div>
+			</div>
+			<div class="flex items-center gap-2">
+				<Show when={labelsHidden()}>
+					<button
+						type="button"
+						onClick={() => void grantAccess()}
+						class="rounded bg-surface-2 px-2 py-1 text-xs text-text-secondary hover:bg-surface-3"
+					>
+						Grant access
+					</button>
+				</Show>
+				<select
+					value={userSettings().rtcMicDeviceId}
+					onChange={(e) =>
+						updateSetting("rtcMicDeviceId", e.currentTarget.value)
+					}
+					class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					aria-label="Microphone device"
+				>
+					<option value="">System default</option>
+					<For each={devices()}>
+						{(d) => (
+							<option value={d.deviceId}>
+								{d.label || `Microphone (${d.deviceId.slice(0, 6)}…)`}
+							</option>
+						)}
+					</For>
+				</select>
+			</div>
+			<Show when={error()}>
+				<div class="text-xs text-danger-text">{error()}</div>
+			</Show>
+		</div>
+	);
+}
 
 const GeneralTab: Component = () => {
 	const { client } = useClient();
@@ -91,6 +183,12 @@ const GeneralTab: Component = () => {
 						</button>
 					</div>
 				</div>
+			</section>
+
+			{/* Voice & Video */}
+			<section>
+				<SectionHeading>Voice & Video</SectionHeading>
+				<MicDeviceSelect />
 			</section>
 
 			{/* Privacy */}

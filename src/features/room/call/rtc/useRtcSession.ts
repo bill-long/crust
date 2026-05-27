@@ -3,6 +3,7 @@ import type {
 	CallMembership,
 	LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
+import { isLivekitTransport } from "matrix-js-sdk/lib/matrixrtc/LivekitTransport";
 import {
 	type MatrixRTCSession,
 	MatrixRTCSessionEvent,
@@ -10,6 +11,7 @@ import {
 import {
 	type Accessor,
 	createEffect,
+	createMemo,
 	createSignal,
 	onCleanup,
 	onMount,
@@ -30,8 +32,18 @@ export interface RtcSessionApi {
 	status: Accessor<RtcStatus>;
 	memberships: Accessor<readonly CallMembership[]>;
 	error: Accessor<Error | null>;
-	/** True when the room exists and at least one focus is configured. */
+	/** True when the room exists, at least one focus is configured, and the
+	 * room is not E2EE-encrypted (Phase 2 is unencrypted-only). */
 	canJoin: Accessor<boolean>;
+	/** Human-readable reason Join is blocked, or null when joinable. */
+	joinBlockReason: Accessor<string | null>;
+	/**
+	 * The LiveKit transport that Phase 2 media should dial. Resolves to the
+	 * oldest existing member's transport when joining an in-progress call,
+	 * or our offered fallback when we are the first participant. Null until
+	 * we have joined (no transport to dial before then).
+	 */
+	activeFocus: Accessor<LivekitTransport | null>;
 	join: () => Promise<void>;
 	leave: () => Promise<void>;
 }
@@ -61,9 +73,40 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 
 	const room = opts.client.getRoom(opts.roomId);
 	const foci = buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId);
+	const isEncrypted = room?.hasEncryptionStateEvent() ?? false;
 	let leavePending = false;
 
-	const [canJoin, setCanJoin] = createSignal(room !== null && foci.length > 0);
+	const joinBlockReason = createMemo((): string | null => {
+		if (!room) return `Room ${opts.roomId} not found in client store`;
+		if (isEncrypted) {
+			return "Native RTC audio currently supports unencrypted rooms only.";
+		}
+		if (foci.length === 0) {
+			return "No MatrixRTC foci configured — set elementCall.url in config.json.";
+		}
+		return null;
+	});
+
+	const [canJoin, setCanJoin] = createSignal(joinBlockReason() === null);
+
+	const activeFocus = createMemo((): LivekitTransport | null => {
+		if (status() !== "joined") return null;
+		const list = memberships();
+		// Pull the oldest member's transport when joining an in-progress call;
+		// fall back to our offered focus if we are the first or the oldest
+		// member's transport isn't LiveKit.
+		const oldest = list.reduce<CallMembership | null>((acc, m) => {
+			if (acc === null) return m;
+			return m.createdTs() < acc.createdTs() ? m : acc;
+		}, null);
+		if (oldest) {
+			const transport = oldest.getTransport(oldest);
+			if (transport && isLivekitTransport(transport)) {
+				return transport;
+			}
+		}
+		return foci.length > 0 ? foci[0] : null;
+	});
 
 	onMount(() => {
 		if (!room) {
@@ -75,7 +118,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		setSession(s);
 		setMemberships([...s.memberships]);
 		setStatus(s.isJoined() ? "joined" : "idle");
-		setCanJoin(foci.length > 0);
+		setCanJoin(joinBlockReason() === null);
 	});
 
 	createEffect(() => {
@@ -134,12 +177,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			return;
 		}
 		if (s.isJoined()) return;
-		if (foci.length === 0) {
-			setError(
-				new Error(
-					"No MatrixRTC foci available — set elementCall.url in config.",
-				),
-			);
+		const blockReason = joinBlockReason();
+		if (blockReason !== null) {
+			setError(new Error(blockReason));
 			setStatus("error");
 			return;
 		}
@@ -211,5 +251,14 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		}
 	});
 
-	return { status, memberships, error, canJoin, join, leave };
+	return {
+		status,
+		memberships,
+		error,
+		canJoin,
+		joinBlockReason,
+		activeFocus,
+		join,
+		leave,
+	};
 }
