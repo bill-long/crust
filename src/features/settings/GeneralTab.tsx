@@ -13,6 +13,49 @@ import { pushLocalUrlPreviewSetting } from "../room/urlPreviews/accountDataSync"
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 function MicDeviceSelect(): ReturnType<Component> {
+	return (
+		<MediaDeviceSelect
+			kind="audioinput"
+			settingKey="rtcMicDeviceId"
+			label="Microphone"
+			description="Input device used for native voice calls (preview)."
+			defaultOptionLabel="System default"
+			unknownLabelPrefix="Microphone"
+			permissionConstraints={{ audio: true }}
+			ariaLabel="Microphone device"
+		/>
+	);
+}
+
+function CamDeviceSelect(): ReturnType<Component> {
+	return (
+		<MediaDeviceSelect
+			kind="videoinput"
+			settingKey="rtcCamDeviceId"
+			label="Camera"
+			description="Camera used for native video calls (preview)."
+			defaultOptionLabel="System default"
+			unknownLabelPrefix="Camera"
+			permissionConstraints={{ video: true }}
+			ariaLabel="Camera device"
+		/>
+	);
+}
+
+interface MediaDeviceSelectProps {
+	kind: MediaDeviceKind;
+	settingKey: "rtcMicDeviceId" | "rtcCamDeviceId";
+	label: string;
+	description: string;
+	defaultOptionLabel: string;
+	unknownLabelPrefix: string;
+	permissionConstraints: MediaStreamConstraints;
+	ariaLabel: string;
+}
+
+function MediaDeviceSelect(
+	props: MediaDeviceSelectProps,
+): ReturnType<Component> {
 	const [devices, setDevices] = createSignal<MediaDeviceInfo[]>([]);
 	const [error, setError] = createSignal<string | null>(null);
 
@@ -24,7 +67,7 @@ function MicDeviceSelect(): ReturnType<Component> {
 		}
 		try {
 			const list = await navigator.mediaDevices.enumerateDevices();
-			setDevices(list.filter((d) => d.kind === "audioinput"));
+			setDevices(list.filter((d) => d.kind === props.kind));
 			setError(null);
 		} catch (e) {
 			setDevices([]);
@@ -34,7 +77,9 @@ function MicDeviceSelect(): ReturnType<Component> {
 
 	const grantAccess = async (): Promise<void> => {
 		try {
-			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			const stream = await navigator.mediaDevices.getUserMedia(
+				props.permissionConstraints,
+			);
 			// We only needed the permission grant — release the tracks immediately.
 			for (const track of stream.getTracks()) track.stop();
 			await refresh();
@@ -64,10 +109,8 @@ function MicDeviceSelect(): ReturnType<Component> {
 	return (
 		<div class="flex items-center justify-between gap-4 py-2">
 			<div class="min-w-0 flex-1">
-				<div class="text-sm font-medium text-text-primary">Microphone</div>
-				<div class="text-xs text-text-muted">
-					Input device used for native voice calls (preview).
-				</div>
+				<div class="text-sm font-medium text-text-primary">{props.label}</div>
+				<div class="text-xs text-text-muted">{props.description}</div>
 			</div>
 			<div class="flex items-center gap-2">
 				<Show when={labelsHidden()}>
@@ -80,18 +123,19 @@ function MicDeviceSelect(): ReturnType<Component> {
 					</button>
 				</Show>
 				<select
-					value={userSettings().rtcMicDeviceId}
+					value={userSettings()[props.settingKey]}
 					onChange={(e) =>
-						updateSetting("rtcMicDeviceId", e.currentTarget.value)
+						updateSetting(props.settingKey, e.currentTarget.value)
 					}
 					class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-					aria-label="Microphone device"
+					aria-label={props.ariaLabel}
 				>
-					<option value="">System default</option>
+					<option value="">{props.defaultOptionLabel}</option>
 					<For each={devices()}>
 						{(d) => (
 							<option value={d.deviceId}>
-								{d.label || `Microphone (${d.deviceId.slice(0, 6)}…)`}
+								{d.label ||
+									`${props.unknownLabelPrefix} (${d.deviceId.slice(0, 6)}…)`}
 							</option>
 						)}
 					</For>
@@ -199,6 +243,7 @@ const GeneralTab: Component = () => {
 			<section>
 				<SectionHeading>Voice & Video</SectionHeading>
 				<MicDeviceSelect />
+				<CamDeviceSelect />
 			</section>
 
 			{/* Privacy */}
