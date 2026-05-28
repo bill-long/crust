@@ -42,12 +42,24 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		elementCallUrl: props.elementCallUrl,
 	});
 
+	// Synchronously gates `enabled` while a Leave is in flight so the
+	// LiveKit effect can't re-enter the call between `livekit.disconnect()`
+	// resolving and `rtc.leave()` flipping its own status. Without this,
+	// a Matrix sync microtask landing in that window could update focus,
+	// fire the LiveKit hook's focus-change branch (which sees `enabled`
+	// still true because `rtc.status()` is still "joined"), and queue a
+	// fresh `doConnect` after the user clicked Leave. Must be declared
+	// before useLivekitRoom because the `enabled` memo reads it during
+	// synchronous setup (createMemo runs its computation once eagerly).
+	const [leaving, setLeaving] = createSignal(false);
+
 	const livekit = useLivekitRoom({
 		client,
 		focus: rtc.activeFocus,
 		// Only connect once we're actually joined; teardown if leaving/error.
 		enabled: createMemo(
-			() => rtc.status() === "joined" && rtc.activeFocus() !== null,
+			() =>
+				!leaving() && rtc.status() === "joined" && rtc.activeFocus() !== null,
 		),
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
@@ -61,8 +73,10 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	const requestClose = (): void => {
 		// While a leave is in flight, ignore close requests. If the leave
 		// fails server-side and the SDK reports we're still joined, the user
-		// needs the overlay (and its error surface) to retry.
-		if (rtc.status() === "leaving") return;
+		// needs the overlay (and its error surface) to retry. `leaving()`
+		// covers the window between `setLeaving(true)` and `rtc.status()`
+		// flipping to "leaving" (after `await livekit.disconnect()`).
+		if (leaving() || rtc.status() === "leaving") return;
 		if (rtc.status() === "joined" || rtc.status() === "joining") {
 			setConfirmClose(true);
 			return;
@@ -71,21 +85,37 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	};
 
 	const confirmLeave = async (): Promise<void> => {
-		// Eagerly disconnect LiveKit & stop the mic so the user gets instant
-		// silence even if Matrix leave is slow or fails server-side.
-		await livekit.disconnect();
-		await rtc.leave();
-		// rtc.leave() never rejects — it stores errors on rtc.error() and
-		// reverts status to "joined" only when the SDK still reports joined.
-		// Throw from here so ConfirmDialog keeps the dialog open and shows the
-		// error instead of silently unmounting the overlay while the call is
-		// live. For "error" (leave failed but session is no longer joined), we
-		// let the overlay close — there's nothing for the user to retry.
-		if (rtc.status() === "joined") {
-			throw new Error(rtc.error()?.message ?? "Leave failed.");
+		// Single-flight: a second click on "Leave" while the first call is still
+		// awaiting must not re-enter. rtc.leave() has a leavePending early-return,
+		// so a second invocation would fall through to props.onClose() and tear
+		// down the overlay even if the first attempt later fails and leaves the
+		// user joined.
+		if (leaving()) return;
+		// Flip `leaving` BEFORE any await so the LiveKit effect's disable
+		// branch fires synchronously (epoch-gated teardown) and the
+		// focus-change branch is unreachable until we finish. Defends
+		// against a focus/membership tick landing between the two awaits
+		// below from resurrecting the call.
+		setLeaving(true);
+		try {
+			// Eagerly disconnect LiveKit & stop the mic so the user gets instant
+			// silence even if Matrix leave is slow or fails server-side.
+			await livekit.disconnect();
+			await rtc.leave();
+			// rtc.leave() never rejects — it stores errors on rtc.error() and
+			// reverts status to "joined" only when the SDK still reports joined.
+			// Throw from here so ConfirmDialog keeps the dialog open and shows the
+			// error instead of silently unmounting the overlay while the call is
+			// live. For "error" (leave failed but session is no longer joined), we
+			// let the overlay close — there's nothing for the user to retry.
+			if (rtc.status() === "joined") {
+				throw new Error(rtc.error()?.message ?? "Leave failed.");
+			}
+			setConfirmClose(false);
+			props.onClose();
+		} finally {
+			setLeaving(false);
 		}
-		setConfirmClose(false);
-		props.onClose();
 	};
 
 	// Focus trap: keep keyboard users inside the dialog while it is open.
@@ -265,7 +295,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 								<button
 									type="button"
 									onClick={() => void confirmLeave()}
-									disabled={rtc.status() === "leaving"}
+									disabled={leaving() || rtc.status() === "leaving"}
 									class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
 								>
 									Leave call

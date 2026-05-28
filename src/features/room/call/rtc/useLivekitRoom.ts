@@ -104,6 +104,16 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	let room: LivekitRoom | null = null;
 	let attempt = 0;
 	let disposed = false;
+	// Number of explicit user-initiated `disconnect()` calls currently in
+	// flight. Held > 0 for the duration of teardown so a concurrent focus/
+	// membership update doesn't slip a reconnect into the focus-change
+	// branch while the user is on their way out. The consumer
+	// (`NativeCallView`) awaits `livekit.disconnect()` BEFORE `rtc.leave()`,
+	// so `enabled` (gated on `rtc.status()==="joined"`) is still true during
+	// the teardown — without this guard, focus churn can re-enter the call
+	// after the user clicked Leave. A counter (not a boolean) so overlapping
+	// disconnect calls don't clear the guard prematurely.
+	let explicitDisconnectDepth = 0;
 	const attachments = new Map<string, AttachedAudio>();
 
 	const detachAll = (): void => {
@@ -381,17 +391,27 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			setStatus("connected");
 		} catch (e) {
 			if (disposed || myAttempt !== attempt) return;
-			const err =
+			// Compute the final user-facing error BEFORE any await so a fresh
+			// `doConnect` that races in during teardown (which clears
+			// `error` via `setError(null)`) isn't subsequently clobbered by
+			// a stale post-await `setError(...)` from this catch.
+			const baseErr =
 				e instanceof Error
 					? e
 					: new Error(typeof e === "string" ? e : "Unknown LiveKit error");
-			setError(err);
+			const finalErr =
+				e instanceof LivekitJwtError
+					? new Error(`Could not get LiveKit token: ${e.message}`)
+					: baseErr;
+			setError(finalErr);
 			setStatus("error");
+			// Invalidate this attempt BEFORE teardown so any LiveKit events
+			// that fire during the async disconnect (track unsubscribed,
+			// participant disconnected) bail through `ifLive` and can't
+			// re-attach audio or re-populate participants after
+			// `detachAll()` / `resetCallDerivedState()` runs.
+			attempt++;
 			await teardown();
-			// Surface a friendlier message for the common JWT failure mode.
-			if (e instanceof LivekitJwtError) {
-				setError(new Error(`Could not get LiveKit token: ${e.message}`));
-			}
 		}
 	};
 
@@ -401,14 +421,63 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		on([opts.enabled, opts.focus], ([enabled, focus]) => {
 			if (disposed) return;
 			if (!enabled || focus === null) {
-				// Disable / no focus → tear down any live connection.
-				if (room || status() === "connecting") {
-					attempt += 1; // invalidate any in-flight attempt
+				// Disable / no focus → tear down any live connection. Catch
+				// "disconnecting" too so an in-flight focus-change teardown
+				// gets a final transition to "idle" rather than being left
+				// suspended with a stale status.
+				if (room || status() === "connecting" || status() === "disconnecting") {
+					const epoch = ++attempt;
 					setStatus("disconnecting");
 					void teardown().then(() => {
-						if (!disposed) setStatus("idle");
+						if (disposed) return;
+						// Bail if a later effect run or explicit disconnect()
+						// superseded us — without this guard, the late
+						// setStatus("idle") would clobber a freshly-started
+						// reconnect's "connecting" state and silently lie.
+						if (epoch !== attempt) return;
+						setStatus("idle");
 					});
 				}
+				return;
+			}
+			// `enabled` stayed true but `focus` changed (or another connect /
+			// teardown is in flight) — tear down the existing room before
+			// starting a new attempt so we don't orphan a LiveKit connection
+			// with attached audio elements pointing at the previous focus.
+			//
+			// If an explicit user-initiated `disconnect()` is in flight, bail:
+			// the consumer awaits livekit.disconnect() BEFORE rtc.leave(), so
+			// `enabled` is still true here, and re-entering the call via a
+			// late focus/membership tick would undo the user's Leave click.
+			if (explicitDisconnect()) return;
+			// We set status to "disconnecting" (mirroring the disable branch)
+			// so a subsequent disable transition can observe in-flight
+			// teardown via its guard. Capture `epoch = ++attempt` and re-check
+			// `epoch === attempt` inside .then() so a later effect run or an
+			// explicit `disconnect()` (both of which bump `attempt`) wins
+			// over this queued reconnect — without that check, the queued
+			// `doConnect` would resurrect a call the user explicitly left.
+			if (room || status() === "connecting" || status() === "disconnecting") {
+				const epoch = ++attempt;
+				setStatus("disconnecting");
+				const targetFocus = focus;
+				void teardown().then(() => {
+					if (disposed) return;
+					if (epoch !== attempt) return; // superseded by another caller
+					// Compare on `livekit_service_url` rather than reference so
+					// a membership-update tick that re-emits a referentially-new
+					// `LivekitTransport` for the same focus doesn't flip us to
+					// "idle" and silently skip the reconnect.
+					const current = opts.focus();
+					if (
+						opts.enabled() &&
+						current?.livekit_service_url === targetFocus.livekit_service_url
+					) {
+						void doConnect(targetFocus);
+					} else {
+						setStatus("idle");
+					}
+				});
 				return;
 			}
 			void doConnect(focus);
@@ -432,22 +501,43 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		}
 		// Optimistic UI update — the LiveKit call below settles asynchronously.
 		setLocalMutedSignal(muted);
+		// Snapshot the current attempt epoch so a teardown/reconnect that
+		// races in during the SDK round-trip doesn't have its
+		// `resetCallDerivedState()` clobbered by a stale post-await write,
+		// and we don't issue setError against a dead room.
+		const myAttempt = attempt;
 		try {
 			await r.localParticipant.setMicrophoneEnabled(!muted);
+			if (disposed || myAttempt !== attempt || room !== r) return;
 			snapshotParticipants(r);
 		} catch (e) {
+			if (disposed || myAttempt !== attempt || room !== r) return;
 			// Revert on failure.
 			setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
 			setError(e instanceof Error ? e : new Error(String(e)));
 		}
 	};
 
+	const explicitDisconnect = (): boolean => explicitDisconnectDepth > 0;
+
 	const disconnect = async (): Promise<void> => {
-		attempt += 1;
-		if (status() === "idle") return;
-		setStatus("disconnecting");
-		await teardown();
-		if (!disposed) setStatus("idle");
+		// Bump the depth BEFORE the idle short-circuit so that a focus/membership
+		// tick racing in immediately after this call (between our attempt bump
+		// and a subsequent createEffect run) still sees the explicit-disconnect
+		// guard and bails out of the focus-change branch. Without this, callers
+		// that invoke disconnect() while already idle would invalidate the epoch
+		// (via attempt++) but leave explicitDisconnect() returning false, opening
+		// a small window where a stale focus change could queue a reconnect.
+		explicitDisconnectDepth += 1;
+		try {
+			attempt += 1;
+			if (status() === "idle") return;
+			setStatus("disconnecting");
+			await teardown();
+			if (!disposed) setStatus("idle");
+		} finally {
+			explicitDisconnectDepth -= 1;
+		}
 	};
 
 	const resumeAudio = async (): Promise<void> => {
