@@ -1,5 +1,6 @@
 import {
 	type Component,
+	createMemo,
 	createSignal,
 	For,
 	onCleanup,
@@ -8,7 +9,9 @@ import {
 } from "solid-js";
 import { useClient } from "../../../../client/client";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
+import { userSettings } from "../../../../stores/settings";
 import { ConfirmDialog } from "../../settings/ConfirmDialog";
+import { useLivekitRoom } from "./useLivekitRoom";
 import { useRtcSession } from "./useRtcSession";
 
 interface NativeCallViewProps {
@@ -39,6 +42,47 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		elementCallUrl: props.elementCallUrl,
 	});
 
+	// Synchronously gates `enabled` while a Leave is in flight so the
+	// LiveKit effect can't re-enter the call between `livekit.disconnect()`
+	// resolving and `rtc.leave()` flipping its own status. Without this,
+	// a Matrix sync microtask landing in that window could update focus,
+	// fire the LiveKit hook's focus-change branch (which sees `enabled`
+	// still true because `rtc.status()` is still "joined"), and queue a
+	// fresh `doConnect` after the user clicked Leave. Must be declared
+	// before useLivekitRoom because the `enabled` memo reads it during
+	// synchronous setup (createMemo runs its computation once eagerly).
+	//
+	// `leaving` is the single-flight guard for `confirmLeave` (cleared in
+	// its finally so the user can retry after a failure). `leaveRequested`
+	// is a sticky suppressor that stays true after a failed leave so the
+	// LiveKit hook does NOT silently reconnect the mic while the error
+	// dialog is still on screen. It is cleared only on a successful leave
+	// (component unmount) or when the user explicitly dismisses the
+	// confirmation dialog with "Stay".
+	const [leaving, setLeaving] = createSignal(false);
+	const [leaveRequested, setLeaveRequested] = createSignal(false);
+	// Captures the error from a failed direct-button leave so it can be
+	// surfaced inside the ConfirmDialog body (which has a backdrop that
+	// obscures the underlying call view). Cleared on dialog dismiss and at
+	// the start of every retry so it does not duplicate ConfirmDialog's
+	// own internal handleConfirm error slot.
+	const [leaveError, setLeaveError] = createSignal<Error | null>(null);
+
+	const livekit = useLivekitRoom({
+		client,
+		focus: rtc.activeFocus,
+		// Only connect once we're actually joined; teardown if leaving/error.
+		enabled: createMemo(
+			() =>
+				!leaving() &&
+				!leaveRequested() &&
+				rtc.status() === "joined" &&
+				rtc.activeFocus() !== null,
+		),
+		memberships: rtc.memberships,
+		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
+	});
+
 	const [confirmClose, setConfirmClose] = createSignal(false);
 	let dialogRef: HTMLDivElement | undefined;
 	let closeButtonRef: HTMLButtonElement | undefined;
@@ -47,8 +91,10 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	const requestClose = (): void => {
 		// While a leave is in flight, ignore close requests. If the leave
 		// fails server-side and the SDK reports we're still joined, the user
-		// needs the overlay (and its error surface) to retry.
-		if (rtc.status() === "leaving") return;
+		// needs the overlay (and its error surface) to retry. `leaving()`
+		// covers the window between `setLeaving(true)` and `rtc.status()`
+		// flipping to "leaving" (after `await livekit.disconnect()`).
+		if (leaving() || rtc.status() === "leaving") return;
 		if (rtc.status() === "joined" || rtc.status() === "joining") {
 			setConfirmClose(true);
 			return;
@@ -57,18 +103,49 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	};
 
 	const confirmLeave = async (): Promise<void> => {
-		await rtc.leave();
-		// rtc.leave() never rejects — it stores errors on rtc.error() and
-		// reverts status to "joined" only when the SDK still reports joined.
-		// Throw from here so ConfirmDialog keeps the dialog open and shows the
-		// error instead of silently unmounting the overlay while the call is
-		// live. For "error" (leave failed but session is no longer joined), we
-		// let the overlay close — there's nothing for the user to retry.
-		if (rtc.status() === "joined") {
-			throw new Error(rtc.error()?.message ?? "Leave failed.");
+		// Single-flight: a second click on "Leave" while the first call is still
+		// awaiting must not re-enter. rtc.leave() has a leavePending early-return,
+		// so a second invocation would fall through to props.onClose() and tear
+		// down the overlay even if the first attempt later fails and leaves the
+		// user joined.
+		if (leaving()) return;
+		// Any retry clears the previous-attempt banner so we don't render two
+		// alert nodes side-by-side once ConfirmDialog's internal handleConfirm
+		// catch fills its own error slot.
+		setLeaveError(null);
+		// Flip `leaving` BEFORE any await so the LiveKit effect's disable
+		// branch fires synchronously (epoch-gated teardown) and the
+		// focus-change branch is unreachable until we finish. Defends
+		// against a focus/membership tick landing between the two awaits
+		// below from resurrecting the call. `leaveRequested` is sticky and
+		// keeps LiveKit suppressed even after `leaving` clears in finally
+		// — so a failed leave (status stays "joined") does NOT silently
+		// resume mic publishing behind the user. The recovery path is the
+		// ConfirmDialog's "Stay" button, which clears `leaveRequested` and
+		// re-enables LiveKit. The direct "Leave call" button's onClick
+		// handler opens the dialog on failure so this recovery path is
+		// always available to the user.
+		setLeaving(true);
+		setLeaveRequested(true);
+		try {
+			// Eagerly disconnect LiveKit & stop the mic so the user gets instant
+			// silence even if Matrix leave is slow or fails server-side.
+			await livekit.disconnect();
+			await rtc.leave();
+			// rtc.leave() never rejects — it stores errors on rtc.error() and
+			// reverts status to "joined" only when the SDK still reports joined.
+			// Throw from here so ConfirmDialog keeps the dialog open and shows the
+			// error instead of silently unmounting the overlay while the call is
+			// live. For "error" (leave failed but session is no longer joined), we
+			// let the overlay close — there's nothing for the user to retry.
+			if (rtc.status() === "joined") {
+				throw new Error(rtc.error()?.message ?? "Leave failed.");
+			}
+			setConfirmClose(false);
+			props.onClose();
+		} finally {
+			setLeaving(false);
 		}
-		setConfirmClose(false);
-		props.onClose();
 	};
 
 	// Focus trap: keep keyboard users inside the dialog while it is open.
@@ -195,18 +272,82 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 					</div>
 				</div>
 
-				<div class="flex gap-2">
+				<div class="flex flex-wrap items-center gap-2">
 					<Show
 						when={rtc.status() !== "joined" && rtc.status() !== "leaving"}
 						fallback={
-							<button
-								type="button"
-								onClick={() => void rtc.leave()}
-								disabled={rtc.status() === "leaving"}
-								class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
-							>
-								Leave call
-							</button>
+							<>
+								<button
+									type="button"
+									onClick={() =>
+										void livekit.setLocalMuted(!livekit.localMuted())
+									}
+									disabled={
+										livekit.status() !== "connecting" &&
+										livekit.status() !== "connected"
+									}
+									aria-pressed={livekit.localMuted()}
+									class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-semibold text-text-emphasis transition-colors hover:bg-surface-3 disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
+									title={livekit.localMuted() ? "Unmute" : "Mute"}
+									aria-label={
+										livekit.localMuted()
+											? "Unmute microphone"
+											: "Mute microphone"
+									}
+								>
+									<svg
+										class="h-4 w-4"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<Show
+											when={livekit.localMuted()}
+											fallback={
+												<>
+													<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+													<path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+													<line x1="12" y1="19" x2="12" y2="23" />
+													<line x1="8" y1="23" x2="16" y2="23" />
+												</>
+											}
+										>
+											<line x1="1" y1="1" x2="23" y2="23" />
+											<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+											<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+											<line x1="12" y1="19" x2="12" y2="23" />
+											<line x1="8" y1="23" x2="16" y2="23" />
+										</Show>
+									</svg>
+									{livekit.localMuted() ? "Unmute" : "Mute"}
+								</button>
+								<button
+									type="button"
+									onClick={() => {
+										confirmLeave().catch((err: unknown) => {
+											setLeaveError(
+												err instanceof Error ? err : new Error(String(err)),
+											);
+											// Failed direct leave: open the confirm
+											// dialog so the user has explicit Retry
+											// (Leave call) and recovery (Stay) actions.
+											// The dialog body surfaces `leaveError`
+											// inside the modal so the user sees what
+											// went wrong without it being obscured by
+											// the dialog backdrop.
+											setConfirmClose(true);
+										});
+									}}
+									disabled={leaving() || rtc.status() === "leaving"}
+									class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
+								>
+									Leave call
+								</button>
+							</>
 						}
 					>
 						<button
@@ -220,34 +361,114 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 					</Show>
 				</div>
 
-				<Show when={!rtc.canJoin() && rtc.status() !== "error"}>
+				<Show when={!rtc.canJoin() && rtc.joinBlockReason() !== null}>
 					<div
 						role="status"
 						aria-live="polite"
 						class="rounded border border-warning-border bg-warning-bg/60 p-3 text-xs text-warning-text"
 					>
-						Cannot join: no MatrixRTC foci configured. Set
-						<code class="mx-1">elementCall.url</code> in config.json.
+						{rtc.joinBlockReason()}
+					</div>
+				</Show>
+
+				<Show when={livekit.error() !== null}>
+					<div
+						role="alert"
+						class="rounded border border-danger-border bg-danger-bg/60 p-3 text-xs text-danger-text"
+					>
+						Audio: {livekit.error()?.message}
+					</div>
+				</Show>
+
+				<Show when={livekit.audioBlocked()}>
+					<div
+						role="status"
+						aria-live="polite"
+						class="flex items-center justify-between gap-3 rounded border border-warning-border bg-warning-bg/60 p-3 text-xs text-warning-text"
+					>
+						<span>Your browser blocked audio playback. Click to enable.</span>
+						<button
+							type="button"
+							onClick={() => void livekit.resumeAudio()}
+							class="rounded bg-warning-text px-2 py-1 text-xs font-semibold text-warning-bg"
+						>
+							Enable audio
+						</button>
 					</div>
 				</Show>
 
 				<div class="rounded border border-border-subtle bg-surface-1 p-4">
-					<div class="text-xs uppercase tracking-wide text-text-disabled">
-						Participants ({rtc.memberships().length})
+					<div class="flex items-center justify-between">
+						<div class="text-xs uppercase tracking-wide text-text-disabled">
+							Participants (
+							{livekit.participants().length || rtc.memberships().length})
+						</div>
+						<Show when={livekit.status() !== "idle"}>
+							<div class="text-[10px] uppercase tracking-wide text-text-disabled">
+								Audio: {livekit.status()}
+							</div>
+						</Show>
 					</div>
 					<Show
-						when={rtc.memberships().length > 0}
+						when={livekit.participants().length > 0}
 						fallback={
-							<div class="mt-2 text-sm text-text-disabled">
-								Nobody else has joined yet.
-							</div>
+							<Show
+								when={rtc.memberships().length > 0}
+								fallback={
+									<div class="mt-2 text-sm text-text-disabled">
+										Nobody else has joined yet.
+									</div>
+								}
+							>
+								<ul class="mt-2 space-y-1 text-sm text-text-emphasis">
+									<For each={rtc.memberships()}>
+										{(m) => (
+											<li class="font-mono text-xs">
+												{m.userId} · device {m.deviceId}
+											</li>
+										)}
+									</For>
+								</ul>
+							</Show>
 						}
 					>
-						<ul class="mt-2 space-y-1 text-sm text-text-emphasis">
-							<For each={rtc.memberships()}>
-								{(m) => (
-									<li class="font-mono text-xs">
-										{m.userId} · device {m.deviceId}
+						<ul class="mt-2 space-y-1.5 text-sm text-text-emphasis">
+							<For each={livekit.participants()}>
+								{(p) => (
+									<li class="flex items-center gap-2">
+										<span
+											aria-hidden="true"
+											class="inline-block h-2 w-2 shrink-0 rounded-full"
+											classList={{
+												"bg-success": p.isSpeaking,
+												"bg-surface-3": !p.isSpeaking,
+											}}
+										/>
+										<span class="min-w-0 flex-1 truncate">
+											{p.displayName}
+											<Show when={p.isLocal}>
+												<span class="ml-1 text-xs text-text-disabled">
+													(you)
+												</span>
+											</Show>
+										</span>
+										<Show when={p.isMuted}>
+											<svg
+												class="h-3.5 w-3.5 text-text-disabled"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												role="img"
+												aria-label="Microphone muted"
+											>
+												<line x1="1" y1="1" x2="23" y2="23" />
+												<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+												<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+											</svg>
+										</Show>
 									</li>
 								)}
 							</For>
@@ -256,16 +477,39 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 				</div>
 
 				<p class="text-xs text-text-disabled">
-					Phase 1 preview: membership-only join (no audio/video). See issue #122
-					for the multi-phase plan.
+					Phase 2 preview: audio only, unencrypted rooms. See issue #122 for the
+					multi-phase plan.
 				</p>
 			</div>
 
 			<ConfirmDialog
 				open={confirmClose}
-				onClose={() => setConfirmClose(false)}
+				onClose={() => {
+					setConfirmClose(false);
+					// User dismissed the dialog (e.g. clicked "Stay" after a
+					// failed leave). Clear the sticky suppressor so the LiveKit
+					// hook can reconnect if they are still joined, and clear
+					// any captured direct-button leave error.
+					setLeaveRequested(false);
+					setLeaveError(null);
+				}}
 				title="Leave call?"
-				body="Closing this panel will end your participation in the call. You can rejoin from the room header at any time."
+				body={
+					<>
+						Closing this panel will end your participation in the call. You can
+						rejoin from the room header at any time.
+						<Show when={leaveError()}>
+							{(err) => (
+								<p
+									class="mt-3 rounded bg-danger-bg/30 px-3 py-1.5 text-xs text-danger-text"
+									role="alert"
+								>
+									Previous leave attempt failed: {err().message}
+								</p>
+							)}
+						</Show>
+					</>
+				}
 				confirmLabel="Leave call"
 				cancelLabel="Stay"
 				destructive

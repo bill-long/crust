@@ -19,6 +19,12 @@ export interface UserSettings {
 	 * `disable` flag (inverted).
 	 */
 	urlPreviews: boolean;
+	/**
+	 * `MediaDeviceInfo.deviceId` to use as the native RTC microphone, or
+	 * empty string for the system default. Consumed by the Phase 2 LiveKit
+	 * room wrapper (#122).
+	 */
+	rtcMicDeviceId: string;
 }
 
 const defaults: UserSettings = {
@@ -28,6 +34,7 @@ const defaults: UserSettings = {
 	desktopNotifications: false,
 	notificationSound: true,
 	urlPreviews: true,
+	rtcMicDeviceId: "",
 };
 
 function loadBool(
@@ -72,6 +79,10 @@ function load(): UserSettings {
 				defaults.notificationSound,
 			),
 			urlPreviews: loadBool(obj, "urlPreviews", defaults.urlPreviews),
+			rtcMicDeviceId:
+				typeof obj.rtcMicDeviceId === "string"
+					? obj.rtcMicDeviceId
+					: defaults.rtcMicDeviceId,
 		};
 	} catch {
 		return { ...defaults };
