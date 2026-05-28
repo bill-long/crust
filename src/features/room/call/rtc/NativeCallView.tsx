@@ -252,7 +252,10 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 									onClick={() =>
 										void livekit.setLocalMuted(!livekit.localMuted())
 									}
-									disabled={livekit.status() !== "connected"}
+									disabled={
+										livekit.status() !== "connecting" &&
+										livekit.status() !== "connected"
+									}
 									aria-pressed={livekit.localMuted()}
 									class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-semibold text-text-emphasis transition-colors hover:bg-surface-3 disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
 									title={livekit.localMuted() ? "Unmute" : "Mute"}
