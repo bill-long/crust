@@ -18,6 +18,7 @@ function MicDeviceSelect(): ReturnType<Component> {
 
 	const refresh = async (): Promise<void> => {
 		if (typeof navigator === "undefined" || !navigator.mediaDevices) {
+			setDevices([]);
 			setError("MediaDevices API not available in this browser.");
 			return;
 		}
@@ -26,6 +27,7 @@ function MicDeviceSelect(): ReturnType<Component> {
 			setDevices(list.filter((d) => d.kind === "audioinput"));
 			setError(null);
 		} catch (e) {
+			setDevices([]);
 			setError(e instanceof Error ? e.message : String(e));
 		}
 	};
@@ -37,6 +39,7 @@ function MicDeviceSelect(): ReturnType<Component> {
 			for (const track of stream.getTracks()) track.stop();
 			await refresh();
 		} catch (e) {
+			setDevices([]);
 			setError(e instanceof Error ? e.message : String(e));
 		}
 	};
