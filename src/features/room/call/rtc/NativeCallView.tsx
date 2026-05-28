@@ -262,7 +262,8 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		// Any retry clears the previous-attempt banner so we don't render two
 		// alert nodes side-by-side once ConfirmDialog's internal handleConfirm
 		// catch fills its own error slot.
-		setLeaveError(null); // Flip `leaving` BEFORE any await so the LiveKit effect's disable
+		setLeaveError(null);
+		// Flip `leaving` BEFORE any await so the LiveKit effect's disable
 		// branch fires synchronously (epoch-gated teardown) and the
 		// focus-change branch is unreachable until we finish. Defends
 		// against a focus/membership tick landing between the two awaits
