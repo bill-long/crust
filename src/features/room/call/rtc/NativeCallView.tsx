@@ -51,7 +51,22 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	// fresh `doConnect` after the user clicked Leave. Must be declared
 	// before useLivekitRoom because the `enabled` memo reads it during
 	// synchronous setup (createMemo runs its computation once eagerly).
+	//
+	// `leaving` is the single-flight guard for `confirmLeave` (cleared in
+	// its finally so the user can retry after a failure). `leaveRequested`
+	// is a sticky suppressor that stays true after a failed leave so the
+	// LiveKit hook does NOT silently reconnect the mic while the error
+	// dialog is still on screen. It is cleared only on a successful leave
+	// (component unmount) or when the user explicitly dismisses the
+	// confirmation dialog with "Stay".
 	const [leaving, setLeaving] = createSignal(false);
+	const [leaveRequested, setLeaveRequested] = createSignal(false);
+	// Captures the error from a failed direct-button leave so it can be
+	// surfaced inside the ConfirmDialog body (which has a backdrop that
+	// obscures the underlying call view). Cleared on dialog dismiss and at
+	// the start of every retry so it does not duplicate ConfirmDialog's
+	// own internal handleConfirm error slot.
+	const [leaveError, setLeaveError] = createSignal<Error | null>(null);
 
 	const livekit = useLivekitRoom({
 		client,
@@ -59,7 +74,10 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		// Only connect once we're actually joined; teardown if leaving/error.
 		enabled: createMemo(
 			() =>
-				!leaving() && rtc.status() === "joined" && rtc.activeFocus() !== null,
+				!leaving() &&
+				!leaveRequested() &&
+				rtc.status() === "joined" &&
+				rtc.activeFocus() !== null,
 		),
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
@@ -91,12 +109,24 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		// down the overlay even if the first attempt later fails and leaves the
 		// user joined.
 		if (leaving()) return;
+		// Any retry clears the previous-attempt banner so we don't render two
+		// alert nodes side-by-side once ConfirmDialog's internal handleConfirm
+		// catch fills its own error slot.
+		setLeaveError(null);
 		// Flip `leaving` BEFORE any await so the LiveKit effect's disable
 		// branch fires synchronously (epoch-gated teardown) and the
 		// focus-change branch is unreachable until we finish. Defends
 		// against a focus/membership tick landing between the two awaits
-		// below from resurrecting the call.
+		// below from resurrecting the call. `leaveRequested` is sticky and
+		// keeps LiveKit suppressed even after `leaving` clears in finally
+		// — so a failed leave (status stays "joined") does NOT silently
+		// resume mic publishing behind the user. The recovery path is the
+		// ConfirmDialog's "Stay" button, which clears `leaveRequested` and
+		// re-enables LiveKit. The direct "Leave call" button's onClick
+		// handler opens the dialog on failure so this recovery path is
+		// always available to the user.
 		setLeaving(true);
+		setLeaveRequested(true);
 		try {
 			// Eagerly disconnect LiveKit & stop the mic so the user gets instant
 			// silence even if Matrix leave is slow or fails server-side.
@@ -297,7 +327,21 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 								</button>
 								<button
 									type="button"
-									onClick={() => void confirmLeave()}
+									onClick={() => {
+										confirmLeave().catch((err: unknown) => {
+											setLeaveError(
+												err instanceof Error ? err : new Error(String(err)),
+											);
+											// Failed direct leave: open the confirm
+											// dialog so the user has explicit Retry
+											// (Leave call) and recovery (Stay) actions.
+											// The dialog body surfaces `leaveError`
+											// inside the modal so the user sees what
+											// went wrong without it being obscured by
+											// the dialog backdrop.
+											setConfirmClose(true);
+										});
+									}}
 									disabled={leaving() || rtc.status() === "leaving"}
 									class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
 								>
@@ -440,9 +484,32 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 
 			<ConfirmDialog
 				open={confirmClose}
-				onClose={() => setConfirmClose(false)}
+				onClose={() => {
+					setConfirmClose(false);
+					// User dismissed the dialog (e.g. clicked "Stay" after a
+					// failed leave). Clear the sticky suppressor so the LiveKit
+					// hook can reconnect if they are still joined, and clear
+					// any captured direct-button leave error.
+					setLeaveRequested(false);
+					setLeaveError(null);
+				}}
 				title="Leave call?"
-				body="Closing this panel will end your participation in the call. You can rejoin from the room header at any time."
+				body={
+					<>
+						Closing this panel will end your participation in the call. You can
+						rejoin from the room header at any time.
+						<Show when={leaveError()}>
+							{(err) => (
+								<p
+									class="mt-3 rounded bg-danger-bg/30 px-3 py-1.5 text-xs text-danger-text"
+									role="alert"
+								>
+									Previous leave attempt failed: {err().message}
+								</p>
+							)}
+						</Show>
+					</>
+				}
 				confirmLabel="Leave call"
 				cancelLabel="Stay"
 				destructive
