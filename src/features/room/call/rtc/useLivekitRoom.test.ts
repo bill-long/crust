@@ -3,7 +3,7 @@ import type {
 	CallMembership,
 	LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
-import { createSignal } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted mocks — vi.mock factories run before module imports.
@@ -15,10 +15,12 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 	const roomFactory = {
 		current: null as null | (() => unknown),
 		callCount: 0,
+		lastOptions: null as unknown,
 	};
 	class MockRoom {
-		constructor() {
+		constructor(options?: unknown) {
 			roomFactory.callCount += 1;
+			roomFactory.lastOptions = options;
 			if (!roomFactory.current) {
 				throw new Error("roomFactory.current not set by test");
 			}
@@ -69,6 +71,7 @@ interface FakeRoom {
 	off: ReturnType<typeof vi.fn>;
 	emit: (event: string, ...args: unknown[]) => void;
 	startAudio: ReturnType<typeof vi.fn>;
+	setE2EEEnabled: ReturnType<typeof vi.fn>;
 	localParticipant: {
 		identity: string;
 		isMicrophoneEnabled: boolean;
@@ -85,6 +88,7 @@ interface FakeRoom {
 function createFakeRoom(opts?: {
 	connectImpl?: () => Promise<void>;
 	enableMicImpl?: () => Promise<void>;
+	setE2EEEnabledImpl?: (enabled: boolean) => Promise<void>;
 }): FakeRoom {
 	const listeners = new Map<string, Set<Listener>>();
 	const localParticipant = {
@@ -121,6 +125,7 @@ function createFakeRoom(opts?: {
 			for (const cb of listeners.get(event) ?? []) cb(...args);
 		},
 		startAudio: vi.fn(async () => {}),
+		setE2EEEnabled: vi.fn(opts?.setE2EEEnabledImpl ?? (async () => {})),
 		localParticipant,
 		remoteParticipants: new Map(),
 		activeSpeakers: [],
@@ -156,6 +161,7 @@ const livekitFocus: LivekitTransport = {
 beforeEach(() => {
 	roomFactory.current = null;
 	roomFactory.callCount = 0;
+	roomFactory.lastOptions = null;
 	jwtMock.mockReset();
 	jwtMock.mockResolvedValue({ url: "wss://sfu", jwt: "JWT" });
 });
@@ -319,6 +325,52 @@ describe("useLivekitRoom", () => {
 		await result.disconnect();
 		expect(fakeRoom.disconnect).toHaveBeenCalled();
 		expect(result.status()).toBe("idle");
+	});
+
+	it("teardownComplete resolves AFTER the cleanup teardown finishes disconnect", async () => {
+		const fakeRoom = createFakeRoom();
+		// Hold disconnect open so we can observe that teardownComplete is
+		// still pending while r.disconnect() hasn't resolved.
+		let releaseDisconnect: () => void = () => {};
+		const disconnectGate = new Promise<void>((res) => {
+			releaseDisconnect = res;
+		});
+		fakeRoom.disconnect.mockImplementation(async () => {
+			await disconnectGate;
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		let api: ReturnType<typeof useLivekitRoom> | null = null;
+		const dispose = createRoot((d) => {
+			api = useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			});
+			return d;
+		});
+		// biome-ignore lint/style/noNonNullAssertion: assigned synchronously in createRoot
+		await waitFor(() => api!.status() === "connected");
+		// Trigger the cleanup branch (which sets teardownPromise = teardown())
+		dispose();
+		// biome-ignore lint/style/noNonNullAssertion: assigned synchronously in createRoot
+		const tearPromise = api!.teardownComplete();
+		// Race: teardownComplete should NOT resolve while disconnect is held.
+		let resolved = false;
+		void tearPromise.then(() => {
+			resolved = true;
+		});
+		await new Promise((r) => setTimeout(r, 5));
+		expect(resolved).toBe(false);
+		// Release disconnect; teardownComplete must now resolve.
+		releaseDisconnect();
+		await tearPromise;
+		expect(resolved).toBe(true);
+		expect(fakeRoom.disconnect).toHaveBeenCalled();
 	});
 
 	it("resolves participant display name via membership rtcBackendIdentity", async () => {
@@ -711,5 +763,188 @@ describe("useLivekitRoom", () => {
 			{ deviceId: undefined },
 		);
 		expect(result.localCamEnabled()).toBe(false);
+	});
+
+	describe("Phase 4 E2EE wiring", () => {
+		const fakeE2EECtx = (): {
+			ctx: import("./rtcE2EEBridge").RtcE2EEContext;
+			e2eeOptions: { keyProvider: never; worker: never };
+			release: ReturnType<typeof vi.fn>;
+			bindRoom: ReturnType<typeof vi.fn>;
+		} => {
+			const e2eeOptions = {
+				keyProvider: { __tag: "kp" } as never,
+				worker: { __tag: "w" } as never,
+			};
+			const release = vi.fn();
+			const bindRoom = vi.fn(() => ({ e2eeOptions, release }));
+			const ctx = {
+				attach: () => () => {},
+				reemit: () => {},
+				bindRoom,
+				dispose: () => {},
+			} as unknown as import("./rtcE2EEBridge").RtcE2EEContext;
+			return { ctx, e2eeOptions, release, bindRoom };
+		};
+
+		it("constructs Room with e2ee options from a fresh per-Room binding", async () => {
+			const fakeRoom = createFakeRoom();
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { ctx, e2eeOptions, bindRoom } = fakeE2EECtx();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					loadLivekit,
+					e2ee: () => ctx,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			const opts = roomFactory.lastOptions as { e2ee?: unknown };
+			expect(opts?.e2ee).toBe(e2eeOptions);
+			expect(bindRoom).toHaveBeenCalledTimes(1);
+		});
+
+		it("releases the binding AFTER room.disconnect on teardown", async () => {
+			const fakeRoom = createFakeRoom();
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { ctx, release } = fakeE2EECtx();
+			const [enabled, setEnabled] = createSignal(true);
+			renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					loadLivekit,
+					e2ee: () => ctx,
+				}),
+			);
+			await waitFor(() => fakeRoom.connect.mock.calls.length === 1);
+			setEnabled(false);
+			await waitFor(() => release.mock.calls.length === 1);
+			const disconnectOrder = fakeRoom.disconnect.mock.invocationCallOrder[0];
+			const releaseOrder = release.mock.invocationCallOrder[0];
+			expect(disconnectOrder).toBeLessThan(releaseOrder);
+		});
+
+		it("awaits setE2EEEnabled(true) BEFORE room.connect()", async () => {
+			const fakeRoom = createFakeRoom();
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { ctx } = fakeE2EECtx();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					loadLivekit,
+					e2ee: () => ctx,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			expect(fakeRoom.setE2EEEnabled).toHaveBeenCalledWith(true);
+			const e2eeOrder = fakeRoom.setE2EEEnabled.mock.invocationCallOrder[0];
+			const connectOrder = fakeRoom.connect.mock.invocationCallOrder[0];
+			expect(e2eeOrder).toBeLessThan(connectOrder);
+		});
+
+		it("aborts connect when disabled flips false mid setE2EEEnabled", async () => {
+			let releaseSetE2EE: (() => void) | undefined;
+			const fakeRoom = createFakeRoom({
+				setE2EEEnabledImpl: () =>
+					new Promise<void>((res) => {
+						releaseSetE2EE = res;
+					}),
+			});
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const [enabled, setEnabled] = createSignal(true);
+			const { ctx, release } = fakeE2EECtx();
+			renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					loadLivekit,
+					e2ee: () => ctx,
+				}),
+			);
+			await waitFor(() => fakeRoom.setE2EEEnabled.mock.calls.length === 1);
+			setEnabled(false);
+			releaseSetE2EE?.();
+			await flush();
+			await flush();
+			expect(fakeRoom.connect).not.toHaveBeenCalled();
+			expect(
+				fakeRoom.localParticipant.setMicrophoneEnabled,
+			).not.toHaveBeenCalled();
+			// The stale-attempt arm in useLivekitRoom MUST release the
+			// per-Room binding it created — otherwise a superseded
+			// connect leaks its keyProvider+worker pair.
+			expect(release).toHaveBeenCalledTimes(1);
+		});
+
+		it("releases the binding when the Room emits an unsolicited Disconnected", async () => {
+			const fakeRoom = createFakeRoom();
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { ctx, release } = fakeE2EECtx();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					loadLivekit,
+					e2ee: () => ctx,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			expect(release).not.toHaveBeenCalled();
+			// Simulate the SFU dropping the websocket without us asking.
+			// If the Disconnected handler doesn't release the binding,
+			// the next connect would overwrite `binding` and the
+			// keyProvider+worker pair would leak.
+			fakeRoom.emit("disconnected");
+			expect(release).toHaveBeenCalledTimes(1);
+		});
+
+		it("does not call setE2EEEnabled when no bridge is provided", async () => {
+			const fakeRoom = createFakeRoom();
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			expect(fakeRoom.setE2EEEnabled).not.toHaveBeenCalled();
+			const opts = roomFactory.lastOptions as { e2ee?: unknown };
+			expect(opts?.e2ee).toBeUndefined();
+		});
 	});
 });
