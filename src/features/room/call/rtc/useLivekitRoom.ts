@@ -266,7 +266,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					deviceId: opts.audioDeviceId() || undefined,
 				},
 			});
-			// participant/track events for a call already in progress.
 			// Register listeners BEFORE connect so we don't miss the initial
 			// participant/track events for a call already in progress.
 			// All handlers below capture `myAttempt` and bail when this
