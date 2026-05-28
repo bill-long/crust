@@ -1,5 +1,4 @@
-import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
-import { RoomStateEvent } from "matrix-js-sdk";
+import type { MatrixClient } from "matrix-js-sdk";
 import type {
 	CallMembership,
 	LivekitTransport,
@@ -18,6 +17,7 @@ import {
 	onMount,
 } from "solid-js";
 import { buildFallbackLivekitFoci } from "./discoverFoci";
+import type { RtcE2EEContext } from "./rtcE2EEBridge";
 
 export type RtcStatus = "idle" | "joining" | "joined" | "leaving" | "error";
 
@@ -27,14 +27,26 @@ export interface UseRtcSessionOptions {
 	roomId: string;
 	/** Operator-deployed Element Call URL — feeds Phase-1 foci fallback. */
 	elementCallUrl: string;
+	/**
+	 * Phase 4 E2EE bridge. When present and non-null, the hook attaches
+	 * the bridge listener BEFORE `joinRoomSession`, flips
+	 * `manageMediaKeys: true` so the SDK runs the to-device key
+	 * transport, and calls `reemitEncryptionKeys()` AFTER attach to
+	 * flush any already-negotiated keys through the wire. When null/
+	 * undefined, the hook stays on the Phase-1/2 quiet-crypto path.
+	 */
+	e2ee?: Accessor<RtcE2EEContext | null>;
 }
 
 export interface RtcSessionApi {
 	status: Accessor<RtcStatus>;
 	memberships: Accessor<readonly CallMembership[]>;
 	error: Accessor<Error | null>;
-	/** True when the room exists, at least one focus is configured, and the
-	 * room is not E2EE-encrypted (Phase 2 is unencrypted-only). */
+	/** True when the room exists and at least one focus is configured.
+	 * Phase 4 lifted the unencrypted-only restriction: encrypted rooms
+	 * are joinable once the consumer supplies the E2EE bridge via
+	 * `opts.e2ee`. The hook itself does not block on encryption — that
+	 * gate lived in Phase 1/2 only. */
 	canJoin: Accessor<boolean>;
 	/** Human-readable reason Join is blocked, or null when joinable. */
 	joinBlockReason: Accessor<string | null>;
@@ -50,19 +62,20 @@ export interface RtcSessionApi {
 }
 
 /**
- * Phase 1 of the native MatrixRTC client (issue #122).
+ * Native MatrixRTC client hook (issue #122).
  *
  * Wraps `client.matrixRTC.getRoomSession(room)` in a SolidJS hook that
- * exposes join status and the current membership list. This phase publishes
- * the legacy `org.matrix.msc3401.call.member` state event ONLY — no media
- * transport is opened, no encryption keys exchanged, no sticky events sent.
- * That isolation is deliberate so callActive in `src/client/summaries.ts`
- * (which only parses the legacy event) keeps working, and the to-device
- * key path (the Phase-4 crypto boundary) stays quiet.
+ * exposes join status and the current membership list. Without the
+ * Phase-4 `e2ee` option the hook stays on the legacy
+ * `org.matrix.msc3401.call.member` state event with the to-device key
+ * path quiet — preserving the Phase-1/2 isolation. When `e2ee` is
+ * supplied, the hook attaches the bridge before joinRoomSession,
+ * flips `manageMediaKeys: true`, and pumps already-negotiated keys via
+ * `reemitEncryptionKeys()` after the manager has spun up.
  *
- * The two guardrail join-config flags below must NOT be flipped to their
- * defaults without an accompanying change in `summaries.ts` and a Phase-4
- * E2EE plan in #122.
+ * `unstableSendStickyEvents` MUST stay `false` until Phase 5 teaches
+ * `summaries.ts` callActive detection and `CallButton.tsx` to read the
+ * newer `m.rtc.member` format.
  */
 export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const [status, setStatus] = createSignal<RtcStatus>("idle");
@@ -76,33 +89,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const foci = buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId);
 	let leavePending = false;
 
-	// Reactive view of the room's encryption status. We subscribe to
-	// `RoomStateEvent.Events` on the MatrixClient (per repo convention) and
-	// flip to `true` when an `m.room.encryption` state event arrives for our
-	// room. The signal feeds `joinBlockReason`, so `canJoin()` and the
-	// pre-publish check in `join()` both see the latest value — preventing a
-	// late-arriving encryption event from bypassing the unencrypted-only gate.
-	const [isEncrypted, setIsEncrypted] = createSignal(
-		room?.hasEncryptionStateEvent() ?? false,
-	);
-	const onRoomStateEvent = (event: MatrixEvent): void => {
-		if (event.getRoomId() !== opts.roomId) return;
-		if (event.getType() !== "m.room.encryption") return;
-		// Matrix encryption is one-way: once enabled, it stays enabled.
-		// Re-query the room rather than assuming the event itself flips it
-		// (defends against redacted/edge-case events).
-		setIsEncrypted(room?.hasEncryptionStateEvent() ?? true);
-	};
-	opts.client.on(RoomStateEvent.Events, onRoomStateEvent);
-	onCleanup(() => {
-		opts.client.off(RoomStateEvent.Events, onRoomStateEvent);
-	});
-
 	const joinBlockReason = createMemo((): string | null => {
 		if (!room) return `Room ${opts.roomId} not found in client store`;
-		if (isEncrypted()) {
-			return "Native RTC audio currently supports unencrypted rooms only.";
-		}
 		if (foci.length === 0) {
 			return "No MatrixRTC foci configured — set elementCall.url in config.json.";
 		}
@@ -190,6 +178,17 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		});
 	});
 
+	// Detach fn returned by `e2ee.attach(...)`. Stored on the closure so
+	// `leave()` and the unmount cleanup tear it down even if the user
+	// never clicked Leave (component closes mid-call). Cleared after
+	// every detach so a double-leave doesn't off() a stale listener.
+	let detachE2EE: (() => void) | null = null;
+	// Bumped on each join attempt; the e2ee `isLive` closure compares
+	// against the captured value so a stale key event arriving after
+	// Leave (or a superseded Join attempt) bails before it pumps a key
+	// from the wrong session into the bridge.
+	let joinEpoch = 0;
+
 	const join = async (): Promise<void> => {
 		const s = session();
 		if (!s) {
@@ -198,11 +197,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			return;
 		}
 		if (s.isJoined()) return;
-		// Re-check immediately before publishing so the encryption gate
-		// can't be bypassed by an `m.room.encryption` event arriving
-		// between mount and the click on "Join". The encryption signal
-		// is wired to `RoomStateEvent.Events`, so this read sees the
-		// latest value rather than a stale hook-init snapshot.
+		// Defensive re-check — defends against `room` being null at
+		// hook-init time (Phase 1 set status="error" but kept the hook
+		// alive so a later getRoom hit would still expose canJoin).
 		const blockReason = joinBlockReason();
 		if (blockReason !== null) {
 			setError(new Error(blockReason));
@@ -211,27 +208,82 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		}
 		setError(null);
 		setStatus("joining");
+		const myEpoch = ++joinEpoch;
+		const ctx = opts.e2ee?.() ?? null;
+		// Attach the E2EE listener BEFORE joinRoomSession so the bridge
+		// catches the initial EncryptionKeyChanged burst from the
+		// RTCEncryptionManager. Store detach immediately so a synchronous
+		// throw from joinRoomSession (validation) doesn't leak the
+		// listener — the catch arm runs detach below.
+		if (ctx) {
+			detachE2EE = ctx.attach(s, () => joinEpoch === myEpoch);
+		}
 		try {
-			// Phase 1 guardrails:
-			//   manageMediaKeys=false        keeps the to-device encryption path
-			//                                quiet until Phase 4 lands E2EE.
-			//   unstableSendStickyEvents=false
-			//                                keeps writing legacy
-			//                                org.matrix.msc3401.call.member state
-			//                                events so summaries.ts callActive
-			//                                detection keeps working.
+			// Phase 4 join config:
+			//   manageMediaKeys: true (with e2ee) enables the to-device
+			//     key transport so the RTCEncryptionManager exchanges
+			//     keys with peers and emits EncryptionKeyChanged.
+			//   manageMediaKeys: false (no e2ee) keeps the Phase-1 quiet
+			//     path so callers without a bridge don't accidentally
+			//     start the crypto path.
+			//   unstableSendStickyEvents: false stays until Phase 5 lands
+			//     the newer m.rtc.member format in summaries.ts /
+			//     CallButton.tsx — keeps legacy callActive detection
+			//     working.
 			// joinRoomSession is fire-and-forget; this try/catch only covers
 			// synchronous validation throws. Async join failures arrive via
 			// MembershipManagerError → onManagerError.
 			s.joinRoomSession(foci as LivekitTransport[], undefined, {
-				manageMediaKeys: false,
+				manageMediaKeys: ctx !== null,
 				unstableSendStickyEvents: false,
 			});
+			// Pump any keys already negotiated through the bridge AFTER
+			// joinRoomSession (which spins up the RTCEncryptionManager).
+			// Reemitting earlier would no-op because the manager doesn't
+			// exist yet.
+			if (ctx) ctx.reemit(s);
 		} catch (e) {
+			// Synchronous throw: detach the listener we just attached so
+			// the next Join attempt isn't competing with a stale one, and
+			// bump the epoch so any EncryptionKeyChanged event that snuck
+			// into the queue before detach bails on its `isLive` check.
+			detachE2EE?.();
+			detachE2EE = null;
+			joinEpoch++;
 			setError(e instanceof Error ? e : new Error(String(e)));
 			setStatus("error");
 		}
 	};
+
+	// Late-arriving bridge attach: when the parent reopens the overlay
+	// while MatrixRTC is already joined (close-without-leave flow, hot
+	// reload, programmatic close that bypassed requestClose), the parent
+	// builds an E2EE ctx through its own recovery effect AFTER `join()`
+	// has already short-circuited on `s.isJoined()`. Without this, the
+	// fresh ctx would never have `attach()` or `reemit()` called and the
+	// LiveKit Room would publish/decode against an empty keyProvider.
+	//
+	// Guard `detachE2EE === null` so a normal Join click — which sets
+	// `e2ee()` first, then calls `join()` synchronously — does not race
+	// this effect into a double-attach: the JoinStateChanged listener
+	// flips status to "joined" only AFTER `join()` has already assigned
+	// `detachE2EE`, so this effect bails.
+	createEffect(() => {
+		const s = session();
+		if (!s) return;
+		const ctx = opts.e2ee?.() ?? null;
+		if (!ctx) return;
+		if (status() !== "joined") return;
+		if (detachE2EE !== null) return;
+		if (!s.isJoined()) return;
+		const myEpoch = ++joinEpoch;
+		detachE2EE = ctx.attach(s, () => joinEpoch === myEpoch);
+		// Pump any keys the RTCEncryptionManager has already negotiated
+		// from before this bridge existed, so the LiveKit keyProvider
+		// has a populated keyCache by the time `bindRoom()` replays it
+		// on connect.
+		ctx.reemit(s);
+	});
 
 	const leave = async (): Promise<void> => {
 		const s = session();
@@ -243,6 +295,13 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		const wasJoining = status() === "joining";
 		if (!s.isJoined() && !wasJoining) {
 			setStatus("idle");
+			// Still detach any E2EE listener — Join may have attached one
+			// even though no membership made it out.
+			detachE2EE?.();
+			detachE2EE = null;
+			// Invalidate the current join attempt so any in-flight key
+			// imports bail before reaching the keyProvider.
+			joinEpoch++;
 			return;
 		}
 		leavePending = true;
@@ -250,12 +309,31 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		setStatus("leaving");
 		try {
 			await s.leaveRoomSession(5_000);
+			// Successful leave → detach the bridge and bump epoch so any
+			// in-flight key import bails. Doing this AFTER (not before)
+			// the await means an error path with `s.isJoined()` still
+			// true can keep the bridge wired (see catch arm below) so
+			// the user's still-live call doesn't silently drop key
+			// updates while they decide whether to retry Leave.
+			detachE2EE?.();
+			detachE2EE = null;
+			joinEpoch++;
 			setStatus("idle");
 		} catch (e) {
 			setError(e instanceof Error ? e : new Error(String(e)));
-			// If the SDK still reports we're joined, leave the user a path back
-			// to retry via the Leave button instead of stranding on "error".
-			setStatus(s.isJoined() ? "joined" : "error");
+			if (s.isJoined()) {
+				// Call still alive — keep the bridge attached AND keep
+				// `joinEpoch` so EncryptionKeyChanged events continue
+				// flowing through to LiveKit. The user can retry Leave
+				// from the dialog without us silently breaking E2EE.
+				setStatus("joined");
+			} else {
+				// SDK confirms we're no longer joined — safe to detach.
+				detachE2EE?.();
+				detachE2EE = null;
+				joinEpoch++;
+				setStatus("error");
+			}
 		} finally {
 			leavePending = false;
 		}
@@ -268,6 +346,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// when the component unmounts isn't double-fired here. Also leave when
 		// we're still in "joining" so a close-during-join doesn't strand a
 		// membership published moments later.
+		detachE2EE?.();
+		detachE2EE = null;
+		joinEpoch++;
 		const s = session();
 		if (!s || leavePending) return;
 		if (s.isJoined() || status() === "joining") {

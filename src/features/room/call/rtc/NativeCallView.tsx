@@ -12,6 +12,7 @@ import { useClient } from "../../../../client/client";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
 import { userSettings } from "../../../../stores/settings";
 import { ConfirmDialog } from "../../settings/ConfirmDialog";
+import { createRtcE2EEContext, type RtcE2EEContext } from "./rtcE2EEBridge";
 import {
 	type LivekitRoomApi,
 	type RtcParticipant,
@@ -41,10 +42,73 @@ const FOCUSABLE_SELECTOR =
  */
 export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	const { client } = useClient();
+
+	// Phase 4 E2EE bridge — created lazily on the first Join click so
+	// the LiveKit chunk + the e2ee worker stay deferred until the user
+	// actually opts in to a call. One context per join cycle: leaving
+	// disposes it and a re-join creates a fresh one. Reusing a context
+	// across Leave→Re-Join would accumulate listeners on the keyProvider
+	// inside LiveKit's E2EEManager (it doesn't unbind on disconnect).
+	const [e2ee, setE2ee] = createSignal<RtcE2EEContext | null>(null);
+	// Bridge-init UI signals: prevents Join button double-click during
+	// the `await createRtcE2EEContext()` window (where `rtc.status()`
+	// is still "idle") and surfaces the error inside the existing
+	// join-block banner.
+	const [bridgeInitializing, setBridgeInitializing] = createSignal(false);
+	const [bridgeInitError, setBridgeInitError] = createSignal<Error | null>(
+		null,
+	);
+
+	// Register the bridge-disposal cleanup BEFORE the hooks below. SolidJS
+	// runs `onCleanup` callbacks in LIFO order (last registered runs
+	// first), so registering this FIRST guarantees it runs LAST — after
+	// `useLivekitRoom`'s teardown has called `binding.release()` on the
+	// active Room and after `useRtcSession` has detached the bridge
+	// listener. Terminating the (last remaining) worker before
+	// `room.disconnect()` resolves could surface errors in the LiveKit
+	// E2EEManager's final teardown frames.
+	//
+	// `unmounted` is checked by the Join async handler AND the
+	// joined-on-mount recovery effect after every await so a fast
+	// unmount during `createRtcE2EEContext()` (dynamic LiveKit chunk +
+	// worker module load takes tens of ms) can't strand a fresh bridge
+	// in `e2ee()` and proceed to publish a phantom MatrixRTC membership
+	// the user never sees a UI for. The async builders dispose the
+	// freshly-built ctx themselves on the stale path.
+	let unmounted = false;
+	onCleanup(() => {
+		unmounted = true;
+		const ctx = e2ee();
+		if (ctx) {
+			// Defer worker termination until useLivekitRoom's in-flight
+			// disconnect (kicked off by its own synchronous `onCleanup`
+			// calling `void teardown()`) has released its binding.
+			// SolidJS's `onCleanup` chain is synchronous and does NOT
+			// await returned promises, so the cross-hook LIFO claim
+			// alone cannot enforce "worker.terminate() AFTER
+			// r.disconnect()" on this unmount-while-joined path. Chain
+			// here instead. The `void` is intentional — Solid will not
+			// wait on this either, but the consumer (the LiveKit close
+			// handlers running before disconnect resolves) does the
+			// last reads on the keyProvider, and once we're past those
+			// the worker can safely terminate.
+			void livekit.teardownComplete().then(
+				() => {
+					ctx.dispose();
+				},
+				() => {
+					ctx.dispose();
+				},
+			);
+			setE2ee(null);
+		}
+	});
+
 	const rtc = useRtcSession({
 		client,
 		roomId: props.roomId,
 		elementCallUrl: props.elementCallUrl,
+		e2ee,
 	});
 
 	// Synchronously gates `enabled` while a Leave is in flight so the
@@ -82,14 +146,94 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 				!leaving() &&
 				!leaveRequested() &&
 				rtc.status() === "joined" &&
-				rtc.activeFocus() !== null,
+				rtc.activeFocus() !== null &&
+				// Hold the LiveKit connect until the E2EE bridge exists.
+				// Otherwise a "joined-on-mount" mount (parent re-opens the
+				// overlay after a non-Leave close, hot reload, or route
+				// flip while MatrixRTC still reports `isJoined()` true)
+				// would race ahead and `r.connect()` WITHOUT
+				// `setE2EEEnabled(true)` — publishing media in the clear.
+				// The joined-on-mount recovery effect below builds the
+				// bridge and flips this to true. Join-button mounts build
+				// the bridge inside the click handler BEFORE flipping
+				// rtc.status() to "joined", so this gate doesn't delay
+				// the normal path.
+				e2ee() !== null,
 		),
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
 		videoDeviceId: createMemo(() => userSettings().rtcCamDeviceId),
+		e2ee,
+	});
+
+	// Builds and installs the E2EE bridge if not already present.
+	// Used by both the Join click handler AND the joined-on-mount
+	// recovery effect below. Returns `true` if a bridge is now installed
+	// (existed already or was built successfully), `false` if the build
+	// threw or the view unmounted mid-build. On the unmount-mid-build
+	// path the freshly-built ctx is disposed inline — DO NOT setE2ee()
+	// because the signal would outlive the owner with nothing else to
+	// dispose it. On failure, `bridgeInitError` is set so the
+	// join-block banner surfaces a real reason instead of silently
+	// downgrading to unencrypted.
+	const ensureBridge = async (): Promise<boolean> => {
+		if (e2ee() !== null) return true;
+		setBridgeInitError(null);
+		setBridgeInitializing(true);
+		try {
+			const ctx = await createRtcE2EEContext();
+			if (unmounted) {
+				ctx.dispose();
+				return false;
+			}
+			// Defensive: if a concurrent ensureBridge() call resolved first
+			// and already installed a context, dispose the duplicate we just
+			// built so its worker is terminated instead of leaked. The
+			// pre-await guard at the top of this function (and the
+			// `bridgeInitializing` gate in the recovery effect) make this
+			// race difficult to trigger in practice, but a fresh context
+			// holds a worker and listener bindings that we must not orphan.
+			if (e2ee() !== null) {
+				ctx.dispose();
+				return true;
+			}
+			setE2ee(ctx);
+			return true;
+		} catch (err) {
+			if (!unmounted) {
+				setBridgeInitError(err instanceof Error ? err : new Error(String(err)));
+			}
+			return false;
+		} finally {
+			if (!unmounted) setBridgeInitializing(false);
+		}
+	};
+
+	// Joined-on-mount recovery: if the parent re-opens the call overlay
+	// while MatrixRTC still reports `isJoined()` true (close-without-leave
+	// flow, hot reload, programmatic close that bypasses requestClose's
+	// confirm dialog), the Join handler never runs and the bridge is
+	// never built. The `enabled` memo above keeps useLivekitRoom dormant
+	// until e2ee() is non-null, so this effect builds the bridge so the
+	// connection can proceed encrypted.
+	createEffect(() => {
+		if (unmounted) return;
+		if (rtc.status() !== "joined") return;
+		if (e2ee() !== null) return;
+		if (bridgeInitializing()) return;
+		// Halt auto-retry after a failure: ensureBridge sets bridgeInitError
+		// on failure and resets bridgeInitializing to false, which would
+		// otherwise re-trigger this effect immediately and produce a tight
+		// retry loop (a cached dynamic-import rejection in Vite/Rollup
+		// resolves in milliseconds). Users on the joined-on-mount path have
+		// no visible Join button to retry through, so absent some manual
+		// recovery affordance the safest behavior is one attempt then stop.
+		if (bridgeInitError() !== null) return;
+		void ensureBridge();
 	});
 
 	const [confirmClose, setConfirmClose] = createSignal(false);
+
 	let dialogRef: HTMLDivElement | undefined;
 	let closeButtonRef: HTMLButtonElement | undefined;
 	let previousFocus: HTMLElement | null = null;
@@ -118,8 +262,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		// Any retry clears the previous-attempt banner so we don't render two
 		// alert nodes side-by-side once ConfirmDialog's internal handleConfirm
 		// catch fills its own error slot.
-		setLeaveError(null);
-		// Flip `leaving` BEFORE any await so the LiveKit effect's disable
+		setLeaveError(null); // Flip `leaving` BEFORE any await so the LiveKit effect's disable
 		// branch fires synchronously (epoch-gated teardown) and the
 		// focus-change branch is unreachable until we finish. Defends
 		// against a focus/membership tick landing between the two awaits
@@ -146,6 +289,16 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 			// let the overlay close — there's nothing for the user to retry.
 			if (rtc.status() === "joined") {
 				throw new Error(rtc.error()?.message ?? "Leave failed.");
+			}
+			// Dispose the E2EE bridge AFTER LiveKit disconnect + Matrix
+			// leave have completed (or the throw above has propagated).
+			// Terminating the worker earlier could surface errors during
+			// in-flight decode/encode of the final teardown frames.
+			// Disposal is idempotent so the onCleanup arm is safe.
+			const ctx = e2ee();
+			if (ctx) {
+				ctx.dispose();
+				setE2ee(null);
 			}
 			setConfirmClose(false);
 			props.onClose();
@@ -196,6 +349,9 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 			previousFocus.focus();
 		}
 		previousFocus = null;
+		// E2EE bridge disposal happens via the earlier-registered
+		// `onCleanup` (component top), which runs AFTER both
+		// useLivekitRoom and useRtcSession teardown (SolidJS LIFO order).
 	});
 
 	const statusLabel = (): string => {
@@ -398,14 +554,42 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 					>
 						<button
 							type="button"
-							onClick={() => void rtc.join()}
-							disabled={!rtc.canJoin() || rtc.status() === "joining"}
+							onClick={() => {
+								if (bridgeInitializing()) return;
+								void (async () => {
+									// Build the E2EE bridge BEFORE rtc.join() so
+									// the bridge listener is wired before
+									// joinRoomSession (Phase-4 invariant 2) and
+									// the LiveKit Room sees the e2ee accessor as
+									// non-null on its very first reactive read.
+									const ok = await ensureBridge();
+									if (!ok) return;
+									if (unmounted) return;
+									await rtc.join();
+								})();
+							}}
+							disabled={
+								!rtc.canJoin() ||
+								rtc.status() === "joining" ||
+								bridgeInitializing()
+							}
 							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
 						>
-							Join call
+							{bridgeInitializing() ? "Preparing…" : "Join call"}
 						</button>
 					</Show>
 				</div>
+
+				<Show when={bridgeInitError() !== null}>
+					<div
+						role="alert"
+						aria-live="assertive"
+						class="rounded border border-danger-bg/40 bg-danger-bg/30 p-3 text-xs text-danger-text"
+					>
+						Could not initialise end-to-end encryption:{" "}
+						{bridgeInitError()?.message ?? "Unknown error"}
+					</div>
+				</Show>
 
 				<Show when={!rtc.canJoin() && rtc.joinBlockReason() !== null}>
 					<div
@@ -496,8 +680,8 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 				</div>
 
 				<p class="text-xs text-text-disabled">
-					Phase 2 preview: audio only, unencrypted rooms. See issue #122 for the
-					multi-phase plan.
+					Native call (Phase 4 preview): audio + video, encrypted rooms
+					supported. See issue #122 for the multi-phase plan.
 				</p>
 			</div>
 

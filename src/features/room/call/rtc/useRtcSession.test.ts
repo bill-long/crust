@@ -1,8 +1,9 @@
 import { renderHook } from "@solidjs/testing-library";
-import { RoomStateEvent } from "matrix-js-sdk";
 import type { CallMembership } from "matrix-js-sdk/lib/matrixrtc";
 import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
+import { createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { RtcE2EEContext } from "./rtcE2EEBridge";
 import { useRtcSession } from "./useRtcSession";
 
 type Listener = (...args: unknown[]) => void;
@@ -12,6 +13,7 @@ interface FakeSession {
 	isJoined: () => boolean;
 	joinRoomSession: ReturnType<typeof vi.fn>;
 	leaveRoomSession: ReturnType<typeof vi.fn>;
+	reemitEncryptionKeys: ReturnType<typeof vi.fn>;
 	on: ReturnType<typeof vi.fn>;
 	off: ReturnType<typeof vi.fn>;
 	emit: (event: string, ...args: unknown[]) => void;
@@ -33,6 +35,7 @@ function createFakeSession(): FakeSession {
 			session.emit(MatrixRTCSessionEvent.JoinStateChanged, false);
 			return true;
 		}),
+		reemitEncryptionKeys: vi.fn(),
 		on: vi.fn((event: string, cb: Listener) => {
 			let set = listeners.get(event);
 			if (!set) {
@@ -51,39 +54,14 @@ function createFakeSession(): FakeSession {
 	return session;
 }
 
-function createClient(opts: {
-	roomFound?: boolean;
-	session: FakeSession;
-	encrypted?: boolean;
-}): {
+function createClient(opts: { roomFound?: boolean; session: FakeSession }): {
 	client: ReturnType<typeof makeClient>;
 } {
 	function makeClient() {
-		const clientListeners = new Map<string, Set<Listener>>();
 		return {
-			getRoom: vi.fn(() =>
-				opts.roomFound === false
-					? null
-					: ({
-							hasEncryptionStateEvent: () => opts.encrypted === true,
-						} as never),
-			),
+			getRoom: vi.fn(() => (opts.roomFound === false ? null : ({} as never))),
 			matrixRTC: {
 				getRoomSession: vi.fn(() => opts.session),
-			},
-			on: vi.fn((event: string, cb: Listener) => {
-				let set = clientListeners.get(event);
-				if (!set) {
-					set = new Set();
-					clientListeners.set(event, set);
-				}
-				set.add(cb);
-			}),
-			off: vi.fn((event: string, cb: Listener) => {
-				clientListeners.get(event)?.delete(cb);
-			}),
-			__emit: (event: string, ...args: unknown[]): void => {
-				for (const cb of clientListeners.get(event) ?? []) cb(...args);
 			},
 		};
 	}
@@ -94,19 +72,19 @@ const renderRtc = (overrides?: {
 	roomFound?: boolean;
 	session?: FakeSession;
 	elementCallUrl?: string;
-	encrypted?: boolean;
+	e2ee?: () => RtcE2EEContext | null;
 }) => {
 	const session = overrides?.session ?? createFakeSession();
 	const { client } = createClient({
 		roomFound: overrides?.roomFound,
 		session,
-		encrypted: overrides?.encrypted,
 	});
 	const { result } = renderHook(() =>
 		useRtcSession({
 			client: client as never,
 			roomId: "!room:example.com",
 			elementCallUrl: overrides?.elementCallUrl ?? "https://call.example.com",
+			e2ee: overrides?.e2ee,
 		}),
 	);
 	return { rtc: result, session, client };
@@ -135,7 +113,7 @@ describe("useRtcSession", () => {
 		expect(rtc.canJoin()).toBe(false);
 	});
 
-	it("calls joinRoomSession with the Phase-1 guardrail flags", async () => {
+	it("calls joinRoomSession with the no-bridge guardrail flags (manageMediaKeys: false)", async () => {
 		const { rtc, session } = renderRtc();
 		await rtc.join();
 		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
@@ -338,79 +316,14 @@ describe("useRtcSession", () => {
 		expect(session.leaveRoomSession).toHaveBeenCalledTimes(1);
 	});
 
-	it("blocks join in encrypted rooms with a clear reason (Phase 2)", async () => {
-		const { rtc, session } = renderRtc({ encrypted: true });
-		expect(rtc.canJoin()).toBe(false);
-		expect(rtc.joinBlockReason()).toContain("unencrypted");
-		await rtc.join();
-		expect(session.joinRoomSession).not.toHaveBeenCalled();
-		expect(rtc.status()).toBe("error");
-	});
-
-	it("flips canJoin to false when an m.room.encryption state event arrives after mount", async () => {
-		const session = createFakeSession();
-		const { client } = createClient({ session });
-		// Mutable flag so the room reports encrypted=true only after we emit
-		// the state event (mirrors the late-arrival race the Phase 2 gate
-		// must defend against).
-		let nowEncrypted = false;
-		client.getRoom = vi.fn(
-			() =>
-				({
-					hasEncryptionStateEvent: () => nowEncrypted,
-				}) as never,
-		);
-		const { result: rtc } = renderHook(() =>
-			useRtcSession({
-				client: client as never,
-				roomId: "!room:example.com",
-				elementCallUrl: "https://call.example.com",
-			}),
-		);
+	it("does NOT block join on encrypted rooms (Phase 4 lifted the gate)", async () => {
+		// The hook no longer tracks room encryption — encrypted rooms are
+		// expected to be joined via the E2EE bridge passed by the
+		// consumer. Asserting canJoin stays true keeps a regression that
+		// re-introduces the Phase-2 gate from sneaking in.
+		const { rtc } = renderRtc();
 		expect(rtc.canJoin()).toBe(true);
-		nowEncrypted = true;
-		client.__emit(RoomStateEvent.Events, {
-			getRoomId: () => "!room:example.com",
-			getType: () => "m.room.encryption",
-		} as never);
-		expect(rtc.canJoin()).toBe(false);
-		expect(rtc.joinBlockReason()).toContain("unencrypted");
-		await rtc.join();
-		expect(session.joinRoomSession).not.toHaveBeenCalled();
-		expect(rtc.status()).toBe("error");
-	});
-
-	it("ignores RoomState.events for unrelated rooms or types", async () => {
-		const session = createFakeSession();
-		const { client } = createClient({ session });
-		let encrypted = false;
-		client.getRoom = vi.fn(
-			() =>
-				({
-					hasEncryptionStateEvent: () => encrypted,
-				}) as never,
-		);
-		const { result: rtc } = renderHook(() =>
-			useRtcSession({
-				client: client as never,
-				roomId: "!room:example.com",
-				elementCallUrl: "https://call.example.com",
-			}),
-		);
-		expect(rtc.canJoin()).toBe(true);
-		// Unrelated room.
-		encrypted = true;
-		client.__emit(RoomStateEvent.Events, {
-			getRoomId: () => "!other:example.com",
-			getType: () => "m.room.encryption",
-		} as never);
-		expect(rtc.canJoin()).toBe(true);
-		// Right room, wrong type.
-		client.__emit(RoomStateEvent.Events, {
-			getRoomId: () => "!room:example.com",
-			getType: () => "m.room.topic",
-		} as never);
-		expect(rtc.canJoin()).toBe(true);
+		expect(rtc.joinBlockReason()).toBeNull();
 	});
 
 	it("exposes a null activeFocus until joined", () => {
@@ -454,5 +367,105 @@ describe("useRtcSession", () => {
 			[younger, oldest],
 		);
 		expect(rtc.activeFocus()).toEqual(oldestTransport);
+	});
+
+	describe("Phase 4 E2EE bridge wiring", () => {
+		const fakeCtx = (): {
+			ctx: RtcE2EEContext;
+			attach: ReturnType<typeof vi.fn>;
+			reemit: ReturnType<typeof vi.fn>;
+			dispose: ReturnType<typeof vi.fn>;
+			detach: ReturnType<typeof vi.fn>;
+		} => {
+			const detach = vi.fn();
+			const attach = vi.fn(() => detach);
+			const reemit = vi.fn();
+			const dispose = vi.fn();
+			const ctx = {
+				e2eeOptions: { keyProvider: {} as never, worker: {} as never },
+				attach,
+				reemit,
+				dispose,
+			} as unknown as RtcE2EEContext;
+			return { ctx, attach, reemit, dispose, detach };
+		};
+
+		it("attaches the bridge BEFORE joinRoomSession and reemits AFTER", async () => {
+			const { ctx, attach, reemit } = fakeCtx();
+			const { rtc, session } = renderRtc({ e2ee: () => ctx });
+			await rtc.join();
+			// Invocation-order assertion: attach < joinRoomSession < reemit.
+			const attachOrder = attach.mock.invocationCallOrder[0];
+			const joinOrder = session.joinRoomSession.mock.invocationCallOrder[0];
+			const reemitOrder = reemit.mock.invocationCallOrder[0];
+			expect(attachOrder).toBeLessThan(joinOrder);
+			expect(joinOrder).toBeLessThan(reemitOrder);
+		});
+
+		it("flips manageMediaKeys: true when the bridge is supplied", async () => {
+			const { ctx } = fakeCtx();
+			const { rtc, session } = renderRtc({ e2ee: () => ctx });
+			await rtc.join();
+			const joinConfig = session.joinRoomSession.mock.calls[0][2];
+			expect(joinConfig).toEqual({
+				manageMediaKeys: true,
+				// Phase 5+ owns this flag; must stay false until summaries.ts
+				// learns the newer m.rtc.member format.
+				unstableSendStickyEvents: false,
+			});
+		});
+
+		it("attach receives an isLive closure that returns false after leave", async () => {
+			const { ctx, attach } = fakeCtx();
+			const { rtc } = renderRtc({ e2ee: () => ctx });
+			await rtc.join();
+			const isLive = attach.mock.calls[0][1] as () => boolean;
+			expect(isLive()).toBe(true);
+			await rtc.leave();
+			expect(isLive()).toBe(false);
+		});
+
+		it("detaches the bridge listener on leave", async () => {
+			const { ctx, detach } = fakeCtx();
+			const { rtc } = renderRtc({ e2ee: () => ctx });
+			await rtc.join();
+			expect(detach).not.toHaveBeenCalled();
+			await rtc.leave();
+			expect(detach).toHaveBeenCalledTimes(1);
+		});
+
+		it("detaches the bridge listener on unmount", async () => {
+			const { ctx, detach } = fakeCtx();
+			const session = createFakeSession();
+			const { client } = createClient({ session });
+			const [e2eeAcc] = createSignal<RtcE2EEContext | null>(ctx);
+			const { result, cleanup } = renderHook(() =>
+				useRtcSession({
+					client: client as never,
+					roomId: "!room:example.com",
+					elementCallUrl: "https://call.example.com",
+					e2ee: e2eeAcc,
+				}),
+			);
+			await result.join();
+			cleanup();
+			expect(detach).toHaveBeenCalled();
+		});
+
+		it("detaches and bumps isLive when joinRoomSession synchronously throws", async () => {
+			const { ctx, attach, detach } = fakeCtx();
+			const session = createFakeSession();
+			session.joinRoomSession.mockImplementation(() => {
+				throw new Error("validation failed");
+			});
+			const { rtc } = renderRtc({ session, e2ee: () => ctx });
+			await rtc.join();
+			expect(rtc.status()).toBe("error");
+			expect(detach).toHaveBeenCalledTimes(1);
+			// isLive must be false after the failed attempt so any late
+			// EncryptionKeyChanged that snuck in before detach bails.
+			const isLive = attach.mock.calls[0][1] as () => boolean;
+			expect(isLive()).toBe(false);
+		});
 	});
 });

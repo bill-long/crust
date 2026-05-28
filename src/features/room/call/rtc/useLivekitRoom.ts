@@ -66,6 +66,15 @@ export interface UseLivekitRoomOptions {
 	 * loader returning a mock module.
 	 */
 	loadLivekit?: () => Promise<typeof import("livekit-client")>;
+	/**
+	 * Phase 4 E2EE bridge context. When present and non-null, the hook
+	 * passes `e2eeOptions` to the LiveKit `Room` constructor and
+	 * `await room.setE2EEEnabled(true)` BEFORE `room.connect()` and
+	 * before any track publish. Missing this ordering = dropped initial
+	 * media frames on every encrypted join. When null/undefined, the
+	 * hook builds an unencrypted Room (Phase 1/2 behaviour).
+	 */
+	e2ee?: Accessor<import("./rtcE2EEBridge").RtcE2EEContext | null>;
 }
 
 export interface VideoTrackEntry {
@@ -115,6 +124,24 @@ export interface LivekitRoomApi {
 	 */
 	audioBlocked: Accessor<boolean>;
 	resumeAudio: () => Promise<void>;
+	/**
+	 * Resolves when all queued teardowns — those started by an explicit
+	 * `disconnect()`, by a focus/enabled change, or by component unmount
+	 * — have run `r.disconnect()` AND released their E2EE binding.
+	 * Resolves immediately if no teardown has ever been triggered.
+	 *
+	 * Every teardown invocation is chained through one shared promise so
+	 * the latest call always waits for any prior in-flight teardown
+	 * before starting. Exists so consumers that own the E2EE bridge can
+	 * chain `ctx.dispose()` (which calls `worker.terminate()` on any
+	 * binding still acquired via the safety-net sweep) behind the
+	 * disconnect that is still using those workers. SolidJS's
+	 * `onCleanup` chain runs synchronously and does NOT await returned
+	 * promises, so the cross-hook LIFO claim alone cannot enforce
+	 * "worker.terminate() AFTER r.disconnect()" on the unmount-while-
+	 * joined path.
+	 */
+	teardownComplete: () => Promise<void>;
 }
 
 interface AttachedAudio {
@@ -150,6 +177,23 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	const [audioBlocked, setAudioBlocked] = createSignal(false);
 
 	let room: LivekitRoom | null = null;
+	// Per-Room E2EE binding kept alongside `room` so teardown can
+	// release the keyProvider+worker AFTER `r.disconnect()` resolves —
+	// LiveKit's E2EEManager attaches listeners on the keyProvider that
+	// only fully detach once disconnect runs the close handlers.
+	// Releasing the binding terminates that Room's dedicated worker and
+	// drops the keyProvider from the relay's active-pump slot, so the
+	// next `bindRoom()` (focus-change reconnect) starts clean.
+	let binding: import("./rtcE2EEBridge").RtcE2EERoomBinding | null = null;
+	// Tracks the most recently kicked-off teardown so external callers
+	// (NativeCallView's bridge-dispose onCleanup) can chain off it.
+	// SolidJS `onCleanup` is synchronous and does not await returned
+	// promises, so the cross-hook ordering of "release binding AFTER
+	// room.disconnect resolves" cannot be enforced by LIFO alone on the
+	// unmount-while-joined path. Exposing this promise lets the bridge
+	// disposal defer `worker.terminate()` until our `teardown()` has
+	// actually released the binding it acquired.
+	let teardownPromise: Promise<void> = Promise.resolve();
 	let attempt = 0;
 	let disposed = false;
 	// Number of explicit user-initiated `disconnect()` calls currently in
@@ -409,6 +453,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		resetCallDerivedState();
 		const r = room;
 		room = null;
+		const b = binding;
+		binding = null;
 		if (r) {
 			try {
 				await r.disconnect();
@@ -416,6 +462,26 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				/* swallow — best-effort */
 			}
 		}
+		// Release AFTER disconnect resolves so the LiveKit close handlers
+		// finish using the keyProvider/worker before we terminate them.
+		b?.release();
+	};
+
+	// Wraps every `teardown()` invocation so `teardownComplete()` always
+	// observes the LATEST in-flight teardown.
+	//
+	// Chains via `.then` rather than overwriting so an unmount that lands
+	// while a focus-change or explicit-disconnect teardown is still
+	// awaiting `r.disconnect()` waits for that original teardown to finish
+	// FIRST (during which `room` and `binding` get nulled), then runs its
+	// own no-op teardown second. Without the chain, the second
+	// `teardown()` call would see `room === null` and resolve immediately,
+	// causing `teardownComplete()` to release the bridge worker before
+	// the first teardown's `await r.disconnect()` had finished using it.
+	const trackTeardown = (): Promise<void> => {
+		const next = teardownPromise.catch(() => undefined).then(() => teardown());
+		teardownPromise = next;
+		return next;
 	};
 
 	const doConnect = async (focus: LivekitTransport): Promise<void> => {
@@ -428,6 +494,11 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		// Without this, `teardown()` sees `room === null` and the orphaned Room
 		// keeps its WebSocket/event listeners alive.
 		let pendingRoom: LivekitRoom | null = null;
+		// Same rationale for the E2EE binding: if we created one but
+		// never promoted it alongside `room`, the catch path must
+		// release it so the dedicated worker doesn't leak.
+		let pendingBinding: import("./rtcE2EEBridge").RtcE2EERoomBinding | null =
+			null;
 
 		try {
 			// Dynamic import: this is the moment LiveKit's chunk first loads.
@@ -440,6 +511,14 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const { url, jwt } = await fetchLivekitToken(focus, openIdToken);
 			if (disposed || myAttempt !== attempt) return;
 
+			const e2eeCtx = opts.e2ee?.() ?? null;
+			// Acquire a fresh per-Room binding BEFORE constructing the
+			// `lk.Room`. The binding owns this Room's keyProvider+worker
+			// pair so focus-change reconnects don't reuse a keyProvider
+			// across Rooms (LiveKit's E2EEManager attaches non-cleanup
+			// listeners on it, leaking per Room instance).
+			const localBinding = e2eeCtx?.bindRoom() ?? null;
+			pendingBinding = localBinding;
 			const r = new lk.Room({
 				adaptiveStream: true,
 				dynacast: true,
@@ -449,6 +528,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				videoCaptureDefaults: {
 					deviceId: opts.videoDeviceId() || undefined,
 				},
+				// Phase 4 invariant 1: E2EE options MUST be passed at
+				// construction time so the Room sets up its E2EEManager
+				// before any track publish path runs.
+				e2ee: localBinding?.e2eeOptions,
 			});
 			// Track for catch-path cleanup: if `r.connect()` rejects (or
 			// anything below throws), we still need to disconnect this
@@ -576,6 +659,15 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					// `setLocalMuted` doesn't invoke SDK methods on a dead room.
 					resetCallDerivedState();
 					room = null;
+					// Release the E2EE binding tied to THIS room so an
+					// unsolicited Disconnected doesn't leak the keyProvider +
+					// worker. Without this, a subsequent reconnect would
+					// overwrite `binding` and the old worker would never get
+					// terminated. Safe because `binding.release()` is idempotent
+					// and we just cleared `room`, so `teardown()`'s later call
+					// is a no-op.
+					binding?.release();
+					binding = null;
 					// Preserve terminal/intentional states so an unsolicited
 					// Disconnected event doesn't clobber the user-visible error
 					// or override an in-flight explicit disconnect.
@@ -586,13 +678,35 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				}),
 			);
 
+			// Phase 4 invariant 1: E2EE must be turned ON before the
+			// websocket connects and before any media track is created
+			// or published. Otherwise the initial publish path runs
+			// without an encrypted transform, leaking media frames in
+			// the clear (and dropping the initial peer-decode burst).
+			if (e2eeCtx) {
+				await r.setE2EEEnabled(true);
+				if (disposed || myAttempt !== attempt) {
+					await r.disconnect().catch(() => {});
+					localBinding?.release();
+					pendingBinding = null;
+					return;
+				}
+			}
+
 			await r.connect(url, jwt);
 			if (disposed || myAttempt !== attempt) {
 				await r.disconnect().catch(() => {});
+				localBinding?.release();
+				pendingBinding = null;
 				return;
 			}
 
 			room = r;
+			binding = localBinding;
+			// Promoted to module-level — clear the pending handle so the
+			// catch path doesn't double-release a binding that `teardown`
+			// now owns.
+			pendingBinding = null;
 
 			// Honour the user's pre-mute preference: if they toggled mute
 			// before we connected (via `setLocalMuted`), publish disabled so
@@ -616,6 +730,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				// shared attachments/derived state here — those belong to the
 				// current attempt and will be cleaned up by its own teardown.
 				await r.disconnect().catch(() => {});
+				// Same as the stale-after-connect arm: we own this binding
+				// since it never reached the module-level `binding` slot.
+				localBinding?.release();
+				pendingBinding = null;
 				return;
 			}
 
@@ -691,6 +809,14 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			if (pendingRoom && pendingRoom !== room) {
 				await pendingRoom.disconnect().catch(() => {});
 			}
+			// Release a binding the catch path created but never promoted
+			// to module-level. If `binding` already points at `localBinding`
+			// (we got past `binding = localBinding;` then threw), teardown
+			// below owns the release — skip to avoid a double release.
+			if (pendingBinding && pendingBinding !== binding) {
+				pendingBinding.release();
+				pendingBinding = null;
+			}
 			if (stale) return;
 			// Re-check liveness AFTER the disconnect await: a reactive tick
 			// (focus change, enabled toggle) could have started a newer
@@ -698,7 +824,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// already assigned its `room`, and calling `teardown()` now would
 			// disconnect that live room and wipe its attachments.
 			if (disposed || postBump !== attempt) return;
-			await teardown();
+			await trackTeardown();
 		}
 	};
 
@@ -715,7 +841,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				if (room || status() === "connecting" || status() === "disconnecting") {
 					const epoch = ++attempt;
 					setStatus("disconnecting");
-					void teardown().then(() => {
+					void trackTeardown().then(() => {
 						if (disposed) return;
 						// Bail if a later effect run or explicit disconnect()
 						// superseded us — without this guard, the late
@@ -748,7 +874,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				const epoch = ++attempt;
 				setStatus("disconnecting");
 				const targetFocus = focus;
-				void teardown().then(() => {
+				void trackTeardown().then(() => {
 					if (disposed) return;
 					if (epoch !== attempt) return; // superseded by another caller
 					// Compare on `livekit_service_url` rather than reference so
@@ -866,7 +992,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			attempt += 1;
 			if (status() === "idle") return;
 			setStatus("disconnecting");
-			await teardown();
+			await trackTeardown();
 			if (!disposed) setStatus("idle");
 		} finally {
 			explicitDisconnectDepth -= 1;
@@ -896,7 +1022,14 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	onCleanup(() => {
 		disposed = true;
 		attempt += 1;
-		void teardown();
+		// Record the teardown promise so external chain consumers (the
+		// bridge dispose in NativeCallView) can defer their own
+		// destructive work until disconnect has released its binding.
+		// Chains via trackTeardown so an in-flight focus-change or
+		// explicit-disconnect teardown finishes its `r.disconnect()`
+		// (and binding release) BEFORE this unmount-driven no-op
+		// teardown resolves.
+		void trackTeardown();
 	});
 
 	return {
@@ -911,5 +1044,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		disconnect,
 		audioBlocked,
 		resumeAudio,
+		// Resolves when any in-flight teardown (from cleanup or an
+		// explicit disconnect) has run `r.disconnect()` AND released
+		// its E2EE binding. Resolves immediately if no teardown has
+		// ever been triggered. Used by NativeCallView's bridge-dispose
+		// onCleanup to chain `ctx.dispose()` (which terminates workers)
+		// behind the disconnect that's still using them — Solid's
+		// `onCleanup` is synchronous and can't enforce this via LIFO.
+		teardownComplete: (): Promise<void> => teardownPromise,
 	};
 }
