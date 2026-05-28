@@ -248,6 +248,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		setError(null);
 		setStatus("connecting");
 
+		// Hoisted so the catch path can disconnect a Room that was created but
+		// never assigned to module-level `room` (e.g., `r.connect()` rejected).
+		// Without this, `teardown()` sees `room === null` and the orphaned Room
+		// keeps its WebSocket/event listeners alive.
+		let pendingRoom: LivekitRoom | null = null;
+
 		try {
 			// Dynamic import: this is the moment LiveKit's chunk first loads.
 			const lk = await (opts.loadLivekit ?? (() => import("livekit-client")))();
@@ -266,6 +272,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					deviceId: opts.audioDeviceId() || undefined,
 				},
 			});
+			// Track for catch-path cleanup: if `r.connect()` rejects (or
+			// anything below throws), we still need to disconnect this
+			// instance — `teardown()` only knows about module-level `room`.
+			pendingRoom = r;
 			// Register listeners BEFORE connect so we don't miss the initial
 			// participant/track events for a call already in progress.
 			// All handlers below capture `myAttempt` and bail when this
@@ -397,7 +407,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			snapshotParticipants(r);
 			setStatus("connected");
 		} catch (e) {
-			if (disposed || myAttempt !== attempt) return;
 			// Compute the final user-facing error BEFORE any await so a fresh
 			// `doConnect` that races in during teardown (which clears
 			// `error` via `setError(null)`) isn't subsequently clobbered by
@@ -410,14 +419,48 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				e instanceof LivekitJwtError
 					? new Error(`Could not get LiveKit token: ${e.message}`)
 					: baseErr;
-			setError(finalErr);
-			setStatus("error");
-			// Invalidate this attempt BEFORE teardown so any LiveKit events
-			// that fire during the async disconnect (track unsubscribed,
-			// participant disconnected) bail through `ifLive` and can't
-			// re-attach audio or re-populate participants after
-			// `detachAll()` / `resetCallDerivedState()` runs.
-			attempt++;
+			const stale = disposed || myAttempt !== attempt;
+			// Sentinel for the post-disconnect re-check below. We capture
+			// AFTER any !stale bump so a newer attempt (started during the
+			// disconnect await) makes `postBump !== attempt` and trips the
+			// re-check, preventing us from tearing down its live `room`.
+			let postBump = attempt;
+			if (!stale) {
+				setError(finalErr);
+				setStatus("error");
+				// Invalidate this attempt BEFORE any await so any LiveKit
+				// events that fire during the async disconnect (track
+				// unsubscribed, participant disconnected, AND the Disconnected
+				// handler's own `attempt++`) bail through `ifLive` and can't
+				// re-attach audio, re-populate participants, or — critically
+				// — bump `attempt` out from under us. We already set
+				// `error`/`status` above so bumping here is safe.
+				//
+				// CRITICAL: bump ONLY when !stale. If we are already stale a
+				// newer attempt owns `attempt`; bumping here would invalidate
+				// that newer attempt at its next stale check, silently
+				// aborting a live reconnect. The stale path's Disconnected
+				// handler is already `ifLive`-gated and bails because
+				// `myAttempt !== attempt`, so no bump is needed there.
+				attempt++;
+				postBump = attempt;
+			}
+			// If we created a Room but never assigned it to module-level
+			// `room` (connect rejected, or any throw before `room = r;`),
+			// teardown won't disconnect it. Explicitly disconnect here so
+			// its WebSocket/listeners don't outlive this failed attempt.
+			// Run this BEFORE the stale return so superseded attempts also
+			// reclaim the orphaned Room.
+			if (pendingRoom && pendingRoom !== room) {
+				await pendingRoom.disconnect().catch(() => {});
+			}
+			if (stale) return;
+			// Re-check liveness AFTER the disconnect await: a reactive tick
+			// (focus change, enabled toggle) could have started a newer
+			// `doConnect` while we yielded. If so, the newer attempt may have
+			// already assigned its `room`, and calling `teardown()` now would
+			// disconnect that live room and wipe its attachments.
+			if (disposed || postBump !== attempt) return;
 			await teardown();
 		}
 	};
