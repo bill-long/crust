@@ -95,7 +95,9 @@ function MicDeviceSelect(): ReturnType<Component> {
 				</select>
 			</div>
 			<Show when={error()}>
-				<div class="text-xs text-danger-text">{error()}</div>
+				<div role="alert" class="text-xs text-danger-text">
+					{error()}
+				</div>
 			</Show>
 		</div>
 	);
