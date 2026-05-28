@@ -371,7 +371,15 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const desiredMuted = localMuted();
 			await r.localParticipant.setMicrophoneEnabled(!desiredMuted);
 			if (disposed || myAttempt !== attempt) {
-				await teardown();
+				// Disconnect THIS captured room only; do not call the shared
+				// `teardown()` which operates on the module-level `room`.
+				// A racing focus-change reconnect can establish a newer room
+				// (and re-assign `room`) while we were awaiting
+				// `setMicrophoneEnabled`; teardown would then disconnect the
+				// wrong (live) room. We also intentionally avoid clearing
+				// shared attachments/derived state here — those belong to the
+				// current attempt and will be cleaned up by its own teardown.
+				await r.disconnect().catch(() => {});
 				return;
 			}
 
