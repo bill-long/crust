@@ -36,9 +36,13 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 			TrackSubscribed: "trackSubscribed",
 			TrackUnsubscribed: "trackUnsubscribed",
 			LocalTrackPublished: "localTrackPublished",
+			LocalTrackUnpublished: "localTrackUnpublished",
 			Disconnected: "disconnected",
 		},
-		Track: { Kind: { Audio: "audio", Video: "video" } },
+		Track: {
+			Kind: { Audio: "audio", Video: "video" },
+			Source: { Camera: "camera", Microphone: "microphone" },
+		},
 	};
 	const jwtMock = vi.fn(async () => ({ url: "wss://sfu", jwt: "JWT" }));
 	return { roomFactory, lkMock, jwtMock };
@@ -68,7 +72,11 @@ interface FakeRoom {
 	localParticipant: {
 		identity: string;
 		isMicrophoneEnabled: boolean;
+		isCameraEnabled: boolean;
 		setMicrophoneEnabled: ReturnType<typeof vi.fn>;
+		setCameraEnabled: ReturnType<typeof vi.fn>;
+		audioTrackPublications: Map<string, unknown>;
+		videoTrackPublications: Map<string, unknown>;
 	};
 	remoteParticipants: Map<string, unknown>;
 	activeSpeakers: { identity: string }[];
@@ -82,10 +90,16 @@ function createFakeRoom(opts?: {
 	const localParticipant = {
 		identity: "local-id",
 		isMicrophoneEnabled: false,
+		isCameraEnabled: false,
 		setMicrophoneEnabled: vi.fn(async (enabled: boolean) => {
 			if (opts?.enableMicImpl) await opts.enableMicImpl();
 			localParticipant.isMicrophoneEnabled = enabled;
 		}),
+		setCameraEnabled: vi.fn(async (enabled: boolean) => {
+			localParticipant.isCameraEnabled = enabled;
+		}),
+		audioTrackPublications: new Map(),
+		videoTrackPublications: new Map(),
 	};
 	const room: FakeRoom = {
 		connect: vi.fn(opts?.connectImpl ?? (async () => {})),
@@ -171,6 +185,7 @@ describe("useLivekitRoom", () => {
 				enabled: () => false,
 				memberships: () => [],
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -190,6 +205,7 @@ describe("useLivekitRoom", () => {
 				enabled: () => true,
 				memberships: () => [],
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -220,6 +236,7 @@ describe("useLivekitRoom", () => {
 				enabled,
 				memberships: () => [],
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -245,6 +262,7 @@ describe("useLivekitRoom", () => {
 				enabled: () => true,
 				memberships: () => [],
 				audioDeviceId: deviceId,
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -267,6 +285,7 @@ describe("useLivekitRoom", () => {
 				enabled: () => true,
 				memberships: () => [],
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -292,6 +311,7 @@ describe("useLivekitRoom", () => {
 				enabled: () => true,
 				memberships: () => [],
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -307,6 +327,7 @@ describe("useLivekitRoom", () => {
 		fakeRoom.remoteParticipants.set("remote-bid", {
 			identity: "remote-bid",
 			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
 		});
 		roomFactory.current = () => fakeRoom;
 		const { client } = createClient();
@@ -327,6 +348,7 @@ describe("useLivekitRoom", () => {
 				enabled: () => true,
 				memberships: () => memberships,
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
@@ -345,10 +367,349 @@ describe("useLivekitRoom", () => {
 				enabled: () => true,
 				memberships: () => [],
 				audioDeviceId: () => "",
+				videoDeviceId: () => "",
 				loadLivekit,
 			}),
 		);
 		await waitFor(() => result.status() === "error");
 		expect(result.error()?.message).toContain("401");
+	});
+
+	it("setLocalCamEnabled(true) calls setCameraEnabled with deviceId and reflects publish", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "cam-abc",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		expect(result.localCamEnabled()).toBe(false);
+		await result.setLocalCamEnabled(true);
+		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenCalledWith(
+			true,
+			{ deviceId: "cam-abc" },
+		);
+		expect(result.localCamEnabled()).toBe(true);
+		// Simulate LocalTrackPublished for the local camera and verify the
+		// reconcile picks it up into videoTracks via reconcileLocalCamera.
+		const localTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		fakeRoom.localParticipant.videoTrackPublications.set("pub-local-cam", {
+			source: "camera",
+			videoTrack: localTrack,
+			isSubscribed: true,
+			trackSid: "pub-local-cam",
+		});
+		fakeRoom.emit("localTrackPublished");
+		expect(result.videoTracks().get("local-id")?.track).toBe(localTrack);
+	});
+
+	it("setLocalCamEnabled(false) unpublishes and removes local entry on LocalTrackUnpublished", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		await result.setLocalCamEnabled(true);
+		const localTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		fakeRoom.localParticipant.videoTrackPublications.set("pub-local-cam", {
+			source: "camera",
+			videoTrack: localTrack,
+			isSubscribed: true,
+			trackSid: "pub-local-cam",
+		});
+		fakeRoom.emit("localTrackPublished");
+		expect(result.videoTracks().has("local-id")).toBe(true);
+
+		await result.setLocalCamEnabled(false);
+		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenLastCalledWith(
+			false,
+			{ deviceId: undefined },
+		);
+		// Simulate LiveKit removing the camera publication and emitting unpublished.
+		fakeRoom.localParticipant.videoTrackPublications.clear();
+		fakeRoom.emit("localTrackUnpublished");
+		expect(result.localCamEnabled()).toBe(false);
+		expect(result.videoTracks().has("local-id")).toBe(false);
+	});
+
+	it("remote camera TrackSubscribed adds a videoTracks entry; TrackUnsubscribed removes it", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remoteTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const remotePub = { source: "camera", trackSid: "remote-sid-1" };
+		fakeRoom.emit("trackSubscribed", remoteTrack, remotePub, {
+			identity: "remote-1",
+		});
+		expect(result.videoTracks().get("remote-1")?.track).toBe(remoteTrack);
+		expect(result.videoTracks().get("remote-1")?.sid).toBe("remote-sid-1");
+
+		fakeRoom.emit("trackUnsubscribed", remoteTrack, remotePub, {
+			identity: "remote-1",
+		});
+		expect(result.videoTracks().has("remote-1")).toBe(false);
+	});
+
+	it("stale TrackUnsubscribed with a different sid does NOT wipe a fresh replacement entry", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const oldTrack = { kind: "video" };
+		const newTrack = { kind: "video" };
+		fakeRoom.emit(
+			"trackSubscribed",
+			oldTrack,
+			{ source: "camera", trackSid: "old-sid" },
+			{ identity: "remote-1" },
+		);
+		// Replace with a new publication (e.g. camera-device switch).
+		fakeRoom.emit(
+			"trackSubscribed",
+			newTrack,
+			{ source: "camera", trackSid: "new-sid" },
+			{ identity: "remote-1" },
+		);
+		expect(result.videoTracks().get("remote-1")?.track).toBe(newTrack);
+		// Late unsubscribe for the old publication must NOT delete the new one.
+		fakeRoom.emit(
+			"trackUnsubscribed",
+			oldTrack,
+			{ source: "camera", trackSid: "old-sid" },
+			{ identity: "remote-1" },
+		);
+		expect(result.videoTracks().get("remote-1")?.track).toBe(newTrack);
+	});
+
+	it("ParticipantDisconnected purges that participant's video entry", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remoteTrack = { kind: "video" };
+		fakeRoom.emit(
+			"trackSubscribed",
+			remoteTrack,
+			{ source: "camera", trackSid: "r-sid" },
+			{ identity: "remote-x" },
+		);
+		expect(result.videoTracks().has("remote-x")).toBe(true);
+		fakeRoom.emit("participantDisconnected", { identity: "remote-x" });
+		expect(result.videoTracks().has("remote-x")).toBe(false);
+	});
+
+	it("non-camera video publications are ignored (e.g. screen-share)", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		fakeRoom.emit(
+			"trackSubscribed",
+			{ kind: "video" },
+			{ source: "screen_share", trackSid: "ss-sid" },
+			{ identity: "remote-1" },
+		);
+		expect(result.videoTracks().has("remote-1")).toBe(false);
+	});
+
+	it("does not reconnect when only videoDeviceId changes", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const [deviceId, setDeviceId] = createSignal("");
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: deviceId,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		expect(roomFactory.callCount).toBe(1);
+		setDeviceId("different-cam");
+		await flush();
+		expect(roomFactory.callCount).toBe(1);
+	});
+
+	it("setLocalCamEnabled reverts optimistic flag and surfaces error when setCameraEnabled rejects", async () => {
+		const fakeRoom = createFakeRoom();
+		fakeRoom.localParticipant.setCameraEnabled.mockImplementation(async () => {
+			throw new Error("cam denied");
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		await result.setLocalCamEnabled(true);
+		// Optimistic flag reverted to actual (still false on the fake).
+		expect(result.localCamEnabled()).toBe(false);
+		expect(result.error()?.message).toContain("cam denied");
+	});
+
+	it("setLocalCamEnabled stale-bails when disconnect lands mid-await", async () => {
+		const fakeRoom = createFakeRoom();
+		let release: () => void = () => {};
+		fakeRoom.localParticipant.setCameraEnabled.mockImplementation(
+			() =>
+				new Promise<void>((r) => {
+					release = r;
+				}),
+		);
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const pending = result.setLocalCamEnabled(true);
+		// Teardown bumps the attempt epoch mid-await; post-await reconciliation
+		// must bail out (no setError on a dead room).
+		await result.disconnect();
+		release();
+		await pending;
+		expect(result.error()).toBeNull();
+		expect(result.status()).toBe("idle");
+	});
+
+	it("rapid enable→disable while setCameraEnabled is in flight settles on disable (intent not clobbered by LocalTrackPublished)", async () => {
+		const fakeRoom = createFakeRoom();
+		// Simulate LiveKit emitting LocalTrackPublished synchronously inside
+		// setCameraEnabled(true) BEFORE the publish promise resolves — the
+		// race window that previously let reconcileLocalCamera overwrite a
+		// user's mid-await "disable" intent.
+		let releaseEnable: () => void = () => {};
+		fakeRoom.localParticipant.setCameraEnabled.mockImplementationOnce(
+			async (enabled: boolean) => {
+				fakeRoom.localParticipant.isCameraEnabled = enabled;
+				if (enabled) {
+					const localTrack = { kind: "video" };
+					fakeRoom.localParticipant.videoTrackPublications.set("pub-cam", {
+						source: "camera",
+						videoTrack: localTrack,
+						isSubscribed: true,
+						trackSid: "pub-cam",
+					});
+					fakeRoom.emit("localTrackPublished");
+				}
+				await new Promise<void>((r) => {
+					releaseEnable = r;
+				});
+			},
+		);
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const enablePromise = result.setLocalCamEnabled(true);
+		// LocalTrackPublished has now fired (synchronously inside the
+		// mocked setCameraEnabled body). User clicks Stop before enable
+		// resolves — must NOT be silently lost.
+		await result.setLocalCamEnabled(false);
+		expect(result.localCamEnabled()).toBe(false);
+		releaseEnable();
+		await enablePromise;
+		// The loop should re-run, see desired=false / actual=true, and
+		// call setCameraEnabled(false) to honor the user's last intent.
+		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenCalledTimes(2);
+		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenLastCalledWith(
+			false,
+			{ deviceId: undefined },
+		);
+		expect(result.localCamEnabled()).toBe(false);
 	});
 });

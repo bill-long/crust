@@ -1,5 +1,6 @@
 import {
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	For,
@@ -11,7 +12,11 @@ import { useClient } from "../../../../client/client";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
 import { userSettings } from "../../../../stores/settings";
 import { ConfirmDialog } from "../../settings/ConfirmDialog";
-import { useLivekitRoom } from "./useLivekitRoom";
+import {
+	type LivekitRoomApi,
+	type RtcParticipant,
+	useLivekitRoom,
+} from "./useLivekitRoom";
 import { useRtcSession } from "./useRtcSession";
 
 interface NativeCallViewProps {
@@ -81,6 +86,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		),
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
+		videoDeviceId: createMemo(() => userSettings().rtcCamDeviceId),
 	});
 
 	const [confirmClose, setConfirmClose] = createSignal(false);
@@ -327,6 +333,46 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 								</button>
 								<button
 									type="button"
+									onClick={() =>
+										void livekit.setLocalCamEnabled(!livekit.localCamEnabled())
+									}
+									disabled={livekit.status() !== "connected"}
+									aria-pressed={livekit.localCamEnabled()}
+									class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-semibold text-text-emphasis transition-colors hover:bg-surface-3 disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
+									title={
+										livekit.localCamEnabled() ? "Stop camera" : "Start camera"
+									}
+									aria-label={
+										livekit.localCamEnabled() ? "Stop camera" : "Start camera"
+									}
+								>
+									<svg
+										class="h-4 w-4"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										aria-hidden="true"
+									>
+										<Show
+											when={livekit.localCamEnabled()}
+											fallback={
+												<>
+													<line x1="1" y1="1" x2="23" y2="23" />
+													<path d="M21 21H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.5M9.5 4H15l2 2h4a2 2 0 0 1 2 2v9.5M13 13a3 3 0 1 1-4-4" />
+												</>
+											}
+										>
+											<path d="M23 7l-7 5 7 5V7z" />
+											<rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+										</Show>
+									</svg>
+									{livekit.localCamEnabled() ? "Stop camera" : "Start camera"}
+								</button>
+								<button
+									type="button"
 									onClick={() => {
 										confirmLeave().catch((err: unknown) => {
 											setLeaveError(
@@ -432,47 +478,20 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 							</Show>
 						}
 					>
-						<ul class="mt-2 space-y-1.5 text-sm text-text-emphasis">
+						<div
+							class="mt-2 grid auto-rows-fr gap-2"
+							classList={{
+								"grid-cols-1": livekit.participants().length <= 1,
+								"grid-cols-2":
+									livekit.participants().length >= 2 &&
+									livekit.participants().length <= 4,
+								"grid-cols-3": livekit.participants().length >= 5,
+							}}
+						>
 							<For each={livekit.participants()}>
-								{(p) => (
-									<li class="flex items-center gap-2">
-										<span
-											aria-hidden="true"
-											class="inline-block h-2 w-2 shrink-0 rounded-full"
-											classList={{
-												"bg-success": p.isSpeaking,
-												"bg-surface-3": !p.isSpeaking,
-											}}
-										/>
-										<span class="min-w-0 flex-1 truncate">
-											{p.displayName}
-											<Show when={p.isLocal}>
-												<span class="ml-1 text-xs text-text-disabled">
-													(you)
-												</span>
-											</Show>
-										</span>
-										<Show when={p.isMuted}>
-											<svg
-												class="h-3.5 w-3.5 text-text-disabled"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												role="img"
-												aria-label="Microphone muted"
-											>
-												<line x1="1" y1="1" x2="23" y2="23" />
-												<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-												<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
-											</svg>
-										</Show>
-									</li>
-								)}
+								{(p) => <ParticipantTile participant={p} livekit={livekit} />}
 							</For>
-						</ul>
+						</div>
 					</Show>
 				</div>
 
@@ -515,6 +534,100 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 				destructive
 				onConfirm={confirmLeave}
 			/>
+		</div>
+	);
+};
+
+interface ParticipantTileProps {
+	participant: RtcParticipant;
+	livekit: LivekitRoomApi;
+}
+
+/**
+ * Renders one participant in the call tile grid. Reactively attaches the
+ * participant's current camera video track (if any) to a stable `<video>`
+ * element via `track.attach(el)` and detaches on cleanup so LiveKit's
+ * adaptive-stream logic correctly pauses when the tile unmounts.
+ *
+ * The element is always present in the DOM; we toggle visibility based on
+ * whether a track is attached so the avatar placeholder doesn't overlap
+ * the video frame. All `<video>` elements are `muted` — audio playback is
+ * handled by the hidden `<audio>` attachments owned by the LiveKit hook,
+ * which avoids local-mic loopback and improves autoplay reliability.
+ */
+const ParticipantTile: Component<ParticipantTileProps> = (props) => {
+	let videoEl: HTMLVideoElement | undefined;
+	const entry = createMemo(() =>
+		props.livekit.videoTracks().get(props.participant.identity),
+	);
+
+	createEffect(() => {
+		const e = entry();
+		const el = videoEl;
+		if (!el) return;
+		if (!e) return;
+		// Attaching to an existing element re-uses the same MediaStream sink
+		// so the adaptive-stream "no consumer" pause doesn't trigger between
+		// rapid track replacements (e.g. camera-device change).
+		e.track.attach(el);
+		onCleanup(() => {
+			try {
+				e.track.detach(el);
+			} catch {
+				// Track may already be stopped during teardown; safe to ignore.
+			}
+		});
+	});
+
+	return (
+		<div
+			class="relative flex aspect-video min-h-0 items-center justify-center overflow-hidden rounded border bg-surface-2"
+			classList={{
+				"border-success": props.participant.isSpeaking,
+				"border-border-subtle": !props.participant.isSpeaking,
+			}}
+		>
+			<video
+				ref={videoEl}
+				class="h-full w-full object-cover"
+				classList={{ hidden: !entry() }}
+				autoplay
+				playsinline
+				muted
+			/>
+			<Show when={!entry()}>
+				<div
+					aria-hidden="true"
+					class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-3 text-lg font-semibold text-text-emphasis"
+				>
+					{(props.participant.displayName.trim()[0] ?? "?").toUpperCase()}
+				</div>
+			</Show>
+			<div class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-black/40 px-2 py-1 text-xs text-white">
+				<span class="min-w-0 truncate">
+					{props.participant.displayName}
+					<Show when={props.participant.isLocal}>
+						<span class="ml-1 text-[10px] opacity-75">(you)</span>
+					</Show>
+				</span>
+				<Show when={props.participant.isMuted}>
+					<svg
+						class="h-3.5 w-3.5 shrink-0"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						role="img"
+						aria-label="Microphone muted"
+					>
+						<line x1="1" y1="1" x2="23" y2="23" />
+						<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+						<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+					</svg>
+				</Show>
+			</div>
 		</div>
 	);
 };

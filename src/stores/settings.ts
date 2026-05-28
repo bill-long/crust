@@ -25,6 +25,12 @@ export interface UserSettings {
 	 * room wrapper (#122).
 	 */
 	rtcMicDeviceId: string;
+	/**
+	 * `MediaDeviceInfo.deviceId` to use as the native RTC camera, or
+	 * empty string for the system default. Consumed by the Phase 3 LiveKit
+	 * room wrapper (#122).
+	 */
+	rtcCamDeviceId: string;
 }
 
 const defaults: UserSettings = {
@@ -35,6 +41,7 @@ const defaults: UserSettings = {
 	notificationSound: true,
 	urlPreviews: true,
 	rtcMicDeviceId: "",
+	rtcCamDeviceId: "",
 };
 
 function loadBool(
@@ -83,6 +90,10 @@ function load(): UserSettings {
 				typeof obj.rtcMicDeviceId === "string"
 					? obj.rtcMicDeviceId
 					: defaults.rtcMicDeviceId,
+			rtcCamDeviceId:
+				typeof obj.rtcCamDeviceId === "string"
+					? obj.rtcCamDeviceId
+					: defaults.rtcCamDeviceId,
 		};
 	} catch {
 		return { ...defaults };

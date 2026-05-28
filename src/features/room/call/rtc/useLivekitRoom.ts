@@ -1,8 +1,10 @@
 import type {
 	Room as LivekitRoom,
+	LocalVideoTrack,
 	RemoteAudioTrack,
 	RemoteTrack,
 	RemoteTrackPublication,
+	RemoteVideoTrack,
 } from "livekit-client";
 import type { MatrixClient } from "matrix-js-sdk";
 import type {
@@ -52,11 +54,25 @@ export interface UseLivekitRoomOptions {
 	/** Microphone deviceId (empty string = system default). */
 	audioDeviceId: Accessor<string>;
 	/**
+	 * Camera deviceId (empty string = system default). Applied at the next
+	 * `setLocalCamEnabled(true)` — changing it mid-call does NOT restart an
+	 * already-published camera (mirrors `audioDeviceId` semantics from
+	 * Phase 2).
+	 */
+	videoDeviceId: Accessor<string>;
+	/**
 	 * Loader for the livekit-client module. Defaults to a dynamic import so
 	 * the LiveKit chunk is only fetched on Join. Tests inject a synchronous
 	 * loader returning a mock module.
 	 */
 	loadLivekit?: () => Promise<typeof import("livekit-client")>;
+}
+
+export interface VideoTrackEntry {
+	/** LiveKit video track — local or remote. Attach to a `<video>` ref. */
+	track: LocalVideoTrack | RemoteVideoTrack;
+	/** Publication sid used for stale-event removal validation. */
+	sid: string;
 }
 
 export interface LivekitRoomApi {
@@ -65,6 +81,32 @@ export interface LivekitRoomApi {
 	participants: Accessor<readonly RtcParticipant[]>;
 	localMuted: Accessor<boolean>;
 	setLocalMuted: (muted: boolean) => Promise<void>;
+	/**
+	 * The user's *desired* camera publish state — flips immediately on
+	 * `setLocalCamEnabled` so the button label is responsive, then a
+	 * single-flight loop drives LiveKit to match. Reset to false on
+	 * teardown so a recovery after a failed leave doesn't show
+	 * camera-on with nothing actually published. The local preview tile
+	 * mounts based on the per-participant `videoTracks` entry (which
+	 * mirrors the SDK's actual publication state), not this signal — so a
+	 * brief desired/actual mismatch during the in-flight reconcile loop
+	 * is invisible to the user.
+	 */
+	localCamEnabled: Accessor<boolean>;
+	/**
+	 * Drive the local camera publish state. Optimistic: the signal flips
+	 * immediately to reflect the latest user intent, then a single-flight
+	 * loop reconciles LiveKit to the latest intent — rapid enable→disable
+	 * settles on the last click rather than the order SDK promises resolve.
+	 */
+	setLocalCamEnabled: (enabled: boolean) => Promise<void>;
+	/**
+	 * Map of LiveKit participant identity → its camera VideoTrack entry.
+	 * Only camera-source publications are stored (screen-share is excluded
+	 * here for now). Tiles consume this and attach the track to their own
+	 * `<video>` ref.
+	 */
+	videoTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/** Disconnects, stops local mic, detaches all audio. Idempotent. */
 	disconnect: () => Promise<void>;
 	/**
@@ -99,6 +141,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		readonly RtcParticipant[]
 	>([]);
 	const [localMuted, setLocalMutedSignal] = createSignal(false);
+	// Actual call-derived state: true while a camera publication is live.
+	// NOT persisted across teardown — see `resetCallDerivedState()`.
+	const [localCamEnabled, setLocalCamEnabledSignal] = createSignal(false);
+	const [videoTracks, setVideoTracks] = createSignal<
+		ReadonlyMap<string, VideoTrackEntry>
+	>(new Map());
 	const [audioBlocked, setAudioBlocked] = createSignal(false);
 
 	let room: LivekitRoom | null = null;
@@ -114,7 +162,27 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// after the user clicked Leave. A counter (not a boolean) so overlapping
 	// disconnect calls don't clear the guard prematurely.
 	let explicitDisconnectDepth = 0;
+	// Camera-toggle single-flight: serializes overlapping setLocalCamEnabled
+	// calls so the last user intent always wins, regardless of which SDK
+	// promise resolves first. The outer call kicks off a reconcile loop and
+	// sets this true; concurrent calls just update the desired-state signal
+	// and let the loop pick it up on its next iteration.
+	let cameraOpPending = false;
 	const attachments = new Map<string, AttachedAudio>();
+	// Mutable mirror of `videoTracks` for in-place updates; published as a
+	// fresh Map to the signal whenever the contents change so Solid sees the
+	// reference change.
+	const videoTrackMap = new Map<string, VideoTrackEntry>();
+	const publishVideoTracks = (): void => {
+		setVideoTracks(new Map(videoTrackMap));
+	};
+	// Cache of participant records keyed by identity. `snapshotParticipants`
+	// reuses an existing object reference when none of its fields changed so
+	// Solid `<For>` keeps the tile DOM (and any attached <video>) mounted
+	// across active-speaker / mute events. Without this, every snapshot would
+	// detach/reattach every video tile and adaptive-stream-pause/resume on
+	// every speaking flip.
+	const participantCache = new Map<string, RtcParticipant>();
 
 	const detachAll = (): void => {
 		for (const a of attachments.values()) {
@@ -162,25 +230,64 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 	const snapshotParticipants = (r: LivekitRoom): void => {
 		const speakingIds = new Set(r.activeSpeakers.map((p) => p.identity));
+		const seen = new Set<string>();
+		const reuseOrBuild = (
+			identity: string,
+			displayName: string,
+			isSpeaking: boolean,
+			isMuted: boolean,
+			isLocal: boolean,
+		): RtcParticipant => {
+			seen.add(identity);
+			const prev = participantCache.get(identity);
+			if (
+				prev &&
+				prev.displayName === displayName &&
+				prev.isSpeaking === isSpeaking &&
+				prev.isMuted === isMuted &&
+				prev.isLocal === isLocal
+			) {
+				return prev;
+			}
+			const next: RtcParticipant = {
+				identity,
+				displayName,
+				isSpeaking,
+				isMuted,
+				isLocal,
+			};
+			participantCache.set(identity, next);
+			return next;
+		};
 		const out: RtcParticipant[] = [];
-		out.push({
-			identity: r.localParticipant.identity,
-			displayName: resolveDisplayName(r.localParticipant.identity),
-			isSpeaking: speakingIds.has(r.localParticipant.identity),
-			isMuted: r.localParticipant.isMicrophoneEnabled === false,
-			isLocal: true,
-		});
+		out.push(
+			reuseOrBuild(
+				r.localParticipant.identity,
+				resolveDisplayName(r.localParticipant.identity),
+				speakingIds.has(r.localParticipant.identity),
+				r.localParticipant.isMicrophoneEnabled === false,
+				true,
+			),
+		);
 		for (const p of r.remoteParticipants.values()) {
 			const micPub = Array.from(p.audioTrackPublications.values()).find(
 				(pub) => pub.source === "microphone",
 			);
-			out.push({
-				identity: p.identity,
-				displayName: resolveDisplayName(p.identity),
-				isSpeaking: speakingIds.has(p.identity),
-				isMuted: micPub?.isMuted ?? true,
-				isLocal: false,
-			});
+			out.push(
+				reuseOrBuild(
+					p.identity,
+					resolveDisplayName(p.identity),
+					speakingIds.has(p.identity),
+					micPub?.isMuted ?? true,
+					false,
+				),
+			);
+		}
+		// Prune cache entries for participants who have disconnected so a
+		// later rejoin with the same identity gets a fresh record (and so we
+		// don't leak memory for a churning call).
+		for (const id of [...participantCache.keys()]) {
+			if (!seen.has(id)) participantCache.delete(id);
 		}
 		setParticipants(out);
 	};
@@ -218,15 +325,83 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		attachments.delete(sid);
 	};
 
+	// Insert / replace the video track for a participant identity. Tile
+	// components own the <video> ref and call `track.attach(el)` reactively
+	// when this map updates — central DOM attachment is intentionally NOT
+	// done here.
+	const upsertVideoTrack = (
+		identity: string,
+		track: LocalVideoTrack | RemoteVideoTrack,
+		sid: string,
+	): void => {
+		const prev = videoTrackMap.get(identity);
+		if (prev && prev.sid === sid && prev.track === track) return;
+		videoTrackMap.set(identity, { track, sid });
+		publishVideoTracks();
+	};
+
+	// Remove the video track for an identity IF the stored entry matches the
+	// publication that's going away. Late stale-publication events from a
+	// device restart or transient unpublish/republish must NOT wipe a fresh
+	// replacement that landed first.
+	const removeVideoTrackIfMatches = (identity: string, sid: string): void => {
+		const prev = videoTrackMap.get(identity);
+		if (!prev || prev.sid !== sid) return;
+		videoTrackMap.delete(identity);
+		publishVideoTracks();
+	};
+
+	// Reconcile the local participant's camera publication into `videoTrackMap`
+	// only. Called from `LocalTrackPublished` and `LocalTrackUnpublished` so
+	// the local preview tile mounts/unmounts in sync with the SDK.
+	//
+	// Intentionally does NOT touch `localCamEnabledSignal`. That signal
+	// represents the user's *desired* state and is owned exclusively by
+	// `setLocalCamEnabled` (for clicks) and `resetCallDerivedState` (for
+	// teardown). If we wrote actual SDK state here, a `LocalTrackPublished`
+	// event firing inside the loop's `setCameraEnabled` await — common with
+	// LiveKit because publish events emit before the publish promise resolves
+	// — would clobber a user's racing "off" intent, and the reconcile loop
+	// would then see desired===actual and skip the disable. Keeping desired
+	// and actual separate is what makes rapid enable→disable settle on the
+	// last click.
+	const reconcileLocalCamera = (r: LivekitRoom): void => {
+		const camPub = Array.from(
+			r.localParticipant.videoTrackPublications.values(),
+		).find((pub) => pub.source === "camera");
+		if (camPub?.videoTrack) {
+			upsertVideoTrack(
+				r.localParticipant.identity,
+				camPub.videoTrack as LocalVideoTrack,
+				camPub.trackSid,
+			);
+		} else {
+			const prev = videoTrackMap.get(r.localParticipant.identity);
+			if (prev) {
+				videoTrackMap.delete(r.localParticipant.identity);
+				publishVideoTracks();
+			}
+		}
+	};
+
 	// Reset call-derived UI state. Called from both `teardown()` (intentional
 	// disconnects) and the `Disconnected` event handler (unsolicited drops)
 	// so the participant list doesn't outlive the call. NOTE: `localMuted` is
 	// treated as a persistent user preference (mute carries across calls and
 	// retries) and is intentionally NOT reset here — clearing it on connect
 	// errors would silently flip a pre-muted user back to unmuted on retry.
+	// `localCamEnabled` (desired-state intent) IS reset here because Phase 3
+	// does not auto-enable camera on reconnect, so a leftover `true` would
+	// drive an unexpected publish on the next connect.
 	const resetCallDerivedState = (): void => {
 		setParticipants([]);
 		setAudioBlocked(false);
+		participantCache.clear();
+		if (videoTrackMap.size > 0) {
+			videoTrackMap.clear();
+			publishVideoTracks();
+		}
+		setLocalCamEnabledSignal(false);
 	};
 
 	const teardown = async (): Promise<void> => {
@@ -271,6 +446,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				audioCaptureDefaults: {
 					deviceId: opts.audioDeviceId() || undefined,
 				},
+				videoCaptureDefaults: {
+					deviceId: opts.videoDeviceId() || undefined,
+				},
 			});
 			// Track for catch-path cleanup: if `r.connect()` rejects (or
 			// anything below throws), we still need to disconnect this
@@ -297,10 +475,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				ifLive(() => snapshotParticipants(r)),
 			);
 			r.on(
-				lk.RoomEvent.ParticipantDisconnected,
-				ifLive(() => snapshotParticipants(r)),
-			);
-			r.on(
 				lk.RoomEvent.ActiveSpeakersChanged,
 				ifLive(() => snapshotParticipants(r)),
 			);
@@ -316,22 +490,74 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				lk.RoomEvent.LocalTrackPublished,
 				ifLive(() => {
 					setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
+					reconcileLocalCamera(r);
+					snapshotParticipants(r);
+				}),
+			);
+			r.on(
+				lk.RoomEvent.LocalTrackUnpublished,
+				ifLive(() => {
+					setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
+					reconcileLocalCamera(r);
 					snapshotParticipants(r);
 				}),
 			);
 			r.on(
 				lk.RoomEvent.TrackSubscribed,
-				ifLive((track: RemoteTrack, publication: RemoteTrackPublication) => {
-					if (track.kind === lk.Track.Kind.Audio) {
-						attachAudioTrack(track as RemoteAudioTrack, publication);
-					}
-					snapshotParticipants(r);
-				}),
+				ifLive(
+					(
+						track: RemoteTrack,
+						publication: RemoteTrackPublication,
+						participant: { identity: string },
+					) => {
+						if (track.kind === lk.Track.Kind.Audio) {
+							attachAudioTrack(track as RemoteAudioTrack, publication);
+						} else if (
+							track.kind === lk.Track.Kind.Video &&
+							publication.source === lk.Track.Source.Camera
+						) {
+							upsertVideoTrack(
+								participant.identity,
+								track as RemoteVideoTrack,
+								publication.trackSid,
+							);
+						}
+						snapshotParticipants(r);
+					},
+				),
 			);
 			r.on(
 				lk.RoomEvent.TrackUnsubscribed,
-				ifLive((_t: RemoteTrack, publication: RemoteTrackPublication) => {
-					detachAudioTrack(publication.trackSid);
+				ifLive(
+					(
+						track: RemoteTrack,
+						publication: RemoteTrackPublication,
+						participant: { identity: string },
+					) => {
+						if (track.kind === lk.Track.Kind.Audio) {
+							detachAudioTrack(publication.trackSid);
+						} else if (
+							track.kind === lk.Track.Kind.Video &&
+							publication.source === lk.Track.Source.Camera
+						) {
+							removeVideoTrackIfMatches(
+								participant.identity,
+								publication.trackSid,
+							);
+						}
+						snapshotParticipants(r);
+					},
+				),
+			);
+			r.on(
+				lk.RoomEvent.ParticipantDisconnected,
+				ifLive((participant: { identity: string }) => {
+					// Clear any lingering video entry for the departed participant
+					// regardless of trackSid. Stale TrackUnsubscribed events tied to
+					// this participant may have been deferred by their disconnect.
+					if (videoTrackMap.delete(participant.identity)) {
+						publishVideoTracks();
+					}
 					snapshotParticipants(r);
 				}),
 			);
@@ -400,6 +626,17 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				for (const pub of p.audioTrackPublications.values()) {
 					if (pub.isSubscribed && pub.audioTrack) {
 						attachAudioTrack(pub.audioTrack as RemoteAudioTrack, pub);
+					}
+				}
+				// Same race for video: a remote camera publication that landed
+				// before our TrackSubscribed listener won't fire one for us.
+				for (const pub of p.videoTrackPublications.values()) {
+					if (pub.isSubscribed && pub.videoTrack && pub.source === "camera") {
+						upsertVideoTrack(
+							p.identity,
+							pub.videoTrack as RemoteVideoTrack,
+							pub.trackSid,
+						);
 					}
 				}
 			}
@@ -568,6 +805,52 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		}
 	};
 
+	const setLocalCamEnabled = async (enabled: boolean): Promise<void> => {
+		// Optimistic write of user intent. The reconcile loop below drives
+		// LiveKit to the latest signal value — rapid enable→disable settles
+		// to the last clicked state even if SDK promises resolve out of order.
+		setLocalCamEnabledSignal(enabled);
+		const r = room;
+		if (!r) return;
+		// Single-flight: another in-flight reconcile will pick up the latest
+		// `localCamEnabled()` signal on its next loop iteration.
+		if (cameraOpPending) return;
+		cameraOpPending = true;
+		try {
+			// Drive until LiveKit's actual state matches user intent. If the
+			// user toggles again during an await, the loop catches it.
+			// Bounded by `disposed` / `attempt` / `room` checks so a teardown
+			// or reconnect mid-loop bails immediately.
+			while (true) {
+				if (disposed) return;
+				const r2 = room;
+				if (!r2 || r2 !== r) return;
+				const desired = localCamEnabled();
+				const actual = r2.localParticipant.isCameraEnabled === true;
+				if (actual === desired) return;
+				const myAttempt = attempt;
+				try {
+					await r2.localParticipant.setCameraEnabled(desired, {
+						deviceId: opts.videoDeviceId() || undefined,
+					});
+				} catch (e) {
+					if (disposed || myAttempt !== attempt || room !== r2) return;
+					// Revert the optimistic flip to actual SDK state, surface error.
+					setLocalCamEnabledSignal(
+						r2.localParticipant.isCameraEnabled === true,
+					);
+					setError(e instanceof Error ? e : new Error(String(e)));
+					return;
+				}
+				if (disposed || myAttempt !== attempt || room !== r2) return;
+				// Loop again: the user may have toggled during the await; if
+				// not, the next iteration's actual===desired check returns.
+			}
+		} finally {
+			cameraOpPending = false;
+		}
+	};
+
 	const explicitDisconnect = (): boolean => explicitDisconnectDepth > 0;
 
 	const disconnect = async (): Promise<void> => {
@@ -622,6 +905,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		participants,
 		localMuted,
 		setLocalMuted,
+		localCamEnabled,
+		setLocalCamEnabled,
+		videoTracks,
 		disconnect,
 		audioBlocked,
 		resumeAudio,
