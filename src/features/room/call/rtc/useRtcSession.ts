@@ -164,7 +164,20 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			setError(err instanceof Error ? err : new Error(String(err)));
 			// Keep status aligned with actual joined state so the UI doesn't
 			// hide the Leave button while the session is still joined.
-			setStatus(s.isJoined() ? "joined" : "error");
+			const stillJoined = s.isJoined();
+			setStatus(stillJoined ? "joined" : "error");
+			// If the async failure means we never actually joined, run the
+			// same E2EE cleanup the synchronous catch arm in `join()` runs:
+			// detach the listener attached BEFORE joinRoomSession and bump
+			// `joinEpoch` so a late EncryptionKeyChanged event (the SDK can
+			// still emit one before tearing down the RTCEncryptionManager)
+			// bails on its `isLive` check instead of pumping a key from the
+			// failed session into the LiveKit keyProvider.
+			if (!stillJoined && detachE2EE !== null) {
+				detachE2EE();
+				detachE2EE = null;
+				joinEpoch++;
+			}
 		};
 
 		s.on(MatrixRTCSessionEvent.MembershipsChanged, onMembershipsChanged);

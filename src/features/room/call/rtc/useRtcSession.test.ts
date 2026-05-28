@@ -467,5 +467,47 @@ describe("useRtcSession", () => {
 			const isLive = attach.mock.calls[0][1] as () => boolean;
 			expect(isLive()).toBe(false);
 		});
+
+		it("detaches and bumps isLive on async MembershipManagerError when not joined", async () => {
+			const { ctx, attach, detach } = fakeCtx();
+			const session = createFakeSession();
+			// joinRoomSession returns OK synchronously without flipping
+			// _joined — simulates an async join failure where the SDK
+			// fires MembershipManagerError before JoinStateChanged(true).
+			session.joinRoomSession.mockImplementation(() => {
+				/* no _joined flip, no JoinStateChanged */
+			});
+			const { rtc } = renderRtc({ session, e2ee: () => ctx });
+			await rtc.join();
+			expect(detach).not.toHaveBeenCalled();
+			session.emit(
+				MatrixRTCSessionEvent.MembershipManagerError,
+				new Error("network"),
+			);
+			expect(rtc.status()).toBe("error");
+			expect(detach).toHaveBeenCalledTimes(1);
+			// isLive must be false so a late EncryptionKeyChanged bails
+			// before pumping a key from the failed session into the bridge.
+			const isLive = attach.mock.calls[0][1] as () => boolean;
+			expect(isLive()).toBe(false);
+		});
+
+		it("keeps bridge attached on MembershipManagerError when still joined", async () => {
+			const { ctx, attach, detach } = fakeCtx();
+			const session = createFakeSession();
+			const { rtc } = renderRtc({ session, e2ee: () => ctx });
+			await rtc.join();
+			expect(rtc.status()).toBe("joined");
+			session.emit(
+				MatrixRTCSessionEvent.MembershipManagerError,
+				new Error("transient"),
+			);
+			// Transient SDK errors during a healthy call must NOT orphan the
+			// bridge — detach would silently kill E2EE mid-call.
+			expect(rtc.status()).toBe("joined");
+			expect(detach).not.toHaveBeenCalled();
+			const isLive = attach.mock.calls[0][1] as () => boolean;
+			expect(isLive()).toBe(true);
+		});
 	});
 });
