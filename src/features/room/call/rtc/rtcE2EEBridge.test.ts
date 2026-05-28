@@ -416,4 +416,31 @@ describe("rtcE2EEBridge", () => {
 		b2.release();
 		ctx.dispose();
 	});
+
+	it("detach clears keyCache so a re-attach + bindRoom doesn't replay stale keys", async () => {
+		const ctx = await newCtx();
+		const session1 = createFakeSession();
+		const detach1 = ctx.attach(session1 as never, () => true);
+		session1.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([7]),
+			3,
+			{},
+			"id-stale",
+		);
+		await flush();
+		// Simulate a failed-join cleanup: detach the listener WITHOUT
+		// having called bindRoom yet (sync-throw path in useRtcSession).
+		detach1();
+		// Re-attach with a fresh session, then bind a new Room.
+		const session2 = createFakeSession();
+		ctx.attach(session2 as never, () => true);
+		const b = ctx.bindRoom();
+		const kp = b.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		// The new binding MUST NOT see the stale key from session1 —
+		// only keys from session2 should populate.
+		expect(kp.calls).toHaveLength(0);
+		b.release();
+		ctx.dispose();
+	});
 });

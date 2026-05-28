@@ -509,5 +509,23 @@ describe("useRtcSession", () => {
 			const isLive = attach.mock.calls[0][1] as () => boolean;
 			expect(isLive()).toBe(true);
 		});
+
+		it("detaches and bumps isLive on SDK-driven JoinStateChanged(false)", async () => {
+			const { ctx, attach, detach } = fakeCtx();
+			const session = createFakeSession();
+			const { rtc } = renderRtc({ session, e2ee: () => ctx });
+			await rtc.join();
+			expect(detach).not.toHaveBeenCalled();
+			// Simulate an SDK-driven leave (kicked, network teardown) —
+			// JoinStateChanged(false) fires without our leave() in flight.
+			session._joined = false;
+			session.emit(MatrixRTCSessionEvent.JoinStateChanged, false);
+			// Bridge must detach + bump epoch so late EncryptionKeyChanged
+			// events from the departing RTCEncryptionManager bail before
+			// pumping a stale key into the keyProvider.
+			expect(detach).toHaveBeenCalledTimes(1);
+			const isLive = attach.mock.calls[0][1] as () => boolean;
+			expect(isLive()).toBe(false);
+		});
 	});
 });

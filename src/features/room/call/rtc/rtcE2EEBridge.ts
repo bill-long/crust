@@ -292,6 +292,13 @@ export async function createRtcE2EEContext(
 			// happened yet (e.g., consumer re-attaches with a new
 			// session after Leave → Re-Join in the same call view).
 			epoch++;
+			// Clear the per-attach key cache so a subsequent attach()
+			// followed by bindRoom() doesn't replay stale keys from the
+			// detached session into the new keyProvider. Focus-change
+			// reconnects within a single attach session call bindRoom()
+			// (not detach) so this doesn't disturb the intended
+			// "replay cached keys into a fresh Room" semantics.
+			keyCache.clear();
 		};
 		activeDetach = detach;
 		return detach;

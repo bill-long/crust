@@ -153,6 +153,16 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 					return "idle";
 				return prev;
 			});
+			// SDK-driven leaves (kicked, network failure, manager-internal
+			// teardown) hit this path without going through our `leave()`,
+			// so detach the E2EE listener and bump `joinEpoch` to invalidate
+			// any in-flight key event from the departing RTCEncryptionManager.
+			// `leavePending` defers to `leave()`'s own cleanup path.
+			if (!isJoined && !leavePending && detachE2EE !== null) {
+				detachE2EE();
+				detachE2EE = null;
+				joinEpoch++;
+			}
 		};
 		const onManagerError = (err: unknown): void => {
 			// If a leave is in flight, defer to leave()'s try/catch which is
