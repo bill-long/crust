@@ -103,21 +103,38 @@ the request was silently dropped — retry with the `[bot]` syntax.
 After pushing fixes and requesting a re-review from `copilot-pull-request-reviewer`,
 determine review completion using the **summary review body**, not thread counts.
 
-### Step 1: Wait for the summary review
+### Step 1: Wait for the Copilot review on HEAD
 
-Copilot publishes individual thread comments first (empty `body`), then a
-**summary review** whose `body` starts with `## Pull request overview` and
-contains a sentence like "generated no new comments" or "generated N comment(s)".
-Poll the REST reviews endpoint until a summary review arrives for HEAD:
+Copilot signals review completion in one of two ways on the new HEAD commit:
+
+**Case A — new findings:** Copilot publishes individual thread comments
+(empty `body` reviews) followed by a **summary review** whose `body` starts
+with `## Pull request overview` and says "generated N comment(s)".
+
+**Case B — no new findings:** Copilot submits a **single empty-body review**
+on the HEAD SHA with **zero associated thread comments**, and no summary
+follows. There is no "generated no new comments" sentence to wait for in
+this case — the absence of both a non-empty summary AND any new threads on
+the new SHA *is* the clean signal.
+
+Poll the REST reviews endpoint every 30 seconds for up to 10 minutes:
 
 ```bash
 gh api /repos/bill-long/crust/pulls/PR_NUMBER/reviews \
-  --jq '.[] | select(.commit_id | startswith("HEAD_SHORT")) | select(.body | length > 0) | .body[0:200]'
+  --jq '.[] | select(.commit_id | startswith("HEAD_SHORT")) | {body_len: (.body | length), submitted_at}'
 ```
 
-- Poll every 30 seconds for up to 10 minutes.
-- A review with an **empty body** is just a thread comment, NOT the summary.
-  Keep polling until a review with a non-empty body appears for HEAD.
+To distinguish the two cases, pair the reviews query with the unreplied-
+threads query from Step 3 below, scoped to the new SHA. The loop is clean
+when **either**:
+
+- A non-empty summary explicitly says "generated no new comments", OR
+- An empty-body review by Copilot exists for HEAD AND no new Copilot threads
+  appear for HEAD after 3 verification polls (Step 4).
+
+**Do not wait indefinitely for a non-empty summary** — it may never arrive
+in Case B. Once you see an empty-body Copilot review on HEAD, switch to
+the thread-scan verification rather than continuing to poll for a summary.
 
 ### Step 2: Check the summary text
 
@@ -644,13 +661,16 @@ additions at the end of the category list:
   HTML with `<br>` and `<p>` tags already handles line breaks.
   Applying `pre-wrap` double-spaces the content. Reserve `pre-wrap`
   for plain-text-only containers (like code blocks or raw body text).
-- **The Copilot review loop requires a clean summary, not just
-  addressed threads.** After addressing Copilot comments, you must
-  push a new commit, re-request review, and wait for a new summary
-  that says "generated no new comments". Replying to threads on the
-  same commit is not enough — Copilot won't re-review the same SHA.
-  Declaring the loop complete without a clean summary caused a missed
-  comment (aria-pressed vs aria-current) that the user had to catch.
+- **The Copilot review loop requires either a clean summary or a no-new-
+  threads signal.** After addressing Copilot comments, push a new commit and
+  re-request review. Copilot then either (a) publishes a non-empty summary
+  saying "generated no new comments" or "generated N comment(s)", OR (b)
+  publishes a single empty-body review on the new SHA with no associated
+  thread comments. Case (b) is also clean — do not wait indefinitely for a
+  summary that may never arrive. Verify cleanliness with the unreplied-
+  Copilot-threads scan (3× at 10s intervals). Declaring the loop complete
+  without either signal caused a missed comment (aria-pressed vs aria-current)
+  that the user had to catch.
 - **Always run a verification scan after replying to Copilot threads.**
   Query ALL non-outdated threads where the last comment is from Copilot
   (meaning we haven't replied yet). Eventual consistency means threads
