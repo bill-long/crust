@@ -149,6 +149,23 @@ describe("useGlobalMicHotkey", () => {
 		document.body.removeChild(div);
 	});
 
+	it("force-clears held state when focus moves into a typing target while held", () => {
+		updateSetting("micMode", "push-to-talk");
+		updateSetting("micHotkey", HOTKEY_CTRL_ONLY);
+		mountHook();
+		// User holds the hotkey while focus is on body — gets keyed in.
+		fireKey("keydown", "ControlLeft", { ctrlKey: true });
+		expect(micHotkeyHeld()).toBe(true);
+		// User clicks into the composer (input) while still holding Ctrl.
+		// No keydown fires there; the focusin handler must drop the held state.
+		const input = document.createElement("input");
+		document.body.appendChild(input);
+		const ev = new FocusEvent("focusin", { bubbles: true });
+		input.dispatchEvent(ev);
+		expect(micHotkeyHeld()).toBe(false);
+		document.body.removeChild(input);
+	});
+
 	it("blur clears held state immediately (no debounce)", () => {
 		updateSetting("micMode", "push-to-talk");
 		updateSetting("micHotkey", HOTKEY_CTRL_SPACE);

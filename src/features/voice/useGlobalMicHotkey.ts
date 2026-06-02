@@ -137,7 +137,16 @@ export function useGlobalMicHotkey(): void {
 
 				window.addEventListener("keydown", onKeyDown, { capture: true });
 				window.addEventListener("keyup", onKeyUp, { capture: true });
+				const onFocusIn = (e: FocusEvent): void => {
+					// If focus moves into a typing target (input/textarea/select/
+					// contenteditable) while the hotkey is still held, no keydown
+					// fires there to trigger suppression. Force-clear held state
+					// so the mic doesn't stay keyed while the user types.
+					if (isTypingTarget(e.target)) forceClearHeld();
+				};
+
 				window.addEventListener("blur", onBlur);
+				window.addEventListener("focusin", onFocusIn);
 
 				// When the user starts rebinding the hotkey, immediately drop
 				// any in-flight held state so a key held at capture-start can't
@@ -150,6 +159,7 @@ export function useGlobalMicHotkey(): void {
 					window.removeEventListener("keydown", onKeyDown, { capture: true });
 					window.removeEventListener("keyup", onKeyUp, { capture: true });
 					window.removeEventListener("blur", onBlur);
+					window.removeEventListener("focusin", onFocusIn);
 					if (releaseTimer !== null) {
 						clearTimeout(releaseTimer);
 						releaseTimer = null;

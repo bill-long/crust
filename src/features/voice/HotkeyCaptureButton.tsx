@@ -58,9 +58,11 @@ function formatCode(code: string): string {
 
 export const HotkeyCaptureButton: Component = () => {
 	const [capturing, setCapturing] = createSignal(false);
-	// Pending committed combo (or `null` to clear). Written by the capture
-	// session's keydown/keyup handlers; consumed by the capture effect to
-	// commit the new binding and exit capture in a reactive scope.
+	// Pending capture outcome. `value` is the new combo to commit; `null` for
+	// `value` means "user cancelled (Esc / blur)" — the existing binding is
+	// preserved. Use the Clear Binding button to remove a binding entirely.
+	// Written by the capture session's keydown/keyup handlers; consumed by
+	// the commit effect below to write settings outside the capture effect.
 	const [pendingCommit, setPendingCommit] = createSignal<{
 		value: MicHotkey | null;
 	} | null>(null);
