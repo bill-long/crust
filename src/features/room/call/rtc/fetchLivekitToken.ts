@@ -9,17 +9,32 @@ export interface LivekitJwtResponse {
 }
 
 /**
- * Normalises an `lk-jwt-service` endpoint. Element Call's deployment
- * convention (matching `discoverFoci.ts`) exposes the JWT issuer at
- * `${base}/livekit/sfu/get`. Some operator configs store the path
- * partially or just the bare base. We accept three shapes so
- * `.well-known`-sourced foci (Phase 3+) keep working:
- *   - `${base}/livekit/sfu/get` → use as-is
- *   - `${base}/livekit`         → append `/sfu/get`
- *   - `${base}`                 → append `/livekit/sfu/get`
+ * Normalises an `lk-jwt-service` endpoint.
+ *
+ * `lk-jwt-service`'s route is `/sfu/get`. Deployments differ on what they
+ * publish in `org.matrix.msc4143.rtc_foci`'s `livekit_service_url` (or in
+ * `config.elementCall.url` for the EC-bundled fallback):
+ *
+ *   - bare host (`https://livekit.example.com`) — MSC4143 standard, also
+ *     Element's reference deployment when lk-jwt-service runs on its own
+ *     subdomain. JWT endpoint: `${base}/sfu/get`.
+ *   - prefixed path (`https://example.com/livekit` or `.../livekit/jwt`) —
+ *     EC-bundled nginx where everything sits behind one origin and the
+ *     reverse proxy strips the prefix. JWT endpoint: `${base}/sfu/get`.
+ *   - fully-qualified (`${base}/sfu/get`) — some operators store the
+ *     terminal endpoint directly. Pass through unchanged.
  *
  * Parses with the URL API so any `?query`/`#fragment` is preserved
  * verbatim and we don't accidentally splice path segments after it.
+ *
+ * Defence-in-depth scheme validation: rejects any input that isn't an
+ * absolute `http:` / `https:` URL. `parseFociFromWellKnown` already
+ * filters these out at ingestion, but a relative / non-http(s) value
+ * arriving here (e.g. via a custom `discoverFoci` override or a
+ * misconfigured `elementCall.url`) would otherwise cause `fetch` to
+ * POST the OpenID token to the app origin or a non-http(s) handler.
+ *
+ * @throws {LivekitJwtError} If the input isn't a valid absolute http(s) URL.
  */
 function normaliseJwtServiceUrl(input: string): string {
 	const trimmed = input.trim();
@@ -27,20 +42,20 @@ function normaliseJwtServiceUrl(input: string): string {
 	try {
 		parsed = new URL(trimmed);
 	} catch {
-		// Fall back to string handling for genuinely opaque inputs; the
-		// downstream fetch will surface a clearer error if it's invalid.
-		const stripped = trimmed.replace(/\/+$/, "");
-		if (stripped.endsWith("/sfu/get")) return stripped;
-		if (stripped.endsWith("/livekit")) return `${stripped}/sfu/get`;
-		return `${stripped}/livekit/sfu/get`;
+		throw new LivekitJwtError(
+			`Invalid LiveKit service URL (not an absolute URL): ${input}`,
+		);
+	}
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+		throw new LivekitJwtError(
+			`Invalid LiveKit service URL (must be http(s)): ${input}`,
+		);
 	}
 	const path = parsed.pathname.replace(/\/+$/, "");
 	if (path.endsWith("/sfu/get")) {
 		parsed.pathname = path;
-	} else if (path.endsWith("/livekit")) {
-		parsed.pathname = `${path}/sfu/get`;
 	} else {
-		parsed.pathname = `${path}/livekit/sfu/get`;
+		parsed.pathname = `${path}/sfu/get`;
 	}
 	return parsed.toString();
 }
