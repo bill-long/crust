@@ -39,65 +39,71 @@ describe("voice store", () => {
 	it("defaults to mic enabled in voice-activity mode", () => {
 		updateSetting("micMode", "voice-activity");
 		updateSetting("micHotkey", null);
-		createRoot(() => {
+		createRoot((dispose) => {
 			expect(userWantsMic()).toBe(true);
 			expect(micHotkeyHeld()).toBe(false);
 			expect(micEnabled()).toBe(true);
+			dispose();
 		});
 	});
 
 	it("toggleUserWantsMic flips intent and feeds through micEnabled", () => {
 		updateSetting("micMode", "voice-activity");
-		createRoot(() => {
+		createRoot((dispose) => {
 			toggleUserWantsMic();
 			expect(userWantsMic()).toBe(false);
 			expect(micEnabled()).toBe(false);
 			toggleUserWantsMic();
 			expect(micEnabled()).toBe(true);
+			dispose();
 		});
 	});
 
 	it("PTT mode is muted by default; held flips on", () => {
 		updateSetting("micMode", "push-to-talk");
 		updateSetting("micHotkey", SOME_HOTKEY);
-		createRoot(() => {
+		createRoot((dispose) => {
 			expect(micEnabled()).toBe(false); // not held
 			setMicHotkeyHeld(true);
 			expect(micEnabled()).toBe(true);
 			setMicHotkeyHeld(false);
 			expect(micEnabled()).toBe(false);
+			dispose();
 		});
 	});
 
 	it("PTM mode is unmuted by default; held flips off", () => {
 		updateSetting("micMode", "push-to-mute");
 		updateSetting("micHotkey", SOME_HOTKEY);
-		createRoot(() => {
+		createRoot((dispose) => {
 			expect(micEnabled()).toBe(true);
 			setMicHotkeyHeld(true);
 			expect(micEnabled()).toBe(false);
 			setMicHotkeyHeld(false);
 			expect(micEnabled()).toBe(true);
+			dispose();
 		});
 	});
 
 	it("PTT/PTM with unbound hotkey falls back to always-on (anti-footgun)", () => {
 		updateSetting("micHotkey", null);
-		createRoot(() => {
+		createRoot((dispose) => {
 			updateSetting("micMode", "push-to-talk");
 			expect(micEnabled()).toBe(true);
 			updateSetting("micMode", "push-to-mute");
 			expect(micEnabled()).toBe(true);
+			dispose();
 		});
 	});
 
 	it("userWantsMic=false hard-mutes regardless of mode", () => {
 		updateSetting("micMode", "push-to-talk");
 		updateSetting("micHotkey", SOME_HOTKEY);
-		createRoot(() => {
+		createRoot((dispose) => {
 			setUserWantsMic(false);
 			setMicHotkeyHeld(true);
 			expect(micEnabled()).toBe(false);
+			dispose();
 		});
 	});
 });

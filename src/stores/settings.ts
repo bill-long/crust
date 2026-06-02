@@ -147,7 +147,12 @@ function load(): UserSettings {
 	}
 }
 
-function parseMicHotkey(raw: unknown): MicHotkey | null {
+/**
+ * Exported for tests. Validates a persisted `micHotkey` value loaded from
+ * storage, returning `null` for any malformed or empty binding so the
+ * downstream voice-store anti-footgun fallback applies.
+ */
+export function parseMicHotkey(raw: unknown): MicHotkey | null {
 	if (raw === null || raw === undefined) return null;
 	if (typeof raw !== "object") return null;
 	const h = raw as Record<string, unknown>;
@@ -161,12 +166,20 @@ function parseMicHotkey(raw: unknown): MicHotkey | null {
 	}
 	const code = h.code;
 	if (code !== null && typeof code !== "string") return null;
+	const normalizedCode =
+		typeof code === "string" && code.length > 0 ? code : null;
+	// Reject "empty" bindings (no modifiers AND no code). Otherwise the voice
+	// store sees `micHotkey !== null` and treats it as a real binding,
+	// defeating the unbound-hotkey anti-footgun fallback for PTT/PTM.
+	if (!h.ctrl && !h.shift && !h.alt && !h.meta && normalizedCode === null) {
+		return null;
+	}
 	return {
 		ctrl: h.ctrl,
 		shift: h.shift,
 		alt: h.alt,
 		meta: h.meta,
-		code: code as string | null,
+		code: normalizedCode,
 	};
 }
 
