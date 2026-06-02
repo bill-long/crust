@@ -53,6 +53,7 @@ import {
 	tabMeta,
 } from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
+import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
@@ -367,6 +368,10 @@ const RoomPane: Component<{
 const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState } = useClient();
 	const config = useConfig();
+	// Mount the global PTT/PTM hotkey listener once at the app shell. The
+	// hook attaches no listeners until the user enables a non-default
+	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
+	useGlobalMicHotkey();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
 	const location = useLocation();

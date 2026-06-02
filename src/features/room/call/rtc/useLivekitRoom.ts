@@ -54,6 +54,14 @@ export interface UseLivekitRoomOptions {
 	/** Microphone deviceId (empty string = system default). */
 	audioDeviceId: Accessor<string>;
 	/**
+	 * Desired mic publish state — drives `setMicrophoneEnabled` via a
+	 * single-flight reconcile loop (like `setLocalCamEnabled`). Honored
+	 * at publish time on connect, and reconciled on every subsequent
+	 * change. Source of truth lives in the voice store
+	 * (`src/stores/voice.ts`); the LiveKit hook never mutates intent.
+	 */
+	micEnabled: Accessor<boolean>;
+	/**
 	 * Camera deviceId (empty string = system default). Applied at the next
 	 * `setLocalCamEnabled(true)` — changing it mid-call does NOT restart an
 	 * already-published camera (mirrors `audioDeviceId` semantics from
@@ -88,8 +96,6 @@ export interface LivekitRoomApi {
 	status: Accessor<LivekitConnectionStatus>;
 	error: Accessor<Error | null>;
 	participants: Accessor<readonly RtcParticipant[]>;
-	localMuted: Accessor<boolean>;
-	setLocalMuted: (muted: boolean) => Promise<void>;
 	/**
 	 * The user's *desired* camera publish state — flips immediately on
 	 * `setLocalCamEnabled` so the button label is responsive, then a
@@ -167,7 +173,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	const [participants, setParticipants] = createSignal<
 		readonly RtcParticipant[]
 	>([]);
-	const [localMuted, setLocalMutedSignal] = createSignal(false);
 	// Actual call-derived state: true while a camera publication is live.
 	// NOT persisted across teardown — see `resetCallDerivedState()`.
 	const [localCamEnabled, setLocalCamEnabledSignal] = createSignal(false);
@@ -212,6 +217,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// sets this true; concurrent calls just update the desired-state signal
 	// and let the loop pick it up on its next iteration.
 	let cameraOpPending = false;
+	// Mic-toggle single-flight: same pattern as `cameraOpPending`. Driven by
+	// `createEffect` on `opts.micEnabled` (intent flips from the voice store
+	// → reconcile loop drives LiveKit to match). The outer trigger kicks off
+	// the loop and sets this true; concurrent triggers just rely on the loop
+	// re-reading `opts.micEnabled()` on its next iteration.
+	let micOpPending = false;
 	const attachments = new Map<string, AttachedAudio>();
 	// Mutable mirror of `videoTracks` for in-place updates; published as a
 	// fresh Map to the signal whenever the contents change so Solid sees the
@@ -430,13 +441,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 	// Reset call-derived UI state. Called from both `teardown()` (intentional
 	// disconnects) and the `Disconnected` event handler (unsolicited drops)
-	// so the participant list doesn't outlive the call. NOTE: `localMuted` is
-	// treated as a persistent user preference (mute carries across calls and
-	// retries) and is intentionally NOT reset here — clearing it on connect
-	// errors would silently flip a pre-muted user back to unmuted on retry.
-	// `localCamEnabled` (desired-state intent) IS reset here because Phase 3
-	// does not auto-enable camera on reconnect, so a leftover `true` would
-	// drive an unexpected publish on the next connect.
+	// so the participant list doesn't outlive the call. NOTE: mic intent
+	// lives in the voice store (`src/stores/voice.ts`) since Phase 6 and is
+	// intentionally NOT touched here — it's a user preference that carries
+	// across calls and retries. `localCamEnabled` (desired-state intent) IS
+	// reset here because Phase 3 does not auto-enable camera on reconnect,
+	// so a leftover `true` would drive an unexpected publish on the next
+	// connect.
 	const resetCallDerivedState = (): void => {
 		setParticipants([]);
 		setAudioBlocked(false);
@@ -591,7 +602,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			r.on(
 				lk.RoomEvent.LocalTrackPublished,
 				ifLive(() => {
-					setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
 					reconcileLocalCamera(r);
 					snapshotParticipants(r);
 				}),
@@ -599,7 +609,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			r.on(
 				lk.RoomEvent.LocalTrackUnpublished,
 				ifLive(() => {
-					setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
 					reconcileLocalCamera(r);
 					snapshotParticipants(r);
 				}),
@@ -675,7 +684,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					// Clear call-derived UI (participants, autoplay banner) so a
 					// stale roster doesn't survive an unsolicited drop. The
 					// module-level `room` handle is also cleared so a later
-					// `setLocalMuted` doesn't invoke SDK methods on a dead room.
+					// `reconcileMic` doesn't invoke SDK methods on a dead room.
 					resetCallDerivedState();
 					room = null;
 					// Release the E2EE binding tied to THIS room so an
@@ -727,18 +736,24 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// now owns.
 			pendingBinding = null;
 
-			// Honour the user's pre-mute preference: if they toggled mute
-			// before we connected (via `setLocalMuted`), publish disabled so
-			// the LiveKit publication starts muted. Otherwise enable the mic
-			// for the common "click join, talk immediately" flow.
-			//
-			// We deliberately do NOT write `setLocalMutedSignal(desiredMuted)`
-			// after the await: the signal already holds `desiredMuted`, and if
-			// the user toggles mute concurrently during the SDK round-trip
-			// their write should win. `LocalTrackPublished` will reconcile the
-			// signal to the actual SDK state once the publication settles.
-			const desiredMuted = localMuted();
-			await r.localParticipant.setMicrophoneEnabled(!desiredMuted);
+			// Honour the user's pre-call mic intent and serialize against the
+			// reconcile loop. Holding `micOpPending` for the publish call
+			// blocks the effect-driven `reconcileMic` from racing in and
+			// issuing a concurrent `setMicrophoneEnabled` on the same
+			// LocalParticipant while we're mid-publish (which would settle
+			// out of order with this call). Any intent flip that lands
+			// during the await is picked up by the post-await trampoline
+			// below — which re-reads `opts.micEnabled()` and reconciles
+			// against the now-settled SDK state. Without this trampoline
+			// the reconcile-effect can short-circuit on a stale `actual`
+			// read and silently lose the user's flip.
+			micOpPending = true;
+			try {
+				const desiredOnPublish = opts.micEnabled();
+				await r.localParticipant.setMicrophoneEnabled(desiredOnPublish);
+			} finally {
+				micOpPending = false;
+			}
 			if (disposed || myAttempt !== attempt) {
 				// Disconnect THIS captured room only; do not call the shared
 				// `teardown()` which operates on the module-level `room`.
@@ -755,6 +770,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				pendingBinding = null;
 				return;
 			}
+			// Post-publish reconcile: catches any intent flip that arrived
+			// during the publish-time await (the effect was blocked by
+			// `micOpPending`). `reconcileMic` short-circuits when intent
+			// already matches the now-settled SDK state, so this is a
+			// cheap no-op when nothing changed.
+			void reconcileMic(r);
 
 			// Scan already-subscribed audio publications that arrived before our
 			// TrackSubscribed listener fired (race window between connect resolve
@@ -924,31 +945,47 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		}),
 	);
 
-	const setLocalMuted = async (muted: boolean): Promise<void> => {
-		const r = room;
-		if (!r) {
-			// Optimistic: remember the desired state so the next publish honors it.
-			setLocalMutedSignal(muted);
-			return;
-		}
-		// Optimistic UI update — the LiveKit call below settles asynchronously.
-		setLocalMutedSignal(muted);
-		// Snapshot the current attempt epoch so a teardown/reconnect that
-		// races in during the SDK round-trip doesn't have its
-		// `resetCallDerivedState()` clobbered by a stale post-await write,
-		// and we don't issue setError against a dead room.
-		const myAttempt = attempt;
+	// Mic single-flight reconcile loop. Driven by `createEffect` on
+	// `opts.micEnabled`; voice store is the source of truth for intent.
+	// Mirrors the `setLocalCamEnabled` pattern: rapid intent flips settle on
+	// the latest read regardless of which SDK promise resolves first.
+	const reconcileMic = async (r: LivekitRoom): Promise<void> => {
+		if (micOpPending) return;
+		micOpPending = true;
 		try {
-			await r.localParticipant.setMicrophoneEnabled(!muted);
-			if (disposed || myAttempt !== attempt || room !== r) return;
-			snapshotParticipants(r);
-		} catch (e) {
-			if (disposed || myAttempt !== attempt || room !== r) return;
-			// Revert on failure.
-			setLocalMutedSignal(r.localParticipant.isMicrophoneEnabled === false);
-			setError(e instanceof Error ? e : new Error(String(e)));
+			while (true) {
+				if (disposed) return;
+				if (room !== r) return;
+				const desired = opts.micEnabled();
+				const actual = r.localParticipant.isMicrophoneEnabled === true;
+				if (actual === desired) return;
+				const myAttempt = attempt;
+				try {
+					await r.localParticipant.setMicrophoneEnabled(desired);
+				} catch (e) {
+					if (disposed || myAttempt !== attempt || room !== r) return;
+					// Surface error but don't mutate intent — the voice store
+					// is the source of truth for what the user wants.
+					setError(e instanceof Error ? e : new Error(String(e)));
+					return;
+				}
+				if (disposed || myAttempt !== attempt || room !== r) return;
+			}
+		} finally {
+			micOpPending = false;
 		}
 	};
+
+	// Drive the mic reconcile loop on every intent flip from the voice store.
+	// On first run with `room === null` this is a no-op; the publish-time
+	// call inside `tryConnect` handles the initial publish, and subsequent
+	// effect runs catch every flip thereafter.
+	createEffect(
+		on(opts.micEnabled, () => {
+			const r = room;
+			if (r) void reconcileMic(r);
+		}),
+	);
 
 	const setLocalCamEnabled = async (enabled: boolean): Promise<void> => {
 		// Optimistic write of user intent. The reconcile loop below drives
@@ -1055,8 +1092,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		status,
 		error,
 		participants,
-		localMuted,
-		setLocalMuted,
 		localCamEnabled,
 		setLocalCamEnabled,
 		videoTracks,
