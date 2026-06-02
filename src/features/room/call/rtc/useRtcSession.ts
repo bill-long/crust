@@ -116,9 +116,13 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	// External AbortController so onCleanup can cancel the in-flight
 	// well-known fetch on overlay close — otherwise a quickly-opened-
 	// and-closed call wastes up to a full 5-second fetch timeout of
-	// network work and emits a stale signal write after disposal.
+	// network work.
 	const discoveryAbort =
 		typeof AbortController === "function" ? new AbortController() : undefined;
+	// Disposed flag so the discovery promise (which still resolves
+	// after `discoveryAbort.abort()` via the fallback arm) doesn't
+	// write to `foci` after the hook has been disposed.
+	let disposed = false;
 	// Wrap the override invocation in `Promise.resolve().then(...)` so
 	// a synchronously-throwing custom `discoverFoci` is normalised into
 	// a rejection and caught by the fallback arm below. A raw
@@ -131,6 +135,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			}),
 		)
 		.then((resolved) => {
+			if (disposed) return;
 			setFoci(resolved);
 		})
 		.catch(() => {
@@ -138,6 +143,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			// might (sync throw or async rejection). Fall back to the
 			// EC-bundled derivation rather than leaving `foci()`
 			// permanently null and blocking Join.
+			if (disposed) return;
 			setFoci(buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId));
 		});
 	let leavePending = false;
@@ -498,6 +504,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// when the component unmounts isn't double-fired here. Also leave when
 		// we're still in "joining" so a close-during-join doesn't strand a
 		// membership published moments later.
+		disposed = true;
 		discoveryAbort?.abort();
 		detachE2EE?.();
 		detachE2EE = null;
