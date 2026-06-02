@@ -18,9 +18,10 @@ import { userSettings } from "./settings";
  *   never persistent state.
  */
 
-// `userWantsMicOn` is the user's persistent click-toggle intent. True
-// means the user is NOT manually muted. In voice-activity mode this is
-// the entire signal; in PTT/PTM it's combined with `hotkeyHeld`.
+// `userWantsMicOn` is the user's click-toggle intent. True means the
+// user is NOT manually muted. In voice-activity mode this is the entire
+// signal; in PTT/PTM it's combined with `hotkeyHeld`. Transient: not
+// persisted across refresh (Discord behavior — refresh unmutes).
 const [userWantsMicOn, setUserWantsMicOnSignal] = createSignal(true);
 
 // `hotkeyHeld` is true while the bound PTT/PTM combo is physically
@@ -44,8 +45,9 @@ export function setMicHotkeyCaptureActive(value: boolean): void {
 }
 
 /**
- * The user's persistent mic intent (true = unmuted by click).
+ * The user's click-toggle mic intent (true = unmuted by click).
  * Toggled by the UserBar mic button and the in-call mute button.
+ * Transient — refresh resets to unmuted (see header comment).
  */
 export function userWantsMic(): boolean {
 	return userWantsMicOn();
