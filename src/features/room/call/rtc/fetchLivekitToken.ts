@@ -25,9 +25,16 @@ export interface LivekitJwtResponse {
  *     terminal endpoint directly. Pass through unchanged.
  *
  * Parses with the URL API so any `?query`/`#fragment` is preserved
- * verbatim and we don't accidentally splice path segments after it. Falls
- * back to string handling for genuinely opaque inputs (the downstream
- * fetch will surface a clearer error if it's malformed).
+ * verbatim and we don't accidentally splice path segments after it.
+ *
+ * Defence-in-depth scheme validation: rejects any input that isn't an
+ * absolute `http:` / `https:` URL. `parseFociFromWellKnown` already
+ * filters these out at ingestion, but a relative / non-http(s) value
+ * arriving here (e.g. via a custom `discoverFoci` override or a
+ * misconfigured `elementCall.url`) would otherwise cause `fetch` to
+ * POST the OpenID token to the app origin or a non-http(s) handler.
+ *
+ * @throws {LivekitJwtError} If the input isn't a valid absolute http(s) URL.
  */
 function normaliseJwtServiceUrl(input: string): string {
 	const trimmed = input.trim();
@@ -35,9 +42,14 @@ function normaliseJwtServiceUrl(input: string): string {
 	try {
 		parsed = new URL(trimmed);
 	} catch {
-		const stripped = trimmed.replace(/\/+$/, "");
-		if (stripped.endsWith("/sfu/get")) return stripped;
-		return `${stripped}/sfu/get`;
+		throw new LivekitJwtError(
+			`Invalid LiveKit service URL (not an absolute URL): ${input}`,
+		);
+	}
+	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+		throw new LivekitJwtError(
+			`Invalid LiveKit service URL (must be http(s)): ${input}`,
+		);
 	}
 	const path = parsed.pathname.replace(/\/+$/, "");
 	if (path.endsWith("/sfu/get")) {
