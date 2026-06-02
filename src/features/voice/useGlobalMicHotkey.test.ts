@@ -149,6 +149,58 @@ describe("useGlobalMicHotkey", () => {
 		document.body.removeChild(div);
 	});
 
+	it("suppresses when focus is in a contenteditable=plaintext-only", () => {
+		updateSetting("micMode", "push-to-talk");
+		updateSetting("micHotkey", HOTKEY_CTRL_SPACE);
+		mountHook();
+		const div = document.createElement("div");
+		div.setAttribute("contenteditable", "plaintext-only");
+		document.body.appendChild(div);
+		fireKey("keydown", "ControlLeft", { ctrlKey: true }, div);
+		fireKey("keydown", "Space", { ctrlKey: true }, div);
+		expect(micHotkeyHeld()).toBe(false);
+		document.body.removeChild(div);
+	});
+
+	it("suppresses when target is inside a contenteditable=false widget nested in an editable host", () => {
+		updateSetting("micMode", "push-to-talk");
+		updateSetting("micHotkey", HOTKEY_CTRL_SPACE);
+		mountHook();
+		// Rich-editor pattern: editable host with a read-only inline widget
+		// (e.g. a mention chip). Keydowns originating inside the false widget
+		// must still suppress because the user is editing the surrounding host.
+		const host = document.createElement("div");
+		host.setAttribute("contenteditable", "true");
+		const widget = document.createElement("span");
+		widget.setAttribute("contenteditable", "false");
+		host.appendChild(widget);
+		document.body.appendChild(host);
+		fireKey("keydown", "ControlLeft", { ctrlKey: true }, widget);
+		fireKey("keydown", "Space", { ctrlKey: true }, widget);
+		expect(micHotkeyHeld()).toBe(false);
+		document.body.removeChild(host);
+	});
+
+	it("suppresses when target is inside a contenteditable=inherit nested in an editable host", () => {
+		updateSetting("micMode", "push-to-talk");
+		updateSetting("micHotkey", HOTKEY_CTRL_SPACE);
+		mountHook();
+		// `contenteditable="inherit"` means "use the parent's editability".
+		// The selector list intentionally only matches the three editable
+		// values, so `closest()` walks past `inherit` to find the editable
+		// host above it.
+		const host = document.createElement("div");
+		host.setAttribute("contenteditable", "true");
+		const inner = document.createElement("span");
+		inner.setAttribute("contenteditable", "inherit");
+		host.appendChild(inner);
+		document.body.appendChild(host);
+		fireKey("keydown", "ControlLeft", { ctrlKey: true }, inner);
+		fireKey("keydown", "Space", { ctrlKey: true }, inner);
+		expect(micHotkeyHeld()).toBe(false);
+		document.body.removeChild(host);
+	});
+
 	it("force-clears held state when focus moves into a typing target while held", () => {
 		updateSetting("micMode", "push-to-talk");
 		updateSetting("micHotkey", HOTKEY_CTRL_ONLY);
