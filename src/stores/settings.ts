@@ -31,6 +31,16 @@ export interface UserSettings {
 	 * room wrapper (#122).
 	 */
 	rtcCamDeviceId: string;
+	/**
+	 * Whether to use crust's native MatrixRTC client (LiveKit-based) for
+	 * voice/video calls. When `false`, falls back to the embedded Element
+	 * Call iframe. Defaults to `true` as of Phase 5 of #122.
+	 *
+	 * Read once at CallOverlay mount — toggling while a call is active
+	 * does NOT swap paths on the running call (intentional: avoids
+	 * double-joining the MatrixRTC session).
+	 */
+	useNativeCalls: boolean;
 }
 
 const defaults: UserSettings = {
@@ -42,6 +52,7 @@ const defaults: UserSettings = {
 	urlPreviews: true,
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
+	useNativeCalls: true,
 };
 
 function loadBool(
@@ -94,6 +105,7 @@ function load(): UserSettings {
 				typeof obj.rtcCamDeviceId === "string"
 					? obj.rtcCamDeviceId
 					: defaults.rtcCamDeviceId,
+			useNativeCalls: loadBool(obj, "useNativeCalls", defaults.useNativeCalls),
 		};
 	} catch {
 		return { ...defaults };

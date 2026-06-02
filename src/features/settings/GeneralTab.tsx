@@ -242,6 +242,12 @@ const GeneralTab: Component = () => {
 			{/* Voice & Video */}
 			<section>
 				<SectionHeading>Voice & Video</SectionHeading>
+				<ToggleRow
+					label="Native call client"
+					description="Use crust's built-in MatrixRTC client for calls. Disable to fall back to the embedded Element Call iframe. Takes effect the next time you start or join a call."
+					checked={userSettings().useNativeCalls}
+					onChange={(v) => updateSetting("useNativeCalls", v)}
+				/>
 				<MicDeviceSelect />
 				<CamDeviceSelect />
 			</section>

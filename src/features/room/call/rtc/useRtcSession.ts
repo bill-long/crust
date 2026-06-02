@@ -93,9 +93,10 @@ export interface RtcSessionApi {
  * flips `manageMediaKeys: true`, and pumps already-negotiated keys via
  * `reemitEncryptionKeys()` after the manager has spun up.
  *
- * `unstableSendStickyEvents` MUST stay `false` until Phase 5 teaches
- * `summaries.ts` callActive detection and `CallButton.tsx` to read the
- * newer `m.rtc.member` format.
+ * `unstableSendStickyEvents` MUST stay `false` until `summaries.ts`
+ * callActive detection and `CallButton.tsx` learn the newer
+ * `m.rtc.member` event format. Current Element Call still accepts the
+ * legacy non-hashed identity, so this is non-urgent (tracked in #122).
  */
 export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const [status, setStatus] = createSignal<RtcStatus>("idle");

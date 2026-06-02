@@ -26,7 +26,8 @@ calls) is table stakes for a chat client we'd actually use daily.
 - Custom emoji and image packs (MSC2545)
 - GIF search (Giphy / Klipy) — opt-in, TOS-compliant
 - Desktop notifications with per-room levels (default / all / mentions-only / mute)
-- Embedded MatrixRTC calls via self-hosted Element Call (iframe embed; native client planned)
+- Native MatrixRTC voice/video calls (LiveKit-backed, end-to-end encrypted);
+  optional fallback to embedded Element Call iframe
 - Strict Content Security Policy from day one
 
 ## GIF search — how and why
