@@ -296,6 +296,39 @@ describe("useRtcSession", () => {
 		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
 	});
 
+	it("ignores a second join() while the SDK is still in the joining phase", async () => {
+		// Regression (Copilot review on #134/e99542d): joinInFlight only
+		// guards before the first await. After joinRoomSession (fire-and-
+		// forget) returns, the finally clears joinInFlight even though
+		// status() === "joining" and s.isJoined() is still false until the
+		// SDK emits JoinStateChanged. A second join() in that window would
+		// otherwise re-attach E2EE and call joinRoomSession again.
+		const session = createFakeSession();
+		// Override the default sync-flip so we can hold the joining phase.
+		session.joinRoomSession = vi.fn(() => {
+			// Fire-and-forget: stay un-joined until we manually emit.
+		});
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+			}),
+		);
+		await result.fociReady;
+		await result.join();
+		expect(result.status()).toBe("joining");
+		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+		// Second click during the joining window — must be ignored.
+		await result.join();
+		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+		// SDK eventually flips to joined.
+		session._joined = true;
+		session.emit(MatrixRTCSessionEvent.JoinStateChanged, true);
+		expect(result.status()).toBe("joined");
+	});
+
 	it("falls back to the EC-bundled foci when discoverFoci rejects", async () => {
 		const session = createFakeSession();
 		const { client } = createClient({ session });

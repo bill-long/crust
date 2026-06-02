@@ -299,6 +299,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			return;
 		}
 		if (s.isJoined()) return;
+		if (status() === "joining") return;
 		if (joinInFlight) return;
 		joinInFlight = true;
 		const myAttempt = ++joinAttemptId;
@@ -342,6 +343,10 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// (e.g. by a separately-resolved code path) while we were
 		// parked.
 		if (s.isJoined()) return;
+		// Also re-check status: another in-flight join may have called
+		// joinRoomSession (fire-and-forget) and returned before the SDK
+		// flipped isJoined; status === "joining" reflects that window.
+		if (status() === "joining") return;
 		// Defensive re-check — defends against `room` being null at
 		// hook-init time (Phase 1 set status="error" but kept the hook
 		// alive so a later getRoom hit would still expose canJoin).
