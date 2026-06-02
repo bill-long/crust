@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { updateSetting, userSettings } from "../../../stores/settings";
 import { CallOverlay } from "./CallOverlay";
 
 vi.mock("solid-refresh", () => ({
@@ -22,8 +23,20 @@ function renderOverlay(onClose: () => void = () => undefined) {
 	));
 }
 
-describe("CallOverlay focus-trap sentinels", () => {
-	afterEach(cleanup);
+describe("CallOverlay focus-trap sentinels (iframe path)", () => {
+	let previousUseNative: boolean;
+
+	beforeEach(() => {
+		previousUseNative = userSettings().useNativeCalls;
+		// Focus-trap tests target the iframe path. Phase 5 (#122) defaults
+		// useNativeCalls to true; opt back into the iframe explicitly.
+		updateSetting("useNativeCalls", false);
+	});
+
+	afterEach(() => {
+		cleanup();
+		updateSetting("useNativeCalls", previousUseNative);
+	});
 
 	it("renders a focusable leading sentinel before the iframe and a trailing one after", () => {
 		renderOverlay();
@@ -75,22 +88,29 @@ describe("CallOverlay focus-trap sentinels", () => {
 	});
 });
 
-describe("CallOverlay native RTC flag gating", () => {
+describe("CallOverlay useNativeCalls gating (Phase 5, #122)", () => {
+	let previousUseNative: boolean;
+
+	beforeEach(() => {
+		previousUseNative = userSettings().useNativeCalls;
+	});
+
 	afterEach(() => {
 		cleanup();
 		vi.resetModules();
-		vi.doUnmock("./rtc/nativeRtcEnabled");
 		vi.doUnmock("./rtc/NativeCallView");
+		updateSetting("useNativeCalls", previousUseNative);
 	});
 
-	it("renders NativeCallView and not the iframe when NATIVE_RTC_ENABLED is true", async () => {
+	it("renders NativeCallView and not the iframe when useNativeCalls is true", async () => {
 		vi.resetModules();
-		vi.doMock("./rtc/nativeRtcEnabled", () => ({ NATIVE_RTC_ENABLED: true }));
 		vi.doMock("./rtc/NativeCallView", () => ({
 			NativeCallView: (props: { roomName: string }) => (
 				<div data-testid="native-call-view">native:{props.roomName}</div>
 			),
 		}));
+		const settingsModule = await import("../../../stores/settings");
+		settingsModule.updateSetting("useNativeCalls", true);
 		const { CallOverlay: CallOverlayReloaded } = await import("./CallOverlay");
 		render(() => (
 			<CallOverlayReloaded
@@ -104,5 +124,40 @@ describe("CallOverlay native RTC flag gating", () => {
 		expect(view.textContent).toBe("native:Alpha");
 		expect(screen.queryByTitle("Element Call — Alpha")).toBeNull();
 		expect(screen.queryByRole("button", { name: "Close call" })).toBeNull();
+	});
+
+	it("renders the iframe when useNativeCalls is false", () => {
+		updateSetting("useNativeCalls", false);
+		renderOverlay();
+		expect(screen.getByTitle("Element Call — Alpha")).toBeTruthy();
+		expect(screen.queryByText(/native:/)).toBeNull();
+	});
+
+	it("does NOT swap to native when useNativeCalls is toggled on mid-call", async () => {
+		// Snapshot-at-mount guarantee: flipping the setting while a call
+		// is open must not tear down the iframe (avoids double-joining
+		// the MatrixRTC session per #122 mutual-exclusion guardrail).
+		vi.resetModules();
+		vi.doMock("./rtc/NativeCallView", () => ({
+			NativeCallView: () => <div data-testid="native-call-view">native</div>,
+		}));
+		const settingsModule = await import("../../../stores/settings");
+		settingsModule.updateSetting("useNativeCalls", false);
+		const { CallOverlay: CallOverlayReloaded } = await import("./CallOverlay");
+		render(() => (
+			<CallOverlayReloaded
+				elementCallUrl="https://call.example.com"
+				roomId="!room:example.com"
+				roomName="Alpha"
+				onClose={() => undefined}
+			/>
+		));
+		expect(screen.getByTitle("Element Call — Alpha")).toBeTruthy();
+
+		// Flip the setting on. The active overlay should stay on the
+		// iframe path; only the next open should pick up the change.
+		settingsModule.updateSetting("useNativeCalls", true);
+		expect(screen.getByTitle("Element Call — Alpha")).toBeTruthy();
+		expect(screen.queryByTestId("native-call-view")).toBeNull();
 	});
 });

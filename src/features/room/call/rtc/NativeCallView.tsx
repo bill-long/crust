@@ -38,7 +38,8 @@ const FOCUSABLE_SELECTOR =
  * identities. Phase 2 will replace the placeholder body with the audio
  * tracks + media controls. The shell (header, close button, leave
  * confirmation, Escape handler) intentionally mirrors `CallOverlay` so the
- * two paths feel identical to a tester flipping `VITE_NATIVE_RTC`.
+ * two paths feel identical to a tester toggling Settings → Voice & Video
+ * → Native call client.
  */
 export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 	const { client } = useClient();

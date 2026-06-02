@@ -1,8 +1,8 @@
 import { type Component, createSignal, onCleanup, onMount } from "solid-js";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
+import { userSettings } from "../../../stores/settings";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
 import { NativeCallView } from "./rtc/NativeCallView";
-import { NATIVE_RTC_ENABLED } from "./rtc/nativeRtcEnabled";
 
 interface CallOverlayProps {
 	/** Operator-deployed Element Call instance URL (e.g. https://call.example.com). */
@@ -16,18 +16,31 @@ interface CallOverlayProps {
 }
 
 /**
- * Full-pane modal hosting an embedded Element Call iframe.
+ * Full-pane modal hosting either crust's native MatrixRTC client (default)
+ * or, when the user has opted out via Settings → Voice & Video → Native
+ * call client, an embedded Element Call iframe.
  *
- * v1 limitation: this uses Element Call's standalone (no-widget) URL form,
- * so the user authenticates separately inside the iframe on the operator's
- * Element Call origin. A future revision can hand off Matrix credentials via
- * the widget API to skip the second login.
+ * The native-vs-iframe choice is **snapshotted at mount**: flipping the
+ * Settings toggle while a call is open does not swap paths on the running
+ * call (avoids double-joining the MatrixRTC session). The new mode takes
+ * effect on the next call.
+ *
+ * v1 limitation (iframe path only): Element Call's standalone (no-widget)
+ * URL form requires the user to authenticate separately inside the iframe
+ * on the operator's Element Call origin.
  *
  * The iframe is unmounted on close; route navigation closes the overlay via
  * the caller's keyed <Show>, matching the v1 "no mini call widget" decision.
  */
 export const CallOverlay: Component<CallOverlayProps> = (props) => {
-	if (NATIVE_RTC_ENABLED) {
+	// Snapshot at mount (NOT a reactive read). The top-level `if` returns
+	// a JSX subtree; SolidJS would not re-run this branch on store updates
+	// anyway, but reading into a const makes the snapshot intent explicit
+	// and prevents future refactors from accidentally introducing a
+	// reactive `<Show>` swap that would publish duplicate MatrixRTC
+	// memberships (issue #122 "Hard guardrails": mutual exclusion).
+	const useNative = userSettings().useNativeCalls;
+	if (useNative) {
 		return (
 			<NativeCallView
 				elementCallUrl={props.elementCallUrl}
