@@ -76,11 +76,23 @@ export class LivekitJwtError extends Error {
  * are short-lived and shouldn't be cached across reconnects (per the SDK
  * note, they're scoped to a single backend call).
  *
- * @throws {LivekitJwtError} On non-2xx, malformed response, or network error.
+ * `deviceId` MUST be the same value matrix-js-sdk's `MatrixRTCSession`
+ * uses for the local participant (i.e. `client.getDeviceId()`).
+ * lk-jwt-service derives the LiveKit participant identity as
+ * `<matrixUserId>:<deviceId>` (see element-hq/lk-jwt-service main.go,
+ * field `device_id`), and that string must match the bridge's keyProvider
+ * entries (built from matrix-js-sdk's `rtcBackendIdentity =
+ * `${userId}:${deviceId}``). Sending an empty/missing `device_id` produces
+ * an identity like `@user:server:` that does not match what the bridge
+ * stores keys under, breaking E2EE for other participants.
+ *
+ * @throws {LivekitJwtError} On non-2xx, malformed response, network error,
+ *   or when `deviceId` is empty.
  */
 export async function fetchLivekitToken(
 	focus: LivekitTransport,
 	openIdToken: IOpenIDToken,
+	deviceId: string,
 	options?: { signal?: AbortSignal; fetchImpl?: typeof fetch },
 ): Promise<LivekitJwtResponse> {
 	const fetchImpl =
@@ -88,6 +100,14 @@ export async function fetchLivekitToken(
 		(typeof fetch === "function" ? fetch.bind(globalThis) : undefined);
 	if (!fetchImpl) {
 		throw new LivekitJwtError("fetch is not available in this environment");
+	}
+	// Defence in depth: callers already validate, but an empty device_id
+	// silently produces a mismatched LiveKit participant identity (see
+	// jsdoc above), so refuse it at the fetch boundary too.
+	if (!deviceId) {
+		throw new LivekitJwtError(
+			"Cannot request LiveKit JWT without a Matrix device ID",
+		);
 	}
 	const url = normaliseJwtServiceUrl(focus.livekit_service_url);
 
@@ -99,6 +119,7 @@ export async function fetchLivekitToken(
 			body: JSON.stringify({
 				room: focus.livekit_alias,
 				openid_token: openIdToken,
+				device_id: deviceId,
 			}),
 			signal: options?.signal,
 		});

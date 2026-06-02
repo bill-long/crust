@@ -10,6 +10,8 @@ const fakeToken: IOpenIDToken = {
 	expires_in: 3600,
 };
 
+const fakeDeviceId = "DEVABC123";
+
 const livekitFocus = (
 	overrides?: Partial<LivekitTransport>,
 ): LivekitTransport => ({
@@ -34,11 +36,16 @@ const asFetch = (m: ReturnType<typeof vi.fn>): typeof fetch =>
 	m as unknown as typeof fetch;
 
 describe("fetchLivekitToken", () => {
-	it("POSTs the openid token + livekit alias to the service URL", async () => {
+	it("POSTs the openid token + livekit alias + device_id to the service URL", async () => {
 		const { fetchImpl } = mockOk();
-		const res = await fetchLivekitToken(livekitFocus(), fakeToken, {
-			fetchImpl: asFetch(fetchImpl),
-		});
+		const res = await fetchLivekitToken(
+			livekitFocus(),
+			fakeToken,
+			"DEVICEXYZ",
+			{
+				fetchImpl: asFetch(fetchImpl),
+			},
+		);
 		expect(res).toEqual({ url: "wss://sfu.example.com", jwt: "JWT" });
 		expect(fetchImpl).toHaveBeenCalledTimes(1);
 		const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
@@ -48,7 +55,22 @@ describe("fetchLivekitToken", () => {
 		expect(body).toEqual({
 			room: "!room:example.com",
 			openid_token: fakeToken,
+			device_id: "DEVICEXYZ",
 		});
+	});
+
+	it("throws LivekitJwtError when device_id is empty (identity-mismatch defence)", async () => {
+		// lk-jwt-service builds identity as `<userId>:<deviceId>`. An
+		// empty device_id silently yields `@user:server:` which mismatches
+		// matrix-js-sdk's `rtcBackendIdentity` and breaks outbound E2EE
+		// (see element-hq/lk-jwt-service main.go).
+		const fetchImpl = vi.fn();
+		await expect(
+			fetchLivekitToken(livekitFocus(), fakeToken, "", {
+				fetchImpl: asFetch(fetchImpl),
+			}),
+		).rejects.toBeInstanceOf(LivekitJwtError);
+		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
 	it("appends /sfu/get when the service URL is a bare host (MSC4143 standard)", async () => {
@@ -56,6 +78,7 @@ describe("fetchLivekitToken", () => {
 		await fetchLivekitToken(
 			livekitFocus({ livekit_service_url: "https://livekit.example.com" }),
 			fakeToken,
+			fakeDeviceId,
 			{ fetchImpl: asFetch(fetchImpl) },
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
@@ -70,6 +93,7 @@ describe("fetchLivekitToken", () => {
 				livekit_service_url: "https://call.example.com/livekit",
 			}),
 			fakeToken,
+			fakeDeviceId,
 			{ fetchImpl: asFetch(fetchImpl) },
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
@@ -86,6 +110,7 @@ describe("fetchLivekitToken", () => {
 				livekit_service_url: "https://matrix-rtc.example.com/livekit/jwt",
 			}),
 			fakeToken,
+			fakeDeviceId,
 			{ fetchImpl: asFetch(fetchImpl) },
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
@@ -100,6 +125,7 @@ describe("fetchLivekitToken", () => {
 				livekit_service_url: "https://call.example.com/livekit/sfu/get/",
 			}),
 			fakeToken,
+			fakeDeviceId,
 			{ fetchImpl: asFetch(fetchImpl) },
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
@@ -112,7 +138,7 @@ describe("fetchLivekitToken", () => {
 			async () => new Response("Unauthorized", { status: 401 }),
 		);
 		await expect(
-			fetchLivekitToken(livekitFocus(), fakeToken, {
+			fetchLivekitToken(livekitFocus(), fakeToken, fakeDeviceId, {
 				fetchImpl: asFetch(fetchImpl),
 			}),
 		).rejects.toMatchObject({ name: "LivekitJwtError", status: 401 });
@@ -124,7 +150,7 @@ describe("fetchLivekitToken", () => {
 				new Response(JSON.stringify({ url: "wss://x" }), { status: 200 }),
 		);
 		await expect(
-			fetchLivekitToken(livekitFocus(), fakeToken, {
+			fetchLivekitToken(livekitFocus(), fakeToken, fakeDeviceId, {
 				fetchImpl: asFetch(fetchImpl),
 			}),
 		).rejects.toBeInstanceOf(LivekitJwtError);
@@ -135,7 +161,7 @@ describe("fetchLivekitToken", () => {
 			throw new TypeError("Failed to fetch");
 		});
 		await expect(
-			fetchLivekitToken(livekitFocus(), fakeToken, {
+			fetchLivekitToken(livekitFocus(), fakeToken, fakeDeviceId, {
 				fetchImpl: asFetch(fetchImpl),
 			}),
 		).rejects.toMatchObject({
@@ -149,7 +175,7 @@ describe("fetchLivekitToken", () => {
 			throw new DOMException("aborted", "AbortError");
 		});
 		await expect(
-			fetchLivekitToken(livekitFocus(), fakeToken, {
+			fetchLivekitToken(livekitFocus(), fakeToken, fakeDeviceId, {
 				fetchImpl: asFetch(fetchImpl),
 			}),
 		).rejects.toMatchObject({ name: "AbortError" });
@@ -171,6 +197,7 @@ describe("fetchLivekitToken", () => {
 			fetchLivekitToken(
 				livekitFocus({ livekit_service_url: badUrl }),
 				fakeToken,
+				fakeDeviceId,
 				{ fetchImpl: asFetch(fetchImpl) },
 			),
 		).rejects.toBeInstanceOf(LivekitJwtError);

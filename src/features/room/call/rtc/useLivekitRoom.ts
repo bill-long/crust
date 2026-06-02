@@ -508,7 +508,26 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const openIdToken = await opts.client.getOpenIdToken();
 			if (disposed || myAttempt !== attempt) return;
 
-			const { url, jwt } = await fetchLivekitToken(focus, openIdToken);
+			// lk-jwt-service builds the LiveKit participant identity as
+			// `<userId>:<deviceId>`. That string MUST match matrix-js-sdk's
+			// `rtcBackendIdentity` (also `<userId>:<deviceId>`, computed
+			// from `client.getDeviceId()` inside RTCEncryptionManager) so
+			// the bridge's keyProvider entries line up with the identity
+			// LiveKit assigns to participants. A missing device_id
+			// silently breaks outbound E2EE for other participants — fail
+			// fast instead.
+			const deviceId = opts.client.getDeviceId();
+			if (!deviceId) {
+				throw new LivekitJwtError(
+					"Matrix client has no device ID; cannot start RTC session",
+				);
+			}
+
+			const { url, jwt } = await fetchLivekitToken(
+				focus,
+				openIdToken,
+				deviceId,
+			);
 			if (disposed || myAttempt !== attempt) return;
 
 			const e2eeCtx = opts.e2ee?.() ?? null;

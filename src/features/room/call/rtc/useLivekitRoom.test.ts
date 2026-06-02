@@ -137,6 +137,7 @@ function createClient(): {
 	client: {
 		getOpenIdToken: ReturnType<typeof vi.fn>;
 		getUser: ReturnType<typeof vi.fn>;
+		getDeviceId: ReturnType<typeof vi.fn>;
 	};
 } {
 	return {
@@ -148,6 +149,7 @@ function createClient(): {
 				expires_in: 3600,
 			})),
 			getUser: vi.fn(() => ({ displayName: "Alice" })),
+			getDeviceId: vi.fn(() => "DEVABC123"),
 		},
 	};
 }
@@ -217,6 +219,13 @@ describe("useLivekitRoom", () => {
 		);
 		await waitFor(() => result.status() === "connected");
 		expect(jwtMock).toHaveBeenCalledTimes(1);
+		// lk-jwt-service derives LiveKit participant identity from
+		// `device_id` (see fetchLivekitToken.ts jsdoc); confirm we forward it.
+		expect(jwtMock).toHaveBeenCalledWith(
+			livekitFocus,
+			expect.objectContaining({ access_token: "tok" }),
+			"DEVABC123",
+		);
 		expect(fakeRoom.connect).toHaveBeenCalledWith("wss://sfu", "JWT");
 		expect(fakeRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(
 			true,
@@ -425,6 +434,29 @@ describe("useLivekitRoom", () => {
 		);
 		await waitFor(() => result.status() === "error");
 		expect(result.error()?.message).toContain("401");
+	});
+
+	it("surfaces missing Matrix device ID as error status before calling JWT", async () => {
+		// lk-jwt-service builds LiveKit participant identity from the
+		// device_id we send; without it, the JWT identity silently
+		// mismatches matrix-js-sdk's rtcBackendIdentity and outbound
+		// E2EE breaks. Fail fast at the boundary instead.
+		const { client } = createClient();
+		client.getDeviceId.mockReturnValueOnce(null);
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "error");
+		expect(result.error()?.message).toContain("device ID");
+		expect(jwtMock).not.toHaveBeenCalled();
 	});
 
 	it("setLocalCamEnabled(true) calls setCameraEnabled with deviceId and reflects publish", async () => {
