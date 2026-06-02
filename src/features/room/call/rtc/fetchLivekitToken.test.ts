@@ -51,19 +51,19 @@ describe("fetchLivekitToken", () => {
 		});
 	});
 
-	it("appends /livekit/sfu/get when the service URL is just the base", async () => {
+	it("appends /sfu/get when the service URL is a bare host (MSC4143 standard)", async () => {
 		const { fetchImpl } = mockOk();
 		await fetchLivekitToken(
-			livekitFocus({ livekit_service_url: "https://call.example.com" }),
+			livekitFocus({ livekit_service_url: "https://livekit.example.com" }),
 			fakeToken,
 			{ fetchImpl: asFetch(fetchImpl) },
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
-			"https://call.example.com/livekit/sfu/get",
+			"https://livekit.example.com/sfu/get",
 		);
 	});
 
-	it("appends /sfu/get when the service URL is base + /livekit", async () => {
+	it("appends /sfu/get when the service URL is base + /livekit (EC bundled)", async () => {
 		const { fetchImpl } = mockOk();
 		await fetchLivekitToken(
 			livekitFocus({
@@ -74,6 +74,22 @@ describe("fetchLivekitToken", () => {
 		);
 		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
 			"https://call.example.com/livekit/sfu/get",
+		);
+	});
+
+	it("appends /sfu/get when the service URL has an arbitrary prefix", async () => {
+		// Element Call ESS deployments publish e.g. `${host}/livekit/jwt`;
+		// the JWT endpoint is `${host}/livekit/jwt/sfu/get`.
+		const { fetchImpl } = mockOk();
+		await fetchLivekitToken(
+			livekitFocus({
+				livekit_service_url: "https://matrix-rtc.example.com/livekit/jwt",
+			}),
+			fakeToken,
+			{ fetchImpl: asFetch(fetchImpl) },
+		);
+		expect((fetchImpl.mock.calls[0] as [string])[0]).toBe(
+			"https://matrix-rtc.example.com/livekit/jwt/sfu/get",
 		);
 	});
 

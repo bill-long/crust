@@ -1,5 +1,8 @@
 import { renderHook } from "@solidjs/testing-library";
-import type { CallMembership } from "matrix-js-sdk/lib/matrixrtc";
+import type {
+	CallMembership,
+	LivekitTransport,
+} from "matrix-js-sdk/lib/matrixrtc";
 import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
 import { createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -95,21 +98,242 @@ describe("useRtcSession", () => {
 		vi.clearAllMocks();
 	});
 
-	it("starts idle when the room exists and foci are configured", () => {
+	it("starts idle when the room exists and foci are configured", async () => {
 		const { rtc } = renderRtc();
+		await rtc.fociReady;
 		expect(rtc.status()).toBe("idle");
 		expect(rtc.canJoin()).toBe(true);
 		expect(rtc.memberships()).toEqual([]);
 	});
 
-	it("enters error state when the room is not in the client store", () => {
+	it("blocks join while foci discovery is in flight", async () => {
+		// Hold discovery open across construction to assert the
+		// pre-resolution canJoin/joinBlockReason contract.
+		let resolveDiscover: ((foci: LivekitTransport[]) => void) | undefined;
+		const pending = new Promise<LivekitTransport[]>((res) => {
+			resolveDiscover = res;
+		});
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: () => pending,
+			}),
+		);
+		expect(result.canJoin()).toBe(false);
+		expect(result.joinBlockReason()).toContain("Discovering");
+		resolveDiscover?.([
+			{
+				type: "livekit",
+				livekit_service_url: "https://livekit.example.com/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		]);
+		await result.fociReady;
+		expect(result.canJoin()).toBe(true);
+		expect(result.joinBlockReason()).toBeNull();
+	});
+
+	it("uses foci from the discoverFoci override when joining", async () => {
+		const discovered: LivekitTransport[] = [
+			{
+				type: "livekit",
+				livekit_service_url: "https://livekit.example.com/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		];
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: async () => discovered,
+			}),
+		);
+		await result.join();
+		const [fociArg] = session.joinRoomSession.mock.calls[0];
+		expect(fociArg).toEqual(discovered);
+	});
+
+	it("falls back to the EC-bundled foci when discoverFoci throws synchronously", async () => {
+		// Regression: hook construction wraps the override in
+		// Promise.resolve().then(...) so a non-async function that
+		// throws is normalised into a rejection and caught — without
+		// the wrap, the throw would escape hook construction.
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: () => {
+					throw new Error("sync override blew up");
+				},
+			}),
+		);
+		await result.fociReady;
+		expect(result.canJoin()).toBe(true);
+		await result.join();
+		const [fociArg] = session.joinRoomSession.mock.calls[0];
+		expect(fociArg).toEqual([
+			{
+				type: "livekit",
+				livekit_service_url: "https://call.example.com/livekit/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		]);
+	});
+
+	it("ignores a second join() call while foci discovery is still pending", async () => {
+		// Regression: a double-click (or two effects firing) before
+		// fociReady resolved would let both invocations pass the
+		// synchronous s.isJoined() guard, park on `await fociReady`,
+		// and then both attach E2EE + invoke joinRoomSession.
+		let resolveDiscover: ((foci: LivekitTransport[]) => void) | undefined;
+		const pending = new Promise<LivekitTransport[]>((res) => {
+			resolveDiscover = res;
+		});
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: () => pending,
+			}),
+		);
+		const first = result.join();
+		const second = result.join();
+		resolveDiscover?.([
+			{
+				type: "livekit",
+				livekit_service_url: "https://livekit.example.com/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		]);
+		await Promise.all([first, second]);
+		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not join when leave() is called while foci discovery is pending", async () => {
+		// Regression: join() awaits fociReady before setting status to
+		// "joining", so if the user closes the overlay (or calls leave())
+		// during discovery, the leave path's early-return arm bumps
+		// joinEpoch — joinInner must observe that and bail instead of
+		// publishing a membership after the cancel.
+		let resolveDiscover: ((foci: LivekitTransport[]) => void) | undefined;
+		const pending = new Promise<LivekitTransport[]>((res) => {
+			resolveDiscover = res;
+		});
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: () => pending,
+			}),
+		);
+		const joinPromise = result.join();
+		// Simulate user closing/leaving while discovery is still in flight.
+		await result.leave();
+		resolveDiscover?.([
+			{
+				type: "livekit",
+				livekit_service_url: "https://livekit.example.com/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		]);
+		await joinPromise;
+		expect(session.joinRoomSession).not.toHaveBeenCalled();
+	});
+
+	it("allows a re-Join click after leave() cancels a discovery-bound join", async () => {
+		// Regression: leave() during a parked join() must clear
+		// joinInFlight (not just bump joinEpoch) so a follow-up Join
+		// click isn't silently swallowed by the re-entrancy guard
+		// while the original joinInner is still waiting on fociReady.
+		// Uses two pending discovery promises so we can sequence
+		// "park join#1, leave, click join#2 (still parked), resolve
+		// discovery, only join#2 actually joins".
+		let resolveDiscover: ((foci: LivekitTransport[]) => void) | undefined;
+		const pending = new Promise<LivekitTransport[]>((res) => {
+			resolveDiscover = res;
+		});
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: () => pending,
+			}),
+		);
+		const join1 = result.join();
+		await result.leave();
+		// Second Join click after the cancel. With the bug present
+		// (joinInFlight stuck true), this returns immediately and the
+		// promise resolves without ever calling joinRoomSession even
+		// after discovery completes.
+		const join2 = result.join();
+		resolveDiscover?.([
+			{
+				type: "livekit",
+				livekit_service_url: "https://livekit.example.com/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		]);
+		await Promise.all([join1, join2]);
+		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+	});
+
+	it("falls back to the EC-bundled foci when discoverFoci rejects", async () => {
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: client as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "https://call.example.com",
+				discoverFoci: async () => {
+					throw new Error("discover crashed");
+				},
+			}),
+		);
+		await result.fociReady;
+		// Foci should still resolve to the EC-bundled fallback so a buggy
+		// override can't permanently block Join.
+		expect(result.canJoin()).toBe(true);
+		await result.join();
+		const [fociArg] = session.joinRoomSession.mock.calls[0];
+		expect(fociArg).toEqual([
+			{
+				type: "livekit",
+				livekit_service_url: "https://call.example.com/livekit/sfu/get",
+				livekit_alias: "!room:example.com",
+			},
+		]);
+	});
+
+	it("enters error state when the room is not in the client store", async () => {
 		const { rtc } = renderRtc({ roomFound: false });
+		await rtc.fociReady;
 		expect(rtc.status()).toBe("error");
 		expect(rtc.error()?.message).toContain("not found");
 	});
 
-	it("disables join when no foci can be derived", () => {
+	it("disables join when no foci can be derived", async () => {
 		const { rtc } = renderRtc({ elementCallUrl: "" });
+		await rtc.fociReady;
 		expect(rtc.canJoin()).toBe(false);
 	});
 
@@ -322,6 +546,7 @@ describe("useRtcSession", () => {
 		// consumer. Asserting canJoin stays true keeps a regression that
 		// re-introduces the Phase-2 gate from sneaking in.
 		const { rtc } = renderRtc();
+		await rtc.fociReady;
 		expect(rtc.canJoin()).toBe(true);
 		expect(rtc.joinBlockReason()).toBeNull();
 	});

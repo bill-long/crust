@@ -16,7 +16,7 @@ import {
 	onCleanup,
 	onMount,
 } from "solid-js";
-import { buildFallbackLivekitFoci } from "./discoverFoci";
+import { buildFallbackLivekitFoci, discoverLivekitFoci } from "./discoverFoci";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
 
 export type RtcStatus = "idle" | "joining" | "joined" | "leaving" | "error";
@@ -25,7 +25,7 @@ export interface UseRtcSessionOptions {
 	client: MatrixClient;
 	/** Room id the session is for. Snapshotted at hook construction. */
 	roomId: string;
-	/** Operator-deployed Element Call URL — feeds Phase-1 foci fallback. */
+	/** Operator-deployed Element Call URL — feeds the EC-bundled foci fallback. */
 	elementCallUrl: string;
 	/**
 	 * Phase 4 E2EE bridge. When present and non-null, the hook attaches
@@ -36,6 +36,18 @@ export interface UseRtcSessionOptions {
 	 * undefined, the hook stays on the Phase-1/2 quiet-crypto path.
 	 */
 	e2ee?: Accessor<RtcE2EEContext | null>;
+	/**
+	 * Test seam — overrides the foci discovery implementation. Defaults to
+	 * `discoverLivekitFoci` from `./discoverFoci`, which reads
+	 * `org.matrix.msc4143.rtc_foci` from the homeserver's `.well-known`
+	 * document and falls back to the EC-bundled derivation.
+	 */
+	discoverFoci?: (
+		client: MatrixClient,
+		elementCallUrl: string,
+		roomId: string,
+		options?: { signal?: AbortSignal },
+	) => Promise<LivekitTransport[]>;
 }
 
 export interface RtcSessionApi {
@@ -46,7 +58,8 @@ export interface RtcSessionApi {
 	 * Phase 4 lifted the unencrypted-only restriction: encrypted rooms
 	 * are joinable once the consumer supplies the E2EE bridge via
 	 * `opts.e2ee`. The hook itself does not block on encryption — that
-	 * gate lived in Phase 1/2 only. */
+	 * gate lived in Phase 1/2 only. Stays `false` while async foci
+	 * discovery is in flight (see `fociReady`). */
 	canJoin: Accessor<boolean>;
 	/** Human-readable reason Join is blocked, or null when joinable. */
 	joinBlockReason: Accessor<string | null>;
@@ -57,6 +70,13 @@ export interface RtcSessionApi {
 	 * we have joined (no transport to dial before then).
 	 */
 	activeFocus: Accessor<LivekitTransport | null>;
+	/**
+	 * Resolves once the async foci discovery (well-known fetch + fallback)
+	 * has settled. Surfaced so tests can synchronise on the moment
+	 * `canJoin` / `joinBlockReason` reflect the final foci list rather
+	 * than the initial "discovering" state. Always resolves; never rejects.
+	 */
+	fociReady: Promise<void>;
 	join: () => Promise<void>;
 	leave: () => Promise<void>;
 }
@@ -86,13 +106,50 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const [session, setSession] = createSignal<MatrixRTCSession | null>(null);
 
 	const room = opts.client.getRoom(opts.roomId);
-	const foci = buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId);
+	// Foci are discovered asynchronously from `.well-known/matrix/client`
+	// per MSC4143, falling back to the EC-bundled derivation when the
+	// homeserver does not advertise any. `null` while in flight so the
+	// UI shows a "Discovering..." block reason instead of trying to join
+	// against a half-resolved list.
+	const [foci, setFoci] = createSignal<LivekitTransport[] | null>(null);
+	const discoverImpl = opts.discoverFoci ?? discoverLivekitFoci;
+	// External AbortController so onCleanup can cancel the in-flight
+	// well-known fetch on overlay close — otherwise a quickly-opened-
+	// and-closed call wastes up to a full 5-second fetch timeout of
+	// network work and emits a stale signal write after disposal.
+	const discoveryAbort =
+		typeof AbortController === "function" ? new AbortController() : undefined;
+	// Wrap the override invocation in `Promise.resolve().then(...)` so
+	// a synchronously-throwing custom `discoverFoci` is normalised into
+	// a rejection and caught by the fallback arm below. A raw
+	// `discoverImpl(...)` call would otherwise throw out of hook
+	// construction.
+	const fociReady: Promise<void> = Promise.resolve()
+		.then(() =>
+			discoverImpl(opts.client, opts.elementCallUrl, opts.roomId, {
+				signal: discoveryAbort?.signal,
+			}),
+		)
+		.then((resolved) => {
+			setFoci(resolved);
+		})
+		.catch(() => {
+			// `discoverLivekitFoci` never throws, but a custom override
+			// might (sync throw or async rejection). Fall back to the
+			// EC-bundled derivation rather than leaving `foci()`
+			// permanently null and blocking Join.
+			setFoci(buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId));
+		});
 	let leavePending = false;
 
 	const joinBlockReason = createMemo((): string | null => {
 		if (!room) return `Room ${opts.roomId} not found in client store`;
-		if (foci.length === 0) {
-			return "No MatrixRTC foci configured — set elementCall.url in config.json.";
+		const list = foci();
+		if (list === null) {
+			return "Discovering MatrixRTC focus…";
+		}
+		if (list.length === 0) {
+			return "No MatrixRTC foci configured — set elementCall.url in config.json or publish org.matrix.msc4143.rtc_foci in .well-known/matrix/client.";
 		}
 		return null;
 	});
@@ -115,7 +172,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				return transport;
 			}
 		}
-		return foci.length > 0 ? foci[0] : null;
+		const fociList = foci();
+		return fociList && fociList.length > 0 ? fociList[0] : null;
 	});
 
 	onMount(() => {
@@ -211,6 +269,21 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	// Leave (or a superseded Join attempt) bails before it pumps a key
 	// from the wrong session into the bridge.
 	let joinEpoch = 0;
+	// Re-entrancy guard for join(): a double-click (or two effects firing)
+	// while foci discovery is still pending would otherwise have both
+	// invocations pass the synchronous `s.isJoined()` check, park on
+	// `await fociReady`, and then both run the attach+joinRoomSession
+	// body — leaking the first E2EE listener and double-invoking
+	// joinRoomSession. Set before the first `await` so the second caller
+	// short-circuits.
+	let joinInFlight = false;
+	// Ownership token for the joinInFlight slot. Bumped by every join()
+	// attempt AND by every cancel path. The owning join() compares its
+	// captured token in `finally`: if the token still matches, it clears
+	// joinInFlight; if it doesn't, a cancel (and possibly a fresh join())
+	// has happened in the meantime and we must not stomp the new owner's
+	// flag.
+	let joinAttemptId = 0;
 
 	const join = async (): Promise<void> => {
 		const s = session();
@@ -219,6 +292,49 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			setStatus("error");
 			return;
 		}
+		if (s.isJoined()) return;
+		if (joinInFlight) return;
+		joinInFlight = true;
+		const myAttempt = ++joinAttemptId;
+		// Snapshot the join epoch so leave()/onCleanup() can cancel a
+		// join attempt parked on `await fociReady` by bumping the
+		// epoch (which they already do in every relevant path —
+		// leave()'s early-return arm at line ~402, leave()'s success/
+		// non-joined error arms, and onCleanup unconditionally). If
+		// the epoch advanced while we were parked, the user closed
+		// the overlay or hit Leave and we must NOT call
+		// joinRoomSession after the fact.
+		const startEpoch = joinEpoch;
+		try {
+			await joinInner(s, startEpoch);
+		} finally {
+			// Only release the slot if we still own it. Cancel paths
+			// bump joinAttemptId AND clear joinInFlight to unblock a
+			// follow-up Join click; a fresh join() may have already
+			// grabbed the slot with a higher joinAttemptId.
+			if (joinAttemptId === myAttempt) {
+				joinInFlight = false;
+			}
+		}
+	};
+
+	const joinInner = async (
+		s: MatrixRTCSession,
+		startEpoch: number,
+	): Promise<void> => {
+		// Wait for async foci discovery to settle before evaluating the
+		// block reason — otherwise a quick Join click would race the
+		// well-known fetch and hit the "Discovering…" block path.
+		if (foci() === null) {
+			await fociReady;
+		}
+		// Cancelled while we were parked: leave() or onCleanup bumped
+		// joinEpoch. Bail before publishing a membership the user
+		// already asked us not to.
+		if (joinEpoch !== startEpoch) return;
+		// Re-check after the await: the session may have been joined
+		// (e.g. by a separately-resolved code path) while we were
+		// parked.
 		if (s.isJoined()) return;
 		// Defensive re-check — defends against `room` being null at
 		// hook-init time (Phase 1 set status="error" but kept the hook
@@ -229,6 +345,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			setStatus("error");
 			return;
 		}
+		// Snapshot the resolved foci list — `joinBlockReason === null`
+		// guarantees this is non-null and non-empty.
+		const fociList = foci() as LivekitTransport[];
 		setError(null);
 		setStatus("joining");
 		const myEpoch = ++joinEpoch;
@@ -256,7 +375,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			// joinRoomSession is fire-and-forget; this try/catch only covers
 			// synchronous validation throws. Async join failures arrive via
 			// MembershipManagerError → onManagerError.
-			s.joinRoomSession(foci as LivekitTransport[], undefined, {
+			s.joinRoomSession(fociList, undefined, {
 				manageMediaKeys: ctx !== null,
 				unstableSendStickyEvents: false,
 			});
@@ -323,8 +442,14 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			detachE2EE?.();
 			detachE2EE = null;
 			// Invalidate the current join attempt so any in-flight key
-			// imports bail before reaching the keyProvider.
+			// imports bail before reaching the keyProvider. Also clear
+			// joinInFlight so a re-Join click after this cancel isn't
+			// silently swallowed by the re-entrancy guard while the
+			// parked joinInner (which we just told to bail via the
+			// epoch bump) is still waiting on fociReady.
 			joinEpoch++;
+			joinAttemptId++;
+			joinInFlight = false;
 			return;
 		}
 		leavePending = true;
@@ -341,6 +466,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			detachE2EE?.();
 			detachE2EE = null;
 			joinEpoch++;
+			joinAttemptId++;
+			joinInFlight = false;
 			setStatus("idle");
 		} catch (e) {
 			setError(e instanceof Error ? e : new Error(String(e)));
@@ -355,6 +482,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				detachE2EE?.();
 				detachE2EE = null;
 				joinEpoch++;
+				joinAttemptId++;
+				joinInFlight = false;
 				setStatus("error");
 			}
 		} finally {
@@ -369,9 +498,12 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// when the component unmounts isn't double-fired here. Also leave when
 		// we're still in "joining" so a close-during-join doesn't strand a
 		// membership published moments later.
+		discoveryAbort?.abort();
 		detachE2EE?.();
 		detachE2EE = null;
 		joinEpoch++;
+		joinAttemptId++;
+		joinInFlight = false;
 		const s = session();
 		if (!s || leavePending) return;
 		if (s.isJoined() || status() === "joining") {
@@ -388,6 +520,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		canJoin,
 		joinBlockReason,
 		activeFocus,
+		fociReady,
 		join,
 		leave,
 	};
