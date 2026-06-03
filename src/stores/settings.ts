@@ -32,16 +32,6 @@ export interface UserSettings {
 	 */
 	rtcCamDeviceId: string;
 	/**
-	 * Whether to use crust's native MatrixRTC client (LiveKit-based) for
-	 * voice/video calls. When `false`, falls back to the embedded Element
-	 * Call iframe. Defaults to `true` as of Phase 5 of #122.
-	 *
-	 * Read once at CallOverlay mount — toggling while a call is active
-	 * does NOT swap paths on the running call (intentional: avoids
-	 * double-joining the MatrixRTC session).
-	 */
-	useNativeCalls: boolean;
-	/**
 	 * Mic transmission mode (Phase 6 of #122 — issue #108).
 	 * - `"voice-activity"`: always transmit when not manually muted.
 	 * - `"push-to-talk"`: transmit only while `micHotkey` is held.
@@ -78,7 +68,6 @@ const defaults: UserSettings = {
 	urlPreviews: true,
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
-	useNativeCalls: true,
 	micMode: "voice-activity",
 	micHotkey: null,
 };
@@ -133,7 +122,6 @@ function load(): UserSettings {
 				typeof obj.rtcCamDeviceId === "string"
 					? obj.rtcCamDeviceId
 					: defaults.rtcCamDeviceId,
-			useNativeCalls: loadBool(obj, "useNativeCalls", defaults.useNativeCalls),
 			micMode:
 				obj.micMode === "voice-activity" ||
 				obj.micMode === "push-to-talk" ||

@@ -1,14 +1,13 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type AppSyncState,
 	ClientContext,
 	type CryptoState,
 } from "../../../client/client";
 import type { SummariesStore } from "../../../client/summaries";
-import { updateSetting, userSettings } from "../../../stores/settings";
 import { CallButton } from "./CallButton";
 
 vi.mock("solid-refresh", () => ({
@@ -61,10 +60,7 @@ function makeMockClient(opts: MockClientOpts) {
 	};
 }
 
-function renderButton(opts: {
-	canSendCallMember: boolean;
-	elementCallUrl: string;
-}) {
+function renderButton(opts: { canSendCallMember: boolean }) {
 	const room = makeMockRoom({
 		roomId: "!room:example.com",
 		canSendCallMember: opts.canSendCallMember,
@@ -100,76 +96,24 @@ function renderButton(opts: {
 			<CallButton
 				roomId="!room:example.com"
 				callActive={() => false}
-				elementCallUrl={opts.elementCallUrl}
 				onStart={() => undefined}
 			/>
 		</ClientContext.Provider>
 	));
 }
 
-describe("CallButton visibility (Phase 5, #122)", () => {
-	let previousUseNative: boolean;
-
-	beforeEach(() => {
-		previousUseNative = userSettings().useNativeCalls;
-	});
-
+describe("CallButton visibility", () => {
 	afterEach(() => {
 		cleanup();
-		updateSetting("useNativeCalls", previousUseNative);
 	});
 
-	it("native mode + empty elementCallUrl: visible (foci can come from .well-known)", () => {
-		updateSetting("useNativeCalls", true);
-		renderButton({ canSendCallMember: true, elementCallUrl: "" });
+	it("visible when the user can send the call-member state event", () => {
+		renderButton({ canSendCallMember: true });
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeTruthy();
 	});
 
-	it("native mode + populated elementCallUrl: visible", () => {
-		updateSetting("useNativeCalls", true);
-		renderButton({
-			canSendCallMember: true,
-			elementCallUrl: "https://call.example.com",
-		});
-		expect(screen.queryByRole("button", { name: "Start a call" })).toBeTruthy();
-	});
-
-	it("iframe mode + empty elementCallUrl: hidden", () => {
-		updateSetting("useNativeCalls", false);
-		renderButton({ canSendCallMember: true, elementCallUrl: "" });
-		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
-	});
-
-	it("iframe mode + whitespace-only elementCallUrl: hidden", () => {
-		updateSetting("useNativeCalls", false);
-		renderButton({ canSendCallMember: true, elementCallUrl: "   " });
-		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
-	});
-
-	it("iframe mode + populated elementCallUrl: visible", () => {
-		updateSetting("useNativeCalls", false);
-		renderButton({
-			canSendCallMember: true,
-			elementCallUrl: "https://call.example.com",
-		});
-		expect(screen.queryByRole("button", { name: "Start a call" })).toBeTruthy();
-	});
-
-	it("power-level denial: hidden regardless of mode (native)", () => {
-		updateSetting("useNativeCalls", true);
-		renderButton({
-			canSendCallMember: false,
-			elementCallUrl: "https://call.example.com",
-		});
-		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
-	});
-
-	it("power-level denial: hidden regardless of mode (iframe)", () => {
-		updateSetting("useNativeCalls", false);
-		renderButton({
-			canSendCallMember: false,
-			elementCallUrl: "https://call.example.com",
-		});
+	it("hidden when the user lacks the power level for the call-member state event", () => {
+		renderButton({ canSendCallMember: false });
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
 	});
 });

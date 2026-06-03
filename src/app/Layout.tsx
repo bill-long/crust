@@ -30,7 +30,7 @@ import {
 } from "../features/emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallButton } from "../features/room/call/CallButton";
-import { CallOverlay } from "../features/room/call/CallOverlay";
+import { NativeCallView } from "../features/room/call/rtc/NativeCallView";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
@@ -131,7 +131,6 @@ const RoomPane: Component<{
 					<CallButton
 						roomId={props.rid}
 						callActive={props.callActive}
-						elementCallUrl={props.elementCallUrl}
 						onStart={() => setCallOpen(true)}
 					/>
 					<RoomNotificationMenu client={props.client} roomId={props.rid} />
@@ -354,7 +353,7 @@ const RoomPane: Component<{
 			</div>
 
 			<Show when={callOpen()}>
-				<CallOverlay
+				<NativeCallView
 					elementCallUrl={props.elementCallUrl}
 					roomId={props.rid}
 					roomName={props.roomName}
