@@ -8,6 +8,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { trackAppModalOpen } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 
 const FOCUSABLE =
@@ -107,6 +108,7 @@ function normalizeWheelDelta(e: WheelEvent): number {
 }
 
 const ImageLightbox: Component<ImageLightboxProps> = (props) => {
+	trackAppModalOpen(props.open);
 	let overlayRef!: HTMLDivElement;
 	let imgRef: HTMLImageElement | undefined;
 	let panSurfaceRef: HTMLDivElement | undefined;

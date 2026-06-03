@@ -7,6 +7,7 @@ import {
 	Show,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
+import { trackAppModalOpen } from "../../stores/modalStack";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -25,6 +26,7 @@ interface CopyLinkFallbackDialogProps {
 const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 	props,
 ) => {
+	trackAppModalOpen(props.open);
 	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;

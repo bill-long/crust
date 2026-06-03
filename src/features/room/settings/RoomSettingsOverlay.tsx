@@ -10,6 +10,7 @@ import {
 	Switch,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
+import { trackAppModalMounted } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 import { AdvancedTab } from "./AdvancedTab";
 import { GeneralTab } from "./GeneralTab";
@@ -55,6 +56,7 @@ const CloseIcon: Component = () => (
 );
 
 const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
+	trackAppModalMounted();
 	let overlayRef!: HTMLDivElement;
 	let contentRef!: HTMLDivElement;
 	let previousFocus: HTMLElement | null = null;

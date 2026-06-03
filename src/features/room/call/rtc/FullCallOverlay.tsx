@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
+import { appModalOpen } from "../../../../stores/modalStack";
 import {
 	toggleUserWantsMic,
 	userWantsMic,
@@ -23,44 +24,51 @@ const FOCUSABLE_SELECTOR =
  * Pane-scoped chrome for the active call. Mounted inside the main-pane
  * container alongside `RoomPane`, gated on
  * `activeCallRoomId() === routeRoomId`, so it covers the room view
- * area but not the sidebars (sidebars remain interactive — the user
- * can navigate to other rooms during a call; PR B-2 will collapse the
- * overlay into a floating mini-widget on that path).
+ * area but not the sidebars. Sidebars (and the rest of the app)
+ * remain interactive — the user can navigate to other rooms or open
+ * Settings during a call.
+ *
+ * Non-modal semantics (Phase 7B PR B-2a): although the overlay
+ * visually covers the main pane, it is not a modal dialog — the
+ * sidebars + UserBar + global shortcuts must keep working. To match
+ * that UX:
+ *
+ * - Role is `region` (not `dialog`); no `aria-modal`.
+ * - No focus trap on Tab — keyboard users can leave to sidebars.
+ * - Escape is handled via `onKeyDown` on the region (NOT a global
+ *   `window` listener) so it only fires while focus is inside the
+ *   overlay; pressing Escape from a sidebar or another modal does
+ *   not dismiss the call.
+ * - `inert` is set whenever ANY app modal (`SettingsOverlay`,
+ *   `RoomSettingsOverlay`, `InviteDialog`, `CopyLinkFallbackDialog`,
+ *   `ConfirmDialog`, `ImageLightbox`) OR a crypto dialog is open,
+ *   so click/keyboard interaction defers to the modal as expected.
  *
  * Reads its session API from `currentCallSession()` and routes user
  * actions through it. Owns no lifecycle state — the hook ownership
  * lives in `CallSessionController`.
- *
- * Phase 7B note: this overlay still claims `role="dialog"
- * aria-modal="true"` and traps Tab, which is inconsistent with the
- * sidebars-stay-clickable UX (mouse users can leave, keyboard users
- * cannot). That tension is resolved in PR B-2 where the mini-widget
- * makes the non-modal semantics obvious. Keeping the existing modal
- * affordances for B-1 minimizes behavior delta on the lifecycle change.
  */
 export const FullCallOverlay: Component = () => {
 	const session = createMemo(() => currentCallSession());
 
-	let dialogRef: HTMLDivElement | undefined;
+	let regionRef: HTMLElement | undefined;
 	let leaveButtonRef: HTMLButtonElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 
-	// Focus trap: keep keyboard users inside the dialog while it is open.
-	const handleDialogKeyDown = (e: KeyboardEvent): void => {
-		if (e.key !== "Tab" || !dialogRef) return;
-		const focusable = Array.from(
-			dialogRef.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-		);
-		if (focusable.length === 0) return;
-		const first = focusable[0];
-		const last = focusable[focusable.length - 1];
-		if (e.shiftKey && document.activeElement === first) {
-			e.preventDefault();
-			last?.focus();
-		} else if (!e.shiftKey && document.activeElement === last) {
-			e.preventDefault();
-			first?.focus();
-		}
+	const overlayInert = (): boolean => appModalOpen() || cryptoDialogOpen();
+
+	// Scoped Escape handler: only fires when focus is inside the region
+	// (events bubble up from the focused descendant to this onKeyDown
+	// binding; Escape from sidebars / other modals never reaches here).
+	// Additionally gated on no modal being open so a layered modal's
+	// own Escape handler always wins.
+	const handleRegionKeyDown = (e: KeyboardEvent): void => {
+		if (e.key !== "Escape") return;
+		if (overlayInert()) return;
+		const s = session();
+		if (!s) return;
+		e.preventDefault();
+		s.requestClose();
 	};
 
 	onMount(() => {
@@ -68,28 +76,21 @@ export const FullCallOverlay: Component = () => {
 		queueMicrotask(() => {
 			// Prefer the Join/Leave button. If it's disabled (e.g. bridge
 			// init in flight, or rtc.canJoin() is false in the not-joined
-			// branch), focusing it is a no-op and leaves focus behind the
-			// overlay — which breaks aria-modal expectations. Fall back to
-			// the first non-disabled focusable inside the dialog (the
-			// close X button at minimum is always enabled here).
+			// branch), focusing it is a no-op and would leave focus on the
+			// trigger button outside the overlay. Fall back to the first
+			// non-disabled focusable in the region (the close X button at
+			// minimum is always enabled outside leave). Without aria-modal
+			// this is not a strict requirement, but it keeps the call
+			// surface a sensible focus target for the user who just
+			// started/joined the call.
 			if (leaveButtonRef && !leaveButtonRef.disabled) {
 				leaveButtonRef.focus();
 				return;
 			}
-			if (!dialogRef) return;
-			const first = dialogRef.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+			if (!regionRef) return;
+			const first = regionRef.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
 			first?.focus();
 		});
-		const onKey = (e: KeyboardEvent): void => {
-			if (e.key === "Escape") {
-				const s = session();
-				if (!s) return;
-				e.preventDefault();
-				s.requestClose();
-			}
-		};
-		window.addEventListener("keydown", onKey);
-		onCleanup(() => window.removeEventListener("keydown", onKey));
 	});
 
 	onCleanup(() => {
@@ -121,15 +122,13 @@ export const FullCallOverlay: Component = () => {
 	return (
 		<Show when={session()}>
 			{(s) => (
-				<div
-					ref={dialogRef}
+				<section
+					ref={regionRef}
 					class="absolute inset-0 z-30 flex flex-col bg-surface-0"
-					role="dialog"
-					aria-modal="true"
 					aria-label={`Native call in ${s().roomName()}`}
-					inert={cryptoDialogOpen() || undefined}
+					inert={overlayInert() || undefined}
 					tabIndex={-1}
-					onKeyDown={handleDialogKeyDown}
+					onKeyDown={handleRegionKeyDown}
 				>
 					<div class="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface-1 px-4">
 						<div class="flex min-w-0 items-center gap-2">
@@ -442,7 +441,7 @@ export const FullCallOverlay: Component = () => {
 							supported. See issue #122 for the multi-phase plan.
 						</p>
 					</div>
-				</div>
+				</section>
 			)}
 		</Show>
 	);

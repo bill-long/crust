@@ -9,6 +9,7 @@ import {
 	Show,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
+import { trackAppModalOpen } from "../../../stores/modalStack";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -43,6 +44,7 @@ interface ConfirmDialogProps {
  * "Anyone can change state" PL preset confirm.
  */
 const ConfirmDialog: Component<ConfirmDialogProps> = (props) => {
+	trackAppModalOpen(props.open);
 	let overlayRef!: HTMLDivElement;
 	let confirmRef: HTMLButtonElement | undefined;
 	let previousFocus: HTMLElement | null = null;
