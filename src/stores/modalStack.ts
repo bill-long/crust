@@ -16,9 +16,14 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
  * allowed to stack on top of regular app modals, so they are tracked
  * separately).
  *
- * Each modal calls {@link pushAppModal} in `onMount` and
- * {@link popAppModal} in `onCleanup`. The counter approach lets
- * modals legitimately stack (e.g. a `ConfirmDialog` opened from within
+ * Each modal calls one of the helpers below from its component body:
+ * {@link trackAppModalMounted} for modals whose mount-state IS their
+ * open-state (rendered via a parent `<Show>`), or
+ * {@link trackAppModalOpen} for modals that stay mounted and gate
+ * their DOM with `<Show when={props.open()}>`. {@link pushAppModal} /
+ * {@link popAppModal} are also exported for direct use when the
+ * helpers don't fit. The counter approach lets modals legitimately
+ * stack (e.g. a `ConfirmDialog` opened from within
  * `RoomSettingsOverlay`) without needing per-modal coordination.
  */
 

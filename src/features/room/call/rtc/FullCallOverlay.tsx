@@ -51,7 +51,7 @@ const FOCUSABLE_SELECTOR =
 export const FullCallOverlay: Component = () => {
 	const session = createMemo(() => currentCallSession());
 
-	let regionRef: HTMLDivElement | undefined;
+	let regionRef: HTMLElement | undefined;
 	let leaveButtonRef: HTMLButtonElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 
