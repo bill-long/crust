@@ -130,6 +130,27 @@ export const FullCallOverlay: Component = () => {
 								Dev preview
 							</span>
 						</div>
+						<button
+							type="button"
+							onClick={() => s().requestClose()}
+							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+							title="Close call"
+							aria-label="Close call"
+						>
+							<svg
+								class="h-4 w-4"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<line x1="18" y1="6" x2="6" y2="18" />
+								<line x1="6" y1="6" x2="18" y2="18" />
+							</svg>
+						</button>
 					</div>
 
 					<div class="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
