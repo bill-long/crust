@@ -9,9 +9,12 @@ import { createSignal } from "solid-js";
  *
  * Hoisted out of `RoomPane` (which is keyed on the route's roomId and
  * thus unmounts on navigation) so the LiveKit Room and MatrixRTC session
- * survive route changes. When the user navigates away from the call's
- * room the full overlay collapses to a floating mini-widget; navigating
- * back re-expands the overlay — same session, no rejoin.
+ * survive route changes. In PR B-1 the `FullCallOverlay` is gated on
+ * `activeCallRoomId() === routeRoomId`, so navigating away simply
+ * unmounts the overlay chrome while the hoisted `CallSessionController`
+ * keeps the session alive; navigating back re-mounts the overlay
+ * against the same live session (no rejoin). PR B-2 will add a
+ * `MiniCallWidget` that renders while away to expose the call.
  *
  * Single-call invariant: the call surface (`FullCallOverlay`, plus
  * `MiniCallWidget` in a follow-up PR) is driven entirely off

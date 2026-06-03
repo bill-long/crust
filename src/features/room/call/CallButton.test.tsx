@@ -124,23 +124,28 @@ describe("CallButton visibility", () => {
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
 	});
 
-	it("disabled with explanatory label when another room has an active call", () => {
+	it("aria-disabled with explanatory label when another room has an active call", () => {
 		setActiveCallRoomId("!other:example.com");
 		renderButton({ canSendCallMember: true });
 		const btn = screen.queryByRole("button", {
 			name: "Leave the current call first",
 		}) as HTMLButtonElement | null;
 		expect(btn).toBeTruthy();
-		expect(btn?.disabled).toBe(true);
+		expect(btn?.getAttribute("aria-disabled")).toBe("true");
+		// The native `disabled` attribute is intentionally NOT set so the
+		// button stays focusable and tooltip/aria-label remain discoverable
+		// to keyboard and assistive-tech users (see Tooltip.tsx).
+		expect(btn?.disabled).toBe(false);
 	});
 
-	it("not disabled when the active call is in this room", () => {
+	it("not aria-disabled when the active call is in this room", () => {
 		setActiveCallRoomId("!room:example.com");
 		renderButton({ canSendCallMember: true });
 		const btn = screen.queryByRole("button", {
 			name: "Start a call",
 		}) as HTMLButtonElement | null;
 		expect(btn).toBeTruthy();
+		expect(btn?.getAttribute("aria-disabled")).toBe("false");
 		expect(btn?.disabled).toBe(false);
 	});
 
