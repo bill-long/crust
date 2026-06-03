@@ -106,6 +106,28 @@ describe("pickReturnToCallRoute", () => {
 		).toBe(`/home/${encodeURIComponent("!gone:example.org")}`);
 	});
 
+	it("falls back to /home/<roomId> when the call room is missing from summaries even if the current space lists it as a child", () => {
+		// space.children may include rooms we don't have a joined summary
+		// for (unjoined public children, or a just-kicked stale entry).
+		// In that case we must NOT route to /space/<spaceId>/<roomId>
+		// because the destination pane has no usable state — fall back
+		// to /home so the user sees a consistent empty state.
+		const summaries: SummariesStore = {
+			"!space:example.org": makeSummary({
+				roomId: "!space:example.org",
+				isSpace: true,
+				children: ["!gone:example.org"],
+			}),
+		};
+		expect(
+			pickReturnToCallRoute(
+				summaries,
+				"!gone:example.org",
+				"!space:example.org",
+			),
+		).toBe(`/home/${encodeURIComponent("!gone:example.org")}`);
+	});
+
 	it("never produces /space/X/Y when the current space's children list does not include Y (sub-space descendants)", () => {
 		// Subspace nesting: !space contains !subspace which contains !room.
 		// The call room is NOT a direct child of !space, so we must NOT

@@ -30,7 +30,15 @@ export function pickReturnToCallRoute(
 ): string {
 	const encodedRoom = encodeURIComponent(callRoomId);
 	const summary = summaries[callRoomId];
-	if (summary?.isDirect) {
+	// Unknown room (e.g. just got kicked, or summary not yet hydrated) →
+	// route to /home. Otherwise we could emit /space/<spaceId>/<roomId>
+	// purely because the space lists the room in its `children` even
+	// though we have no joined-membership summary for it — which lands
+	// the user on an empty / error pane inside that space.
+	if (!summary) {
+		return `/home/${encodedRoom}`;
+	}
+	if (summary.isDirect) {
 		return `/dm/${encodedRoom}`;
 	}
 	if (currentSpaceId) {
