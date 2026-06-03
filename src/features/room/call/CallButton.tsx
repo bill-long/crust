@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { activeCallRoomId } from "../../../stores/activeCall";
 
 /**
  * State event type that matrix-js-sdk + Element Call currently write for
@@ -78,14 +79,37 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 
 	const visible = (): boolean => canStartCall();
 
+	// True when the user is in another room's call. The button stays
+	// visible (so its existence isn't surprising) but is marked
+	// aria-disabled with a tooltip — refusing the click protects the
+	// in-progress call from being silently torn down by a stray click.
+	// We use `aria-disabled` rather than the native `disabled` attribute
+	// so the button remains focusable and pointer/keyboard events still
+	// fire (otherwise the tooltip/aria-label would be undiscoverable
+	// for keyboard and AT users; see Tooltip.tsx). PR B-2 will replace
+	// this with a confirm-dialog handoff that awaits the active
+	// controller's leave path before switching.
+	const otherCallActive = (): boolean => {
+		const active = activeCallRoomId();
+		return active !== null && active !== props.roomId;
+	};
+	const buttonLabel = (): string => {
+		if (otherCallActive()) return "Leave the current call first";
+		return props.callActive() ? "Join call" : "Start a call";
+	};
+
 	return (
 		<Show when={visible()}>
 			<button
 				type="button"
-				onClick={() => props.onStart()}
-				class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
-				title={props.callActive() ? "Join call" : "Start a call"}
-				aria-label={props.callActive() ? "Join call" : "Start a call"}
+				onClick={() => {
+					if (otherCallActive()) return;
+					props.onStart();
+				}}
+				aria-disabled={otherCallActive()}
+				class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text-disabled any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+				title={buttonLabel()}
+				aria-label={buttonLabel()}
 			>
 				<svg
 					class="h-4 w-4"

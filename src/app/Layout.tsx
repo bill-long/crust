@@ -30,7 +30,8 @@ import {
 } from "../features/emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallButton } from "../features/room/call/CallButton";
-import { NativeCallView } from "../features/room/call/rtc/NativeCallView";
+import { CallSessionController } from "../features/room/call/rtc/CallSessionController";
+import { FullCallOverlay } from "../features/room/call/rtc/FullCallOverlay";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
@@ -54,6 +55,7 @@ import {
 } from "../features/settings/SettingsOverlay";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
+import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
@@ -100,7 +102,6 @@ const RoomPane: Component<{
 	rid: string;
 	roomName: string;
 	callActive: () => boolean;
-	elementCallUrl: string;
 	copyState: () => "idle" | "copied" | "error";
 	onCopyLink: () => void;
 	canInvite: () => boolean;
@@ -119,7 +120,6 @@ const RoomPane: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
-	const [callOpen, setCallOpen] = createSignal(false);
 
 	return (
 		<div class="relative flex h-full flex-col">
@@ -131,7 +131,7 @@ const RoomPane: Component<{
 					<CallButton
 						roomId={props.rid}
 						callActive={props.callActive}
-						onStart={() => setCallOpen(true)}
+						onStart={() => setActiveCallRoomId(props.rid)}
 					/>
 					<RoomNotificationMenu client={props.client} roomId={props.rid} />
 					<Show when={props.canInvite()}>
@@ -351,15 +351,6 @@ const RoomPane: Component<{
 					</div>
 				</Show>
 			</div>
-
-			<Show when={callOpen()}>
-				<NativeCallView
-					elementCallUrl={props.elementCallUrl}
-					roomId={props.rid}
-					roomName={props.roomName}
-					onClose={() => setCallOpen(false)}
-				/>
-			</Show>
 		</div>
 	);
 };
@@ -510,6 +501,11 @@ const Layout: Component = () => {
 	useNotifications(client, summaries, activeRoomId);
 
 	const handleLogout = async (): Promise<void> => {
+		// Tear down any active call BEFORE logging out so the controller's
+		// onCleanup runs against a still-authenticated client (rather than
+		// firing leave/disconnect after `client.logout()` has invalidated
+		// the session). Per rubber-duck #2 on Phase 7B.
+		setActiveCallRoomId(null);
 		closeNotificationSound();
 		try {
 			await client.logout(true);
@@ -640,6 +636,13 @@ const Layout: Component = () => {
 
 	const performLeave = async (rid: string): Promise<void> => {
 		if (leaving()) return;
+		// If the user is leaving the room that hosts the active call, tear
+		// the call down first so the controller doesn't outlive its room
+		// (otherwise the mini-widget / overlay would point at a room the
+		// client no longer participates in). Per rubber-duck #3 on Phase 7B.
+		if (activeCallRoomId() === rid) {
+			setActiveCallRoomId(null);
+		}
 		// Snapshot route params BEFORE the async leave call so a router
 		// update during the await (e.g., the SDK forcing us out of the
 		// room first) doesn't push the post-leave navigation into the
@@ -731,45 +734,73 @@ const Layout: Component = () => {
 					/>
 				}
 				main={
-					<Show
-						when={roomId()}
-						keyed
-						fallback={
-							<main class="flex h-full flex-col">
-								<div class="flex flex-1 items-center justify-center">
-									<p class="text-text-disabled">
-										Select a room to start chatting
-									</p>
-								</div>
-							</main>
-						}
-					>
-						{(rid) => (
-							<RoomPane
-								client={client}
-								rid={rid}
-								roomName={roomName()}
-								callActive={callActive}
-								elementCallUrl={config.elementCall.url}
-								copyState={copyState}
-								onCopyLink={() => handleCopyRoomLink(rid)}
-								canInvite={canInviteHere}
-								onInvite={() => setInviteRoomId(rid)}
-								leaving={leaving}
-								onLeave={handleLeave}
-								onOpenSettings={() =>
-									setRoomSettings({ roomId: rid, tab: "general" })
-								}
-								membersVisible={membersPaneVisible}
-								onToggleMembers={toggleMembersPane}
-								membersWidth={membersWidth}
-								onMembersWidthChange={(next) => setMembersWidth(next)}
-								onMembersWidthCommit={() => saveMembersWidth(membersWidth())}
-							/>
-						)}
-					</Show>
+					<div class="relative flex h-full min-h-0 flex-col">
+						<Show
+							when={roomId()}
+							keyed
+							fallback={
+								<main class="flex h-full flex-col">
+									<div class="flex flex-1 items-center justify-center">
+										<p class="text-text-disabled">
+											Select a room to start chatting
+										</p>
+									</div>
+								</main>
+							}
+						>
+							{(rid) => (
+								<RoomPane
+									client={client}
+									rid={rid}
+									roomName={roomName()}
+									callActive={callActive}
+									copyState={copyState}
+									onCopyLink={() => handleCopyRoomLink(rid)}
+									canInvite={canInviteHere}
+									onInvite={() => setInviteRoomId(rid)}
+									leaving={leaving}
+									onLeave={handleLeave}
+									onOpenSettings={() =>
+										setRoomSettings({ roomId: rid, tab: "general" })
+									}
+									membersVisible={membersPaneVisible}
+									onToggleMembers={toggleMembersPane}
+									membersWidth={membersWidth}
+									onMembersWidthChange={(next) => setMembersWidth(next)}
+									onMembersWidthCommit={() => saveMembersWidth(membersWidth())}
+								/>
+							)}
+						</Show>
+						{/* Full-overlay chrome for the active call, scoped to the
+							main pane so the sidebars stay clickable. The
+							CallSessionController (mounted below at Layout level)
+							owns the session lifecycle so the call survives the
+							RoomPane remount that happens on route changes. */}
+						<Show
+							when={
+								activeCallRoomId() !== null &&
+								activeCallRoomId() === (roomId() ?? null)
+							}
+						>
+							<FullCallOverlay />
+						</Show>
+					</div>
 				}
 			/>
+
+			{/* Hoisted call-session controller — single source of truth for
+				the MatrixRTC + LiveKit lifecycle. Keyed on the active call's
+				room id so a switch flow forces a clean unmount → cleanup →
+				remount cycle (Phase 7B of #122, closes #99 bullets 2 & 4). */}
+			<Show when={activeCallRoomId()} keyed>
+				{(rid) => (
+					<CallSessionController
+						roomId={rid}
+						roomName={() => summaries[rid]?.name?.trim() || "this room"}
+						elementCallUrl={config.elementCall.url}
+					/>
+				)}
+			</Show>
 
 			{/* Invite dialog — roomId is snapshotted at open time so an
 				in-flight invite still targets the original room if the user

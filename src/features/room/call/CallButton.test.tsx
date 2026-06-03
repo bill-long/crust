@@ -8,6 +8,10 @@ import {
 	type CryptoState,
 } from "../../../client/client";
 import type { SummariesStore } from "../../../client/summaries";
+import {
+	_resetActiveCallForTests,
+	setActiveCallRoomId,
+} from "../../../stores/activeCall";
 import { CallButton } from "./CallButton";
 
 vi.mock("solid-refresh", () => ({
@@ -73,7 +77,8 @@ function renderButton(opts: { canSendCallMember: boolean }) {
 	const [cryptoState] = createSignal<CryptoState>("ready");
 	// CallButton never reads summaries; an empty object is sufficient.
 	const summaries = {} as SummariesStore;
-	return render(() => (
+	const onStart = vi.fn();
+	const result = render(() => (
 		<ClientContext.Provider
 			value={{
 				client: client as unknown as MatrixClient,
@@ -96,15 +101,17 @@ function renderButton(opts: { canSendCallMember: boolean }) {
 			<CallButton
 				roomId="!room:example.com"
 				callActive={() => false}
-				onStart={() => undefined}
+				onStart={onStart}
 			/>
 		</ClientContext.Provider>
 	));
+	return { ...result, onStart };
 }
 
 describe("CallButton visibility", () => {
 	afterEach(() => {
 		cleanup();
+		_resetActiveCallForTests();
 	});
 
 	it("visible when the user can send the call-member state event", () => {
@@ -115,5 +122,40 @@ describe("CallButton visibility", () => {
 	it("hidden when the user lacks the power level for the call-member state event", () => {
 		renderButton({ canSendCallMember: false });
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
+	});
+
+	it("aria-disabled with explanatory label when another room has an active call", () => {
+		setActiveCallRoomId("!other:example.com");
+		renderButton({ canSendCallMember: true });
+		const btn = screen.queryByRole("button", {
+			name: "Leave the current call first",
+		}) as HTMLButtonElement | null;
+		expect(btn).toBeTruthy();
+		expect(btn?.getAttribute("aria-disabled")).toBe("true");
+		// The native `disabled` attribute is intentionally NOT set so the
+		// button stays focusable and tooltip/aria-label remain discoverable
+		// to keyboard and assistive-tech users (see Tooltip.tsx).
+		expect(btn?.disabled).toBe(false);
+	});
+
+	it("not aria-disabled when the active call is in this room", () => {
+		setActiveCallRoomId("!room:example.com");
+		renderButton({ canSendCallMember: true });
+		const btn = screen.queryByRole("button", {
+			name: "Start a call",
+		}) as HTMLButtonElement | null;
+		expect(btn).toBeTruthy();
+		expect(btn?.getAttribute("aria-disabled")).toBe("false");
+		expect(btn?.disabled).toBe(false);
+	});
+
+	it("does not invoke onStart when refused due to another active call", () => {
+		setActiveCallRoomId("!other:example.com");
+		const { onStart } = renderButton({ canSendCallMember: true });
+		const btn = screen.queryByRole("button", {
+			name: "Leave the current call first",
+		}) as HTMLButtonElement | null;
+		btn?.click();
+		expect(onStart).not.toHaveBeenCalled();
 	});
 });

@@ -159,7 +159,7 @@ interface AttachedAudio {
  * Phase 2 LiveKit room wrapper for the native MatrixRTC client (#122).
  *
  * Dynamically imports `livekit-client` inside the connect path so neither
- * app boot nor opening `NativeCallView` pulls the chunk — only the first
+ * app boot nor opening the call overlay pulls the chunk — only the first
  * Join click does. Stays as a state machine keyed on (focus, enabled) so
  * Solid effect re-runs from mute/device toggles don't reconnect the room.
  *
@@ -191,7 +191,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// next `bindRoom()` (focus-change reconnect) starts clean.
 	let binding: import("./rtcE2EEBridge").RtcE2EERoomBinding | null = null;
 	// Tracks the most recently kicked-off teardown so external callers
-	// (NativeCallView's bridge-dispose onCleanup) can chain off it.
+	// (`CallSessionController`'s bridge-dispose onCleanup) can chain off it.
 	// SolidJS `onCleanup` is synchronous and does not await returned
 	// promises, so the cross-hook ordering of "release binding AFTER
 	// room.disconnect resolves" cannot be enforced by LIFO alone on the
@@ -205,7 +205,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// flight. Held > 0 for the duration of teardown so a concurrent focus/
 	// membership update doesn't slip a reconnect into the focus-change
 	// branch while the user is on their way out. The consumer
-	// (`NativeCallView`) awaits `livekit.disconnect()` BEFORE `rtc.leave()`,
+	// (`CallSessionController`) awaits `livekit.disconnect()` BEFORE `rtc.leave()`,
 	// so `enabled` (gated on `rtc.status()==="joined"`) is still true during
 	// the teardown — without this guard, focus churn can re-enter the call
 	// after the user clicked Leave. A counter (not a boolean) so overlapping
@@ -1079,7 +1079,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		disposed = true;
 		attempt += 1;
 		// Record the teardown promise so external chain consumers (the
-		// bridge dispose in NativeCallView) can defer their own
+		// bridge dispose in CallSessionController) can defer their own
 		// destructive work until disconnect has released its binding.
 		// Chains via trackTeardown so an in-flight focus-change or
 		// explicit-disconnect teardown finishes its `r.disconnect()`
@@ -1101,7 +1101,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		// Resolves when any in-flight teardown (from cleanup or an
 		// explicit disconnect) has run `r.disconnect()` AND released
 		// its E2EE binding. Resolves immediately if no teardown has
-		// ever been triggered. Used by NativeCallView's bridge-dispose
+		// ever been triggered. Used by CallSessionController's bridge-dispose
 		// onCleanup to chain `ctx.dispose()` (which terminates workers)
 		// behind the disconnect that's still using them — Solid's
 		// `onCleanup` is synchronous and can't enforce this via LIFO.
