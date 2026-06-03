@@ -9,6 +9,7 @@ import {
 	Show,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
+import { trackAppModalOpen } from "../../stores/modalStack";
 import { InviteByUserIdForm } from "./settings/InviteByUserIdForm";
 
 const FOCUSABLE =
@@ -27,6 +28,7 @@ interface InviteDialogProps {
 }
 
 const InviteDialog: Component<InviteDialogProps> = (props) => {
+	trackAppModalOpen(props.open);
 	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;

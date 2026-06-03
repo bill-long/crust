@@ -9,6 +9,7 @@ import {
 	Switch,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
+import { trackAppModalMounted } from "../../stores/modalStack";
 import { userSettings } from "../../stores/settings";
 import { AccountTab } from "./AccountTab";
 import { DevicesTab } from "./DevicesTab";
@@ -68,6 +69,7 @@ const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
+	trackAppModalMounted();
 	let overlayRef!: HTMLDivElement;
 	let contentRef!: HTMLDivElement;
 	let previousFocus: HTMLElement | null = null;
