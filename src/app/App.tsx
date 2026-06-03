@@ -12,6 +12,7 @@ import { ClientProvider, useClient } from "../client/client";
 import { LoginPage } from "../features/auth/LoginPage";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { closeNotificationSound } from "../features/room/notificationSound";
+import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
@@ -42,6 +43,13 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	createEffect(() => {
 		if (syncState() === "logged-out" && !cleaningUp) {
 			cleaningUp = true;
+			// Tear down any active call surface so the controller unmounts
+			// and its onCleanup chain runs. The client is already stopped
+			// by `onSessionLoggedOut` (per the comment below), so any
+			// in-flight `leaveRoomSession` will no-op — but we still need
+			// to drop the global signal so a stale mini-widget / overlay
+			// never outlives the session.
+			setActiveCallRoomId(null);
 			closeNotificationSound();
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
@@ -59,6 +67,12 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	});
 
 	const handleForceLogout = async (): Promise<void> => {
+		// Tear down any active call BEFORE stopping the client so the
+		// controller's onCleanup runs against a still-alive client (the
+		// same ordering `Layout.handleLogout` uses — see rubber-duck #2
+		// on Phase 7B). Without this the mini-widget / overlay could
+		// briefly point at a session whose underlying client is stopped.
+		setActiveCallRoomId(null);
 		closeNotificationSound();
 		client.stopClient();
 		// Clear session and navigate immediately so the user never sees
