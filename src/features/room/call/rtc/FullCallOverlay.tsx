@@ -65,7 +65,21 @@ export const FullCallOverlay: Component = () => {
 
 	onMount(() => {
 		previousFocus = document.activeElement as HTMLElement | null;
-		queueMicrotask(() => leaveButtonRef?.focus());
+		queueMicrotask(() => {
+			// Prefer the Join/Leave button. If it's disabled (e.g. bridge
+			// init in flight, or rtc.canJoin() is false in the not-joined
+			// branch), focusing it is a no-op and leaves focus behind the
+			// overlay — which breaks aria-modal expectations. Fall back to
+			// the first non-disabled focusable inside the dialog (the
+			// close X button at minimum is always enabled here).
+			if (leaveButtonRef && !leaveButtonRef.disabled) {
+				leaveButtonRef.focus();
+				return;
+			}
+			if (!dialogRef) return;
+			const first = dialogRef.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+			first?.focus();
+		});
 		const onKey = (e: KeyboardEvent): void => {
 			if (e.key === "Escape") {
 				const s = session();
@@ -132,8 +146,12 @@ export const FullCallOverlay: Component = () => {
 						</div>
 						<button
 							type="button"
-							onClick={() => s().requestClose()}
-							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+							onClick={() => {
+								if (s().leaving() || s().rtc.status() === "leaving") return;
+								s().requestClose();
+							}}
+							aria-disabled={s().leaving() || s().rtc.status() === "leaving"}
+							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text-disabled any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 							title="Close call"
 							aria-label="Close call"
 						>
