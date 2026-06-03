@@ -194,6 +194,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -214,6 +215,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -230,7 +232,6 @@ describe("useLivekitRoom", () => {
 		expect(fakeRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(
 			true,
 		);
-		expect(result.localMuted()).toBe(false);
 	});
 
 	it("aborts publish when disabled flips false mid-connect", async () => {
@@ -252,6 +253,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -278,6 +280,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: deviceId,
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -289,10 +292,11 @@ describe("useLivekitRoom", () => {
 		expect(roomFactory.callCount).toBe(1);
 	});
 
-	it("optimistically toggles mute and calls setMicrophoneEnabled", async () => {
+	it("reconciles mic publish state when micEnabled() flips", async () => {
 		const fakeRoom = createFakeRoom();
 		roomFactory.current = () => fakeRoom;
 		const { client } = createClient();
+		const [mic, setMic] = createSignal(true);
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -301,18 +305,86 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: mic,
 				loadLivekit,
 			}),
 		);
 		await waitFor(() => result.status() === "connected");
+		// Publish-time honoured the initial true.
+		expect(fakeRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(
+			true,
+		);
 		fakeRoom.localParticipant.setMicrophoneEnabled.mockClear();
-		const p = result.setLocalMuted(true);
-		// Optimistic — UI reflects mute before LiveKit settles.
-		expect(result.localMuted()).toBe(true);
-		await p;
+		// Simulate the SDK reflecting the publish actually went live.
+		fakeRoom.localParticipant.isMicrophoneEnabled = true;
+
+		setMic(false);
+		await waitFor(
+			() =>
+				fakeRoom.localParticipant.setMicrophoneEnabled.mock.calls.length > 0,
+		);
 		expect(fakeRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(
 			false,
 		);
+		fakeRoom.localParticipant.isMicrophoneEnabled = false;
+		fakeRoom.localParticipant.setMicrophoneEnabled.mockClear();
+
+		setMic(true);
+		await waitFor(
+			() =>
+				fakeRoom.localParticipant.setMicrophoneEnabled.mock.calls.length > 0,
+		);
+		expect(fakeRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(
+			true,
+		);
+	});
+
+	it("catches mic intent flip during publish-time setMicrophoneEnabled", async () => {
+		let releasePublish: (() => void) | undefined;
+		const fakeRoom = createFakeRoom({
+			enableMicImpl: () =>
+				new Promise<void>((res) => {
+					releasePublish = res;
+				}),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const [mic, setMic] = createSignal(true);
+		renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: mic,
+				loadLivekit,
+			}),
+		);
+		// Wait for publish-time setMicrophoneEnabled to be issued (and held).
+		await waitFor(
+			() =>
+				fakeRoom.localParticipant.setMicrophoneEnabled.mock.calls.length === 1,
+		);
+		// Flip intent while the publish call is mid-flight.
+		setMic(false);
+		await flush();
+		// The reconcile effect must NOT race a concurrent SDK call while the
+		// publish-time call is still pending — `micOpPending` blocks it.
+		expect(
+			fakeRoom.localParticipant.setMicrophoneEnabled.mock.calls.length,
+		).toBe(1);
+		// Release the publish-time call (settles isMicrophoneEnabled = true).
+		releasePublish?.();
+		// Post-publish trampoline must reconcile to the latest intent (false).
+		await waitFor(
+			() =>
+				fakeRoom.localParticipant.setMicrophoneEnabled.mock.calls.length >= 2,
+		);
+		expect(
+			fakeRoom.localParticipant.setMicrophoneEnabled,
+		).toHaveBeenLastCalledWith(false);
 	});
 
 	it("disconnect tears down the room and returns to idle", async () => {
@@ -327,6 +399,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -358,6 +431,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			});
 			return d;
@@ -410,6 +484,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => memberships,
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -429,6 +504,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -451,6 +527,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -471,6 +548,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "cam-abc",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -507,6 +585,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -546,6 +625,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -576,6 +656,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -618,6 +699,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -646,6 +728,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -672,6 +755,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: deviceId,
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -697,6 +781,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -726,6 +811,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -775,6 +861,7 @@ describe("useLivekitRoom", () => {
 				memberships: () => [],
 				audioDeviceId: () => "",
 				videoDeviceId: () => "",
+				micEnabled: () => true,
 				loadLivekit,
 			}),
 		);
@@ -832,6 +919,7 @@ describe("useLivekitRoom", () => {
 					memberships: () => [],
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
+					micEnabled: () => true,
 					loadLivekit,
 					e2ee: () => ctx,
 				}),
@@ -856,6 +944,7 @@ describe("useLivekitRoom", () => {
 					memberships: () => [],
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
+					micEnabled: () => true,
 					loadLivekit,
 					e2ee: () => ctx,
 				}),
@@ -881,6 +970,7 @@ describe("useLivekitRoom", () => {
 					memberships: () => [],
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
+					micEnabled: () => true,
 					loadLivekit,
 					e2ee: () => ctx,
 				}),
@@ -912,6 +1002,7 @@ describe("useLivekitRoom", () => {
 					memberships: () => [],
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
+					micEnabled: () => true,
 					loadLivekit,
 					e2ee: () => ctx,
 				}),
@@ -944,6 +1035,7 @@ describe("useLivekitRoom", () => {
 					memberships: () => [],
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
+					micEnabled: () => true,
 					loadLivekit,
 					e2ee: () => ctx,
 				}),
@@ -970,6 +1062,7 @@ describe("useLivekitRoom", () => {
 					memberships: () => [],
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
+					micEnabled: () => true,
 					loadLivekit,
 				}),
 			);

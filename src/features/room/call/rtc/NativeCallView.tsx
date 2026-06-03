@@ -11,6 +11,11 @@ import {
 import { useClient } from "../../../../client/client";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
 import { userSettings } from "../../../../stores/settings";
+import {
+	toggleUserWantsMic,
+	userWantsMic,
+	micEnabled as voiceMicEnabled,
+} from "../../../../stores/voice";
 import { ConfirmDialog } from "../../settings/ConfirmDialog";
 import { createRtcE2EEContext, type RtcE2EEContext } from "./rtcE2EEBridge";
 import {
@@ -164,6 +169,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
 		videoDeviceId: createMemo(() => userSettings().rtcCamDeviceId),
+		micEnabled: voiceMicEnabled,
 		e2ee,
 	});
 
@@ -443,20 +449,16 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 							<>
 								<button
 									type="button"
-									onClick={() =>
-										void livekit.setLocalMuted(!livekit.localMuted())
-									}
+									onClick={toggleUserWantsMic}
 									disabled={
 										livekit.status() !== "connecting" &&
 										livekit.status() !== "connected"
 									}
-									aria-pressed={livekit.localMuted()}
+									aria-pressed={!userWantsMic()}
 									class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-semibold text-text-emphasis transition-colors hover:bg-surface-3 disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
-									title={livekit.localMuted() ? "Unmute" : "Mute"}
+									title={userWantsMic() ? "Mute" : "Unmute"}
 									aria-label={
-										livekit.localMuted()
-											? "Unmute microphone"
-											: "Mute microphone"
+										userWantsMic() ? "Mute microphone" : "Unmute microphone"
 									}
 								>
 									<svg
@@ -470,7 +472,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 										aria-hidden="true"
 									>
 										<Show
-											when={livekit.localMuted()}
+											when={!voiceMicEnabled()}
 											fallback={
 												<>
 													<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -487,7 +489,7 @@ export const NativeCallView: Component<NativeCallViewProps> = (props) => {
 											<line x1="8" y1="23" x2="16" y2="23" />
 										</Show>
 									</svg>
-									{livekit.localMuted() ? "Unmute" : "Mute"}
+									{userWantsMic() ? "Mute" : "Unmute"}
 								</button>
 								<button
 									type="button"

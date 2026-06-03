@@ -7,6 +7,9 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { HotkeyCaptureButton } from "../features/voice/HotkeyCaptureButton";
+import { updateSetting, userSettings } from "../stores/settings";
+import { micEnabled, toggleUserWantsMic, userWantsMic } from "../stores/voice";
 import { Avatar } from "./Avatar";
 
 interface UserBarProps {
@@ -223,13 +226,68 @@ const SyncStatusLine: Component<{
 	</Show>
 );
 
+const MicConfigMenu: Component = () => {
+	const settings = userSettings;
+	const showHotkeyUi = (): boolean => settings().micMode !== "voice-activity";
+	const needsBinding = (): boolean =>
+		settings().micMode !== "voice-activity" && settings().micHotkey === null;
+	return (
+		<div class="mt-3 border-t border-border-subtle pt-2">
+			<label class="block">
+				<span class="mb-1 block text-xs font-semibold text-text-secondary">
+					Mic mode
+				</span>
+				<select
+					value={settings().micMode}
+					onChange={(e) => {
+						const v = e.currentTarget.value;
+						if (
+							v === "voice-activity" ||
+							v === "push-to-talk" ||
+							v === "push-to-mute"
+						) {
+							updateSetting("micMode", v);
+						}
+					}}
+					class="w-full rounded bg-surface-2 px-2 py-1 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3 any-pointer-coarse:text-sm"
+					aria-label="Microphone transmission mode"
+				>
+					<option value="voice-activity">Voice activity</option>
+					<option value="push-to-talk">Push to talk</option>
+					<option value="push-to-mute">Push to mute</option>
+				</select>
+			</label>
+			<Show when={showHotkeyUi()}>
+				<div class="mt-2">
+					<span class="mb-1 block text-xs font-semibold text-text-secondary">
+						Hotkey
+					</span>
+					<HotkeyCaptureButton />
+					<Show when={needsBinding()}>
+						<p class="mt-1 text-[10px] leading-snug text-warning-text">
+							Bind a key to enable this mode — until then the mic stays
+							always-on.
+						</p>
+					</Show>
+				</div>
+			</Show>
+		</div>
+	);
+};
+
 // --- Main UserBar ---
 
 const UserBar: Component<UserBarProps> = (props) => {
-	const [micMuted, setMicMuted] = createSignal(false);
 	const [deafened, setDeafened] = createSignal(false);
 	const [micVolume, setMicVolume] = createSignal(100);
 	const [outputVolume, setOutputVolume] = createSignal(100);
+
+	// Mic icon reflects the LIVE transmission intent: `!micEnabled()` is
+	// true when the user has clicked mute OR when PTT/PTM mode says we
+	// aren't currently transmitting (e.g. PTT key not held). This matches
+	// Discord's "muted-look while not transmitting" pattern.
+	const micIconMuted = (): boolean => !micEnabled();
+	const micButtonActive = (): boolean => !userWantsMic();
 
 	return (
 		<div class="flex h-[52px] shrink-0 items-center gap-1 border-t border-border-subtle bg-surface-1 px-2">
@@ -285,10 +343,10 @@ const UserBar: Component<UserBarProps> = (props) => {
 
 			{/* Mic split button */}
 			<SplitAudioButton
-				icon={<MicIcon muted={micMuted()} />}
-				active={micMuted()}
-				label={micMuted() ? "Unmute microphone" : "Mute microphone"}
-				onToggle={() => setMicMuted((v) => !v)}
+				icon={<MicIcon muted={micIconMuted()} />}
+				active={micButtonActive()}
+				label={userWantsMic() ? "Mute microphone" : "Unmute microphone"}
+				onToggle={toggleUserWantsMic}
 				menuContent={
 					<>
 						<div class="mb-2 text-xs font-semibold text-text-secondary">
@@ -299,15 +357,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 							value={micVolume()}
 							onChange={setMicVolume}
 						/>
-						<div class="mt-2">
-							<button
-								type="button"
-								disabled
-								class="w-full rounded px-2 py-1 text-xs text-text-disabled"
-							>
-								Push to Talk (coming soon)
-							</button>
-						</div>
+						<MicConfigMenu />
 					</>
 				}
 			/>

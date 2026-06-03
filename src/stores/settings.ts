@@ -41,6 +41,32 @@ export interface UserSettings {
 	 * double-joining the MatrixRTC session).
 	 */
 	useNativeCalls: boolean;
+	/**
+	 * Mic transmission mode (Phase 6 of #122 — issue #108).
+	 * - `"voice-activity"`: always transmit when not manually muted.
+	 * - `"push-to-talk"`: transmit only while `micHotkey` is held.
+	 * - `"push-to-mute"`: transmit unless `micHotkey` is held.
+	 *
+	 * In PTT/PTM modes, an unbound `micHotkey` falls back to
+	 * voice-activity behavior (see `src/stores/voice.ts`) so the user
+	 * isn't silently muted forever after picking a mode.
+	 */
+	micMode: "voice-activity" | "push-to-talk" | "push-to-mute";
+	/**
+	 * Hotkey combo for PTT/PTM. `code` is `KeyboardEvent.code`
+	 * (e.g. `"Space"`, `"KeyT"`); `null` means a modifier-only combo
+	 * (e.g. just Ctrl). `null` for the whole object means unbound.
+	 */
+	micHotkey: MicHotkey | null;
+}
+
+export interface MicHotkey {
+	ctrl: boolean;
+	shift: boolean;
+	alt: boolean;
+	meta: boolean;
+	/** `KeyboardEvent.code`, or `null` for a modifier-only combo. */
+	code: string | null;
 }
 
 const defaults: UserSettings = {
@@ -53,6 +79,8 @@ const defaults: UserSettings = {
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
 	useNativeCalls: true,
+	micMode: "voice-activity",
+	micHotkey: null,
 };
 
 function loadBool(
@@ -106,10 +134,53 @@ function load(): UserSettings {
 					? obj.rtcCamDeviceId
 					: defaults.rtcCamDeviceId,
 			useNativeCalls: loadBool(obj, "useNativeCalls", defaults.useNativeCalls),
+			micMode:
+				obj.micMode === "voice-activity" ||
+				obj.micMode === "push-to-talk" ||
+				obj.micMode === "push-to-mute"
+					? obj.micMode
+					: defaults.micMode,
+			micHotkey: parseMicHotkey(obj.micHotkey),
 		};
 	} catch {
 		return { ...defaults };
 	}
+}
+
+/**
+ * Exported for tests. Validates a persisted `micHotkey` value loaded from
+ * storage, returning `null` for any malformed or empty binding so the
+ * downstream voice-store anti-footgun fallback applies.
+ */
+export function parseMicHotkey(raw: unknown): MicHotkey | null {
+	if (raw === null || raw === undefined) return null;
+	if (typeof raw !== "object") return null;
+	const h = raw as Record<string, unknown>;
+	if (
+		typeof h.ctrl !== "boolean" ||
+		typeof h.shift !== "boolean" ||
+		typeof h.alt !== "boolean" ||
+		typeof h.meta !== "boolean"
+	) {
+		return null;
+	}
+	const code = h.code;
+	if (code !== null && typeof code !== "string") return null;
+	const normalizedCode =
+		typeof code === "string" && code.length > 0 ? code : null;
+	// Reject "empty" bindings (no modifiers AND no code). Otherwise the voice
+	// store sees `micHotkey !== null` and treats it as a real binding,
+	// defeating the unbound-hotkey anti-footgun fallback for PTT/PTM.
+	if (!h.ctrl && !h.shift && !h.alt && !h.meta && normalizedCode === null) {
+		return null;
+	}
+	return {
+		ctrl: h.ctrl,
+		shift: h.shift,
+		alt: h.alt,
+		meta: h.meta,
+		code: normalizedCode,
+	};
 }
 
 function applyZoom(level: number): void {
