@@ -101,11 +101,11 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const otherCallRoomName = (): string => {
 		const active = activeCallRoomId();
 		if (!active) return "another room";
-		return summaries[active]?.name ?? "another room";
+		return summaries[active]?.name?.trim() || "another room";
 	};
 
 	const thisRoomName = (): string =>
-		summaries[props.roomId]?.name ?? "this room";
+		summaries[props.roomId]?.name?.trim() || "this room";
 
 	const buttonLabel = (): string => {
 		if (otherCallActive()) return "Switch to call in this room";

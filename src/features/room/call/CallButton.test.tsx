@@ -238,6 +238,50 @@ describe("CallButton visibility", () => {
 		expect(dialog.textContent).toContain("this room");
 	});
 
+	it("treats whitespace-only summary names as missing for dialog fallback", () => {
+		const summaries: SummariesStore = {
+			"!room:example.com": {
+				roomId: "!room:example.com",
+				name: "   ",
+				avatarUrl: null,
+				lastMessage: null,
+				unreadCount: 0,
+				highlightCount: 0,
+				membership: "join",
+				isEncrypted: false,
+				isDirect: false,
+				isSpace: false,
+				kind: "text",
+				callActive: false,
+				children: [],
+			},
+			"!other:example.com": {
+				roomId: "!other:example.com",
+				name: "\t\n",
+				avatarUrl: null,
+				lastMessage: null,
+				unreadCount: 0,
+				highlightCount: 0,
+				membership: "join",
+				isEncrypted: false,
+				isDirect: false,
+				isSpace: false,
+				kind: "text",
+				callActive: true,
+				children: [],
+			},
+		};
+		setActiveCallRoomId("!other:example.com");
+		renderButton({ canSendCallMember: true, summaries });
+		const btn = screen.getByRole("button", {
+			name: "Switch to call in this room",
+		});
+		btn.click();
+		const dialog = screen.getByRole("dialog", { name: "Switch calls?" });
+		expect(dialog.textContent).toContain("another room");
+		expect(dialog.textContent).toContain("this room");
+	});
+
 	it("calls onStart directly when no other call is active", () => {
 		const { onStart } = renderButton({ canSendCallMember: true });
 		const btn = screen.getByRole("button", { name: "Start a call" });

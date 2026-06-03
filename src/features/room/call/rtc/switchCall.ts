@@ -2,11 +2,11 @@ import { setActiveCallRoomId } from "../../../../stores/activeCall";
 import { currentCallSession } from "./callSessionStore";
 
 /**
- * Cross-room call switch orchestrator (Phase 7B PR B-2c of #122 —
- * closes #99 bullets 2 & 4). Used by `CallButton` when the user clicks
- * Start/Join in a room different from the currently-active call's
- * room. Tears down the current MatrixRTC session, then flips the
- * global `activeCallRoomId` to the target room.
+ * Cross-room call switch orchestrator (Phase 7B PR B-2c of #122).
+ * Used by `CallButton` when the user clicks Start/Join in a room
+ * different from the currently-active call's room. Tears down the
+ * current MatrixRTC session, then flips the global `activeCallRoomId`
+ * to the target room.
  *
  * Does NOT auto-join the new room — the new controller mounts and the
  * overlay's existing Join button continues to be the explicit join
