@@ -32,6 +32,7 @@ import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog"
 import { CallButton } from "../features/room/call/CallButton";
 import { CallSessionController } from "../features/room/call/rtc/CallSessionController";
 import { FullCallOverlay } from "../features/room/call/rtc/FullCallOverlay";
+import { MiniCallWidget } from "../features/room/call/rtc/MiniCallWidget";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
@@ -801,6 +802,13 @@ const Layout: Component = () => {
 					/>
 				)}
 			</Show>
+
+			{/* Floating mini-widget — visible whenever a call is active and
+				the user is NOT viewing the call's room. Sibling of the
+				controller (not its child) because Layout owns the
+				`summaries` store the widget needs for route picking, and
+				the controller is intentionally signal-only. */}
+			<MiniCallWidget summaries={summaries} />
 
 			{/* Invite dialog — roomId is snapshotted at open time so an
 				in-flight invite still targets the original room if the user
