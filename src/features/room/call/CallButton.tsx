@@ -8,7 +8,6 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
-import { userSettings } from "../../../stores/settings";
 
 /**
  * State event type that matrix-js-sdk + Element Call currently write for
@@ -23,25 +22,12 @@ interface CallButtonProps {
 	roomId: string;
 	/** Whether a call is currently in progress in this room. */
 	callActive: () => boolean;
-	/**
-	 * Operator Element Call URL. Required for the iframe path; in native
-	 * mode it's only used as a last-resort focus fallback when the
-	 * homeserver does not publish `org.matrix.msc4143.rtc_foci` in
-	 * `.well-known/matrix/client`. The button stays visible in native
-	 * mode even with an empty URL — `useRtcSession` will surface a
-	 * "No MatrixRTC foci configured" message after the overlay opens
-	 * if discovery yields nothing.
-	 */
-	elementCallUrl: string;
 	onStart: () => void;
 }
 
 /**
  * Header button to start or join a MatrixRTC call. Hidden when the user
- * lacks the power level to send the call-member state event. In iframe
- * mode (Settings → Voice & Video → Native call client = off) the button
- * is additionally hidden unless the operator has deployed Element Call
- * (`config.elementCall.url`).
+ * lacks the power level to send the call-member state event.
  */
 export const CallButton: Component<CallButtonProps> = (props) => {
 	const { client } = useClient();
@@ -90,14 +76,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		}
 	});
 
-	const visible = (): boolean => {
-		if (!canStartCall()) return false;
-		// Native mode can discover foci from `.well-known/matrix/client`,
-		// so an empty elementCallUrl is acceptable. Iframe mode has no
-		// other source for the call URL and must hide.
-		if (userSettings().useNativeCalls) return true;
-		return props.elementCallUrl.trim().length > 0;
-	};
+	const visible = (): boolean => canStartCall();
 
 	return (
 		<Show when={visible()}>
