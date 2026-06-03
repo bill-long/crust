@@ -5,7 +5,7 @@ import { userSettings } from "./settings";
  * Global voice intent store (Phase 6 of #122 — issue #108).
  *
  * Unifies "should the mic be transmitting?" across the UserBar mic
- * button, the in-call mute button (`NativeCallView`), and the global
+ * button, the in-call mute button (`FullCallOverlay`), and the global
  * push-to-talk / push-to-mute hotkey (`useGlobalMicHotkey`). The
  * single derived `micEnabled` accessor drives the LiveKit room wrapper
  * (`useLivekitRoom`), eliminating dual-writer races between the
