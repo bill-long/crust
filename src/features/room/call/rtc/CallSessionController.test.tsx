@@ -374,6 +374,8 @@ describe("CallSessionController", () => {
 		setActiveCallRoomId("!room:example.com");
 		const result = renderController();
 		const s = currentCallSession();
+		expect(s).not.toBeNull();
+		if (!s) throw new Error("currentCallSession() returned null");
 		hooksState.setRtcStatus("joined");
 		await flush();
 		let resolveDisconnect: () => void = () => {};
@@ -383,7 +385,7 @@ describe("CallSessionController", () => {
 					resolveDisconnect = r;
 				}),
 		);
-		const leavePromise = s?.requestLeave();
+		const leavePromise = s.requestLeave();
 		await flush();
 		// Unmount the controller while the leave is awaiting livekit.disconnect().
 		// `runLeave`'s finally writes setLeaving(false) AFTER unmount; the
