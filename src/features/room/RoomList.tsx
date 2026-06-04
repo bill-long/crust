@@ -25,6 +25,7 @@ import {
 	type JoinState,
 	useSpaceHierarchy,
 } from "../space/useSpaceHierarchy";
+import { CreateRoomDialog } from "./CreateRoomDialog";
 
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
@@ -333,6 +334,14 @@ const RoomList: Component = () => {
 
 	const hierarchy = useSpaceHierarchy(() => params.spaceId);
 
+	const [createOpen, setCreateOpen] = createSignal(false);
+	const openCreate = (): void => {
+		setCreateOpen(true);
+	};
+	const closeCreate = (): void => {
+		setCreateOpen(false);
+	};
+
 	const navigateToRoom = (roomId: string): void => {
 		const room = summaries[roomId];
 		if (!room) return;
@@ -352,10 +361,31 @@ const RoomList: Component = () => {
 
 	return (
 		<aside class="flex h-full flex-col border-r border-border-subtle bg-surface-1/50">
-			<div class="border-b border-border-subtle px-4 py-3">
-				<span class="text-sm font-semibold text-text-secondary">
+			<div class="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
+				<span class="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
 					{spaceName()}
 				</span>
+				<button
+					type="button"
+					onClick={openCreate}
+					aria-label="Create room"
+					title="Create room"
+					class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+				>
+					<svg
+						aria-hidden="true"
+						width="16"
+						height="16"
+						viewBox="0 0 16 16"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+					>
+						<line x1="8" y1="3" x2="8" y2="13" />
+						<line x1="3" y1="8" x2="13" y2="8" />
+					</svg>
+				</button>
 			</div>
 
 			<div class="flex-1 overflow-y-auto p-1">
@@ -481,6 +511,13 @@ const RoomList: Component = () => {
 					</Show>
 				</Show>
 			</div>
+
+			<CreateRoomDialog
+				client={client}
+				open={createOpen}
+				onClose={closeCreate}
+				spaceId={params.spaceId}
+			/>
 		</aside>
 	);
 };

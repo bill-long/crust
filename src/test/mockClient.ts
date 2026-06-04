@@ -349,6 +349,8 @@ export function createMockClient(
 		sendMessage: vi.fn().mockResolvedValue({ event_id: "$sent" }),
 		sendEvent: vi.fn().mockResolvedValue({ event_id: "$sent" }),
 		sendStateEvent: vi.fn().mockResolvedValue({ event_id: "$state" }),
+		createRoom: vi.fn().mockResolvedValue({ room_id: "!created:example.com" }),
+		getDomain: () => "example.com",
 		sendTyping: vi.fn().mockResolvedValue(undefined),
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
 		redactEvent: vi.fn().mockResolvedValue(undefined),
