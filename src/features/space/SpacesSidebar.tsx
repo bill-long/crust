@@ -99,13 +99,13 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 
 						return (
 							<SidebarItem selected={isSelected}>
-								<div class="group relative">
+								<div class="peer group relative">
 									<button
 										type="button"
 										onClick={() =>
 											navigate(`/space/${encodeURIComponent(space.roomId)}`)
 										}
-										class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
+										class={`relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
 											isSelected()
 												? "rounded-xl bg-surface-2 text-text-primary"
 												: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"

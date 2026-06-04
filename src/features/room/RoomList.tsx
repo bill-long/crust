@@ -373,7 +373,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 				<span class="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
 					{spaceName()}
 				</span>
-				<Show when={!isHome() && params.spaceId}>
+				<Show when={!isHome() && props.onOpenSpaceSettings && params.spaceId}>
 					{(spaceId) => (
 						<button
 							type="button"
