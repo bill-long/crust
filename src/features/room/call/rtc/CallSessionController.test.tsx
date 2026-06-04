@@ -401,7 +401,7 @@ describe("CallSessionController", () => {
 		// setLeaveError/setConfirmLeaveOpen post-unmount).
 		hooksState.rtcLeave.mockImplementationOnce(async () => {});
 		resolveDisconnect();
-		await expect(leavePromise).rejects.toThrow();
+		await expect(leavePromise).rejects.toThrow("Leave failed.");
 		// Session was cleared by the unmount path; no resurrected publication.
 		expect(currentCallSession()).toBeNull();
 	});
