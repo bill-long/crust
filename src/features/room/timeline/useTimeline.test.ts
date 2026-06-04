@@ -2247,12 +2247,308 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			// Only the sent reaction should count.
-			expect(events[0].reactions["🚀"]).toBe(1);
+			// Only the sent reaction should count, with one sender.
+			expect(events[0].reactions["🚀"].count).toBe(1);
+			expect(events[0].reactions["🚀"].senders).toHaveLength(1);
+			expect(events[0].reactions["🚀"].senders[0].userId).toBe("@bob:test");
 			// myReactions tracks the user's own pressed key. The user's
 			// own reaction failed (NOT_SENT), so myReactions must not
 			// include "🚀" — otherwise the pressed pill state lies.
 			expect(events[0].myReactions["🚀"]).toBeUndefined();
+		});
+	});
+
+	it("duplicate reactions from the same sender are deduped in count and senders", async () => {
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Two sent reactions from the SAME sender (transient local-echo
+		// reconciliation edge case). Both successful — dedupe must keep
+		// only the first so count and senders.length stay equal.
+		const reaction1 = createMatrixEvent({
+			eventId: "$r1",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 2000,
+		});
+		const reaction2 = createMatrixEvent({
+			eventId: "$r2",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 3000,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🚀", new Set([reaction1, reaction2])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			const agg = events[0].reactions["🚀"];
+			expect(agg.count).toBe(1);
+			expect(agg.senders).toHaveLength(1);
+			expect(agg.senders[0].userId).toBe("@bob:test");
+		});
+	});
+
+	it("myReactions tracks the latest event id when a sender has multiple echoes", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Simulate the transient window where a local-echo for my
+		// reaction still exists alongside the server-confirmed event:
+		// the dedupe must not strand myReactions on the stale txn id.
+		const myUserId = "@test:example.com";
+		const localEcho = createMatrixEvent({
+			eventId: "~local.r1",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 2000,
+			status: EventStatus.SENDING,
+		});
+		const serverConfirmed = createMatrixEvent({
+			eventId: "$server.r1",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 3000,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🚀", new Set([localEcho, serverConfirmed])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			// Count and senders dedupe to one entry, but myReactions
+			// must point at the server-confirmed id (status === null
+			// beats pending status) so the redaction path targets the
+			// correct event.
+			expect(events[0].reactions["🚀"].count).toBe(1);
+			expect(events[0].myReactions["🚀"]).toBe("$server.r1");
+		});
+	});
+
+	it("myReactions prefers server-confirmed event regardless of Set iteration order", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Same as the previous test but with the server-confirmed
+		// event iterated FIRST. matrix-js-sdk does not guarantee Set
+		// iteration order matches send order, so the resolution must
+		// pick by status/ts, not first/last position.
+		const myUserId = "@test:example.com";
+		const localEcho = createMatrixEvent({
+			eventId: "~local.r2",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎉",
+				},
+			},
+			ts: 2000,
+			status: EventStatus.SENDING,
+		});
+		const serverConfirmed = createMatrixEvent({
+			eventId: "$server.r2",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎉",
+				},
+			},
+			ts: 3000,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🎉", new Set([serverConfirmed, localEcho])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			expect(events[0].myReactions["🎉"]).toBe("$server.r2");
+		});
+	});
+
+	it("senders are sorted alphabetically for a stable tooltip order", async () => {
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@host:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Insert reactions in non-alphabetical iteration order; the
+		// rendered senders array must come out sorted by display name
+		// so the tooltip doesn't shuffle between renders.
+		const r1 = createMatrixEvent({
+			eventId: "$r1",
+			roomId: "!roomA:test",
+			sender: "@charlie:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎯",
+				},
+			},
+			ts: 2000,
+		});
+		const r2 = createMatrixEvent({
+			eventId: "$r2",
+			roomId: "!roomA:test",
+			sender: "@alice:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎯",
+				},
+			},
+			ts: 2100,
+		});
+		const r3 = createMatrixEvent({
+			eventId: "$r3",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎯",
+				},
+			},
+			ts: 2200,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [["🎯", new Set([r1, r2, r3])]],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			const senders = events[0].reactions["🎯"].senders;
+			// Display names default to MXID when no member is found in
+			// the mock room, so sort by MXID: alice < bob < charlie.
+			expect(senders.map((s) => s.userId)).toEqual([
+				"@alice:test",
+				"@bob:test",
+				"@charlie:test",
+			]);
 		});
 	});
 
