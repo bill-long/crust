@@ -1,4 +1,4 @@
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createRoot, createSignal, type Setter } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -339,5 +339,71 @@ describe("CallSessionController", () => {
 		// clear the newer publication.
 		first.unmount();
 		expect(currentCallSession()).toBe(secondApi);
+	});
+
+	it("requestClose opens the leave-confirm ConfirmDialog when status is joined", async () => {
+		setActiveCallRoomId("!room:example.com");
+		renderController();
+		const s = currentCallSession();
+		hooksState.setRtcStatus("joined");
+		await flush();
+		expect(screen.queryByRole("dialog", { name: "Leave call?" })).toBeNull();
+		s?.requestClose();
+		await flush();
+		const dialog = screen.getByRole("dialog", { name: "Leave call?" });
+		expect(dialog).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Leave call" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Stay" })).toBeTruthy();
+		// Did NOT leave yet — just opened the dialog.
+		expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+		expect(activeCallRoomId()).toBe("!room:example.com");
+	});
+
+	it("requestClose with status=idle skips the dialog and clears activeCallRoomId immediately", async () => {
+		setActiveCallRoomId("!room:example.com");
+		renderController();
+		const s = currentCallSession();
+		// status stays idle (default).
+		s?.requestClose();
+		await flush();
+		expect(screen.queryByRole("dialog", { name: "Leave call?" })).toBeNull();
+		expect(activeCallRoomId()).toBeNull();
+	});
+
+	it("ConfirmDialog Stay button closes the dialog without leaving the call", async () => {
+		setActiveCallRoomId("!room:example.com");
+		renderController();
+		const s = currentCallSession();
+		hooksState.setRtcStatus("joined");
+		await flush();
+		s?.requestClose();
+		await flush();
+		screen.getByRole("button", { name: "Stay" }).click();
+		await flush();
+		expect(screen.queryByRole("dialog", { name: "Leave call?" })).toBeNull();
+		expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+		expect(activeCallRoomId()).toBe("!room:example.com");
+	});
+
+	it("ConfirmDialog Leave button runs the leave path and clears activeCallRoomId", async () => {
+		setActiveCallRoomId("!room:example.com");
+		renderController();
+		const s = currentCallSession();
+		hooksState.setRtcStatus("joined");
+		await flush();
+		hooksState.rtcLeave.mockImplementationOnce(async () => {
+			hooksState.setRtcStatus("idle");
+		});
+		s?.requestClose();
+		await flush();
+		screen.getByRole("button", { name: "Leave call" }).click();
+		// Allow the dialog's onConfirm promise (confirmLeave → rtc.leave)
+		// to resolve through its microtasks.
+		await flush();
+		await flush();
+		await flush();
+		expect(hooksState.livekitDisconnect).toHaveBeenCalledTimes(1);
+		expect(hooksState.rtcLeave).toHaveBeenCalledTimes(1);
+		expect(activeCallRoomId()).toBeNull();
 	});
 });
