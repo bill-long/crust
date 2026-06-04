@@ -239,8 +239,8 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 			// Post-create space linking is best-effort: if it fails the room
 			// was still created and the user is navigated into it; we just
-			// surface a non-blocking error on the toast/log path. Retrying
-			// the whole submit would create a second room.
+			// log the failure to the console. Retrying the whole submit
+			// would create a second room.
 			if (shouldAddToSpace && capturedSpaceId) {
 				const via = homeserverDomain();
 				try {
