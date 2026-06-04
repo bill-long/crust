@@ -1332,24 +1332,31 @@ describe("useLivekitRoom", () => {
 				});
 			});
 
-			await waitFor(() => result.status() === "connected");
-			// Reset history to just the post-stable-connected sequence.
-			transitions.length = 0;
+			try {
+				await waitFor(() => result.status() === "connected");
+				// Reset history to just the post-stable-connected sequence.
+				transitions.length = 0;
 
-			setEnabled(false);
-			expect(result.status()).toBe("disconnecting");
-			// Re-enable while still "disconnecting" → focus-change branch
-			// fires, bumps epoch, chains T2 + doConnect(A).
-			setEnabled(true);
-			releaseA();
-			await waitFor(() => result.status() === "connected");
-			expect(roomFactory.callCount).toBe(2);
-			expect(fakeA2.connect).toHaveBeenCalledTimes(1);
-			// Critical: no stale "idle" leak between the disable-branch's
-			// "disconnecting" and the reconnect's "connected". T1's
-			// post-await callback bailed on the epoch guard.
-			expect(transitions).toEqual(["disconnecting", "connecting", "connected"]);
-			stopRecording();
+				setEnabled(false);
+				expect(result.status()).toBe("disconnecting");
+				// Re-enable while still "disconnecting" → focus-change branch
+				// fires, bumps epoch, chains T2 + doConnect(A).
+				setEnabled(true);
+				releaseA();
+				await waitFor(() => result.status() === "connected");
+				expect(roomFactory.callCount).toBe(2);
+				expect(fakeA2.connect).toHaveBeenCalledTimes(1);
+				// Critical: no stale "idle" leak between the disable-branch's
+				// "disconnecting" and the reconnect's "connected". T1's
+				// post-await callback bailed on the epoch guard.
+				expect(transitions).toEqual([
+					"disconnecting",
+					"connecting",
+					"connected",
+				]);
+			} finally {
+				stopRecording();
+			}
 		});
 
 		it("late TrackMuted from a mid-teardown setMicrophoneEnabled does not repopulate participants (ifLive guard holds)", async () => {
