@@ -18,7 +18,7 @@ import {
 import { useClient } from "../../client/client";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
-import { validateMatrixUserId } from "./inviteValidation";
+import { parseInvites } from "./inviteParsing";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -37,27 +37,6 @@ interface CreateRoomDialogProps {
 	 * changes during submit don't redirect the child relation.
 	 */
 	spaceId?: string;
-}
-
-interface ParsedInvites {
-	mxids: string[];
-	error: string | null;
-}
-
-function parseInvites(raw: string, selfId: string | null): ParsedInvites {
-	const tokens = raw
-		.split(/[\s,;]+/)
-		.map((s) => s.trim())
-		.filter((s) => s.length > 0);
-	if (tokens.length === 0) return { mxids: [], error: null };
-	const out = new Set<string>();
-	for (const tok of tokens) {
-		const r = validateMatrixUserId(tok);
-		if (!r.ok) return { mxids: [], error: `${tok}: ${r.error}` };
-		if (r.userId === selfId) continue;
-		out.add(r.userId);
-	}
-	return { mxids: Array.from(out), error: null };
 }
 
 const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
