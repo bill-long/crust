@@ -235,6 +235,36 @@ describe("stateNotice", () => {
 			expect(setAvatar?.text).toBe("Bob set their avatar");
 		});
 
+		it("uses the matrix ID when first setting a display name (avoids 'Robert set their display name to Robert')", () => {
+			const setName = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@robert:test",
+					stateKey: "@robert:test",
+					content: { membership: "join", displayname: "Robert" },
+					prevContent: { membership: "join" },
+				}),
+				makeRoom(),
+			);
+			expect(setName?.text).toBe(
+				"@robert:test set their display name to Robert",
+			);
+		});
+
+		it("uses the prior display name when removing it", () => {
+			const removeName = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: { membership: "join" },
+					prevContent: { membership: "join", displayname: "Bob" },
+				}),
+				makeRoom(),
+			);
+			expect(removeName?.text).toBe("Bob removed their display name");
+		});
+
 		it("returns null for a no-op join→join with identical profile", () => {
 			expect(
 				buildStateNotice(

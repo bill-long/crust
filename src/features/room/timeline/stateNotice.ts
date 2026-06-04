@@ -98,7 +98,14 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 				return { text: `${oldName} changed their name to ${newName}` };
 			}
 			if (newName) {
-				return { text: `${subject} set their display name to ${newName}` };
+				// Subject derives from content.displayname for most cases,
+				// but here that would produce "Robert set their display
+				// name to Robert" since the new name *is* the new subject.
+				// Fall back to the matrix ID (stateKey) so the notice
+				// reads "@robert:test set their display name to Robert".
+				return {
+					text: `${stateKey} set their display name to ${newName}`,
+				};
 			}
 			if (oldName) {
 				return { text: `${oldName} removed their display name` };
