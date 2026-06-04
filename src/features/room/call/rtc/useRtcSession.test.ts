@@ -4,7 +4,7 @@ import type {
 	LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
 import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
 import { useRtcSession } from "./useRtcSession";
@@ -625,6 +625,81 @@ describe("useRtcSession", () => {
 			[younger, oldest],
 		);
 		expect(rtc.activeFocus()).toEqual(oldestTransport);
+	});
+
+	it("activeFocus does not re-emit when getTransport returns a value-equal but referentially-new transport", async () => {
+		// Regression for #126: CallMembership.getTransport() builds a new
+		// LivekitTransport object on every call. Without an `equals`
+		// option on the activeFocus memo, downstream consumers
+		// (useLivekitRoom's focus-change branch) would re-run on every
+		// MembershipsChanged tick even when the underlying focus URL is
+		// unchanged.
+		const { rtc, session } = renderRtc();
+		await rtc.join();
+		const url = "https://other-sfu.example.com/livekit/sfu/get";
+		const makeMember = (): CallMembership =>
+			({
+				userId: "@alice:example.com",
+				deviceId: "AAA",
+				createdTs: () => 1000,
+				// Each call returns a fresh object, mirroring the SDK's behavior.
+				getTransport: () => ({
+					type: "livekit" as const,
+					livekit_service_url: url,
+					livekit_alias: "!room:example.com",
+				}),
+			}) as unknown as CallMembership;
+
+		await createRoot(async (dispose) => {
+			try {
+				// Seed memberships with our test transport so activeFocus
+				// settles on `url` BEFORE we start counting.
+				session.emit(
+					MatrixRTCSessionEvent.MembershipsChanged,
+					[],
+					[makeMember()],
+				);
+				let emissions = 0;
+				createEffect(() => {
+					rtc.activeFocus();
+					emissions++;
+				});
+				await Promise.resolve();
+				expect(emissions).toBe(1);
+				expect(rtc.activeFocus()?.livekit_service_url).toBe(url);
+
+				// Three more membership ticks, each producing a referentially-new
+				// transport with the same wire identity.
+				for (let i = 0; i < 3; i++) {
+					session.emit(
+						MatrixRTCSessionEvent.MembershipsChanged,
+						[],
+						[makeMember()],
+					);
+				}
+				await Promise.resolve();
+				expect(emissions).toBe(1);
+
+				// A genuine focus migration (different URL) must still propagate.
+				const migrated = {
+					userId: "@alice:example.com",
+					deviceId: "AAA",
+					createdTs: () => 1000,
+					getTransport: () => ({
+						type: "livekit" as const,
+						livekit_service_url: "https://new-sfu.example.com/livekit/sfu/get",
+						livekit_alias: "!room:example.com",
+					}),
+				} as unknown as CallMembership;
+				session.emit(MatrixRTCSessionEvent.MembershipsChanged, [], [migrated]);
+				await Promise.resolve();
+				expect(emissions).toBe(2);
+			} finally {
+				// Guarantee root disposal even if an expect() above throws,
+				// otherwise the leaked root can interfere with later tests.
+				dispose();
+			}
+		});
 	});
 
 	describe("Phase 4 E2EE bridge wiring", () => {

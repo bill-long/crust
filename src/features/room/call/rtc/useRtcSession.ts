@@ -163,25 +163,41 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 
 	const canJoin = createMemo(() => joinBlockReason() === null);
 
-	const activeFocus = createMemo((): LivekitTransport | null => {
-		if (status() !== "joined") return null;
-		const list = memberships();
-		// Pull the oldest member's transport when joining an in-progress call;
-		// fall back to our offered focus if we are the first or the oldest
-		// member's transport isn't LiveKit.
-		const oldest = list.reduce<CallMembership | null>((acc, m) => {
-			if (acc === null) return m;
-			return m.createdTs() < acc.createdTs() ? m : acc;
-		}, null);
-		if (oldest) {
-			const transport = oldest.getTransport(oldest);
-			if (transport && isLivekitTransport(transport)) {
-				return transport;
+	const activeFocus = createMemo<LivekitTransport | null>(
+		() => {
+			if (status() !== "joined") return null;
+			const list = memberships();
+			// Pull the oldest member's transport when joining an in-progress call;
+			// fall back to our offered focus if we are the first or the oldest
+			// member's transport isn't LiveKit.
+			const oldest = list.reduce<CallMembership | null>((acc, m) => {
+				if (acc === null) return m;
+				return m.createdTs() < acc.createdTs() ? m : acc;
+			}, null);
+			if (oldest) {
+				const transport = oldest.getTransport(oldest);
+				if (transport && isLivekitTransport(transport)) {
+					return transport;
+				}
 			}
-		}
-		const fociList = foci();
-		return fociList && fociList.length > 0 ? fociList[0] : null;
-	});
+			const fociList = foci();
+			return fociList && fociList.length > 0 ? fociList[0] : null;
+		},
+		null,
+		{
+			// `CallMembership.getTransport` returns a referentially-new
+			// `LivekitTransport` object on every membership tick. Without
+			// this `equals`, downstream consumers (e.g. `useLivekitRoom`'s
+			// focus-change branch) would re-evaluate on every membership
+			// update even when the underlying focus is unchanged. Compare
+			// on the wire-identifying fields (`type` + `livekit_service_url`
+			// + `livekit_alias`) so a real focus migration still propagates.
+			equals: (a, b) =>
+				a?.type === b?.type &&
+				a?.livekit_service_url === b?.livekit_service_url &&
+				a?.livekit_alias === b?.livekit_alias,
+		},
+	);
 
 	onMount(() => {
 		if (!room) {
