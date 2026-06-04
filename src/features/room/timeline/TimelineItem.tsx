@@ -1,9 +1,11 @@
+import { Popover } from "@kobalte/core/popover";
 import type { MatrixClient } from "matrix-js-sdk";
 import { EventStatus } from "matrix-js-sdk";
-import { type Component, createMemo, For, Show } from "solid-js";
+import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { userSettings } from "../../../stores/settings";
+import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
-import type { ResolvedEmote } from "../../emoji/types";
+import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
 import {
 	extractUrlsFromHtml,
@@ -180,34 +182,62 @@ const HoverToolbar: Component<{
 	msgtype: string | undefined;
 	canPin: boolean;
 	isPinned: boolean;
-	onReact: () => void;
+	packs: ImagePack[];
+	onReactPick: (key: string) => void;
 	onReply: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
 	onTogglePin: () => void;
 }> = (props) => {
+	const [pickerOpen, setPickerOpen] = createSignal(false);
+	const handlePick = (item: PickerEmoji): void => {
+		const key = item.kind === "custom" ? item.emote.mxcUrl : item.emoji.unicode;
+		props.onReactPick(key);
+		setPickerOpen(false);
+	};
 	return (
-		<div class="pointer-events-none absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-md bg-surface-2 px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-			<button
-				type="button"
-				class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-				onClick={props.onReact}
-				aria-label="Add reaction"
+		<div
+			class="pointer-events-none absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-md bg-surface-2 px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+			classList={{
+				"!pointer-events-auto !opacity-100": pickerOpen(),
+			}}
+		>
+			<Popover
+				open={pickerOpen()}
+				onOpenChange={setPickerOpen}
+				placement="top-end"
+				gutter={6}
 			>
-				<svg
-					class="h-4 w-4"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width="2"
-					aria-hidden="true"
+				<Popover.Trigger
+					as="button"
+					type="button"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					aria-label="Add reaction"
 				>
-					<circle cx="12" cy="12" r="10" />
-					<path d="M8 14s1.5 2 4 2 4-2 4-2" />
-					<line x1="9" y1="9" x2="9.01" y2="9" />
-					<line x1="15" y1="9" x2="15.01" y2="9" />
-				</svg>
-			</button>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						aria-hidden="true"
+					>
+						<circle cx="12" cy="12" r="10" />
+						<path d="M8 14s1.5 2 4 2 4-2 4-2" />
+						<line x1="9" y1="9" x2="9.01" y2="9" />
+						<line x1="15" y1="9" x2="15.01" y2="9" />
+					</svg>
+				</Popover.Trigger>
+				<Popover.Portal>
+					<Popover.Content class="z-50 focus:outline-none">
+						<EmojiPicker
+							packs={props.packs}
+							onSelect={handlePick}
+							onClose={() => setPickerOpen(false)}
+						/>
+					</Popover.Content>
+				</Popover.Portal>
+			</Popover>
 			<button
 				type="button"
 				class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
@@ -331,7 +361,8 @@ const TimelineItem: Component<{
 	client: MatrixClient;
 	shortcodeLookup: Map<string, ResolvedEmote>;
 	emoteLookup: Map<string, ResolvedEmote>;
-	onOpenReactionPicker?: () => void;
+	/** Custom emoji packs for the room — passed to the reaction picker. */
+	packs: ImagePack[];
 	/**
 	 * Invoked when the user clicks an `m.image` thumbnail. Only wired
 	 * for server-confirmed (non-pending, non-failed) image events.
@@ -459,7 +490,8 @@ const TimelineItem: Component<{
 					msgtype={ev.msgtype}
 					canPin={props.canPin ?? false}
 					isPinned={props.isPinned ?? false}
-					onReact={() => props.onOpenReactionPicker?.()}
+					packs={props.packs}
+					onReactPick={(key) => props.onReact(key)}
 					onReply={props.onReply}
 					onEdit={props.onEdit}
 					onDelete={props.onDelete}

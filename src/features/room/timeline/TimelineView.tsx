@@ -16,8 +16,7 @@ import {
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { useClient } from "../../../client/client";
-import { EmojiPicker } from "../../emoji/EmojiPicker";
-import type { ImagePack, PickerEmoji } from "../../emoji/types";
+import type { ImagePack } from "../../emoji/types";
 import {
 	buildEmoteLookup,
 	buildShortcodeLookup,
@@ -150,9 +149,6 @@ const TimelineView: Component<{
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
 	);
-	const [reactionPickerEventId, setReactionPickerEventId] = createSignal<
-		string | null
-	>(null);
 	const [paginationStatus, setPaginationStatus] = createSignal("");
 
 	// Announce backward pagination state changes for screen readers.
@@ -498,7 +494,6 @@ const TimelineView: Component<{
 				setWantsBottom(true);
 				setReplyTo(null);
 				setEditingEvent(null);
-				setReactionPickerEventId(null);
 				pagingOlderToken++;
 				setPagingOlder(false);
 				settleAtBottom();
@@ -1000,16 +995,6 @@ const TimelineView: Component<{
 		focusComposer(originalRoomId);
 	};
 
-	const onReactionPickerSelect = (
-		eventId: string,
-		item: PickerEmoji,
-		_itemRef: HTMLDivElement | undefined,
-	): void => {
-		const key = item.kind === "custom" ? item.emote.mxcUrl : item.emoji.unicode;
-		onReact(eventId, key);
-		setReactionPickerEventId(null);
-	};
-
 	const onEdit = (ev: TimelineEvent): void => {
 		// Get current body from SDK event for accurate prefill
 		// Use getContent() (includes edits) not getOriginalContent()
@@ -1257,27 +1242,9 @@ const TimelineView: Component<{
 										client={client}
 										shortcodeLookup={shortcodeLookup()}
 										emoteLookup={emoteLookup()}
-										onOpenReactionPicker={() => {
-											setReactionPickerEventId(event.eventId);
-										}}
+										packs={packs()}
 										onOpenImage={setLightboxEventId}
 									/>
-									<Show when={reactionPickerEventId() === event.eventId}>
-										<div class="ml-11 mt-1 mb-1">
-											<EmojiPicker
-												packs={packs()}
-												onSelect={(item) =>
-													onReactionPickerSelect(event.eventId, item, undefined)
-												}
-												onClose={() => {
-													setReactionPickerEventId(null);
-													requestAnimationFrame(() => {
-														scrollRef?.focus();
-													});
-												}}
-											/>
-										</div>
-									</Show>
 								</div>
 							)}
 						</Virtualizer>

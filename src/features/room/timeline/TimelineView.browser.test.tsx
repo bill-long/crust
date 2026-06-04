@@ -511,4 +511,66 @@ describe("TimelineView (browser)", () => {
 			.toBeLessThan(2);
 		m.unmount();
 	});
+
+	// Test 8 (issue #161): clicking the "Add reaction" trigger opens
+	// the EmojiPicker as a portal popover anchored to the trigger.
+	// The picker must NOT live inside the timeline scroller (which
+	// would push the message row out of view); the scroller's
+	// scrollHeight and scrollTop must be unchanged by opening the
+	// picker; and Esc must close it.
+	it("reaction picker opens as a portal popover without shifting the timeline (#161)", async () => {
+		const roomId = "!react:example.com";
+		harness.setRoomState(roomId, { events: manyEvents(40, "$msg") });
+		const m = mount(roomId);
+		const scroller = m.getScroller();
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeLessThan(2);
+		// Scroll up to the middle so the bottom-pin can't mask a
+		// displacement bug.
+		scroller.scrollTop = Math.floor(
+			(scroller.scrollHeight - scroller.clientHeight) / 2,
+		);
+		scroller.dispatchEvent(
+			new WheelEvent("wheel", { deltaY: -50, bubbles: true }),
+		);
+		await frame();
+		await frame();
+		const scrollHeightBefore = scroller.scrollHeight;
+		const scrollTopBefore = scroller.scrollTop;
+		const trigger = scroller.querySelector<HTMLButtonElement>(
+			'button[aria-label="Add reaction"]',
+		);
+		if (!trigger) throw new Error("no Add reaction trigger found");
+		trigger.click();
+		// Picker appears via portal — query the whole document, not the scroller.
+		await expect
+			.poll(
+				() => document.querySelectorAll('[aria-label="Emoji picker"]').length,
+				{ timeout: 2000, interval: 50 },
+			)
+			.toBeGreaterThan(0);
+		const picker = document.querySelector<HTMLElement>(
+			'[aria-label="Emoji picker"]',
+		);
+		if (!picker) throw new Error("emoji picker not in document");
+		// The bug: picker inside scroller pushed messages out of view.
+		expect(scroller.contains(picker)).toBe(false);
+		// Brief stability window to catch any deferred layout from the
+		// picker mount (RAF, ResizeObserver) before asserting no shift.
+		await wait(50);
+		expect(scroller.scrollHeight).toBe(scrollHeightBefore);
+		expect(scroller.scrollTop).toBe(scrollTopBefore);
+		// Esc closes the picker.
+		picker.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+		);
+		await expect
+			.poll(
+				() => document.querySelectorAll('[aria-label="Emoji picker"]').length,
+				{ timeout: 2000, interval: 50 },
+			)
+			.toBe(0);
+		m.unmount();
+	});
 });
