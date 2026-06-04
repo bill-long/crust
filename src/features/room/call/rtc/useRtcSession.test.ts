@@ -651,49 +651,54 @@ describe("useRtcSession", () => {
 			}) as unknown as CallMembership;
 
 		await createRoot(async (dispose) => {
-			// Seed memberships with our test transport so activeFocus
-			// settles on `url` BEFORE we start counting.
-			session.emit(
-				MatrixRTCSessionEvent.MembershipsChanged,
-				[],
-				[makeMember()],
-			);
-			let emissions = 0;
-			createEffect(() => {
-				rtc.activeFocus();
-				emissions++;
-			});
-			await Promise.resolve();
-			expect(emissions).toBe(1);
-			expect(rtc.activeFocus()?.livekit_service_url).toBe(url);
-
-			// Three more membership ticks, each producing a referentially-new
-			// transport with the same wire identity.
-			for (let i = 0; i < 3; i++) {
+			try {
+				// Seed memberships with our test transport so activeFocus
+				// settles on `url` BEFORE we start counting.
 				session.emit(
 					MatrixRTCSessionEvent.MembershipsChanged,
 					[],
 					[makeMember()],
 				);
-			}
-			await Promise.resolve();
-			expect(emissions).toBe(1);
+				let emissions = 0;
+				createEffect(() => {
+					rtc.activeFocus();
+					emissions++;
+				});
+				await Promise.resolve();
+				expect(emissions).toBe(1);
+				expect(rtc.activeFocus()?.livekit_service_url).toBe(url);
 
-			// A genuine focus migration (different URL) must still propagate.
-			const migrated = {
-				userId: "@alice:example.com",
-				deviceId: "AAA",
-				createdTs: () => 1000,
-				getTransport: () => ({
-					type: "livekit" as const,
-					livekit_service_url: "https://new-sfu.example.com/livekit/sfu/get",
-					livekit_alias: "!room:example.com",
-				}),
-			} as unknown as CallMembership;
-			session.emit(MatrixRTCSessionEvent.MembershipsChanged, [], [migrated]);
-			await Promise.resolve();
-			expect(emissions).toBe(2);
-			dispose();
+				// Three more membership ticks, each producing a referentially-new
+				// transport with the same wire identity.
+				for (let i = 0; i < 3; i++) {
+					session.emit(
+						MatrixRTCSessionEvent.MembershipsChanged,
+						[],
+						[makeMember()],
+					);
+				}
+				await Promise.resolve();
+				expect(emissions).toBe(1);
+
+				// A genuine focus migration (different URL) must still propagate.
+				const migrated = {
+					userId: "@alice:example.com",
+					deviceId: "AAA",
+					createdTs: () => 1000,
+					getTransport: () => ({
+						type: "livekit" as const,
+						livekit_service_url: "https://new-sfu.example.com/livekit/sfu/get",
+						livekit_alias: "!room:example.com",
+					}),
+				} as unknown as CallMembership;
+				session.emit(MatrixRTCSessionEvent.MembershipsChanged, [], [migrated]);
+				await Promise.resolve();
+				expect(emissions).toBe(2);
+			} finally {
+				// Guarantee root disposal even if an expect() above throws,
+				// otherwise the leaked root can interfere with later tests.
+				dispose();
+			}
 		});
 	});
 
