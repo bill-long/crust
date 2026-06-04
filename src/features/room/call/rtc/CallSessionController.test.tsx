@@ -370,6 +370,40 @@ describe("CallSessionController", () => {
 		expect(activeCallRoomId()).toBeNull();
 	});
 
+	it("dispose during in-flight leave: cleanup completes without error and runLeave's finally setLeaving(false) is benign after unmount", async () => {
+		setActiveCallRoomId("!room:example.com");
+		const result = renderController();
+		const s = currentCallSession();
+		hooksState.setRtcStatus("joined");
+		await flush();
+		let resolveDisconnect: () => void = () => {};
+		hooksState.livekitDisconnect.mockImplementationOnce(
+			() =>
+				new Promise<void>((r) => {
+					resolveDisconnect = r;
+				}),
+		);
+		const leavePromise = s?.requestLeave();
+		await flush();
+		// Unmount the controller while the leave is awaiting livekit.disconnect().
+		// `runLeave`'s finally writes setLeaving(false) AFTER unmount; the
+		// signal write must be a benign no-op (no console errors, no
+		// post-unmount UI mutation). Also exercises the requestLeave catch
+		// branch: requestLeave does setLeaveError + setConfirmLeaveOpen
+		// after the throw from `if (rtc.status === "joined")`, both signal
+		// writes on a torn-down controller.
+		result.unmount();
+		// rtc.leave resolves but status stays "joined" → runLeave throws
+		// "Leave failed." inside its try, finally clears `leaving`, the
+		// caught error propagates out of requestLeave (which also calls
+		// setLeaveError/setConfirmLeaveOpen post-unmount).
+		hooksState.rtcLeave.mockImplementationOnce(async () => {});
+		resolveDisconnect();
+		await expect(leavePromise).rejects.toThrow();
+		// Session was cleared by the unmount path; no resurrected publication.
+		expect(currentCallSession()).toBeNull();
+	});
+
 	it("ConfirmDialog Stay button closes the dialog without leaving the call", async () => {
 		setActiveCallRoomId("!room:example.com");
 		renderController();

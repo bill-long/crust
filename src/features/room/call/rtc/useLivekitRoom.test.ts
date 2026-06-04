@@ -3,7 +3,7 @@ import type {
 	CallMembership,
 	LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
-import { createRoot, createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Hoisted mocks — vi.mock factories run before module imports.
@@ -1070,6 +1070,374 @@ describe("useLivekitRoom", () => {
 			expect(fakeRoom.setE2EEEnabled).not.toHaveBeenCalled();
 			const opts = roomFactory.lastOptions as { e2ee?: unknown };
 			expect(opts?.e2ee).toBeUndefined();
+		});
+	});
+
+	describe("Phase 2 race-ordering (issue #125)", () => {
+		// Distinct LivekitTransports — focus-change branch in
+		// useLivekitRoom.ts:924-928 compares `livekit_service_url`, not
+		// reference, so every focus in a sequenced test needs its own URL.
+		const focusA: LivekitTransport = {
+			type: "livekit",
+			livekit_service_url: "https://sfu-a.example.com",
+			livekit_alias: "!room:example.com",
+		};
+		const focusB: LivekitTransport = {
+			type: "livekit",
+			livekit_service_url: "https://sfu-b.example.com",
+			livekit_alias: "!room:example.com",
+		};
+		const focusC: LivekitTransport = {
+			type: "livekit",
+			livekit_service_url: "https://sfu-c.example.com",
+			livekit_alias: "!room:example.com",
+		};
+
+		// Queue a deterministic sequence of fake rooms per connect attempt
+		// so we can verify only the expected attempts construct a Room.
+		function queueRooms(...fakes: FakeRoom[]): void {
+			const queue = [...fakes];
+			roomFactory.current = (): FakeRoom => {
+				const next = queue.shift();
+				if (!next) throw new Error("queueRooms exhausted");
+				return next;
+			};
+		}
+
+		// Helper for a room whose disconnect() is held until released.
+		// Returns the room and its release fn. Disconnect resolves WITHOUT
+		// emitting "disconnected" so the test owns event timing — the
+		// production paths exercised here all null `room` synchronously
+		// before awaiting r.disconnect(), so the Disconnected handler is
+		// `ifLive`-gated away. Emitting it would double-bump `attempt`
+		// and confuse the epoch assertions.
+		function heldDisconnectRoom(): { room: FakeRoom; release: () => void } {
+			const room = createFakeRoom();
+			let release: () => void = () => {};
+			const gate = new Promise<void>((res) => {
+				release = res;
+			});
+			room.disconnect.mockImplementation(async () => {
+				await gate;
+			});
+			return { room, release };
+		}
+
+		it("focus A→B→C in rapid succession: only the final connect wins (B never constructed)", async () => {
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			const fakeC = createFakeRoom();
+			queueRooms(fakeA, fakeC);
+			const { client } = createClient();
+			const [focus, setFocus] = createSignal<LivekitTransport | null>(focusA);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			expect(roomFactory.callCount).toBe(1);
+
+			setFocus(focusB);
+			setFocus(focusC);
+			releaseA();
+			await waitFor(
+				() => roomFactory.callCount === 2 && result.status() === "connected",
+			);
+			expect(roomFactory.callCount).toBe(2);
+			expect(fakeC.connect).toHaveBeenCalledTimes(1);
+			expect(jwtMock).toHaveBeenCalledTimes(2);
+			expect(jwtMock).toHaveBeenNthCalledWith(
+				2,
+				focusC,
+				expect.anything(),
+				"DEVABC123",
+			);
+		});
+
+		it("leave during focus change: explicit-disconnect refcount blocks the focus branch from reconnecting", async () => {
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			// Empty queue after A — any erroneous reconnect throws loudly.
+			queueRooms(fakeA);
+			const { client } = createClient();
+			const [focus, setFocus] = createSignal<LivekitTransport | null>(focusA);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+
+			// Kick off explicit disconnect FIRST so the refcount is held
+			// across teardown's await. Then race a focus change in while
+			// the teardown is still in flight: the focus branch must see
+			// `explicitDisconnect() === true` and bail early (the
+			// disconnect()-bumped epoch alone is not sufficient — by the
+			// time the focus tick fires here, that epoch is the current
+			// epoch, so a missing refcount guard would let the focus
+			// branch enter its `if (room || status === "disconnecting")`
+			// arm, ++attempt to a new epoch, and chain a fresh doConnect).
+			const disconnectPromise = result.disconnect();
+			setFocus(focusB);
+			releaseA();
+			await disconnectPromise;
+			// Drain microtasks so that if the explicit-disconnect refcount
+			// guard regressed, a leaked focus-branch `.then` would have
+			// chained doConnect(B) → loadLivekit → new MockRoom (which
+			// throws on the empty queue and bumps `roomFactory.callCount`
+			// in the constructor's first line). Without these flushes the
+			// assertion races the queued microtasks and false-passes.
+			await flush();
+			await flush();
+			await flush();
+			expect(roomFactory.callCount).toBe(1);
+			expect(result.status()).toBe("idle");
+		});
+
+		it("disable during focus change: disable branch's epoch bump invalidates the queued reconnect", async () => {
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			queueRooms(fakeA);
+			const { client } = createClient();
+			const [focus, setFocus] = createSignal<LivekitTransport | null>(focusA);
+			const [enabled, setEnabled] = createSignal(true);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+
+			setFocus(focusB);
+			setEnabled(false);
+			releaseA();
+			await waitFor(() => result.status() === "idle");
+			expect(roomFactory.callCount).toBe(1);
+		});
+
+		it("dispose during teardown: post-await .then bails on disposed flag (no setStatus('idle') after unmount)", async () => {
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			queueRooms(fakeA);
+			const { client } = createClient();
+			const [enabled, setEnabled] = createSignal(true);
+			let api: ReturnType<typeof useLivekitRoom> | null = null;
+			const dispose = createRoot((d) => {
+				api = useLivekitRoom({
+					client: client as never,
+					focus: () => focusA,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				});
+				return d;
+			});
+			// biome-ignore lint/style/noNonNullAssertion: assigned in createRoot
+			await waitFor(() => api!.status() === "connected");
+
+			setEnabled(false);
+			// biome-ignore lint/style/noNonNullAssertion: assigned in createRoot
+			expect(api!.status()).toBe("disconnecting");
+			dispose();
+			releaseA();
+			await flush();
+			await flush();
+			// Disposed guard held — the disable branch's post-await
+			// setStatus("idle") side effect was suppressed.
+			// biome-ignore lint/style/noNonNullAssertion: assigned in createRoot
+			expect(api!.status()).toBe("disconnecting");
+			expect(fakeA.disconnect).toHaveBeenCalledTimes(1);
+		});
+
+		it("concurrent disconnect() calls: shared teardown chain; racing focus change does not leak a reconnect", async () => {
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			queueRooms(fakeA);
+			const { client } = createClient();
+			const [focus, setFocus] = createSignal<LivekitTransport | null>(focusA);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+
+			const d1 = result.disconnect();
+			const d2 = result.disconnect();
+			setFocus(focusB);
+			releaseA();
+			await Promise.all([d1, d2]);
+			expect(fakeA.disconnect).toHaveBeenCalledTimes(1);
+			expect(roomFactory.callCount).toBe(1);
+			expect(result.status()).toBe("idle");
+		});
+
+		it("stale .then clobber: T1 must not setStatus('idle') after a newer T2 superseded it", async () => {
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			const fakeA2 = createFakeRoom();
+			queueRooms(fakeA, fakeA2);
+			const { client } = createClient();
+			const [enabled, setEnabled] = createSignal(true);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => focusA,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			// Subscribe to every status change so we can prove T1's
+			// stale `.then` (which would call `setStatus("idle")`
+			// without the `epoch !== attempt` guard at
+			// useLivekitRoom.ts:890) did not fire. Asserting only the
+			// final status would not catch this: T2's doConnect would
+			// overwrite back to "connected" regardless.
+			const transitions: string[] = [];
+			let stopRecording: () => void = () => {};
+			createRoot((d) => {
+				stopRecording = d;
+				createEffect(() => {
+					transitions.push(result.status());
+				});
+			});
+
+			await waitFor(() => result.status() === "connected");
+			// Reset history to just the post-stable-connected sequence.
+			transitions.length = 0;
+
+			setEnabled(false);
+			expect(result.status()).toBe("disconnecting");
+			// Re-enable while still "disconnecting" → focus-change branch
+			// fires, bumps epoch, chains T2 + doConnect(A).
+			setEnabled(true);
+			releaseA();
+			await waitFor(() => result.status() === "connected");
+			expect(roomFactory.callCount).toBe(2);
+			expect(fakeA2.connect).toHaveBeenCalledTimes(1);
+			// Critical: no stale "idle" leak between the disable-branch's
+			// "disconnecting" and the reconnect's "connected". T1's
+			// post-await callback bailed on the epoch guard.
+			expect(transitions).toEqual(["disconnecting", "connecting", "connected"]);
+			stopRecording();
+		});
+
+		it("late TrackMuted from a mid-teardown setMicrophoneEnabled does not repopulate participants (ifLive guard holds)", async () => {
+			// The real Phase 2 invariant: even if an SDK event fires
+			// AFTER teardown's resetCallDerivedState has cleared the
+			// participants list, the ifLive-wrapped handler must bail on
+			// stale myAttempt and NOT re-run snapshotParticipants on the
+			// dying room. We emit `trackMuted` explicitly AFTER awaiting
+			// teardown so the test can't false-pass via resetCallDerived-
+			// State having the last word.
+			const { room: fakeA, release: releaseA } = heldDisconnectRoom();
+			// Seed a remote participant so a snapshot call would actually
+			// re-publish a non-empty list (the local id is also included).
+			fakeA.remoteParticipants.set("remote-bid", {
+				identity: "remote-bid",
+				audioTrackPublications: new Map(),
+				videoTrackPublications: new Map(),
+			});
+			queueRooms(fakeA);
+			const { client } = createClient();
+			const [enabled, setEnabled] = createSignal(true);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => focusA,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			expect(result.participants().length).toBe(2);
+
+			// Disable bumps `attempt` synchronously, queues teardown.
+			setEnabled(false);
+			// Release teardown's r.disconnect so resetCallDerivedState
+			// runs and participants is wiped to [].
+			releaseA();
+			await waitFor(() => result.status() === "idle");
+			expect(result.participants()).toEqual([]);
+
+			// NOW fire a late TrackMuted as if the SDK delivered an event
+			// after our local teardown. The ifLive handler captured
+			// `myAttempt` at register-time; the disable branch's
+			// ++attempt invalidated it, so this emit must NOT cause
+			// snapshotParticipants to re-publish the seeded remote.
+			fakeA.emit("trackMuted");
+			expect(result.participants()).toEqual([]);
+		});
+
+		it("disconnect() while idle leaves the hook functional and constructs no rooms", async () => {
+			const fakeA = createFakeRoom();
+			queueRooms(fakeA);
+			const { client } = createClient();
+			const [focus, setFocus] = createSignal<LivekitTransport | null>(focusA);
+			const [enabled, setEnabled] = createSignal(false);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus,
+					enabled,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await flush();
+			expect(result.status()).toBe("idle");
+			expect(roomFactory.callCount).toBe(0);
+			// disconnect-while-idle: the implementation bumps attempt and
+			// depth BEFORE the idle short-circuit (see useLivekitRoom.ts
+			// disconnect()), so a racing focus tick scheduled in the same
+			// Solid batch sees explicitDisconnect()===true. We observe
+			// externally: no rooms are constructed, and the hook is still
+			// healthy afterward (re-enable connects normally).
+			const p = result.disconnect();
+			setFocus(focusB);
+			await p;
+			expect(result.status()).toBe("idle");
+			expect(roomFactory.callCount).toBe(0);
+			setEnabled(true);
+			await waitFor(() => result.status() === "connected");
+			expect(roomFactory.callCount).toBe(1);
 		});
 	});
 });
