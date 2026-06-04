@@ -469,434 +469,458 @@ const TimelineItem: Component<{
 	});
 
 	return (
-		<div
-			data-event-id={ev.eventId}
-			class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() || isRedactionFailed() ? "bg-danger-bg/20" : ""} ${isPending() || isRedactionPending() ? "opacity-60" : ""}`}
+		<Show
+			when={!ev.stateNotice}
+			fallback={
+				<div
+					data-event-id={ev.eventId}
+					class="group flex items-center gap-2 px-4 py-0.5 text-xs text-text-muted italic"
+					role="note"
+				>
+					<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
+					<span
+						class="max-w-[80%] truncate"
+						title={`${ev.stateNotice?.text ?? ""} • ${fullDateTime()}`}
+					>
+						{ev.stateNotice?.text}
+					</span>
+					<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
+				</div>
+			}
 		>
-			{/* Hover toolbar — hidden for failed/pending echoes (no remote
+			<div
+				data-event-id={ev.eventId}
+				class={`group relative flex gap-3 px-4 hover:bg-surface-1/50 ${props.showHeader ? "mt-2 pt-1" : "py-0.5"} ${isFailed() || isRedactionFailed() ? "bg-danger-bg/20" : ""} ${isPending() || isRedactionPending() ? "opacity-60" : ""}`}
+			>
+				{/* Hover toolbar — hidden for failed/pending echoes (no remote
 			    event yet, so react/reply/edit/delete would have no target).
 			    Also hidden while a redaction is pending or failed on this
 			    target — the relevant action is Retry/Discard on the redaction. */}
-			<Show
-				when={
-					!isFailed() &&
-					!isPending() &&
-					!isRedactionPending() &&
-					!isRedactionFailed()
-				}
-			>
-				<HoverToolbar
-					isOwnMessage={props.isOwnMessage}
-					msgtype={ev.msgtype}
-					canPin={props.canPin ?? false}
-					isPinned={props.isPinned ?? false}
-					packs={props.packs}
-					onReactPick={(key) => props.onReact(key)}
-					onReply={props.onReply}
-					onEdit={props.onEdit}
-					onDelete={props.onDelete}
-					onTogglePin={() => props.onTogglePin?.()}
-				/>
-			</Show>
+				<Show
+					when={
+						!isFailed() &&
+						!isPending() &&
+						!isRedactionPending() &&
+						!isRedactionFailed()
+					}
+				>
+					<HoverToolbar
+						isOwnMessage={props.isOwnMessage}
+						msgtype={ev.msgtype}
+						canPin={props.canPin ?? false}
+						isPinned={props.isPinned ?? false}
+						packs={props.packs}
+						onReactPick={(key) => props.onReact(key)}
+						onReply={props.onReply}
+						onEdit={props.onEdit}
+						onDelete={props.onDelete}
+						onTogglePin={() => props.onTogglePin?.()}
+					/>
+				</Show>
 
-			<Show
-				when={props.showHeader}
-				fallback={
-					<div class="flex w-8 shrink-0 items-start justify-center">
-						<span
-							class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
-							title={fullDateTime()}
-							aria-hidden="true"
-						>
-							{formattedTime()}
-						</span>
-					</div>
-				}
-			>
-				{/* Avatar */}
-				<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-					{(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
-				</div>
-			</Show>
-
-			<div class="min-w-0 flex-1">
-				{/* Header: sender + time (only for first message in group) */}
 				<Show
 					when={props.showHeader}
 					fallback={
-						<span class="sr-only">
-							{ev.senderName.trim() || "Unknown"} at {formattedTime()}
-						</span>
+						<div class="flex w-8 shrink-0 items-start justify-center">
+							<span
+								class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+								title={fullDateTime()}
+								aria-hidden="true"
+							>
+								{formattedTime()}
+							</span>
+						</div>
 					}
 				>
-					<div class="flex items-baseline gap-2">
-						<span class="text-sm font-semibold text-text-emphasis">
-							{ev.senderName.trim() || "Unknown"}
-						</span>
-						<span class="text-xs text-text-faint" title={fullDateTime()}>
-							{formattedTime()}
-						</span>
-						<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
-							<span
-								class="text-xs text-success-hover"
-								role="img"
-								aria-label="Encrypted"
-							>
-								🔒
-							</span>
-						</Show>
+					{/* Avatar */}
+					<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+						{(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
 					</div>
 				</Show>
 
-				{/* Body — suppressed during pending/failed redaction since
-				    the SDK's `markLocallyRedacted` clears the visible
-				    content; the overlay carries the meaning. */}
-				<Show when={!isRedactionPending() && !isRedactionFailed()}>
+				<div class="min-w-0 flex-1">
+					{/* Header: sender + time (only for first message in group) */}
 					<Show
-						when={!ev.isDecryptionFailure}
+						when={props.showHeader}
 						fallback={
-							<p class="text-sm italic text-warning-text/80">
-								Unable to decrypt this message
-							</p>
+							<span class="sr-only">
+								{ev.senderName.trim() || "Unknown"} at {formattedTime()}
+							</span>
 						}
 					>
+						<div class="flex items-baseline gap-2">
+							<span class="text-sm font-semibold text-text-emphasis">
+								{ev.senderName.trim() || "Unknown"}
+							</span>
+							<span class="text-xs text-text-faint" title={fullDateTime()}>
+								{formattedTime()}
+							</span>
+							<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
+								<span
+									class="text-xs text-success-hover"
+									role="img"
+									aria-label="Encrypted"
+								>
+									🔒
+								</span>
+							</Show>
+						</div>
+					</Show>
+
+					{/* Body — suppressed during pending/failed redaction since
+				    the SDK's `markLocallyRedacted` clears the visible
+				    content; the overlay carries the meaning. */}
+					<Show when={!isRedactionPending() && !isRedactionFailed()}>
 						<Show
-							when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
+							when={!ev.isDecryptionFailure}
 							fallback={
-								<p class="text-sm italic text-text-disabled">Decrypting…</p>
+								<p class="text-sm italic text-warning-text/80">
+									Unable to decrypt this message
+								</p>
 							}
 						>
 							<Show
-								when={
-									(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
-									ev.imageUrl
-								}
+								when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
 								fallback={
-									<Show
-										when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
-										fallback={
-											<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
-												{ev.body ||
-													(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
-												<Show when={ev.isEdited}>
-													<span class="ml-1 text-xs text-text-faint">
-														(edited)
-													</span>
-												</Show>
-											</p>
-										}
-									>
-										{(() => {
-											const gifUrl =
-												ev.msgtype === "m.text" ? extractGifUrl(ev.body) : null;
-											if (!gifUrl) {
-												return (
-													<>
-														<MessageBody
-															body={ev.body}
-															format={ev.format}
-															formattedBody={ev.formattedBody}
-															isEdited={ev.isEdited}
-															client={props.client}
-															shortcodeLookup={props.shortcodeLookup}
-														/>
-														<UrlPreviewList
-															client={props.client}
-															urls={previewUrls}
-															ts={() => ev.timestamp}
-															disabled={() => previewUrls().length === 0}
-														/>
-													</>
-												);
-											}
-											// Extract reply context from body prefix if present
-											const isReply = ev.body.startsWith("> ");
-											const replyPreview = isReply
-												? ev.body
-														.split("\n")[0]
-														.replace(/^> <([^>]+)> /, "$1: ")
-														.replace(/^> /, "")
-												: null;
-											return (
-												<>
-													<Show when={replyPreview}>
-														<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
-															{replyPreview}
-														</div>
-													</Show>
-													<InlineGif
-														url={gifUrl}
-														alt="GIF"
-														width={ev.imageWidth}
-														height={ev.imageHeight}
-													/>
+									<p class="text-sm italic text-text-disabled">Decrypting…</p>
+								}
+							>
+								<Show
+									when={
+										(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
+										ev.imageUrl
+									}
+									fallback={
+										<Show
+											when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
+											fallback={
+												<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+													{ev.body ||
+														(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
 													<Show when={ev.isEdited}>
 														<span class="ml-1 text-xs text-text-faint">
 															(edited)
 														</span>
 													</Show>
-												</>
-											);
-										})()}
-									</Show>
-								}
-							>
-								{(() => {
-									// Only m.image (not stickers) is openable in the
-									// lightbox, and only when the send has confirmed —
-									// pending / failed local echoes shouldn't be navigable
-									// because their event id can rekey on confirmation.
-									// Also require a usable full URL: without it the
-									// lightbox would open and immediately auto-close
-									// (no matching gallery entry), which reads as a
-									// dead click.
-									const isOpenableImage =
-										ev.msgtype === "m.image" &&
-										ev.status === null &&
-										!!ev.imageFullUrl &&
-										!!props.onOpenImage;
-									const imgEl = (
-										<img
-											src={ev.imageUrl ?? ""}
-											alt={ev.body?.trim() || "Image"}
-											width={imageReserveDims().w}
-											height={imageReserveDims().h}
-											class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
-											loading="lazy"
-										/>
-									);
-									if (!isOpenableImage) return imgEl;
-									return (
-										<button
-											type="button"
-											onClick={() => props.onOpenImage?.(ev.eventId)}
-											aria-label={`Open image${ev.imageFilename ? `: ${ev.imageFilename}` : ""} in full-screen viewer`}
-											class="inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 align-top focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0"
+												</p>
+											}
 										>
-											{imgEl}
-										</button>
-									);
-								})()}
+											{(() => {
+												const gifUrl =
+													ev.msgtype === "m.text"
+														? extractGifUrl(ev.body)
+														: null;
+												if (!gifUrl) {
+													return (
+														<>
+															<MessageBody
+																body={ev.body}
+																format={ev.format}
+																formattedBody={ev.formattedBody}
+																isEdited={ev.isEdited}
+																client={props.client}
+																shortcodeLookup={props.shortcodeLookup}
+															/>
+															<UrlPreviewList
+																client={props.client}
+																urls={previewUrls}
+																ts={() => ev.timestamp}
+																disabled={() => previewUrls().length === 0}
+															/>
+														</>
+													);
+												}
+												// Extract reply context from body prefix if present
+												const isReply = ev.body.startsWith("> ");
+												const replyPreview = isReply
+													? ev.body
+															.split("\n")[0]
+															.replace(/^> <([^>]+)> /, "$1: ")
+															.replace(/^> /, "")
+													: null;
+												return (
+													<>
+														<Show when={replyPreview}>
+															<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
+																{replyPreview}
+															</div>
+														</Show>
+														<InlineGif
+															url={gifUrl}
+															alt="GIF"
+															width={ev.imageWidth}
+															height={ev.imageHeight}
+														/>
+														<Show when={ev.isEdited}>
+															<span class="ml-1 text-xs text-text-faint">
+																(edited)
+															</span>
+														</Show>
+													</>
+												);
+											})()}
+										</Show>
+									}
+								>
+									{(() => {
+										// Only m.image (not stickers) is openable in the
+										// lightbox, and only when the send has confirmed —
+										// pending / failed local echoes shouldn't be navigable
+										// because their event id can rekey on confirmation.
+										// Also require a usable full URL: without it the
+										// lightbox would open and immediately auto-close
+										// (no matching gallery entry), which reads as a
+										// dead click.
+										const isOpenableImage =
+											ev.msgtype === "m.image" &&
+											ev.status === null &&
+											!!ev.imageFullUrl &&
+											!!props.onOpenImage;
+										const imgEl = (
+											<img
+												src={ev.imageUrl ?? ""}
+												alt={ev.body?.trim() || "Image"}
+												width={imageReserveDims().w}
+												height={imageReserveDims().h}
+												class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
+												loading="lazy"
+											/>
+										);
+										if (!isOpenableImage) return imgEl;
+										return (
+											<button
+												type="button"
+												onClick={() => props.onOpenImage?.(ev.eventId)}
+												aria-label={`Open image${ev.imageFilename ? `: ${ev.imageFilename}` : ""} in full-screen viewer`}
+												class="inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 align-top focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0"
+											>
+												{imgEl}
+											</button>
+										);
+									})()}
+								</Show>
 							</Show>
 						</Show>
 					</Show>
-				</Show>
 
-				{/* Reactions — also hidden during pending/failed redaction
+					{/* Reactions — also hidden during pending/failed redaction
 				    so the message reads as "deleting" rather than fully
 				    interactive. */}
-				<Show when={!isRedactionPending() && !isRedactionFailed()}>
-					<ReactionPills
-						reactions={ev.reactions}
-						myReactions={ev.myReactions}
-						onReact={props.onReact}
-						emoteLookup={props.emoteLookup}
-					/>
-					<Show
-						when={
-							(props.failedReactionKeys?.length ?? 0) > 0 &&
-							props.onRetryReaction &&
-							props.onDiscardReaction
-						}
-					>
-						<FailedReactionPills
-							keys={props.failedReactionKeys ?? []}
+					<Show when={!isRedactionPending() && !isRedactionFailed()}>
+						<ReactionPills
+							reactions={ev.reactions}
+							myReactions={ev.myReactions}
+							onReact={props.onReact}
 							emoteLookup={props.emoteLookup}
-							onRetry={(key) => props.onRetryReaction?.(key)}
-							onDiscard={(key) => props.onDiscardReaction?.(key)}
 						/>
+						<Show
+							when={
+								(props.failedReactionKeys?.length ?? 0) > 0 &&
+								props.onRetryReaction &&
+								props.onDiscardReaction
+							}
+						>
+							<FailedReactionPills
+								keys={props.failedReactionKeys ?? []}
+								emoteLookup={props.emoteLookup}
+								onRetry={(key) => props.onRetryReaction?.(key)}
+								onDiscard={(key) => props.onDiscardReaction?.(key)}
+							/>
+						</Show>
 					</Show>
-				</Show>
 
-				{/* Failed-send banner: visible when status is NOT_SENT, with
+					{/* Failed-send banner: visible when status is NOT_SENT, with
 				    Retry / Discard actions. Discard removes the local echo;
 				    Retry resends through the SDK's pending-event queue. */}
-				<Show when={isFailed()}>
-					<div
-						class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
-						role="alert"
-					>
-						<span aria-hidden="true">⚠</span>
-						<span>Failed to send</span>
-						<Show when={props.onRetry}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-								onClick={props.onRetry}
-							>
-								Retry
-							</button>
-						</Show>
-						<Show when={props.onDiscard}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
-								onClick={props.onDiscard}
-							>
-								Discard
-							</button>
-						</Show>
-					</div>
-				</Show>
+					<Show when={isFailed()}>
+						<div
+							class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
+							role="alert"
+						>
+							<span aria-hidden="true">⚠</span>
+							<span>Failed to send</span>
+							<Show when={props.onRetry}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={props.onRetry}
+								>
+									Retry
+								</button>
+							</Show>
+							<Show when={props.onDiscard}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									onClick={props.onDiscard}
+								>
+									Discard
+								</button>
+							</Show>
+						</div>
+					</Show>
 
-				{/* Sending indicator + Cancel control. The body is dimmed
+					{/* Sending indicator + Cancel control. The body is dimmed
 				    via opacity-60 on the outer wrapper; this surfaces a
 				    way to back out of a stuck send. */}
-				<Show when={isPending()}>
-					<div class="mt-1 flex items-center gap-2 text-xs text-text-muted">
-						<span class="sr-only" role="status">
-							Sending message
-						</span>
-						<span aria-hidden="true">Sending…</span>
-						<Show when={props.onCancel}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
-								onClick={props.onCancel}
-								aria-label="Cancel sending message"
-							>
-								Cancel
-							</button>
-						</Show>
-					</div>
-				</Show>
+					<Show when={isPending()}>
+						<div class="mt-1 flex items-center gap-2 text-xs text-text-muted">
+							<span class="sr-only" role="status">
+								Sending message
+							</span>
+							<span aria-hidden="true">Sending…</span>
+							<Show when={props.onCancel}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									onClick={props.onCancel}
+									aria-label="Cancel sending message"
+								>
+									Cancel
+								</button>
+							</Show>
+						</div>
+					</Show>
 
-				{/* Pending-redaction indicator + Cancel control. The body is
+					{/* Pending-redaction indicator + Cancel control. The body is
 				    dimmed via the outer wrapper; Cancel calls
 				    `client.cancelPendingEvent` on the in-flight redaction
 				    (only QUEUED / ENCRYPTING are SDK-cancellable; SENDING
 				    is in-flight HTTP and SENT is post-ack). */}
-				<Show when={isRedactionPending()}>
-					<div class="mt-1 flex items-center gap-2 text-xs text-text-muted">
-						<span class="sr-only" role="status">
-							Deleting message
-						</span>
-						<span aria-hidden="true">Deleting…</span>
-						<Show when={isRedactionCancellable() && props.onCancelRedaction}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
-								onClick={props.onCancelRedaction}
-								aria-label="Cancel deleting message"
-							>
-								Cancel
-							</button>
-						</Show>
-					</div>
-				</Show>
+					<Show when={isRedactionPending()}>
+						<div class="mt-1 flex items-center gap-2 text-xs text-text-muted">
+							<span class="sr-only" role="status">
+								Deleting message
+							</span>
+							<span aria-hidden="true">Deleting…</span>
+							<Show when={isRedactionCancellable() && props.onCancelRedaction}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									onClick={props.onCancelRedaction}
+									aria-label="Cancel deleting message"
+								>
+									Cancel
+								</button>
+							</Show>
+						</div>
+					</Show>
 
-				{/* Failed-redaction banner: Retry resends the m.room.redaction
+					{/* Failed-redaction banner: Retry resends the m.room.redaction
 				    echo; Discard cancels it (target restores to normal). */}
-				<Show when={isRedactionFailed()}>
-					<div
-						class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
-						role="alert"
-					>
-						<span aria-hidden="true">⚠</span>
-						<span>Delete failed</span>
-						<Show when={props.onRetryRedaction}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-								onClick={props.onRetryRedaction}
-								aria-label="Retry deleting message"
-							>
-								Retry
-							</button>
-						</Show>
-						<Show when={props.onDiscardRedaction}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
-								onClick={props.onDiscardRedaction}
-								aria-label="Discard pending deletion"
-							>
-								Discard
-							</button>
-						</Show>
-					</div>
-				</Show>
+					<Show when={isRedactionFailed()}>
+						<div
+							class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
+							role="alert"
+						>
+							<span aria-hidden="true">⚠</span>
+							<span>Delete failed</span>
+							<Show when={props.onRetryRedaction}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={props.onRetryRedaction}
+									aria-label="Retry deleting message"
+								>
+									Retry
+								</button>
+							</Show>
+							<Show when={props.onDiscardRedaction}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									onClick={props.onDiscardRedaction}
+									aria-label="Discard pending deletion"
+								>
+									Discard
+								</button>
+							</Show>
+						</div>
+					</Show>
 
-				{/* Failed-edit banner: visible when the latest edit echo is
+					{/* Failed-edit banner: visible when the latest edit echo is
 				    NOT_SENT. Shows the attempted edit body so the user can
 				    decide whether to retry without retyping. Gated below
 				    failed-send and failed-redaction states so we don't
 				    stack three failure banners. */}
-				<Show
-					when={
-						!isFailed() &&
-						!isRedactionPending() &&
-						!isRedactionFailed() &&
-						props.failedEditAttempt !== undefined
-					}
-				>
-					<div
-						class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
-						role="alert"
+					<Show
+						when={
+							!isFailed() &&
+							!isRedactionPending() &&
+							!isRedactionFailed() &&
+							props.failedEditAttempt !== undefined
+						}
 					>
-						<span aria-hidden="true">⚠</span>
-						<span>Edit failed:</span>
-						<span
-							class="max-w-[24rem] truncate rounded bg-danger-bg/15 px-1.5 py-0.5 text-text-emphasis"
-							title={props.failedEditAttempt || "(empty)"}
+						<div
+							class="mt-1 flex flex-wrap items-center gap-2 text-xs text-danger-text"
+							role="alert"
 						>
-							{props.failedEditAttempt || "(empty)"}
-						</span>
-						<Show when={props.onRetryEdit}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-								onClick={props.onRetryEdit}
-								aria-label="Retry sending edit"
+							<span aria-hidden="true">⚠</span>
+							<span>Edit failed:</span>
+							<span
+								class="max-w-[24rem] truncate rounded bg-danger-bg/15 px-1.5 py-0.5 text-text-emphasis"
+								title={props.failedEditAttempt || "(empty)"}
 							>
-								Retry
-							</button>
-						</Show>
-						<Show when={props.onDiscardEdit}>
-							<button
-								type="button"
-								class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
-								onClick={props.onDiscardEdit}
-								aria-label="Discard failed edit"
-							>
-								Discard
-							</button>
-						</Show>
-					</div>
-				</Show>
+								{props.failedEditAttempt || "(empty)"}
+							</span>
+							<Show when={props.onRetryEdit}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={props.onRetryEdit}
+									aria-label="Retry sending edit"
+								>
+									Retry
+								</button>
+							</Show>
+							<Show when={props.onDiscardEdit}>
+								<button
+									type="button"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									onClick={props.onDiscardEdit}
+									aria-label="Discard failed edit"
+								>
+									Discard
+								</button>
+							</Show>
+						</div>
+					</Show>
 
-				{/* Read receipts — cap visible avatars and overflow to "+N"
+					{/* Read receipts — cap visible avatars and overflow to "+N"
 				    so multi-hundred-member rooms don't render a sprawling
 				    row of small circles. Cap is intentionally small (5);
 				    the chip's aria-label exposes the remaining names. */}
-				<Show when={props.readReceipts && props.readReceipts.length > 0}>
-					<div class="mt-1.5 flex gap-0.5">
-						<For each={receiptDisplay().visible}>
-							{(receipt) => (
+					<Show when={props.readReceipts && props.readReceipts.length > 0}>
+						<div class="mt-1.5 flex gap-0.5">
+							<For each={receiptDisplay().visible}>
+								{(receipt) => (
+									<div
+										class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-muted"
+										title={receipt.displayName}
+										role="img"
+										aria-label={`Read by ${receipt.displayName}`}
+									>
+										{(receipt.displayName.trim() || "?")
+											.charAt(0)
+											.toUpperCase()}
+									</div>
+								)}
+							</For>
+							<Show when={receiptDisplay().overflowCount > 0}>
 								<div
-									class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-muted"
-									title={receipt.displayName}
+									class="flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-3 px-1 text-[8px] font-semibold text-text-muted"
+									title={receiptDisplay().overflowLabel}
 									role="img"
-									aria-label={`Read by ${receipt.displayName}`}
+									aria-label={receiptDisplay().overflowLabel}
 								>
-									{(receipt.displayName.trim() || "?").charAt(0).toUpperCase()}
+									+{receiptDisplay().overflowCount}
 								</div>
-							)}
-						</For>
-						<Show when={receiptDisplay().overflowCount > 0}>
-							<div
-								class="flex h-4 min-w-4 items-center justify-center rounded-full bg-surface-3 px-1 text-[8px] font-semibold text-text-muted"
-								title={receiptDisplay().overflowLabel}
-								role="img"
-								aria-label={receiptDisplay().overflowLabel}
-							>
-								+{receiptDisplay().overflowCount}
-							</div>
-						</Show>
-					</div>
-				</Show>
+							</Show>
+						</div>
+					</Show>
+				</div>
 			</div>
-		</div>
+		</Show>
 	);
 };
 
