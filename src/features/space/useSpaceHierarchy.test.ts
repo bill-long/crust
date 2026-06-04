@@ -1,7 +1,8 @@
 import type { HierarchyRoom } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
+import { createStore } from "solid-js/store";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { SummariesStore } from "../../client/summaries";
+import type { RoomSummary, SummariesStore } from "../../client/summaries";
 
 // Mock useClient before importing the hook
 vi.mock("../../client/client", () => ({
@@ -69,11 +70,37 @@ function setupMockClient(overrides: Record<string, unknown> = {}) {
 		joinRoom: vi.fn(),
 		...overrides,
 	};
-	const summaries: SummariesStore = {};
+	// Use a real Solid store so memos in useSpaceHierarchy re-run when
+	// optimisticallyMarkJoined mutates membership.
+	const [summaries, setSummaries] = createStore<SummariesStore>({});
+	const optimisticallyMarkJoined = vi.fn(
+		(roomId: string, info: { name: string; avatarUrl: string | null }) => {
+			const stub: RoomSummary = {
+				roomId,
+				name: info.name,
+				avatarUrl: info.avatarUrl,
+				lastMessage: null,
+				unreadCount: 0,
+				highlightCount: 0,
+				membership: "join",
+				isEncrypted: false,
+				isDirect: false,
+				isSpace: false,
+				kind: "text",
+				callActive: false,
+				children: [],
+			};
+			setSummaries(roomId, stub);
+		},
+	);
 
-	(useClient as Mock).mockReturnValue({ client: mockClient, summaries });
+	(useClient as Mock).mockReturnValue({
+		client: mockClient,
+		summaries,
+		optimisticallyMarkJoined,
+	});
 
-	return { mockClient, summaries };
+	return { mockClient, summaries, optimisticallyMarkJoined };
 }
 
 describe("useSpaceHierarchy", () => {
@@ -536,6 +563,183 @@ describe("useSpaceHierarchy", () => {
 			// loadingMore should be reset, truncated still true (can retry)
 			expect(hierarchy.loadingMore).toBe(false);
 			expect(hierarchy.truncated).toBe(true);
+		});
+	});
+
+	it("optimistically marks the joined room as 'join' in summaries (#132)", async () => {
+		const { mockClient, summaries, optimisticallyMarkJoined } =
+			setupMockClient();
+		mockClient.joinRoom.mockResolvedValue(undefined);
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!room:x", {
+					name: "General",
+					avatar_url: "mxc://example.com/abc",
+				}),
+			],
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			// Before the join the room is discoverable.
+			expect(
+				hierarchy.discoverableRooms.find((r) => r.roomId === "!room:x"),
+			).toBeDefined();
+			expect(summaries["!room:x"]).toBeUndefined();
+
+			await hierarchy.joinRoom("!room:x");
+			await flushPromises();
+
+			// The hook seeded a summary stub so the joined-channels list can
+			// pick the room up immediately, without waiting on /sync.
+			expect(optimisticallyMarkJoined).toHaveBeenCalledWith("!room:x", {
+				name: "General",
+				avatarUrl:
+					"https://example.com/_matrix/media/v3/download/example.com/abc",
+			});
+			expect(summaries["!room:x"]?.membership).toBe("join");
+
+			// And the room is gone from Discover because filterDiscoverableRooms
+			// excludes anything with membership='join'.
+			expect(
+				hierarchy.discoverableRooms.find((r) => r.roomId === "!room:x"),
+			).toBeUndefined();
+		});
+	});
+
+	it("falls back to canonical_alias / roomId when hierarchy name is missing", async () => {
+		const { mockClient, optimisticallyMarkJoined } = setupMockClient();
+		mockClient.joinRoom.mockResolvedValue(undefined);
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!room:x", {
+					name: "   ",
+					canonical_alias: "#general:x",
+				}),
+			],
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			await hierarchy.joinRoom("!room:x");
+			await flushPromises();
+
+			expect(optimisticallyMarkJoined).toHaveBeenCalledWith("!room:x", {
+				name: "#general:x",
+				avatarUrl: null,
+			});
+		});
+	});
+
+	it("does not mark joined when the join fails", async () => {
+		const { mockClient, optimisticallyMarkJoined } = setupMockClient();
+		mockClient.joinRoom.mockRejectedValue(new Error("forbidden"));
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!room:x"),
+			],
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			await hierarchy.joinRoom("!room:x");
+			await flushPromises();
+
+			expect(hierarchy.joinState("!room:x")).toBe("error");
+			expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
+		});
+	});
+
+	it("does not mark joined when the user navigated to a different space mid-join", async () => {
+		const { mockClient, optimisticallyMarkJoined } = setupMockClient();
+		let resolveJoin = () => {};
+		mockClient.joinRoom.mockReturnValue(
+			new Promise<void>((r) => {
+				resolveJoin = r;
+			}),
+		);
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!room:x"),
+			],
+		});
+
+		await withRoot(async () => {
+			const [spaceId, setSpaceId] = createSignal<string | undefined>(
+				"!space:x",
+			);
+			const hierarchy = useSpaceHierarchy(spaceId);
+			await flushPromises();
+
+			const joinDone = hierarchy.joinRoom("!room:x");
+			await flushPromises();
+
+			mockClient.getRoomHierarchy.mockResolvedValue({
+				rooms: [makeHierarchyRoom("!space2:x", { room_type: "m.space" })],
+			});
+			setSpaceId("!space2:x");
+			await flushPromises();
+
+			resolveJoin();
+			await joinDone;
+			await flushPromises();
+
+			expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
+		});
+	});
+
+	it("does not mark joined on A→B→A reincarnation race", async () => {
+		// User clicks Join in space A, then navigates B then back to A.
+		// `spaceId() === startSpaceId` would erroneously pass (both are A)
+		// even though the pagination/session generation has advanced; the
+		// generation guard catches this so stale completions don't write
+		// optimistic state into the fresh A session.
+		const { mockClient, optimisticallyMarkJoined } = setupMockClient();
+		let resolveJoin = () => {};
+		mockClient.joinRoom.mockReturnValue(
+			new Promise<void>((r) => {
+				resolveJoin = r;
+			}),
+		);
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:A", { room_type: "m.space" }),
+				makeHierarchyRoom("!room:x"),
+			],
+		});
+
+		await withRoot(async () => {
+			const [spaceId, setSpaceId] = createSignal<string | undefined>(
+				"!space:A",
+			);
+			const hierarchy = useSpaceHierarchy(spaceId);
+			await flushPromises();
+
+			const joinDone = hierarchy.joinRoom("!room:x");
+			await flushPromises();
+
+			// Navigate A → B → A while the join is in flight.
+			setSpaceId("!space:B");
+			await flushPromises();
+			setSpaceId("!space:A");
+			await flushPromises();
+
+			resolveJoin();
+			await joinDone;
+			await flushPromises();
+
+			expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
+			expect(hierarchy.joinState("!room:x")).toBe("idle");
 		});
 	});
 });

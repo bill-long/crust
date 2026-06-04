@@ -297,11 +297,22 @@ function buildLastMessage(event: MatrixEvent): RoomSummary["lastMessage"] {
 	};
 }
 
+/**
+ * Minimal display info used by `optimisticallyMarkJoined` to populate a
+ * stub summary entry between a successful `client.joinRoom()` resolution
+ * and the next /sync round-trip that delivers the authoritative room state.
+ */
+export interface OptimisticJoinInfo {
+	name: string;
+	avatarUrl: string | null;
+}
+
 export function createSummariesStore(client: MatrixClient): {
 	summaries: SummariesStore;
 	setSummaries: SetStoreFunction<SummariesStore>;
 	init: () => void;
 	cleanup: () => void;
+	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const baseUrl = client.getHomeserverUrl();
@@ -355,6 +366,49 @@ export function createSummariesStore(client: MatrixClient): {
 			if (active) scheduleCallExpiryRefresh(room);
 		}, delay);
 		callExpiryTimers.set(room.roomId, id);
+	}
+
+	/**
+	 * Stub-create (or flip-to-join) a summary entry for a room the user has
+	 * just successfully joined. `client.joinRoom()` resolves before /sync
+	 * delivers the room's state, so neither `ClientEvent.Room` nor
+	 * `RoomEvent.MyMembership` have fired yet — without this, the joined
+	 * room would not appear in the joined-channels list and would remain in
+	 * the space's Discover list until the next browser refresh (see #132).
+	 *
+	 * When the eventual /sync arrives, `onNewRoom` runs `upsertRoom` which
+	 * fully overwrites the stub with authoritative data, so this is a
+	 * pure forward-looking optimistic write.
+	 */
+	function optimisticallyMarkJoined(
+		roomId: string,
+		info: OptimisticJoinInfo,
+	): void {
+		const existing = summaries[roomId];
+		if (existing?.membership === "join") return;
+		if (existing) {
+			setSummaries(roomId, "membership", "join");
+			return;
+		}
+		setSummaries(
+			produce((s) => {
+				s[roomId] = {
+					roomId,
+					name: info.name,
+					avatarUrl: info.avatarUrl,
+					lastMessage: null,
+					unreadCount: 0,
+					highlightCount: 0,
+					membership: "join",
+					isEncrypted: false,
+					isDirect: false,
+					isSpace: false,
+					kind: "text",
+					callActive: false,
+					children: [],
+				};
+			}),
+		);
 	}
 
 	function upsertRoom(room: Room): void {
@@ -612,5 +666,5 @@ export function createSummariesStore(client: MatrixClient): {
 		client.off(RoomStateEvent.Events, onRoomStateEvents);
 	}
 
-	return { summaries, setSummaries, init, cleanup };
+	return { summaries, setSummaries, init, cleanup, optimisticallyMarkJoined };
 }
