@@ -2326,6 +2326,148 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("myReactions tracks the latest event id when a sender has multiple echoes", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Simulate the transient window where a local-echo for my
+		// reaction still exists alongside the server-confirmed event:
+		// the dedupe must not strand myReactions on the stale txn id.
+		const myUserId = "@test:example.com";
+		const localEcho = createMatrixEvent({
+			eventId: "~local.r1",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 2000,
+			status: EventStatus.SENDING,
+		});
+		const serverConfirmed = createMatrixEvent({
+			eventId: "$server.r1",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 3000,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🚀", new Set([localEcho, serverConfirmed])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			// Count and senders dedupe to one entry, but myReactions
+			// must point at the server-confirmed id (status === null
+			// beats pending status) so the redaction path targets the
+			// correct event.
+			expect(events[0].reactions["🚀"].count).toBe(1);
+			expect(events[0].myReactions["🚀"]).toBe("$server.r1");
+		});
+	});
+
+	it("myReactions prefers server-confirmed event regardless of Set iteration order", async () => {
+		const { EventStatus } = await import("matrix-js-sdk");
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Same as the previous test but with the server-confirmed
+		// event iterated FIRST. matrix-js-sdk does not guarantee Set
+		// iteration order matches send order, so the resolution must
+		// pick by status/ts, not first/last position.
+		const myUserId = "@test:example.com";
+		const localEcho = createMatrixEvent({
+			eventId: "~local.r2",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎉",
+				},
+			},
+			ts: 2000,
+			status: EventStatus.SENDING,
+		});
+		const serverConfirmed = createMatrixEvent({
+			eventId: "$server.r2",
+			roomId: "!roomA:test",
+			sender: myUserId,
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎉",
+				},
+			},
+			ts: 3000,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🎉", new Set([serverConfirmed, localEcho])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			expect(events[0].myReactions["🎉"]).toBe("$server.r2");
+		});
+	});
+
 	it("failed edit echoes do not mark the original message as edited", async () => {
 		const { EventStatus } = await import("matrix-js-sdk");
 		const original: import("../../../test/mockClient").MockEvent = {

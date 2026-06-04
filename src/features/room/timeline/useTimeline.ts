@@ -238,6 +238,15 @@ function eventToTimelineEvent(
 						if (key && evSet) {
 							const senders: ReactionAggregate["senders"] = [];
 							const seenSenders = new Set<string>();
+							// Track the best candidate id for myUserId across same-key
+							// echoes. Prefer server-confirmed (status === null) over
+							// pending, breaking ties by ts so the redaction path always
+							// targets the freshest valid event regardless of Set
+							// iteration order (matrix-js-sdk does not guarantee local
+							// echo comes before its server-confirmed counterpart).
+							let myBestId: string | undefined;
+							let myBestPending = true;
+							let myBestTs = Number.NEGATIVE_INFINITY;
 							for (const ev of evSet) {
 								const evStatus = ev.status;
 								if (
@@ -247,17 +256,31 @@ function eventToTimelineEvent(
 									continue;
 								}
 								const senderId = ev.getSender();
-								if (!senderId || seenSenders.has(senderId)) continue;
+								if (!senderId) continue;
+								if (myUserId && senderId === myUserId) {
+									const id = ev.getId();
+									if (id) {
+										const isPending = evStatus !== null;
+										const ts = ev.getTs();
+										const better =
+											myBestId === undefined ||
+											(myBestPending && !isPending) ||
+											(myBestPending === isPending && ts > myBestTs);
+										if (better) {
+											myBestId = id;
+											myBestPending = isPending;
+											myBestTs = ts;
+										}
+									}
+								}
+								if (seenSenders.has(senderId)) continue;
 								seenSenders.add(senderId);
 								const rawName = room.getMember(senderId)?.name?.trim();
 								const name =
 									rawName && !hasControlChar(rawName) ? rawName : senderId;
 								senders.push({ userId: senderId, name });
-								if (myUserId && senderId === myUserId) {
-									const id = ev.getId();
-									if (id) myReactions[key] = id;
-								}
 							}
+							if (myBestId) myReactions[key] = myBestId;
 							if (senders.length > 0) {
 								reactions[key] = { count: senders.length, senders };
 							}
