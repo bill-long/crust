@@ -24,6 +24,12 @@ import {
 	useImagePacks,
 } from "../../emoji/useImagePacks";
 import { Composer } from "../composer/Composer";
+import {
+	formatDateSeparatorLabel,
+	isDifferentDay,
+	isSameDay,
+	useDayTick,
+} from "./dateFormatting";
 import { ImageLightbox, type LightboxImage } from "./ImageLightbox";
 import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
@@ -41,11 +47,26 @@ function shouldShowHeader(
 	if (!prev || !curr) return true;
 	if (prev.senderId !== curr.senderId) return true;
 	if (curr.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS) return true;
-	// Break group on day boundary
-	const prevDay = new Date(prev.timestamp).toDateString();
-	const currDay = new Date(curr.timestamp).toDateString();
-	if (prevDay !== currDay) return true;
+	// Break group on day boundary so the date separator can land cleanly
+	// between the two halves.
+	if (!isSameDay(prev.timestamp, curr.timestamp)) return true;
 	return false;
+}
+
+/**
+ * Whether to render a date separator above this message. True at the
+ * top of the loaded timeline, and whenever the message is the first
+ * one on a new calendar day.
+ */
+function shouldShowDateSeparator(
+	events: readonly TimelineEvent[],
+	index: number,
+): boolean {
+	if (index === 0) return true;
+	const prev = events[index - 1];
+	const curr = events[index];
+	if (!prev || !curr) return false;
+	return isDifferentDay(prev.timestamp, curr.timestamp);
 }
 
 interface ReadReceiptEntry {
@@ -103,6 +124,11 @@ const TimelineView: Component<{
 	);
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 	const emoteLookup = createMemo(() => buildEmoteLookup(packs()));
+
+	// Reactive "now" that updates at local midnight so separator labels
+	// like "Today" / "Yesterday" stay accurate for sessions left open
+	// across a day boundary.
+	const dayTick = useDayTick();
 
 	let scrollRef: HTMLDivElement | undefined;
 	let virtHandle: VirtualizerHandle | undefined;
@@ -1160,6 +1186,21 @@ const TimelineView: Component<{
 						>
 							{(event, indexAcc) => (
 								<div>
+									<Show when={shouldShowDateSeparator(events, indexAcc())}>
+										<div class="flex items-center gap-3 px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-faint uppercase select-none">
+											<div
+												class="h-px flex-1 bg-border-subtle"
+												aria-hidden="true"
+											/>
+											<span>
+												{formatDateSeparatorLabel(event.timestamp, dayTick())}
+											</span>
+											<div
+												class="h-px flex-1 bg-border-subtle"
+												aria-hidden="true"
+											/>
+										</div>
+									</Show>
 									<TimelineItem
 										event={event}
 										showHeader={shouldShowHeader(events, indexAcc())}
