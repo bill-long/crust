@@ -483,6 +483,7 @@ const TimelineItem: Component<{
 						title={`${ev.stateNotice?.text ?? ""} • ${fullDateTime()}`}
 					>
 						{ev.stateNotice?.text}
+						<span class="sr-only"> • {fullDateTime()}</span>
 					</span>
 					<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
 				</div>
