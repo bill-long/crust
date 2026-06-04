@@ -11,6 +11,7 @@ import {
 import { ClientProvider, useClient } from "../client/client";
 import { LoginPage } from "../features/auth/LoginPage";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
+import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
@@ -87,56 +88,64 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	};
 
 	return (
-		<Switch>
-			<Match when={syncState() === "initial"}>
-				<div class="flex h-full items-center justify-center bg-surface-0">
-					<div class="text-center">
-						<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
-						<p class="text-text-muted">
-							{cryptoState() === "loading"
-								? "Initializing encryption…"
-								: "Syncing…"}
-						</p>
-					</div>
-				</div>
-			</Match>
-			<Match when={syncState() === "error"}>
-				<div class="flex h-full items-center justify-center bg-surface-0">
-					<div class="text-center">
-						<p class="text-danger-text">Sync error</p>
-						<p class="mt-1 text-sm text-text-disabled">
-							Check your connection and try refreshing.
-						</p>
-						<button
-							type="button"
-							onClick={handleForceLogout}
-							class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary"
-						>
-							Log out
-						</button>
-					</div>
-				</div>
-			</Match>
-			<Match when={syncState() === "logged-out"}>
-				<div class="flex h-full items-center justify-center bg-surface-0">
-					<div class="text-center">
-						<p class="text-text-muted">Session expired, redirecting…</p>
-					</div>
-				</div>
-			</Match>
-			<Match when={true}>
-				<div class="flex h-full flex-col bg-surface-0 text-text-primary">
-					<Show when={cryptoState() === "error"}>
-						<div class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text">
-							Encryption initialization failed — encrypted messages may not be
-							readable.
+		<>
+			<Switch>
+				<Match when={syncState() === "initial"}>
+					<div class="flex h-full items-center justify-center bg-surface-0">
+						<div class="text-center">
+							<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+							<p class="text-text-muted">
+								{cryptoState() === "loading"
+									? "Initializing encryption…"
+									: "Syncing…"}
+							</p>
 						</div>
-					</Show>
-					<CryptoStatusBanner />
-					<div class="flex min-h-0 flex-1 flex-col">{props.children}</div>
-				</div>
-			</Match>
-		</Switch>
+					</div>
+				</Match>
+				<Match when={syncState() === "error"}>
+					<div class="flex h-full items-center justify-center bg-surface-0">
+						<div class="text-center">
+							<p class="text-danger-text">Sync error</p>
+							<p class="mt-1 text-sm text-text-disabled">
+								Check your connection and try refreshing.
+							</p>
+							<button
+								type="button"
+								onClick={handleForceLogout}
+								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary"
+							>
+								Log out
+							</button>
+						</div>
+					</div>
+				</Match>
+				<Match when={syncState() === "logged-out"}>
+					<div class="flex h-full items-center justify-center bg-surface-0">
+						<div class="text-center">
+							<p class="text-text-muted">Session expired, redirecting…</p>
+						</div>
+					</div>
+				</Match>
+				<Match when={true}>
+					<div class="flex h-full flex-col bg-surface-0 text-text-primary">
+						<Show when={cryptoState() === "error"}>
+							<div class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text">
+								Encryption initialization failed — encrypted messages may not be
+								readable.
+							</div>
+						</Show>
+						<CryptoStatusBanner />
+						<div class="flex min-h-0 flex-1 flex-col">{props.children}</div>
+					</div>
+				</Match>
+			</Switch>
+			{/* Mounted as a sibling of <Switch> (and of the per-route
+				children) so the call-session lifecycle owner survives BOTH
+				sub-route shape changes (e.g. mini-widget "Return" flipping
+				/space/X/Y -> /home/Y) AND transient sync-state transitions.
+				Renders nothing until activeCallRoomId() becomes non-null. */}
+			<PersistentCallSurface />
+		</>
 	);
 };
 

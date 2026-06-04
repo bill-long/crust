@@ -30,9 +30,7 @@ import {
 } from "../features/emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallButton } from "../features/room/call/CallButton";
-import { CallSessionController } from "../features/room/call/rtc/CallSessionController";
 import { FullCallOverlay } from "../features/room/call/rtc/FullCallOverlay";
-import { MiniCallWidget } from "../features/room/call/rtc/MiniCallWidget";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
 import { closeNotificationSound } from "../features/room/notificationSound";
@@ -62,7 +60,6 @@ import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import type { CryptoAction } from "../types/crypto";
 import { stripBasePath } from "./basePath";
-import { useConfig } from "./ConfigProvider";
 import { useDecodedParams } from "./useDecodedParams";
 
 const MEMBERS_WIDTH_KEY = "crust_members_width";
@@ -358,7 +355,6 @@ const RoomPane: Component<{
 
 const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState } = useClient();
-	const config = useConfig();
 	// Mount the global PTT/PTM hotkey listener once at the app shell. The
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
@@ -774,9 +770,12 @@ const Layout: Component = () => {
 						</Show>
 						{/* Full-overlay chrome for the active call, scoped to the
 							main pane so the sidebars stay clickable. The
-							CallSessionController (mounted below at Layout level)
-							owns the session lifecycle so the call survives the
-							RoomPane remount that happens on route changes. */}
+							CallSessionController is mounted ABOVE this Layout
+							(see `PersistentCallSurface` in App.tsx) so the
+							call survives the RoomPane / Layout remount that
+							happens on route-shape changes — the overlay is
+							pure chrome over `currentCallSession()` and is
+							safe to remount. */}
 						<Show
 							when={
 								activeCallRoomId() !== null &&
@@ -788,27 +787,6 @@ const Layout: Component = () => {
 					</div>
 				}
 			/>
-
-			{/* Hoisted call-session controller — single source of truth for
-				the MatrixRTC + LiveKit lifecycle. Keyed on the active call's
-				room id so a switch flow forces a clean unmount → cleanup →
-				remount cycle (Phase 7B of #122, closes #99 bullets 2 & 4). */}
-			<Show when={activeCallRoomId()} keyed>
-				{(rid) => (
-					<CallSessionController
-						roomId={rid}
-						roomName={() => summaries[rid]?.name?.trim() || "this room"}
-						elementCallUrl={config.elementCall.url}
-					/>
-				)}
-			</Show>
-
-			{/* Floating mini-widget — visible whenever a call is active and
-				the user is NOT viewing the call's room. Sibling of the
-				controller (not its child) because Layout owns the
-				`summaries` store the widget needs for route picking, and
-				the controller is intentionally signal-only. */}
-			<MiniCallWidget summaries={summaries} />
 
 			{/* Invite dialog — roomId is snapshotted at open time so an
 				in-flight invite still targets the original room if the user
