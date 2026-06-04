@@ -42,7 +42,7 @@ const HIERARCHY_MAX_DEPTH = 1;
 export function useSpaceHierarchy(
 	spaceId: () => string | undefined,
 ): SpaceHierarchy {
-	const { client, summaries } = useClient();
+	const { client, summaries, optimisticallyMarkJoined } = useClient();
 	const mxcToHttp = (mxcUrl: string): string | null =>
 		client.mxcUrlToHttp(mxcUrl, 48, 48, "crop") ?? null;
 
@@ -158,6 +158,10 @@ export function useSpaceHierarchy(
 		if (current === "joining" || current === "joined") return;
 
 		const startSpaceId = spaceId();
+		// Capture the pagination generation so we can detect A→B→A
+		// navigation: the spaceId may have returned to its original value
+		// while we awaited the join, but the generation has advanced.
+		const gen = paginationGeneration;
 		setJoinStates((prev) => ({ ...prev, [roomId]: "joining" }));
 
 		try {
@@ -167,13 +171,34 @@ export function useSpaceHierarchy(
 					? extractViaServers(rooms, startSpaceId, roomId)
 					: [];
 			await client.joinRoom(roomId, { viaServers });
-			// Only update state if still on the same space
-			if (spaceId() === startSpaceId) {
+			// Only update state if still on the same space session
+			if (paginationGeneration === gen) {
+				// Optimistically populate the summary store so the room
+				// disappears from Discover and appears in the joined list
+				// immediately. `client.joinRoom()` resolves before /sync
+				// delivers the room's state, so without this the UI would
+				// be stale until the next browser refresh (#132). When the
+				// eventual /sync arrives, `ClientEvent.Room` -> `upsertRoom`
+				// overwrites this stub with authoritative data.
+				const hierarchyRoom = allRooms().find((r) => r.room_id === roomId);
+				if (hierarchyRoom) {
+					optimisticallyMarkJoined(roomId, {
+						name:
+							hierarchyRoom.name?.trim() ||
+							hierarchyRoom.canonical_alias ||
+							roomId,
+						avatarUrl: hierarchyRoom.avatar_url
+							? mxcToHttp(hierarchyRoom.avatar_url)
+							: null,
+					});
+				} else {
+					optimisticallyMarkJoined(roomId, { name: roomId, avatarUrl: null });
+				}
 				setJoinStates((prev) => ({ ...prev, [roomId]: "joined" }));
 			}
 		} catch (err) {
 			console.error(`Failed to join room ${roomId}:`, err);
-			if (spaceId() === startSpaceId) {
+			if (paginationGeneration === gen) {
 				setJoinStates((prev) => ({ ...prev, [roomId]: "error" }));
 			}
 		}

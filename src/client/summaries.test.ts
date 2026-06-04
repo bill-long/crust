@@ -615,3 +615,105 @@ describe("createSummariesStore call expiry timer", () => {
 		store.cleanup();
 	});
 });
+
+describe("createSummariesStore optimisticallyMarkJoined", () => {
+	function makeStore() {
+		const rooms = new Map<string, ReturnType<typeof createMockRoom>>();
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		return store;
+	}
+
+	it("creates a stub summary entry when none exists", () => {
+		const store = makeStore();
+		store.optimisticallyMarkJoined("!new:x", {
+			name: "General",
+			avatarUrl: "https://example.com/a.png",
+		});
+
+		const s = store.summaries["!new:x"];
+		expect(s).toBeDefined();
+		expect(s.roomId).toBe("!new:x");
+		expect(s.name).toBe("General");
+		expect(s.avatarUrl).toBe("https://example.com/a.png");
+		expect(s.membership).toBe("join");
+		expect(s.isSpace).toBe(false);
+		expect(s.kind).toBe("text");
+		expect(s.unreadCount).toBe(0);
+		expect(s.highlightCount).toBe(0);
+		expect(s.callActive).toBe(false);
+		expect(s.children).toEqual([]);
+		expect(s.lastMessage).toBeNull();
+
+		store.cleanup();
+	});
+
+	it("flips an existing non-join summary to membership='join' without clobbering other fields", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			roomId: "!r:x",
+			name: "Existing name",
+			avatarUrl: "existing.png",
+			lastMessage: { body: "hi", sender: "@a:x", timestamp: 1000 },
+			unreadCount: 3,
+			highlightCount: 1,
+			membership: "leave",
+			isEncrypted: true,
+			isDirect: false,
+			isSpace: false,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkJoined("!r:x", {
+			name: "Hierarchy name",
+			avatarUrl: "hierarchy.png",
+		});
+
+		const s = store.summaries["!r:x"];
+		expect(s.membership).toBe("join");
+		// Existing authoritative fields are preserved — hierarchy is only
+		// a fallback when there's no summary yet.
+		expect(s.name).toBe("Existing name");
+		expect(s.avatarUrl).toBe("existing.png");
+		expect(s.unreadCount).toBe(3);
+		expect(s.isEncrypted).toBe(true);
+		expect(s.lastMessage).toEqual({
+			body: "hi",
+			sender: "@a:x",
+			timestamp: 1000,
+		});
+
+		store.cleanup();
+	});
+
+	it("is a no-op when the room is already marked as joined", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			roomId: "!r:x",
+			name: "Real name",
+			avatarUrl: null,
+			lastMessage: null,
+			unreadCount: 0,
+			highlightCount: 0,
+			membership: "join",
+			isEncrypted: false,
+			isDirect: false,
+			isSpace: false,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkJoined("!r:x", {
+			name: "Should-not-overwrite",
+			avatarUrl: "should-not-overwrite.png",
+		});
+
+		expect(store.summaries["!r:x"].name).toBe("Real name");
+		expect(store.summaries["!r:x"].avatarUrl).toBeNull();
+
+		store.cleanup();
+	});
+});

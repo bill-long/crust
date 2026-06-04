@@ -20,7 +20,11 @@ import {
 } from "../features/crypto/useCryptoStatus";
 import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
 import type { Session } from "../stores/session";
-import { createSummariesStore, type SummariesStore } from "./summaries";
+import {
+	createSummariesStore,
+	type OptimisticJoinInfo,
+	type SummariesStore,
+} from "./summaries";
 
 export type AppSyncState =
 	| "initial"
@@ -38,6 +42,14 @@ interface ClientContextValue {
 	cryptoState: () => CryptoState;
 	summaries: SummariesStore;
 	cryptoStatus: CryptoStatus;
+	/**
+	 * Optimistically populate a "joined" summary entry for `roomId` so the
+	 * room appears in the joined-channels list and is removed from any
+	 * space-Discover list immediately on join, without waiting for /sync to
+	 * deliver authoritative state (see #132). The eventual `ClientEvent.Room`
+	 * handler will overwrite the stub with authoritative data.
+	 */
+	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
 	/**
 	 * Request the recovery key from the user. Components that show a
 	 * recovery key input dialog should call setRecoveryKeyResolver to
@@ -156,6 +168,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		summaries,
 		init: initSummaries,
 		cleanup: cleanupSummaries,
+		optimisticallyMarkJoined,
 	} = createSummariesStore(matrixClient);
 
 	const onSync = (state: SyncState): void => {
@@ -258,6 +271,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				cryptoState,
 				summaries,
 				cryptoStatus,
+				optimisticallyMarkJoined,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,
 				clearSecretStorageCache,

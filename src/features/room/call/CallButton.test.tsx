@@ -103,6 +103,7 @@ function renderButton(opts: {
 				requestRecoveryKey: async () => null,
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
+				optimisticallyMarkJoined: () => {},
 			}}
 		>
 			<CallButton
