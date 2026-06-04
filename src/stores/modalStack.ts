@@ -4,7 +4,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
  * App-level modal stack counter.
  *
  * Why this exists: components that render non-modal but call-related UI
- * (`FullCallOverlay`, and in PR B-2b the `MiniCallWidget`) need to know
+ * (`FullCallOverlay` and `CallStatusPanel`) need to know
  * whether ANY app modal (`SettingsOverlay`, `RoomSettingsOverlay`,
  * `InviteDialog`, `CopyLinkFallbackDialog`, `ConfirmDialog`,
  * `ImageLightbox`) is currently open so they can mark themselves

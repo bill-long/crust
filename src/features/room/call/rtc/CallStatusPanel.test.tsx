@@ -10,17 +10,13 @@ import {
 	_resetAppModalStackForTests,
 	pushAppModal,
 } from "../../../../stores/modalStack";
-import {
-	_resetVoiceForTests,
-	setUserWantsMic,
-	userWantsMic,
-} from "../../../../stores/voice";
+import { _resetVoiceForTests } from "../../../../stores/voice";
+import { CallStatusPanel } from "./CallStatusPanel";
 import {
 	_resetCallSessionForTests,
 	publishCallSession,
 } from "./callSessionStore";
 import { makeFakeCallSession } from "./fakeCallSession.test-utils";
-import { MiniCallWidget } from "./MiniCallWidget";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -45,7 +41,7 @@ function emptySummaries(): SummariesStore {
 	return {} as SummariesStore;
 }
 
-describe("MiniCallWidget", () => {
+describe("CallStatusPanel", () => {
 	const fakes: Array<{ dispose: () => void }> = [];
 	const track = <T extends { dispose: () => void }>(fake: T): T => {
 		fakes.push(fake);
@@ -65,26 +61,25 @@ describe("MiniCallWidget", () => {
 	});
 
 	it("renders nothing when no active call is set", () => {
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		expect(screen.queryByRole("complementary")).toBeNull();
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		expect(screen.queryByTestId("call-status-panel")).toBeNull();
 	});
 
 	it("renders nothing when no session has been published", () => {
 		setActiveCallRoomId("!room:example.com");
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		expect(screen.queryByRole("complementary")).toBeNull();
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		expect(screen.queryByTestId("call-status-panel")).toBeNull();
 	});
 
-	it("renders nothing when the route roomId matches the active call", () => {
-		const fake = track(makeFakeCallSession({ roomId: "!room:example.com" }));
+	it("renders nothing when the published session's roomId does not match activeCallRoomId", () => {
+		const fake = track(makeFakeCallSession({ roomId: "!other:example.com" }));
 		publishCallSession(fake.api);
-		setActiveCallRoomId("!room:example.com");
-		mockParams = { roomId: "!room:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		expect(screen.queryByRole("complementary")).toBeNull();
+		setActiveCallRoomId("!call:example.com");
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		expect(screen.queryByTestId("call-status-panel")).toBeNull();
 	});
 
-	it("renders when the route differs from the call's room", () => {
+	it("renders when call is active and session matches", () => {
 		const fake = track(
 			makeFakeCallSession({
 				roomId: "!call:example.com",
@@ -94,26 +89,41 @@ describe("MiniCallWidget", () => {
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
 		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		expect(screen.getByTestId("call-status-panel")).toBeTruthy();
 		expect(
 			screen.queryByRole("complementary", { name: "Active call in Standup" }),
 		).toBeTruthy();
 	});
 
-	it("Return button navigates to the call's room via pickReturnToCallRoute (home fallback when unknown)", () => {
+	it("still renders when the user is viewing the call's own room (Discord-style always-visible)", () => {
+		const fake = track(
+			makeFakeCallSession({
+				roomId: "!call:example.com",
+				roomName: "Standup",
+			}),
+		);
+		publishCallSession(fake.api);
+		setActiveCallRoomId("!call:example.com");
+		mockParams = { roomId: "!call:example.com" };
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		expect(screen.getByTestId("call-status-panel")).toBeTruthy();
+	});
+
+	it("Return click navigates to the call's room via pickReturnToCallRoute (home fallback)", () => {
 		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
 		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		screen.getByRole("button", { name: "Return to call" }).click();
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		screen.getByRole("button", { name: /Return to call/ }).click();
 		expect(navigateMock).toHaveBeenCalledTimes(1);
 		expect(navigateMock).toHaveBeenCalledWith(
 			`/home/${encodeURIComponent("!call:example.com")}`,
 		);
 	});
 
-	it("Return button uses /space/<spaceId>/<roomId> when the current space lists the call's room as a child", () => {
+	it("Return click uses /space/<spaceId>/<roomId> when the current space lists the call's room", () => {
 		const summaries: SummariesStore = {
 			"!space:example.com": {
 				roomId: "!space:example.com",
@@ -153,58 +163,47 @@ describe("MiniCallWidget", () => {
 			roomId: "!other:example.com",
 			spaceId: "!space:example.com",
 		};
-		render(() => <MiniCallWidget summaries={summaries} />);
-		screen.getByRole("button", { name: "Return to call" }).click();
+		render(() => <CallStatusPanel summaries={summaries} />);
+		screen.getByRole("button", { name: /Return to call/ }).click();
 		const encSpace = encodeURIComponent("!space:example.com");
 		const encRoom = encodeURIComponent("!call:example.com");
 		expect(navigateMock).toHaveBeenCalledWith(`/space/${encSpace}/${encRoom}`);
 	});
 
-	it("Leave button calls session.requestClose", () => {
+	it("Disconnect click calls session.requestClose and does not also navigate", () => {
 		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
 		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		screen.getByRole("button", { name: "Leave call" }).click();
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		screen.getByRole("button", { name: "Disconnect from call" }).click();
 		expect(fake.requestClose).toHaveBeenCalledTimes(1);
+		expect(navigateMock).not.toHaveBeenCalled();
 	});
 
-	it("Leave button is disabled while leaving", () => {
+	it("Disconnect button is disabled while leaving", () => {
 		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
 		fake.setLeaving(true);
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
-		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
 		expect(
-			(screen.getByRole("button", { name: "Leave call" }) as HTMLButtonElement)
-				.disabled,
+			(
+				screen.getByRole("button", {
+					name: "Disconnect from call",
+				}) as HTMLButtonElement
+			).disabled,
 		).toBe(true);
-	});
-
-	it("mic toggle calls toggleUserWantsMic", () => {
-		setUserWantsMic(true);
-		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
-		publishCallSession(fake.api);
-		setActiveCallRoomId("!call:example.com");
-		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		screen.getByRole("button", { name: "Mute microphone" }).click();
-		expect(userWantsMic()).toBe(false);
 	});
 
 	it("aside is inert when an app modal is open", async () => {
 		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
-		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
 		pushAppModal();
 		await flush();
-		const aside = screen.getByRole("complementary", {
-			name: /Active call/,
-		});
+		const aside = screen.getByTestId("call-status-panel");
 		expect((aside as HTMLElement & { inert?: boolean }).inert).toBe(true);
 	});
 
@@ -212,13 +211,10 @@ describe("MiniCallWidget", () => {
 		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
-		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
 		setCryptoDialogOpen(true);
 		await flush();
-		const aside = screen.getByRole("complementary", {
-			name: /Active call/,
-		});
+		const aside = screen.getByTestId("call-status-panel");
 		expect((aside as HTMLElement & { inert?: boolean }).inert).toBe(true);
 	});
 
@@ -226,16 +222,20 @@ describe("MiniCallWidget", () => {
 		const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
-		mockParams = { roomId: "!other:example.com" };
-		render(() => <MiniCallWidget summaries={emptySummaries()} />);
-		const label = screen.getByTestId("mini-call-status");
+		render(() => <CallStatusPanel summaries={emptySummaries()} />);
+		const label = screen.getByTestId("call-status-label");
 		expect(label.textContent).toBe("Not joined");
 		fake.setRtcStatus("joining");
 		await flush();
 		expect(label.textContent).toBe("Connecting…");
 		fake.setRtcStatus("joined");
 		await flush();
-		expect(label.textContent).toBe("Connected");
+		expect(label.textContent).toBe("Voice Connected");
+		fake.setRtcStatus("joined");
+		fake.setRtcError(new Error("boom"));
+		await flush();
+		expect(label.textContent).toBe("Connected (error)");
+		fake.setRtcError(null);
 		fake.setRtcStatus("leaving");
 		await flush();
 		expect(label.textContent).toBe("Leaving…");
