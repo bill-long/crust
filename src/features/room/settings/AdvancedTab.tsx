@@ -17,6 +17,8 @@ interface AdvancedTabProps {
 	client: MatrixClient;
 	roomId: string;
 	onLeft?: (roomId: string) => void;
+	/** When true, label copy uses "space" instead of "room". */
+	isSpace?: boolean;
 }
 
 type JoinRuleValue = JoinRule;
@@ -271,7 +273,7 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 					onClick={() => setShowLeave(true)}
 					class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text"
 				>
-					Leave room
+					{props.isSpace ? "Leave space" : "Leave room"}
 				</button>
 			</section>
 
@@ -281,8 +283,9 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				title={`Leave ${roomName()}?`}
 				body={
 					<p>
-						You'll stop receiving messages in this room. You can rejoin if the
-						room is public or someone re-invites you.
+						{props.isSpace
+							? "You'll be removed from this space. You can rejoin if the space is public or someone re-invites you. Rooms you're a member of inside the space will not be affected."
+							: "You'll stop receiving messages in this room. You can rejoin if the room is public or someone re-invites you."}
 					</p>
 				}
 				confirmLabel="Leave"

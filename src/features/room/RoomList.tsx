@@ -275,7 +275,15 @@ const DiscoverEntry: Component<{
 	);
 };
 
-const RoomList: Component = () => {
+interface RoomListProps {
+	/**
+	 * Called when the user clicks the gear button in the header while
+	 * viewing a space. Receives the space's room ID.
+	 */
+	onOpenSpaceSettings?: (spaceId: string) => void;
+}
+
+const RoomList: Component<RoomListProps> = (props) => {
 	const { client, summaries } = useClient();
 	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
@@ -365,6 +373,32 @@ const RoomList: Component = () => {
 				<span class="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
 					{spaceName()}
 				</span>
+				<Show when={!isHome() && params.spaceId}>
+					{(spaceId) => (
+						<button
+							type="button"
+							onClick={() => props.onOpenSpaceSettings?.(spaceId())}
+							aria-label="Space settings"
+							title="Space settings"
+							class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+						>
+							<svg
+								aria-hidden="true"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<circle cx="12" cy="12" r="3" />
+								<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+							</svg>
+						</button>
+					)}
+				</Show>
 				<button
 					type="button"
 					onClick={openCreate}

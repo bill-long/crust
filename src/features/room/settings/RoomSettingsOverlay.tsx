@@ -34,6 +34,13 @@ interface RoomSettingsOverlayProps {
 	onClose: () => void;
 	/** Called when the Advanced tab finishes a Leave action. */
 	onLeft?: (roomId: string) => void;
+	/**
+	 * Hint from the caller that the target is a space. Used to switch
+	 * labels ("Room Settings" → "Space Settings", etc). When omitted,
+	 * we fall back to `room.isSpaceRoom()` which may report false during
+	 * initial sync before the m.room.create event lands.
+	 */
+	isSpace?: boolean;
 }
 
 const FOCUSABLE =
@@ -107,6 +114,16 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 	const tabTitle = (): string =>
 		roomSettingsTabMeta.find((t) => t.id === props.activeTab)?.label ?? "";
 
+	const isSpace = (): boolean => {
+		if (props.isSpace !== undefined) return props.isSpace;
+		const room = props.client.getRoom(props.roomId);
+		return typeof room?.isSpaceRoom === "function" ? room.isSpaceRoom() : false;
+	};
+
+	const entityNoun = (): "space" | "room" => (isSpace() ? "space" : "room");
+	const sidebarHeading = (): string =>
+		isSpace() ? "Space Settings" : "Room Settings";
+
 	const roomName = (): string => {
 		const room = props.client.getRoom(props.roomId);
 		const name = room?.name?.trim();
@@ -120,7 +137,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 			style={{ zoom: `${100 / userSettings().zoomLevel}` }}
 			role="dialog"
 			aria-modal="true"
-			aria-label={`Room settings — ${roomName()}`}
+			aria-label={`${isSpace() ? "Space" : "Room"} settings — ${roomName()}`}
 			inert={cryptoDialogOpen() || undefined}
 			tabIndex={-1}
 			onKeyDown={handleKeyDown}
@@ -132,7 +149,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 				<nav class="flex w-56 shrink-0 flex-col rounded-l-lg bg-surface-1">
 					<div class="flex-1 overflow-y-auto px-2 pt-6">
 						<div class="mb-2 px-3 text-xs font-semibold uppercase tracking-wide text-text-muted">
-							Room Settings
+							{sidebarHeading()}
 						</div>
 						<div
 							class="mb-3 truncate px-3 text-sm font-medium text-text-primary"
@@ -174,7 +191,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 							type="button"
 							onClick={props.onClose}
 							class="flex items-center gap-2 rounded p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label="Close room settings"
+							aria-label={`Close ${entityNoun()} settings`}
 						>
 							<CloseIcon />
 							<kbd class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-text-disabled">
@@ -199,6 +216,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 									<AdvancedTab
 										client={props.client}
 										roomId={props.roomId}
+										isSpace={isSpace()}
 										onLeft={(rid) => {
 											props.onLeft?.(rid);
 											props.onClose();
