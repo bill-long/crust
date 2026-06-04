@@ -123,6 +123,9 @@ export const ResizableLayout: Component<{
 	roomList: JSX.Element;
 	main: JSX.Element;
 	userBar?: JSX.Element;
+	/** Optional slot rendered immediately above the user bar in the
+	 * sidebar column (e.g. an active-call status panel). */
+	callStatus?: JSX.Element;
 }> = (props) => {
 	const initial = loadWidths();
 	const [spacesWidth, setSpacesWidth] = createSignal(initial.spaces);
@@ -170,6 +173,7 @@ export const ResizableLayout: Component<{
 						{props.roomList}
 					</div>
 				</div>
+				{props.callStatus}
 				{props.userBar}
 			</div>
 			{/* Resize divider between sidebar and main */}

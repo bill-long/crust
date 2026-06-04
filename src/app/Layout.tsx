@@ -30,6 +30,7 @@ import {
 } from "../features/emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallButton } from "../features/room/call/CallButton";
+import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
 import { FullCallOverlay } from "../features/room/call/rtc/FullCallOverlay";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { MemberList } from "../features/room/MemberList";
@@ -707,6 +708,7 @@ const Layout: Component = () => {
 			<ResizableLayout
 				spaces={<SpacesSidebar />}
 				roomList={<RoomList />}
+				callStatus={<CallStatusPanel summaries={summaries} />}
 				userBar={
 					<UserBar
 						displayName={displayName()}

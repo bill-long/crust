@@ -14,12 +14,13 @@ import { createSignal } from "solid-js";
  * unmounts the overlay chrome while the persistent `CallSessionController`
  * (mounted in `PersistentCallSurface` above the per-route `Layout`)
  * keeps the session alive; navigating back re-mounts the overlay
- * against the same live session (no rejoin). The `MiniCallWidget`,
- * also mounted in `PersistentCallSurface`, renders while the user is
- * viewing a different room and exposes a "Return to call" affordance.
+ * against the same live session (no rejoin). The `CallStatusPanel`,
+ * mounted above `UserBar` in the sidebar column, renders whenever a
+ * call is active and exposes a "Return to call" affordance plus a
+ * disconnect button.
  *
  * Single-call invariant: the call surface (`FullCallOverlay` +
- * `MiniCallWidget`) is driven entirely off `activeCallRoomId()`, so
+ * `CallStatusPanel`) is driven entirely off `activeCallRoomId()`, so
  * only one MatrixRTC session can be live at a time. `CallButton`
  * enforces this by refusing to start a new call while one is active
  * in a different room (the user must leave the current call first).

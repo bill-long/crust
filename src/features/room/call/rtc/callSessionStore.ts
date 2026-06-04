@@ -7,7 +7,7 @@ import type { RtcSessionApi } from "./useRtcSession";
  * are constructed. `null` while no call is active (controller unmounted).
  *
  * The controller owns the lifecycle; chrome (`FullCallOverlay`,
- * `MiniCallWidget`) reads from this store to render and routes user
+ * `CallStatusPanel`) reads from this store to render and routes user
  * actions back through it. Keep this surface small — anything not used
  * by chrome should stay internal to the controller.
  */

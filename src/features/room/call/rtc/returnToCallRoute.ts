@@ -2,7 +2,7 @@ import type { SummariesStore } from "../../../../client/summaries";
 
 /**
  * Pick the best app route to navigate to in order to "return" the user
- * to a given call's room. Used by the `MiniCallWidget` when the user
+ * to a given call's room. Used by the `CallStatusPanel` when the user
  * is viewing a different room (or `/settings/*`) and clicks
  * "Return to call".
  *
