@@ -36,14 +36,13 @@ const ReactionKey: Component<{
 				<img
 					src={emote.httpUrl}
 					alt={`:${emote.shortcode}:`}
-					title={`:${emote.shortcode}:`}
 					class="inline h-4 w-4 object-contain"
 				/>
 			);
 		}
 		// Unknown pack
 		return (
-			<span title={props.reactionKey} role="img" aria-label="custom emoji">
+			<span role="img" aria-label="custom emoji">
 				?
 			</span>
 		);
