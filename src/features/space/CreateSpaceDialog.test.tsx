@@ -294,6 +294,47 @@ describe("CreateSpaceDialog", () => {
 		});
 	});
 
+	it("ignores a stale upload when the next file is rejected by validation", async () => {
+		const { client } = setup();
+		let resolveFirst!: (v: { content_uri: string }) => void;
+		(client.uploadContent as ReturnType<typeof vi.fn>).mockImplementationOnce(
+			() =>
+				new Promise<{ content_uri: string }>((res) => {
+					resolveFirst = res;
+				}),
+		);
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		Object.defineProperty(fileInput, "files", {
+			value: [makeImageFile("first.png")],
+			configurable: true,
+		});
+		fireEvent.change(fileInput);
+		await flush();
+		// Pick a non-image — uploadAvatar must bump generation BEFORE validating
+		// so the in-flight upload's resolution is dropped.
+		Object.defineProperty(fileInput, "files", {
+			value: [new File(["x"], "x.txt", { type: "text/plain" })],
+			configurable: true,
+		});
+		fireEvent.change(fileInput);
+		await flush();
+		resolveFirst({ content_uri: "mxc://example.com/stale" });
+		await flush();
+		await flush();
+		fireEvent.input(screen.getByLabelText(/^Name$/i), {
+			target: { value: "S" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+		await flush();
+		await flush();
+		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
+			.calls[0][0] as Record<string, unknown>;
+		const initial = opts.initial_state as Array<{ type: string }>;
+		expect(initial.find((e) => e.type === "m.room.avatar")).toBeUndefined();
+	});
+
 	it("parses invite MXIDs and includes them in invite[]", async () => {
 		const { client } = setup();
 		fireEvent.input(screen.getByLabelText(/^Name$/i), {

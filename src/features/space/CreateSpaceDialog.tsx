@@ -194,15 +194,21 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 	};
 
 	async function uploadAvatar(file: File): Promise<void> {
+		// Bump generation BEFORE validation so a previous in-flight upload's
+		// resolution is dropped even when the new selection is rejected
+		// (non-image / too large). Otherwise the stale upload would still
+		// repopulate avatarMxc after the user's latest pick was discarded.
+		const myGen = ++uploadGeneration;
 		if (!file.type.startsWith("image/")) {
 			setAvatarError("File must be an image");
+			setAvatarUploading(false);
 			return;
 		}
 		if (file.size > MAX_AVATAR_BYTES) {
 			setAvatarError("Image must be under 10 MB");
+			setAvatarUploading(false);
 			return;
 		}
-		const myGen = ++uploadGeneration;
 		setAvatarError(null);
 		setAvatarUploading(true);
 		try {

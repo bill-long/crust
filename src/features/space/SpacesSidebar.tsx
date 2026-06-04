@@ -148,7 +148,7 @@ const SpacesSidebar: Component = () => {
 					<button
 						type="button"
 						onClick={() => setCreateOpen(true)}
-						class="peer flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-3 text-success transition-all hover:rounded-xl hover:bg-success hover:text-accent-foreground"
+						class="peer flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-3 text-success-text transition-all hover:rounded-xl hover:bg-success hover:text-accent-foreground"
 						title="Create space"
 						aria-label="Create space"
 					>
