@@ -130,9 +130,16 @@ describe("msUntilNextLocalMidnight", () => {
 		expect(msUntilNextLocalMidnight(noon)).toBe(nextMidnight - noon);
 	});
 
-	it("returns 24h when called at the start of a local day", () => {
+	it("returns the full local-day length when called at the start of a local day", () => {
+		// Compute the expected gap from the next-day constructor rather than
+		// hardcoding 24h: on DST transition days a local day can be 23h or
+		// 25h long, and the implementation deliberately follows local-calendar
+		// boundaries.
 		const startOfDay = new Date(2026, 4, 25, 0, 0, 0, 0).getTime();
-		expect(msUntilNextLocalMidnight(startOfDay)).toBe(24 * 60 * 60 * 1000);
+		const nextMidnight = new Date(2026, 4, 26, 0, 0, 0, 0).getTime();
+		expect(msUntilNextLocalMidnight(startOfDay)).toBe(
+			nextMidnight - startOfDay,
+		);
 	});
 
 	it("always returns a strictly positive value", () => {

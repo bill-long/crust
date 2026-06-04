@@ -109,14 +109,18 @@ export function msUntilNextLocalMidnight(from: number = Date.now()): number {
 export function useDayTick(): () => number {
 	const [now, setNow] = createSignal(Date.now());
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let disposed = false;
 	const schedule = (): void => {
+		if (disposed) return;
 		timer = setTimeout(() => {
+			if (disposed) return;
 			setNow(Date.now());
 			schedule();
 		}, msUntilNextLocalMidnight());
 	};
 	schedule();
 	onCleanup(() => {
+		disposed = true;
 		if (timer !== undefined) clearTimeout(timer);
 	});
 	return now;
