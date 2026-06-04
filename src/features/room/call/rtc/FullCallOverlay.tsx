@@ -137,10 +137,7 @@ export const FullCallOverlay: Component = () => {
 								class="inline-block h-2 w-2 shrink-0 rounded-full bg-success"
 							/>
 							<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
-								Native call · {s().roomName()}
-							</span>
-							<span class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-disabled">
-								Dev preview
+								{s().roomName()}
 							</span>
 						</div>
 						<button
@@ -435,11 +432,6 @@ export const FullCallOverlay: Component = () => {
 								</div>
 							</Show>
 						</div>
-
-						<p class="text-xs text-text-disabled">
-							Native call (Phase 4 preview): audio + video, encrypted rooms
-							supported. See issue #122 for the multi-phase plan.
-						</p>
 					</div>
 				</section>
 			)}
