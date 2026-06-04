@@ -44,4 +44,17 @@ describe("formatReactors", () => {
 			"Alice, Bob, and 5 others reacted with :heart:",
 		);
 	});
+
+	it("strips ASCII control characters from the label", () => {
+		expect(formatReactors(s(1), "\u0000\u0007\u001b\u007f🎉\r\n")).toBe(
+			"Alice reacted with 🎉",
+		);
+	});
+
+	it("falls back to a placeholder when the label is empty after sanitization", () => {
+		expect(formatReactors(s(1), "\u0000\u001f\u007f   ")).toBe(
+			"Alice reacted with this reaction",
+		);
+		expect(formatReactors(s(1), "")).toBe("Alice reacted with this reaction");
+	});
 });

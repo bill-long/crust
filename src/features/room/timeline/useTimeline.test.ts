@@ -2527,9 +2527,7 @@ describe("useTimeline", () => {
 		const timelineSet = roomA.getUnfilteredTimelineSet();
 		timelineSet.relations = {
 			getChildEventsForEvent: (_eventId: string) => ({
-				getSortedAnnotationsByKey: () => [
-					["🎯", new Set([r1, r2, r3])],
-				],
+				getSortedAnnotationsByKey: () => [["🎯", new Set([r1, r2, r3])]],
 			}),
 		} as unknown as typeof timelineSet.relations;
 
