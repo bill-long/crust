@@ -10,6 +10,7 @@ import {
 	extractUrlsFromText,
 } from "../urlPreviews/extractUrls";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
+import { formatFullDateTime } from "./dateFormatting";
 import { formatReactors } from "./reactionFormatting";
 import type { TimelineEvent } from "./useTimeline";
 
@@ -341,6 +342,9 @@ const TimelineItem: Component<{
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
 	);
+	const fullDateTime = createMemo(() =>
+		formatFullDateTime(ev.timestamp, userSettings().timeFormat),
+	);
 	const isFailed = createMemo(() => ev.status === EventStatus.NOT_SENT);
 	const isPending = createMemo(
 		() =>
@@ -469,6 +473,7 @@ const TimelineItem: Component<{
 					<div class="flex w-8 shrink-0 items-start justify-center">
 						<span
 							class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+							title={fullDateTime()}
 							aria-hidden="true"
 						>
 							{formattedTime()}
@@ -496,7 +501,9 @@ const TimelineItem: Component<{
 						<span class="text-sm font-semibold text-text-emphasis">
 							{ev.senderName.trim() || "Unknown"}
 						</span>
-						<span class="text-xs text-text-faint">{formattedTime()}</span>
+						<span class="text-xs text-text-faint" title={fullDateTime()}>
+							{formattedTime()}
+						</span>
 						<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
 							<span
 								class="text-xs text-success-hover"
