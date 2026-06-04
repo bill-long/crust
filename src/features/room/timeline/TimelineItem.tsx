@@ -828,7 +828,7 @@ const TimelineItem: Component<{
 				    row of small circles. Cap is intentionally small (5);
 				    the chip's aria-label exposes the remaining names. */}
 				<Show when={props.readReceipts && props.readReceipts.length > 0}>
-					<div class="mt-0.5 flex gap-0.5">
+					<div class="mt-1.5 flex gap-0.5">
 						<For each={receiptDisplay().visible}>
 							{(receipt) => (
 								<div
