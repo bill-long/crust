@@ -666,6 +666,29 @@ export function useTimeline(
 				}
 
 				rebuildEventsFromWindow(room);
+
+				// Just-joined / sparse-initial-sync recovery: the SDK's live
+				// timeline can contain only non-displayable events (e.g. the
+				// user's own `m.room.member` join event after `client.joinRoom()`
+				// when the homeserver returns `timeline.limited` with no
+				// message events). The window has no displayable content but
+				// `canPaginate(Backward)` is true because a `prev_batch` token
+				// is set. Without this, the user sees an empty timeline until
+				// they manually scroll up or refresh the browser. Auto-backfill
+				// a small number of pages so recent history shows up.
+				//
+				// Keep `loading()` true and skip publishing `canLoadOlder` while
+				// the backfill runs so the view doesn't render an empty state
+				// and so its scroll-driven auto-pagination doesn't fire
+				// concurrently. The non-live `onTimelineEvent` reload path is
+				// suppressed by setting `backfillReloadAttempted = true` — the
+				// reload it would trigger is exactly what we're doing here.
+				if (events.length === 0 && tw.canPaginate(Direction.Backward)) {
+					backfillReloadAttempted = true;
+					void runInitialBackfill(rid, gen, tw, room);
+					return;
+				}
+
 				// Set canLoadOlder before loading=false so dependents never
 				// observe the transient state (loading=false, canLoadOlder=false,
 				// events>0)
@@ -682,8 +705,53 @@ export function useTimeline(
 	}
 
 	const PAGINATION_SIZE = 50;
+	/**
+	 * Outer cap on the just-joined / sparse-sync auto-backfill loop.
+	 * Each iteration calls `tw.paginate(Direction.Backward, PAGINATION_SIZE, true, 1)`
+	 * which bounds the SDK to at most one /messages request per round.
+	 * Three rounds is enough to surface real history past a tail of
+	 * member/state churn without hammering the server when the room
+	 * genuinely has no displayable history past the join point.
+	 */
+	const INITIAL_BACKFILL_MAX_ROUNDS = 3;
 	let paginationRoomId: string | null = null;
 	let paginationNewerRoomId: string | null = null;
+
+	/**
+	 * Auto-backfill driven by `loadRoom` when the initial window contains
+	 * no displayable events but `canPaginate(Backward)` is true. Owns the
+	 * `loading` / `canLoadOlder` finalization for that path so the view
+	 * stays in its "initial load" visual state until we've either found
+	 * displayable history or exhausted the cap.
+	 */
+	async function runInitialBackfill(
+		rid: string,
+		gen: number,
+		tw: TimelineWindow,
+		room: Room,
+	): Promise<void> {
+		try {
+			for (let i = 0; i < INITIAL_BACKFILL_MAX_ROUNDS; i++) {
+				if (gen !== roomGeneration) return;
+				if (!tw.canPaginate(Direction.Backward)) break;
+				// requestLimit=1: cap the SDK's internal /messages recursion
+				// per outer round so our INITIAL_BACKFILL_MAX_ROUNDS cap
+				// actually bounds the number of network requests.
+				await tw.paginate(Direction.Backward, PAGINATION_SIZE, true, 1);
+				if (gen !== roomGeneration) return;
+				rebuildEventsFromWindow(room);
+				if (events.length > 0) break;
+			}
+		} catch {
+			// Best-effort: the user can still scroll up to retry.
+		} finally {
+			if (gen === roomGeneration && currentRoomId === rid) {
+				setCanLoadOlder(tw.canPaginate(Direction.Backward));
+				setLoadingOlder(false);
+				setLoading(false);
+			}
+		}
+	}
 
 	async function loadOlderMessages(): Promise<void> {
 		if (
