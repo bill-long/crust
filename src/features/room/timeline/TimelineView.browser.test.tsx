@@ -386,9 +386,18 @@ describe("TimelineView (browser)", () => {
 		harness.appendEvents(roomId, [
 			mkEvent("$post-arrow-up", "after arrow up", 1700000999999),
 		]);
-		await wait(150);
-		const distAfter = distFromBottom(scroller);
-		expect(distAfter).toBeGreaterThan(distBefore + 5);
+		// Poll until Virtua renders and measures the new row (scrollHeight
+		// grows by the row's height). This proves the row is in the DOM and
+		// that the bottom-pin / re-anchor RO did not snap us back — if
+		// wantsBottom were still true, the snap would have driven the value
+		// below 2. Replaces a fixed 150ms sleep that raced Virtua's async
+		// render under CI load (issue #131).
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeGreaterThan(distBefore + 5);
+		// Brief stability wait to catch any late snap.
+		await wait(100);
+		expect(distFromBottom(scroller)).toBeGreaterThan(distBefore + 5);
 		m.unmount();
 	});
 
@@ -411,11 +420,17 @@ describe("TimelineView (browser)", () => {
 		);
 		await frame();
 		// Confirm the intent is cleared by appending and observing
-		// no-snap behaviour.
+		// no-snap behaviour. Poll until Virtua renders and measures the
+		// new row (scrollHeight grows), then re-assert after a stability
+		// window. Replaces a fixed 100ms sleep that raced Virtua's async
+		// render under CI load (issue #131).
 		const beforeArm = distFromBottom(scroller);
 		harness.appendEvents(roomId, [
 			mkEvent("$pre-rearm", "before rearm", 1700000999000),
 		]);
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeGreaterThan(beforeArm + 5);
 		await wait(100);
 		expect(distFromBottom(scroller)).toBeGreaterThan(beforeArm + 5);
 		// Now wheel-down within 50px of the bottom to re-arm.
