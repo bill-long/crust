@@ -223,10 +223,19 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 	// user simply dismissed before joining.
 	let everJoined = false;
 
-	const confirmLeave = async (): Promise<void> => {
-		// Single-flight: a second click on "Leave" while the first call
-		// is still awaiting must not re-enter.
-		if (leaving()) return;
+	// Awaitable single-flight: every concurrent caller awaits the same
+	// in-flight leave promise. Without this, a second `confirmLeave()`
+	// call while one is already in flight (e.g. the ConfirmDialog
+	// confirm fires while `switchCall` is also awaiting `requestLeave`)
+	// would resolve immediately and let the caller misinterpret the
+	// premature return as "leave succeeded". The eventual real
+	// completion of the original leave would then run
+	// `setActiveCallRoomId(null)` and clobber any room id the caller
+	// had set in the meantime (PR B-2c regression scenario: switch A→B
+	// while A is already mid-leave would land at `null`, not B).
+	let leavePromise: Promise<void> | null = null;
+
+	const runLeave = async (): Promise<void> => {
 		setLeaveError(null);
 		// Flip `leaving` BEFORE any await so the LiveKit effect's disable
 		// branch fires synchronously (epoch-gated teardown) and the
@@ -260,6 +269,14 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 		} finally {
 			setLeaving(false);
 		}
+	};
+
+	const confirmLeave = (): Promise<void> => {
+		if (leavePromise) return leavePromise;
+		leavePromise = runLeave().finally(() => {
+			leavePromise = null;
+		});
+		return leavePromise;
 	};
 
 	const requestClose = (): void => {
