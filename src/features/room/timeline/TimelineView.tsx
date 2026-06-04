@@ -40,10 +40,17 @@ function shouldShowHeader(
 	events: readonly TimelineEvent[],
 	index: number,
 ): boolean {
+	const curr = events[index];
+	if (!curr) return true;
+	// State notices render as a compact one-liner without an avatar or
+	// header — and a regular message immediately after a notice should
+	// always show its own header so the grouping doesn't span the
+	// notice.
+	if (curr.stateNotice) return false;
 	if (index === 0) return true;
 	const prev = events[index - 1];
-	const curr = events[index];
-	if (!prev || !curr) return true;
+	if (!prev) return true;
+	if (prev.stateNotice) return true;
 	if (prev.senderId !== curr.senderId) return true;
 	if (curr.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS) return true;
 	// Break group on day boundary so the date separator can land cleanly
@@ -248,9 +255,15 @@ const TimelineView: Component<{
 		const room = client.getRoom(props.roomId);
 		if (!room) return map;
 
-		// Build a set of displayable event IDs for quick lookup
+		// Build a set of displayable event IDs for quick lookup.
+		// State-notice events (joins/leaves/name changes) are excluded so
+		// receipts targeting them fall through to the nearest prior
+		// message via the walk-backwards path below — otherwise the
+		// "read by …" avatars would intermittently disappear whenever
+		// membership churns.
 		const displayableIds = new Set<string>();
 		for (const ev of events) {
+			if (ev.stateNotice) continue;
 			displayableIds.add(ev.eventId);
 		}
 

@@ -14,6 +14,8 @@ import {
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { extractGifUrl } from "../../gif/gifUrl";
+import type { StateNotice } from "./stateNotice";
+import { buildStateNotice, isStateNoticeType } from "./stateNotice";
 
 /**
  * Aggregated reaction data for a single key on a single message.
@@ -91,6 +93,16 @@ export interface TimelineEvent {
 	 *   before render but kept here for completeness.
 	 */
 	status: EventStatus | null;
+	/**
+	 * Derived, pre-rendered text for non-message state events
+	 * (m.room.member joins/leaves/profile changes, room.name / topic /
+	 * avatar / encryption / canonical_alias / tombstone). Null for
+	 * regular messages. When non-null, `TimelineItem` renders a
+	 * compact one-line notice instead of the standard message bubble
+	 * and skips avatars, headers, hover toolbars, reactions, and
+	 * read-receipt rows.
+	 */
+	stateNotice: StateNotice | null;
 }
 
 // Reject any ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F).
@@ -310,6 +322,14 @@ function eventToTimelineEvent(
 	// replacements do.
 	const isEdited = !!replacementId && !replacementFailed;
 
+	// Pre-compute the one-line notice for state events (joins, name
+	// changes, etc.). Null for regular messages and for state events
+	// that carry no user-visible change (e.g. join->join with the
+	// same display name and avatar).
+	const stateNotice = isStateNoticeType(event.getType())
+		? buildStateNotice(event, room)
+		: null;
+
 	return {
 		eventId: event.getId() ?? "",
 		senderId: sender,
@@ -337,21 +357,31 @@ function eventToTimelineEvent(
 		reactions,
 		myReactions,
 		status: event.status ?? null,
+		stateNotice,
 	};
 }
 
-function isDisplayable(event: MatrixEvent): boolean {
+function isDisplayable(event: MatrixEvent, room: Room): boolean {
 	const type = event.getType();
+	const isStateNotice = isStateNoticeType(type);
 	if (
 		type !== "m.room.message" &&
 		type !== "m.room.encrypted" &&
-		type !== "m.sticker"
+		type !== "m.sticker" &&
+		!isStateNotice
 	) {
 		return false;
 	}
 	// Filter out message edits (m.replace) — they update existing events
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// State notices are displayable only when they produce a non-null
+	// notice (filters out no-op transitions like join->join with no
+	// profile change). This keeps the invariant that every displayable
+	// state event has a renderable text.
+	if (isStateNotice) {
+		return buildStateNotice(event, room) !== null;
+	}
 	// Locally-redacted-pending events: matrix-js-sdk's `markLocallyRedacted`
 	// sets `unsigned.redacted_because` so `isRedacted()` is already true
 	// and `getContent()` / `getOriginalContent()` both return `{}` the
@@ -578,7 +608,7 @@ export function useTimeline(
 		if (!currentTimelineWindow) return;
 		const matrixEvents = currentTimelineWindow.getEvents();
 		const displayable = matrixEvents
-			.filter((e) => isDisplayable(e) && e.getId())
+			.filter((e) => isDisplayable(e, room) && e.getId())
 			.map((e) => eventToTimelineEvent(e, room, client));
 		setEvents(reconcile(displayable, { key: "eventId", merge: false }));
 	}
@@ -961,7 +991,7 @@ export function useTimeline(
 				if (idx >= 0) {
 					const sourceEvent = findWindowEvent(redactedId);
 					if (sourceEvent) {
-						if (isDisplayable(sourceEvent)) {
+						if (isDisplayable(sourceEvent, room)) {
 							draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
 						} else {
 							draft.splice(idx, 1);
@@ -1062,7 +1092,7 @@ export function useTimeline(
 						setEvents(
 							produce((draft) => {
 								const idx = draft.findIndex((e) => e.eventId === redactedId);
-								if (idx >= 0 && isDisplayable(targetEvent)) {
+								if (idx >= 0 && isDisplayable(targetEvent, eventRoom)) {
 									draft[idx] = eventToTimelineEvent(
 										targetEvent,
 										eventRoom,
@@ -1179,7 +1209,7 @@ export function useTimeline(
 			return;
 		}
 
-		if (!isDisplayable(event)) {
+		if (!isDisplayable(event, room)) {
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {
@@ -1238,7 +1268,7 @@ export function useTimeline(
 		// redactions, and edits were initially appended as m.room.encrypted
 		// placeholders and must now be reclassified.
 		// Decryption failures always update in place (SDK sets synthetic content).
-		if (!event.isDecryptionFailure() && !isDisplayable(event)) {
+		if (!event.isDecryptionFailure() && !isDisplayable(event, room)) {
 			const decryptedType = event.getType();
 
 			setEvents(

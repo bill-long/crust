@@ -40,6 +40,18 @@ export interface MockEvent {
 	localRedaction?: MockEvent;
 	/** True once the redaction is server-confirmed (sets `unsigned.redacted_because`). */
 	redacted?: boolean;
+	/**
+	 * State key for state events (e.g. the affected mxid for
+	 * `m.room.member`). Exposed via `getStateKey()` on the wrapped
+	 * event so the timeline can derive notice text.
+	 */
+	stateKey?: string;
+	/**
+	 * Prior state-event content, exposed via `getPrevContent()`.
+	 * Used by the state-notice helper to derive transition text
+	 * (leave→join, etc.).
+	 */
+	prevContent?: Record<string, unknown>;
 }
 
 export function createMatrixEvent(evt: MockEvent) {
@@ -100,6 +112,8 @@ export function createMatrixEvent(evt: MockEvent) {
 		replacingEvent: () =>
 			evt.replacingEvent ? createMatrixEvent(evt.replacingEvent) : null,
 		event: { redacts: evt.redacts },
+		getStateKey: () => evt.stateKey,
+		getPrevContent: () => evt.prevContent ?? {},
 		get status() {
 			return status;
 		},

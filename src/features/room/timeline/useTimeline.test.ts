@@ -235,6 +235,63 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("includes state events as state-notice timeline items", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+			{
+				eventId: "$2",
+				roomId: "!roomA:test",
+				sender: "@bob:test",
+				type: "m.room.member",
+				stateKey: "@bob:test",
+				content: { membership: "join", displayname: "Bob" },
+				prevContent: {},
+				ts: 2000,
+			},
+			{
+				eventId: "$3",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.name",
+				stateKey: "",
+				content: { name: "New Title" },
+				prevContent: { name: "Old Title" },
+				ts: 3000,
+			},
+			// No-op state write — must be filtered out, not rendered.
+			{
+				eventId: "$4",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.topic",
+				stateKey: "",
+				content: { topic: "same" },
+				prevContent: { topic: "same" },
+				ts: 4000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			// hello + join + name change. The no-op topic write is filtered.
+			expect(events.length).toBe(3);
+			expect(events[0].body).toBe("hello");
+			expect(events[0].stateNotice).toBe(null);
+			expect(events[1].stateNotice?.text).toBe("Bob joined the room");
+			expect(events[2].stateNotice?.text).toBe(
+				'@alice:test changed the room name to "New Title"',
+			);
+		});
+	});
+
 	it("includes encrypted events as displayable", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			encryptedMessage("!roomA:test", "$1", "@alice:test", 1000, true),
