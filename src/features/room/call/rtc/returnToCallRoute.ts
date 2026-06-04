@@ -11,7 +11,16 @@ import type { SummariesStore } from "../../../../client/summaries";
  *   2. Otherwise, if the user is currently viewing a space whose
  *      direct children include the call's room → preserve that
  *      space context: `/space/<spaceId>/<roomId>`.
- *   3. Otherwise → `/home/<roomId>`.
+ *   3. Otherwise, if some OTHER known space lists the call's room as
+ *      a direct child → `/space/<thatSpaceId>/<roomId>`. When several
+ *      spaces qualify, pick the lexicographically-smallest space id so
+ *      the choice is deterministic across reloads. Matrix does not
+ *      currently expose a "primary parent" through `summaries` (the
+ *      `m.space.parent` canonical bit is not surfaced), so an
+ *      arbitrary-but-stable choice is the best we can do until that
+ *      metadata is added.
+ *   4. Otherwise → `/home/<roomId>` (true orphan, or a kicked / not-
+ *      yet-hydrated summary).
  *
  * Hard invariant: NEVER produce `/space/X/Y` unless `Y` is a direct
  * child of `X` in the summaries store. A user navigating between
@@ -46,6 +55,25 @@ export function pickReturnToCallRoute(
 		if (space?.isSpace && space.children.includes(callRoomId)) {
 			return `/space/${encodeURIComponent(currentSpaceId)}/${encodedRoom}`;
 		}
+	}
+	// Walk all known spaces looking for one that contains the call room
+	// as a direct child. This is what makes "Return" work when the user
+	// is in space B but the call is in space A — the previous behavior
+	// fell back to /home and silently dropped the call's space context.
+	// Determinism: sort the candidate ids so the same call always
+	// resolves to the same space across reloads / re-renders.
+	const candidates: string[] = [];
+	for (const id in summaries) {
+		if (!Object.hasOwn(summaries, id)) continue;
+		if (id === currentSpaceId) continue; // already considered above
+		const s = summaries[id];
+		if (s.isSpace && s.children.includes(callRoomId)) {
+			candidates.push(id);
+		}
+	}
+	if (candidates.length > 0) {
+		candidates.sort();
+		return `/space/${encodeURIComponent(candidates[0])}/${encodedRoom}`;
 	}
 	return `/home/${encodedRoom}`;
 }
