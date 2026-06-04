@@ -716,4 +716,75 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 
 		store.cleanup();
 	});
+
+	it("creates a space stub when isSpace=true is passed", () => {
+		const store = makeStore();
+		store.optimisticallyMarkJoined("!space:x", {
+			name: "My Space",
+			avatarUrl: null,
+			isSpace: true,
+		});
+
+		expect(store.summaries["!space:x"].isSpace).toBe(true);
+
+		store.cleanup();
+	});
+
+	it("promotes an existing non-space entry to isSpace=true when isSpace=true is passed", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			roomId: "!r:x",
+			name: "Stale name",
+			avatarUrl: null,
+			lastMessage: null,
+			unreadCount: 0,
+			highlightCount: 0,
+			membership: "leave",
+			isEncrypted: false,
+			isDirect: false,
+			isSpace: false,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkJoined("!r:x", {
+			name: "ignored",
+			avatarUrl: null,
+			isSpace: true,
+		});
+
+		expect(store.summaries["!r:x"].isSpace).toBe(true);
+		expect(store.summaries["!r:x"].membership).toBe("join");
+
+		store.cleanup();
+	});
+
+	it("does not flip isSpace=true to false when isSpace is omitted or false", () => {
+		const store = makeStore();
+		store.setSummaries("!s:x", {
+			roomId: "!s:x",
+			name: "A Space",
+			avatarUrl: null,
+			lastMessage: null,
+			unreadCount: 0,
+			highlightCount: 0,
+			membership: "leave",
+			isEncrypted: false,
+			isDirect: false,
+			isSpace: true,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkJoined("!s:x", {
+			name: "ignored",
+			avatarUrl: null,
+		});
+
+		expect(store.summaries["!s:x"].isSpace).toBe(true);
+
+		store.cleanup();
+	});
 });

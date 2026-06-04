@@ -305,6 +305,13 @@ function buildLastMessage(event: MatrixEvent): RoomSummary["lastMessage"] {
 export interface OptimisticJoinInfo {
 	name: string;
 	avatarUrl: string | null;
+	/**
+	 * Marks the new entry as a space. Used when the user just created a
+	 * room with `creation_content.type === "m.space"` so it appears in
+	 * `SpacesSidebar` before /sync delivers the authoritative
+	 * `m.room.create` state event.
+	 */
+	isSpace?: boolean;
 }
 
 export function createSummariesStore(client: MatrixClient): {
@@ -388,6 +395,14 @@ export function createSummariesStore(client: MatrixClient): {
 		if (existing?.membership === "join") return;
 		if (existing) {
 			setSummaries(roomId, "membership", "join");
+			// Only ever flip isSpace true, never false: the existing entry's
+			// isSpace was set from authoritative state and must be trusted
+			// for the false case (the caller may not know the truth for
+			// previously-seen rooms). The true case is safe to promote when
+			// the caller knows for certain (e.g. just created a space).
+			if (info.isSpace === true && existing.isSpace !== true) {
+				setSummaries(roomId, "isSpace", true);
+			}
 			return;
 		}
 		setSummaries(
@@ -402,7 +417,7 @@ export function createSummariesStore(client: MatrixClient): {
 					membership: "join",
 					isEncrypted: false,
 					isDirect: false,
-					isSpace: false,
+					isSpace: info.isSpace === true,
 					kind: "text",
 					callActive: false,
 					children: [],
