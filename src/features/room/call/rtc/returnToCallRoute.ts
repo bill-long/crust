@@ -23,10 +23,11 @@ import type { SummariesStore } from "../../../../client/summaries";
  *      yet-hydrated summary).
  *
  * Hard invariant: NEVER produce `/space/X/Y` unless `Y` is a direct
- * child of `X` in the summaries store. A user navigating between
- * spaces should never be flipped into a space they were not already
- * in, and we must never construct a path that the route guard /
- * sidebar would treat as inconsistent. When in doubt the helper
+ * child of `X` in the summaries store (and `X` is a space the user is
+ * currently joined to). Rule #3 may flip the user into a different
+ * space than they were viewing, but only ever a space that genuinely
+ * contains the call room — the route guard and sidebar would otherwise
+ * treat the destination as inconsistent. When in doubt the helper
  * falls back to `/home/...`.
  *
  * Pure function — does no signal reads of its own so it is safe to
