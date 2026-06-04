@@ -927,6 +927,257 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("auto-backfills when initial window has no displayable events but can paginate", async () => {
+		// Simulates the just-joined / sparse-sync case: the live timeline
+		// contains only the user's own m.room.member join event (non-
+		// displayable), and the server set a backward pagination token.
+		// Without auto-backfill, the user sees an empty timeline until they
+		// manually scroll up or refresh the browser (bug repro: leave a
+		// channel, rejoin, click in — empty).
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$join",
+				roomId: "!roomA:test",
+				sender: "@test:example.com",
+				type: "m.room.member",
+				content: { membership: "join" },
+				ts: 1000,
+			},
+		]);
+		roomA.getLiveTimeline().getPaginationToken = () => "token-1";
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		// First paginateEventTimeline call appends a displayable message,
+		// then nulls the backward token. Returning false signals "no more".
+		client.paginateEventTimeline = vi.fn().mockImplementation(async () => {
+			const room = client.getRoom("!roomA:test");
+			if (room) {
+				const timeline = room.getLiveTimeline();
+				const olderEvent = {
+					getId: () => "$older",
+					getRoomId: () => "!roomA:test",
+					getSender: () => "@alice:test",
+					getType: () => "m.room.message",
+					getContent: () => ({ msgtype: "m.text", body: "older msg" }),
+					getTs: () => 500,
+					isEncrypted: () => false,
+					isDecryptionFailure: () => false,
+					replacingEventId: () => null,
+					event: { redacts: undefined },
+				};
+				timeline.__prepend(
+					olderEvent as unknown as Parameters<typeof timeline.__prepend>[0],
+				);
+				timeline.getPaginationToken = () => null;
+			}
+			return false;
+		});
+
+		await withRoot(async () => {
+			const { events, loading, canLoadOlder } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			// Auto-backfill kicked in and surfaced the older message.
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("older msg");
+			expect(loading()).toBe(false);
+			expect(canLoadOlder()).toBe(false);
+			expect(client.paginateEventTimeline).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	it("auto-backfill caps the number of paginate rounds", async () => {
+		// Pagination keeps returning non-displayable events (more member
+		// churn) so the loop never finds anything displayable. The cap
+		// must bound the number of /messages calls.
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$join",
+				roomId: "!roomA:test",
+				sender: "@test:example.com",
+				type: "m.room.member",
+				content: { membership: "join" },
+				ts: 1000,
+			},
+		]);
+		roomA.getLiveTimeline().getPaginationToken = () => "token-1";
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		let callIdx = 0;
+		client.paginateEventTimeline = vi.fn().mockImplementation(async () => {
+			callIdx++;
+			const room = client.getRoom("!roomA:test");
+			if (room) {
+				const timeline = room.getLiveTimeline();
+				const memberEvent = {
+					getId: () => `$mem${callIdx}`,
+					getRoomId: () => "!roomA:test",
+					getSender: () => "@alice:test",
+					getType: () => "m.room.member",
+					getContent: () => ({ membership: "join" }),
+					getTs: () => 500 - callIdx,
+					isEncrypted: () => false,
+					isDecryptionFailure: () => false,
+					replacingEventId: () => null,
+					event: { redacts: undefined },
+				};
+				timeline.__prepend(
+					memberEvent as unknown as Parameters<typeof timeline.__prepend>[0],
+				);
+				// Keep the token non-null so canPaginate stays true.
+			}
+			return true;
+		});
+
+		await withRoot(async () => {
+			const { events, loading, canLoadOlder } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(0);
+			expect(loading()).toBe(false);
+			// Capped at the INITIAL_BACKFILL_MAX_ROUNDS internal constant (3).
+			expect(client.paginateEventTimeline).toHaveBeenCalledTimes(3);
+			// canLoadOlder remains true so the user can scroll to keep going.
+			expect(canLoadOlder()).toBe(true);
+		});
+	});
+
+	it("auto-backfill is skipped when initial window already has displayable events", async () => {
+		// Sanity: rooms that already have visible content must not trigger
+		// any background pagination on initial load.
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+		]);
+		roomA.getLiveTimeline().getPaginationToken = () => "token-1";
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+		client.paginateEventTimeline = vi.fn().mockResolvedValue(false);
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(1);
+			expect(client.paginateEventTimeline).not.toHaveBeenCalled();
+		});
+	});
+
+	it("auto-backfill is skipped when there is no backward pagination token", async () => {
+		// Without a prev_batch token, canPaginate(Backward) is false — the
+		// timeline genuinely has no more history, so no auto-backfill.
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$join",
+				roomId: "!roomA:test",
+				sender: "@test:example.com",
+				type: "m.room.member",
+				content: { membership: "join" },
+				ts: 1000,
+			},
+		]);
+		// No pagination token set; default returns null.
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+		client.paginateEventTimeline = vi.fn().mockResolvedValue(false);
+
+		await withRoot(async () => {
+			const { events, loading } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+			expect(events.length).toBe(0);
+			expect(loading()).toBe(false);
+			expect(client.paginateEventTimeline).not.toHaveBeenCalled();
+		});
+	});
+
+	it("auto-backfill is discarded when the room changes mid-flight", async () => {
+		// A→B switch during the in-flight backfill must not leak room A's
+		// state into room B's view.
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$joinA",
+				roomId: "!roomA:test",
+				sender: "@test:example.com",
+				type: "m.room.member",
+				content: { membership: "join" },
+				ts: 1000,
+			},
+		]);
+		roomA.getLiveTimeline().getPaginationToken = () => "token-a";
+		const roomB = createMockRoom("!roomB:test", [
+			textMessage("!roomB:test", "$b1", "@bob:test", "room B msg", 2000),
+		]);
+
+		const client = createMockClient(
+			new Map([
+				["!roomA:test", roomA],
+				["!roomB:test", roomB],
+			]),
+		);
+
+		let resolveA!: (value: boolean) => void;
+		client.paginateEventTimeline = vi.fn().mockImplementation(
+			() =>
+				new Promise<boolean>((resolve) => {
+					resolveA = (val: boolean) => {
+						// When eventually resolved, the rebuild of room A's
+						// window must not poison room B's events store.
+						const t = roomA.getLiveTimeline();
+						const olderEvent = {
+							getId: () => "$olderA",
+							getRoomId: () => "!roomA:test",
+							getSender: () => "@alice:test",
+							getType: () => "m.room.message",
+							getContent: () => ({ msgtype: "m.text", body: "leaked from A" }),
+							getTs: () => 500,
+							isEncrypted: () => false,
+							isDecryptionFailure: () => false,
+							replacingEventId: () => null,
+							event: { redacts: undefined },
+						};
+						t.__prepend(
+							olderEvent as unknown as Parameters<typeof t.__prepend>[0],
+						);
+						t.getPaginationToken = () => null;
+						resolve(val);
+					};
+				}),
+		);
+
+		await withRoot(async () => {
+			const [rid, setRid] = createSignal("!roomA:test");
+			const { events } = useTimeline(client as unknown as MatrixClient, rid);
+
+			await flushPromises();
+			// Backfill in flight (pagination promise not yet resolved).
+			expect(events.length).toBe(0);
+
+			// Switch to room B before A's backfill resolves.
+			setRid("!roomB:test");
+			await flushPromises();
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room B msg");
+
+			// Now resolve A — must not mutate room B's events.
+			resolveA(false);
+			await flushPromises();
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("room B msg");
+		});
+	});
+
 	it("loadOlderMessages fetches and prepends older events", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			textMessage("!roomA:test", "$3", "@alice:test", "recent", 3000),
