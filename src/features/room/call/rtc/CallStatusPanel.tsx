@@ -116,7 +116,7 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 	const labelTextClass = (kind: CallStatusKind): string => {
 		switch (kind) {
 			case "joined":
-				return "text-success";
+				return "text-success-text";
 			case "joining":
 				return "text-warning-text";
 			case "leaving":
