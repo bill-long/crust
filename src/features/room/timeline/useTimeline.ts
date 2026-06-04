@@ -282,6 +282,16 @@ function eventToTimelineEvent(
 							}
 							if (myBestId) myReactions[key] = myBestId;
 							if (senders.length > 0) {
+								// Sort by display name (locale-aware, case-insensitive)
+								// with userId as a stable tiebreaker so the tooltip and
+								// aria-label render in a deterministic order regardless
+								// of relation Set iteration order.
+								senders.sort((a, b) => {
+									const cmp = a.name.localeCompare(b.name, undefined, {
+										sensitivity: "base",
+									});
+									return cmp !== 0 ? cmp : a.userId.localeCompare(b.userId);
+								});
 								reactions[key] = { count: senders.length, senders };
 							}
 						}

@@ -2468,6 +2468,92 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("senders are sorted alphabetically for a stable tooltip order", async () => {
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@host:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Insert reactions in non-alphabetical iteration order; the
+		// rendered senders array must come out sorted by display name
+		// so the tooltip doesn't shuffle between renders.
+		const r1 = createMatrixEvent({
+			eventId: "$r1",
+			roomId: "!roomA:test",
+			sender: "@charlie:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎯",
+				},
+			},
+			ts: 2000,
+		});
+		const r2 = createMatrixEvent({
+			eventId: "$r2",
+			roomId: "!roomA:test",
+			sender: "@alice:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎯",
+				},
+			},
+			ts: 2100,
+		});
+		const r3 = createMatrixEvent({
+			eventId: "$r3",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🎯",
+				},
+			},
+			ts: 2200,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🎯", new Set([r1, r2, r3])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			const senders = events[0].reactions["🎯"].senders;
+			// Display names default to MXID when no member is found in
+			// the mock room, so sort by MXID: alice < bob < charlie.
+			expect(senders.map((s) => s.userId)).toEqual([
+				"@alice:test",
+				"@bob:test",
+				"@charlie:test",
+			]);
+		});
+	});
+
 	it("failed edit echoes do not mark the original message as edited", async () => {
 		const { EventStatus } = await import("matrix-js-sdk");
 		const original: import("../../../test/mockClient").MockEvent = {

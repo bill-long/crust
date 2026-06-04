@@ -13,15 +13,17 @@ export function formatReactors(
 	senders: { userId: string; name: string }[],
 	label: string,
 ): string {
-	const names = senders.map((s) => s.name);
-	if (names.length === 0) return "";
-	if (names.length === 1) return `${names[0]} reacted with ${label}`;
-	if (names.length === 2)
-		return `${names[0]} and ${names[1]} reacted with ${label}`;
-	if (names.length <= 5) {
-		const head = names.slice(0, -1).join(", ");
-		return `${head}, and ${names[names.length - 1]} reacted with ${label}`;
+	const n = senders.length;
+	if (n === 0) return "";
+	if (n === 1) return `${senders[0].name} reacted with ${label}`;
+	if (n === 2)
+		return `${senders[0].name} and ${senders[1].name} reacted with ${label}`;
+	if (n <= 5) {
+		const head = senders
+			.slice(0, -1)
+			.map((s) => s.name)
+			.join(", ");
+		return `${head}, and ${senders[n - 1].name} reacted with ${label}`;
 	}
-	const head = names.slice(0, 2).join(", ");
-	return `${head}, and ${names.length - 2} others reacted with ${label}`;
+	return `${senders[0].name}, ${senders[1].name}, and ${n - 2} others reacted with ${label}`;
 }
