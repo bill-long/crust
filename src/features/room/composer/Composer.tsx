@@ -552,6 +552,11 @@ const Composer: Component<{
 			props.onCancelEdit?.();
 			return;
 		}
+		if (e.key === "Escape" && props.replyTo) {
+			e.preventDefault();
+			props.onCancelReply?.();
+			return;
+		}
 		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 			e.preventDefault();
 			send();
