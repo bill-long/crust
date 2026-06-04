@@ -2247,12 +2247,82 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			// Only the sent reaction should count.
-			expect(events[0].reactions["🚀"]).toBe(1);
+			// Only the sent reaction should count, with one sender.
+			expect(events[0].reactions["🚀"].count).toBe(1);
+			expect(events[0].reactions["🚀"].senders).toHaveLength(1);
+			expect(events[0].reactions["🚀"].senders[0].userId).toBe("@bob:test");
 			// myReactions tracks the user's own pressed key. The user's
 			// own reaction failed (NOT_SENT), so myReactions must not
 			// include "🚀" — otherwise the pressed pill state lies.
 			expect(events[0].myReactions["🚀"]).toBeUndefined();
+		});
+	});
+
+	it("duplicate reactions from the same sender are deduped in count and senders", async () => {
+		const parent = textMessage(
+			"!roomA:test",
+			"$parent",
+			"@alice:test",
+			"target",
+			1000,
+		);
+		const roomA = createMockRoom("!roomA:test", [parent]);
+
+		// Two sent reactions from the SAME sender (transient local-echo
+		// reconciliation edge case). Both successful — dedupe must keep
+		// only the first so count and senders.length stay equal.
+		const reaction1 = createMatrixEvent({
+			eventId: "$r1",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 2000,
+		});
+		const reaction2 = createMatrixEvent({
+			eventId: "$r2",
+			roomId: "!roomA:test",
+			sender: "@bob:test",
+			type: "m.reaction",
+			content: {
+				"m.relates_to": {
+					rel_type: "m.annotation",
+					event_id: "$parent",
+					key: "🚀",
+				},
+			},
+			ts: 3000,
+		});
+
+		const timelineSet = roomA.getUnfilteredTimelineSet();
+		timelineSet.relations = {
+			getChildEventsForEvent: (_eventId: string) => ({
+				getSortedAnnotationsByKey: () => [
+					["🚀", new Set([reaction1, reaction2])],
+				],
+			}),
+		} as unknown as typeof timelineSet.relations;
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(1);
+			const agg = events[0].reactions["🚀"];
+			expect(agg.count).toBe(1);
+			expect(agg.senders).toHaveLength(1);
+			expect(agg.senders[0].userId).toBe("@bob:test");
 		});
 	});
 

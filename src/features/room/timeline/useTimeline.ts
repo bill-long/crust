@@ -15,6 +15,20 @@ import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { extractGifUrl } from "../../gif/gifUrl";
 
+/**
+ * Aggregated reaction data for a single key on a single message.
+ *
+ * `senders` holds one entry per unique reactor (deduped by user ID),
+ * with the display name already resolved at aggregation time so the
+ * render path does not need a per-pill member lookup. `count` and
+ * `senders.length` are always equal — they're computed in the same
+ * dedupe pass so the tooltip and pill count can never disagree.
+ */
+export interface ReactionAggregate {
+	count: number;
+	senders: { userId: string; name: string }[];
+}
+
 export interface TimelineEvent {
 	eventId: string;
 	senderId: string;
@@ -66,7 +80,7 @@ export interface TimelineEvent {
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
-	reactions: Record<string, number>;
+	reactions: Record<string, ReactionAggregate>;
 	myReactions: Record<string, string>;
 	/**
 	 * SDK send status for this event:
@@ -222,7 +236,8 @@ function eventToTimelineEvent(
 				if (sortedEntries) {
 					for (const [key, evSet] of sortedEntries) {
 						if (key && evSet) {
-							let count = 0;
+							const senders: ReactionAggregate["senders"] = [];
+							const seenSenders = new Set<string>();
 							for (const ev of evSet) {
 								const evStatus = ev.status;
 								if (
@@ -231,13 +246,21 @@ function eventToTimelineEvent(
 								) {
 									continue;
 								}
-								count++;
-								if (myUserId && ev.getSender() === myUserId) {
+								const senderId = ev.getSender();
+								if (!senderId || seenSenders.has(senderId)) continue;
+								seenSenders.add(senderId);
+								const rawName = room.getMember(senderId)?.name?.trim();
+								const name =
+									rawName && !hasControlChar(rawName) ? rawName : senderId;
+								senders.push({ userId: senderId, name });
+								if (myUserId && senderId === myUserId) {
 									const id = ev.getId();
 									if (id) myReactions[key] = id;
 								}
 							}
-							if (count > 0) reactions[key] = count;
+							if (senders.length > 0) {
+								reactions[key] = { count: senders.length, senders };
+							}
 						}
 					}
 				}

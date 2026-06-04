@@ -10,6 +10,7 @@ import {
 	extractUrlsFromText,
 } from "../urlPreviews/extractUrls";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
+import { formatReactors } from "./reactionFormatting";
 import type { TimelineEvent } from "./useTimeline";
 
 function reactionLabel(
@@ -62,8 +63,10 @@ const ReactionPills: Component<{
 		<Show when={entries().length > 0}>
 			<div class="mt-1 flex flex-wrap gap-1">
 				<For each={entries()}>
-					{([key, count]) => {
+					{([key, agg]) => {
 						const isMine = () => Object.hasOwn(props.myReactions, key);
+						const label = reactionLabel(key, props.emoteLookup);
+						const tooltip = formatReactors(agg.senders, label);
 						return (
 							<button
 								type="button"
@@ -73,7 +76,8 @@ const ReactionPills: Component<{
 										: "bg-surface-2 text-text-secondary hover:bg-surface-3"
 								}`}
 								onClick={() => props.onReact(key)}
-								aria-label={`${reactionLabel(key, props.emoteLookup)} ${count}${isMine() ? ", remove your reaction" : ", react"}`}
+								title={tooltip}
+								aria-label={`${tooltip}. ${isMine() ? "Click to remove your reaction" : "Click to react"}.`}
 								aria-pressed={isMine()}
 							>
 								<ReactionKey
@@ -83,7 +87,7 @@ const ReactionPills: Component<{
 								<span
 									class={isMine() ? "text-accent-text" : "text-text-disabled"}
 								>
-									{count}
+									{agg.count}
 								</span>
 							</button>
 						);
