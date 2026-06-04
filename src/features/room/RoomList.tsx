@@ -64,10 +64,10 @@ const ChannelTypeIcon: Component<{ kind: "text" | "voice" }> = (props) => (
 				stroke-linejoin="round"
 				class="shrink-0 text-text-muted"
 			>
-				<line x1="3" y1="6" x2="13" y2="6" />
-				<line x1="3" y1="10" x2="13" y2="10" />
-				<line x1="7" y1="2.5" x2="5.5" y2="13.5" />
-				<line x1="10.5" y1="2.5" x2="9" y2="13.5" />
+				<line x1="2" y1="6" x2="14" y2="6" />
+				<line x1="2" y1="10" x2="14" y2="10" />
+				<line x1="6.5" y1="2" x2="4.5" y2="14" />
+				<line x1="11.5" y1="2" x2="9.5" y2="14" />
 			</svg>
 		}
 	>
@@ -85,10 +85,53 @@ const ChannelTypeIcon: Component<{ kind: "text" | "voice" }> = (props) => (
 			class="shrink-0 text-text-muted"
 		>
 			<path d="M3 6h2.5L9 3v10L5.5 10H3Z" />
-			<path d="M11.5 5.5a3.5 3.5 0 0 1 0 5" />
-			<path d="M13 3.5a6 6 0 0 1 0 9" />
+			<line x1="11.5" y1="6" x2="11.5" y2="10" />
+			<line x1="13.5" y1="4.5" x2="13.5" y2="11.5" />
 		</svg>
 	</Show>
+);
+
+/** Person icon used as the leading slot for direct-message rooms so DMs and
+    channel rooms share a consistent name x-position. */
+const DmTypeIcon: Component = () => (
+	<svg
+		aria-label="Direct message"
+		role="img"
+		width="14"
+		height="14"
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.5"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0 text-text-muted"
+	>
+		<circle cx="8" cy="5.5" r="2.5" />
+		<path d="M3 13.5c0-2.5 2.5-4 5-4s5 1.5 5 4" />
+	</svg>
+);
+
+/** Small lock badge for encrypted rooms. Rendered after the name as a status
+    indicator so the name x-position stays stable across encrypted and
+    non-encrypted rows. */
+const EncryptedBadge: Component = () => (
+	<svg
+		aria-label="Encrypted"
+		role="img"
+		width="12"
+		height="12"
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.5"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0 text-success-text"
+	>
+		<rect x="3.5" y="7.5" width="9" height="6" rx="1" />
+		<path d="M5.5 7.5V5.5a2.5 2.5 0 0 1 5 0v2" />
+	</svg>
 );
 
 /** Static green dot indicating an in-progress call in this room. */
@@ -119,39 +162,28 @@ const RoomEntry: Component<{
 			aria-current={props.isSelected ? "true" : undefined}
 		>
 			<div class="min-w-0 flex-1">
-				<div class="flex items-center gap-1">
-					<Show when={!props.room.isDirect}>
+				<div class="flex items-center gap-2">
+					<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
 						<ChannelTypeIcon kind={props.room.kind} />
 					</Show>
-					<Show when={props.room.callActive}>
-						<ActiveCallDot />
-					</Show>
-					<Show when={props.room.isEncrypted}>
-						<span
-							class="text-xs text-success-text"
-							role="img"
-							aria-label="Encrypted"
-						>
-							🔒
-						</span>
-					</Show>
 					<span
-						class="truncate text-sm font-medium"
+						class="min-w-0 flex-1 truncate text-sm font-medium"
 						classList={{
 							"text-text-disabled": props.isMuted && !props.isSelected,
 						}}
 					>
 						{props.room.name.trim() || "Unnamed room"}
 					</span>
+					<Show when={props.room.isEncrypted}>
+						<EncryptedBadge />
+					</Show>
+					<Show when={props.room.callActive}>
+						<ActiveCallDot />
+					</Show>
 					<Show when={props.isMuted}>
 						<BellOffBadge />
 					</Show>
 				</div>
-				<Show when={props.room.lastMessage}>
-					<p class="truncate text-xs text-text-disabled">
-						{props.room.lastMessage?.body}
-					</p>
-				</Show>
 			</div>
 
 			{/* Unread badge — hidden when muted */}
