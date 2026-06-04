@@ -1,5 +1,10 @@
 import { useNavigate } from "@solidjs/router";
-import { type MatrixClient, Preset, Visibility } from "matrix-js-sdk";
+import {
+	EventType,
+	type MatrixClient,
+	Preset,
+	Visibility,
+} from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -241,8 +246,8 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 				try {
 					await props.client.sendStateEvent(
 						capturedSpaceId,
-						"m.space.child" as never,
-						{ via: via ? [via] : [], suggested: false } as never,
+						EventType.SpaceChild,
+						{ via: via ? [via] : [], suggested: false },
 						room_id,
 					);
 				} catch (linkErr) {

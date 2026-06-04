@@ -425,7 +425,9 @@ describe("CreateRoomDialog", () => {
 		await flush();
 		expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
 		expect(navigateMock).not.toHaveBeenCalled();
-		// onClose was called once by us (via setOpen(false)) but not by the handler.
+		// We closed the dialog directly with setOpen(false), not via the
+		// dialog's onClose path; the post-await guard must skip the handler's
+		// own onClose call as well.
 		expect(onClose).toHaveBeenCalledTimes(0);
 	});
 
