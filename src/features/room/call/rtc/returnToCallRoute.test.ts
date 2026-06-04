@@ -265,6 +265,78 @@ describe("pickReturnToCallRoute", () => {
 		).toBe(`/home/${encodeURIComponent("!room:example.org")}`);
 	});
 
+	it("ignores candidate spaces whose membership is not 'join'", () => {
+		// Stale "leave" / "invite" entries can linger in `summaries` (e.g.
+		// after the user is kicked from a space). The sidebar, `getSpaces`,
+		// and the route guards all filter on `membership === "join"`, so
+		// routing into one would land the user on an inaccessible pane.
+		const summaries: SummariesStore = {
+			"!room:example.org": makeSummary({ roomId: "!room:example.org" }),
+			"!leftSpace:example.org": makeSummary({
+				roomId: "!leftSpace:example.org",
+				isSpace: true,
+				membership: "leave",
+				children: ["!room:example.org"],
+			}),
+			"!invitedSpace:example.org": makeSummary({
+				roomId: "!invitedSpace:example.org",
+				isSpace: true,
+				membership: "invite",
+				children: ["!room:example.org"],
+			}),
+		};
+		// No joined space qualifies → fall back to /home.
+		expect(
+			pickReturnToCallRoute(summaries, "!room:example.org", undefined),
+		).toBe(`/home/${encodeURIComponent("!room:example.org")}`);
+	});
+
+	it("prefers a joined candidate over a non-joined one with a lexicographically-smaller id", () => {
+		// Determinism is by sorted id, but only AMONG joined candidates.
+		// A stale "leave" entry with a smaller id must not win.
+		const summaries: SummariesStore = {
+			"!room:example.org": makeSummary({ roomId: "!room:example.org" }),
+			"!aLeft:example.org": makeSummary({
+				roomId: "!aLeft:example.org",
+				isSpace: true,
+				membership: "leave",
+				children: ["!room:example.org"],
+			}),
+			"!zJoined:example.org": makeSummary({
+				roomId: "!zJoined:example.org",
+				isSpace: true,
+				membership: "join",
+				children: ["!room:example.org"],
+			}),
+		};
+		expect(
+			pickReturnToCallRoute(summaries, "!room:example.org", undefined),
+		).toBe(
+			`/space/${encodeURIComponent("!zJoined:example.org")}/${encodeURIComponent("!room:example.org")}`,
+		);
+	});
+
+	it("ignores currentSpaceId if its membership is not 'join'", () => {
+		// e.g. user is mid-navigation right after being kicked from
+		// the current space — must not pin them inside it.
+		const summaries: SummariesStore = {
+			"!room:example.org": makeSummary({ roomId: "!room:example.org" }),
+			"!left:example.org": makeSummary({
+				roomId: "!left:example.org",
+				isSpace: true,
+				membership: "leave",
+				children: ["!room:example.org"],
+			}),
+		};
+		expect(
+			pickReturnToCallRoute(
+				summaries,
+				"!room:example.org",
+				"!left:example.org",
+			),
+		).toBe(`/home/${encodeURIComponent("!room:example.org")}`);
+	});
+
 	it("URL-encodes both space id and room id", () => {
 		const summaries: SummariesStore = {
 			"!room:example.org": makeSummary({ roomId: "!room:example.org" }),

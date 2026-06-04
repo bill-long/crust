@@ -52,7 +52,11 @@ export function pickReturnToCallRoute(
 	}
 	if (currentSpaceId) {
 		const space = summaries[currentSpaceId];
-		if (space?.isSpace && space.children.includes(callRoomId)) {
+		if (
+			space?.isSpace &&
+			space.membership === "join" &&
+			space.children.includes(callRoomId)
+		) {
 			return `/space/${encodeURIComponent(currentSpaceId)}/${encodedRoom}`;
 		}
 	}
@@ -62,12 +66,21 @@ export function pickReturnToCallRoute(
 	// fell back to /home and silently dropped the call's space context.
 	// Determinism: sort the candidate ids so the same call always
 	// resolves to the same space across reloads / re-renders.
+	// Filter to joined spaces only — `SummariesStore` can hold stale
+	// "leave" / "invite" entries (e.g. after the user is kicked from a
+	// space) and routing into one would land them on a pane the rest
+	// of the UI treats as inaccessible (sidebar, `getSpaces`, etc. all
+	// gate on `membership === "join"`).
 	const candidates: string[] = [];
 	for (const id in summaries) {
 		if (!Object.hasOwn(summaries, id)) continue;
 		if (id === currentSpaceId) continue; // already considered above
 		const s = summaries[id];
-		if (s.isSpace && s.children.includes(callRoomId)) {
+		if (
+			s.isSpace &&
+			s.membership === "join" &&
+			s.children.includes(callRoomId)
+		) {
 			candidates.push(id);
 		}
 	}
