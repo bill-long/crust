@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	CRYPTO_DB_PREFIX,
 	CRYPTO_RECOVERY_KEY,
 	type CryptoInitDeps,
 	type CryptoRecoveryStage,
+	clearCryptoStores,
 	clearRecoveryStage,
+	initCryptoStore,
 	nextCryptoRecoveryStage,
 	persistRecoveryStage,
 	readRecoveryStage,
@@ -22,6 +25,30 @@ const ID_B = recoveryIdentity({
 	homeserverUrl: "https://strange.pizza",
 	userId: "@test:strange.pizza",
 	deviceId: "DEVICE_B",
+});
+
+describe("crypto store helpers", () => {
+	it("uses a non-default prefix to avoid colliding with co-hosted apps", () => {
+		expect(CRYPTO_DB_PREFIX).toBe("crust");
+		expect(CRYPTO_DB_PREFIX).not.toBe("matrix-js-sdk");
+	});
+
+	it("initCryptoStore initializes with indexeddb + the Crust prefix", async () => {
+		const initRustCrypto = vi.fn(() => Promise.resolve());
+		await initCryptoStore({ initRustCrypto });
+		expect(initRustCrypto).toHaveBeenCalledWith({
+			useIndexedDB: true,
+			cryptoDatabasePrefix: CRYPTO_DB_PREFIX,
+		});
+	});
+
+	it("clearCryptoStores scopes the wipe to the Crust prefix", async () => {
+		const clearStores = vi.fn(() => Promise.resolve());
+		await clearCryptoStores({ clearStores });
+		expect(clearStores).toHaveBeenCalledWith({
+			cryptoDatabasePrefix: CRYPTO_DB_PREFIX,
+		});
+	});
 });
 
 describe("recoveryIdentity", () => {

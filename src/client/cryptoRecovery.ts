@@ -39,9 +39,54 @@
  * for a different account logged in later in the same tab.
  */
 
+import type { MatrixClient } from "matrix-js-sdk";
+
 export type CryptoRecoveryStage = "reload" | "clear" | null;
 
 export const CRYPTO_RECOVERY_KEY = "crust:crypto-init-recovery";
+
+/**
+ * IndexedDB database-name prefix for Crust's Rust crypto store, passed to both
+ * `initRustCrypto` and `clearStores`. matrix-js-sdk defaults this to
+ * "matrix-js-sdk", which other matrix-js-sdk apps on the same origin (e.g. a
+ * co-hosted Cinny at the parent path) also use — so without a unique prefix the
+ * two apps share the same `…::matrix-sdk-crypto` databases. That collision
+ * corrupts each other's crypto state AND means Crust's recovery `clearStores`
+ * would delete the neighbouring app's keys. The "crust" prefix isolates Crust
+ * to `crust::matrix-sdk-crypto(-meta)`. See issue #202.
+ *
+ * Note: switching to this prefix intentionally orphans any crypto state Crust
+ * previously wrote under the default "matrix-js-sdk" prefix — that store was
+ * shared with the co-hosted app and is not safe to reuse, so a one-time
+ * re-verification on upgrade is expected. Do NOT add cleanup that deletes the
+ * default-prefixed databases: on a shared origin they belong to the other app.
+ */
+export const CRYPTO_DB_PREFIX = "crust";
+
+/**
+ * Initialize Crust's Rust crypto store. Centralizes the `useIndexedDB` +
+ * `cryptoDatabasePrefix` options so every caller agrees on the same database.
+ */
+export async function initCryptoStore(
+	client: Pick<MatrixClient, "initRustCrypto">,
+): Promise<void> {
+	await client.initRustCrypto({
+		useIndexedDB: true,
+		cryptoDatabasePrefix: CRYPTO_DB_PREFIX,
+	});
+}
+
+/**
+ * Clear Crust's stores, scoping the Rust crypto-store wipe to Crust's own
+ * database prefix. ALL `clearStores` calls (logout, session expiry, recovery)
+ * must go through this so they never delete a co-hosted app's crypto DBs and
+ * always target the databases `initCryptoStore` actually created.
+ */
+export async function clearCryptoStores(
+	client: Pick<MatrixClient, "clearStores">,
+): Promise<void> {
+	await client.clearStores({ cryptoDatabasePrefix: CRYPTO_DB_PREFIX });
+}
 
 /**
  * Maximum time to wait for `initRustCrypto` (or the recovery `clearStores`)
