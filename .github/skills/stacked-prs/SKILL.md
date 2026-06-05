@@ -52,8 +52,8 @@ Query open issues, decide order, and track the chain. The CLI runtime
 provides a per-session SQL database via the `sql` tool — using it as a
 tracking table is recommended because rows can be updated as the chain
 progresses without re-reading prose. If `sql` is unavailable, a
-markdown checklist with the same columns (`ord | issue | branch | base
-| title | status`) is a fine substitute.
+markdown checklist with the same columns
+(`ord | issue | branch | base | title | status`) is a fine substitute.
 
 ```sql
 CREATE TABLE IF NOT EXISTS issue_chain (
