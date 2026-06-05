@@ -1,6 +1,11 @@
 import type { Room, RoomMember } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
-import { buildRoomLink, buildRoomLinkById, pickViaServers } from "./roomLink";
+import {
+	buildRoomLink,
+	buildRoomLinkById,
+	canShareJoinLink,
+	pickViaServers,
+} from "./roomLink";
 
 function mkMember(userId: string, powerLevel: number | undefined): RoomMember {
 	return { userId, powerLevel } as unknown as RoomMember;
@@ -188,5 +193,29 @@ describe("buildRoomLinkById", () => {
 			url: "https://matrix.to/#/%23general%3Amatrix.org",
 			displayLabel: "#general:matrix.org",
 		});
+	});
+});
+
+describe("canShareJoinLink", () => {
+	it.each([
+		"public",
+		"knock",
+		"restricted",
+		"knock_restricted",
+	])("allows a shareable link for %s rooms", (rule) => {
+		expect(canShareJoinLink(rule)).toBe(true);
+	});
+
+	it("hides the link for invite-only rooms", () => {
+		expect(canShareJoinLink("invite")).toBe(false);
+	});
+
+	it("hides the link when the join rule is unset", () => {
+		expect(canShareJoinLink(undefined)).toBe(false);
+		expect(canShareJoinLink(null)).toBe(false);
+	});
+
+	it("hides the link for unknown join rules", () => {
+		expect(canShareJoinLink("custom_rule")).toBe(false);
 	});
 });

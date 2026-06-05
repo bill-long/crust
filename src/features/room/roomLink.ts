@@ -19,6 +19,28 @@ export interface RoomLink {
 const MATRIX_TO_BASE = "https://matrix.to/#/";
 const DEFAULT_VIA_LIMIT = 3;
 
+/**
+ * Join rules for which a shareable matrix.to link can actually let the
+ * recipient in: directly (`public`), by knocking (`knock` /
+ * `knock_restricted`), or as a member of a parent space (`restricted`).
+ * Excludes `invite` and any unset rule, where the recipient would still
+ * need an explicit invite — so a link affordance should be hidden there.
+ */
+const SHAREABLE_JOIN_RULES = new Set([
+	"public",
+	"knock",
+	"restricted",
+	"knock_restricted",
+]);
+
+/**
+ * Whether a room's join rule lets a shared link recipient join (or knock)
+ * without first receiving an explicit invite.
+ */
+export function canShareJoinLink(joinRule: string | undefined | null): boolean {
+	return joinRule != null && SHAREABLE_JOIN_RULES.has(joinRule);
+}
+
 export function buildRoomLink(
 	room: Room,
 	viaLimit = DEFAULT_VIA_LIMIT,

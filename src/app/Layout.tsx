@@ -48,6 +48,7 @@ import {
 	type RoomSettingsTab,
 } from "../features/room/settings/RoomSettingsOverlay";
 import { TimelineView } from "../features/room/timeline/TimelineView";
+import { createCopyLink } from "../features/room/useCopyLink";
 import { useNotifications } from "../features/room/useNotifications";
 import {
 	SettingsOverlay,
@@ -420,87 +421,15 @@ const Layout: Component = () => {
 		id: string;
 		kind: "room" | "space";
 	} | null>(null);
-	const [copyState, setCopyState] = createSignal<"idle" | "copied" | "error">(
-		"idle",
-	);
-	const [fallbackLink, setFallbackLink] = createSignal<string | null>(null);
-	let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
-	// Monotonic generation counter for copy operations. Each click bumps it;
-	// awaited results (and the auto-reset timer they schedule) must verify
-	// they are still the current generation before mutating state. Without
-	// this guard a slow first request could overwrite the result of a faster
-	// second request, or an unmount could leave the success continuation
-	// scheduling a timer that outlives the component.
-	let copyGen = 0;
-	let copyDisposed = false;
-	onCleanup(() => {
-		copyDisposed = true;
-		copyGen++;
-		if (copyResetTimer !== undefined) {
-			clearTimeout(copyResetTimer);
-			copyResetTimer = undefined;
-		}
-	});
+	const copyLink = createCopyLink();
 
-	const handleCopyRoomLink = async (rid: string): Promise<void> => {
+	const handleCopyRoomLink = (rid: string): void => {
 		const room = client.getRoom(rid);
 		// During initial sync or on deep links the Room object may not be
 		// loaded yet. Fall back to a minimal matrix.to link built from the
 		// route param so the button doesn't silently no-op.
 		const { url } = room ? buildRoomLink(room) : buildRoomLinkById(rid);
-
-		const gen = ++copyGen;
-		if (copyResetTimer !== undefined) {
-			clearTimeout(copyResetTimer);
-			copyResetTimer = undefined;
-		}
-
-		// Schedule the 2s auto-reset that returns the button label back to
-		// the neutral "Copy link" state. Used by both the success and the
-		// error paths so the visible status doesn't strand indefinitely.
-		const scheduleReset = (): void => {
-			copyResetTimer = setTimeout(() => {
-				copyResetTimer = undefined;
-				if (copyDisposed || gen !== copyGen) return;
-				setCopyState("idle");
-			}, 2000);
-		};
-
-		const clipboard =
-			typeof navigator !== "undefined" ? navigator.clipboard : undefined;
-		if (!clipboard?.writeText) {
-			// Force an aria-live re-announcement when the prior state was
-			// already "error": two synchronous setCopyState calls in the
-			// same event handler batch collapse to a single render, leaving
-			// the polite region silent. setTimeout(..., 0) lets the browser
-			// commit the "idle" render before the "error" render lands.
-			setCopyState("idle");
-			setTimeout(() => {
-				if (copyDisposed || gen !== copyGen) return;
-				setCopyState("error");
-				scheduleReset();
-			}, 0);
-			setFallbackLink(url);
-			return;
-		}
-		// Reset to idle synchronously so any prior "Copied!"/"Copy failed"
-		// label and aria-live announcement clear before the async clipboard
-		// result lands.
-		setCopyState("idle");
-		try {
-			await clipboard.writeText(url);
-			if (copyDisposed || gen !== copyGen) return;
-			setCopyState("copied");
-			// If a prior failed attempt left the fallback dialog open and the
-			// retry succeeded, close it so the user isn't asked to copy by hand.
-			setFallbackLink(null);
-			scheduleReset();
-		} catch {
-			if (copyDisposed || gen !== copyGen) return;
-			setCopyState("error");
-			setFallbackLink(url);
-			scheduleReset();
-		}
+		void copyLink.copy(url);
 	};
 
 	// `location.pathname` is the full URL pathname including any Vite base
@@ -651,13 +580,7 @@ const Layout: Component = () => {
 	// (or fallback dialog) from room A doesn't leak into room B's header.
 	createEffect(() => {
 		roomId();
-		copyGen++;
-		if (copyResetTimer !== undefined) {
-			clearTimeout(copyResetTimer);
-			copyResetTimer = undefined;
-		}
-		setCopyState("idle");
-		setFallbackLink(null);
+		copyLink.reset();
 	});
 
 	const roomName = () => {
@@ -918,7 +841,7 @@ const Layout: Component = () => {
 									rid={rid}
 									roomName={roomName()}
 									callActive={callActive}
-									copyState={copyState}
+									copyState={copyLink.copyState}
 									onCopyLink={() => handleCopyRoomLink(rid)}
 									canInvite={canInviteHere}
 									onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
@@ -972,15 +895,12 @@ const Layout: Component = () => {
 
 			{/* Clipboard-unavailable fallback for "Copy room link". The URL is
 				captured at open time so it survives subsequent room switches. */}
-			<Show when={fallbackLink()}>
+			<Show when={copyLink.fallbackLink()}>
 				{(url) => (
 					<CopyLinkFallbackDialog
 						url={url()}
-						open={() => fallbackLink() !== null}
-						onClose={() => {
-							setFallbackLink(null);
-							setCopyState("idle");
-						}}
+						open={() => copyLink.fallbackLink() !== null}
+						onClose={() => copyLink.clearFallback()}
 					/>
 				)}
 			</Show>
