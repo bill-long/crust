@@ -28,6 +28,8 @@ export interface RoomPermissions {
 	canSetPowerLevels: Accessor<boolean>;
 	canSetJoinRules: Accessor<boolean>;
 	canSetHistoryVisibility: Accessor<boolean>;
+	/** Whether the user may set `m.room.guest_access`. */
+	canSetGuestAccess: Accessor<boolean>;
 	/** Whether the user may add/remove `m.space.child` (manage child rooms). */
 	canSetSpaceChild: Accessor<boolean>;
 	canInvite: Accessor<boolean>;
@@ -182,6 +184,7 @@ export function useRoomPermissions(
 		canSetPowerLevels: makeStateCan(POWER_LEVELS_TYPE),
 		canSetJoinRules: makeStateCan("m.room.join_rules"),
 		canSetHistoryVisibility: makeStateCan("m.room.history_visibility"),
+		canSetGuestAccess: makeStateCan("m.room.guest_access"),
 		canSetSpaceChild: makeStateCan("m.space.child"),
 		canInvite: makeKeyCan("invite"),
 		canKick: canKickMemo,

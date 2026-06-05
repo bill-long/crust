@@ -1,0 +1,122 @@
+import { type MatrixClient, Visibility } from "matrix-js-sdk";
+import {
+	type Component,
+	createResource,
+	createSignal,
+	onCleanup,
+	Show,
+} from "solid-js";
+import { FieldStatus } from "./FieldStatus";
+
+interface DirectoryPublishingSectionProps {
+	client: MatrixClient;
+	roomId: string;
+}
+
+/**
+ * Toggle for listing the space in the homeserver's public room directory
+ * (`/publicRooms`). Unlike the other visibility controls this is NOT a room-
+ * state event — it uses the `/directory/list/room/{roomId}` endpoint via
+ * `getRoomDirectoryVisibility` / `setRoomDirectoryVisibility`, so it is loaded
+ * once (no `RoomStateEvent` reactivity) and written with an optimistic toggle
+ * that reverts on failure.
+ *
+ * There is no `maySendStateEvent` permission for directory listing, so the
+ * toggle stays enabled (except while loading/saving) and relies on the server
+ * to reject unauthorized writes; the error is then surfaced inline.
+ */
+const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
+	props,
+) => {
+	let disposed = false;
+	onCleanup(() => {
+		disposed = true;
+	});
+
+	const [published, { mutate, refetch }] = createResource(
+		() => props.roomId,
+		async (rid): Promise<boolean> => {
+			const res = await props.client.getRoomDirectoryVisibility(rid);
+			return res.visibility === Visibility.Public;
+		},
+	);
+
+	const [saving, setSaving] = createSignal(false);
+	const [error, setError] = createSignal<string | null>(null);
+
+	const state = (): "idle" | "saving" | "error" => {
+		if (saving()) return "saving";
+		if (error()) return "error";
+		return "idle";
+	};
+
+	const toggle = async (): Promise<void> => {
+		if (saving() || published.loading || published.error) return;
+		const current = published() ?? false;
+		const next = !current;
+		setSaving(true);
+		setError(null);
+		// Optimistically reflect the new state; revert if the write fails.
+		mutate(next);
+		try {
+			await props.client.setRoomDirectoryVisibility(
+				props.roomId,
+				next ? Visibility.Public : Visibility.Private,
+			);
+			if (disposed) return;
+		} catch (e) {
+			if (disposed) return;
+			mutate(current);
+			setError(
+				e instanceof Error ? e.message : "Failed to update directory listing.",
+			);
+		} finally {
+			if (!disposed) setSaving(false);
+		}
+	};
+
+	const checked = (): boolean => published() ?? false;
+	const disabled = (): boolean =>
+		saving() || published.loading || published.error !== undefined;
+
+	return (
+		<section>
+			<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+				Directory listing
+			</h3>
+			<label class="flex items-start gap-3 text-sm">
+				<input
+					type="checkbox"
+					checked={checked()}
+					disabled={disabled()}
+					onChange={() => void toggle()}
+					class="mt-0.5 accent-accent disabled:cursor-not-allowed disabled:opacity-60"
+				/>
+				<span class="text-text-secondary">
+					Publish this space to the public room directory so anyone on the
+					homeserver can find it.
+				</span>
+			</label>
+			<FieldStatus
+				state={state()}
+				error={error()}
+				onRetry={() => void toggle()}
+				onDismiss={() => setError(null)}
+			/>
+			<Show when={published.error}>
+				<p class="mt-1 text-xs text-danger-text" role="alert">
+					Couldn't load the current directory listing status.{" "}
+					<button
+						type="button"
+						onClick={() => void refetch()}
+						class="font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text"
+					>
+						Retry
+					</button>
+				</p>
+			</Show>
+		</section>
+	);
+};
+
+export { DirectoryPublishingSection };
