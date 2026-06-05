@@ -121,4 +121,14 @@ describe("RoomSettingsOverlay", () => {
 		setup("advanced");
 		expect(screen.getByRole("button", { name: "Leave room" })).toBeTruthy();
 	});
+
+	it("shows the space-only Rooms tab for a space", () => {
+		setup("general", true);
+		expect(screen.getByRole("button", { name: "Rooms" })).toBeTruthy();
+	});
+
+	it("hides the Rooms tab for a regular room", () => {
+		setup("general", false);
+		expect(screen.queryByRole("button", { name: "Rooms" })).toBeNull();
+	});
 });
