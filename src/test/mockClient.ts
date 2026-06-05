@@ -207,6 +207,7 @@ export function createMockRoom(
 	>();
 
 	const canSendStateByType = new Map<string, boolean>();
+	let canInviteFlag = true;
 	const currentState = {
 		getStateEvents: (type: string, stateKey?: string) => {
 			const typeMap = stateEventStore.get(type);
@@ -235,6 +236,7 @@ export function createMockRoom(
 		},
 		getJoinedMembers: () => memberState.filter((m) => m.membership === "join"),
 		getMembers: () => [...memberState],
+		canInvite: (_userId: string) => canInviteFlag,
 		findEventById: (eventId: string) =>
 			matrixEvents.find((e) => e.getId() === eventId) ?? null,
 		on: (event: string, handler: (...args: unknown[]) => void) => {
@@ -257,6 +259,9 @@ export function createMockRoom(
 		},
 		__setCanSendStateEvent: (type: string, allowed: boolean) => {
 			canSendStateByType.set(type, allowed);
+		},
+		__setCanInvite: (allowed: boolean) => {
+			canInviteFlag = allowed;
 		},
 		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);

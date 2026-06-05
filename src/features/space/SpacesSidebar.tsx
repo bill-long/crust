@@ -45,6 +45,12 @@ interface SpacesSidebarProps {
 	 * Callers should open the leave confirmation flow.
 	 */
 	onLeaveSpace?: (spaceId: string) => void;
+	/**
+	 * Called when the user picks the right-click "Invite people" item.
+	 * Only shown when the local user has permission to invite to the
+	 * space. Callers should open the invite dialog targeting the space.
+	 */
+	onInviteSpace?: (spaceId: string) => void;
 }
 
 const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
@@ -103,8 +109,23 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 							getSpaceUnreadRollup(summaries, space.roomId),
 						);
 						const isSelected = () => params.spaceId === space.roomId;
+						// Render-time check: hide the Invite item when the local
+						// user lacks invite permission in this space, or when the
+						// space room isn't yet loaded into the SDK store. This
+						// accepts mild staleness (no state-event subscription) —
+						// the invite call itself will reject with M_FORBIDDEN if
+						// permissions change after the menu opens.
+						const canInviteToSpace = (): boolean => {
+							if (!props.onInviteSpace) return false;
+							const userId = client.getUserId();
+							if (!userId) return false;
+							const room = client.getRoom(space.roomId);
+							return !!room?.canInvite(userId);
+						};
 						const hasMenu = (): boolean =>
-							!!props.onOpenSpaceSettings || !!props.onLeaveSpace;
+							!!props.onOpenSpaceSettings ||
+							!!props.onLeaveSpace ||
+							canInviteToSpace();
 
 						const triggerInner = (
 							<>
@@ -211,6 +232,14 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 														}
 													>
 														Space settings
+													</ContextMenu.Item>
+												</Show>
+												<Show when={canInviteToSpace()}>
+													<ContextMenu.Item
+														class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+														onSelect={() => props.onInviteSpace?.(space.roomId)}
+													>
+														Invite people
 													</ContextMenu.Item>
 												</Show>
 												<Show when={props.onLeaveSpace}>

@@ -385,7 +385,10 @@ const Layout: Component = () => {
 		roomId: string;
 		tab: RoomSettingsTab;
 	} | null>(null);
-	const [inviteRoomId, setInviteRoomId] = createSignal<string | null>(null);
+	const [inviteTarget, setInviteTarget] = createSignal<{
+		id: string;
+		kind: "room" | "space";
+	} | null>(null);
 	const [copyState, setCopyState] = createSignal<"idle" | "copied" | "error">(
 		"idle",
 	);
@@ -753,6 +756,7 @@ const Layout: Component = () => {
 							setRoomSettings({ roomId: sid, tab: "general" })
 						}
 						onLeaveSpace={(sid) => setLeaveSpaceConfirmId(sid)}
+						onInviteSpace={(sid) => setInviteTarget({ id: sid, kind: "space" })}
 					/>
 				}
 				roomList={
@@ -810,7 +814,7 @@ const Layout: Component = () => {
 									copyState={copyState}
 									onCopyLink={() => handleCopyRoomLink(rid)}
 									canInvite={canInviteHere}
-									onInvite={() => setInviteRoomId(rid)}
+									onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
 									leaving={() => isLeaving(rid)}
 									onLeave={handleLeave}
 									onOpenSettings={() =>
@@ -844,16 +848,17 @@ const Layout: Component = () => {
 				}
 			/>
 
-			{/* Invite dialog — roomId is snapshotted at open time so an
-				in-flight invite still targets the original room if the user
-				navigates away. */}
-			<Show when={inviteRoomId()}>
-				{(rid) => (
+			{/* Invite dialog — target (id + kind) is snapshotted at open time so an
+				in-flight invite still targets the original room/space if the user
+				navigates away, and the dialog header copy can't drift mid-dialog. */}
+			<Show when={inviteTarget()}>
+				{(target) => (
 					<InviteDialog
 						client={client}
-						roomId={rid()}
-						open={() => inviteRoomId() !== null}
-						onClose={() => setInviteRoomId(null)}
+						roomId={target().id}
+						kind={target().kind}
+						open={() => inviteTarget() !== null}
+						onClose={() => setInviteTarget(null)}
 					/>
 				)}
 			</Show>

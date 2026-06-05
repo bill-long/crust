@@ -9,19 +9,22 @@ import {
 } from "solid-js";
 import { validateMatrixUserId } from "../inviteValidation";
 
-export function describeInviteError(err: unknown): string {
+export function describeInviteError(
+	err: unknown,
+	kind: "room" | "space" = "room",
+): string {
 	const code =
 		err && typeof err === "object" && "errcode" in err
 			? (err as { errcode?: unknown }).errcode
 			: undefined;
 	if (code === "M_FORBIDDEN") {
-		return "You don't have permission to invite to this room.";
+		return `You don't have permission to invite to this ${kind}.`;
 	}
 	if (code === "M_LIMIT_EXCEEDED") {
 		return "You're being rate-limited. Wait a moment, then try again.";
 	}
 	if (code === "M_NOT_FOUND") {
-		return "This room no longer exists or you can't access it.";
+		return `This ${kind} no longer exists or you can't access it.`;
 	}
 	if (err instanceof Error && err.message) return err.message;
 	return "Couldn't send the invite. Please try again.";
@@ -30,6 +33,12 @@ export function describeInviteError(err: unknown): string {
 interface InviteByUserIdFormProps {
 	client: MatrixClient;
 	roomId: string;
+	/**
+	 * Whether the invite target is a regular room or a space. Used only
+	 * for noun selection in user-facing messages — the underlying
+	 * `client.invite` call is identical. Defaults to "room".
+	 */
+	kind?: "room" | "space";
 	/**
 	 * When this accessor returns a new value, the form clears its
 	 * input and status messages. Useful for resetting the form when
@@ -111,7 +120,7 @@ const InviteByUserIdForm: Component<InviteByUserIdFormProps> = (props) => {
 		const room = props.client.getRoom(props.roomId);
 		const existing = room?.getMember(userId);
 		if (existing?.membership === "join") {
-			setErrorText(`${userId} is already in this room.`);
+			setErrorText(`${userId} is already in this ${props.kind ?? "room"}.`);
 			setSuccessText("");
 			return;
 		}
@@ -131,7 +140,7 @@ const InviteByUserIdForm: Component<InviteByUserIdFormProps> = (props) => {
 			setSuccessText(`Invited ${inviteTarget}.`);
 			if (shouldRefocus()) inputRef?.focus();
 		} catch (err) {
-			setErrorText(describeInviteError(err));
+			setErrorText(describeInviteError(err, props.kind ?? "room"));
 			setInputValue(inviteTarget);
 			if (shouldRefocus()) inputRef?.focus();
 		} finally {
