@@ -8,6 +8,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { secretStorageBootstrapOpts } from "./secretStorageBootstrap";
 
 type SetupStep = "intro" | "working" | "show-key" | "done" | "error";
 
@@ -19,9 +20,10 @@ interface BackupSetupDialogProps {
  * Wizard dialog for setting up key backup + secret storage.
  * Flow: intro → working → show-key → done (or error at any point).
  *
- * If secret storage already exists, the SDK reuses it and the
- * createSecretStorageKey callback is never called — in that case
- * we skip the "show recovery key" step.
+ * Secret storage is reused if it already exists: the SDK only calls
+ * createSecretStorageKey (minting a new recovery key) when no storage exists,
+ * so the "show recovery key" step is skipped on reuse. See
+ * secretStorageBootstrapOpts.
  */
 const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 	const { client, cryptoStatus, clearSecretStorageCache } = useClient();
@@ -52,15 +54,17 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 		try {
 			let generatedKey: GeneratedSecretStorageKey | undefined;
 
-			await crypto.bootstrapSecretStorage({
-				createSecretStorageKey: async () => {
+			// Reuse existing secret storage; only mint a new recovery key when
+			// none exists (createSecretStorageKey is called only then). Never
+			// force new secret storage — that would mint a fresh recovery key on
+			// every run (see secretStorageBootstrapOpts).
+			await crypto.bootstrapSecretStorage(
+				secretStorageBootstrapOpts(async () => {
 					const key = await crypto.createRecoveryKeyFromPassphrase();
 					generatedKey = key;
 					return key;
-				},
-				setupNewKeyBackup: true,
-				setupNewSecretStorage: true,
-			});
+				}),
+			);
 
 			if (disposed) return;
 
