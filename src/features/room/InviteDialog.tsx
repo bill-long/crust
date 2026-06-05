@@ -23,6 +23,13 @@ interface InviteDialogProps {
 	 * the room the user originally opened the dialog for.
 	 */
 	roomId: string;
+	/**
+	 * Whether the invite target is a regular room or a space. Drives
+	 * user-facing copy only (the SDK call is identical). Defaults to
+	 * "room". Caller should snapshot this at open time alongside roomId
+	 * so the dialog header cannot drift mid-dialog.
+	 */
+	kind?: "room" | "space";
 	open: () => boolean;
 	onClose: () => void;
 }
@@ -107,15 +114,16 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 			>
 				<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 					<h2 id={titleId} class="mb-3 text-lg font-semibold text-text-primary">
-						Invite to room
+						Invite to {props.kind ?? "room"}
 					</h2>
 					<p class="mb-4 text-sm text-text-muted">
-						Enter a Matrix user ID to invite.
+						Enter a Matrix user ID to invite to this {props.kind ?? "room"}.
 					</p>
 
 					<InviteByUserIdForm
 						client={props.client}
 						roomId={props.roomId}
+						kind={props.kind ?? "room"}
 						resetSignal={resetTick}
 						onSubmittingChange={setSubmitting}
 						onInputRef={(el) => {

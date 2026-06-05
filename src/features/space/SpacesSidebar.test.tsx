@@ -9,7 +9,7 @@ import {
 	type RoomSummary,
 	type SummariesStore,
 } from "../../client/summaries";
-import { createMockClient } from "../../test/mockClient";
+import { createMockClient, createMockRoom } from "../../test/mockClient";
 import { SpacesSidebar } from "./SpacesSidebar";
 
 vi.mock("solid-refresh", () => ({
@@ -126,6 +126,39 @@ function setupWithLeave(): {
 	return { client, onOpenSpaceSettings, onLeaveSpace };
 }
 
+function setupWithInvite(opts?: {
+	canInvite?: boolean;
+	includeSettings?: boolean;
+	includeLeave?: boolean;
+}): {
+	client: ReturnType<typeof createMockClient>;
+	onInviteSpace: ReturnType<typeof vi.fn>;
+	onOpenSpaceSettings: ReturnType<typeof vi.fn>;
+	onLeaveSpace: ReturnType<typeof vi.fn>;
+} {
+	const room = createMockRoom("!alpha:example.com", [], [], { name: "Alpha" });
+	if (opts?.canInvite === false) room.__setCanInvite(false);
+	const client = createMockClient(new Map([["!alpha:example.com", room]]));
+	const onInviteSpace = vi.fn();
+	const onOpenSpaceSettings = vi.fn();
+	const onLeaveSpace = vi.fn();
+	render(() => (
+		<Wrapper
+			client={client}
+			seed={[makeSpaceSummary("!alpha:example.com", "Alpha")]}
+		>
+			<SpacesSidebar
+				onInviteSpace={onInviteSpace}
+				onOpenSpaceSettings={
+					opts?.includeSettings === false ? undefined : onOpenSpaceSettings
+				}
+				onLeaveSpace={opts?.includeLeave === false ? undefined : onLeaveSpace}
+			/>
+		</Wrapper>
+	));
+	return { client, onInviteSpace, onOpenSpaceSettings, onLeaveSpace };
+}
+
 describe("SpacesSidebar gear button", () => {
 	it("renders a settings button for each space that calls onOpenSpaceSettings", () => {
 		const { onOpenSpaceSettings } = setupWithSpace();
@@ -220,5 +253,65 @@ describe("SpacesSidebar right-click context menu", () => {
 		expect(screen.queryByRole("menuitem")).toBeNull();
 		expect(screen.queryByText("Space settings")).toBeNull();
 		expect(screen.queryByText("Leave space")).toBeNull();
+	});
+});
+
+describe("SpacesSidebar invite", () => {
+	function openContextMenu(): void {
+		const avatar = screen.getByRole("button", { name: "Alpha" });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
+	}
+
+	it("renders Invite people item when onInviteSpace is provided and user can invite", async () => {
+		setupWithInvite();
+		openContextMenu();
+		expect(await screen.findByText("Invite people")).toBeTruthy();
+	});
+
+	it("selecting Invite people calls onInviteSpace with the space id", async () => {
+		const { onInviteSpace } = setupWithInvite();
+		openContextMenu();
+		await screen.findByText("Invite people");
+		const item = screen
+			.getAllByRole("menuitem")
+			.find((el) => el.textContent === "Invite people") as HTMLElement;
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(onInviteSpace).toHaveBeenCalledWith("!alpha:example.com");
+	});
+
+	it("hides Invite people when the user lacks invite permission", async () => {
+		setupWithInvite({ canInvite: false });
+		openContextMenu();
+		// Space settings still mounts → wait for the menu, then assert absence.
+		await screen.findByText("Space settings");
+		expect(screen.queryByText("Invite people")).toBeNull();
+	});
+
+	it("mounts a ContextMenu with only Invite people when other handlers are absent", async () => {
+		const { onInviteSpace } = setupWithInvite({
+			includeSettings: false,
+			includeLeave: false,
+		});
+		openContextMenu();
+		expect(await screen.findByText("Invite people")).toBeTruthy();
+		expect(screen.queryByText("Space settings")).toBeNull();
+		expect(screen.queryByText("Leave space")).toBeNull();
+		const item = screen
+			.getAllByRole("menuitem")
+			.find((el) => el.textContent === "Invite people") as HTMLElement;
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(onInviteSpace).toHaveBeenCalledWith("!alpha:example.com");
+	});
+
+	it("does not mount a ContextMenu when canInvite is false and no other handlers are provided", () => {
+		setupWithInvite({
+			canInvite: false,
+			includeSettings: false,
+			includeLeave: false,
+		});
+		const avatar = screen.getByRole("button", { name: "Alpha" });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
+		expect(screen.queryByRole("menu")).toBeNull();
+		expect(screen.queryByText("Invite people")).toBeNull();
 	});
 });
