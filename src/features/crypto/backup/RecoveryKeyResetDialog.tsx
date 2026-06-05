@@ -8,6 +8,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { RecoveryKeyDisplay } from "./RecoveryKeyDisplay";
 import {
 	canConsolidateRecoveryKey,
 	getConsolidationReadiness,
@@ -40,13 +41,10 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 	const [recoveryKey, setRecoveryKey] = createSignal<string | undefined>();
 	const [errorMessage, setErrorMessage] = createSignal("");
 	const [partial, setPartial] = createSignal(false);
-	const [copied, setCopied] = createSignal(false);
 	let disposed = false;
-	let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
 	onCleanup(() => {
 		disposed = true;
-		if (copiedTimer !== undefined) clearTimeout(copiedTimer);
 	});
 
 	const doReset = async (): Promise<void> => {
@@ -120,36 +118,6 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 				setStep("error");
 			}
 		}
-	};
-
-	const copyRecoveryKey = async (): Promise<void> => {
-		const key = recoveryKey();
-		if (!key) return;
-		try {
-			await navigator.clipboard.writeText(key);
-			setCopied(true);
-			if (copiedTimer !== undefined) clearTimeout(copiedTimer);
-			copiedTimer = setTimeout(() => {
-				copiedTimer = undefined;
-				if (!disposed) setCopied(false);
-			}, 2000);
-		} catch {
-			// Clipboard API not available; user can manually select + copy
-		}
-	};
-
-	const downloadRecoveryKey = (): void => {
-		const key = recoveryKey();
-		if (!key) return;
-		const blob = new Blob([`Recovery Key\n\n${key}\n`], { type: "text/plain" });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = "crust-recovery-key.txt";
-		document.body.appendChild(a);
-		a.click();
-		a.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 0);
 	};
 
 	const handleBackdropClick = (e: MouseEvent): void => {
@@ -242,28 +210,9 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 							longer work.
 						</p>
 
-						<div class="mb-4 rounded-lg bg-surface-2 p-4">
-							<code class="block break-all font-mono text-sm leading-relaxed text-success-text">
-								{recoveryKey()}
-							</code>
-						</div>
-
-						<div class="mb-6 flex gap-2">
-							<button
-								type="button"
-								onClick={copyRecoveryKey}
-								class="flex-1 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
-							>
-								{copied() ? "Copied \u2713" : "Copy"}
-							</button>
-							<button
-								type="button"
-								onClick={downloadRecoveryKey}
-								class="flex-1 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
-							>
-								Download
-							</button>
-						</div>
+						<Show when={recoveryKey()}>
+							{(key) => <RecoveryKeyDisplay recoveryKey={key()} />}
+						</Show>
 
 						<div class="flex justify-end">
 							<button
