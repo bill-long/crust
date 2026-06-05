@@ -9,6 +9,8 @@ on:
 permissions:
   contents: read
   packages: write
+  # Needed for cache-from/to: type=gha (GHA cache API).
+  actions: write
 
 jobs:
   publish:

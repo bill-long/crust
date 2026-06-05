@@ -9,8 +9,9 @@
 # provided by /etc/nginx/conf.d/websocket-upgrade.conf on this host).
 
 # Redirect bare /crust -> /crust/ so the SPA loads with the expected base path.
+# $is_args$args preserves any query string on the redirect.
 location = /crust {
-    return 301 /crust/;
+    return 301 /crust/$is_args$args;
 }
 
 location /crust/ {
