@@ -2,6 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
+	createMemo,
 	For,
 	Match,
 	on,
@@ -16,13 +17,19 @@ import { AdvancedTab } from "./AdvancedTab";
 import { GeneralTab } from "./GeneralTab";
 import { MembersTab } from "./MembersTab";
 import { PermissionsTab } from "./PermissionsTab";
+import { RoomsTab } from "./RoomsTab";
 
 export const roomSettingsTabMeta = [
 	{ id: "general", label: "General" },
+	{ id: "rooms", label: "Rooms", spaceOnly: true },
 	{ id: "permissions", label: "Permissions" },
 	{ id: "members", label: "Members" },
 	{ id: "advanced", label: "Advanced" },
-] as const;
+] as const satisfies readonly {
+	id: string;
+	label: string;
+	spaceOnly?: boolean;
+}[];
 
 export type RoomSettingsTab = (typeof roomSettingsTabMeta)[number]["id"];
 
@@ -120,6 +127,11 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 		return typeof room?.isSpaceRoom === "function" ? room.isSpaceRoom() : false;
 	};
 
+	// Hide space-only tabs (e.g. Rooms) when the target is a regular room.
+	const visibleTabs = createMemo(() =>
+		roomSettingsTabMeta.filter((t) => isSpace() || !("spaceOnly" in t)),
+	);
+
 	const entityNoun = (): "space" | "room" => (isSpace() ? "space" : "room");
 	const sidebarHeading = (): string =>
 		isSpace() ? "Space Settings" : "Room Settings";
@@ -158,7 +170,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 							{roomName()}
 						</div>
 						<div class="space-y-0.5">
-							<For each={roomSettingsTabMeta}>
+							<For each={visibleTabs()}>
 								{(tab) => (
 									<button
 										type="button"
@@ -205,6 +217,9 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 							<Switch>
 								<Match when={props.activeTab === "general"}>
 									<GeneralTab client={props.client} roomId={props.roomId} />
+								</Match>
+								<Match when={props.activeTab === "rooms" && isSpace()}>
+									<RoomsTab client={props.client} roomId={props.roomId} />
 								</Match>
 								<Match when={props.activeTab === "permissions"}>
 									<PermissionsTab client={props.client} roomId={props.roomId} />
