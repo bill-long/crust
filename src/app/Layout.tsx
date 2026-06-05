@@ -355,7 +355,8 @@ const RoomPane: Component<{
 };
 
 const Layout: Component = () => {
-	const { client, summaries, cryptoStatus, syncState } = useClient();
+	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
+		useClient();
 	// Mount the global PTT/PTM hotkey listener once at the app shell. The
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
@@ -665,6 +666,10 @@ const Layout: Component = () => {
 		markLeaving(rid, true);
 		try {
 			await client.leave(rid);
+			// Hide the room from all lists now; `client.leave()` has resolved
+			// so the server processed the leave, but the local MyMembership
+			// sync event can lag a tick. Idempotent with the eventual sync.
+			optimisticallyMarkLeft(rid);
 			// Close any open overlays that target this room.
 			if (roomSettings()?.roomId === rid) setRoomSettings(null);
 			setLeaveConfirmRoomId(null);
@@ -696,6 +701,9 @@ const Layout: Component = () => {
 		markLeaving(sid, true);
 		try {
 			await client.leave(sid);
+			// Remove the space avatar from the sidebar immediately rather than
+			// waiting for the leave-membership sync event (see #180).
+			optimisticallyMarkLeft(sid);
 			if (roomSettings()?.roomId === sid) setRoomSettings(null);
 			setLeaveSpaceConfirmId(null);
 			if (wasCurrentSpace) {
