@@ -1,0 +1,21 @@
+# Crust - Self-hosted Matrix web client
+#
+# Usage on the host (e.g. /home/bill/crust/):
+#   1. Place this file and a config.json next to it.
+#   2. `docker compose pull && docker compose up -d`
+#   3. Front it with the host's reverse proxy (see nginx-location.conf.example).
+#
+# Update flow:
+#   docker compose pull && docker compose up -d && docker image prune -f
+
+services:
+  crust:
+    image: ghcr.io/bill-long/crust:latest
+    container_name: crust
+    restart: unless-stopped
+    volumes:
+      - ./config.json:/usr/share/nginx/html/config.json:ro
+    ports:
+      # Bind to loopback only; TLS terminated by the host's nginx,
+      # which proxies /crust/ -> 127.0.0.1:8083/.
+      - "127.0.0.1:8083:80"

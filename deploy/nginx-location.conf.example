@@ -1,0 +1,25 @@
+# Snippet to add inside the existing `server { listen 443 ... server_name strange.pizza; }`
+# block on the host, alongside the existing `/_matrix/`, `/.well-known/matrix/`,
+# and `/` locations.
+#
+# Order matters: place these blocks BEFORE the catch-all `location / {}`
+# that proxies to Cinny, so they take precedence for sub-path requests.
+#
+# Depends on `$connection_upgrade` being defined at http{} scope (already
+# provided by /etc/nginx/conf.d/websocket-upgrade.conf on this host).
+
+# Redirect bare /crust -> /crust/ so the SPA loads with the expected base path.
+location = /crust {
+    return 301 /crust/;
+}
+
+location /crust/ {
+    proxy_pass http://127.0.0.1:8083/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+}
