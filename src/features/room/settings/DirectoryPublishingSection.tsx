@@ -22,8 +22,11 @@ interface DirectoryPublishingSectionProps {
  * that reverts on failure.
  *
  * There is no `maySendStateEvent` permission for directory listing, so the
- * toggle stays enabled (except while loading/saving) and relies on the server
- * to reject unauthorized writes; the error is then surfaced inline.
+ * toggle is not permission-gated: it stays enabled and relies on the server
+ * to reject unauthorized writes (the error is surfaced inline). It is only
+ * disabled while loading or saving, or when the initial load failed — in the
+ * load-failure case a separate Retry is offered, since there is no known
+ * current value to toggle from.
  */
 const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 	props,
