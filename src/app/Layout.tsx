@@ -867,8 +867,8 @@ const Layout: Component = () => {
 									onLeft={(leftRid) => {
 										setRoomSettings(null);
 										// If the user just left the space they were
-										// viewing (or the overlay's target IS the space
-										// snapshot), don't try to navigate back into it.
+										// viewing, navigate to /home instead of trying
+										// to navigate back into the just-left space.
 										const leftCurrentSpace =
 											spaceIdAtOpen !== undefined && leftRid === spaceIdAtOpen;
 										if (spaceIdAtOpen && !leftCurrentSpace) {
