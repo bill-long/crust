@@ -61,6 +61,7 @@ function mkEvent(eventId: string, body: string, ts: number): TimelineEvent {
 		myReactions: {},
 		status: null,
 		stateNotice: null,
+		membershipTransition: null,
 	};
 }
 
@@ -76,6 +77,26 @@ function manyEvents(n: number, prefix = "$evt"): TimelineEvent[] {
 		);
 	}
 	return arr;
+}
+
+/** A grouped membership-transition notice event (defaults to a join). */
+function mkMemberEvent(
+	eventId: string,
+	subject: string,
+	ts: number,
+): TimelineEvent {
+	return {
+		...mkEvent(eventId, "", ts),
+		type: "m.room.member",
+		senderName: subject,
+		stateNotice: { text: `${subject} joined the room` },
+		membershipTransition: {
+			kind: "join",
+			userId: `@${subject.toLowerCase()}:example.com`,
+			subject,
+			avatarUrl: null,
+		},
+	};
 }
 
 function getScroller(container: HTMLElement): HTMLElement {
@@ -572,6 +593,57 @@ describe("TimelineView (browser)", () => {
 				{ timeout: 2000, interval: 50 },
 			)
 			.toBe(0);
+		m.unmount();
+	});
+
+	// Membership-notice grouping (issue #183): a run of consecutive joins
+	// collapses to one summary; clicking expands to the individual notices and
+	// "Show less" collapses again.
+	it("groups consecutive membership notices and toggles expansion", async () => {
+		const roomId = "!grp:example.com";
+		const base = 1700000000000;
+		const members = ["Alice", "Bob", "Carol", "Dave"].map((name, i) =>
+			mkMemberEvent(`$m_${i}_${nextSyntheticId++}`, name, base + i * 1000),
+		);
+		harness.setRoomState(roomId, { events: members });
+		const m = mount(roomId);
+
+		// Collapsed: one summary line, no individual "joined the room" notices.
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toContain("Alice, Bob and 2 others joined");
+		expect(m.container.textContent).not.toContain("Alice joined the room");
+
+		// Expand.
+		const expandBtn = m.container.querySelector<HTMLButtonElement>(
+			'button[aria-expanded="false"]',
+		);
+		expect(expandBtn).toBeTruthy();
+		expandBtn?.click();
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toContain("Alice joined the room");
+		expect(m.container.textContent).toContain("Dave joined the room");
+
+		// Collapse via "Show less".
+		const collapseBtn = Array.from(
+			m.container.querySelectorAll<HTMLButtonElement>("button"),
+		).find((b) => b.textContent?.trim() === "Show less");
+		expect(collapseBtn).toBeTruthy();
+		collapseBtn?.click();
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.not.toContain("Alice joined the room");
+		expect(m.container.textContent).toContain("Alice, Bob and 2 others joined");
 		m.unmount();
 	});
 });
