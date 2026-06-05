@@ -19,7 +19,9 @@ import type { CreateSecretStorageOpts } from "matrix-js-sdk/lib/crypto-api";
  * is tracked separately — see issue #207.
  */
 export function secretStorageBootstrapOpts(
-	createSecretStorageKey: CreateSecretStorageOpts["createSecretStorageKey"],
+	createSecretStorageKey: NonNullable<
+		CreateSecretStorageOpts["createSecretStorageKey"]
+	>,
 ): CreateSecretStorageOpts {
 	return {
 		createSecretStorageKey,

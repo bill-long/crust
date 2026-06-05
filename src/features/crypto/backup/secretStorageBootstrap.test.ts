@@ -1,10 +1,11 @@
+import type { GeneratedSecretStorageKey } from "matrix-js-sdk/lib/crypto-api";
 import { describe, expect, it } from "vitest";
 import { secretStorageBootstrapOpts } from "./secretStorageBootstrap";
 
-const createKey = async () =>
-	({ encodedPrivateKey: "key" }) as unknown as Awaited<
-		ReturnType<NonNullable<Parameters<typeof secretStorageBootstrapOpts>[0]>>
-	>;
+const createKey = async (): Promise<GeneratedSecretStorageKey> => ({
+	privateKey: new Uint8Array(),
+	encodedPrivateKey: "key",
+});
 
 describe("secretStorageBootstrapOpts", () => {
 	it("never forces new secret storage (reuses existing, no extra recovery key)", () => {
