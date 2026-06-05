@@ -14,6 +14,7 @@ import {
 import type { CryptoAction } from "../../types/crypto";
 import { BackupSetupDialog } from "./backup/BackupSetupDialog";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
+import { RecoveryKeyResetDialog } from "./backup/RecoveryKeyResetDialog";
 import { CrossSigningSetup } from "./CrossSigningSetup";
 import { IncomingVerificationToast } from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
@@ -56,10 +57,16 @@ const CryptoStatusBanner: Component = () => {
 	const [showSetup, setShowSetup] = createSignal(false);
 	const [showVerification, setShowVerification] = createSignal(false);
 	const [showBackupSetup, setShowBackupSetup] = createSignal(false);
+	const [showRecoveryReset, setShowRecoveryReset] = createSignal(false);
 
 	// Expose whether any crypto dialog is open (for inert on underlying content)
 	createEffect(() => {
-		setCryptoDialogOpen(showSetup() || showVerification() || showBackupSetup());
+		setCryptoDialogOpen(
+			showSetup() ||
+				showVerification() ||
+				showBackupSetup() ||
+				showRecoveryReset(),
+		);
 	});
 
 	const verification = useVerification(client);
@@ -89,6 +96,9 @@ const CryptoStatusBanner: Component = () => {
 			case "setup-backup":
 				setShowBackupSetup(true);
 				break;
+			case "reset-recovery-key":
+				setShowRecoveryReset(true);
+				break;
 		}
 	});
 	onCleanup(unregister);
@@ -115,6 +125,16 @@ const CryptoStatusBanner: Component = () => {
 				<BackupSetupDialog
 					onClose={() => {
 						setShowBackupSetup(false);
+						cryptoStatus.refresh();
+						restoreCryptoTriggerFocus();
+					}}
+				/>
+			</Show>
+
+			<Show when={showRecoveryReset()}>
+				<RecoveryKeyResetDialog
+					onClose={() => {
+						setShowRecoveryReset(false);
 						cryptoStatus.refresh();
 						restoreCryptoTriggerFocus();
 					}}

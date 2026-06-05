@@ -4,4 +4,5 @@ export type CryptoAction =
 	| "setup-cross-signing"
 	| "verify-session"
 	| "setup-backup"
+	| "reset-recovery-key"
 	| "hidden";
