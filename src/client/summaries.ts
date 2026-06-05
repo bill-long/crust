@@ -320,6 +320,7 @@ export function createSummariesStore(client: MatrixClient): {
 	init: () => void;
 	cleanup: () => void;
 	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
+	optimisticallyMarkLeft: (roomId: string) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const baseUrl = client.getHomeserverUrl();
@@ -424,6 +425,28 @@ export function createSummariesStore(client: MatrixClient): {
 				};
 			}),
 		);
+	}
+
+	/**
+	 * Flip an existing summary entry to `membership: "leave"` so every
+	 * join-filtered selector (`getSpaces`, `getSpaceRooms`, `getOrphanRooms`,
+	 * `getDmRooms`, `getSpaceUnreadRollup`) hides it immediately, without
+	 * waiting for the SDK's leave-membership sync event.
+	 *
+	 * Called after `client.leave()` resolves but before the next /sync
+	 * delivers `RoomEvent.MyMembership`. The eventual authoritative update
+	 * sets the same "leave" membership (or `onDeleteRoom` removes the entry
+	 * entirely), so this is idempotent and the room is never re-added as
+	 * joined: the other handlers only `upsertRoom` (which would re-read the
+	 * still-"join" membership from the SDK) when no entry exists, and this
+	 * entry persists with "leave" until /sync catches up.
+	 *
+	 * No-op when the entry is absent (nothing is displayed) or already "leave".
+	 */
+	function optimisticallyMarkLeft(roomId: string): void {
+		const existing = summaries[roomId];
+		if (!existing || existing.membership === "leave") return;
+		setSummaries(roomId, "membership", "leave");
 	}
 
 	function upsertRoom(room: Room): void {
@@ -681,5 +704,12 @@ export function createSummariesStore(client: MatrixClient): {
 		client.off(RoomStateEvent.Events, onRoomStateEvents);
 	}
 
-	return { summaries, setSummaries, init, cleanup, optimisticallyMarkJoined };
+	return {
+		summaries,
+		setSummaries,
+		init,
+		cleanup,
+		optimisticallyMarkJoined,
+		optimisticallyMarkLeft,
+	};
 }

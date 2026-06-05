@@ -217,6 +217,7 @@ export const TestClientProvider: ParentComponent<{
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: () => {},
+				optimisticallyMarkLeft: () => {},
 			}}
 		>
 			{props.children}

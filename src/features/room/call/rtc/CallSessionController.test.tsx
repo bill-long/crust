@@ -151,6 +151,7 @@ function renderController(): { unmount: () => void } {
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: () => {},
+				optimisticallyMarkLeft: () => {},
 			}}
 		>
 			<CallSessionController

@@ -6,6 +6,7 @@ import {
 	getNextCallExpiry,
 	isCallActive,
 } from "./summaries";
+import { getSpaces } from "./summaries-selectors";
 
 const CALL_TYPE = "org.matrix.msc3401.call.member";
 const NOW = 1_780_000_000_000;
@@ -784,6 +785,86 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 		});
 
 		expect(store.summaries["!s:x"].isSpace).toBe(true);
+
+		store.cleanup();
+	});
+});
+
+describe("createSummariesStore optimisticallyMarkLeft", () => {
+	function makeStore() {
+		const rooms = new Map<string, ReturnType<typeof createMockRoom>>();
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		return store;
+	}
+
+	function joinedEntry(roomId: string, isSpace = false) {
+		return {
+			roomId,
+			name: "Room",
+			avatarUrl: null,
+			lastMessage: null,
+			unreadCount: 0,
+			highlightCount: 0,
+			membership: "join",
+			isEncrypted: false,
+			isDirect: false,
+			isSpace,
+			kind: "text" as const,
+			callActive: false,
+			children: [],
+		};
+	}
+
+	it("flips a joined entry to membership='leave' without clobbering other fields", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			...joinedEntry("!r:x"),
+			name: "Keep me",
+			avatarUrl: "keep.png",
+			unreadCount: 5,
+		});
+
+		store.optimisticallyMarkLeft("!r:x");
+
+		const s = store.summaries["!r:x"];
+		expect(s.membership).toBe("leave");
+		expect(s.name).toBe("Keep me");
+		expect(s.avatarUrl).toBe("keep.png");
+		expect(s.unreadCount).toBe(5);
+
+		store.cleanup();
+	});
+
+	it("is a no-op when the entry does not exist", () => {
+		const store = makeStore();
+		store.optimisticallyMarkLeft("!missing:x");
+		expect(store.summaries["!missing:x"]).toBeUndefined();
+		store.cleanup();
+	});
+
+	it("is a no-op when the entry is already 'leave'", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			...joinedEntry("!r:x"),
+			membership: "leave",
+		});
+		store.optimisticallyMarkLeft("!r:x");
+		expect(store.summaries["!r:x"].membership).toBe("leave");
+		store.cleanup();
+	});
+
+	it("hides a left space from getSpaces", () => {
+		const store = makeStore();
+		store.setSummaries("!space:x", joinedEntry("!space:x", true));
+		expect(getSpaces(store.summaries).map((s) => s.roomId)).toContain(
+			"!space:x",
+		);
+
+		store.optimisticallyMarkLeft("!space:x");
+		expect(getSpaces(store.summaries).map((s) => s.roomId)).not.toContain(
+			"!space:x",
+		);
 
 		store.cleanup();
 	});

@@ -51,6 +51,14 @@ interface ClientContextValue {
 	 */
 	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
 	/**
+	 * Optimistically flip `roomId`'s summary entry to "leave" so it disappears
+	 * from all join-filtered lists (channels, spaces sidebar) immediately when
+	 * the user leaves, without waiting for the leave-membership /sync event.
+	 * Call after `client.leave()` resolves. Idempotent; the eventual sync
+	 * confirms the same "leave" state.
+	 */
+	optimisticallyMarkLeft: (roomId: string) => void;
+	/**
 	 * Request the recovery key from the user. Components that show a
 	 * recovery key input dialog should call setRecoveryKeyResolver to
 	 * register themselves.
@@ -169,6 +177,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		init: initSummaries,
 		cleanup: cleanupSummaries,
 		optimisticallyMarkJoined,
+		optimisticallyMarkLeft,
 	} = createSummariesStore(matrixClient);
 
 	const onSync = (state: SyncState): void => {
@@ -272,6 +281,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				summaries,
 				cryptoStatus,
 				optimisticallyMarkJoined,
+				optimisticallyMarkLeft,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,
 				clearSecretStorageCache,
