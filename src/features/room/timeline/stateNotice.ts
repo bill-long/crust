@@ -28,7 +28,7 @@ export interface MembershipTransition {
 	kind: MembershipTransitionKind;
 	/** Matrix user ID of the affected member (the event's state_key). */
 	userId: string;
-	/** Display name of the affected user (the member event's state_key). */
+	/** Display name of the affected user (resolved from the event/state). */
 	subject: string;
 	/** http avatar URL of the affected user, or null when none is known. */
 	avatarUrl: string | null;

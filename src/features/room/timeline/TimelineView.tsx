@@ -203,6 +203,23 @@ const TimelineView: Component<{
 		});
 	});
 
+	// Per-row "expanded" lookup, precomputed once per change of groups or
+	// expansion state. Each group's membership IDs are scanned at most once
+	// (visiting only the leader index), so the virtualizer render prop can
+	// read O(1) per row instead of re-scanning the run for every member row.
+	const expandedByIndex = createMemo<boolean[]>(() => {
+		const groups = membershipGroups();
+		const set = expandedMemberIds();
+		const out = new Array<boolean>(groups.length).fill(false);
+		groups.forEach((g, i) => {
+			if (g && g.leaderIndex === i) {
+				const expanded = g.memberEventIds.some((id) => set.has(id));
+				if (expanded) for (const mi of g.memberIndices) out[mi] = true;
+			}
+		});
+		return out;
+	});
+
 	// Reactive "now" that updates at local midnight so separator labels
 	// like "Today" / "Yesterday" stay accurate for sessions left open
 	// across a day boundary.
@@ -1267,16 +1284,19 @@ const TimelineView: Component<{
 								// underlying signals.
 								const group = (): MembershipGroup | null =>
 									membershipGroups()[indexAcc()] ?? null;
+								// O(1) per-row expansion lookup (precomputed memo).
+								const expanded = (): boolean =>
+									expandedByIndex()[indexAcc()] ?? false;
 								const mode = (): "item" | "summary" | "hidden" => {
 									const g = group();
-									if (!g || isGroupExpanded(g)) return "item";
+									if (!g || expanded()) return "item";
 									return g.leaderIndex === indexAcc() ? "summary" : "hidden";
 								};
 								const showCollapseControl = (): boolean => {
 									const g = group();
 									return (
 										!!g &&
-										isGroupExpanded(g) &&
+										expanded() &&
 										g.memberIndices[g.memberIndices.length - 1] === indexAcc()
 									);
 								};
