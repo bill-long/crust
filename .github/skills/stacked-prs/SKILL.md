@@ -112,11 +112,15 @@ For each row in `issue_chain`:
    not return. `manage_schedule` is a CLI built-in for recurring prompts;
    the `code-review` skill itself assumes an interactively-active agent
    and so documents only the REST/GraphQL queries. This skill uses the
-   same queries from inside the scheduled poll. If `manage_schedule` is
-   unavailable in the current runtime, fall back to a synchronous wait
-   loop in this agent's turn (`Start-Sleep -Seconds 90` between the same
-   REST/GraphQL polls); this blocks the agent on each PR but still
-   completes the workflow. Clean when **either**:
+   same queries from inside the scheduled poll. **Record the schedule
+   id returned by `manage_schedule` with `action: "create"`** — you'll
+   need it to stop the poll once the review is clean. If
+   `manage_schedule` is unavailable in the current runtime, fall back
+   to a synchronous wait loop in this agent's turn (e.g.
+   `Start-Sleep -Seconds 90` in PowerShell, or `sleep 90` in
+   bash/zsh — adapt to the local shell) between the same REST/GraphQL
+   polls; this blocks the agent on each PR but still completes the
+   workflow. Clean when **either**:
    - A non-empty Copilot summary review on the new HEAD SHA says "generated
      no new comments", OR
    - An empty-body Copilot review exists on the new HEAD SHA AND no
@@ -126,8 +130,9 @@ For each row in `issue_chain`:
     If unreplied threads exist: address them, push, reply, re-request
     review, continue polling. See `code-review` skill for the exact GraphQL
     query and reply mechanics. **As soon as the review is clean, call
-    `manage_schedule` with `action: "stop"` and the schedule id** —
-    otherwise the recurring poll keeps firing across subsequent issues.
+    `manage_schedule` with `action: "stop"` and the recorded schedule
+    id** — otherwise the recurring poll keeps firing across subsequent
+    issues.
 10. **Mark the row done** in `issue_chain`.
 
 ### 3. Post-chain audit
