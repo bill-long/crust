@@ -18,7 +18,7 @@ import {
 	type RoomSettingsTab,
 } from "./RoomSettingsOverlay";
 
-function setup(active: RoomSettingsTab = "general") {
+function setup(active: RoomSettingsTab = "general", isSpace?: boolean) {
 	const room = createMockRoom("!room:example.com", [], [], {
 		name: "Test Room",
 	});
@@ -44,6 +44,7 @@ function setup(active: RoomSettingsTab = "general") {
 				activeTab={activeTab()}
 				onTabChange={onTabChange}
 				onClose={onClose}
+				isSpace={isSpace}
 			/>
 		);
 	});
@@ -94,5 +95,30 @@ describe("RoomSettingsOverlay", () => {
 		const { onClose } = setup();
 		fireEvent.click(screen.getByLabelText("Close room settings"));
 		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("uses Space-flavored labels when isSpace is true", () => {
+		setup("general", true);
+		expect(screen.getByText("Space Settings")).toBeTruthy();
+		expect(screen.getByLabelText("Close space settings")).toBeTruthy();
+		expect(
+			screen.getByRole("dialog", { name: "Space settings — Test Room" }),
+		).toBeTruthy();
+	});
+
+	it("uses Room-flavored labels when isSpace is false", () => {
+		setup("general", false);
+		expect(screen.getByText("Room Settings")).toBeTruthy();
+		expect(screen.getByLabelText("Close room settings")).toBeTruthy();
+	});
+
+	it("passes isSpace=true into AdvancedTab leave label", () => {
+		setup("advanced", true);
+		expect(screen.getByRole("button", { name: "Leave space" })).toBeTruthy();
+	});
+
+	it("passes isSpace=false (default) into AdvancedTab leave label", () => {
+		setup("advanced");
+		expect(screen.getByRole("button", { name: "Leave room" })).toBeTruthy();
 	});
 });

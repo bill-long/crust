@@ -706,8 +706,20 @@ const Layout: Component = () => {
 		<div class="flex min-h-0 flex-1 bg-surface-0 text-text-primary">
 			{/* Resizable layout with user bar spanning left sidebar */}
 			<ResizableLayout
-				spaces={<SpacesSidebar />}
-				roomList={<RoomList />}
+				spaces={
+					<SpacesSidebar
+						onOpenSpaceSettings={(sid) =>
+							setRoomSettings({ roomId: sid, tab: "general" })
+						}
+					/>
+				}
+				roomList={
+					<RoomList
+						onOpenSpaceSettings={(sid) =>
+							setRoomSettings({ roomId: sid, tab: "general" })
+						}
+					/>
+				}
 				callStatus={<CallStatusPanel summaries={summaries} />}
 				userBar={
 					<UserBar
@@ -834,16 +846,32 @@ const Layout: Component = () => {
 							// params.spaceId during the async leave cannot
 							// re-run this child and overwrite the snapshot.
 							const spaceIdAtOpen = untrack(() => params.spaceId);
+							// Snapshot whether the overlay's target is itself a
+							// space — read once at open time from summaries so
+							// the label survives even if the room object hasn't
+							// fully synced. Falls back to room.isSpaceRoom().
+							const isSpaceTarget = untrack(
+								() =>
+									summaries[rid]?.isSpace ??
+									client.getRoom(rid)?.isSpaceRoom() ??
+									false,
+							);
 							return (
 								<RoomSettingsOverlay
 									client={client}
 									roomId={rid}
+									isSpace={isSpaceTarget}
 									activeTab={target().tab}
 									onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
 									onClose={() => setRoomSettings(null)}
-									onLeft={() => {
+									onLeft={(leftRid) => {
 										setRoomSettings(null);
-										if (spaceIdAtOpen) {
+										// If the user just left the space they were
+										// viewing, navigate to /home instead of trying
+										// to navigate back into the just-left space.
+										const leftCurrentSpace =
+											spaceIdAtOpen !== undefined && leftRid === spaceIdAtOpen;
+										if (spaceIdAtOpen && !leftCurrentSpace) {
 											navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
 										} else {
 											navigate("/home");
