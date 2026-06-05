@@ -97,10 +97,11 @@ For each row in `issue_chain`:
    - **The PR body must mention the issue with a closing keyword.**
      GitHub accepts `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`,
      `resolve`, `resolves`, or `resolved`, each followed (optionally with
-     a colon, e.g. `Closes: #186`) by `#N`. As each PR in the chain
-     merges in order, GitHub auto-retargets the next PR to `main`, so
-     the PR-body trailer fires on merge into the default branch and the
-     issue auto-closes.
+     a colon, e.g. `Closes: #186`) by `#N`. As each parent merges and its
+     branch is deleted, GitHub auto-retargets the next PR to `main`, so
+     the trailer fires on merge into the default branch and the issue
+     auto-closes. See **Auto-close failure mode** below for the deletion
+     requirement and the post-merge audit safety net.
    - When the PR only partially addresses the issue (e.g. deferred tabs),
      use `Addresses #N` in the PR body and list what's deferred in an
      "Out of scope" section. `Addresses` is not a closing keyword, so
