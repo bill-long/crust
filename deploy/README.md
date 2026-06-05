@@ -33,8 +33,8 @@ where `$PAT` is a personal access token with `read:packages`.
 ## Server deployment
 
 > **Prerequisite:** the GHCR package must be public, or run
-> `docker login ghcr.io` on the server first. See
-> [First-time GHCR setup](#first-time-ghcr-setup) below.
+> `docker login ghcr.io` on the server first. See the
+> [First-time GHCR setup](#first-time-ghcr-setup) section above.
 
 ```bash
 # One-time

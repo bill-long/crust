@@ -12,6 +12,13 @@ permissions:
   # Needed for cache-from/to: type=gha (GHA cache API).
   actions: write
 
+# Serialize publishes per ref so an older run can't overwrite latest/main after
+# a newer one has finished. Don't cancel in-flight publishes for tags (we want
+# them all), only for branch pushes.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
