@@ -123,12 +123,12 @@ For each row in `issue_chain`:
      unreplied Copilot threads appear across 3 consecutive scans (≥10s
      apart).
 
-    If unreplied threads exist: address them, push, reply, re-request
-    review, continue polling. See `code-review` skill for the exact GraphQL
-    query and reply mechanics. **As soon as the review is clean, call
-    `manage_schedule` with `action: "stop"` and the recorded schedule
-    id** — otherwise the recurring poll keeps firing across subsequent
-    issues.
+   If unreplied threads exist: address them, push, reply, re-request
+   review, continue polling. See `code-review` skill for the exact GraphQL
+   query and reply mechanics. **As soon as the review is clean, call
+   `manage_schedule` with `action: "stop"` and the recorded schedule
+   id** — otherwise the recurring poll keeps firing across subsequent
+   issues.
 10. **Mark the row done** in `issue_chain`.
 
 ### 3. Post-chain audit
@@ -142,7 +142,7 @@ After all rows are `done` and the user has merged the chain:
    comment referencing the merged PR. Skip issues the chain
    intentionally left open (PRs that used `Addresses #N` for partial
    work).
-3. **Comb every PR in the chain for deferred findings:** open separate
+3. **Comb through every PR in the chain for deferred findings:** open separate
    follow-up issues for:
    - Findings the Copilot review raised that were intentionally deferred.
    - Rubber-duck flags marked "out of scope for this PR".
