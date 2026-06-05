@@ -64,15 +64,23 @@ export async function leaveChildRooms(
 
 /**
  * Aggregate feedback shown when a space was left but some child rooms could
- * not be. `leftCount` counts successfully-left children (not the space itself).
+ * not be. `leftCount` counts successfully-left children (not the space itself);
+ * it can be 0 when every child leave failed.
  */
 export function buildPartialLeaveMessage(
 	leftCount: number,
 	failedNames: readonly string[],
 ): string {
-	return `Left the space and ${leftCount} room${
-		leftCount === 1 ? "" : "s"
-	}, but ${failedNames.length} could not be left (${failedNames.join(
+	const failedCount = failedNames.length;
+	const failedList = `${failedCount} room${
+		failedCount === 1 ? "" : "s"
+	} could not be left (${failedNames.join(
 		", ",
 	)}). They remain joined — leave them individually.`;
+	if (leftCount === 0) {
+		return `Left the space, but ${failedList}`;
+	}
+	return `Left the space and ${leftCount} room${
+		leftCount === 1 ? "" : "s"
+	}, but ${failedList}`;
 }

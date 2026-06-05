@@ -135,12 +135,20 @@ describe("buildPartialLeaveMessage", () => {
 	it("uses singular grammar for one left room", () => {
 		const msg = buildPartialLeaveMessage(1, ["Beta"]);
 		expect(msg).toContain("Left the space and 1 room,");
-		expect(msg).toContain("1 could not be left (Beta)");
+		expect(msg).toContain("1 room could not be left (Beta)");
 	});
 
 	it("uses plural grammar and lists all failed names", () => {
 		const msg = buildPartialLeaveMessage(2, ["Beta", "Gamma"]);
 		expect(msg).toContain("Left the space and 2 rooms,");
-		expect(msg).toContain("2 could not be left (Beta, Gamma)");
+		expect(msg).toContain("2 rooms could not be left (Beta, Gamma)");
+	});
+
+	it("omits the left-rooms count when every child leave failed", () => {
+		const msg = buildPartialLeaveMessage(0, ["Beta", "Gamma"]);
+		// No awkward "Left the space and 0 rooms".
+		expect(msg).not.toContain("0 room");
+		expect(msg).toContain("Left the space, but 2 rooms could not be left");
+		expect(msg).toContain("(Beta, Gamma)");
 	});
 });
