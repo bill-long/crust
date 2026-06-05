@@ -391,6 +391,27 @@ const Layout: Component = () => {
 	// Reset to false each time the dialog opens (see onLeaveSpace handler).
 	const [leaveSpaceAlsoChildren, setLeaveSpaceAlsoChildren] =
 		createSignal(false);
+	// Snapshot of the joined child rooms (and whether any child subspaces
+	// exist) taken when the leave-space dialog opens. Snapshotting keeps the
+	// dialog's checkbox/count stable after the space is optimistically marked
+	// "left" — at which point getSpaceRooms(summaries, sid) would return [].
+	const [leaveSpaceChildren, setLeaveSpaceChildren] = createSignal<
+		ReturnType<typeof getSpaceRooms>
+	>([]);
+	const [leaveSpaceHasSubspaces, setLeaveSpaceHasSubspaces] =
+		createSignal(false);
+	// The snapshot children that are still joined (pruned live against the
+	// store). Drives BOTH the dialog count and the actual leave set, so the
+	// displayed count stays consistent with the aggregate result message —
+	// including on a retry after a partial failure, where already-left
+	// children have flipped to membership "leave". (Pruning by each child's
+	// membership — not the space's — is why this doesn't regress to [] when
+	// the space itself is optimistically marked left.)
+	const leaveSpaceJoinedChildren = createMemo(() =>
+		leaveSpaceChildren().filter(
+			(r) => summaries[r.roomId]?.membership === "join",
+		),
+	);
 	const [roomSettings, setRoomSettings] = createSignal<{
 		roomId: string;
 		tab: RoomSettingsTab;
@@ -711,11 +732,13 @@ const Layout: Component = () => {
 		// navigation into the wrong place.
 		const wasCurrentSpace = params.spaceId === sid;
 		const currentRoomId = params.roomId;
-		// Snapshot the joined child rooms to leave BEFORE leaving the space:
-		// once the space's own membership flips to "leave" (optimistically or
-		// via sync), getSpaceRooms returns []. getSpaceRooms already excludes
-		// subspaces and only returns children the user has joined.
-		const childRooms = alsoLeaveChildren ? getSpaceRooms(summaries, sid) : [];
+		// Use the still-joined children from the open-time snapshot (see
+		// onLeaveSpace + leaveSpaceJoinedChildren) rather than recomputing
+		// getSpaceRooms here: by this point the space may already be marked
+		// "left" (e.g. on a retry after a partial failure), at which point
+		// getSpaceRooms returns []. Pruning to still-joined children also means
+		// a retry re-attempts only the ones that previously failed.
+		const childRooms = alsoLeaveChildren ? leaveSpaceJoinedChildren() : [];
 
 		let leftCount = 0;
 		let failedNames: string[] = [];
@@ -725,15 +748,21 @@ const Layout: Component = () => {
 		try {
 			// Leaving the space itself is the only step that can hard-fail the
 			// operation; the child leaves below use allSettled and never throw.
-			await client.leave(sid);
-			// Remove the space avatar from the sidebar immediately rather than
-			// waiting for the leave-membership sync event (see #180).
-			optimisticallyMarkLeft(sid);
-			// Tear down the active call only AFTER the leave succeeded, so a
-			// failed leave doesn't needlessly end a call in a room we're still
-			// in. The same success-gated rule is applied to child rooms below.
-			if (activeCallRoomId() === sid) {
-				setActiveCallRoomId(null);
+			// Guard on still being joined so a retry after a partial child
+			// failure (where the space was already left on the first attempt)
+			// skips straight to re-leaving the remaining children instead of
+			// re-issuing a leave on a space we're no longer in.
+			if (summaries[sid]?.membership === "join") {
+				await client.leave(sid);
+				// Remove the space avatar from the sidebar immediately rather than
+				// waiting for the leave-membership sync event (see #180).
+				optimisticallyMarkLeft(sid);
+				// Tear down the active call only AFTER the leave succeeded, so a
+				// failed leave doesn't needlessly end a call in a room we're still
+				// in. The same success-gated rule is applied to child rooms below.
+				if (activeCallRoomId() === sid) {
+					setActiveCallRoomId(null);
+				}
 			}
 
 			if (childRooms.length > 0) {
@@ -782,22 +811,6 @@ const Layout: Component = () => {
 		return summaries[sid]?.name?.trim() || "this space";
 	});
 
-	// Joined, non-space child rooms that "Also leave child rooms" would leave.
-	const leaveSpaceChildRooms = createMemo(() => {
-		const sid = leaveSpaceConfirmId();
-		if (!sid) return [];
-		return getSpaceRooms(summaries, sid);
-	});
-
-	// Whether the space being left has any child subspaces (which are NOT
-	// left by the checkbox — the user leaves those separately).
-	const leaveSpaceHasChildSubspaces = createMemo(() => {
-		const sid = leaveSpaceConfirmId();
-		if (!sid) return false;
-		const children = summaries[sid]?.children ?? [];
-		return children.some((cid) => summaries[cid]?.isSpace === true);
-	});
-
 	// Reactive "can the current user invite to the active room?"
 	// Recomputed when roomId changes OR when room state events fire (power
 	// levels / membership / join rules can affect canInvite).
@@ -840,6 +853,14 @@ const Layout: Component = () => {
 						}
 						onLeaveSpace={(sid) => {
 							setLeaveSpaceAlsoChildren(false);
+							// Snapshot the joined children + subspace flag now, while
+							// the space is still joined (getSpaceRooms requires it).
+							setLeaveSpaceChildren(getSpaceRooms(summaries, sid));
+							setLeaveSpaceHasSubspaces(
+								(summaries[sid]?.children ?? []).some(
+									(cid) => summaries[cid]?.isSpace === true,
+								),
+							);
 							setLeaveSpaceConfirmId(sid);
 						}}
 						onInviteSpace={(sid) => setInviteTarget({ id: sid, kind: "space" })}
@@ -1050,7 +1071,7 @@ const Layout: Component = () => {
 							in the space that you have not joined — especially private ones —
 							since you will no longer see them in the space's room list.
 						</p>
-						<Show when={leaveSpaceChildRooms().length > 0}>
+						<Show when={leaveSpaceJoinedChildren().length > 0}>
 							<label class="flex items-start gap-2 text-text-secondary">
 								<input
 									type="checkbox"
@@ -1061,13 +1082,13 @@ const Layout: Component = () => {
 									}
 								/>
 								<span>
-									Also leave the {leaveSpaceChildRooms().length} room
-									{leaveSpaceChildRooms().length === 1 ? "" : "s"} I've joined
-									in this space.
+									Also leave the {leaveSpaceJoinedChildren().length} room
+									{leaveSpaceJoinedChildren().length === 1 ? "" : "s"} I've
+									joined in this space.
 								</span>
 							</label>
 						</Show>
-						<Show when={leaveSpaceHasChildSubspaces()}>
+						<Show when={leaveSpaceHasSubspaces()}>
 							<p class="text-xs text-text-muted">
 								Child spaces are not affected — leave those separately.
 							</p>
