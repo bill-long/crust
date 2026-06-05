@@ -95,11 +95,11 @@ For each row in `issue_chain`:
 7. **Open the PR** with `--base <previous-branch> --body-file <temp.md>`
    (never inline `--body`; backticks get mangled in PowerShell).
    - **The PR body must mention the issue with a closing keyword.**
-     GitHub accepts: `close | closes | closed | fix | fixes | fixed |
-     resolve | resolves | resolved`, each followed (optionally with a
-     colon, e.g. `Closes: #186`) by `#N`. As each PR in the chain merges
-     in order, GitHub auto-retargets the next PR to `main`, so the
-     PR-body trailer fires on merge into the default branch and the
+     GitHub accepts `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`,
+     `resolve`, `resolves`, or `resolved`, each followed (optionally with
+     a colon, e.g. `Closes: #186`) by `#N`. As each PR in the chain
+     merges in order, GitHub auto-retargets the next PR to `main`, so
+     the PR-body trailer fires on merge into the default branch and the
      issue auto-closes.
    - When the PR only partially addresses the issue (e.g. deferred tabs),
      use `Addresses #N` in the PR body and list what's deferred in an
@@ -161,11 +161,12 @@ After all rows are `done` and the user has merged the chain:
 ## Auto-close failure mode
 
 GitHub auto-closes an issue when the PR merging into the default
-branch mentions it with a closing keyword (`Closes/Fixes/Resolves
-#N`) in the PR body. Stacked PRs work fine here: GitHub auto-retargets
-the chain to `main` as parents merge (provided "Automatically delete
-head branches" is on, or the merger ticks "Delete branch"), so each
-PR's body trailer fires when it merges.
+branch mentions it with a closing keyword
+(`Closes/Fixes/Resolves #N`) in the PR body. Stacked PRs work fine
+here: GitHub auto-retargets the chain to `main` as parents merge
+(provided "Automatically delete head branches" is on, or the merger
+ticks "Delete branch"), so each PR's body trailer fires when it
+merges.
 
 A recent run on this repo: 5 of 8 chain PRs auto-closed (each had
 `Closes #N` in the PR body); 3 of 8 did not (each was missing the
