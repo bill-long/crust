@@ -9,6 +9,7 @@ import {
 	Switch,
 } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
+import { clearCryptoStores } from "../client/cryptoRecovery";
 import { LoginPage } from "../features/auth/LoginPage";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
@@ -67,8 +68,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
 			// Clear stores (best-effort async) then redirect.
-			client
-				.clearStores()
+			clearCryptoStores(client)
 				.catch((e: unknown) => {
 					console.warn("Failed to clear stores on session expiry:", e);
 				})
@@ -93,7 +93,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		clearSession();
 		navigate("/login", { replace: true });
 		try {
-			await client.clearStores();
+			await clearCryptoStores(client);
 		} catch {
 			// best-effort
 		}

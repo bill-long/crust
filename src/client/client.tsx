@@ -22,7 +22,9 @@ import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/ac
 import type { Session } from "../stores/session";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
+	clearCryptoStores,
 	clearRecoveryStage,
+	initCryptoStore,
 	persistRecoveryStage,
 	readRecoveryStage,
 	recoveryIdentity,
@@ -235,8 +237,8 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			readStage: readRecoveryStage,
 			persistStage: persistRecoveryStage,
 			clearStage: clearRecoveryStage,
-			clearStores: () => matrixClient.clearStores(),
-			initCrypto: () => matrixClient.initRustCrypto({ useIndexedDB: true }),
+			clearStores: () => clearCryptoStores(matrixClient),
+			initCrypto: () => initCryptoStore(matrixClient),
 			isAborted: () => disposed || syncState() === "logged-out",
 			reload: () => window.location.reload(),
 			timeoutMs: CRYPTO_INIT_TIMEOUT_MS,

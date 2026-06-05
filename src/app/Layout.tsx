@@ -11,6 +11,7 @@ import {
 	untrack,
 } from "solid-js";
 import { useClient } from "../client/client";
+import { clearCryptoStores } from "../client/cryptoRecovery";
 import { getSpaceRooms } from "../client/summaries-selectors";
 import {
 	clamp,
@@ -485,7 +486,7 @@ const Layout: Component = () => {
 			client.stopClient();
 		}
 		try {
-			await client.clearStores();
+			await clearCryptoStores(client);
 		} catch (e) {
 			console.warn("Failed to clear stores on logout:", e);
 		}
