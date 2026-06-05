@@ -91,26 +91,20 @@ For each row in `issue_chain`:
 5. **Pre-push gate via the `code-review` skill** — `pnpm typecheck && pnpm lint && pnpm build`,
    then 4-pass review (scoped + blind × Claude + GPT), iterate until
    all four agree.
-6. **Commit, then run the pre-flight check from the "Auto-close failure
-   mode" section** to verify the HEAD commit message has a closing or
-   `Addresses` keyword. Only push after the check passes — the user
-   pre-approved push.
+6. **Commit and push** — the user pre-approved push.
 7. **Open the PR** with `--base <previous-branch> --body-file <temp.md>`
    (never inline `--body`; backticks get mangled in PowerShell).
-   - **Mention the issue with a closing keyword in BOTH the commit
-     message AND the PR body.** GitHub accepts: `close | closes |
-     closed | fix | fixes | fixed | resolve | resolves | resolved`,
-     each followed (optionally with a colon, e.g. `Closes: #186`) by
-     `#N`. Putting the trailer in both places maximizes the likelihood
-     that the issue auto-closes regardless of how the chain is ultimately
-     merged — closure still depends on the reference surviving into
-     default-branch history or the merged PR's metadata (see the
-     post-merge audit for the safety net). The pre-flight in step 6
-     enforces the commit-message half.
+   - **The PR body must mention the issue with a closing keyword.**
+     GitHub accepts: `close | closes | closed | fix | fixes | fixed |
+     resolve | resolves | resolved`, each followed (optionally with a
+     colon, e.g. `Closes: #186`) by `#N`. As each PR in the chain merges
+     in order, GitHub auto-retargets the next PR to `main`, so the
+     PR-body trailer fires on merge into the default branch and the
+     issue auto-closes.
    - When the PR only partially addresses the issue (e.g. deferred tabs),
-     use `Addresses #N` in both the commit and the PR body, and list what's
-     deferred in an "Out of scope" section. The pre-flight check accepts
-     this as the partial-coverage signal.
+     use `Addresses #N` in the PR body and list what's deferred in an
+     "Out of scope" section. `Addresses` is not a closing keyword, so
+     the issue stays open as intended.
 8. **Request Copilot review** with `[bot]` syntax — see `code-review` skill.
 9. **Poll for Copilot review** using the CLI runtime's `manage_schedule`
    tool at 90s intervals — Copilot review submissions do NOT generate
@@ -143,12 +137,9 @@ After all rows are `done` and the user has merged the chain:
 1. **Query open issues** — `gh issue list --state open --limit 500`. If
    the result is at the limit, raise it or paginate; a truncated list
    silently leaves stragglers undiagnosed.
-2. **For each open issue that should have closed but didn't:** scan all
-   commits that landed from the PR (not just the merge commit, since
-   non-squash merges preserve implementation commits separately):
-   `gh pr view <num> --json commits -q '.commits[] | .messageHeadline, .messageBody'`,
-   plus the merge commit body, plus the merged PR body. If no closing
-   keyword like `Closes #N` appears in any of these, that's the cause.
+2. **For each open issue that should have closed but didn't:** look at
+   the merged PR body. If the closing keyword (`Closes #N` etc.) is
+   missing or was edited out, that's the cause.
 3. **Close stragglers** with a brief comment referencing the merged PR.
 4. **Comb every PR in the chain for deferred findings:** open separate
    follow-up issues for:
@@ -164,36 +155,21 @@ After all rows are `done` and the user has merged the chain:
 
 ## Auto-close failure mode
 
-GitHub auto-closes an issue when the PR that mentions it with a closing
-keyword (`Closes/Fixes/Resolves #N`) is merged into the default branch.
-For stacked PRs the safest practice is to put the trailer in **both**
-the commit message and the PR body — that way the issue closes whether
-the trailer survives via the PR body (after GitHub auto-retargets the
-PR), via the commit message (when the commit reaches `main`), or both.
+GitHub auto-closes an issue when the PR merging into the default
+branch mentions it with a closing keyword (`Closes/Fixes/Resolves
+#N`) in the PR body. Stacked PRs work fine here: GitHub auto-retargets
+the chain to `main` as parents merge (provided "Automatically delete
+head branches" is on, or the merger ticks "Delete branch"), so each
+PR's body trailer fires when it merges.
 
 A recent run on this repo: 5 of 8 chain PRs auto-closed (each had
-`Closes #N` in both PR body and commit message); 3 of 8 did not (each
-had neither). The failure mode is **forgetting the trailer entirely**.
+`Closes #N` in the PR body); 3 of 8 did not (each was missing the
+trailer entirely). The failure mode is **forgetting the trailer**.
 
-**Pre-flight check before pushing each PR:** verify the closing keyword
-is in the most recent commit message on the branch. Accept either a
-closing keyword (any of GitHub's nine inflections) or an explicit
-`Addresses #N` reference for partial-coverage PRs. The PR body is
-written next via `--body-file`; the same trailer should appear there.
-
-```powershell
-$commitMsg = git log -1 --pretty=format:"%B"
-$closes  = $commitMsg -match '(?i)\b(close[sd]?|fix(es|ed)?|resolve[sd]?)(:\s*|\s+)#\d+\b'
-$partial = $commitMsg -match '(?i)\bAddresses(:\s*|\s+)#\d+\b'
-if (-not ($closes -or $partial)) {
-  throw "HEAD commit message missing 'Closes/Fixes/Resolves #N' or 'Addresses #N' reference"
-}
-```
-
-**Post-merge audit** (step 3 of the workflow) remains the safety net:
-squash-merge, force-push, or rebase flows can drop commit history
-before reaching `main`. Always verify open-issue state after the chain
-merges and close stragglers manually.
+**Post-merge audit** (step 3 of the workflow) is the safety net: if
+auto-delete is off, an unusual merge order is used, or someone edits
+out the trailer, the trailer can fail to fire. Always verify
+open-issue state after the chain merges and close stragglers manually.
 
 ## What this skill explicitly defers to other skills
 
