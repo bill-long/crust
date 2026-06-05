@@ -30,13 +30,12 @@ describe("leaveChildRooms", () => {
 				{ roomId: "!a:x", name: "Alpha" },
 				{ roomId: "!b:x", name: "Beta" },
 			],
-			{ currentRoomId: undefined, activeCallRoomId: null },
+			{ currentRoomId: undefined },
 		);
 
 		expect(out.leftRoomIds).toEqual(["!a:x", "!b:x"]);
 		expect(out.failedNames).toEqual([]);
 		expect(out.routeRoomLeft).toBe(false);
-		expect(out.callRoomLeft).toBe(false);
 		expect(client.leave).toHaveBeenCalledTimes(2);
 	});
 
@@ -49,7 +48,7 @@ describe("leaveChildRooms", () => {
 				{ roomId: "!a:x", name: "Alpha" },
 				{ roomId: "!b:x", name: "Beta" },
 			],
-			{ currentRoomId: undefined, activeCallRoomId: null },
+			{ currentRoomId: undefined },
 		);
 
 		expect(out.leftRoomIds).toEqual(["!a:x"]);
@@ -62,7 +61,9 @@ describe("leaveChildRooms", () => {
 		const out = await leaveChildRooms(
 			client,
 			[{ roomId: "!b:x", name: "   " }],
-			{ currentRoomId: undefined, activeCallRoomId: null },
+			{
+				currentRoomId: undefined,
+			},
 		);
 
 		expect(out.failedNames).toEqual(["!b:x"]);
@@ -73,7 +74,7 @@ describe("leaveChildRooms", () => {
 		const out = await leaveChildRooms(
 			client,
 			[{ roomId: "!cur:x", name: "Current" }],
-			{ currentRoomId: "!cur:x", activeCallRoomId: null },
+			{ currentRoomId: "!cur:x" },
 		);
 		expect(out.routeRoomLeft).toBe(true);
 	});
@@ -84,31 +85,49 @@ describe("leaveChildRooms", () => {
 		const out = await leaveChildRooms(
 			client,
 			[{ roomId: "!cur:x", name: "Current" }],
-			{ currentRoomId: "!cur:x", activeCallRoomId: null },
+			{ currentRoomId: "!cur:x" },
 		);
 		expect(out.routeRoomLeft).toBe(false);
 		expect(out.failedNames).toEqual(["Current"]);
 	});
 
-	it("reports callRoomLeft only when the call room's leave succeeded", async () => {
-		const client = makeClient({ "!call:x": "resolve" });
+	it("invokes onRoomLeft per room as each leave succeeds, skipping failures", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const client = makeClient({
+			"!a:x": "resolve",
+			"!b:x": "reject",
+			"!c:x": "resolve",
+		});
+		const left: string[] = [];
 		const out = await leaveChildRooms(
 			client,
-			[{ roomId: "!call:x", name: "Voice" }],
-			{ currentRoomId: undefined, activeCallRoomId: "!call:x" },
+			[
+				{ roomId: "!a:x", name: "Alpha" },
+				{ roomId: "!b:x", name: "Beta" },
+				{ roomId: "!c:x", name: "Gamma" },
+			],
+			{ currentRoomId: undefined, onRoomLeft: (id) => left.push(id) },
 		);
-		expect(out.callRoomLeft).toBe(true);
+		expect(left.sort()).toEqual(["!a:x", "!c:x"]);
+		expect(out.leftRoomIds).toEqual(["!a:x", "!c:x"]);
+		expect(out.failedNames).toEqual(["Beta"]);
 	});
 
-	it("does NOT report callRoomLeft when the call room's leave failed", async () => {
+	it("does not mark a leave as failed when onRoomLeft throws", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
-		const client = makeClient({ "!call:x": "reject" });
+		const client = makeClient({ "!a:x": "resolve" });
 		const out = await leaveChildRooms(
 			client,
-			[{ roomId: "!call:x", name: "Voice" }],
-			{ currentRoomId: undefined, activeCallRoomId: "!call:x" },
+			[{ roomId: "!a:x", name: "Alpha" }],
+			{
+				currentRoomId: undefined,
+				onRoomLeft: () => {
+					throw new Error("boom");
+				},
+			},
 		);
-		expect(out.callRoomLeft).toBe(false);
+		expect(out.leftRoomIds).toEqual(["!a:x"]);
+		expect(out.failedNames).toEqual([]);
 	});
 });
 

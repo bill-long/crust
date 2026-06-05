@@ -739,11 +739,16 @@ const Layout: Component = () => {
 			if (childRooms.length > 0) {
 				const outcome = await leaveChildRooms(client, childRooms, {
 					currentRoomId,
-					activeCallRoomId: activeCallRoomId(),
+					// Apply per-room side effects the moment each child's leave
+					// resolves: hide it from the sidebar and, if it hosts the
+					// active call, tear the call down immediately so the
+					// controller never outlives its room during the batch. A
+					// child whose leave failed never reaches this callback.
+					onRoomLeft: (id) => {
+						optimisticallyMarkLeft(id);
+						if (activeCallRoomId() === id) setActiveCallRoomId(null);
+					},
 				});
-				for (const id of outcome.leftRoomIds) optimisticallyMarkLeft(id);
-				// Only tear the call down if the room hosting it was actually left.
-				if (outcome.callRoomLeft) setActiveCallRoomId(null);
 				leftCount = outcome.leftRoomIds.length;
 				failedNames = outcome.failedNames;
 				routeRoomLeft = outcome.routeRoomLeft;
@@ -1059,12 +1064,13 @@ const Layout: Component = () => {
 									Also leave the {leaveSpaceChildRooms().length} room
 									{leaveSpaceChildRooms().length === 1 ? "" : "s"} I've joined
 									in this space.
-									<Show when={leaveSpaceHasChildSubspaces()}>
-										{" "}
-										Child spaces are not affected — leave those separately.
-									</Show>
 								</span>
 							</label>
+						</Show>
+						<Show when={leaveSpaceHasChildSubspaces()}>
+							<p class="text-xs text-text-muted">
+								Child spaces are not affected — leave those separately.
+							</p>
 						</Show>
 					</div>
 				}

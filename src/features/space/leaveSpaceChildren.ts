@@ -13,47 +13,53 @@ export interface ChildLeaveOutcome {
 	failedNames: string[];
 	/** True when the caller's current routed room was successfully left. */
 	routeRoomLeft: boolean;
-	/** True when the active-call room was successfully left. */
-	callRoomLeft: boolean;
 }
 
 /**
  * Leave a batch of child rooms best-effort. Uses `Promise.allSettled` so a
  * single failure doesn't abort the batch, and reports which rooms were left so
- * the caller can apply optimistic updates / call teardown / navigation only for
- * the rooms that were actually left.
+ * the caller can apply navigation / aggregate feedback.
  *
- * `currentRoomId` and `activeCallRoomId` are reported back as `routeRoomLeft` /
- * `callRoomLeft` only when their leave succeeded — the caller must NOT tear down
- * the active call for a room whose leave rejected (the user is still in it).
+ * `onRoomLeft` is invoked for each room **immediately** after its own
+ * `client.leave` resolves — before the rest of the batch settles. The caller
+ * uses it to apply per-room side effects (optimistic mark-left, tearing down an
+ * active call hosted in that room) the moment that room is actually left, so a
+ * call controller never outlives its room during the batch and a room whose
+ * leave *failed* is never affected. Throwing inside `onRoomLeft` does not mark
+ * the leave as failed.
  */
 export async function leaveChildRooms(
 	client: Pick<MatrixClient, "leave">,
 	children: readonly LeavableChild[],
-	opts: { currentRoomId?: string; activeCallRoomId: string | null },
+	opts: { currentRoomId?: string; onRoomLeft?: (roomId: string) => void },
 ): Promise<ChildLeaveOutcome> {
 	const results = await Promise.allSettled(
-		children.map((c) => client.leave(c.roomId)),
+		children.map(async (c) => {
+			await client.leave(c.roomId);
+			try {
+				opts.onRoomLeft?.(c.roomId);
+			} catch (err) {
+				console.error("onRoomLeft callback failed:", c.roomId, err);
+			}
+		}),
 	);
 
 	const leftRoomIds: string[] = [];
 	const failedNames: string[] = [];
 	let routeRoomLeft = false;
-	let callRoomLeft = false;
 
 	results.forEach((res, i) => {
 		const { roomId, name } = children[i];
 		if (res.status === "fulfilled") {
 			leftRoomIds.push(roomId);
 			if (roomId === opts.currentRoomId) routeRoomLeft = true;
-			if (roomId === opts.activeCallRoomId) callRoomLeft = true;
 		} else {
 			console.error("Failed to leave child room:", roomId, res.reason);
 			failedNames.push(name.trim() || roomId);
 		}
 	});
 
-	return { leftRoomIds, failedNames, routeRoomLeft, callRoomLeft };
+	return { leftRoomIds, failedNames, routeRoomLeft };
 }
 
 /**
