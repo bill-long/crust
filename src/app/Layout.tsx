@@ -950,7 +950,7 @@ const Layout: Component = () => {
 				open={() => leaveSpaceConfirmId() !== null}
 				onClose={() => setLeaveSpaceConfirmId(null)}
 				title={`Leave ${leaveSpaceConfirmName()}?`}
-				body="You will stop seeing this space and its curated room list in the sidebar. Rooms inside the space that you joined remain joined and reachable directly — leaving the space does not remove you from them."
+				body="You will stop seeing this space and its curated room list in the sidebar. Rooms inside the space that you have already joined remain joined and reachable directly. You may lose access to rooms in the space that you have not joined — especially private ones — since you will no longer see them in the space's room list."
 				confirmLabel="Leave"
 				destructive
 				pendingLabel="Leaving…"

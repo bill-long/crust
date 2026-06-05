@@ -163,8 +163,7 @@ describe("SpacesSidebar gear button", () => {
 describe("SpacesSidebar right-click context menu", () => {
 	function openContextMenu(): void {
 		const avatar = screen.getByRole("button", { name: "Alpha" });
-		const trigger = avatar.parentElement as HTMLElement;
-		fireEvent.contextMenu(trigger, { clientX: 10, clientY: 10 });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
 	}
 
 	it("opens a context menu with Space settings and Leave space items", async () => {
@@ -199,9 +198,27 @@ describe("SpacesSidebar right-click context menu", () => {
 	it("omits the Leave space item when no onLeaveSpace prop is provided", async () => {
 		setupWithSpace();
 		const avatar = screen.getByRole("button", { name: "Alpha" });
-		const trigger = avatar.parentElement as HTMLElement;
-		fireEvent.contextMenu(trigger, { clientX: 10, clientY: 10 });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
 		expect(await screen.findByText("Space settings")).toBeTruthy();
+		expect(screen.queryByText("Leave space")).toBeNull();
+	});
+
+	it("does not mount a ContextMenu when neither handler is provided (avoids empty popover)", () => {
+		const client = createMockClient();
+		render(() => (
+			<Wrapper
+				client={client}
+				seed={[makeSpaceSummary("!gamma:example.com", "Gamma")]}
+			>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const avatar = screen.getByRole("button", { name: "Gamma" });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
+		// The popover itself should not mount (not just be empty).
+		expect(screen.queryByRole("menu")).toBeNull();
+		expect(screen.queryByRole("menuitem")).toBeNull();
+		expect(screen.queryByText("Space settings")).toBeNull();
 		expect(screen.queryByText("Leave space")).toBeNull();
 	});
 });
