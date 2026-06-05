@@ -1,5 +1,5 @@
 import type { RouteSectionProps } from "@solidjs/router";
-import { Route, Router, useNavigate } from "@solidjs/router";
+import { Route, Router, useLocation, useNavigate } from "@solidjs/router";
 import {
 	type Component,
 	createEffect,
@@ -17,6 +17,7 @@ import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
+import { useDecodedParams } from "./useDecodedParams";
 
 /** Auth guard — redirects to /login if no session, otherwise boots the Matrix client. */
 const AuthGuard: Component<RouteSectionProps> = (props) => {
@@ -38,6 +39,17 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 const SyncGate: Component<RouteSectionProps> = (props) => {
 	const { syncState, cryptoState, client } = useClient();
 	const navigate = useNavigate();
+	const location = useLocation();
+	const params = useDecodedParams<{ roomId?: string }>();
+
+	const openDeviceSettings = (): void => {
+		navigate("/settings/devices", {
+			state: {
+				returnTo: location.pathname + location.search + location.hash,
+				activeRoomId: params.roomId,
+			},
+		});
+	};
 
 	// Auto-redirect to login when session is expired
 	let cleaningUp = false;
@@ -129,10 +141,15 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				<Match when={true}>
 					<div class="flex h-full flex-col bg-surface-0 text-text-primary">
 						<Show when={cryptoState() === "error"}>
-							<div class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text">
+							<button
+								type="button"
+								onClick={openDeviceSettings}
+								class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text transition-colors hover:bg-warning-bg/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border focus-visible:ring-inset"
+								aria-label="Encryption initialization failed. Open Devices & Security settings."
+							>
 								Encryption initialization failed — encrypted messages may not be
-								readable.
-							</div>
+								readable. <span class="underline">Open settings →</span>
+							</button>
 						</Show>
 						<CryptoStatusBanner />
 						<div class="flex min-h-0 flex-1 flex-col">{props.children}</div>
