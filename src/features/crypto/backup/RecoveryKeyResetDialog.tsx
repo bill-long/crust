@@ -9,36 +9,45 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { RecoveryKeyDisplay } from "./RecoveryKeyDisplay";
-import { secretStorageBootstrapOpts } from "./secretStorageBootstrap";
+import {
+	canConsolidateRecoveryKey,
+	getConsolidationReadiness,
+	secretStorageResetOpts,
+} from "./recoveryKeyReset";
 
-type SetupStep = "intro" | "working" | "show-key" | "done" | "error";
+type ResetStep = "intro" | "working" | "show-key" | "error";
 
-interface BackupSetupDialogProps {
+interface RecoveryKeyResetDialogProps {
 	onClose: () => void;
 }
 
 /**
- * Wizard dialog for setting up key backup + secret storage.
- * Flow: intro → working → show-key → done (or error at any point).
+ * Resets the account's recovery key, consolidating secret storage under a
+ * single new key. Used to repair "split" secret storage where different
+ * secrets are encrypted under different recovery keys.
  *
- * Secret storage is reused if it already exists: the SDK only calls
- * createSecretStorageKey (minting a new recovery key) when no storage exists,
- * so the "show recovery key" step is skipped on reuse. See
- * secretStorageBootstrapOpts.
+ * Non-destructive: re-keys secret storage with `setupNewSecretStorage` but
+ * preserves cross-signing identity and the key-backup version (the existing
+ * secrets are re-encrypted under the new key). Other sessions stay verified.
+ * It only proceeds when every secret is available locally, so re-keying can't
+ * orphan a secret under a key the user no longer has.
  */
-const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
+const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
+	props,
+) => {
 	const { client, cryptoStatus, clearSecretStorageCache } = useClient();
 
-	const [step, setStep] = createSignal<SetupStep>("intro");
+	const [step, setStep] = createSignal<ResetStep>("intro");
 	const [recoveryKey, setRecoveryKey] = createSignal<string | undefined>();
 	const [errorMessage, setErrorMessage] = createSignal("");
+	const [partial, setPartial] = createSignal(false);
 	let disposed = false;
 
 	onCleanup(() => {
 		disposed = true;
 	});
 
-	const doSetup = async (): Promise<void> => {
+	const doReset = async (): Promise<void> => {
 		const crypto = client.getCrypto();
 		if (!crypto) {
 			setErrorMessage("Encryption is not available.");
@@ -48,22 +57,35 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 
 		setStep("working");
 		setErrorMessage("");
+		setPartial(false);
+
+		// Declared outside the try so a generated key is still shown if a later
+		// step fails (the new key may already be the account's default).
+		let generatedKey: GeneratedSecretStorageKey | undefined;
 
 		try {
-			let generatedKey: GeneratedSecretStorageKey | undefined;
+			// Only re-key when every secret is available locally; otherwise
+			// re-keying would orphan a secret under a key the user no longer has.
+			const readiness = await getConsolidationReadiness(crypto);
+			if (disposed) return;
+			if (!canConsolidateRecoveryKey(readiness)) {
+				setErrorMessage(
+					"Your encryption keys aren't all available on this device yet. Verify this session (and make sure key backup is connected), then try again.",
+				);
+				setStep("error");
+				return;
+			}
 
-			// Reuse existing secret storage; only mint a new recovery key when
-			// none exists (createSecretStorageKey is called only then). Never
-			// force new secret storage — that would mint a fresh recovery key on
-			// every run (see secretStorageBootstrapOpts).
 			await crypto.bootstrapSecretStorage(
-				secretStorageBootstrapOpts(async () => {
+				secretStorageResetOpts(async () => {
 					const key = await crypto.createRecoveryKeyFromPassphrase();
 					generatedKey = key;
 					return key;
 				}),
 			);
+			if (disposed) return;
 
+			const status = await crypto.getSecretStorageStatus();
 			if (disposed) return;
 
 			await cryptoStatus.refresh();
@@ -71,19 +93,30 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 
 			if (generatedKey?.encodedPrivateKey) {
 				setRecoveryKey(generatedKey.encodedPrivateKey);
+				// If secret storage isn't fully populated under the new key, warn
+				// but still show the key — it is now the account default.
+				setPartial(!status.ready);
 				setStep("show-key");
 			} else {
-				// Secret storage already existed; backup created using existing key
-				setStep("done");
+				setErrorMessage("Reset did not produce a new recovery key.");
+				setStep("error");
 			}
 		} catch (e) {
 			if (disposed) return;
-			console.error("Key backup setup failed:", e);
+			console.error("Recovery key reset failed:", e);
 			clearSecretStorageCache();
-			setErrorMessage(
-				e instanceof Error ? e.message : "Setup failed. Please try again.",
-			);
-			setStep("error");
+			if (generatedKey?.encodedPrivateKey) {
+				// A new key was generated and may already be the account default;
+				// show it so the user can save it, flagged as incomplete.
+				setRecoveryKey(generatedKey.encodedPrivateKey);
+				setPartial(true);
+				setStep("show-key");
+			} else {
+				setErrorMessage(
+					e instanceof Error ? e.message : "Reset failed. Please try again.",
+				);
+				setStep("error");
+			}
 		}
 	};
 
@@ -105,26 +138,28 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Set up key backup"
+			aria-label="Reset recovery key"
 			tabIndex={-1}
 			ref={(el) => el.focus()}
 			onClick={handleBackdropClick}
 			onKeyDown={handleKeyDown}
 		>
 			<Switch>
-				{/* Intro */}
+				{/* Intro / confirm */}
 				<Match when={step() === "intro"}>
 					<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 						<h2 class="mb-3 text-lg font-semibold text-text-primary">
-							Set up key backup
+							Reset recovery key
 						</h2>
 						<p class="mb-2 text-sm text-text-secondary">
-							Key backup stores your encrypted message keys on the server so you
-							can access your message history from any device.
+							This replaces your recovery key with a single new one and stores
+							all your encryption secrets under it. Use this if you've ended up
+							with more than one recovery key.
 						</p>
 						<p class="mb-6 text-sm text-text-muted">
-							You'll receive a recovery key — save it somewhere safe. You'll
-							need it if you lose access to all your devices.
+							Your other sessions stay verified and your message history is
+							kept. Your previous recovery keys will stop working, so save the
+							new one.
 						</p>
 						<div class="flex justify-end gap-2">
 							<button
@@ -132,14 +167,14 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 								onClick={props.onClose}
 								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
 							>
-								Later
+								Cancel
 							</button>
 							<button
 								type="button"
-								onClick={doSetup}
+								onClick={doReset}
 								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 							>
-								Continue
+								Reset recovery key
 							</button>
 						</div>
 					</div>
@@ -150,7 +185,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 					<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
 						<div class="flex flex-col items-center gap-4">
 							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
-							<p class="text-sm text-text-secondary">Setting up key backup…</p>
+							<p class="text-sm text-text-secondary">Resetting recovery key…</p>
 						</div>
 					</div>
 				</Match>
@@ -159,11 +194,20 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 				<Match when={step() === "show-key"}>
 					<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 						<h2 class="mb-3 text-lg font-semibold text-text-primary">
-							Save your recovery key
+							Save your new recovery key
 						</h2>
+						<Show when={partial()}>
+							<p
+								class="mb-4 rounded-lg bg-warning-bg/60 px-3 py-2 text-sm text-warning-text-bright"
+								role="alert"
+							>
+								The reset may not have finished completely. Save this key, then
+								reopen this page and check Devices &amp; Security.
+							</p>
+						</Show>
 						<p class="mb-4 text-sm text-text-muted">
-							Store this key somewhere safe. You'll need it to recover your
-							encrypted messages if you lose access to all your devices.
+							Store this key somewhere safe. Your previous recovery keys no
+							longer work.
 						</p>
 
 						<Show when={recoveryKey()}>
@@ -173,44 +217,10 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 						<div class="flex justify-end">
 							<button
 								type="button"
-								onClick={() => {
-									setStep("done");
-								}}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
-							>
-								I've saved my key
-							</button>
-						</div>
-					</div>
-				</Match>
-
-				{/* Done */}
-				<Match when={step() === "done"}>
-					<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
-						<div class="mb-4 text-center">
-							<span class="text-4xl" role="img" aria-label="Success">
-								✅
-							</span>
-						</div>
-						<h2 class="mb-2 text-center text-lg font-semibold text-text-primary">
-							Key backup is set up
-						</h2>
-						<p class="mb-6 text-center text-sm text-text-muted">
-							<Show
-								when={recoveryKey()}
-								fallback="Your message keys will be backed up automatically."
-							>
-								Your message keys will be backed up automatically. Keep your
-								recovery key safe — you'll need it to restore your messages.
-							</Show>
-						</p>
-						<div class="flex justify-center">
-							<button
-								type="button"
 								onClick={props.onClose}
 								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 							>
-								Done
+								I've saved my key
 							</button>
 						</div>
 					</div>
@@ -220,7 +230,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 				<Match when={step() === "error"}>
 					<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
 						<h2 class="mb-2 text-lg font-semibold text-text-primary">
-							Backup setup failed
+							Reset failed
 						</h2>
 						<p class="mb-4 text-sm text-danger-text-bright">{errorMessage()}</p>
 						<div class="flex justify-end gap-2">
@@ -233,7 +243,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 							</button>
 							<button
 								type="button"
-								onClick={doSetup}
+								onClick={() => setStep("intro")}
 								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 							>
 								Try again
@@ -246,4 +256,4 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 	);
 };
 
-export { BackupSetupDialog };
+export { RecoveryKeyResetDialog };

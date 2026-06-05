@@ -191,6 +191,28 @@ const DevicesTab: Component = () => {
 						</Show>
 					</div>
 				</div>
+
+				{/* Reset recovery key (advanced) — repairs split secret storage */}
+				<Show when={cryptoStatus.crossSigningReady() === true}>
+					<div class="mt-4 flex items-center justify-between gap-3 rounded-lg border border-border-subtle px-4 py-3">
+						<div class="min-w-0">
+							<div class="text-sm font-medium text-text-primary">
+								Reset recovery key
+							</div>
+							<div class="text-xs text-text-muted">
+								Replace your recovery key with a single new one (e.g. if you
+								have more than one). Other sessions stay verified.
+							</div>
+						</div>
+						<button
+							type="button"
+							onClick={() => triggerCryptoAction("reset-recovery-key")}
+							class="shrink-0 rounded bg-surface-3 px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						>
+							Reset…
+						</button>
+					</div>
+				</Show>
 			</section>
 
 			{/* Devices */}
