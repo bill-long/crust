@@ -2,7 +2,7 @@
 
 A self-hosted, opinionated Matrix client for Discord-style communities.
 
-Built for [chat.strange.pizza](https://chat.strange.pizza); open-sourced
+Built for the [strange.pizza](https://strange.pizza) community; open-sourced
 under Apache-2.0. Public deploy at
 [strange.pizza/crust](https://strange.pizza/crust).
 
