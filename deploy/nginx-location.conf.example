@@ -1,0 +1,24 @@
+# Snippet to add inside the existing `server { listen 443 ... server_name strange.pizza; }`
+# block on the host, alongside the existing `/_matrix/`, `/.well-known/matrix/`,
+# and `/` locations.
+#
+# Order matters: place these blocks BEFORE the catch-all `location / {}`
+# that proxies to Cinny, so they take precedence for sub-path requests.
+#
+# Crust is served as static files; the SPA itself does not need a WebSocket
+# upgrade through this proxy (Matrix sync streams go directly to the
+# homeserver via the existing `/_matrix/` location block).
+
+# Redirect bare /crust -> /crust/ so the SPA loads with the expected base path.
+# $is_args$args preserves any query string on the redirect.
+location = /crust {
+    return 301 /crust/$is_args$args;
+}
+
+location /crust/ {
+    proxy_pass http://127.0.0.1:8083/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
