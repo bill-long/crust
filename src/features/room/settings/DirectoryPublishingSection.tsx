@@ -1,8 +1,10 @@
 import { type MatrixClient, Visibility } from "matrix-js-sdk";
 import {
 	type Component,
+	createEffect,
 	createResource,
 	createSignal,
+	on,
 	onCleanup,
 	Show,
 } from "solid-js";
@@ -36,6 +38,14 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 		disposed = true;
 	});
 
+	// Operation generation. Bumped on every new toggle and when the target
+	// room changes. Combined with the `disposed` flag (set on unmount), this
+	// lets any in-flight write that resolves late — after a room switch, a
+	// newer toggle, or unmount — be dropped instead of mutating state for the
+	// wrong room or clobbering a newer write's saving state.
+	let opGen = 0;
+	const stale = (gen: number): boolean => disposed || gen !== opGen;
+
 	const [published, { mutate, refetch }] = createResource(
 		() => props.roomId,
 		async (rid): Promise<boolean> => {
@@ -47,6 +57,21 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 	const [saving, setSaving] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
 
+	// When the room changes, invalidate any in-flight write and clear transient
+	// local state so saving/error feedback can't leak across rooms. The
+	// resource itself refetches via its `() => props.roomId` source.
+	createEffect(
+		on(
+			() => props.roomId,
+			() => {
+				opGen++;
+				setSaving(false);
+				setError(null);
+			},
+			{ defer: true },
+		),
+	);
+
 	const state = (): "idle" | "saving" | "error" => {
 		if (saving()) return "saving";
 		if (error()) return "error";
@@ -57,6 +82,7 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 		if (saving() || published.loading || published.error) return;
 		const current = published() ?? false;
 		const next = !current;
+		const gen = ++opGen;
 		setSaving(true);
 		setError(null);
 		// Optimistically reflect the new state; revert if the write fails.
@@ -66,15 +92,16 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 				props.roomId,
 				next ? Visibility.Public : Visibility.Private,
 			);
-			if (disposed) return;
 		} catch (e) {
-			if (disposed) return;
+			// Drop a revert/error that resolves after a room switch (or unmount)
+			// so it can't bleed into the new room's state.
+			if (stale(gen)) return;
 			mutate(current);
 			setError(
 				e instanceof Error ? e.message : "Failed to update directory listing.",
 			);
 		} finally {
-			if (!disposed) setSaving(false);
+			if (!stale(gen)) setSaving(false);
 		}
 	};
 

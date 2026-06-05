@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 
@@ -127,5 +128,118 @@ describe("VisibilityTab", () => {
 		await flush();
 		expect(checkbox.checked).toBe(false);
 		expect(screen.getByRole("alert")).toBeTruthy();
+	});
+
+	function mkRoom(id: string) {
+		const room = createMockRoom(id, [], [], { name: id });
+		room.__setStateEvent("m.room.power_levels", "", {});
+		room.__setStateEvent("m.room.join_rules", "", { join_rule: "invite" });
+		room.__setStateEvent("m.room.history_visibility", "", {
+			history_visibility: "shared",
+		});
+		return room;
+	}
+
+	it("clears saving state and re-enables the control after the room changes mid-write", async () => {
+		const roomA = mkRoom("!a:example.com");
+		const roomB = mkRoom("!b:example.com");
+		const client = createMockClient(
+			new Map([
+				["!a:example.com", roomA],
+				["!b:example.com", roomB],
+			]),
+		);
+		(
+			client.getRoomDirectoryVisibility as ReturnType<typeof vi.fn>
+		).mockImplementation(async (rid: string) => ({
+			visibility: rid === "!b:example.com" ? "public" : "private",
+		}));
+		// Room A's publish write hangs until we release it.
+		let resolveWrite!: () => void;
+		(
+			client.setRoomDirectoryVisibility as ReturnType<typeof vi.fn>
+		).mockImplementationOnce(
+			() =>
+				new Promise<Record<string, never>>((res) => {
+					resolveWrite = () => res({});
+				}),
+		);
+
+		const [roomId, setRoomId] = createSignal("!a:example.com");
+		render(() => (
+			<VisibilityTab
+				client={client as unknown as MatrixClient}
+				roomId={roomId()}
+			/>
+		));
+		await flush();
+		const checkbox = (): HTMLInputElement =>
+			screen.getByRole("checkbox") as HTMLInputElement;
+		// Start publishing room A (private -> public); the write hangs, leaving
+		// the control in the saving (disabled) state.
+		fireEvent.click(checkbox());
+		await flush();
+		expect(checkbox().disabled).toBe(true);
+		// Switching rooms must reset the transient saving state so the new
+		// room's control isn't stuck disabled by room A's in-flight write.
+		setRoomId("!b:example.com");
+		await flush();
+		await flush();
+		expect(checkbox().checked).toBe(true);
+		expect(checkbox().disabled).toBe(false);
+		// The stale room-A write later resolves; nothing should change.
+		resolveWrite();
+		await flush();
+		await flush();
+		expect(checkbox().checked).toBe(true);
+		expect(checkbox().disabled).toBe(false);
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("ignores a stale directory write rejection after the room changed", async () => {
+		const roomA = mkRoom("!a:example.com");
+		const roomB = mkRoom("!b:example.com");
+		const client = createMockClient(
+			new Map([
+				["!a:example.com", roomA],
+				["!b:example.com", roomB],
+			]),
+		);
+		(
+			client.getRoomDirectoryVisibility as ReturnType<typeof vi.fn>
+		).mockImplementation(async (rid: string) => ({
+			visibility: rid === "!b:example.com" ? "public" : "private",
+		}));
+		let rejectWrite!: () => void;
+		(
+			client.setRoomDirectoryVisibility as ReturnType<typeof vi.fn>
+		).mockImplementationOnce(
+			() =>
+				new Promise<Record<string, never>>((_res, rej) => {
+					rejectWrite = () => rej(new Error("late failure"));
+				}),
+		);
+
+		const [roomId, setRoomId] = createSignal("!a:example.com");
+		render(() => (
+			<VisibilityTab
+				client={client as unknown as MatrixClient}
+				roomId={roomId()}
+			/>
+		));
+		await flush();
+		const checkbox = (): HTMLInputElement =>
+			screen.getByRole("checkbox") as HTMLInputElement;
+		fireEvent.click(checkbox());
+		await flush();
+		setRoomId("!b:example.com");
+		await flush();
+		await flush();
+		// The stale room-A write rejects — no error should surface on room B.
+		rejectWrite();
+		await flush();
+		await flush();
+		expect(checkbox().checked).toBe(true);
+		expect(screen.queryByRole("alert")).toBeNull();
 	});
 });
