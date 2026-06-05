@@ -208,6 +208,7 @@ export function createMockRoom(
 
 	const canSendStateByType = new Map<string, boolean>();
 	let canInviteFlag = true;
+	let isSpaceFlag = false;
 	const currentState = {
 		getStateEvents: (type: string, stateKey?: string) => {
 			const typeMap = stateEventStore.get(type);
@@ -237,6 +238,7 @@ export function createMockRoom(
 		getJoinedMembers: () => memberState.filter((m) => m.membership === "join"),
 		getMembers: () => [...memberState],
 		canInvite: (_userId: string) => canInviteFlag,
+		isSpaceRoom: () => isSpaceFlag,
 		findEventById: (eventId: string) =>
 			matrixEvents.find((e) => e.getId() === eventId) ?? null,
 		on: (event: string, handler: (...args: unknown[]) => void) => {
@@ -262,6 +264,9 @@ export function createMockRoom(
 		},
 		__setCanInvite: (allowed: boolean) => {
 			canInviteFlag = allowed;
+		},
+		__setIsSpace: (value: boolean) => {
+			isSpaceFlag = value;
 		},
 		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);
@@ -341,6 +346,7 @@ export function createMockClient(
 		getDeviceId: () => "TESTDEVICE",
 		getRoom: (roomId: string) => rooms.get(roomId) ?? null,
 		getVisibleRooms: () => Array.from(rooms.values()),
+		getRooms: () => Array.from(rooms.values()),
 		mxcUrlToHttp: (
 			mxcUrl: string,
 			_w?: number,
@@ -399,6 +405,7 @@ export function createMockClient(
 			// Update getRoom/getVisibleRooms closures
 			client.getRoom = (roomId: string) => rooms.get(roomId) ?? null;
 			client.getVisibleRooms = () => Array.from(rooms.values());
+			client.getRooms = () => Array.from(rooms.values());
 		},
 
 		// Test helper: set or remove account data

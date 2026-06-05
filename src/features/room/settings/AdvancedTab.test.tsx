@@ -99,7 +99,7 @@ describe("AdvancedTab", () => {
 		);
 	});
 
-	it("allows restricted when it is the current join rule, but disables it without an allow list otherwise", () => {
+	it("keeps Restricted selectable even without an existing allow list", () => {
 		setup({ join: { join_rule: JoinRule.Restricted, allow: [] } });
 		expect(
 			button("Restricted (space)").getAttribute("aria-disabled"),
@@ -107,9 +107,9 @@ describe("AdvancedTab", () => {
 		cleanup();
 
 		setup({ join: { join_rule: JoinRule.Invite, allow: [] } });
-		expect(button("Restricted (space)").getAttribute("aria-disabled")).toBe(
-			"true",
-		);
+		expect(
+			button("Restricted (space)").getAttribute("aria-disabled"),
+		).toBeNull();
 	});
 
 	it("writes history visibility changes", async () => {
