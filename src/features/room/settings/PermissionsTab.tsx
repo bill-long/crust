@@ -1,5 +1,6 @@
 import { EventType, type MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import { Tooltip } from "../../../components/Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FieldStatus } from "./FieldStatus";
 import {
@@ -13,7 +14,6 @@ import {
 	requiresStateDefaultConfirm,
 	withPreset,
 } from "./powerLevelPresets";
-import { Tooltip } from "./Tooltip";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
 import { useRoomStateContent } from "./useRoomStateContent";

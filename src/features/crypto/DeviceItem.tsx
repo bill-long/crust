@@ -1,4 +1,5 @@
 import { type Component, Show } from "solid-js";
+import { Tooltip } from "../../components/Tooltip";
 
 export interface DeviceInfo {
 	deviceId: string;
@@ -30,6 +31,11 @@ function formatLastSeen(ts: number | undefined): string {
 }
 
 const DeviceItem: Component<DeviceItemProps> = (props) => {
+	const unverifiedExplanation = (): string =>
+		props.device.isCurrentDevice
+			? "This session hasn't been verified. Verify it from another signed-in session so its messages can be cryptographically trusted."
+			: "This session hasn't been verified — its messages can't be cryptographically trusted. Verify it to confirm it belongs to you.";
+
 	return (
 		<div class="flex items-center justify-between rounded-lg bg-surface-2/50 px-4 py-3">
 			<div class="min-w-0 flex-1">
@@ -55,14 +61,22 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 					when={props.device.isVerified}
 					fallback={
 						<>
-							<span
-								class="text-warning-text"
-								role="img"
-								aria-label="Unverified"
+							<Tooltip content={unverifiedExplanation()} triggerTabIndex={0}>
+								<span class="flex items-center gap-1 text-warning-text">
+									<span aria-hidden="true">⚠</span>
+									<span class="text-xs">Unverified</span>
+								</span>
+							</Tooltip>
+							<Show
+								when={!props.device.isCurrentDevice && props.onVerify}
+								fallback={
+									<Show when={props.device.isCurrentDevice}>
+										<span class="text-xs text-text-secondary">
+											Verify from another session
+										</span>
+									</Show>
+								}
 							>
-								⚠
-							</span>
-							<Show when={!props.device.isCurrentDevice && props.onVerify}>
 								<button
 									type="button"
 									onClick={() => props.onVerify?.(props.device.deviceId)}
