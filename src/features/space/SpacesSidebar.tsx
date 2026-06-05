@@ -152,7 +152,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 										<button
 											type="button"
 											onClick={() => props.onOpenSpaceSettings?.(space.roomId)}
-											aria-label={`Settings for ${space.name.trim() || "space"}`}
+											aria-label={`Settings for ${space.name.trim() || "Unnamed space"}`}
 											title="Space settings"
 											class="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-surface-4 text-text-secondary pointer-events-none opacity-0 shadow transition-opacity hover:text-text-primary focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover group-hover:pointer-events-auto group-hover:opacity-100"
 										>
