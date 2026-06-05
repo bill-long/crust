@@ -21,6 +21,12 @@ concurrency:
 
 jobs:
   publish:
+    # Guard against workflow_dispatch from a feature branch publishing unreviewed
+    # code. Only publish from main or v* tags regardless of trigger.
+    if: >-
+      github.event_name != 'workflow_dispatch'
+      || github.ref == 'refs/heads/main'
+      || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
