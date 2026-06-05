@@ -1,4 +1,4 @@
-import type { MatrixEvent, Room } from "matrix-js-sdk";
+import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 
 /**
  * Derived text for a non-message state event (m.room.member, m.room.name,
@@ -9,6 +9,29 @@ import type { MatrixEvent, Room } from "matrix-js-sdk";
  */
 export interface StateNotice {
 	text: string;
+}
+
+/**
+ * Membership transitions that the timeline groups into a single collapsed
+ * notice ("Alice, Bob and 3 others joined"). Profile-only member changes
+ * (display name / avatar while joined), invite withdrawals/rejections, and
+ * unbans are intentionally NOT grouping transitions — they stay individual.
+ */
+export type MembershipTransitionKind =
+	| "join"
+	| "leave"
+	| "invite"
+	| "kick"
+	| "ban";
+
+export interface MembershipTransition {
+	kind: MembershipTransitionKind;
+	/** Matrix user ID of the affected member (the event's state_key). */
+	userId: string;
+	/** Display name of the affected user (the member event's state_key). */
+	subject: string;
+	/** http avatar URL of the affected user, or null when none is known. */
+	avatarUrl: string | null;
 }
 
 /** State event types that the timeline renders as a notice. */
@@ -227,4 +250,71 @@ export function buildStateNotice(
 		};
 	}
 	return null;
+}
+
+function memberAvatarUrl(
+	client: MatrixClient,
+	room: Room,
+	stateKey: string,
+	content: Record<string, unknown>,
+	prev: Record<string, unknown>,
+): string | null {
+	// Prefer the avatar carried by the event itself (new for join/invite,
+	// previous for leave/kick/ban where the affected user may have left and
+	// `room.getMember` would return null), then fall back to current state.
+	const fromContent =
+		typeof content.avatar_url === "string" ? content.avatar_url : "";
+	const fromPrev = typeof prev.avatar_url === "string" ? prev.avatar_url : "";
+	const fromMember = room.getMember(stateKey)?.getMxcAvatarUrl?.() ?? "";
+	const mxc = fromContent || fromPrev || fromMember;
+	if (!mxc) return null;
+	return client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null;
+}
+
+/**
+ * Classify an `m.room.member` event as a grouping membership transition, or
+ * null when it should not group (non-member event, profile-only change while
+ * joined, invite withdrawal/rejection, or unban). Used by the timeline to
+ * collapse consecutive same-kind transitions into one notice.
+ */
+export function buildMembershipTransition(
+	event: MatrixEvent,
+	room: Room,
+	client: MatrixClient,
+): MembershipTransition | null {
+	if (event.getType() !== "m.room.member") return null;
+	const stateKey =
+		typeof event.getStateKey === "function" ? (event.getStateKey() ?? "") : "";
+	if (!stateKey) return null;
+	const content = event.getContent() as Record<string, unknown>;
+	const prev = getPrevContent(event);
+	const membership =
+		typeof content.membership === "string" ? content.membership : "leave";
+	const prevMembership =
+		typeof prev.membership === "string" ? prev.membership : "leave";
+	const sender = event.getSender() ?? "";
+
+	let kind: MembershipTransitionKind | null = null;
+	if (membership === "join") {
+		// Profile-only updates (join->join) are not membership transitions.
+		if (prevMembership === "join") return null;
+		kind = "join";
+	} else if (membership === "invite") {
+		kind = "invite";
+	} else if (membership === "ban") {
+		kind = "ban";
+	} else if (membership === "leave") {
+		// Invite withdrawal/rejection and unban are distinct transitions that
+		// stay individual; only voluntary leaves and kicks group.
+		if (prevMembership === "invite" || prevMembership === "ban") return null;
+		kind = sender === stateKey ? "leave" : "kick";
+	}
+	if (!kind) return null;
+
+	return {
+		kind,
+		userId: stateKey,
+		subject: memberSubjectName(room, stateKey, content, prev),
+		avatarUrl: memberAvatarUrl(client, room, stateKey, content, prev),
+	};
 }

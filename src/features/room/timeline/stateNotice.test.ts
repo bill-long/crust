@@ -1,6 +1,7 @@
-import type { MatrixEvent, Room } from "matrix-js-sdk";
+import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import {
+	buildMembershipTransition,
 	buildStateNotice,
 	isStateNoticeType,
 	STATE_NOTICE_TYPES,
@@ -460,5 +461,117 @@ describe("stateNotice", () => {
 				)?.text,
 			).toBe("This room has been upgraded");
 		});
+	});
+});
+
+describe("buildMembershipTransition", () => {
+	const fakeClient = {
+		mxcUrlToHttp: (mxc: string) => (mxc ? `http://media/${mxc}` : null),
+	} as unknown as MatrixClient;
+
+	function classify(init: FakeEventInit, room = makeRoom()) {
+		return buildMembershipTransition(makeEvent(init), room, fakeClient);
+	}
+
+	it("classifies a fresh join", () => {
+		const t = classify({
+			type: "m.room.member",
+			stateKey: "@bob:test",
+			sender: "@bob:test",
+			content: { membership: "join", displayname: "Bob" },
+			prevContent: { membership: "leave" },
+		});
+		expect(t).toMatchObject({ kind: "join", subject: "Bob" });
+	});
+
+	it("classifies a self leave", () => {
+		const t = classify({
+			type: "m.room.member",
+			stateKey: "@bob:test",
+			sender: "@bob:test",
+			content: { membership: "leave" },
+			prevContent: { membership: "join", displayname: "Bob" },
+		});
+		expect(t?.kind).toBe("leave");
+	});
+
+	it("classifies a kick (left by someone else)", () => {
+		const t = classify({
+			type: "m.room.member",
+			stateKey: "@bob:test",
+			sender: "@alice:test",
+			content: { membership: "leave" },
+			prevContent: { membership: "join", displayname: "Bob" },
+		});
+		expect(t?.kind).toBe("kick");
+	});
+
+	it("classifies an invite and a ban", () => {
+		expect(
+			classify({
+				type: "m.room.member",
+				stateKey: "@bob:test",
+				content: { membership: "invite", displayname: "Bob" },
+			})?.kind,
+		).toBe("invite");
+		expect(
+			classify({
+				type: "m.room.member",
+				stateKey: "@bob:test",
+				content: { membership: "ban" },
+				prevContent: { membership: "join" },
+			})?.kind,
+		).toBe("ban");
+	});
+
+	it("does not classify profile-only changes, invite withdrawals, or unbans", () => {
+		// Profile change while joined.
+		expect(
+			classify({
+				type: "m.room.member",
+				stateKey: "@bob:test",
+				content: { membership: "join", displayname: "Bobby" },
+				prevContent: { membership: "join", displayname: "Bob" },
+			}),
+		).toBeNull();
+		// Invite rejected / withdrawn.
+		expect(
+			classify({
+				type: "m.room.member",
+				stateKey: "@bob:test",
+				content: { membership: "leave" },
+				prevContent: { membership: "invite" },
+			}),
+		).toBeNull();
+		// Unban.
+		expect(
+			classify({
+				type: "m.room.member",
+				stateKey: "@bob:test",
+				content: { membership: "leave" },
+				prevContent: { membership: "ban" },
+			}),
+		).toBeNull();
+	});
+
+	it("returns null for non-member events", () => {
+		expect(
+			classify({ type: "m.room.name", content: { name: "x" } }),
+		).toBeNull();
+	});
+
+	it("resolves an avatar from the event content", () => {
+		const t = classify({
+			type: "m.room.member",
+			stateKey: "@bob:test",
+			sender: "@bob:test",
+			content: {
+				membership: "join",
+				displayname: "Bob",
+				avatar_url: "mxc://server/abc",
+			},
+			prevContent: { membership: "leave" },
+		});
+		expect(t?.avatarUrl).toBe("http://media/mxc://server/abc");
 	});
 });

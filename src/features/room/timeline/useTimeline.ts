@@ -14,8 +14,12 @@ import {
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { extractGifUrl } from "../../gif/gifUrl";
-import type { StateNotice } from "./stateNotice";
-import { buildStateNotice, isStateNoticeType } from "./stateNotice";
+import type { MembershipTransition, StateNotice } from "./stateNotice";
+import {
+	buildMembershipTransition,
+	buildStateNotice,
+	isStateNoticeType,
+} from "./stateNotice";
 
 /**
  * Aggregated reaction data for a single key on a single message.
@@ -103,6 +107,14 @@ export interface TimelineEvent {
 	 * read-receipt rows.
 	 */
 	stateNotice: StateNotice | null;
+	/**
+	 * Structured membership-transition metadata for `m.room.member` events
+	 * that the timeline can collapse into a grouped notice (join / leave /
+	 * invite / kick / ban). Null for non-member events and for member events
+	 * that should stay individual (profile-only change, invite
+	 * withdrawal/rejection, unban). When set, `stateNotice` is also set.
+	 */
+	membershipTransition: MembershipTransition | null;
 }
 
 // Reject any ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F).
@@ -329,6 +341,10 @@ function eventToTimelineEvent(
 	const stateNotice = isStateNoticeType(event.getType())
 		? buildStateNotice(event, room)
 		: null;
+	const membershipTransition =
+		stateNotice !== null && event.getType() === "m.room.member"
+			? buildMembershipTransition(event, room, client)
+			: null;
 
 	return {
 		eventId: event.getId() ?? "",
@@ -358,6 +374,7 @@ function eventToTimelineEvent(
 		myReactions,
 		status: event.status ?? null,
 		stateNotice,
+		membershipTransition,
 	};
 }
 

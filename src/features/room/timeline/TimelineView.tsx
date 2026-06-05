@@ -10,9 +10,11 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
+	Match,
 	on,
 	onCleanup,
 	Show,
+	Switch,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { useClient } from "../../../client/client";
@@ -29,7 +31,12 @@ import {
 	isSameDay,
 	useDayTick,
 } from "./dateFormatting";
+import { GroupedMembershipNotice } from "./GroupedMembershipNotice";
 import { ImageLightbox, type LightboxImage } from "./ImageLightbox";
+import {
+	computeMembershipGroups,
+	type MembershipGroup,
+} from "./membershipGrouping";
 import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
@@ -130,6 +137,67 @@ const TimelineView: Component<{
 	);
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 	const emoteLookup = createMemo(() => buildEmoteLookup(packs()));
+
+	// Group consecutive same-kind membership transitions (join/leave/invite/
+	// kick/ban) so a burst doesn't drown out real messages. Recomputed when
+	// the loaded events change; expansion is tracked by member event ID so it
+	// survives pagination (array indices shift, event IDs don't).
+	const membershipGroups = createMemo(() => computeMembershipGroups(events));
+	const [expandedMemberIds, setExpandedMemberIds] = createSignal<
+		ReadonlySet<string>
+	>(new Set());
+	const isGroupExpanded = (group: MembershipGroup): boolean => {
+		const set = expandedMemberIds();
+		return group.memberEventIds.some((id) => set.has(id));
+	};
+	const expandGroup = (group: MembershipGroup): void => {
+		setExpandedMemberIds((prev) => {
+			const next = new Set(prev);
+			for (const id of group.memberEventIds) next.add(id);
+			return next;
+		});
+	};
+	const collapseGroup = (group: MembershipGroup): void => {
+		setExpandedMemberIds((prev) => {
+			const next = new Set(prev);
+			for (const id of group.memberEventIds) next.delete(id);
+			return next;
+		});
+	};
+	const groupMembers = (
+		group: MembershipGroup,
+	): { userId: string; name: string; avatarUrl: string | null }[] =>
+		group.memberIndices.map((mi) => {
+			const e = events[mi];
+			const mt = e?.membershipTransition;
+			return {
+				userId: mt?.userId ?? e?.senderId ?? "",
+				name: mt?.subject ?? e?.senderName ?? "",
+				avatarUrl: mt?.avatarUrl ?? null,
+			};
+		});
+
+	// Prune expansion state to event IDs still present in a current group.
+	// Without this the Set would accumulate IDs forever as the user expands
+	// groups and as events scroll out of the loaded window; it also clears
+	// naturally on room switch (the events — and thus their IDs — change).
+	createEffect(() => {
+		const groups = membershipGroups();
+		setExpandedMemberIds((prev) => {
+			if (prev.size === 0) return prev;
+			const present = new Set<string>();
+			for (const g of groups) {
+				if (g) for (const id of g.memberEventIds) present.add(id);
+			}
+			let changed = false;
+			const next = new Set<string>();
+			for (const id of prev) {
+				if (present.has(id)) next.add(id);
+				else changed = true;
+			}
+			return changed ? next : prev;
+		});
+	});
 
 	// Reactive "now" that updates at local midnight so separator labels
 	// like "Today" / "Yesterday" stay accurate for sessions left open
@@ -584,6 +652,12 @@ const TimelineView: Component<{
 		clearFlashClass();
 		const idx = events.findIndex((e) => e.eventId === id);
 		if (idx < 0) return;
+		// If the target is hidden inside a collapsed membership group, expand
+		// it first so the individual row exists and can be scrolled to/flashed.
+		const targetGroup = membershipGroups()[idx];
+		if (targetGroup && !isGroupExpanded(targetGroup)) {
+			expandGroup(targetGroup);
+		}
 		const handle = virtHandle;
 		if (!handle) return;
 		markProgrammaticScroll();
@@ -1182,84 +1256,156 @@ const TimelineView: Component<{
 							shift={pagingOlder()}
 							startMargin={topAreaHeight()}
 						>
-							{(event, indexAcc) => (
-								<div>
-									<Show when={shouldShowDateSeparator(events, indexAcc())}>
-										<div class="flex items-center gap-3 px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-faint uppercase select-none">
-											<div
-												class="h-px flex-1 bg-border-subtle"
-												aria-hidden="true"
-											/>
-											<span>
-												{formatDateSeparatorLabel(event.timestamp, dayTick())}
-											</span>
-											<div
-												class="h-px flex-1 bg-border-subtle"
-												aria-hidden="true"
-											/>
-										</div>
-									</Show>
-									<TimelineItem
-										event={event}
-										showHeader={shouldShowHeader(events, indexAcc())}
-										isOwnMessage={event.senderId === myUserId}
-										canPin={props.canPin}
-										isPinned={props.isPinned?.(event.eventId) ?? false}
-										onTogglePin={() => props.onTogglePin?.(event.eventId)}
-										onReact={(key) => onReact(event.eventId, key)}
-										onReply={() => setReplyTo(event)}
-										onEdit={() => onEdit(event)}
-										onDelete={() => onDelete(event.eventId)}
-										onRetry={() => onRetry(event.eventId)}
-										onDiscard={() => cancelPending(event.eventId)}
-										onCancel={() => cancelPending(event.eventId)}
-										onRetryRedaction={() => onRetryRedaction(event.eventId)}
-										onDiscardRedaction={() =>
-											abortPendingRedaction(event.eventId)
-										}
-										onCancelRedaction={() =>
-											abortPendingRedaction(event.eventId)
-										}
-										pendingRedactionStatus={
-											pendingRedactions[event.eventId]?.status
-										}
-										failedReactionKeys={Object.keys(
-											pendingReactions[event.eventId] ?? {},
-										)}
-										onRetryReaction={(key) =>
-											onRetryReaction(event.eventId, key)
-										}
-										onDiscardReaction={(key) =>
-											onDiscardReaction(event.eventId, key)
-										}
-										failedEditAttempt={(() => {
-											const arr = pendingEdits[event.eventId];
-											if (!arr || arr.length === 0) return undefined;
-											const last = arr[arr.length - 1];
-											const newContent = last.getContent()?.["m.new_content"] as
-												| { body?: unknown }
-												| undefined;
-											const body =
-												typeof newContent?.body === "string"
-													? newContent.body
-													: "";
-											// Replacement bodies sent by the composer carry
-											// the "* " prefix on the wrapper `body` (Matrix
-											// reply-fallback convention); `m.new_content`
-											// carries the unprefixed text we want to show.
-											return body;
-										})()}
-										onRetryEdit={() => onRetryEdit(event.eventId)}
-										onDiscardEdit={() => onDiscardEdit(event.eventId)}
-										readReceipts={receipts()[event.eventId]}
-										client={client}
-										shortcodeLookup={shortcodeLookup()}
-										emoteLookup={emoteLookup()}
-										packs={packs()}
-										onOpenImage={setLightboxEventId}
-									/>
-								</div>
-							)}
+							{(event, indexAcc) => {
+								// Membership-group state for this row. Plain functions
+								// (not memos) so no per-row computation owner is needed
+								// inside virtua's render prop; reads still track the
+								// underlying signals.
+								const group = (): MembershipGroup | null =>
+									membershipGroups()[indexAcc()] ?? null;
+								const mode = (): "item" | "summary" | "hidden" => {
+									const g = group();
+									if (!g || isGroupExpanded(g)) return "item";
+									return g.leaderIndex === indexAcc() ? "summary" : "hidden";
+								};
+								const showCollapseControl = (): boolean => {
+									const g = group();
+									return (
+										!!g &&
+										isGroupExpanded(g) &&
+										g.memberIndices[g.memberIndices.length - 1] === indexAcc()
+									);
+								};
+								return (
+									<div>
+										<Show when={shouldShowDateSeparator(events, indexAcc())}>
+											<div class="flex items-center gap-3 px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-faint uppercase select-none">
+												<div
+													class="h-px flex-1 bg-border-subtle"
+													aria-hidden="true"
+												/>
+												<span>
+													{formatDateSeparatorLabel(event.timestamp, dayTick())}
+												</span>
+												<div
+													class="h-px flex-1 bg-border-subtle"
+													aria-hidden="true"
+												/>
+											</div>
+										</Show>
+										<Switch>
+											<Match when={mode() === "summary"}>
+												<GroupedMembershipNotice
+													members={
+														group()
+															? groupMembers(group() as MembershipGroup)
+															: []
+													}
+													kind={group()?.kind ?? "join"}
+													leaderEventId={event.eventId}
+													onExpand={() => {
+														const g = group();
+														if (g) expandGroup(g);
+													}}
+												/>
+											</Match>
+											{/* Collapsed non-leader member: a zero-height anchor
+											    that keeps the 1:1 event↔row mapping (so indices,
+											    pagination shift, and jump-to-event by
+											    data-event-id all stay intact). */}
+											<Match when={mode() === "hidden"}>
+												<div data-event-id={event.eventId} />
+											</Match>
+											<Match when={mode() === "item"}>
+												<TimelineItem
+													event={event}
+													showHeader={shouldShowHeader(events, indexAcc())}
+													isOwnMessage={event.senderId === myUserId}
+													canPin={props.canPin}
+													isPinned={props.isPinned?.(event.eventId) ?? false}
+													onTogglePin={() => props.onTogglePin?.(event.eventId)}
+													onReact={(key) => onReact(event.eventId, key)}
+													onReply={() => setReplyTo(event)}
+													onEdit={() => onEdit(event)}
+													onDelete={() => onDelete(event.eventId)}
+													onRetry={() => onRetry(event.eventId)}
+													onDiscard={() => cancelPending(event.eventId)}
+													onCancel={() => cancelPending(event.eventId)}
+													onRetryRedaction={() =>
+														onRetryRedaction(event.eventId)
+													}
+													onDiscardRedaction={() =>
+														abortPendingRedaction(event.eventId)
+													}
+													onCancelRedaction={() =>
+														abortPendingRedaction(event.eventId)
+													}
+													pendingRedactionStatus={
+														pendingRedactions[event.eventId]?.status
+													}
+													failedReactionKeys={Object.keys(
+														pendingReactions[event.eventId] ?? {},
+													)}
+													onRetryReaction={(key) =>
+														onRetryReaction(event.eventId, key)
+													}
+													onDiscardReaction={(key) =>
+														onDiscardReaction(event.eventId, key)
+													}
+													failedEditAttempt={(() => {
+														const arr = pendingEdits[event.eventId];
+														if (!arr || arr.length === 0) return undefined;
+														const last = arr[arr.length - 1];
+														const newContent = last.getContent()?.[
+															"m.new_content"
+														] as { body?: unknown } | undefined;
+														const body =
+															typeof newContent?.body === "string"
+																? newContent.body
+																: "";
+														// Replacement bodies sent by the composer carry
+														// the "* " prefix on the wrapper `body` (Matrix
+														// reply-fallback convention); `m.new_content`
+														// carries the unprefixed text we want to show.
+														return body;
+													})()}
+													onRetryEdit={() => onRetryEdit(event.eventId)}
+													onDiscardEdit={() => onDiscardEdit(event.eventId)}
+													readReceipts={receipts()[event.eventId]}
+													client={client}
+													shortcodeLookup={shortcodeLookup()}
+													emoteLookup={emoteLookup()}
+													packs={packs()}
+													onOpenImage={setLightboxEventId}
+												/>
+												<Show when={showCollapseControl()}>
+													<div class="flex items-center gap-2 px-4 py-0.5 text-xs text-text-muted italic">
+														<span
+															class="h-px flex-1 bg-border-subtle"
+															aria-hidden="true"
+														/>
+														<button
+															type="button"
+															aria-expanded="true"
+															onClick={() => {
+																const g = group();
+																if (g) collapseGroup(g);
+															}}
+															class="rounded px-1 not-italic transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+														>
+															Show less
+														</button>
+														<span
+															class="h-px flex-1 bg-border-subtle"
+															aria-hidden="true"
+														/>
+													</div>
+												</Show>
+											</Match>
+										</Switch>
+									</div>
+								);
+							}}
 						</Virtualizer>
 						{/* Loading newer messages indicator */}
 						<Show when={loadingNewer()}>
