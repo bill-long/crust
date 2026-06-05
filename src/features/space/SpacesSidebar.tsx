@@ -35,9 +35,8 @@ const SidebarItem: Component<SidebarItemProps> = (props) => (
 
 interface SpacesSidebarProps {
 	/**
-	 * Called when the user opens settings for a space via the hover/focus
-	 * gear button on a space avatar or the right-click "Space settings"
-	 * item.
+	 * Called when the user opens settings for a space via the right-click
+	 * "Space settings" item.
 	 */
 	onOpenSpaceSettings?: (spaceId: string) => void;
 	/**
@@ -171,36 +170,6 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 										</span>
 									</Show>
 								</button>
-
-								{/* Hover/focus-revealed gear → space settings. Sibling
-								    of the avatar button (not nested) to avoid
-								    nested-interactive HTML. Opacity is gated on
-								    group-hover and focus-visible so keyboard users
-								    can tab to it. */}
-								<Show when={props.onOpenSpaceSettings}>
-									<button
-										type="button"
-										onClick={() => props.onOpenSpaceSettings?.(space.roomId)}
-										aria-label={`Settings for ${space.name.trim() || "Unnamed space"}`}
-										title="Space settings"
-										class="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-surface-4 text-text-secondary pointer-events-none opacity-0 shadow transition-opacity hover:text-text-primary focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover group-hover:pointer-events-auto group-hover:opacity-100"
-									>
-										<svg
-											aria-hidden="true"
-											width="12"
-											height="12"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2.5"
-											stroke-linecap="round"
-											stroke-linejoin="round"
-										>
-											<circle cx="12" cy="12" r="2.5" />
-											<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-										</svg>
-									</button>
-								</Show>
 							</>
 						);
 
@@ -210,15 +179,13 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 								    will render — otherwise right-clicking would open an
 								    empty popover. When no handlers are wired, render the
 								    avatar block in a plain wrapper that preserves the
-								    `peer` + `group` hooks. */}
+								    `peer` hook. */}
 								<Show
 									when={hasMenu()}
-									fallback={
-										<div class="peer group relative">{triggerInner}</div>
-									}
+									fallback={<div class="peer relative">{triggerInner}</div>}
 								>
 									<ContextMenu>
-										<ContextMenu.Trigger class="peer group relative">
+										<ContextMenu.Trigger class="peer relative">
 											{triggerInner}
 										</ContextMenu.Trigger>
 
