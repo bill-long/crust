@@ -94,14 +94,9 @@ For each row in `issue_chain`:
 6. **Commit and push** — the user pre-approved push.
 7. **Open the PR** with `--base <previous-branch> --body-file <temp.md>`
    (never inline `--body`; backticks get mangled in PowerShell).
-   - **The PR body must mention the issue with a closing keyword.**
-     GitHub accepts `close`, `closes`, `closed`, `fix`, `fixes`, `fixed`,
-     `resolve`, `resolves`, or `resolved`, each followed (optionally with
-     a colon, e.g. `Closes: #186`) by `#N`. As each parent merges and its
-     branch is deleted, GitHub auto-retargets the next PR to `main`, so
-     the trailer fires on merge into the default branch and the issue
-     auto-closes. See **Auto-close failure mode** below for the deletion
-     requirement and the post-merge audit safety net.
+   - **The PR body must mention the issue with a closing keyword**
+     (`close`, `closes`, `closed`, `fix`, `fixes`, `fixed`, `resolve`,
+     `resolves`, or `resolved`, followed by `#N`).
    - When the PR only partially addresses the issue (e.g. deferred tabs),
      use `Addresses #N` in the PR body and list what's deferred in an
      "Out of scope" section. `Addresses` is not a closing keyword, so
@@ -141,13 +136,13 @@ For each row in `issue_chain`:
 After all rows are `done` and the user has merged the chain:
 
 1. **Query open issues** — `gh issue list --state open --limit 500`. If
-   the result is at the limit, raise it or paginate; a truncated list
-   silently leaves stragglers undiagnosed.
-2. **For each open issue that should have closed but didn't:** look at
-   the merged PR body. If the closing keyword (`Closes #N` etc.) is
-   missing or was edited out, that's the cause.
-3. **Close stragglers** with a brief comment referencing the merged PR.
-4. **Comb every PR in the chain for deferred findings:** open separate
+   the result is at the limit, raise it or paginate.
+2. **For each chain issue still open:** if the PR used a closing
+   keyword and the issue didn't auto-close, close it manually with a
+   comment referencing the merged PR. Skip issues the chain
+   intentionally left open (PRs that used `Addresses #N` for partial
+   work).
+3. **Comb every PR in the chain for deferred findings:** open separate
    follow-up issues for:
    - Findings the Copilot review raised that were intentionally deferred.
    - Rubber-duck flags marked "out of scope for this PR".
@@ -158,25 +153,6 @@ After all rows are `done` and the user has merged the chain:
    **Default to opening issues for ALL of these.** The repo maintainer has
    explicitly stated: "we can't just skip features." Better to have an open
    tracking issue than a silent gap.
-
-## Auto-close failure mode
-
-GitHub auto-closes an issue when the PR merging into the default
-branch mentions it with a closing keyword
-(`Closes/Fixes/Resolves #N`) in the PR body. Stacked PRs work fine
-here: GitHub auto-retargets the chain to `main` as parents merge
-(provided "Automatically delete head branches" is on, or the merger
-ticks "Delete branch"), so each PR's body trailer fires when it
-merges.
-
-A recent run on this repo: 5 of 8 chain PRs auto-closed (each had
-`Closes #N` in the PR body); 3 of 8 did not (each was missing the
-trailer entirely). The failure mode is **forgetting the trailer**.
-
-**Post-merge audit** (step 3 of the workflow) is the safety net: if
-auto-delete is off, an unusual merge order is used, or someone edits
-out the trailer, the trailer can fail to fire. Always verify
-open-issue state after the chain merges and close stragglers manually.
 
 ## What this skill explicitly defers to other skills
 
