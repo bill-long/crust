@@ -7,8 +7,8 @@ import {
 	on,
 	Show,
 } from "solid-js";
+import { Tooltip } from "../../../components/Tooltip";
 import { FieldStatus } from "./FieldStatus";
-import { Tooltip } from "./Tooltip";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
 import { useRoomStateContent } from "./useRoomStateContent";

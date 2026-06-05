@@ -19,12 +19,21 @@ interface TooltipProps {
 	 * the child's `w-full` actually fills the section.
 	 */
 	triggerClass?: string;
+	/**
+	 * When set, applies `tabindex` to the Trigger element itself so the
+	 * tooltip is keyboard-reachable even when its child isn't a natively
+	 * focusable control (e.g. a static status indicator). Kobalte opens
+	 * the tooltip on the Trigger's `focusin` and links its description via
+	 * `aria-describedby` on that same element, so the focus target and the
+	 * described element coincide. Omit for triggers wrapping a focusable
+	 * control such as a `<button>`.
+	 */
+	triggerTabIndex?: number;
 }
 
 /**
- * Thin wrapper around Kobalte Tooltip with sensible defaults for the
- * Room Settings surface. Portals to the document body and styles itself
- * against the dark-mode design tokens.
+ * Thin wrapper around Kobalte Tooltip with sensible defaults. Portals to
+ * the document body and styles itself against the dark-mode design tokens.
  *
  * Important: native `<button disabled>` doesn't fire pointer/keyboard
  * events and isn't focusable, so the tooltip's trigger never sees
@@ -38,7 +47,11 @@ const Tooltip: Component<TooltipProps> = (props) => {
 				openDelay={props.openDelay ?? 200}
 				placement={props.placement ?? "top"}
 			>
-				<KTooltip.Trigger as="div" class={props.triggerClass ?? "inline-flex"}>
+				<KTooltip.Trigger
+					as="div"
+					class={props.triggerClass ?? "inline-flex"}
+					tabindex={props.triggerTabIndex}
+				>
 					{props.children}
 				</KTooltip.Trigger>
 				<KTooltip.Portal>
