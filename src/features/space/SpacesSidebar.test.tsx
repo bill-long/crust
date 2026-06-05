@@ -160,16 +160,8 @@ function setupWithInvite(opts?: {
 	return { client, onInviteSpace, onOpenSpaceSettings, onLeaveSpace };
 }
 
-describe("SpacesSidebar gear button", () => {
-	it("renders a settings button for each space that calls onOpenSpaceSettings", () => {
-		const { onOpenSpaceSettings } = setupWithSpace();
-		const gear = screen.getByRole("button", { name: /Settings for Alpha/ });
-		expect(gear).toBeTruthy();
-		fireEvent.click(gear);
-		expect(onOpenSpaceSettings).toHaveBeenCalledWith("!alpha:example.com");
-	});
-
-	it("clicking the avatar still navigates and does NOT open settings", () => {
+describe("SpacesSidebar avatar", () => {
+	it("clicking the avatar navigates and does NOT open settings", () => {
 		const { onOpenSpaceSettings } = setupWithSpace();
 		fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
 		expect(navigateMock).toHaveBeenCalledWith(
@@ -178,18 +170,10 @@ describe("SpacesSidebar gear button", () => {
 		expect(onOpenSpaceSettings).not.toHaveBeenCalled();
 	});
 
-	it("omits the gear button when no onOpenSpaceSettings prop is provided", () => {
-		const client = createMockClient();
-		render(() => (
-			<Wrapper
-				client={client}
-				seed={[makeSpaceSummary("!beta:example.com", "Beta")]}
-			>
-				<SpacesSidebar />
-			</Wrapper>
-		));
+	it("does not render a hover settings gear on the avatar", () => {
+		setupWithSpace();
 		expect(
-			screen.queryByRole("button", { name: /Settings for Beta/ }),
+			screen.queryByRole("button", { name: /Settings for Alpha/ }),
 		).toBeNull();
 	});
 });
