@@ -1,10 +1,5 @@
 import { useNavigate } from "@solidjs/router";
-import {
-	EventType,
-	type MatrixClient,
-	Preset,
-	Visibility,
-} from "matrix-js-sdk";
+import { type MatrixClient, Preset, Visibility } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -18,6 +13,7 @@ import {
 import { useClient } from "../../client/client";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
+import { linkRoomToSpace } from "../space/spaceChildLink";
 import { parseInvites } from "./inviteParsing";
 
 const FOCUSABLE =
@@ -219,19 +215,11 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 			// Post-create space linking is best-effort: if it fails the room
 			// was still created and the user is navigated into it; we just
 			// log the failure to the console. Retrying the whole submit
-			// would create a second room.
+			// would create a second room. Both sides of the relationship
+			// (m.space.child on the parent + m.space.parent on the child) are
+			// sent — see linkRoomToSpace.
 			if (shouldAddToSpace && capturedSpaceId) {
-				const via = homeserverDomain();
-				try {
-					await props.client.sendStateEvent(
-						capturedSpaceId,
-						EventType.SpaceChild,
-						{ via: via ? [via] : [], suggested: false },
-						room_id,
-					);
-				} catch (linkErr) {
-					console.error("Failed to add new room to space:", linkErr);
-				}
+				await linkRoomToSpace(props.client, capturedSpaceId, room_id);
 			}
 
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)
