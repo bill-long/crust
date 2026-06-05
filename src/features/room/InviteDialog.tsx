@@ -12,7 +12,7 @@ import {
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
 import { CopyLinkFallbackDialog } from "./CopyLinkFallbackDialog";
-import { buildRoomLink, buildRoomLinkById, canShareJoinLink } from "./roomLink";
+import { buildRoomLinkUrl, canShareJoinLink } from "./roomLink";
 import { InviteByUserIdForm } from "./settings/InviteByUserIdForm";
 import { useRoomStateContent } from "./settings/useRoomStateContent";
 import { createCopyLink } from "./useCopyLink";
@@ -60,12 +60,7 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 	);
 
 	const copyLink = createCopyLink();
-	const inviteUrl = (): string => {
-		const room = props.client.getRoom(props.roomId);
-		// Prefer the canonical alias / via-hinted link from the loaded Room;
-		// fall back to a minimal link from the ID if it hasn't synced yet.
-		return room ? buildRoomLink(room).url : buildRoomLinkById(props.roomId).url;
-	};
+	const inviteUrl = (): string => buildRoomLinkUrl(props.client, props.roomId);
 	const copyLabel = (): string => {
 		switch (copyLink.copyState()) {
 			case "copied":

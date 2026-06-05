@@ -40,7 +40,7 @@ import { PinnedMessagesPanel } from "../features/room/pinned/PinnedMessagesPanel
 import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomList } from "../features/room/RoomList";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
-import { buildRoomLink, buildRoomLinkById } from "../features/room/roomLink";
+import { buildRoomLinkUrl } from "../features/room/roomLink";
 import { SearchPanel } from "../features/room/search/SearchPanel";
 import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
 import {
@@ -424,12 +424,10 @@ const Layout: Component = () => {
 	const copyLink = createCopyLink();
 
 	const handleCopyRoomLink = (rid: string): void => {
-		const room = client.getRoom(rid);
 		// During initial sync or on deep links the Room object may not be
-		// loaded yet. Fall back to a minimal matrix.to link built from the
-		// route param so the button doesn't silently no-op.
-		const { url } = room ? buildRoomLink(room) : buildRoomLinkById(rid);
-		void copyLink.copy(url);
+		// loaded yet; buildRoomLinkUrl falls back to an ID link seeded with our
+		// homeserver so the button doesn't silently produce a weaker link.
+		void copyLink.copy(buildRoomLinkUrl(client, rid));
 	};
 
 	// `location.pathname` is the full URL pathname including any Vite base

@@ -1,4 +1,4 @@
-import type { Room } from "matrix-js-sdk";
+import type { MatrixClient, Room } from "matrix-js-sdk";
 
 /**
  * Build a shareable matrix.to link for a Room.
@@ -102,17 +102,50 @@ export function pickViaServers(
 
 /**
  * Build a minimal matrix.to link from a room ID or alias when the SDK
- * Room object isn't available yet (initial sync, deep links). The
- * resulting link has no `?via=` hints, so it relies on the alias's
- * homeserver (for aliases) or the target client's federation reach
- * (for raw room IDs). Use `buildRoomLink(room)` whenever a Room is
- * available — it produces a more robust link with via hints.
+ * Room object isn't available yet (initial sync, deep links).
+ *
+ * Aliases self-resolve via their own homeserver, so `viaServers` is ignored
+ * for them. For raw room IDs, any provided `viaServers` are appended as
+ * `?via=` hints (e.g. the client's own homeserver from `client.getDomain()`)
+ * so the link still resolves when the recipient doesn't share a server with
+ * the room. Use `buildRoomLink(room)` whenever a Room is available — it
+ * derives richer via hints from the membership.
  */
-export function buildRoomLinkById(idOrAlias: string): RoomLink {
+export function buildRoomLinkById(
+	idOrAlias: string,
+	viaServers: string[] = [],
+): RoomLink {
+	const encoded = encodeURIComponent(idOrAlias);
+	const isAlias = idOrAlias.startsWith("#");
+	if (isAlias || viaServers.length === 0) {
+		return {
+			url: `${MATRIX_TO_BASE}${encoded}`,
+			displayLabel: idOrAlias,
+		};
+	}
+	const viaParams = viaServers
+		.map((s) => `via=${encodeURIComponent(s)}`)
+		.join("&");
 	return {
-		url: `${MATRIX_TO_BASE}${encodeURIComponent(idOrAlias)}`,
+		url: `${MATRIX_TO_BASE}${encoded}?${viaParams}`,
 		displayLabel: idOrAlias,
 	};
+}
+
+/**
+ * Resolve the best shareable matrix.to URL for a room.
+ *
+ * Prefers the loaded `Room` (canonical alias, or room ID with membership-
+ * derived `?via=` hints). When the Room hasn't synced yet, falls back to a
+ * link built from the ID, seeded with the client's own homeserver
+ * (`getDomain()`) as a `?via=` hint so it still resolves for recipients on
+ * other homeservers.
+ */
+export function buildRoomLinkUrl(client: MatrixClient, roomId: string): string {
+	const room = client.getRoom(roomId);
+	if (room) return buildRoomLink(room).url;
+	const domain = client.getDomain();
+	return buildRoomLinkById(roomId, domain ? [domain] : []).url;
 }
 
 function extractServer(userId: string): string | null {

@@ -1,8 +1,9 @@
-import type { Room, RoomMember } from "matrix-js-sdk";
+import type { MatrixClient, Room, RoomMember } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import {
 	buildRoomLink,
 	buildRoomLinkById,
+	buildRoomLinkUrl,
 	canShareJoinLink,
 	pickViaServers,
 } from "./roomLink";
@@ -194,6 +195,27 @@ describe("buildRoomLinkById", () => {
 			displayLabel: "#general:matrix.org",
 		});
 	});
+
+	it("appends via hints for a room ID when servers are provided", () => {
+		expect(buildRoomLinkById("!abc:matrix.org", ["matrix.org"])).toEqual({
+			url: "https://matrix.to/#/!abc%3Amatrix.org?via=matrix.org",
+			displayLabel: "!abc:matrix.org",
+		});
+	});
+
+	it("encodes via servers and joins multiple with &", () => {
+		expect(
+			buildRoomLinkById("!abc:matrix.org", ["a.example", "b:8448.example"]).url,
+		).toBe(
+			"https://matrix.to/#/!abc%3Amatrix.org?via=a.example&via=b%3A8448.example",
+		);
+	});
+
+	it("ignores via hints for aliases (they self-resolve)", () => {
+		expect(buildRoomLinkById("#general:matrix.org", ["matrix.org"]).url).toBe(
+			"https://matrix.to/#/%23general%3Amatrix.org",
+		);
+	});
 });
 
 describe("canShareJoinLink", () => {
@@ -217,5 +239,39 @@ describe("canShareJoinLink", () => {
 
 	it("hides the link for unknown join rules", () => {
 		expect(canShareJoinLink("custom_rule")).toBe(false);
+	});
+});
+
+function mkClient(opts: {
+	room?: Room | null;
+	domain?: string | null;
+}): MatrixClient {
+	return {
+		getRoom: () => opts.room ?? null,
+		getDomain: () => opts.domain ?? null,
+	} as unknown as MatrixClient;
+}
+
+describe("buildRoomLinkUrl", () => {
+	it("uses the loaded Room's alias/via link when the room is available", () => {
+		const room = mkRoom({ alias: "#general:matrix.org" });
+		const client = mkClient({ room, domain: "other.example" });
+		expect(buildRoomLinkUrl(client, "#general:matrix.org")).toBe(
+			"https://matrix.to/#/%23general%3Amatrix.org",
+		);
+	});
+
+	it("falls back to an ID link seeded with the homeserver when the room is missing", () => {
+		const client = mkClient({ room: null, domain: "home.example" });
+		expect(buildRoomLinkUrl(client, "!abc:matrix.org")).toBe(
+			"https://matrix.to/#/!abc%3Amatrix.org?via=home.example",
+		);
+	});
+
+	it("falls back to a bare ID link when the homeserver domain is unavailable", () => {
+		const client = mkClient({ room: null, domain: null });
+		expect(buildRoomLinkUrl(client, "!abc:matrix.org")).toBe(
+			"https://matrix.to/#/!abc%3Amatrix.org",
+		);
 	});
 });
