@@ -21,6 +21,14 @@ import {
 import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
 import type { Session } from "../stores/session";
 import {
+	CRYPTO_INIT_TIMEOUT_MS,
+	clearRecoveryStage,
+	persistRecoveryStage,
+	readRecoveryStage,
+	recoveryIdentity,
+	runCryptoInit,
+} from "./cryptoRecovery";
+import {
 	createSummariesStore,
 	type OptimisticJoinInfo,
 	type SummariesStore,
@@ -222,34 +230,19 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	matrixClient.on(HttpApiEvent.SessionLoggedOut, onSessionLoggedOut);
 
 	onMount(async () => {
-		try {
-			await matrixClient.initRustCrypto({ useIndexedDB: true });
-			if (disposed || syncState() === "logged-out") return;
-			setCryptoState("ready");
-		} catch (e) {
-			// Stale crypto store from a different user/device — clear and retry
-			if (
-				e instanceof Error &&
-				e.message.includes("account in the store doesn't match")
-			) {
-				console.warn("Stale crypto store detected, clearing and retrying");
-				try {
-					await matrixClient.clearStores();
-					if (disposed || syncState() === "logged-out") return;
-					await matrixClient.initRustCrypto({ useIndexedDB: true });
-					if (disposed || syncState() === "logged-out") return;
-					setCryptoState("ready");
-				} catch (retryErr) {
-					console.error("Crypto init retry failed:", retryErr);
-					if (disposed || syncState() === "logged-out") return;
-					setCryptoState("error");
-				}
-			} else {
-				console.error("Crypto init failed:", e);
-				if (disposed || syncState() === "logged-out") return;
-				setCryptoState("error");
-			}
-		}
+		const result = await runCryptoInit({
+			identity: recoveryIdentity(props.session),
+			readStage: readRecoveryStage,
+			persistStage: persistRecoveryStage,
+			clearStage: clearRecoveryStage,
+			clearStores: () => matrixClient.clearStores(),
+			initCrypto: () => matrixClient.initRustCrypto({ useIndexedDB: true }),
+			isAborted: () => disposed || syncState() === "logged-out",
+			reload: () => window.location.reload(),
+			timeoutMs: CRYPTO_INIT_TIMEOUT_MS,
+		});
+		if (result === "reloading" || result === "aborted") return;
+		setCryptoState(result === "ready" ? "ready" : "error");
 		if (disposed || syncState() === "logged-out") return;
 		matrixClient.startClient({ initialSyncLimit: 20 });
 	});
