@@ -126,7 +126,12 @@ function setup(opts?: {
 	return { client, store };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	// Restore any console spies (e.g. the console.error spies in the
+	// write-failure tests) so they don't leak into later tests.
+	vi.restoreAllMocks();
+});
 
 describe("RoomsTab", () => {
 	it("lists current child rooms and add-candidates", () => {
@@ -265,6 +270,7 @@ describe("RoomsTab", () => {
 	});
 
 	it("rolls back the optimistic remove and surfaces an error when the write fails", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
 		const { client } = setup();
 		(client.sendStateEvent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
 			new Error("M_FORBIDDEN"),
