@@ -185,10 +185,14 @@ const TimelineView: Component<{
 		const groups = membershipGroups();
 		setExpandedMemberIds((prev) => {
 			if (prev.size === 0) return prev;
+			// The same group object repeats at every member index; add each
+			// group's IDs once by visiting only its leader index.
 			const present = new Set<string>();
-			for (const g of groups) {
-				if (g) for (const id of g.memberEventIds) present.add(id);
-			}
+			groups.forEach((g, i) => {
+				if (g && g.leaderIndex === i) {
+					for (const id of g.memberEventIds) present.add(id);
+				}
+			});
 			let changed = false;
 			const next = new Set<string>();
 			for (const id of prev) {
