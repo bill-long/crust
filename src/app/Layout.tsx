@@ -11,6 +11,7 @@ import {
 	untrack,
 } from "solid-js";
 import { useClient } from "../client/client";
+import { getSpaceRooms } from "../client/summaries-selectors";
 import {
 	clamp,
 	DEFAULT_MEMBERS,
@@ -53,6 +54,10 @@ import {
 	type SettingsTab,
 	tabMeta,
 } from "../features/settings/SettingsOverlay";
+import {
+	buildPartialLeaveMessage,
+	leaveChildRooms,
+} from "../features/space/leaveSpaceChildren";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
@@ -382,6 +387,31 @@ const Layout: Component = () => {
 	const [leaveSpaceConfirmId, setLeaveSpaceConfirmId] = createSignal<
 		string | null
 	>(null);
+	// "Also leave child rooms" checkbox state for the leave-space dialog.
+	// Reset to false each time the dialog opens (see onLeaveSpace handler).
+	const [leaveSpaceAlsoChildren, setLeaveSpaceAlsoChildren] =
+		createSignal(false);
+	// Snapshot of the joined child rooms (and whether any child subspaces
+	// exist) taken when the leave-space dialog opens. Snapshotting keeps the
+	// dialog's checkbox/count stable after the space is optimistically marked
+	// "left" — at which point getSpaceRooms(summaries, sid) would return [].
+	const [leaveSpaceChildren, setLeaveSpaceChildren] = createSignal<
+		ReturnType<typeof getSpaceRooms>
+	>([]);
+	const [leaveSpaceHasSubspaces, setLeaveSpaceHasSubspaces] =
+		createSignal(false);
+	// The snapshot children that are still joined (pruned live against the
+	// store). Drives BOTH the dialog count and the actual leave set, so the
+	// displayed count stays consistent with the aggregate result message —
+	// including on a retry after a partial failure, where already-left
+	// children have flipped to membership "leave". (Pruning by each child's
+	// membership — not the space's — is why this doesn't regress to [] when
+	// the space itself is optimistically marked left.)
+	const leaveSpaceJoinedChildren = createMemo(() =>
+		leaveSpaceChildren().filter(
+			(r) => summaries[r.roomId]?.membership === "join",
+		),
+	);
 	const [roomSettings, setRoomSettings] = createSignal<{
 		roomId: string;
 		tab: RoomSettingsTab;
@@ -692,21 +722,71 @@ const Layout: Component = () => {
 		return summaries[rid]?.name?.trim() || "this room";
 	});
 
-	const performLeaveSpace = async (sid: string): Promise<void> => {
+	const performLeaveSpace = async (
+		sid: string,
+		alsoLeaveChildren = false,
+	): Promise<void> => {
 		if (isLeaving(sid)) return;
 		// Snapshot the current space param BEFORE the async leave call so a
 		// router update during the await doesn't push the post-leave
 		// navigation into the wrong place.
 		const wasCurrentSpace = params.spaceId === sid;
+		const currentRoomId = params.roomId;
+		// Use the still-joined children from the open-time snapshot (see
+		// onLeaveSpace + leaveSpaceJoinedChildren) rather than recomputing
+		// getSpaceRooms here: by this point the space may already be marked
+		// "left" (e.g. on a retry after a partial failure), at which point
+		// getSpaceRooms returns []. Pruning to still-joined children also means
+		// a retry re-attempts only the ones that previously failed.
+		const childRooms = alsoLeaveChildren ? leaveSpaceJoinedChildren() : [];
+
+		let leftCount = 0;
+		let failedNames: string[] = [];
+		let routeRoomLeft = false;
+
 		markLeaving(sid, true);
 		try {
-			await client.leave(sid);
-			// Remove the space avatar from the sidebar immediately rather than
-			// waiting for the leave-membership sync event (see #180).
-			optimisticallyMarkLeft(sid);
+			// Leaving the space itself is the only step that can hard-fail the
+			// operation; the child leaves below use allSettled and never throw.
+			// Guard on still being joined so a retry after a partial child
+			// failure (where the space was already left on the first attempt)
+			// skips straight to re-leaving the remaining children instead of
+			// re-issuing a leave on a space we're no longer in.
+			if (summaries[sid]?.membership === "join") {
+				await client.leave(sid);
+				// Remove the space avatar from the sidebar immediately rather than
+				// waiting for the leave-membership sync event (see #180).
+				optimisticallyMarkLeft(sid);
+				// Tear down the active call only AFTER the leave succeeded, so a
+				// failed leave doesn't needlessly end a call in a room we're still
+				// in. The same success-gated rule is applied to child rooms below.
+				if (activeCallRoomId() === sid) {
+					setActiveCallRoomId(null);
+				}
+			}
+
+			if (childRooms.length > 0) {
+				const outcome = await leaveChildRooms(client, childRooms, {
+					currentRoomId,
+					// Apply per-room side effects the moment each child's leave
+					// resolves: hide it from the sidebar and, if it hosts the
+					// active call, tear the call down immediately so the
+					// controller never outlives its room during the batch. A
+					// child whose leave failed never reaches this callback.
+					onRoomLeft: (id) => {
+						optimisticallyMarkLeft(id);
+						if (activeCallRoomId() === id) setActiveCallRoomId(null);
+					},
+				});
+				leftCount = outcome.leftRoomIds.length;
+				failedNames = outcome.failedNames;
+				routeRoomLeft = outcome.routeRoomLeft;
+			}
+
 			if (roomSettings()?.roomId === sid) setRoomSettings(null);
-			setLeaveSpaceConfirmId(null);
-			if (wasCurrentSpace) {
+			// Navigate away if we were viewing the space, or a child room we
+			// just left was the active route.
+			if (wasCurrentSpace || routeRoomLeft) {
 				navigate("/home");
 			}
 		} catch (err) {
@@ -715,6 +795,14 @@ const Layout: Component = () => {
 		} finally {
 			markLeaving(sid, false);
 		}
+
+		// The space was left successfully. If some children failed, keep the
+		// dialog open and surface aggregate feedback via its body (ConfirmDialog
+		// keeps the dialog open and shows the message when onConfirm throws).
+		if (failedNames.length > 0) {
+			throw new Error(buildPartialLeaveMessage(leftCount, failedNames));
+		}
+		setLeaveSpaceConfirmId(null);
 	};
 
 	const leaveSpaceConfirmName = createMemo(() => {
@@ -763,7 +851,18 @@ const Layout: Component = () => {
 						onOpenSpaceSettings={(sid) =>
 							setRoomSettings({ roomId: sid, tab: "general" })
 						}
-						onLeaveSpace={(sid) => setLeaveSpaceConfirmId(sid)}
+						onLeaveSpace={(sid) => {
+							setLeaveSpaceAlsoChildren(false);
+							// Snapshot the joined children + subspace flag now, while
+							// the space is still joined (getSpaceRooms requires it).
+							setLeaveSpaceChildren(getSpaceRooms(summaries, sid));
+							setLeaveSpaceHasSubspaces(
+								(summaries[sid]?.children ?? []).some(
+									(cid) => summaries[cid]?.isSpace === true,
+								),
+							);
+							setLeaveSpaceConfirmId(sid);
+						}}
 						onInviteSpace={(sid) => setInviteTarget({ id: sid, kind: "space" })}
 					/>
 				}
@@ -963,14 +1062,46 @@ const Layout: Component = () => {
 				open={() => leaveSpaceConfirmId() !== null}
 				onClose={() => setLeaveSpaceConfirmId(null)}
 				title={`Leave ${leaveSpaceConfirmName()}?`}
-				body="You will stop seeing this space and its curated room list in the sidebar. Rooms inside the space that you have already joined remain joined and reachable directly. You may lose access to rooms in the space that you have not joined — especially private ones — since you will no longer see them in the space's room list."
+				body={
+					<div class="space-y-3">
+						<p>
+							You will stop seeing this space and its curated room list in the
+							sidebar. Rooms inside the space that you have already joined
+							remain joined and reachable directly. You may lose access to rooms
+							in the space that you have not joined — especially private ones —
+							since you will no longer see them in the space's room list.
+						</p>
+						<Show when={leaveSpaceJoinedChildren().length > 0}>
+							<label class="flex items-start gap-2 text-text-secondary">
+								<input
+									type="checkbox"
+									class="mt-0.5"
+									checked={leaveSpaceAlsoChildren()}
+									onChange={(e) =>
+										setLeaveSpaceAlsoChildren(e.currentTarget.checked)
+									}
+								/>
+								<span>
+									Also leave the {leaveSpaceJoinedChildren().length} room
+									{leaveSpaceJoinedChildren().length === 1 ? "" : "s"} I've
+									joined in this space.
+								</span>
+							</label>
+						</Show>
+						<Show when={leaveSpaceHasSubspaces()}>
+							<p class="text-xs text-text-muted">
+								Child spaces are not affected — leave those separately.
+							</p>
+						</Show>
+					</div>
+				}
 				confirmLabel="Leave"
 				destructive
 				pendingLabel="Leaving…"
 				onConfirm={async () => {
 					const sid = leaveSpaceConfirmId();
 					if (!sid) return;
-					await performLeaveSpace(sid);
+					await performLeaveSpace(sid, leaveSpaceAlsoChildren());
 				}}
 			/>
 
