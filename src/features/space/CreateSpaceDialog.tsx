@@ -375,7 +375,7 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 									type="button"
 									onClick={() => fileInputRef?.click()}
 									disabled={submitting() || avatarUploading()}
-									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 								>
 									<Show when={avatarHttp()} fallback="Add avatar">
 										Replace
@@ -386,7 +386,7 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 										type="button"
 										onClick={removeAvatar}
 										disabled={submitting()}
-										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 									>
 										Remove
 									</button>

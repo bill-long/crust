@@ -63,6 +63,10 @@ const Wrapper: ParentComponent<{
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
+function makeImageFile(name = "a.png", bytes = 100, type = "image/png"): File {
+	return new File([new Uint8Array(bytes)], name, { type });
+}
+
 afterEach(() => {
 	cleanup();
 	navigateMock.mockReset();
@@ -491,5 +495,163 @@ describe("CreateRoomDialog", () => {
 		expect(
 			(screen.getByLabelText(/^Topic/i) as HTMLTextAreaElement).value,
 		).toBe("");
+	});
+
+	it("uploads avatar and includes m.room.avatar in initial_state", async () => {
+		const { client } = setup();
+		fireEvent.input(screen.getByLabelText(/^Name$/i), {
+			target: { value: "general" },
+		});
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		const file = makeImageFile();
+		Object.defineProperty(fileInput, "files", { value: [file] });
+		fireEvent.change(fileInput);
+		await flush();
+		await flush();
+		expect(client.uploadContent).toHaveBeenCalledWith(file);
+		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+		await flush();
+		await flush();
+		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
+			.calls[0][0] as Record<string, unknown>;
+		const initial = opts.initial_state as Array<{
+			type: string;
+			content: Record<string, unknown>;
+		}>;
+		expect(initial.find((e) => e.type === "m.room.avatar")?.content).toEqual({
+			url: "mxc://example.com/avatar",
+		});
+		expect(optimisticallyMarkJoined).toHaveBeenCalledWith(
+			"!created:example.com",
+			expect.objectContaining({
+				avatarUrl: expect.stringContaining("example.com/avatar"),
+			}),
+		);
+	});
+
+	it("rejects non-image files", async () => {
+		const { client } = setup();
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		const file = new File(["x"], "x.txt", { type: "text/plain" });
+		Object.defineProperty(fileInput, "files", { value: [file] });
+		fireEvent.change(fileInput);
+		await flush();
+		expect(client.uploadContent).not.toHaveBeenCalled();
+		expect(screen.getByText(/must be an image/i)).toBeTruthy();
+	});
+
+	it("rejects images over 10 MB", async () => {
+		const { client } = setup();
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		const file = makeImageFile("big.png", 11 * 1024 * 1024);
+		Object.defineProperty(fileInput, "files", { value: [file] });
+		fireEvent.change(fileInput);
+		await flush();
+		expect(client.uploadContent).not.toHaveBeenCalled();
+		expect(screen.getByText(/under 10 MB/i)).toBeTruthy();
+	});
+
+	it("disables Create while avatar is uploading", async () => {
+		const { client } = setup();
+		let resolveUpload!: (v: { content_uri: string }) => void;
+		(client.uploadContent as ReturnType<typeof vi.fn>).mockImplementationOnce(
+			() =>
+				new Promise<{ content_uri: string }>((res) => {
+					resolveUpload = res;
+				}),
+		);
+		fireEvent.input(screen.getByLabelText(/^Name$/i), {
+			target: { value: "general" },
+		});
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		Object.defineProperty(fileInput, "files", { value: [makeImageFile()] });
+		fireEvent.change(fileInput);
+		await flush();
+		const submit = screen.getByRole("button", {
+			name: /^Create$/i,
+		}) as HTMLButtonElement;
+		expect(submit.disabled).toBe(true);
+		resolveUpload({ content_uri: "mxc://example.com/late" });
+		await flush();
+		await flush();
+		expect(submit.disabled).toBe(false);
+	});
+
+	it("ignores a stale upload result after a newer file is picked", async () => {
+		const { client } = setup();
+		let resolveFirst!: (v: { content_uri: string }) => void;
+		(client.uploadContent as ReturnType<typeof vi.fn>)
+			.mockImplementationOnce(
+				() =>
+					new Promise<{ content_uri: string }>((res) => {
+						resolveFirst = res;
+					}),
+			)
+			.mockResolvedValueOnce({ content_uri: "mxc://example.com/second" });
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		Object.defineProperty(fileInput, "files", {
+			value: [makeImageFile("first.png")],
+			configurable: true,
+		});
+		fireEvent.change(fileInput);
+		await flush();
+		Object.defineProperty(fileInput, "files", {
+			value: [makeImageFile("second.png")],
+			configurable: true,
+		});
+		fireEvent.change(fileInput);
+		await flush();
+		await flush();
+		// The first (stale) upload resolves last — must be ignored.
+		resolveFirst({ content_uri: "mxc://example.com/first" });
+		await flush();
+		await flush();
+		fireEvent.input(screen.getByLabelText(/^Name$/i), {
+			target: { value: "general" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+		await flush();
+		await flush();
+		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
+			.calls[0][0] as Record<string, unknown>;
+		const initial = opts.initial_state as Array<{
+			type: string;
+			content: Record<string, unknown>;
+		}>;
+		expect(initial.find((e) => e.type === "m.room.avatar")?.content).toEqual({
+			url: "mxc://example.com/second",
+		});
+	});
+
+	it("Remove avatar clears the mxc and the next submit omits m.room.avatar", async () => {
+		const { client } = setup();
+		fireEvent.input(screen.getByLabelText(/^Name$/i), {
+			target: { value: "general" },
+		});
+		const fileInput = document.querySelector(
+			'input[type="file"]',
+		) as HTMLInputElement;
+		Object.defineProperty(fileInput, "files", { value: [makeImageFile()] });
+		fireEvent.change(fileInput);
+		await flush();
+		await flush();
+		fireEvent.click(screen.getByRole("button", { name: /^Remove$/i }));
+		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+		await flush();
+		await flush();
+		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
+			.calls[0][0] as Record<string, unknown>;
+		const initial = (opts.initial_state ?? []) as Array<{ type: string }>;
+		expect(initial.find((e) => e.type === "m.room.avatar")).toBeUndefined();
 	});
 });
