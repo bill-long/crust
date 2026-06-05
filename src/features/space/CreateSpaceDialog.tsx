@@ -3,6 +3,7 @@ import {
 	EventType,
 	type MatrixClient,
 	Preset,
+	RoomType,
 	Visibility,
 } from "matrix-js-sdk";
 import {
@@ -18,7 +19,7 @@ import {
 import { useClient } from "../../client/client";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
-import { parseInvites } from "./inviteParsing";
+import { parseInvites } from "../room/inviteParsing";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -26,26 +27,22 @@ const FOCUSABLE =
 /** Local-part of a Matrix room alias. Server adds ":server" + leading "#". */
 const ALIAS_LOCAL_PART_RE = /^[A-Za-z0-9._=/+-]+$/;
 
-interface CreateRoomDialogProps {
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB (matches AccountTab/GeneralTab)
+
+interface CreateSpaceDialogProps {
 	client: MatrixClient;
 	open: () => boolean;
 	onClose: () => void;
-	/**
-	 * If set, the dialog shows an "Add to this space" checkbox (default
-	 * checked) and, on submit, sends an `m.space.child` state event on the
-	 * space pointing at the new room. Snapshotted at open time so route
-	 * changes during submit don't redirect the child relation.
-	 */
-	spaceId?: string;
 }
 
-const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
+const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 	trackAppModalOpen(props.open);
 	const navigate = useNavigate();
 	const { optimisticallyMarkJoined } = useClient();
 
 	let overlayRef!: HTMLDivElement;
 	let nameRef: HTMLInputElement | undefined;
+	let fileInputRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	/**
@@ -55,6 +52,13 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 	 * flight submit to commit side effects.
 	 */
 	let submitGeneration = 0;
+	/**
+	 * Separate counter for avatar uploads. Bumped on every file selection
+	 * AND on every form reset, so a stale upload that resolves after the
+	 * user picks a different file or reopens the dialog cannot overwrite
+	 * the current avatar mxc.
+	 */
+	let uploadGeneration = 0;
 	onCleanup(() => {
 		mounted = false;
 	});
@@ -62,32 +66,19 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 	const titleId = createUniqueId();
 	const aliasHintId = createUniqueId();
 	const inviteHintId = createUniqueId();
+	const avatarHintId = createUniqueId();
 	const errorId = createUniqueId();
 
 	const [name, setName] = createSignal("");
 	const [topic, setTopic] = createSignal("");
 	const [alias, setAlias] = createSignal("");
 	const [isPublic, setIsPublic] = createSignal(false);
-	const [encryption, setEncryption] = createSignal(true);
-	/** Once the user toggles encryption manually, stop auto-defaulting. */
-	const [encryptionTouched, setEncryptionTouched] = createSignal(false);
-	const [addToSpace, setAddToSpace] = createSignal(true);
 	const [inviteRaw, setInviteRaw] = createSignal("");
+	const [avatarMxc, setAvatarMxc] = createSignal<string | null>(null);
+	const [avatarUploading, setAvatarUploading] = createSignal(false);
+	const [avatarError, setAvatarError] = createSignal<string | null>(null);
 	const [submitting, setSubmitting] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
-	/** spaceId captured at dialog-open time so route changes don't poison submit. */
-	const [snapshotSpaceId, setSnapshotSpaceId] = createSignal<string | null>(
-		null,
-	);
-
-	// Default encryption follows visibility (on for invite-only, off for
-	// public) until the user manually toggles it.
-	createEffect(() => {
-		const pub = isPublic();
-		if (!encryptionTouched()) {
-			setEncryption(!pub);
-		}
-	});
 
 	const selfId = createMemo(() => props.client.getUserId() ?? null);
 	const parsedInvites = createMemo(() => parseInvites(inviteRaw(), selfId()));
@@ -101,8 +92,15 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 	const homeserverDomain = createMemo(() => props.client.getDomain() ?? "");
 
+	const avatarHttp = createMemo<string | null>(() => {
+		const mxc = avatarMxc();
+		if (!mxc) return null;
+		return props.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null;
+	});
+
 	const canSubmit = createMemo(() => {
 		if (submitting()) return false;
+		if (avatarUploading()) return false;
 		if (name().trim().length === 0) return false;
 		if (!aliasValid()) return false;
 		if (parsedInvites().error) return false;
@@ -111,14 +109,15 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 	function resetForm(): void {
 		submitGeneration++;
+		uploadGeneration++;
 		setName("");
 		setTopic("");
 		setAlias("");
 		setIsPublic(false);
-		setEncryption(true);
-		setEncryptionTouched(false);
-		setAddToSpace(true);
 		setInviteRaw("");
+		setAvatarMxc(null);
+		setAvatarUploading(false);
+		setAvatarError(null);
 		setError(null);
 		setSubmitting(false);
 	}
@@ -128,7 +127,6 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 			if (isOpen && !wasOpen) {
 				previousFocus = document.activeElement as HTMLElement | null;
 				resetForm();
-				setSnapshotSpaceId(props.spaceId ?? null);
 				queueMicrotask(() => nameRef?.focus());
 			} else if (!isOpen && wasOpen) {
 				if (previousFocus && document.body.contains(previousFocus)) {
@@ -160,7 +158,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 		if (e.key === "Tab") {
 			const focusable = Array.from(
 				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			);
+			).filter((el) => el.offsetParent !== null);
 			if (focusable.length === 0) return;
 			const first = focusable[0];
 			const last = focusable[focusable.length - 1];
@@ -174,6 +172,54 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 		}
 	};
 
+	async function uploadAvatar(file: File): Promise<void> {
+		// Bump generation BEFORE validation so a previous in-flight upload's
+		// resolution is dropped even when the new selection is rejected
+		// (non-image / too large). Otherwise the stale upload would still
+		// repopulate avatarMxc after the user's latest pick was discarded.
+		const myGen = ++uploadGeneration;
+		if (!file.type.startsWith("image/")) {
+			setAvatarError("File must be an image");
+			setAvatarUploading(false);
+			return;
+		}
+		if (file.size > MAX_AVATAR_BYTES) {
+			setAvatarError("Image must be under 10 MB");
+			setAvatarUploading(false);
+			return;
+		}
+		setAvatarError(null);
+		setAvatarUploading(true);
+		try {
+			const response = await props.client.uploadContent(file);
+			if (!mounted || !props.open() || myGen !== uploadGeneration) return;
+			setAvatarMxc(response.content_uri);
+		} catch (e) {
+			if (!mounted || !props.open() || myGen !== uploadGeneration) return;
+			setAvatarError(
+				e instanceof Error ? e.message : "Failed to upload avatar",
+			);
+		} finally {
+			if (mounted && props.open() && myGen === uploadGeneration) {
+				setAvatarUploading(false);
+			}
+		}
+	}
+
+	const onFileSelect = (): void => {
+		const file = fileInputRef?.files?.[0];
+		if (file) void uploadAvatar(file);
+		if (fileInputRef) fileInputRef.value = "";
+	};
+
+	const removeAvatar = (): void => {
+		// Bump upload generation so any in-flight upload's result is dropped.
+		uploadGeneration++;
+		setAvatarMxc(null);
+		setAvatarError(null);
+		setAvatarUploading(false);
+	};
+
 	async function handleSubmit(e: Event): Promise<void> {
 		e.preventDefault();
 		if (!canSubmit()) return;
@@ -184,72 +230,76 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 		const trimmedTopic = topic().trim();
 		const aliasLocal = trimmedAlias();
 		const pub = isPublic();
-		const encrypt = encryption();
 		const invites = parsedInvites().mxids;
-		const capturedSpaceId = snapshotSpaceId();
-		const shouldAddToSpace = capturedSpaceId !== null && addToSpace();
+		const mxc = avatarMxc();
 
 		try {
+			const initialState: Array<{
+				type: string;
+				state_key: string;
+				content: Record<string, unknown>;
+			}> = [
+				{
+					type: EventType.RoomHistoryVisibility,
+					state_key: "",
+					content: {
+						history_visibility: pub ? "world_readable" : "shared",
+					},
+				},
+				{
+					type: EventType.RoomGuestAccess,
+					state_key: "",
+					content: { guest_access: "forbidden" },
+				},
+			];
+			if (mxc) {
+				initialState.push({
+					type: EventType.RoomAvatar,
+					state_key: "",
+					content: { url: mxc },
+				});
+			}
+
 			const opts: Parameters<MatrixClient["createRoom"]>[0] = {
 				name: trimmedName,
 				visibility: pub ? Visibility.Public : Visibility.Private,
 				preset: pub ? Preset.PublicChat : Preset.PrivateChat,
+				creation_content: { type: RoomType.Space },
+				power_level_content_override: {
+					// Space PL floor: only admins post events (spaces don't
+					// carry chat messages anyway), only admins set state,
+					// moderators (PL≥50) can invite and add child rooms.
+					events_default: 100,
+					state_default: 100,
+					users_default: 0,
+					invite: 50,
+					events: {
+						[EventType.SpaceChild]: 50,
+					},
+				},
+				initial_state: initialState,
 			};
 			if (trimmedTopic) opts.topic = trimmedTopic;
 			if (aliasLocal) opts.room_alias_name = aliasLocal;
 			if (invites.length > 0) opts.invite = invites;
-			if (encrypt) {
-				opts.initial_state = [
-					{
-						type: "m.room.encryption",
-						state_key: "",
-						content: { algorithm: "m.megolm.v1.aes-sha2" },
-					},
-				];
-			}
+
 			const { room_id } = await props.client.createRoom(opts);
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)
 				return;
 
 			optimisticallyMarkJoined(room_id, {
 				name: trimmedName,
-				avatarUrl: null,
+				avatarUrl: avatarHttp(),
+				isSpace: true,
 			});
 
-			// Post-create space linking is best-effort: if it fails the room
-			// was still created and the user is navigated into it; we just
-			// log the failure to the console. Retrying the whole submit
-			// would create a second room.
-			if (shouldAddToSpace && capturedSpaceId) {
-				const via = homeserverDomain();
-				try {
-					await props.client.sendStateEvent(
-						capturedSpaceId,
-						EventType.SpaceChild,
-						{ via: via ? [via] : [], suggested: false },
-						room_id,
-					);
-				} catch (linkErr) {
-					console.error("Failed to add new room to space:", linkErr);
-				}
-			}
-
-			if (!mounted || !props.open() || myGeneration !== submitGeneration)
-				return;
-
-			if (shouldAddToSpace && capturedSpaceId) {
-				navigate(
-					`/space/${encodeURIComponent(capturedSpaceId)}/${encodeURIComponent(room_id)}`,
-				);
-			} else {
-				navigate(`/home/${encodeURIComponent(room_id)}`);
-			}
+			navigate(`/space/${encodeURIComponent(room_id)}`);
 			props.onClose();
 		} catch (err) {
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)
 				return;
 			const msg =
-				err instanceof Error ? err.message : "Failed to create the room.";
+				err instanceof Error ? err.message : "Failed to create the space.";
 			setError(msg);
 			setSubmitting(false);
 		}
@@ -275,11 +325,94 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 					onSubmit={handleSubmit}
 				>
 					<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
-						Create room
+						Create space
 					</h2>
 					<p class="mb-4 text-sm text-text-muted">
-						A new room on your homeserver.
+						Spaces group rooms and people. You can add rooms later.
 					</p>
+
+					<div class="mb-4 flex items-center gap-3">
+						<Show
+							when={avatarHttp()}
+							fallback={
+								<div class="flex h-16 w-16 items-center justify-center rounded-full bg-surface-3 text-text-secondary">
+									<svg
+										class="h-7 w-7"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="2"
+										aria-hidden="true"
+									>
+										<title>Avatar placeholder</title>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M4 7h3l2-2h6l2 2h3v12H4V7z"
+										/>
+										<circle cx="12" cy="13" r="3.5" />
+									</svg>
+								</div>
+							}
+						>
+							<img
+								src={avatarHttp() ?? ""}
+								alt=""
+								class="h-16 w-16 rounded-full object-cover"
+							/>
+						</Show>
+						<div class="flex flex-col gap-1">
+							<div class="flex gap-2">
+								<input
+									ref={fileInputRef}
+									type="file"
+									accept="image/*"
+									class="hidden"
+									onChange={onFileSelect}
+									aria-describedby={avatarHintId}
+								/>
+								<button
+									type="button"
+									onClick={() => fileInputRef?.click()}
+									disabled={submitting() || avatarUploading()}
+									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									<Show when={avatarHttp()} fallback="Add avatar">
+										Replace
+									</Show>
+								</button>
+								<Show when={avatarHttp()}>
+									<button
+										type="button"
+										onClick={removeAvatar}
+										disabled={submitting()}
+										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										Remove
+									</button>
+								</Show>
+							</div>
+							<span
+								id={avatarHintId}
+								class={`text-xs ${avatarError() ? "text-danger-text" : "text-text-faint"}`}
+								role={avatarError() ? "alert" : undefined}
+							>
+								<Show
+									when={avatarError()}
+									fallback={
+										<Show
+											when={avatarUploading()}
+											fallback="Optional. PNG, JPG, GIF, or WEBP up to 10 MB."
+										>
+											Uploading…
+										</Show>
+									}
+								>
+									{avatarError()}
+								</Show>
+							</span>
+						</div>
+					</div>
 
 					<label class="mb-3 block text-sm">
 						<span class="mb-1 block font-medium text-text-secondary">Name</span>
@@ -292,7 +425,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							onInput={(e) => setName(e.currentTarget.value)}
 							disabled={submitting()}
 							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-							placeholder="general"
+							placeholder="My space"
 						/>
 					</label>
 
@@ -307,7 +440,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							onInput={(e) => setTopic(e.currentTarget.value)}
 							disabled={submitting()}
 							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-							placeholder="What's this room about?"
+							placeholder="What's this space about?"
 						/>
 					</label>
 
@@ -327,7 +460,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 								aria-describedby={aliasHintId}
 								aria-invalid={!aliasValid()}
 								class="flex-1 bg-transparent py-2 text-text-primary placeholder-text-faint focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-								placeholder="general"
+								placeholder="my-space"
 							/>
 							<Show when={homeserverDomain()}>
 								<span class="pr-3 text-text-faint" aria-hidden="true">
@@ -375,33 +508,6 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							<span class="text-text-primary">Public</span>
 						</label>
 					</fieldset>
-
-					<label class="mb-3 inline-flex items-center gap-2 text-sm">
-						<input
-							type="checkbox"
-							checked={encryption()}
-							onChange={(e) => {
-								setEncryptionTouched(true);
-								setEncryption(e.currentTarget.checked);
-							}}
-							disabled={submitting()}
-							class="accent-accent"
-						/>
-						<span class="text-text-primary">End-to-end encryption</span>
-					</label>
-
-					<Show when={snapshotSpaceId()}>
-						<label class="mb-3 flex items-center gap-2 text-sm">
-							<input
-								type="checkbox"
-								checked={addToSpace()}
-								onChange={(e) => setAddToSpace(e.currentTarget.checked)}
-								disabled={submitting()}
-								class="accent-accent"
-							/>
-							<span class="text-text-primary">Add to this space</span>
-						</label>
-					</Show>
 
 					<label class="mb-3 block text-sm">
 						<span class="mb-1 block font-medium text-text-secondary">
@@ -466,4 +572,4 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 	);
 };
 
-export { CreateRoomDialog };
+export { CreateSpaceDialog };
