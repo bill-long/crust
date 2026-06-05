@@ -368,13 +368,14 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 									type="file"
 									accept="image/*"
 									class="hidden"
+									tabIndex={-1}
 									onChange={onFileSelect}
-									aria-describedby={avatarHintId}
 								/>
 								<button
 									type="button"
 									onClick={() => fileInputRef?.click()}
 									disabled={submitting() || avatarUploading()}
+									aria-describedby={avatarHintId}
 									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 								>
 									<Show when={avatarHttp()} fallback="Add avatar">
