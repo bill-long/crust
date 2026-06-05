@@ -44,6 +44,39 @@ If the user declines, exit this skill and direct them to run the
 `code-review` skill per PR instead — do not start the chain under per-PR
 approval, since that defeats the time-saving premise.
 
+## MANDATORY: One PR reaches a clean Copilot review before the next is started
+
+**This is a hard, blocking gate. It is the #1 way this workflow fails.**
+
+The chain is built **strictly one PR at a time, in order**. You may NOT
+create the next issue's branch, implement it, push it, or open its PR until
+the *current* PR has a **confirmed-clean Copilot review** (per the §2 step-9
+definition: a summary saying "generated no new comments", OR an empty-body
+review on HEAD with no unreplied Copilot threads across 3 scans).
+
+Non-negotiable rules:
+
+- **"Fix pushed" is NOT "review clean."** After you push fixes and re-request
+  review, the loop is *still open*. You must poll the **new** review to a
+  terminal state (clean, or a fresh set of comments) before doing anything
+  else. Never treat addressing comments + re-requesting as completion.
+- **Never have two PRs in a non-clean review state at the same time.** Exactly
+  one PR is "in review" at any moment. Its `issue_chain` row stays in a
+  `review-<pr>` state until clean, then flips to `done`. Only a `done` row
+  permits starting the next issue.
+- **Do not end your turn while a review loop is open.** Re-requesting a review
+  and moving on (to the next issue, or to "waiting") abandons the loop. Copilot
+  reviews send no notification — keep actively polling (see step 9) until the
+  current PR is clean. The poll exists to *drive the loop to completion*, not as
+  a fire-and-forget backstop you can walk away from.
+- **Before starting any new issue, re-verify the previous PR is still clean.**
+  A late review round can land after you thought the loop was done; confirm the
+  newest review on the newest HEAD has no unreplied Copilot threads.
+
+If you catch yourself about to branch/implement/open the next PR, STOP and ask:
+"Is the current PR's Copilot review confirmed clean on its latest commit?" If
+you can't point to a clean review, the gate is not satisfied.
+
 ## The workflow
 
 ### 1. Plan the chain
@@ -78,9 +111,13 @@ Ordering heuristics:
 The first issue branches from `main`. Every subsequent issue branches from
 the **previous issue's branch** and targets it as the PR base.
 
+**Gate:** do not create issue N+1's branch until issue N's row is `done`
+(its PR's Copilot review is confirmed clean — see the MANDATORY section above).
+
 ### 2. Per-issue loop
 
-For each row in `issue_chain`:
+For each row in `issue_chain` (one at a time — do not begin the next row until
+the current row is `done`):
 
 1. **Read the issue** — `gh issue view N` — and any linked context.
 2. **Plan the implementation.**
@@ -129,7 +166,10 @@ For each row in `issue_chain`:
    `manage_schedule` with `action: "stop"` and the recorded schedule
    id** — otherwise the recurring poll keeps firing across subsequent
    issues.
-10. **Mark the row done** in `issue_chain`.
+10. **Mark the row done** in `issue_chain` — **only** after the Copilot review
+    on the PR's latest commit is confirmed clean. A `done` row is the signal
+    that you may now start the next issue; do not mark it `done` while any
+    Copilot thread is unreplied or a re-requested review is still pending.
 
 ### 3. Post-chain audit
 
