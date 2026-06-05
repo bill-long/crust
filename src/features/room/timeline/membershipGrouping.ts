@@ -98,6 +98,8 @@ const KIND_VERB: Record<MembershipTransitionKind, string> = {
 	invite: "were invited",
 	kick: "were removed",
 	ban: "were banned",
+	call_join: "joined the call",
+	call_leave: "left the call",
 };
 
 const KIND_VERB_SINGULAR: Record<MembershipTransitionKind, string> = {
@@ -106,6 +108,8 @@ const KIND_VERB_SINGULAR: Record<MembershipTransitionKind, string> = {
 	invite: "was invited",
 	kick: "was removed",
 	ban: "was banned",
+	call_join: "joined the call",
+	call_leave: "left the call",
 };
 
 /**

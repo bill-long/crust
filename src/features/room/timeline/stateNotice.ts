@@ -1,4 +1,5 @@
 import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
+import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 
 /**
  * Derived text for a non-message state event (m.room.member, m.room.name,
@@ -22,7 +23,9 @@ export type MembershipTransitionKind =
 	| "leave"
 	| "invite"
 	| "kick"
-	| "ban";
+	| "ban"
+	| "call_join"
+	| "call_leave";
 
 export interface MembershipTransition {
 	kind: MembershipTransitionKind;
@@ -43,6 +46,7 @@ export const STATE_NOTICE_TYPES: ReadonlySet<string> = new Set([
 	"m.room.encryption",
 	"m.room.canonical_alias",
 	"m.room.tombstone",
+	CALL_MEMBER_EVENT_TYPE,
 ]);
 
 export function isStateNoticeType(type: string): boolean {
@@ -94,6 +98,84 @@ function getPrevContent(event: MatrixEvent): Record<string, unknown> {
 function quoted(s: string): string {
 	const trimmed = s.trim();
 	return trimmed.length > 0 ? `"${trimmed}"` : "";
+}
+
+/**
+ * Whether a MatrixRTC `org.matrix.msc3401.call.member` content blob
+ * represents an active call membership. An empty blob (`{}`) is the
+ * "left the call" tombstone. Both the modern MSC4143 flat per-device
+ * shape and the legacy nested shapes (non-empty `m.calls` /
+ * `memberships` arrays) count as present so the timeline can render
+ * join/leave history regardless of the publishing client.
+ *
+ * For the modern flat shape this requires the SDK-mandatory identifying
+ * fields (`application: "m.call"` plus string `call_id`, `device_id`,
+ * and `focus_active.type`), mirroring `checkSessionsMembershipData` in
+ * `summaries.ts` so a malformed payload (e.g. a bare
+ * `{ application: "m.call" }`) is not mistaken for a real membership.
+ * Unlike the live "active call" badge it intentionally does NOT apply
+ * the badge's ROOM-slot `call_id` filter or `foci_preferred` validation:
+ * historical notices cover any well-formed membership, including
+ * non-primary call slots.
+ */
+function hasCallMembership(content: Record<string, unknown>): boolean {
+	if (Object.keys(content).length === 0) return false;
+	const focusActive = content.focus_active as { type?: unknown } | undefined;
+	if (
+		content.application === "m.call" &&
+		typeof content.call_id === "string" &&
+		typeof content.device_id === "string" &&
+		typeof focusActive?.type === "string"
+	) {
+		return true;
+	}
+	const calls = content["m.calls"];
+	if (Array.isArray(calls) && calls.length > 0) return true;
+	const memberships = content.memberships;
+	if (Array.isArray(memberships) && memberships.length > 0) return true;
+	return false;
+}
+
+/**
+ * Classify a call-member state event as an explicit join or leave by
+ * diffing its content against its `prev_content`. A membership appearing
+ * is a join; a membership being removed (content emptied) is a leave.
+ * Returns null for non-transitions (membership refreshes that stay
+ * present, or empty->empty no-ops).
+ *
+ * Scope/limitations (see issue #210):
+ *  - Memberships are keyed per-user *and per-device*. Each device's
+ *    state event is diffed independently, so a user joining/leaving a
+ *    call from two devices can produce two "joined"/"left" notices, and
+ *    one device leaving while another stays in the call still emits a
+ *    "left the call" notice. Burst grouping dedupes simultaneous joins
+ *    by user, but interleaved per-device events are not reconciled here.
+ *  - Expiry-based leaves (a membership lapsing without a follow-up
+ *    event) produce no event and therefore no notice. Only explicit
+ *    transitions are covered.
+ */
+function classifyCallTransition(
+	event: MatrixEvent,
+): "call_join" | "call_leave" | null {
+	const content = event.getContent() as Record<string, unknown>;
+	const prev = getPrevContent(event);
+	const currActive = hasCallMembership(content);
+	const prevActive = hasCallMembership(prev);
+	if (currActive && !prevActive) return "call_join";
+	if (!currActive && prevActive) return "call_leave";
+	return null;
+}
+
+function callMemberNotice(event: MatrixEvent, room: Room): StateNotice | null {
+	const transition = classifyCallTransition(event);
+	if (!transition) return null;
+	const subject = actorName(event, room);
+	return {
+		text:
+			transition === "call_join"
+				? `${subject} joined the call`
+				: `${subject} left the call`,
+	};
 }
 
 function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
@@ -192,6 +274,9 @@ export function buildStateNotice(
 	if (type === "m.room.member") {
 		return memberNotice(event, room);
 	}
+	if (type === CALL_MEMBER_EVENT_TYPE) {
+		return callMemberNotice(event, room);
+	}
 	const content = event.getContent() as Record<string, unknown>;
 	const prev = getPrevContent(event);
 	const actor = actorName(event, room);
@@ -272,9 +357,25 @@ function memberAvatarUrl(
 }
 
 /**
- * Classify an `m.room.member` event as a grouping membership transition, or
- * null when it should not group (non-member event, profile-only change while
- * joined, invite withdrawal/rejection, or unban). Used by the timeline to
+ * Avatar URL for a call-member transition's subject. Call-member events
+ * don't carry profile data, so resolve the sender's avatar from current
+ * room state (null when the member or avatar is unknown).
+ */
+function callMemberAvatarUrl(
+	client: MatrixClient,
+	room: Room,
+	sender: string,
+): string | null {
+	const mxc = room.getMember(sender)?.getMxcAvatarUrl?.() ?? "";
+	if (!mxc) return null;
+	return client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null;
+}
+
+/**
+ * Classify an `m.room.member` (or MatrixRTC call-member) event as a grouping
+ * membership transition, or null when it should not group (non-member event,
+ * profile-only change while joined, invite withdrawal/rejection, unban, or a
+ * call-membership refresh that is not a join/leave). Used by the timeline to
  * collapse consecutive same-kind transitions into one notice.
  */
 export function buildMembershipTransition(
@@ -282,6 +383,17 @@ export function buildMembershipTransition(
 	room: Room,
 	client: MatrixClient,
 ): MembershipTransition | null {
+	if (event.getType() === CALL_MEMBER_EVENT_TYPE) {
+		const transition = classifyCallTransition(event);
+		if (!transition) return null;
+		const sender = event.getSender() ?? "";
+		return {
+			kind: transition,
+			userId: sender,
+			subject: actorName(event, room),
+			avatarUrl: callMemberAvatarUrl(client, room, sender),
+		};
+	}
 	if (event.getType() !== "m.room.member") return null;
 	const stateKey =
 		typeof event.getStateKey === "function" ? (event.getStateKey() ?? "") : "";

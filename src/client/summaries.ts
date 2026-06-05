@@ -34,7 +34,7 @@ export interface RoomSummary {
 }
 
 /** State event type that MatrixRTC / Element Call use today (legacy MSC3401). */
-const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
+export const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
 
 /**
  * Default membership expiry used when a MatrixRTC per-device membership omits
