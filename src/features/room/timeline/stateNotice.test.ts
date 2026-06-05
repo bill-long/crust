@@ -587,6 +587,18 @@ describe("stateNotice", () => {
 			);
 			expect(notice?.text).toBe("@ghost:test joined the call");
 		});
+
+		it("returns null for a call event with no sender", () => {
+			const e = {
+				getType: () => CALL,
+				getSender: () => null,
+				getStateKey: () => "_x",
+				getContent: () => ({ ...FLAT }),
+				getPrevContent: () => ({}),
+				isRedacted: () => false,
+			} as unknown as MatrixEvent;
+			expect(buildStateNotice(e, room)).toBeNull();
+		});
 	});
 });
 
@@ -752,5 +764,22 @@ describe("buildMembershipTransition", () => {
 				prevContent: { ...FLAT },
 			}),
 		).toBeNull();
+	});
+
+	it("returns null for a call transition with no sender", () => {
+		const e = {
+			getType: () => "org.matrix.msc3401.call.member",
+			getSender: () => null,
+			getStateKey: () => "_x",
+			getContent: () => ({
+				application: "m.call",
+				call_id: "",
+				device_id: "DEV",
+				focus_active: { type: "livekit" },
+			}),
+			getPrevContent: () => ({}),
+			isRedacted: () => false,
+		} as unknown as MatrixEvent;
+		expect(buildMembershipTransition(e, makeRoom(), fakeClient)).toBeNull();
 	});
 });

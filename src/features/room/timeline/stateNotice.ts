@@ -169,6 +169,10 @@ function classifyCallTransition(
 function callMemberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 	const transition = classifyCallTransition(event);
 	if (!transition) return null;
+	// Mirror summaries.ts: a call-member event with no sender has no
+	// identifiable participant. Bail so we never render " joined the call"
+	// or collide grouping dedupe on an empty userId.
+	if (!event.getSender()) return null;
 	const subject = actorName(event, room);
 	return {
 		text:
@@ -387,6 +391,9 @@ export function buildMembershipTransition(
 		const transition = classifyCallTransition(event);
 		if (!transition) return null;
 		const sender = event.getSender() ?? "";
+		// No sender → no identifiable participant; skip (mirrors summaries.ts
+		// and keeps grouping dedupe from colliding on an empty userId).
+		if (!sender) return null;
 		return {
 			kind: transition,
 			userId: sender,
