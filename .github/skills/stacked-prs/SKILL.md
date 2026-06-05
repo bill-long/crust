@@ -7,8 +7,9 @@ description: Workflow for addressing multiple open issues as a chain of stacked 
 
 Use this skill when the user asks to "address all open issues", "work through
 the open issues", "create stacked PRs for the open issues", or similar. The
-goal is one PR per issue, branches chained so each diff stays minimal, all
-reviews completing in parallel batches the user can ack in bulk.
+goal is one PR per issue, branches chained so each diff stays minimal,
+all PRs reaching a clean Copilot review state before the user does a
+single batched human review at the end of the chain.
 
 ## When this skill is the right tool
 
@@ -100,10 +101,12 @@ For each row in `issue_chain`:
      message AND the PR body.** GitHub accepts: `close | closes |
      closed | fix | fixes | fixed | resolve | resolves | resolved`,
      each followed (optionally with a colon, e.g. `Closes: #186`) by
-     `#N`. Putting the trailer in both places is the
-     simplest way to guarantee the issue auto-closes regardless of how
-     the chain is ultimately merged. The pre-flight in step 6 enforces
-     the commit-message half.
+     `#N`. Putting the trailer in both places maximizes the likelihood
+     that the issue auto-closes regardless of how the chain is ultimately
+     merged — closure still depends on the reference surviving into
+     default-branch history or the merged PR's metadata (see the
+     post-merge audit for the safety net). The pre-flight in step 6
+     enforces the commit-message half.
    - When the PR only partially addresses the issue (e.g. deferred tabs),
      use `Addresses #N` in both the commit and the PR body, and list what's
      deferred in an "Out of scope" section. The pre-flight check accepts
@@ -115,7 +118,11 @@ For each row in `issue_chain`:
    not return. `manage_schedule` is a CLI built-in for recurring prompts;
    the `code-review` skill itself assumes an interactively-active agent
    and so documents only the REST/GraphQL queries. This skill uses the
-   same queries from inside the scheduled poll. Clean when **either**:
+   same queries from inside the scheduled poll. If `manage_schedule` is
+   unavailable in the current runtime, fall back to a synchronous wait
+   loop in this agent's turn (`Start-Sleep -Seconds 90` between the same
+   REST/GraphQL polls); this blocks the agent on each PR but still
+   completes the workflow. Clean when **either**:
    - A non-empty Copilot summary review on the new HEAD SHA says "generated
      no new comments", OR
    - An empty-body Copilot review exists on the new HEAD SHA AND no
@@ -176,8 +183,8 @@ written next via `--body-file`; the same trailer should appear there.
 
 ```powershell
 $commitMsg = git log -1 --pretty=format:"%B"
-$closes  = $commitMsg -match '(?i)\b(close[sd]?|fix(es|ed)?|resolve[sd]?):?\s+#\d+\b'
-$partial = $commitMsg -match '(?i)\bAddresses:?\s+#\d+\b'
+$closes  = $commitMsg -match '(?i)\b(close[sd]?|fix(es|ed)?|resolve[sd]?)(:\s*|\s+)#\d+\b'
+$partial = $commitMsg -match '(?i)\bAddresses(:\s*|\s+)#\d+\b'
 if (-not ($closes -or $partial)) {
   throw "HEAD commit message missing 'Closes/Fixes/Resolves #N' or 'Addresses #N' reference"
 }
