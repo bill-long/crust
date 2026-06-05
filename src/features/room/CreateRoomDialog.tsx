@@ -1,5 +1,10 @@
 import { useNavigate } from "@solidjs/router";
-import { type MatrixClient, Preset, Visibility } from "matrix-js-sdk";
+import {
+	EventType,
+	type MatrixClient,
+	Preset,
+	Visibility,
+} from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -22,6 +27,8 @@ const FOCUSABLE =
 /** Local-part of a Matrix room alias. Server adds ":server" + leading "#". */
 const ALIAS_LOCAL_PART_RE = /^[A-Za-z0-9._=/+-]+$/;
 
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB (matches AccountTab/GeneralTab)
+
 interface CreateRoomDialogProps {
 	client: MatrixClient;
 	open: () => boolean;
@@ -42,6 +49,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 	let overlayRef!: HTMLDivElement;
 	let nameRef: HTMLInputElement | undefined;
+	let fileInputRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	/**
@@ -51,6 +59,13 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 	 * flight submit to commit side effects.
 	 */
 	let submitGeneration = 0;
+	/**
+	 * Separate counter for avatar uploads. Bumped on every file selection
+	 * AND on every form reset, so a stale upload that resolves after the
+	 * user picks a different file or reopens the dialog cannot overwrite
+	 * the current avatar mxc.
+	 */
+	let uploadGeneration = 0;
 	onCleanup(() => {
 		mounted = false;
 	});
@@ -58,6 +73,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 	const titleId = createUniqueId();
 	const aliasHintId = createUniqueId();
 	const inviteHintId = createUniqueId();
+	const avatarHintId = createUniqueId();
 	const errorId = createUniqueId();
 
 	const [name, setName] = createSignal("");
@@ -69,6 +85,9 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 	const [encryptionTouched, setEncryptionTouched] = createSignal(false);
 	const [addToSpace, setAddToSpace] = createSignal(true);
 	const [inviteRaw, setInviteRaw] = createSignal("");
+	const [avatarMxc, setAvatarMxc] = createSignal<string | null>(null);
+	const [avatarUploading, setAvatarUploading] = createSignal(false);
+	const [avatarError, setAvatarError] = createSignal<string | null>(null);
 	const [submitting, setSubmitting] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
 	/** spaceId captured at dialog-open time so route changes don't poison submit. */
@@ -97,8 +116,15 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 	const homeserverDomain = createMemo(() => props.client.getDomain() ?? "");
 
+	const avatarHttp = createMemo<string | null>(() => {
+		const mxc = avatarMxc();
+		if (!mxc) return null;
+		return props.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null;
+	});
+
 	const canSubmit = createMemo(() => {
 		if (submitting()) return false;
+		if (avatarUploading()) return false;
 		if (name().trim().length === 0) return false;
 		if (!aliasValid()) return false;
 		if (parsedInvites().error) return false;
@@ -107,6 +133,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 	function resetForm(): void {
 		submitGeneration++;
+		uploadGeneration++;
 		setName("");
 		setTopic("");
 		setAlias("");
@@ -115,6 +142,9 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 		setEncryptionTouched(false);
 		setAddToSpace(true);
 		setInviteRaw("");
+		setAvatarMxc(null);
+		setAvatarUploading(false);
+		setAvatarError(null);
 		setError(null);
 		setSubmitting(false);
 	}
@@ -156,7 +186,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 		if (e.key === "Tab") {
 			const focusable = Array.from(
 				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			);
+			).filter((el) => el.offsetParent !== null);
 			if (focusable.length === 0) return;
 			const first = focusable[0];
 			const last = focusable[focusable.length - 1];
@@ -168,6 +198,54 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 				first.focus();
 			}
 		}
+	};
+
+	async function uploadAvatar(file: File): Promise<void> {
+		// Bump generation BEFORE validation so a previous in-flight upload's
+		// resolution is dropped even when the new selection is rejected
+		// (non-image / too large). Otherwise the stale upload would still
+		// repopulate avatarMxc after the user's latest pick was discarded.
+		const myGen = ++uploadGeneration;
+		if (!file.type.startsWith("image/")) {
+			setAvatarError("File must be an image");
+			setAvatarUploading(false);
+			return;
+		}
+		if (file.size > MAX_AVATAR_BYTES) {
+			setAvatarError("Image must be under 10 MB");
+			setAvatarUploading(false);
+			return;
+		}
+		setAvatarError(null);
+		setAvatarUploading(true);
+		try {
+			const response = await props.client.uploadContent(file);
+			if (!mounted || !props.open() || myGen !== uploadGeneration) return;
+			setAvatarMxc(response.content_uri);
+		} catch (e) {
+			if (!mounted || !props.open() || myGen !== uploadGeneration) return;
+			setAvatarError(
+				e instanceof Error ? e.message : "Failed to upload avatar",
+			);
+		} finally {
+			if (mounted && props.open() && myGen === uploadGeneration) {
+				setAvatarUploading(false);
+			}
+		}
+	}
+
+	const onFileSelect = (): void => {
+		const file = fileInputRef?.files?.[0];
+		if (file) void uploadAvatar(file);
+		if (fileInputRef) fileInputRef.value = "";
+	};
+
+	const removeAvatar = (): void => {
+		// Bump upload generation so any in-flight upload's result is dropped.
+		uploadGeneration++;
+		setAvatarMxc(null);
+		setAvatarError(null);
+		setAvatarUploading(false);
 	};
 
 	async function handleSubmit(e: Event): Promise<void> {
@@ -182,10 +260,31 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 		const pub = isPublic();
 		const encrypt = encryption();
 		const invites = parsedInvites().mxids;
+		const mxc = avatarMxc();
 		const capturedSpaceId = snapshotSpaceId();
 		const shouldAddToSpace = capturedSpaceId !== null && addToSpace();
 
 		try {
+			const initialState: Array<{
+				type: string;
+				state_key: string;
+				content: Record<string, unknown>;
+			}> = [];
+			if (encrypt) {
+				initialState.push({
+					type: "m.room.encryption",
+					state_key: "",
+					content: { algorithm: "m.megolm.v1.aes-sha2" },
+				});
+			}
+			if (mxc) {
+				initialState.push({
+					type: EventType.RoomAvatar,
+					state_key: "",
+					content: { url: mxc },
+				});
+			}
+
 			const opts: Parameters<MatrixClient["createRoom"]>[0] = {
 				name: trimmedName,
 				visibility: pub ? Visibility.Public : Visibility.Private,
@@ -194,22 +293,14 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 			if (trimmedTopic) opts.topic = trimmedTopic;
 			if (aliasLocal) opts.room_alias_name = aliasLocal;
 			if (invites.length > 0) opts.invite = invites;
-			if (encrypt) {
-				opts.initial_state = [
-					{
-						type: "m.room.encryption",
-						state_key: "",
-						content: { algorithm: "m.megolm.v1.aes-sha2" },
-					},
-				];
-			}
+			if (initialState.length > 0) opts.initial_state = initialState;
 			const { room_id } = await props.client.createRoom(opts);
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)
 				return;
 
 			optimisticallyMarkJoined(room_id, {
 				name: trimmedName,
-				avatarUrl: null,
+				avatarUrl: avatarHttp(),
 			});
 
 			// Post-create space linking is best-effort: if it fails the room
@@ -268,6 +359,90 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 					<p class="mb-4 text-sm text-text-muted">
 						A new room on your homeserver.
 					</p>
+
+					<div class="mb-4 flex items-center gap-3">
+						<Show
+							when={avatarHttp()}
+							fallback={
+								<div class="flex h-16 w-16 items-center justify-center rounded-full bg-surface-3 text-text-secondary">
+									<svg
+										class="h-7 w-7"
+										fill="none"
+										viewBox="0 0 24 24"
+										stroke="currentColor"
+										stroke-width="2"
+										aria-hidden="true"
+									>
+										<title>Avatar placeholder</title>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M4 7h3l2-2h6l2 2h3v12H4V7z"
+										/>
+										<circle cx="12" cy="13" r="3.5" />
+									</svg>
+								</div>
+							}
+						>
+							<img
+								src={avatarHttp() ?? ""}
+								alt=""
+								class="h-16 w-16 rounded-full object-cover"
+							/>
+						</Show>
+						<div class="flex flex-col gap-1">
+							<div class="flex gap-2">
+								<input
+									ref={fileInputRef}
+									type="file"
+									accept="image/*"
+									class="hidden"
+									tabIndex={-1}
+									onChange={onFileSelect}
+								/>
+								<button
+									type="button"
+									onClick={() => fileInputRef?.click()}
+									disabled={submitting() || avatarUploading()}
+									aria-describedby={avatarHintId}
+									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+								>
+									<Show when={avatarHttp()} fallback="Add avatar">
+										Replace
+									</Show>
+								</button>
+								<Show when={avatarHttp()}>
+									<button
+										type="button"
+										onClick={removeAvatar}
+										disabled={submitting()}
+										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+									>
+										Remove
+									</button>
+								</Show>
+							</div>
+							<span
+								id={avatarHintId}
+								class={`text-xs ${avatarError() ? "text-danger-text" : "text-text-faint"}`}
+								role={avatarError() ? "alert" : undefined}
+							>
+								<Show
+									when={avatarError()}
+									fallback={
+										<Show
+											when={avatarUploading()}
+											fallback="Optional. PNG, JPG, GIF, or WEBP up to 10 MB."
+										>
+											Uploading…
+										</Show>
+									}
+								>
+									{avatarError()}
+								</Show>
+							</span>
+						</div>
+					</div>
 
 					<label class="mb-3 block text-sm">
 						<span class="mb-1 block font-medium text-text-secondary">Name</span>
