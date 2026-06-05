@@ -75,14 +75,29 @@ const Wrapper: ParentComponent<{
 	);
 };
 
-function setup(opts?: { canManage?: boolean }) {
+function setup(opts?: {
+	canManage?: boolean;
+	registerCandidateRoom?: boolean;
+	registerChildRoom?: boolean;
+}) {
 	const space = createMockRoom("!space:x", [], [], { name: "My Space" });
 	space.__setStateEvent("m.room.create", "", { type: "m.space" });
 	space.__setStateEvent("m.room.power_levels", "", {});
 	if (opts?.canManage === false) {
 		space.__setCanSendStateEvent("m.space.child", false);
 	}
-	const client = createMockClient(new Map([["!space:x", space]]));
+	const rooms = new Map([["!space:x", space]]);
+	if (opts?.registerCandidateRoom) {
+		// A known child room the user can manage — so the m.space.parent send
+		// in the Add flow is attempted (getRoom + maySendStateEvent succeed).
+		const cand = createMockRoom("!cand:x", [], [], { name: "Candidate Room" });
+		rooms.set("!cand:x", cand);
+	}
+	if (opts?.registerChildRoom) {
+		const child = createMockRoom("!child:x", [], [], { name: "Child Room" });
+		rooms.set("!child:x", child);
+	}
+	const client = createMockClient(rooms);
 	const store = createSummariesStore(client as unknown as MatrixClient);
 	store.setSummaries(
 		"!space:x",
@@ -111,7 +126,12 @@ function setup(opts?: { canManage?: boolean }) {
 	return { client, store };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	// Restore any console spies (e.g. the console.error spies in the
+	// write-failure tests) so they don't leak into later tests.
+	vi.restoreAllMocks();
+});
 
 describe("RoomsTab", () => {
 	it("lists current child rooms and add-candidates", () => {
@@ -149,6 +169,34 @@ describe("RoomsTab", () => {
 		);
 	});
 
+	it("also sends m.space.parent on the child room when permitted (#184)", async () => {
+		const { client } = setup({ registerCandidateRoom: true });
+		fireEvent.click(
+			screen.getByRole("button", { name: "Add Candidate Room to this space" }),
+		);
+		await flush();
+		expect(client.sendStateEvent).toHaveBeenCalledWith(
+			"!cand:x",
+			"m.space.parent",
+			{ via: ["example.com"], canonical: true },
+			"!space:x",
+		);
+	});
+
+	it("skips m.space.parent when the child room is not known locally", async () => {
+		const { client } = setup();
+		fireEvent.click(
+			screen.getByRole("button", { name: "Add Candidate Room to this space" }),
+		);
+		await flush();
+		expect(client.sendStateEvent).not.toHaveBeenCalledWith(
+			"!cand:x",
+			"m.space.parent",
+			expect.anything(),
+			"!space:x",
+		);
+	});
+
 	it("sends an empty m.space.child on Remove", async () => {
 		const { client } = setup();
 		fireEvent.click(
@@ -160,6 +208,20 @@ describe("RoomsTab", () => {
 			"m.space.child",
 			{},
 			"!child:x",
+		);
+	});
+
+	it("also clears m.space.parent on the child when permitted on Remove (#184)", async () => {
+		const { client } = setup({ registerChildRoom: true });
+		fireEvent.click(
+			screen.getByRole("button", { name: "Remove Child Room from this space" }),
+		);
+		await flush();
+		expect(client.sendStateEvent).toHaveBeenCalledWith(
+			"!child:x",
+			"m.space.parent",
+			{},
+			"!space:x",
 		);
 	});
 
@@ -191,6 +253,7 @@ describe("RoomsTab", () => {
 	});
 
 	it("rolls back the optimistic add and surfaces an error when the write fails", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
 		const { client } = setup();
 		(client.sendStateEvent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
 			new Error("M_FORBIDDEN"),
@@ -207,6 +270,7 @@ describe("RoomsTab", () => {
 	});
 
 	it("rolls back the optimistic remove and surfaces an error when the write fails", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
 		const { client } = setup();
 		(client.sendStateEvent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
 			new Error("M_FORBIDDEN"),

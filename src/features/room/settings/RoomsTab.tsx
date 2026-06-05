@@ -1,4 +1,4 @@
-import { EventType, type MatrixClient } from "matrix-js-sdk";
+import type { MatrixClient } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -10,6 +10,10 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import {
+	linkRoomToSpace,
+	unlinkRoomFromSpace,
+} from "../../space/spaceChildLink";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
 
@@ -130,16 +134,21 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 
 	const addRoom = (roomId: string): void => {
 		if (!canManage() || childrenState.pending()) return;
-		const via = props.client.getDomain();
 		setPendingRoomId(roomId);
 		void childrenState
 			.apply([...childIds(), roomId], async () => {
-				await props.client.sendStateEvent(
-					props.roomId,
-					EventType.SpaceChild,
-					{ via: via ? [via] : [], suggested: false },
-					roomId,
-				);
+				// Send both sides of the relationship: m.space.child on this
+				// space and (permitting) m.space.parent on the child room. The
+				// child send is what this optimistic write tracks, so surface
+				// its failure to roll back; the parent send is best-effort.
+				const res = await linkRoomToSpace(props.client, props.roomId, roomId, {
+					checkParentPermission: true,
+				});
+				if (!res.childOk) {
+					throw res.childError instanceof Error
+						? res.childError
+						: new Error("Could not add the room to the space.");
+				}
 			})
 			.finally(() => setPendingRoomId(null));
 	};
@@ -151,13 +160,28 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 			.apply(
 				childIds().filter((id) => id !== roomId),
 				async () => {
-					// Empty content removes the m.space.child relationship.
-					await props.client.sendStateEvent(
+					// Clear both sides of the relationship (m.space.child here and,
+					// permitting, m.space.parent on the child) so removal stays
+					// symmetric with Add. Only the m.space.child write — the
+					// user-visible "room left the space" effect — drives success
+					// and rollback. Clearing the child's m.space.parent is
+					// best-effort and intentionally non-fatal: a space admin may
+					// not have state-event permission in the child room, and any
+					// residual m.space.parent is the benign direction (a child
+					// claiming a space that no longer lists it, which clients
+					// distrust). Bidirectional space state can't be updated
+					// atomically, so we don't block the removal on it.
+					const res = await unlinkRoomFromSpace(
+						props.client,
 						props.roomId,
-						EventType.SpaceChild,
-						{},
 						roomId,
+						{ checkParentPermission: true },
 					);
+					if (!res.childOk) {
+						throw res.childError instanceof Error
+							? res.childError
+							: new Error("Could not remove the room from the space.");
+					}
 				},
 			)
 			.finally(() => setPendingRoomId(null));

@@ -166,6 +166,13 @@ describe("CreateRoomDialog", () => {
 			{ via: ["example.com"], suggested: false },
 			"!created:example.com",
 		);
+		// #184: the bidirectional m.space.parent is also sent on the child.
+		expect(client.sendStateEvent).toHaveBeenCalledWith(
+			"!created:example.com",
+			"m.space.parent",
+			{ via: ["example.com"], canonical: true },
+			"!space:example.com",
+		);
 		expect(navigateMock).toHaveBeenCalledWith(
 			"/space/" +
 				encodeURIComponent("!space:example.com") +
