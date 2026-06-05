@@ -1,3 +1,4 @@
+import { ContextMenu } from "@kobalte/core/context-menu";
 import { useNavigate } from "@solidjs/router";
 import {
 	type Accessor,
@@ -35,9 +36,15 @@ const SidebarItem: Component<SidebarItemProps> = (props) => (
 interface SpacesSidebarProps {
 	/**
 	 * Called when the user opens settings for a space via the hover/focus
-	 * gear button on a space avatar.
+	 * gear button on a space avatar or the right-click "Space settings"
+	 * item.
 	 */
 	onOpenSpaceSettings?: (spaceId: string) => void;
+	/**
+	 * Called when the user picks the right-click "Leave space" item.
+	 * Callers should open the leave confirmation flow.
+	 */
+	onLeaveSpace?: (spaceId: string) => void;
 }
 
 const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
@@ -96,83 +103,128 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 							getSpaceUnreadRollup(summaries, space.roomId),
 						);
 						const isSelected = () => params.spaceId === space.roomId;
+						const hasMenu = (): boolean =>
+							!!props.onOpenSpaceSettings || !!props.onLeaveSpace;
+
+						const triggerInner = (
+							<>
+								<button
+									type="button"
+									onClick={() =>
+										navigate(`/space/${encodeURIComponent(space.roomId)}`)
+									}
+									class={`relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
+										isSelected()
+											? "rounded-xl bg-surface-2 text-text-primary"
+											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
+									}`}
+									title={space.name.trim() || "Unnamed space"}
+									aria-label={space.name.trim() || "Unnamed space"}
+									aria-current={isSelected() ? "page" : undefined}
+								>
+									<Show
+										when={space.avatarUrl}
+										fallback={
+											<span class="text-sm font-semibold">
+												{(space.name.trim() || "?").charAt(0).toUpperCase()}
+											</span>
+										}
+									>
+										<img
+											src={space.avatarUrl ?? ""}
+											alt={space.name.trim() || "Space"}
+											class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
+										/>
+									</Show>
+
+									{/* Unread badge */}
+									<Show when={rollup().unread > 0}>
+										<span
+											class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
+												rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
+											}`}
+											role="status"
+											aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
+										>
+											{rollup().unread > 99 ? "99+" : rollup().unread}
+										</span>
+									</Show>
+								</button>
+
+								{/* Hover/focus-revealed gear → space settings. Sibling
+								    of the avatar button (not nested) to avoid
+								    nested-interactive HTML. Opacity is gated on
+								    group-hover and focus-visible so keyboard users
+								    can tab to it. */}
+								<Show when={props.onOpenSpaceSettings}>
+									<button
+										type="button"
+										onClick={() => props.onOpenSpaceSettings?.(space.roomId)}
+										aria-label={`Settings for ${space.name.trim() || "Unnamed space"}`}
+										title="Space settings"
+										class="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-surface-4 text-text-secondary pointer-events-none opacity-0 shadow transition-opacity hover:text-text-primary focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover group-hover:pointer-events-auto group-hover:opacity-100"
+									>
+										<svg
+											aria-hidden="true"
+											width="12"
+											height="12"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2.5"
+											stroke-linecap="round"
+											stroke-linejoin="round"
+										>
+											<circle cx="12" cy="12" r="2.5" />
+											<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+										</svg>
+									</button>
+								</Show>
+							</>
+						);
 
 						return (
 							<SidebarItem selected={isSelected}>
-								<div class="peer group relative">
-									<button
-										type="button"
-										onClick={() =>
-											navigate(`/space/${encodeURIComponent(space.roomId)}`)
-										}
-										class={`relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
-											isSelected()
-												? "rounded-xl bg-surface-2 text-text-primary"
-												: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
-										}`}
-										title={space.name.trim() || "Unnamed space"}
-										aria-label={space.name.trim() || "Unnamed space"}
-										aria-current={isSelected() ? "page" : undefined}
-									>
-										<Show
-											when={space.avatarUrl}
-											fallback={
-												<span class="text-sm font-semibold">
-													{(space.name.trim() || "?").charAt(0).toUpperCase()}
-												</span>
-											}
-										>
-											<img
-												src={space.avatarUrl ?? ""}
-												alt={space.name.trim() || "Space"}
-												class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
-											/>
-										</Show>
+								{/* Only mount the ContextMenu when at least one menu item
+								    will render — otherwise right-clicking would open an
+								    empty popover. When no handlers are wired, render the
+								    avatar block in a plain wrapper that preserves the
+								    `peer` + `group` hooks. */}
+								<Show
+									when={hasMenu()}
+									fallback={
+										<div class="peer group relative">{triggerInner}</div>
+									}
+								>
+									<ContextMenu>
+										<ContextMenu.Trigger class="peer group relative">
+											{triggerInner}
+										</ContextMenu.Trigger>
 
-										{/* Unread badge */}
-										<Show when={rollup().unread > 0}>
-											<span
-												class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-													rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-												}`}
-												role="status"
-												aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
-											>
-												{rollup().unread > 99 ? "99+" : rollup().unread}
-											</span>
-										</Show>
-									</button>
-
-									{/* Hover/focus-revealed gear → space settings. Sibling
-									    of the avatar button (not nested) to avoid
-									    nested-interactive HTML. Opacity is gated on
-									    group-hover and focus-visible so keyboard users
-									    can tab to it. */}
-									<Show when={props.onOpenSpaceSettings}>
-										<button
-											type="button"
-											onClick={() => props.onOpenSpaceSettings?.(space.roomId)}
-											aria-label={`Settings for ${space.name.trim() || "Unnamed space"}`}
-											title="Space settings"
-											class="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-surface-4 text-text-secondary pointer-events-none opacity-0 shadow transition-opacity hover:text-text-primary focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover group-hover:pointer-events-auto group-hover:opacity-100"
-										>
-											<svg
-												aria-hidden="true"
-												width="12"
-												height="12"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2.5"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-											>
-												<circle cx="12" cy="12" r="2.5" />
-												<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-											</svg>
-										</button>
-									</Show>
-								</div>
+										<ContextMenu.Portal>
+											<ContextMenu.Content class="z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-none">
+												<Show when={props.onOpenSpaceSettings}>
+													<ContextMenu.Item
+														class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+														onSelect={() =>
+															props.onOpenSpaceSettings?.(space.roomId)
+														}
+													>
+														Space settings
+													</ContextMenu.Item>
+												</Show>
+												<Show when={props.onLeaveSpace}>
+													<ContextMenu.Item
+														class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+														onSelect={() => props.onLeaveSpace?.(space.roomId)}
+													>
+														Leave space
+													</ContextMenu.Item>
+												</Show>
+											</ContextMenu.Content>
+										</ContextMenu.Portal>
+									</ContextMenu>
+								</Show>
 							</SidebarItem>
 						);
 					}}

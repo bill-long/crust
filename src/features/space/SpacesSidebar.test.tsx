@@ -104,6 +104,28 @@ function setupWithSpace(): {
 	return { client, onOpenSpaceSettings };
 }
 
+function setupWithLeave(): {
+	client: ReturnType<typeof createMockClient>;
+	onOpenSpaceSettings: ReturnType<typeof vi.fn>;
+	onLeaveSpace: ReturnType<typeof vi.fn>;
+} {
+	const client = createMockClient();
+	const onOpenSpaceSettings = vi.fn();
+	const onLeaveSpace = vi.fn();
+	render(() => (
+		<Wrapper
+			client={client}
+			seed={[makeSpaceSummary("!alpha:example.com", "Alpha")]}
+		>
+			<SpacesSidebar
+				onOpenSpaceSettings={onOpenSpaceSettings}
+				onLeaveSpace={onLeaveSpace}
+			/>
+		</Wrapper>
+	));
+	return { client, onOpenSpaceSettings, onLeaveSpace };
+}
+
 describe("SpacesSidebar gear button", () => {
 	it("renders a settings button for each space that calls onOpenSpaceSettings", () => {
 		const { onOpenSpaceSettings } = setupWithSpace();
@@ -135,5 +157,68 @@ describe("SpacesSidebar gear button", () => {
 		expect(
 			screen.queryByRole("button", { name: /Settings for Beta/ }),
 		).toBeNull();
+	});
+});
+
+describe("SpacesSidebar right-click context menu", () => {
+	function openContextMenu(): void {
+		const avatar = screen.getByRole("button", { name: "Alpha" });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
+	}
+
+	it("opens a context menu with Space settings and Leave space items", async () => {
+		setupWithLeave();
+		openContextMenu();
+		expect(await screen.findByText("Space settings")).toBeTruthy();
+		expect(screen.getByText("Leave space")).toBeTruthy();
+	});
+
+	it("selecting Leave space calls onLeaveSpace", async () => {
+		const { onLeaveSpace } = setupWithLeave();
+		openContextMenu();
+		await screen.findByText("Leave space");
+		const item = screen
+			.getAllByRole("menuitem")
+			.find((el) => el.textContent === "Leave space") as HTMLElement;
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(onLeaveSpace).toHaveBeenCalledWith("!alpha:example.com");
+	});
+
+	it("selecting Space settings calls onOpenSpaceSettings", async () => {
+		const { onOpenSpaceSettings } = setupWithLeave();
+		openContextMenu();
+		await screen.findByText("Space settings");
+		const item = screen
+			.getAllByRole("menuitem")
+			.find((el) => el.textContent === "Space settings") as HTMLElement;
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(onOpenSpaceSettings).toHaveBeenCalledWith("!alpha:example.com");
+	});
+
+	it("omits the Leave space item when no onLeaveSpace prop is provided", async () => {
+		setupWithSpace();
+		const avatar = screen.getByRole("button", { name: "Alpha" });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
+		expect(await screen.findByText("Space settings")).toBeTruthy();
+		expect(screen.queryByText("Leave space")).toBeNull();
+	});
+
+	it("does not mount a ContextMenu when neither handler is provided (avoids empty popover)", () => {
+		const client = createMockClient();
+		render(() => (
+			<Wrapper
+				client={client}
+				seed={[makeSpaceSummary("!gamma:example.com", "Gamma")]}
+			>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const avatar = screen.getByRole("button", { name: "Gamma" });
+		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
+		// The popover itself should not mount (not just be empty).
+		expect(screen.queryByRole("menu")).toBeNull();
+		expect(screen.queryByRole("menuitem")).toBeNull();
+		expect(screen.queryByText("Space settings")).toBeNull();
+		expect(screen.queryByText("Leave space")).toBeNull();
 	});
 });

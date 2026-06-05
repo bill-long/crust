@@ -364,8 +364,21 @@ const Layout: Component = () => {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
-	const [leaving, setLeaving] = createSignal(false);
+	const [leavingIds, setLeavingIds] = createSignal<ReadonlySet<string>>(
+		new Set(),
+	);
+	const isLeaving = (id: string | null | undefined): boolean =>
+		id != null && leavingIds().has(id);
+	const markLeaving = (id: string, on: boolean): void => {
+		const next = new Set(leavingIds());
+		if (on) next.add(id);
+		else next.delete(id);
+		setLeavingIds(next);
+	};
 	const [leaveConfirmRoomId, setLeaveConfirmRoomId] = createSignal<
+		string | null
+	>(null);
+	const [leaveSpaceConfirmId, setLeaveSpaceConfirmId] = createSignal<
 		string | null
 	>(null);
 	const [roomSettings, setRoomSettings] = createSignal<{
@@ -628,12 +641,12 @@ const Layout: Component = () => {
 
 	const handleLeave = (): void => {
 		const rid = roomId();
-		if (!rid || leaving()) return;
+		if (!rid || isLeaving(rid)) return;
 		setLeaveConfirmRoomId(rid);
 	};
 
 	const performLeave = async (rid: string): Promise<void> => {
-		if (leaving()) return;
+		if (isLeaving(rid)) return;
 		// If the user is leaving the room that hosts the active call, tear
 		// the call down first so the controller doesn't outlive its room
 		// (otherwise the mini-widget / overlay would point at a room the
@@ -646,7 +659,7 @@ const Layout: Component = () => {
 		// room first) doesn't push the post-leave navigation into the
 		// wrong space.
 		const spaceId = params.spaceId;
-		setLeaving(true);
+		markLeaving(rid, true);
 		try {
 			await client.leave(rid);
 			// Close any open overlays that target this room.
@@ -661,7 +674,7 @@ const Layout: Component = () => {
 			console.error("Failed to leave room:", err);
 			throw err;
 		} finally {
-			setLeaving(false);
+			markLeaving(rid, false);
 		}
 	};
 
@@ -669,6 +682,34 @@ const Layout: Component = () => {
 		const rid = leaveConfirmRoomId();
 		if (!rid) return "";
 		return summaries[rid]?.name?.trim() || "this room";
+	});
+
+	const performLeaveSpace = async (sid: string): Promise<void> => {
+		if (isLeaving(sid)) return;
+		// Snapshot the current space param BEFORE the async leave call so a
+		// router update during the await doesn't push the post-leave
+		// navigation into the wrong place.
+		const wasCurrentSpace = params.spaceId === sid;
+		markLeaving(sid, true);
+		try {
+			await client.leave(sid);
+			if (roomSettings()?.roomId === sid) setRoomSettings(null);
+			setLeaveSpaceConfirmId(null);
+			if (wasCurrentSpace) {
+				navigate("/home");
+			}
+		} catch (err) {
+			console.error("Failed to leave space:", err);
+			throw err;
+		} finally {
+			markLeaving(sid, false);
+		}
+	};
+
+	const leaveSpaceConfirmName = createMemo(() => {
+		const sid = leaveSpaceConfirmId();
+		if (!sid) return "";
+		return summaries[sid]?.name?.trim() || "this space";
 	});
 
 	// Reactive "can the current user invite to the active room?"
@@ -711,6 +752,7 @@ const Layout: Component = () => {
 						onOpenSpaceSettings={(sid) =>
 							setRoomSettings({ roomId: sid, tab: "general" })
 						}
+						onLeaveSpace={(sid) => setLeaveSpaceConfirmId(sid)}
 					/>
 				}
 				roomList={
@@ -769,7 +811,7 @@ const Layout: Component = () => {
 									onCopyLink={() => handleCopyRoomLink(rid)}
 									canInvite={canInviteHere}
 									onInvite={() => setInviteRoomId(rid)}
-									leaving={leaving}
+									leaving={() => isLeaving(rid)}
 									onLeave={handleLeave}
 									onOpenSettings={() =>
 										setRoomSettings({ roomId: rid, tab: "general" })
@@ -898,6 +940,24 @@ const Layout: Component = () => {
 					const rid = leaveConfirmRoomId();
 					if (!rid) return;
 					await performLeave(rid);
+				}}
+			/>
+
+			{/* Leave-space confirm — opened from the SpacesSidebar context
+				menu. The Settings → Advanced "Leave space" path goes through
+				AdvancedTab's own confirm and is routed via onLeft. */}
+			<ConfirmDialog
+				open={() => leaveSpaceConfirmId() !== null}
+				onClose={() => setLeaveSpaceConfirmId(null)}
+				title={`Leave ${leaveSpaceConfirmName()}?`}
+				body="You will stop seeing this space and its curated room list in the sidebar. Rooms inside the space that you have already joined remain joined and reachable directly. You may lose access to rooms in the space that you have not joined — especially private ones — since you will no longer see them in the space's room list."
+				confirmLabel="Leave"
+				destructive
+				pendingLabel="Leaving…"
+				onConfirm={async () => {
+					const sid = leaveSpaceConfirmId();
+					if (!sid) return;
+					await performLeaveSpace(sid);
 				}}
 			/>
 
