@@ -19,6 +19,10 @@ interface CopyLinkFallbackDialogProps {
 	 * underlying room changes.
 	 */
 	url: string;
+	/** Heading text. Defaults to "Copy room link". */
+	title?: string;
+	/** Accessible label for the readonly link input. Defaults to "Room link". */
+	inputLabel?: string;
 	open: () => boolean;
 	onClose: () => void;
 }
@@ -99,7 +103,7 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 			>
 				<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 					<h2 id={titleId} class="mb-2 text-lg font-semibold text-text-primary">
-						Copy room link
+						{props.title ?? "Copy room link"}
 					</h2>
 					<p id={descId} class="mb-3 text-sm text-text-muted">
 						Your browser blocked clipboard access. Select the link and copy it
@@ -110,7 +114,7 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 						type="text"
 						readOnly
 						value={props.url}
-						aria-label="Room link"
+						aria-label={props.inputLabel ?? "Room link"}
 						onFocus={(e) => e.currentTarget.select()}
 						class="mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 					/>
