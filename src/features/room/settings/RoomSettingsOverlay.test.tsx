@@ -131,4 +131,36 @@ describe("RoomSettingsOverlay", () => {
 		setup("general", false);
 		expect(screen.queryByRole("button", { name: "Rooms" })).toBeNull();
 	});
+
+	it("shows the space-only Visibility tab for a space", () => {
+		setup("general", true);
+		expect(screen.getByRole("button", { name: "Visibility" })).toBeTruthy();
+	});
+
+	it("hides the Visibility tab for a regular room", () => {
+		setup("general", false);
+		expect(screen.queryByRole("button", { name: "Visibility" })).toBeNull();
+	});
+
+	it("renders the Visibility tab content for a space", () => {
+		setup("visibility", true);
+		expect(screen.getByRole("heading", { name: "Join rule" })).toBeTruthy();
+		expect(screen.getByRole("heading", { name: "Guest access" })).toBeTruthy();
+		expect(
+			screen.getByRole("heading", { name: "Directory listing" }),
+		).toBeTruthy();
+	});
+
+	it("moves Join rule out of the Advanced tab for spaces", () => {
+		setup("advanced", true);
+		// For spaces, join rule / history live on the Visibility tab, so the
+		// Advanced tab only shows the Danger zone.
+		expect(screen.queryByRole("heading", { name: "Join rule" })).toBeNull();
+		expect(screen.getByRole("button", { name: "Leave space" })).toBeTruthy();
+	});
+
+	it("keeps Join rule on the Advanced tab for regular rooms", () => {
+		setup("advanced", false);
+		expect(screen.getByRole("heading", { name: "Join rule" })).toBeTruthy();
+	});
 });

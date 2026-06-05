@@ -18,10 +18,12 @@ import { GeneralTab } from "./GeneralTab";
 import { MembersTab } from "./MembersTab";
 import { PermissionsTab } from "./PermissionsTab";
 import { RoomsTab } from "./RoomsTab";
+import { VisibilityTab } from "./VisibilityTab";
 
 export const roomSettingsTabMeta = [
 	{ id: "general", label: "General" },
 	{ id: "rooms", label: "Rooms", spaceOnly: true },
+	{ id: "visibility", label: "Visibility", spaceOnly: true },
 	{ id: "permissions", label: "Permissions" },
 	{ id: "members", label: "Members" },
 	{ id: "advanced", label: "Advanced" },
@@ -220,6 +222,9 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 								</Match>
 								<Match when={props.activeTab === "rooms" && isSpace()}>
 									<RoomsTab client={props.client} roomId={props.roomId} />
+								</Match>
+								<Match when={props.activeTab === "visibility" && isSpace()}>
+									<VisibilityTab client={props.client} roomId={props.roomId} />
 								</Match>
 								<Match when={props.activeTab === "permissions"}>
 									<PermissionsTab client={props.client} roomId={props.roomId} />

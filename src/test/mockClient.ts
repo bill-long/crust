@@ -355,6 +355,10 @@ export function createMockClient(
 		sendEvent: vi.fn().mockResolvedValue({ event_id: "$sent" }),
 		sendStateEvent: vi.fn().mockResolvedValue({ event_id: "$state" }),
 		createRoom: vi.fn().mockResolvedValue({ room_id: "!created:example.com" }),
+		getRoomDirectoryVisibility: vi
+			.fn()
+			.mockResolvedValue({ visibility: "private" }),
+		setRoomDirectoryVisibility: vi.fn().mockResolvedValue({}),
 		uploadContent: vi
 			.fn()
 			.mockResolvedValue({ content_uri: "mxc://example.com/avatar" }),
