@@ -47,7 +47,12 @@ approval, since that defeats the time-saving premise.
 
 ### 1. Plan the chain
 
-Query open issues, decide order, store in the session SQL database:
+Query open issues, decide order, and track the chain. The CLI runtime
+provides a per-session SQL database via the `sql` tool — using it as a
+tracking table is recommended because rows can be updated as the chain
+progresses without re-reading prose. If `sql` is unavailable, a
+markdown checklist with the same columns (`ord | issue | branch | base
+| title | status`) is a fine substitute.
 
 ```sql
 CREATE TABLE IF NOT EXISTS issue_chain (
@@ -82,8 +87,8 @@ For each row in `issue_chain`:
    anything involving multiple files, new state, or architectural choices.
    Adopt findings that prevent bugs; set aside ones that bloat scope.
 4. **Implement.**
-5. **Pre-push gate via the `code-review` skill** — typecheck + lint + build
-   + test, then 4-pass review (scoped + blind × Claude + GPT), iterate until
+5. **Pre-push gate via the `code-review` skill** — `pnpm typecheck && pnpm lint && pnpm build`,
+   then 4-pass review (scoped + blind × Claude + GPT), iterate until
    all four agree.
 6. **Commit, then run the pre-flight check from the "Auto-close failure
    mode" section** to verify the HEAD commit message has a closing or
@@ -94,7 +99,8 @@ For each row in `issue_chain`:
    - **Mention the issue with a closing keyword in BOTH the commit
      message AND the PR body.** GitHub accepts: `close | closes |
      closed | fix | fixes | fixed | resolve | resolves | resolved`,
-     each followed by `#N`. Putting the trailer in both places is the
+     each followed (optionally with a colon, e.g. `Closes: #186`) by
+     `#N`. Putting the trailer in both places is the
      simplest way to guarantee the issue auto-closes regardless of how
      the chain is ultimately merged. The pre-flight in step 6 enforces
      the commit-message half.
@@ -103,10 +109,13 @@ For each row in `issue_chain`:
      deferred in an "Out of scope" section. The pre-flight check accepts
      this as the partial-coverage signal.
 8. **Request Copilot review** with `[bot]` syntax — see `code-review` skill.
-9. **Poll for Copilot review** using `manage_schedule` at 90s intervals —
-   Copilot review submissions do NOT generate completion notifications, so
-   passive waiting does not work. The schedule prompt should follow the
-   `code-review` skill's completion semantics exactly — clean when **either**:
+9. **Poll for Copilot review** using the CLI runtime's `manage_schedule`
+   tool at 90s intervals — Copilot review submissions do NOT generate
+   completion notifications, so a passive wait (e.g. `read_agent`) will
+   not return. `manage_schedule` is a CLI built-in for recurring prompts;
+   the `code-review` skill itself assumes an interactively-active agent
+   and so documents only the REST/GraphQL queries. This skill uses the
+   same queries from inside the scheduled poll. Clean when **either**:
    - A non-empty Copilot summary review on the new HEAD SHA says "generated
      no new comments", OR
    - An empty-body Copilot review exists on the new HEAD SHA AND no
@@ -167,8 +176,8 @@ written next via `--body-file`; the same trailer should appear there.
 
 ```powershell
 $commitMsg = git log -1 --pretty=format:"%B"
-$closes  = $commitMsg -match '(?i)\b(close[sd]?|fix(es|ed)?|resolve[sd]?)\s+#\d+\b'
-$partial = $commitMsg -match '(?i)\bAddresses\s+#\d+\b'
+$closes  = $commitMsg -match '(?i)\b(close[sd]?|fix(es|ed)?|resolve[sd]?):?\s+#\d+\b'
+$partial = $commitMsg -match '(?i)\bAddresses:?\s+#\d+\b'
 if (-not ($closes -or $partial)) {
   throw "HEAD commit message missing 'Closes/Fixes/Resolves #N' or 'Addresses #N' reference"
 }
