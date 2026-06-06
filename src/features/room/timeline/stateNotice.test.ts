@@ -4,7 +4,9 @@ import {
 	buildMembershipTransition,
 	buildStateNotice,
 	computeSuppressedCallEventIds,
+	iconForTransitionKind,
 	isStateNoticeType,
+	type MembershipTransitionKind,
 	STATE_NOTICE_TYPES,
 } from "./stateNotice";
 
@@ -784,6 +786,162 @@ describe("buildMembershipTransition", () => {
 			isRedacted: () => false,
 		} as unknown as MatrixEvent;
 		expect(buildMembershipTransition(e, makeRoom(), fakeClient)).toBeNull();
+	});
+});
+
+describe("state notice icons", () => {
+	const CALL = "org.matrix.msc3401.call.member";
+	const callRoom = makeRoom({ "@alice:test": "Alice" });
+
+	function iconFor(init: FakeEventInit, room = makeRoom()) {
+		return buildStateNotice(makeEvent(init), room)?.icon;
+	}
+
+	it("uses the join glyph for arrivals", () => {
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@bob:test",
+				stateKey: "@bob:test",
+				content: { membership: "join", displayname: "Bob" },
+				prevContent: { membership: "leave" },
+			}),
+		).toBe("join");
+		// An invite brings a member in → join glyph.
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@alice:test",
+				stateKey: "@bob:test",
+				content: { membership: "invite", displayname: "Bob" },
+			}),
+		).toBe("join");
+		expect(
+			iconFor(
+				{
+					type: CALL,
+					stateKey: "_@alice:test_DEV",
+					sender: "@alice:test",
+					content: {
+						application: "m.call",
+						call_id: "",
+						device_id: "DEV",
+						focus_active: { type: "livekit" },
+					},
+					prevContent: {},
+				},
+				callRoom,
+			),
+		).toBe("join");
+	});
+
+	it("uses the leave glyph for departures", () => {
+		// Self leave.
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@bob:test",
+				stateKey: "@bob:test",
+				content: { membership: "leave" },
+				prevContent: { membership: "join", displayname: "Bob" },
+			}),
+		).toBe("leave");
+		// Kick (left by someone else).
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@alice:test",
+				stateKey: "@bob:test",
+				content: { membership: "leave" },
+				prevContent: { membership: "join", displayname: "Bob" },
+			}),
+		).toBe("leave");
+		// Ban.
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@alice:test",
+				stateKey: "@bob:test",
+				content: { membership: "ban" },
+				prevContent: { membership: "join", displayname: "Bob" },
+			}),
+		).toBe("leave");
+		// Call leave.
+		expect(
+			iconFor(
+				{
+					type: CALL,
+					stateKey: "_@alice:test_DEV",
+					sender: "@alice:test",
+					content: {},
+					prevContent: {
+						application: "m.call",
+						call_id: "",
+						device_id: "DEV",
+						focus_active: { type: "livekit" },
+					},
+				},
+				callRoom,
+			),
+		).toBe("leave");
+	});
+
+	it("uses the info glyph for non-membership and profile changes", () => {
+		// Display-name change while joined.
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@bob:test",
+				stateKey: "@bob:test",
+				content: { membership: "join", displayname: "Bobby" },
+				prevContent: { membership: "join", displayname: "Bob" },
+			}),
+		).toBe("info");
+		// Invite rejected by the invitee.
+		expect(
+			iconFor({
+				type: "m.room.member",
+				sender: "@bob:test",
+				stateKey: "@bob:test",
+				content: { membership: "leave" },
+				prevContent: { membership: "invite", displayname: "Bob" },
+			}),
+		).toBe("info");
+		// Room name change.
+		expect(
+			iconFor({
+				type: "m.room.name",
+				sender: "@alice:test",
+				content: { name: "New" },
+				prevContent: { name: "Old" },
+			}),
+		).toBe("info");
+		// Encryption enabled.
+		expect(
+			iconFor({
+				type: "m.room.encryption",
+				sender: "@alice:test",
+				content: { algorithm: "m.megolm.v1.aes-sha2" },
+				prevContent: {},
+			}),
+		).toBe("info");
+	});
+
+	it("maps every grouping transition kind to a glyph", () => {
+		const cases: Record<MembershipTransitionKind, "join" | "leave"> = {
+			join: "join",
+			invite: "join",
+			call_join: "join",
+			leave: "leave",
+			kick: "leave",
+			ban: "leave",
+			call_leave: "leave",
+		};
+		for (const [kind, expected] of Object.entries(cases)) {
+			expect(iconForTransitionKind(kind as MembershipTransitionKind)).toBe(
+				expected,
+			);
+		}
 	});
 });
 

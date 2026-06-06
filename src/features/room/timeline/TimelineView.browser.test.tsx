@@ -89,7 +89,7 @@ function mkMemberEvent(
 		...mkEvent(eventId, "", ts),
 		type: "m.room.member",
 		senderName: subject,
-		stateNotice: { text: `${subject} joined the room` },
+		stateNotice: { text: `${subject} joined the room`, icon: "join" },
 		membershipTransition: {
 			kind: "join",
 			userId: `@${subject.toLowerCase()}:example.com`,

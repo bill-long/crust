@@ -8,8 +8,34 @@ import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
  * when the event carries no user-visible change (e.g. join->join with
  * identical profile, no-op topic write).
  */
+/**
+ * Leading-glyph category for a state notice, mirroring how Element / Cinny
+ * differentiate membership transitions in the timeline gutter: an arrow-in
+ * for arrivals, an arrow-out for departures, and a neutral info glyph for
+ * everything else (profile, room name/topic/avatar, encryption, etc.).
+ */
+export type StateNoticeIcon = "join" | "leave" | "info";
+
 export interface StateNotice {
 	text: string;
+	icon: StateNoticeIcon;
+}
+
+/** Leading glyph for a grouped membership run, keyed by its transition kind. */
+export function iconForTransitionKind(
+	kind: MembershipTransitionKind,
+): StateNoticeIcon {
+	switch (kind) {
+		case "join":
+		case "invite":
+		case "call_join":
+			return "join";
+		case "leave":
+		case "kick":
+		case "ban":
+		case "call_leave":
+			return "leave";
+	}
 }
 
 /**
@@ -254,6 +280,7 @@ function callMemberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 			transition === "call_join"
 				? `${subject} joined the call`
 				: `${subject} left the call`,
+		icon: transition === "call_join" ? "join" : "leave",
 	};
 }
 
@@ -279,7 +306,10 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 			typeof content.displayname === "string" ? content.displayname.trim() : "";
 		if (oldName !== newName) {
 			if (oldName && newName) {
-				return { text: `${oldName} changed their name to ${newName}` };
+				return {
+					text: `${oldName} changed their name to ${newName}`,
+					icon: "info",
+				};
 			}
 			if (newName) {
 				// Subject derives from content.displayname for most cases,
@@ -289,10 +319,11 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 				// reads "@robert:test set their display name to Robert".
 				return {
 					text: `${stateKey} set their display name to ${newName}`,
+					icon: "info",
 				};
 			}
 			if (oldName) {
-				return { text: `${oldName} removed their display name` };
+				return { text: `${oldName} removed their display name`, icon: "info" };
 			}
 		}
 		const oldAvatar =
@@ -301,40 +332,43 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 			typeof content.avatar_url === "string" ? content.avatar_url : "";
 		if (oldAvatar !== newAvatar) {
 			if (!oldAvatar && newAvatar)
-				return { text: `${subject} set their avatar` };
+				return { text: `${subject} set their avatar`, icon: "info" };
 			if (oldAvatar && !newAvatar)
-				return { text: `${subject} removed their avatar` };
-			return { text: `${subject} changed their avatar` };
+				return { text: `${subject} removed their avatar`, icon: "info" };
+			return { text: `${subject} changed their avatar`, icon: "info" };
 		}
 		return null;
 	}
 
 	if (membership === "join") {
-		return { text: `${subject} joined the room` };
+		return { text: `${subject} joined the room`, icon: "join" };
 	}
 	if (membership === "leave") {
 		if (prevMembership === "invite") {
 			if (sender === stateKey) {
-				return { text: `${subject} rejected the invite` };
+				return { text: `${subject} rejected the invite`, icon: "info" };
 			}
-			return { text: `${actor} withdrew the invite to ${subject}` };
+			return {
+				text: `${actor} withdrew the invite to ${subject}`,
+				icon: "info",
+			};
 		}
 		if (prevMembership === "ban") {
-			return { text: `${subject} was unbanned by ${actor}` };
+			return { text: `${subject} was unbanned by ${actor}`, icon: "info" };
 		}
 		if (sender === stateKey) {
-			return { text: `${subject} left the room` };
+			return { text: `${subject} left the room`, icon: "leave" };
 		}
-		return { text: `${subject} was removed by ${actor}` };
+		return { text: `${subject} was removed by ${actor}`, icon: "leave" };
 	}
 	if (membership === "ban") {
-		return { text: `${subject} was banned by ${actor}` };
+		return { text: `${subject} was banned by ${actor}`, icon: "leave" };
 	}
 	if (membership === "invite") {
-		return { text: `${actor} invited ${subject}` };
+		return { text: `${actor} invited ${subject}`, icon: "join" };
 	}
 	if (membership === "knock") {
-		return { text: `${subject} requested to join` };
+		return { text: `${subject} requested to join`, icon: "info" };
 	}
 	return null;
 }
@@ -364,9 +398,12 @@ export function buildStateNotice(
 		const newName = typeof content.name === "string" ? content.name.trim() : "";
 		if (oldName === newName) return null;
 		if (!newName) {
-			return { text: `${actor} removed the room name` };
+			return { text: `${actor} removed the room name`, icon: "info" };
 		}
-		return { text: `${actor} changed the room name to ${quoted(newName)}` };
+		return {
+			text: `${actor} changed the room name to ${quoted(newName)}`,
+			icon: "info",
+		};
 	}
 	if (type === "m.room.topic") {
 		const oldTopic = typeof prev.topic === "string" ? prev.topic.trim() : "";
@@ -374,17 +411,21 @@ export function buildStateNotice(
 			typeof content.topic === "string" ? content.topic.trim() : "";
 		if (oldTopic === newTopic) return null;
 		if (!newTopic) {
-			return { text: `${actor} removed the topic` };
+			return { text: `${actor} removed the topic`, icon: "info" };
 		}
-		return { text: `${actor} changed the topic to ${quoted(newTopic)}` };
+		return {
+			text: `${actor} changed the topic to ${quoted(newTopic)}`,
+			icon: "info",
+		};
 	}
 	if (type === "m.room.avatar") {
 		const oldUrl = typeof prev.url === "string" ? prev.url : "";
 		const newUrl = typeof content.url === "string" ? content.url : "";
 		if (oldUrl === newUrl) return null;
-		if (!newUrl) return { text: `${actor} removed the room avatar` };
-		if (!oldUrl) return { text: `${actor} set the room avatar` };
-		return { text: `${actor} changed the room avatar` };
+		if (!newUrl)
+			return { text: `${actor} removed the room avatar`, icon: "info" };
+		if (!oldUrl) return { text: `${actor} set the room avatar`, icon: "info" };
+		return { text: `${actor} changed the room avatar`, icon: "info" };
 	}
 	if (type === "m.room.encryption") {
 		// The algorithm can be re-set; only emit once per actual transition.
@@ -393,7 +434,7 @@ export function buildStateNotice(
 			typeof content.algorithm === "string" ? content.algorithm : "";
 		if (!newAlg) return null;
 		if (oldAlg && oldAlg === newAlg) return null;
-		return { text: "Encryption was enabled" };
+		return { text: "Encryption was enabled", icon: "info" };
 	}
 	if (type === "m.room.canonical_alias") {
 		const oldAlias = typeof prev.alias === "string" ? prev.alias.trim() : "";
@@ -401,9 +442,12 @@ export function buildStateNotice(
 			typeof content.alias === "string" ? content.alias.trim() : "";
 		if (oldAlias === newAlias) return null;
 		if (!newAlias) {
-			return { text: `${actor} removed the main address` };
+			return { text: `${actor} removed the main address`, icon: "info" };
 		}
-		return { text: `${actor} set the main address to ${newAlias}` };
+		return {
+			text: `${actor} set the main address to ${newAlias}`,
+			icon: "info",
+		};
 	}
 	if (type === "m.room.tombstone") {
 		const reason = typeof content.body === "string" ? content.body.trim() : "";
@@ -411,6 +455,7 @@ export function buildStateNotice(
 			text: reason
 				? `This room has been upgraded: ${reason}`
 				: "This room has been upgraded",
+			icon: "info",
 		};
 	}
 	return null;
