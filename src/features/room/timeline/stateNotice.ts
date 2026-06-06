@@ -179,8 +179,9 @@ function hasCallMembership(content: Record<string, unknown>): boolean {
  *    timeline layer by {@link computeCallTimelineNotices}, which hides the
  *    redundant notices.
  *  - Expiry-based leaves (a membership lapsing without a follow-up event)
- *    produce no event and therefore no notice. Only explicit transitions are
- *    covered; synthesizing expiry leaves is tracked separately.
+ *    produce no event, so this single-event diff covers only explicit
+ *    transitions; expiry leaves are synthesized at the timeline layer by
+ *    {@link computeCallTimelineNotices} (issues #215, #219).
  */
 function classifyCallTransition(
 	event: MatrixEvent,
