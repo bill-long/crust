@@ -50,14 +50,49 @@ interface JoinRuleSectionProps {
 	roomId: string;
 }
 
-/** Compare allow lists by the set of allowed room IDs (order-insensitive). */
+/**
+ * Compare allow lists by their multiset of room IDs. Sorting (rather than a
+ * Set) keeps the comparison correct even when an entry's `room_id` is
+ * duplicated, so the optimistic-state equality check can't mistake
+ * `[a, a]` for `[a, b]` and miss a real server update.
+ */
 function sameAllow(
 	a: readonly AllowEntry[],
 	b: readonly AllowEntry[],
 ): boolean {
 	if (a.length !== b.length) return false;
-	const setB = new Set(b.map((e) => e.room_id));
-	return a.every((e) => setB.has(e.room_id));
+	const ax = a.map((e) => e.room_id).sort();
+	const bx = b.map((e) => e.room_id).sort();
+	return ax.every((id, i) => id === bx[i]);
+}
+
+/**
+ * Normalize the raw `allow` array from room state into well-formed entries.
+ * The content comes from other clients/servers and can be malformed (null
+ * entries, non-objects, missing/non-string `room_id`); drop those so the
+ * editor never renders or writes a bad entry. A missing or unrecognized
+ * `type` defaults to `m.room_membership` (validated against the spec's
+ * allow types) so writes always carry a valid type.
+ */
+const VALID_ALLOW_TYPES = new Set<string>(Object.values(RestrictedAllowType));
+
+function normalizeAllow(raw: unknown): AllowEntry[] {
+	if (!Array.isArray(raw)) return [];
+	const out: AllowEntry[] = [];
+	for (const entry of raw) {
+		if (!entry || typeof entry !== "object") continue;
+		const roomId = (entry as { room_id?: unknown }).room_id;
+		if (typeof roomId !== "string" || roomId.length === 0) continue;
+		const type = (entry as { type?: unknown }).type;
+		out.push({
+			room_id: roomId,
+			type:
+				typeof type === "string" && VALID_ALLOW_TYPES.has(type)
+					? (type as RestrictedAllowType)
+					: RestrictedAllowType.RoomMembership,
+		});
+	}
+	return out;
 }
 
 /**
@@ -79,10 +114,9 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 	);
 	const serverValue = createMemo<JoinRulesValue>(() => {
 		const content = joinRules();
-		const allow = Array.isArray(content?.allow) ? content.allow : [];
 		return {
 			rule: (content?.join_rule as JoinRuleValue) ?? JoinRule.Invite,
-			allow,
+			allow: normalizeAllow(content?.allow),
 		};
 	});
 	const joinOpt = useOptimisticState<JoinRulesValue>({
@@ -282,4 +316,4 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 	);
 };
 
-export { JoinRuleSection };
+export { JoinRuleSection, normalizeAllow, sameAllow };
