@@ -53,6 +53,27 @@ const fullDate24hFmt = new Intl.DateTimeFormat(undefined, {
 	hour12: false,
 });
 
+const time12hFmt = new Intl.DateTimeFormat(undefined, {
+	hour: "2-digit",
+	minute: "2-digit",
+	hour12: true,
+});
+
+const time24hFmt = new Intl.DateTimeFormat(undefined, {
+	hour: "2-digit",
+	minute: "2-digit",
+	hour12: false,
+});
+
+/**
+ * Short localized time string (e.g. "7:23 PM" / "19:23") for message and
+ * notice rows, honoring the user's 12h/24h preference.
+ */
+export function formatTime(ts: number, timeFormat: "12h" | "24h"): string {
+	const fmt = timeFormat === "12h" ? time12hFmt : time24hFmt;
+	return fmt.format(new Date(ts));
+}
+
 /**
  * Returns "Today", "Yesterday", or a localized long date label
  * (e.g. "Monday, May 25, 2026") for everything older. The `now`

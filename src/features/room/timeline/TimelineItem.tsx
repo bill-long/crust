@@ -12,7 +12,7 @@ import {
 	extractUrlsFromText,
 } from "../urlPreviews/extractUrls";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
-import { formatFullDateTime } from "./dateFormatting";
+import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { formatReactors } from "./reactionFormatting";
 import { StateNoticeIcon } from "./StateNoticeIcon";
 import type { TimelineEvent } from "./useTimeline";
@@ -155,15 +155,6 @@ const FailedReactionPills: Component<{
 		</Show>
 	);
 };
-
-function formatTime(ts: number, format: "12h" | "24h"): string {
-	const d = new Date(ts);
-	return d.toLocaleTimeString([], {
-		hour: "2-digit",
-		minute: "2-digit",
-		hour12: format === "12h",
-	});
-}
 
 function unsupportedLabel(msgtype: string): string {
 	switch (msgtype) {

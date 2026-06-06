@@ -1,4 +1,6 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import { userSettings } from "../../../stores/settings";
+import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { summarizeMembershipGroup } from "./membershipGrouping";
 import { StateNoticeIcon } from "./StateNoticeIcon";
 import {
@@ -18,6 +20,8 @@ interface GroupedMembershipNoticeProps {
 	kind: MembershipTransitionKind;
 	/** Event ID of the run's first event — kept as the row's jump anchor. */
 	leaderEventId: string;
+	/** Timestamp (ms) of the run's first event, shown on hover. */
+	timestamp: number;
 	/** Expand the group to show each individual notice. */
 	onExpand: () => void;
 }
@@ -56,10 +60,17 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 
 	const stack = createMemo(() => uniqueMembers().slice(0, MAX_STACK));
 
+	const formattedTime = createMemo(() =>
+		formatTime(props.timestamp, userSettings().timeFormat),
+	);
+	const fullDateTime = createMemo(() =>
+		formatFullDateTime(props.timestamp, userSettings().timeFormat),
+	);
+
 	return (
 		<div
 			data-event-id={props.leaderEventId}
-			class="flex items-center gap-3 px-4 py-0.5 hover:bg-surface-1/50"
+			class="group flex items-center gap-3 px-4 py-0.5 hover:bg-surface-1/50"
 			role="note"
 		>
 			<div class="flex w-8 shrink-0 justify-center text-text-faint">
@@ -107,6 +118,14 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 					<polyline points="6 9 12 15 18 9" />
 				</svg>
 			</button>
+			<span
+				class="shrink-0 text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100"
+				title={fullDateTime()}
+				aria-hidden="true"
+			>
+				{formattedTime()}
+			</span>
+			<span class="sr-only"> • {fullDateTime()}</span>
 		</div>
 	);
 };

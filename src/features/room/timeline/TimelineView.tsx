@@ -1327,6 +1327,7 @@ const TimelineView: Component<{
 													}
 													kind={group()?.kind ?? "join"}
 													leaderEventId={event.eventId}
+													timestamp={event.timestamp}
 													onExpand={() => {
 														const g = group();
 														if (g) expandGroup(g);
