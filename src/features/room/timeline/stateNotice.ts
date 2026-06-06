@@ -169,16 +169,15 @@ function hasCallMembership(content: Record<string, unknown>): boolean {
  * Returns null for non-transitions (membership refreshes that stay
  * present, or empty->empty no-ops).
  *
- * Scope/limitations (see issue #210):
- *  - Memberships are keyed per-user *and per-device*. Each device's
- *    state event is diffed independently, so a user joining/leaving a
- *    call from two devices can produce two "joined"/"left" notices, and
- *    one device leaving while another stays in the call still emits a
- *    "left the call" notice. Burst grouping dedupes simultaneous joins
- *    by user, but interleaved per-device events are not reconciled here.
- *  - Expiry-based leaves (a membership lapsing without a follow-up
- *    event) produce no event and therefore no notice. Only explicit
- *    transitions are covered.
+ * Scope/limitations (see issues #210, #215):
+ *  - This is a single-event diff and is per-device: a user joining/leaving
+ *    from two devices produces two transitions here. Per-device duplicates
+ *    and premature leaves are reconciled into per-user liveness at the
+ *    timeline layer by {@link computeSuppressedCallEventIds}, which hides the
+ *    redundant notices.
+ *  - Expiry-based leaves (a membership lapsing without a follow-up event)
+ *    produce no event and therefore no notice. Only explicit transitions are
+ *    covered; synthesizing expiry leaves is tracked separately.
  */
 function classifyCallTransition(
 	event: MatrixEvent,
@@ -190,6 +189,82 @@ function classifyCallTransition(
 	if (currActive && !prevActive) return "call_join";
 	if (!currActive && prevActive) return "call_leave";
 	return null;
+}
+
+/**
+ * Device id a call-member transition refers to. A join carries it in the
+ * current content; a leave empties the content, so the device id lives in
+ * `prev_content`. Falls back to an empty-string sentinel for the legacy
+ * nested shapes (`m.calls` / `memberships`) that don't expose a top-level
+ * `device_id`, which collapses a user's device-less memberships into one
+ * logical slot — best-effort, since per-device reconciliation targets the
+ * modern MSC4143 flat shape.
+ */
+function callTransitionDeviceId(event: MatrixEvent): string {
+	const content = event.getContent() as Record<string, unknown>;
+	if (typeof content.device_id === "string") return content.device_id;
+	const prev = getPrevContent(event);
+	if (typeof prev.device_id === "string") return prev.device_id;
+	return "";
+}
+
+/**
+ * Reconcile per-device MatrixRTC call memberships into per-user liveness so the
+ * timeline only shows a "joined the call" notice when a user goes from zero to
+ * one live device, and a "left the call" notice when their last live device
+ * leaves. Returns the set of call-member event IDs whose notice should be
+ * suppressed (a duplicate join while already present on another device, or a
+ * premature leave while still present on another device).
+ *
+ * `events` MUST be in timeline (chronological ascending) order. Liveness is
+ * causal/forward — a later event never changes an earlier event's decision —
+ * so this is safe to recompute over the full loaded window on both a bulk
+ * rebuild and an incremental live append.
+ *
+ * Addresses the per-device duplication / premature-leave limitation noted in
+ * `classifyCallTransition` (issue #215). Expiry-based leaves (a membership
+ * lapsing with no follow-up event) are out of scope here and tracked
+ * separately — they produce no event to suppress or surface.
+ */
+export function computeSuppressedCallEventIds(
+	events: readonly MatrixEvent[],
+): Set<string> {
+	const suppressed = new Set<string>();
+	const liveDevices = new Map<string, Set<string>>();
+	for (const event of events) {
+		if (event.getType() !== CALL_MEMBER_EVENT_TYPE) continue;
+		// A redacted call-member event renders no notice (buildStateNotice bails
+		// on redacted state events), so it must not affect liveness either —
+		// otherwise a redacted leave would still drop a device and mis-suppress
+		// later notices.
+		if (typeof event.isRedacted === "function" && event.isRedacted()) {
+			continue;
+		}
+		const transition = classifyCallTransition(event);
+		if (!transition) continue;
+		const sender = event.getSender();
+		if (!sender) continue;
+		const eventId = event.getId();
+		const deviceId = callTransitionDeviceId(event);
+
+		let devices = liveDevices.get(sender);
+		if (!devices) {
+			devices = new Set<string>();
+			liveDevices.set(sender, devices);
+		}
+
+		if (transition === "call_join") {
+			const alreadyPresent = devices.size > 0;
+			devices.add(deviceId);
+			// A join while another device is already live is a duplicate.
+			if (alreadyPresent && eventId) suppressed.add(eventId);
+		} else {
+			devices.delete(deviceId);
+			// A leave while another device is still live is premature.
+			if (devices.size > 0 && eventId) suppressed.add(eventId);
+		}
+	}
+	return suppressed;
 }
 
 function callMemberNotice(event: MatrixEvent, room: Room): StateNotice | null {
