@@ -34,7 +34,8 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 	// Hero only for large landscape images with known intrinsic dimensions
 	// (needed to reserve aspect-ratio space and avoid layout shift) that also
 	// resolve to a usable homeserver image URL — otherwise we'd reserve a
-	// large empty banner.
+	// large empty banner. The URL check uses the same truthiness test as the
+	// render path's <Show> so the two predicates can't diverge.
 	const isHero = (): boolean => {
 		const img = props.data.image;
 		return (
@@ -43,7 +44,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			img.height !== undefined &&
 			img.width >= HERO_MIN_WIDTH &&
 			img.width >= img.height &&
-			heroHttpUrl() !== null
+			!!heroHttpUrl()
 		);
 	};
 

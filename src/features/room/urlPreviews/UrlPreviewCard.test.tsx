@@ -101,6 +101,25 @@ describe("UrlPreviewCard", () => {
 		expect(screen.getByText("Broken image")).toBeTruthy();
 	});
 
+	it("falls back to compact when the mxc URL resolves to an empty string", () => {
+		const client = {
+			mxcUrlToHttp: () => "",
+		} as unknown as MatrixClient;
+		render(() => (
+			<UrlPreviewCard
+				client={client}
+				url="https://example.com/watch"
+				data={{
+					title: "Empty image",
+					image: { mxcUrl: "mxc://empty", width: 1280, height: 720 },
+				}}
+			/>
+		));
+		// A falsy-but-non-null URL must not reserve a hero banner.
+		expect(document.querySelector('[style*="aspect-ratio"]')).toBeNull();
+		expect(screen.getByText("Empty image")).toBeTruthy();
+	});
+
 	it("overlays a play affordance and labels video links for video og:type", () => {
 		renderCard({
 			title: "Clip",
