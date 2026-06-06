@@ -9,6 +9,10 @@ import {
 	type RoomSummary,
 	type SummariesStore,
 } from "../../client/summaries";
+import {
+	_resetLastChannelsForTests,
+	setLastChannel,
+} from "../../stores/lastChannel";
 import { createMockClient, createMockRoom } from "../../test/mockClient";
 import { SpacesSidebar } from "./SpacesSidebar";
 
@@ -39,6 +43,24 @@ function makeSpaceSummary(roomId: string, name: string): RoomSummary {
 		isEncrypted: false,
 		isDirect: false,
 		isSpace: true,
+		kind: "text",
+		callActive: false,
+		children: [],
+	};
+}
+
+function makeRoomSummary(roomId: string, name: string): RoomSummary {
+	return {
+		roomId,
+		name,
+		avatarUrl: null,
+		lastMessage: null,
+		unreadCount: 0,
+		highlightCount: 0,
+		membership: "join",
+		isEncrypted: false,
+		isDirect: false,
+		isSpace: false,
 		kind: "text",
 		callActive: false,
 		children: [],
@@ -86,6 +108,7 @@ afterEach(() => {
 	cleanup();
 	navigateMock.mockReset();
 	paramsState.spaceId = undefined;
+	_resetLastChannelsForTests();
 });
 
 function setupWithSpace(): {
@@ -298,5 +321,48 @@ describe("SpacesSidebar invite", () => {
 		fireEvent.contextMenu(avatar, { clientX: 10, clientY: 10 });
 		expect(screen.queryByRole("menu")).toBeNull();
 		expect(screen.queryByText("Invite people")).toBeNull();
+	});
+});
+
+describe("SpacesSidebar last-viewed channel (#226)", () => {
+	function setupWithChild(): { spaceId: string; childId: string } {
+		const spaceId = "!alpha:example.com";
+		const childId = "!general:example.com";
+		const space = makeSpaceSummary(spaceId, "Alpha");
+		space.children = [childId];
+		const child = makeRoomSummary(childId, "general");
+		const client = createMockClient();
+		render(() => (
+			<Wrapper client={client} seed={[space, child]}>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		return { spaceId, childId };
+	}
+
+	it("navigates to the landing view when no channel is remembered", () => {
+		const { spaceId } = setupWithChild();
+		fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+		expect(navigateMock).toHaveBeenCalledWith(
+			`/space/${encodeURIComponent(spaceId)}`,
+		);
+	});
+
+	it("re-opens the remembered channel when it is a joined child", () => {
+		const { spaceId, childId } = setupWithChild();
+		setLastChannel(spaceId, childId);
+		fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+		expect(navigateMock).toHaveBeenCalledWith(
+			`/space/${encodeURIComponent(spaceId)}/${encodeURIComponent(childId)}`,
+		);
+	});
+
+	it("falls back to landing when the remembered channel is not a child of the space", () => {
+		const { spaceId } = setupWithChild();
+		setLastChannel(spaceId, "!stale:example.com");
+		fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+		expect(navigateMock).toHaveBeenCalledWith(
+			`/space/${encodeURIComponent(spaceId)}`,
+		);
 	});
 });

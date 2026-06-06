@@ -64,6 +64,7 @@ import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
+import { setLastChannel } from "../stores/lastChannel";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import type { CryptoAction } from "../types/crypto";
@@ -574,6 +575,14 @@ const Layout: Component = () => {
 	};
 
 	const roomId = () => params.roomId;
+
+	// Remember the last-viewed channel per space so re-selecting that space
+	// in the sidebar re-opens this channel (Discord/Cinny parity, issue #226).
+	createEffect(() => {
+		const sid = params.spaceId;
+		const rid = roomId();
+		if (sid && rid) setLastChannel(sid, rid);
+	});
 
 	// Reset Copy-link feedback whenever the active room changes so a "Copied!"
 	// (or fallback dialog) from room A doesn't leak into room B's header.

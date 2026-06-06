@@ -12,9 +12,11 @@ import {
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import {
+	getSpaceRooms,
 	getSpaces,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import { getLastChannel } from "../../stores/lastChannel";
 import { CreateSpaceDialog } from "./CreateSpaceDialog";
 
 interface SidebarItemProps {
@@ -61,6 +63,23 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	const spaces = createMemo(() => getSpaces(summaries));
 	const homeSelected = () => !params.spaceId;
 	const neverSelected = () => false;
+
+	// Navigate to a space, re-opening the last-viewed channel when one is
+	// remembered and still a joined child of the space; otherwise fall back
+	// to the space landing view (issue #226).
+	const openSpace = (spaceId: string): void => {
+		const remembered = getLastChannel(spaceId);
+		if (
+			remembered &&
+			getSpaceRooms(summaries, spaceId).some((r) => r.roomId === remembered)
+		) {
+			navigate(
+				`/space/${encodeURIComponent(spaceId)}/${encodeURIComponent(remembered)}`,
+			);
+			return;
+		}
+		navigate(`/space/${encodeURIComponent(spaceId)}`);
+	};
 
 	return (
 		<aside class="flex h-full flex-col items-stretch bg-surface-1 py-3">
@@ -130,9 +149,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 							<>
 								<button
 									type="button"
-									onClick={() =>
-										navigate(`/space/${encodeURIComponent(space.roomId)}`)
-									}
+									onClick={() => openSpace(space.roomId)}
 									class={`relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
 										isSelected()
 											? "rounded-xl bg-surface-2 text-text-primary"
