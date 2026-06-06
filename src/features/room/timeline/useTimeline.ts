@@ -247,8 +247,10 @@ function buildSyntheticCallLeaveEvent(
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,
-		reactions: {},
-		myReactions: {},
+		// Null-prototype maps for consistency with eventToTimelineEvent and to
+		// keep reaction-key lookups safe from prototype-pollution edge cases.
+		reactions: Object.create(null) as TimelineEvent["reactions"],
+		myReactions: Object.create(null) as TimelineEvent["myReactions"],
 		status: null,
 		stateNotice: { text: `${subject} left the call`, icon: "leave" },
 		membershipTransition: {
