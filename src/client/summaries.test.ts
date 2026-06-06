@@ -48,6 +48,15 @@ describe("callMembershipExpiresAt", () => {
 		).toBe(1000 + 4 * HOUR);
 	});
 
+	it("treats a null expires like absent (defaults to 4h, matching `?? 4h`)", () => {
+		const content = modernMembership({ createdTs: 1000 }) as Record<
+			string,
+			unknown
+		>;
+		content.expires = null;
+		expect(callMembershipExpiresAt(makeEv(content))).toBe(1000 + 4 * HOUR);
+	});
+
 	it("falls back to the event ts when created_ts is absent", () => {
 		const content = modernMembership({ createdTs: 0, expires: 5000 }) as Record<
 			string,
