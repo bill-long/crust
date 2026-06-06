@@ -462,6 +462,144 @@ describe("stateNotice", () => {
 			).toBe("This room has been upgraded");
 		});
 	});
+
+	describe("call membership (org.matrix.msc3401.call.member)", () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		const room = makeRoom({ "@alice:test": "Alice" });
+		// A well-formed modern MSC4143 per-device membership.
+		const FLAT = {
+			application: "m.call",
+			call_id: "",
+			device_id: "DEV",
+			focus_active: { type: "livekit" },
+		};
+
+		it("is a recognised notice type", () => {
+			expect(STATE_NOTICE_TYPES.has(CALL)).toBe(true);
+			expect(isStateNoticeType(CALL)).toBe(true);
+		});
+
+		it("renders a join for the modern MSC4143 flat shape", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: CALL,
+					stateKey: "_@alice:test_DEV",
+					sender: "@alice:test",
+					content: { ...FLAT },
+					prevContent: {},
+				}),
+				room,
+			);
+			expect(notice?.text).toBe("Alice joined the call");
+		});
+
+		it("renders a leave when the membership is emptied", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: CALL,
+					stateKey: "_@alice:test_DEV",
+					sender: "@alice:test",
+					content: {},
+					prevContent: { ...FLAT },
+				}),
+				room,
+			);
+			expect(notice?.text).toBe("Alice left the call");
+		});
+
+		it("renders a join for the legacy nested m.calls shape", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: CALL,
+					sender: "@alice:test",
+					content: { "m.calls": [{ "m.call_id": "x" }] },
+					prevContent: {},
+				}),
+				room,
+			);
+			expect(notice?.text).toBe("Alice joined the call");
+		});
+
+		it("returns null for a membership refresh (still present)", () => {
+			expect(
+				buildStateNotice(
+					makeEvent({
+						type: CALL,
+						sender: "@alice:test",
+						content: { ...FLAT },
+						prevContent: { ...FLAT },
+					}),
+					room,
+				),
+			).toBeNull();
+		});
+
+		it("returns null for an empty->empty no-op", () => {
+			expect(
+				buildStateNotice(
+					makeEvent({
+						type: CALL,
+						sender: "@alice:test",
+						content: {},
+						prevContent: {},
+					}),
+					room,
+				),
+			).toBeNull();
+		});
+
+		it("ignores a malformed flat membership missing required fields", () => {
+			// Missing call_id/device_id entirely.
+			expect(
+				buildStateNotice(
+					makeEvent({
+						type: CALL,
+						sender: "@alice:test",
+						content: { application: "m.call" },
+						prevContent: {},
+					}),
+					room,
+				),
+			).toBeNull();
+			// Present ids but missing focus_active.type (not a valid membership).
+			expect(
+				buildStateNotice(
+					makeEvent({
+						type: CALL,
+						sender: "@alice:test",
+						content: { application: "m.call", call_id: "", device_id: "DEV" },
+						prevContent: {},
+					}),
+					room,
+				),
+			).toBeNull();
+		});
+
+		it("falls back to the bare matrix id when the member is unknown", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: CALL,
+					sender: "@ghost:test",
+					content: { ...FLAT },
+					prevContent: {},
+				}),
+				makeRoom(),
+			);
+			expect(notice?.text).toBe("@ghost:test joined the call");
+		});
+
+		it("returns null for a call event with no sender", () => {
+			const e = {
+				getType: () => CALL,
+				getSender: () => null,
+				getStateKey: () => "_x",
+				getContent: () => ({ ...FLAT }),
+				getPrevContent: () => ({}),
+				isRedacted: () => false,
+			} as unknown as MatrixEvent;
+			expect(buildStateNotice(e, room)).toBeNull();
+		});
+	});
 });
 
 describe("buildMembershipTransition", () => {
@@ -573,5 +711,75 @@ describe("buildMembershipTransition", () => {
 			prevContent: { membership: "leave" },
 		});
 		expect(t?.avatarUrl).toBe("http://media/mxc://server/abc");
+	});
+
+	it("classifies call joins and leaves with the sender as subject", () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		const FLAT = {
+			application: "m.call",
+			call_id: "",
+			device_id: "DEV",
+			focus_active: { type: "livekit" },
+		};
+		const join = classify(
+			{
+				type: CALL,
+				stateKey: "_@bob:test_DEV",
+				sender: "@bob:test",
+				content: { ...FLAT },
+				prevContent: {},
+			},
+			makeRoom({ "@bob:test": "Bob" }),
+		);
+		expect(join).toMatchObject({
+			kind: "call_join",
+			userId: "@bob:test",
+			subject: "Bob",
+		});
+		const leave = classify(
+			{
+				type: CALL,
+				stateKey: "_@bob:test_DEV",
+				sender: "@bob:test",
+				content: {},
+				prevContent: { ...FLAT },
+			},
+			makeRoom({ "@bob:test": "Bob" }),
+		);
+		expect(leave?.kind).toBe("call_leave");
+	});
+
+	it("does not classify a call-membership refresh", () => {
+		const FLAT = {
+			application: "m.call",
+			call_id: "",
+			device_id: "DEV",
+			focus_active: { type: "livekit" },
+		};
+		expect(
+			classify({
+				type: "org.matrix.msc3401.call.member",
+				sender: "@bob:test",
+				content: { ...FLAT },
+				prevContent: { ...FLAT },
+			}),
+		).toBeNull();
+	});
+
+	it("returns null for a call transition with no sender", () => {
+		const e = {
+			getType: () => "org.matrix.msc3401.call.member",
+			getSender: () => null,
+			getStateKey: () => "_x",
+			getContent: () => ({
+				application: "m.call",
+				call_id: "",
+				device_id: "DEV",
+				focus_active: { type: "livekit" },
+			}),
+			getPrevContent: () => ({}),
+			isRedacted: () => false,
+		} as unknown as MatrixEvent;
+		expect(buildMembershipTransition(e, makeRoom(), fakeClient)).toBeNull();
 	});
 });

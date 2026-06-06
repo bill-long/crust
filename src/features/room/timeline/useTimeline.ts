@@ -13,6 +13,7 @@ import {
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
+import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { extractGifUrl } from "../../gif/gifUrl";
 import type { MembershipTransition, StateNotice } from "./stateNotice";
 import {
@@ -342,7 +343,9 @@ function eventToTimelineEvent(
 		? buildStateNotice(event, room)
 		: null;
 	const membershipTransition =
-		stateNotice !== null && event.getType() === "m.room.member"
+		stateNotice !== null &&
+		(event.getType() === "m.room.member" ||
+			event.getType() === CALL_MEMBER_EVENT_TYPE)
 			? buildMembershipTransition(event, room, client)
 			: null;
 

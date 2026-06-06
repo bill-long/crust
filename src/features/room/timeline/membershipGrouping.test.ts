@@ -200,4 +200,19 @@ describe("summarizeMembershipGroup", () => {
 			"A and B were banned",
 		);
 	});
+
+	it("formats call join and leave groups", () => {
+		expect(summarizeMembershipGroup(m(["Alice"]), "call_join")).toBe(
+			"Alice joined the call",
+		);
+		expect(summarizeMembershipGroup(m(["Alice", "Bob"]), "call_leave")).toBe(
+			"Alice and Bob left the call",
+		);
+		expect(
+			summarizeMembershipGroup(
+				m(["Alice", "Bob", "Carol", "Dave"]),
+				"call_join",
+			),
+		).toBe("Alice, Bob and 2 others joined the call");
+	});
 });
