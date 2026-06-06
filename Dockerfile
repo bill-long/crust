@@ -1,5 +1,8 @@
 # Build
-FROM node:22-alpine AS build
+# Pin the build stage to the native build platform so cross-arch images don't
+# emulate the (slow) Node/pnpm build under QEMU — the Vite output is static and
+# architecture-independent, so it's built once and reused for every target arch.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 RUN corepack enable
 WORKDIR /app
 # Sub-path hosting: pass `--build-arg VITE_BASE_PATH=/crust/` to bake the
