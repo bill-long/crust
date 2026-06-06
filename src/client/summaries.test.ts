@@ -2,6 +2,7 @@ import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../test/mockClient";
 import {
+	callMembershipExpiresAt,
 	createSummariesStore,
 	getNextCallExpiry,
 	isCallActive,
@@ -28,6 +29,50 @@ function modernMembership(opts: {
 		foci_preferred: [],
 	};
 }
+
+describe("callMembershipExpiresAt", () => {
+	const makeEv = (content: Record<string, unknown>, ts = NOW): MatrixEvent =>
+		({ getContent: () => content, getTs: () => ts }) as unknown as MatrixEvent;
+
+	it("returns created_ts + expires for a valid membership", () => {
+		expect(
+			callMembershipExpiresAt(
+				makeEv(modernMembership({ createdTs: 1000, expires: 5000 })),
+			),
+		).toBe(6000);
+	});
+
+	it("defaults to the 4h expiry when expires is absent", () => {
+		expect(
+			callMembershipExpiresAt(makeEv(modernMembership({ createdTs: 1000 }))),
+		).toBe(1000 + 4 * HOUR);
+	});
+
+	it("falls back to the event ts when created_ts is absent", () => {
+		const content = modernMembership({ createdTs: 0, expires: 5000 }) as Record<
+			string,
+			unknown
+		>;
+		delete content.created_ts;
+		expect(callMembershipExpiresAt(makeEv(content, 2000))).toBe(7000);
+	});
+
+	it("returns a numeric NaN (not a string) for a non-numeric expires", () => {
+		const content = modernMembership({ createdTs: 1000 }) as Record<
+			string,
+			unknown
+		>;
+		content.expires = "garbage";
+		const result = callMembershipExpiresAt(makeEv(content));
+		expect(typeof result).toBe("number");
+		expect(Number.isNaN(result as number)).toBe(true);
+	});
+
+	it("returns null for empty / legacy / non-membership shapes", () => {
+		expect(callMembershipExpiresAt(makeEv({}))).toBeNull();
+		expect(callMembershipExpiresAt(makeEv({ "m.calls": [{}] }))).toBeNull();
+	});
+});
 
 describe("isCallActive", () => {
 	beforeEach(() => {

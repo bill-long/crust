@@ -208,8 +208,20 @@ export function callMembershipExpiresAt(ev: MatrixEvent): number | null {
 		return null;
 	}
 	const createdTs = content.created_ts ?? ev.getTs();
-	const expires = content.expires ?? DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS;
-	return (createdTs as number) + (expires as number);
+	// The SDK does not type-check `expires`. Coerce it to a real number (or NaN)
+	// so this function honors its `number | null` return type rather than
+	// leaking a string via `number + string` concatenation. A non-numeric value
+	// becomes NaN, which flows through as never-expiring everywhere: `NaN <= now`
+	// is false (treated live) and `Number.isFinite(NaN)` is false (excluded from
+	// expiry scheduling), matching the SDK's `isExpired()` arithmetic.
+	const rawExpires: unknown = content.expires;
+	const expires =
+		rawExpires === undefined
+			? DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS
+			: typeof rawExpires === "number"
+				? rawExpires
+				: Number.NaN;
+	return (createdTs as number) + expires;
 }
 
 export type SummariesStore = Record<string, RoomSummary>;
