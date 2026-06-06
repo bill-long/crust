@@ -6,11 +6,13 @@ import {
 	waitFor,
 } from "@solidjs/testing-library";
 import {
+	ClientEvent,
 	EventType,
 	JoinRule,
 	type MatrixClient,
 	RoomStateEvent,
 } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { JoinRuleSection, normalizeAllow, sameAllow } from "./JoinRuleSection";
@@ -153,6 +155,73 @@ describe("JoinRuleSection allow list", () => {
 		await waitFor(() =>
 			expect(screen.getByRole("button", { name: "+ Beta" })).toBeTruthy(),
 		);
+	});
+
+	it("refreshes candidates when a parent space syncs in (ClientEvent.Room)", async () => {
+		const { client, beta } = setup({ linkBeta: false });
+		expect(screen.queryByRole("button", { name: "+ Beta" })).toBeNull();
+
+		// Beta becomes a linked parent space and a room-added event fires.
+		beta.__setStateEvent("m.space.child", ROOM, { via: ["example.com"] });
+		(
+			client as unknown as {
+				__emit: (event: string, ...args: unknown[]) => void;
+			}
+		).__emit(ClientEvent.Room, {});
+
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "+ Beta" })).toBeTruthy(),
+		);
+	});
+
+	it("resets the optimistic overlay when the target room changes", () => {
+		const roomA = createMockRoom("!a:example.com", [], [], { name: "A" });
+		roomA.__setStateEvent("m.room.join_rules", "", {
+			join_rule: JoinRule.Public,
+		});
+		const roomB = createMockRoom("!b:example.com", [], [], { name: "B" });
+		roomB.__setStateEvent("m.room.join_rules", "", {
+			join_rule: JoinRule.Invite,
+		});
+		const client = createMockClient(
+			new Map([
+				["!a:example.com", roomA],
+				["!b:example.com", roomB],
+			]),
+		);
+		// A write that never resolves keeps the optimistic overlay in flight.
+		(
+			client as unknown as { sendStateEvent: ReturnType<typeof vi.fn> }
+		).sendStateEvent = vi.fn(() => new Promise<never>(() => {}));
+
+		const [rid, setRid] = createSignal("!a:example.com");
+		render(() => (
+			<JoinRuleSection
+				client={client as unknown as MatrixClient}
+				roomId={rid()}
+			/>
+		));
+
+		// Optimistically switch room A to Knock (overlay stays pending).
+		fireEvent.click(screen.getByRole("button", { name: "Knock" }));
+		expect(
+			screen
+				.getByRole("button", { name: "Knock" })
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+
+		// Switching rooms must drop A's overlay, not bleed it into room B.
+		setRid("!b:example.com");
+		expect(
+			screen
+				.getByRole("button", { name: "Invite only" })
+				.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(
+			screen
+				.getByRole("button", { name: "Knock" })
+				.getAttribute("aria-pressed"),
+		).toBe("false");
 	});
 
 	it("hides add/remove controls without permission", () => {

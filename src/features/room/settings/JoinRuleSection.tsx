@@ -1,4 +1,5 @@
 import {
+	ClientEvent,
 	EventType,
 	JoinRule,
 	type MatrixClient,
@@ -8,9 +9,11 @@ import {
 } from "matrix-js-sdk";
 import {
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	For,
+	on,
 	onCleanup,
 	Show,
 } from "solid-js";
@@ -129,6 +132,16 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 		equals: (a, b) => a.rule === b.rule && sameAllow(a.allow, b.allow),
 	});
 
+	// The settings overlay component instance may be reused across rooms, so
+	// clear the optimistic overlay/error when the target room changes.
+	createEffect(
+		on(
+			() => props.roomId,
+			() => joinOpt.reset(),
+			{ defer: true },
+		),
+	);
+
 	const effectiveRule = (): JoinRuleValue => joinOpt.value().rule;
 	const effectiveAllow = (): AllowEntry[] => joinOpt.value().allow;
 
@@ -173,6 +186,9 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 	// linked into a space while open). Recompute candidates when a relevant
 	// space-relationship state event lands, mirroring useRoomStateContent.
 	const [spaceTick, setSpaceTick] = createSignal(0);
+	const bumpSpaceTick = (): void => {
+		setSpaceTick((n) => n + 1);
+	};
 	const onSpaceState = (event: MatrixEvent): void => {
 		const type = event.getType();
 		// Only react to relationship changes involving this room: a parent
@@ -182,12 +198,18 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 			(type === "m.space.parent" && event.getRoomId() === roomId()) ||
 			(type === "m.space.child" && event.getStateKey?.() === roomId())
 		) {
-			setSpaceTick((n) => n + 1);
+			bumpSpaceTick();
 		}
 	};
 	props.client.on(RoomStateEvent.Events, onSpaceState);
+	// A declared parent space may only become resolvable (known room, and
+	// recognized as a space) once it finishes syncing — which doesn't
+	// necessarily fire a child-link event keyed to this room. Recompute when
+	// a room is added so such parents surface as candidates.
+	props.client.on(ClientEvent.Room, bumpSpaceTick);
 	onCleanup(() => {
 		props.client.off(RoomStateEvent.Events, onSpaceState);
+		props.client.off(ClientEvent.Room, bumpSpaceTick);
 	});
 
 	const candidates = createMemo(() => {
