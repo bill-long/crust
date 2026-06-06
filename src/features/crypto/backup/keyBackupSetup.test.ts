@@ -167,6 +167,16 @@ describe("fetchServerKeyBackup", () => {
 		await expect(fetchServerKeyBackup(client)).resolves.toBeNull();
 	});
 
+	it("propagates a M_NOT_FOUND that isn't a real 404 (e.g. proxy)", async () => {
+		const client = mockFetchClient(async () => {
+			throw new MatrixError({ errcode: "M_NOT_FOUND" }, 503);
+		});
+
+		await expect(fetchServerKeyBackup(client)).rejects.toBeInstanceOf(
+			MatrixError,
+		);
+	});
+
 	it("propagates any non-404 error (uncertain — never treated as none)", async () => {
 		const client = mockFetchClient(async () => {
 			throw new MatrixError({ errcode: "M_UNKNOWN" }, 500);

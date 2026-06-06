@@ -32,7 +32,11 @@ export async function fetchServerKeyBackup(
 			{ prefix: ClientPrefix.V3 },
 		);
 	} catch (e) {
-		if (e instanceof MatrixError && e.errcode === "M_NOT_FOUND") {
+		if (
+			e instanceof MatrixError &&
+			e.httpStatus === 404 &&
+			e.errcode === "M_NOT_FOUND"
+		) {
 			return null;
 		}
 		throw e;
@@ -99,7 +103,7 @@ export async function ensureKeyBackup(
 	// only when its decryption key is available; on a fresh device the backup
 	// stays inactive until the user unlocks it with their recovery key.
 	const activeVersion = await crypto.getActiveSessionBackupVersion();
-	if (!activeVersion) {
+	if (activeVersion === null) {
 		return { outcome: "needs-restore" };
 	}
 	return existingBackup ? { outcome: "reused" } : { outcome: "created" };
