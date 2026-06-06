@@ -14,7 +14,63 @@ import {
 	encryptedMessage,
 	textMessage,
 } from "../../../test/mockClient";
-import { useTimeline } from "./useTimeline";
+import type { TimelineEvent } from "./useTimeline";
+import { mergeRowsByTimestamp, useTimeline } from "./useTimeline";
+
+const row = (eventId: string, timestamp: number): TimelineEvent =>
+	({ eventId, timestamp }) as unknown as TimelineEvent;
+
+describe("mergeRowsByTimestamp", () => {
+	const ids = (rows: TimelineEvent[]) => rows.map((r) => r.eventId);
+
+	it("places an insert after a base row sharing its timestamp", () => {
+		const out = mergeRowsByTimestamp(
+			[row("R100", 100), row("R200", 200), row("R300", 300)],
+			[row("S200", 200)],
+		);
+		// S200 sorts after the equal-ts R200 and BEFORE the later R300.
+		expect(ids(out)).toEqual(["R100", "R200", "S200", "R300"]);
+	});
+
+	it("places an equal-ts insert at the tail when it has no later base row", () => {
+		const out = mergeRowsByTimestamp(
+			[row("R100", 100), row("R200", 200)],
+			[row("S200", 200)],
+		);
+		expect(ids(out)).toEqual(["R100", "R200", "S200"]);
+	});
+
+	it("inserts strictly between base rows and keeps stacked equal inserts ordered", () => {
+		expect(
+			ids(
+				mergeRowsByTimestamp(
+					[row("R100", 100), row("R300", 300)],
+					[row("S200", 200)],
+				),
+			),
+		).toEqual(["R100", "S200", "R300"]);
+		expect(
+			ids(
+				mergeRowsByTimestamp(
+					[row("Ra", 200), row("Rb", 200), row("Rc", 300)],
+					[row("S1", 200), row("S2", 200)],
+				),
+			),
+		).toEqual(["Ra", "Rb", "S1", "S2", "Rc"]);
+	});
+
+	it("appends inserts later than every base row, and is a no-op with none", () => {
+		expect(
+			ids(
+				mergeRowsByTimestamp(
+					[row("R100", 100), row("R200", 200)],
+					[row("S500", 500)],
+				),
+			),
+		).toEqual(["R100", "R200", "S500"]);
+		expect(ids(mergeRowsByTimestamp([row("R1", 1)], []))).toEqual(["R1"]);
+	});
+});
 
 /** Run a test inside createRoot with proper error propagation. */
 function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
@@ -370,11 +426,15 @@ describe("useTimeline", () => {
 
 	it("rebuilds call notices when a shown join is redacted, surfacing a sibling", async () => {
 		const CALL = "org.matrix.msc3401.call.member";
+		// `created_ts` near now (with the default 4h expiry) keeps both
+		// memberships live for the duration of the test, isolating it from
+		// expiry-based leave synthesis.
 		const blob = (deviceId: string) => ({
 			application: "m.call",
 			call_id: "",
 			device_id: deviceId,
 			focus_active: { type: "livekit" },
+			created_ts: Date.now(),
 		});
 		// Device A join is shown; device B join is suppressed as a duplicate.
 		const j1: import("../../../test/mockClient").MockEvent = {
@@ -428,6 +488,185 @@ describe("useTimeline", () => {
 
 			expect(events.map((e) => e.eventId)).toEqual(["$m", "$j2"]);
 			expect(events[1].stateNotice?.text).toBe("@alice:test joined the call");
+		});
+	});
+
+	it("synthesizes a 'left the call' notice for a membership that lapsed by expiry", async () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		// Joined two hours ago with a one-hour expiry and never sent a leave —
+		// the membership has lapsed by expiry, so a synthetic leave is surfaced.
+		const createdTs = Date.now() - 2 * 60 * 60 * 1000;
+		const expiresAt = createdTs + 60 * 60 * 1000;
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$m", "@alice:test", "hi", 1000),
+			{
+				eventId: "$j1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_A",
+				content: {
+					application: "m.call",
+					call_id: "",
+					device_id: "A",
+					focus_active: { type: "livekit" },
+					created_ts: createdTs,
+					expires: 60 * 60 * 1000,
+				},
+				prevContent: {},
+				ts: createdTs,
+			},
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			// message + the real join + the synthesized expiry leave.
+			expect(
+				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+			).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
+			const synthetic = events[events.length - 1];
+			expect(synthetic.eventId).toBe(
+				`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
+			);
+			expect(synthetic.timestamp).toBe(expiresAt);
+			expect(synthetic.membershipTransition?.kind).toBe("call_leave");
+		});
+	});
+
+	it("surfaces the expiry leave via the timer when a live membership lapses", async () => {
+		vi.useFakeTimers();
+		try {
+			const CALL = "org.matrix.msc3401.call.member";
+			// Joined "now" (fake clock) with a short expiry so the membership is
+			// live at load and lapses shortly after — exercising the
+			// scheduleCallExpiryRefresh timer that re-runs the rebuild when no
+			// follow-up leave event arrives.
+			const createdTs = Date.now();
+			const expiresAt = createdTs + 200;
+			const roomA = createMockRoom("!roomA:test", [
+				textMessage("!roomA:test", "$m", "@alice:test", "hi", 1000),
+				{
+					eventId: "$j1",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: CALL,
+					stateKey: "@alice:test_A",
+					content: {
+						application: "m.call",
+						call_id: "",
+						device_id: "A",
+						focus_active: { type: "livekit" },
+						created_ts: createdTs,
+						expires: 200,
+					},
+					prevContent: {},
+					ts: createdTs,
+				},
+			]);
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async (_dispose) => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				// Flush the load promise + any 0-delay timers WITHOUT advancing far
+				// enough to fire the expiry timer (scheduled ~250ms out).
+				await vi.advanceTimersByTimeAsync(0);
+
+				// At load the membership is still live — only the join shows.
+				expect(
+					events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+				).toEqual(["@alice:test joined the call"]);
+
+				// Advance past the expiry (+grace) so the scheduled rebuild fires.
+				await vi.advanceTimersByTimeAsync(300);
+
+				expect(
+					events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+				).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
+				expect(events[events.length - 1].eventId).toBe(
+					`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
+				);
+			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("reschedules and surfaces the expiry leave when a live event corrects the clock", async () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		// Membership joined "now" with a 3s expiry — live at load. The loaded
+		// events carry no `unsigned.age`, so the server-time offset starts at 0.
+		const createdTs = Date.now();
+		const expiresAt = createdTs + 3000;
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$m", "@alice:test", "hi", createdTs - 1000),
+			{
+				eventId: "$j1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_A",
+				content: {
+					application: "m.call",
+					call_id: "",
+					device_id: "A",
+					focus_active: { type: "livekit" },
+					created_ts: createdTs,
+					expires: 3000,
+				},
+				prevContent: {},
+				ts: createdTs,
+			},
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			// Offset 0, membership still live — only the join shows.
+			expect(
+				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+			).toEqual(["@alice:test joined the call"]);
+
+			// A live message that materially corrects the clock forward (server
+			// ~10s ahead). The rebuild it triggers re-evaluates expiry against the
+			// corrected now, which is now past the membership's expiry.
+			const liveMsg = createFakeEvent(
+				"!roomA:test",
+				"$live",
+				"@bob:test",
+				"hello",
+				createdTs + 100,
+			);
+			(liveMsg as unknown as { event: unknown }).event = {
+				unsigned: { age: 1 },
+			};
+			(liveMsg as unknown as { localTimestamp: number }).localTimestamp =
+				liveMsg.getTs() - 10000;
+			appendLive(client, roomA, liveMsg);
+
+			expect(
+				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+			).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
+			expect(events.some((e) => e.eventId === "$live")).toBe(true);
+			expect(
+				events.some(
+					(e) =>
+						e.eventId ===
+						`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
+				),
+			).toBe(true);
 		});
 	});
 

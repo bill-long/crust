@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildMembershipTransition,
 	buildStateNotice,
-	computeSuppressedCallEventIds,
+	computeCallTimelineNotices,
 	iconForTransitionKind,
 	isStateNoticeType,
 	type MembershipTransitionKind,
@@ -18,6 +18,7 @@ interface FakeEventInit {
 	prevContent?: Record<string, unknown>;
 	redacted?: boolean;
 	id?: string;
+	ts?: number;
 }
 
 function makeEvent(init: FakeEventInit): MatrixEvent {
@@ -29,6 +30,7 @@ function makeEvent(init: FakeEventInit): MatrixEvent {
 		getPrevContent: () => init.prevContent ?? {},
 		isRedacted: () => init.redacted ?? false,
 		getId: () => init.id,
+		getTs: () => init.ts ?? 0,
 	};
 	return e as unknown as MatrixEvent;
 }
@@ -945,7 +947,7 @@ describe("state notice icons", () => {
 	});
 });
 
-describe("computeSuppressedCallEventIds", () => {
+describe("computeCallTimelineNotices — suppression", () => {
 	const CALL = "org.matrix.msc3401.call.member";
 
 	function callBlob(deviceId: string): Record<string, unknown> {
@@ -977,8 +979,14 @@ describe("computeSuppressedCallEventIds", () => {
 		});
 	}
 
+	// All events default to ts 0; `now: 0` keeps every membership unexpired so
+	// these cases exercise explicit-leave suppression only.
+	function suppressedFor(events: MatrixEvent[]): Set<string> {
+		return computeCallTimelineNotices(events, 0).suppressed;
+	}
+
 	it("does not suppress a lone join or its matching last-device leave", () => {
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			join("j1", "@alice:test", "A"),
 			leave("l1", "@alice:test", "A"),
 		]);
@@ -986,7 +994,7 @@ describe("computeSuppressedCallEventIds", () => {
 	});
 
 	it("suppresses a duplicate join from a second device", () => {
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			join("j1", "@alice:test", "A"),
 			join("j2", "@alice:test", "B"),
 		]);
@@ -995,7 +1003,7 @@ describe("computeSuppressedCallEventIds", () => {
 
 	it("suppresses a premature leave while another device stays in the call", () => {
 		// Alice joins from A and B, then A leaves (B still live), then B leaves.
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			join("j1", "@alice:test", "A"),
 			join("j2", "@alice:test", "B"),
 			leave("l1", "@alice:test", "A"),
@@ -1006,7 +1014,7 @@ describe("computeSuppressedCallEventIds", () => {
 	});
 
 	it("tracks per-user liveness independently", () => {
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			join("aj", "@alice:test", "A"),
 			join("bj", "@bob:test", "B"),
 			leave("al", "@alice:test", "A"),
@@ -1017,7 +1025,7 @@ describe("computeSuppressedCallEventIds", () => {
 	});
 
 	it("re-shows a join after the user fully left and rejoined", () => {
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			join("j1", "@alice:test", "A"),
 			leave("l1", "@alice:test", "A"),
 			join("j2", "@alice:test", "A"),
@@ -1036,7 +1044,7 @@ describe("computeSuppressedCallEventIds", () => {
 		// getSender defaults to @alice in the helper, so force it null here.
 		(noSender as unknown as { getSender: () => string | null }).getSender =
 			() => null;
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			makeEvent({ type: "m.room.message", id: "m1" }),
 			noSender,
 		]);
@@ -1046,7 +1054,7 @@ describe("computeSuppressedCallEventIds", () => {
 	it("ignores redacted call-member events in liveness", () => {
 		// Alice's device-A join is redacted, so it must not occupy her liveness;
 		// the device-B join is then her first live device and stays visible.
-		const ids = computeSuppressedCallEventIds([
+		const ids = suppressedFor([
 			makeEvent({
 				type: CALL,
 				id: "j1",
@@ -1058,5 +1066,239 @@ describe("computeSuppressedCallEventIds", () => {
 			join("j2", "@alice:test", "B"),
 		]);
 		expect(ids.size).toBe(0);
+	});
+});
+
+describe("computeCallTimelineNotices — expiry leaves", () => {
+	const CALL = "org.matrix.msc3401.call.member";
+	const HOUR = 60 * 60 * 1000;
+
+	function activeBlob(
+		deviceId: string,
+		createdTs: number,
+		expires?: number,
+	): Record<string, unknown> {
+		return {
+			application: "m.call",
+			call_id: "",
+			device_id: deviceId,
+			focus_active: { type: "livekit" },
+			created_ts: createdTs,
+			...(expires === undefined ? {} : { expires }),
+		};
+	}
+
+	function activeEvent(
+		id: string,
+		sender: string,
+		deviceId: string,
+		createdTs: number,
+		opts: { expires?: number; refresh?: boolean; ts?: number } = {},
+	): MatrixEvent {
+		return makeEvent({
+			type: CALL,
+			id,
+			sender,
+			ts: opts.ts ?? createdTs,
+			content: activeBlob(deviceId, createdTs, opts.expires),
+			// A refresh (active→active) carries the previous membership as
+			// prev_content; a fresh join has empty prev_content.
+			prevContent: opts.refresh ? activeBlob(deviceId, createdTs - 1) : {},
+		});
+	}
+
+	function leaveEvent(
+		id: string,
+		sender: string,
+		deviceId: string,
+		ts: number,
+	): MatrixEvent {
+		return makeEvent({
+			type: CALL,
+			id,
+			sender,
+			ts,
+			content: {},
+			prevContent: activeBlob(deviceId, ts - HOUR),
+		});
+	}
+
+	it("synthesizes a leave when a lone membership lapses by expiry", () => {
+		// Join at t=0 with 1h expiry; no leave event; evaluate well after expiry.
+		const { syntheticLeaves, suppressed, nextExpiry } =
+			computeCallTimelineNotices(
+				[activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR })],
+				2 * HOUR,
+			);
+		expect(suppressed.size).toBe(0);
+		expect(syntheticLeaves).toEqual([
+			{ userId: "@alice:test", deviceId: "A", expiresAt: HOUR },
+		]);
+		expect(nextExpiry).toBeNull();
+	});
+
+	it("defaults to a 4h expiry when `expires` is absent", () => {
+		const { syntheticLeaves } = computeCallTimelineNotices(
+			[activeEvent("j1", "@alice:test", "A", 0)],
+			5 * HOUR,
+		);
+		expect(syntheticLeaves).toEqual([
+			{ userId: "@alice:test", deviceId: "A", expiresAt: 4 * HOUR },
+		]);
+	});
+
+	it("does not synthesize a leave before the membership has expired", () => {
+		const { syntheticLeaves, nextExpiry } = computeCallTimelineNotices(
+			[activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR })],
+			HOUR / 2,
+		);
+		expect(syntheticLeaves).toEqual([]);
+		// The timeline should re-evaluate at the membership's expiry.
+		expect(nextExpiry).toBe(HOUR);
+	});
+
+	it("a refresh extends the expiry so no premature synthetic leave fires", () => {
+		// Join at 0 (expiry 1h), refresh at 50m (new expiry 50m+1h = 110m).
+		const { syntheticLeaves, suppressed, nextExpiry } =
+			computeCallTimelineNotices(
+				[
+					activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR }),
+					activeEvent("r1", "@alice:test", "A", 50 * 60 * 1000, {
+						expires: HOUR,
+						refresh: true,
+					}),
+				],
+				HOUR + 5 * 60 * 1000, // 65m: past the original expiry, before the refreshed one
+			);
+		expect(syntheticLeaves).toEqual([]);
+		expect(suppressed.size).toBe(0);
+		expect(nextExpiry).toBe(50 * 60 * 1000 + HOUR);
+	});
+
+	it("an explicit leave before expiry renders (no synthetic, not suppressed)", () => {
+		const { syntheticLeaves, suppressed } = computeCallTimelineNotices(
+			[
+				activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR }),
+				leaveEvent("l1", "@alice:test", "A", HOUR / 2),
+			],
+			2 * HOUR,
+		);
+		expect(syntheticLeaves).toEqual([]);
+		expect(suppressed.size).toBe(0);
+	});
+
+	it("anchors a multi-device expiry leave at the last device's expiry", () => {
+		// Alice on A (expiry 1h) and B (expiry 90m); both lapse, last is B.
+		const { syntheticLeaves } = computeCallTimelineNotices(
+			[
+				activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR }),
+				activeEvent("j2", "@alice:test", "B", 0, { expires: 90 * 60 * 1000 }),
+			],
+			2 * HOUR,
+		);
+		expect(syntheticLeaves).toEqual([
+			{ userId: "@alice:test", deviceId: "B", expiresAt: 90 * 60 * 1000 },
+		]);
+	});
+
+	it("does not suppress a later explicit leave once another device has expired", () => {
+		// A expires at 1h with no leave event; B explicitly leaves at 90m.
+		// B's leave is the user's real last departure → must render. (The
+		// simultaneous B join is a per-device duplicate and is suppressed.)
+		const { syntheticLeaves, suppressed } = computeCallTimelineNotices(
+			[
+				activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR }),
+				activeEvent("j2", "@alice:test", "B", 0, { expires: 3 * HOUR }),
+				leaveEvent("l2", "@alice:test", "B", 90 * 60 * 1000),
+			],
+			2 * HOUR,
+		);
+		expect([...suppressed]).toEqual(["j2"]);
+		expect(suppressed.has("l2")).toBe(false);
+		expect(syntheticLeaves).toEqual([]);
+	});
+
+	it("suppresses a redundant explicit leave after the device already expired", () => {
+		// A expires at 1h; a late explicit leave for A arrives at 90m.
+		const { syntheticLeaves, suppressed } = computeCallTimelineNotices(
+			[
+				activeEvent("j1", "@alice:test", "A", 0, { expires: HOUR }),
+				leaveEvent("l1", "@alice:test", "A", 90 * 60 * 1000),
+			],
+			2 * HOUR,
+		);
+		// The expiry leave at 1h is surfaced; the late explicit leave is hidden.
+		expect(syntheticLeaves).toEqual([
+			{ userId: "@alice:test", deviceId: "A", expiresAt: HOUR },
+		]);
+		expect([...suppressed]).toEqual(["l1"]);
+	});
+
+	it("renders an explicit leave whose join is before the loaded window", () => {
+		// Only the leave is loaded (the join scrolled off the top). The device
+		// was never seen as active in-window, so the leave must NOT be
+		// suppressed — it's the user's real departure.
+		const { syntheticLeaves, suppressed, nextExpiry } =
+			computeCallTimelineNotices(
+				[leaveEvent("l1", "@alice:test", "A", 90 * 60 * 1000)],
+				2 * HOUR,
+			);
+		expect(suppressed.size).toBe(0);
+		expect(syntheticLeaves).toEqual([]);
+		expect(nextExpiry).toBeNull();
+	});
+
+	it("suppresses an out-of-window leave while the user is still live on another device", () => {
+		// Device B joins in-window (live); device A's join is before the window
+		// (never seen), and A's leave arrives while B is still live. The leave is
+		// premature — the user is still in the call — so it must be suppressed.
+		const { syntheticLeaves, suppressed } = computeCallTimelineNotices(
+			[
+				activeEvent("jB", "@alice:test", "B", 0, { expires: 10 * HOUR }),
+				leaveEvent("lA", "@alice:test", "A", 30 * 60 * 1000),
+			],
+			HOUR,
+		);
+		expect([...suppressed]).toEqual(["lA"]);
+		expect(syntheticLeaves).toEqual([]);
+	});
+
+	it("never synthesizes a leave for legacy / device-less membership shapes", () => {
+		// Legacy nested shape has no per-device expiry; only explicit leaves.
+		const legacy = makeEvent({
+			type: CALL,
+			id: "j1",
+			sender: "@alice:test",
+			ts: 0,
+			content: { "m.calls": [{ "m.call_id": "x" }] },
+			prevContent: {},
+		});
+		const { syntheticLeaves, nextExpiry } = computeCallTimelineNotices(
+			[legacy],
+			10 * HOUR,
+		);
+		expect(syntheticLeaves).toEqual([]);
+		expect(nextExpiry).toBeNull();
+	});
+
+	it("treats a real event at exactly a device's expiry as winning the tie", () => {
+		// B's membership expires at exactly 1h; A's explicit leave is also at 1h.
+		// The real leave at 1h is processed first, so A is the last departure and
+		// renders; B then expires but the user is already gone → no double leave.
+		const { syntheticLeaves, suppressed } = computeCallTimelineNotices(
+			[
+				activeEvent("j1", "@alice:test", "A", 0, { expires: 2 * HOUR }),
+				activeEvent("j2", "@alice:test", "B", 0, { expires: HOUR }),
+				leaveEvent("l1", "@alice:test", "A", HOUR),
+			],
+			3 * HOUR,
+		);
+		// A leaves explicitly at 1h while B is still (barely) live → premature,
+		// suppressed; B then lapses by expiry at 1h → synthetic leave for B.
+		// (B's simultaneous duplicate join is suppressed too.)
+		expect([...suppressed].sort()).toEqual(["j2", "l1"]);
+		expect(syntheticLeaves).toEqual([
+			{ userId: "@alice:test", deviceId: "B", expiresAt: HOUR },
+		]);
 	});
 });

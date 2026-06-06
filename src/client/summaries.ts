@@ -105,96 +105,125 @@ function* iterValidCallMemberships(
 	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);
 	if (events.length === 0) return;
 	for (const ev of events) {
-		const content = ev.getContent() as {
-			application?: unknown;
-			call_id?: unknown;
-			device_id?: unknown;
-			focus_active?: { type?: unknown };
-			foci_preferred?: unknown;
-			created_ts?: number;
-			expires?: number;
-			[k: string]: unknown;
-		};
-		const keys = Object.keys(content);
-		// Empty / tombstone events mean "left the call".
-		if (keys.length === 0) continue;
-		// Only the modern flat per-device MSC4143 shape (application + flat
-		// keys) is considered. The deprecated `{ memberships: [...] }` shape
-		// is intentionally ignored to match matrix-js-sdk behavior; stale
-		// events of that shape commonly linger in room state.
-		if (keys.length <= 1 || content.application !== "m.call") continue;
-		// Mirror matrix-js-sdk's `checkSessionsMembershipData`: require the
-		// fields the SDK treats as mandatory so malformed events don't light
-		// the indicator.
-		if (
-			typeof content.call_id !== "string" ||
-			typeof content.device_id !== "string" ||
-			typeof content.focus_active?.type !== "string"
-		) {
-			continue;
-		}
-		// Only count memberships for the default room call slot. The SDK's
-		// `MatrixRTCSessionManager` filters by `slotDescription.id === "ROOM"`,
-		// with a back-compat shim that treats empty-string `call_id` as
-		// `"ROOM"` (see `CallMembership.slotId`). Memberships with any other
-		// `call_id` (e.g. nested breakout sessions) are ignored — they belong
-		// to a different RTC session, not the room's primary call.
-		if (content.call_id !== "" && content.call_id !== "ROOM") continue;
-		// `foci_preferred` is optional, but if present must be an array of
-		// `{ type: string, ... }` transport objects (matches SDK).
-		if (content.foci_preferred !== undefined) {
-			if (!Array.isArray(content.foci_preferred)) continue;
-			let fociValid = true;
-			for (const f of content.foci_preferred) {
-				if (
-					typeof f !== "object" ||
-					f === null ||
-					typeof (f as { type?: unknown }).type !== "string"
-				) {
-					fociValid = false;
-					break;
-				}
-			}
-			if (!fociValid) continue;
-		}
-		// Mirror SDK `checkSessionsMembershipData`: if `created_ts`, `scope`,
-		// or `m.call.intent` are present they must be of the expected type;
-		// otherwise the SDK rejects the event entirely. (The SDK does NOT
-		// type-check `expires` — see the longer note at the expiry-calc step
-		// below for what happens with non-numeric `expires`.)
-		if (
-			content.created_ts !== undefined &&
-			typeof content.created_ts !== "number"
-		) {
-			continue;
-		}
-		if (content.scope !== undefined && typeof content.scope !== "string") {
-			continue;
-		}
-		const callIntent = (content as Record<string, unknown>)["m.call.intent"];
-		if (callIntent !== undefined && typeof callIntent !== "string") {
-			continue;
-		}
-		const createdTs = content.created_ts ?? ev.getTs();
-		// Mirror SDK exactly: `data.expires ?? DEFAULT_EXPIRE_DURATION`. The
-		// SDK does NOT type-check `expires`, so a non-numeric runtime value
-		// (e.g. `"garbage"`, `{}`) flows through. When that happens
-		// `createdTs + expires` produces a string via JS coercion; the
-		// subsequent `<= now` comparison coerces that string to a number
-		// (typically NaN), and any NaN comparison is `false` — so the
-		// membership is treated as not-expired. This matches SDK behavior
-		// because the SDK's `isExpired()` uses the same arithmetic on the
-		// same untyped value and arrives at the same result.
-		const expires = content.expires ?? DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS;
-		const expiresAt = (createdTs as number) + (expires as number);
-		if ((expiresAt as unknown as number) <= now) continue;
+		const expiresAt = callMembershipExpiresAt(ev);
+		// Not a valid modern flat ROOM-slot membership (empty/tombstone,
+		// legacy shape, or malformed) — ignore.
+		if (expiresAt === null) continue;
+		// `expiresAt` may be NaN when `expires` is non-numeric; `NaN <= now`
+		// is `false`, so such memberships are treated as never-expiring, which
+		// matches the SDK's `isExpired()` arithmetic (see the note in
+		// `callMembershipExpiresAt`).
+		if (expiresAt <= now) continue;
 		// Skip memberships from users who are no longer joined to the room.
 		// Also skip events with no sender (SDK rejects these in
 		// `CallMembership.membershipDataFromMatrixEvent`).
 		const sender = ev.getSender();
 		if (!sender || room.getMember(sender)?.membership !== "join") continue;
-		yield { expiresAt: expiresAt as unknown as number };
+		yield { expiresAt };
 	}
+}
+
+/**
+ * Absolute expiry timestamp (ms since epoch) for a single MatrixRTC
+ * `org.matrix.msc3401.call.member` event's content — `created_ts +
+ * (expires ?? 4h)` — or `null` when the content is not a valid modern
+ * MSC4143 flat ROOM-slot membership (empty/tombstone, legacy
+ * `{ memberships: [...] }` / `{ m.calls: [...] }` shape, or malformed).
+ *
+ * Validation mirrors matrix-js-sdk's `checkSessionsMembershipData` exactly so
+ * the timeline's expiry-leave synthesis (`computeCallTimelineNotices`) and the
+ * call-active indicator (`iterValidCallMemberships`) agree on which
+ * memberships can expire and when.
+ *
+ * The returned value may be non-finite (NaN) when `expires` is present but
+ * non-numeric: the SDK does not type-check `expires`, so `createdTs + expires`
+ * coerces to NaN and any `<= now` comparison against it is `false` — i.e. the
+ * membership is treated as never-expiring, matching the SDK's `isExpired()`.
+ */
+export function callMembershipExpiresAt(ev: MatrixEvent): number | null {
+	const content = ev.getContent() as {
+		application?: unknown;
+		call_id?: unknown;
+		device_id?: unknown;
+		focus_active?: { type?: unknown };
+		foci_preferred?: unknown;
+		created_ts?: number;
+		expires?: number;
+		[k: string]: unknown;
+	};
+	const keys = Object.keys(content);
+	// Empty / tombstone events mean "left the call".
+	if (keys.length === 0) return null;
+	// Only the modern flat per-device MSC4143 shape (application + flat keys)
+	// is considered. The deprecated `{ memberships: [...] }` shape is
+	// intentionally ignored to match matrix-js-sdk behavior; stale events of
+	// that shape commonly linger in room state.
+	if (keys.length <= 1 || content.application !== "m.call") return null;
+	// Mirror matrix-js-sdk's `checkSessionsMembershipData`: require the fields
+	// the SDK treats as mandatory so malformed events don't light the
+	// indicator.
+	if (
+		typeof content.call_id !== "string" ||
+		typeof content.device_id !== "string" ||
+		typeof content.focus_active?.type !== "string"
+	) {
+		return null;
+	}
+	// Only count memberships for the default room call slot. The SDK's
+	// `MatrixRTCSessionManager` filters by `slotDescription.id === "ROOM"`,
+	// with a back-compat shim that treats empty-string `call_id` as `"ROOM"`
+	// (see `CallMembership.slotId`). Memberships with any other `call_id`
+	// (e.g. nested breakout sessions) are ignored — they belong to a different
+	// RTC session, not the room's primary call.
+	if (content.call_id !== "" && content.call_id !== "ROOM") return null;
+	// `foci_preferred` is optional, but if present must be an array of
+	// `{ type: string, ... }` transport objects (matches SDK).
+	if (content.foci_preferred !== undefined) {
+		if (!Array.isArray(content.foci_preferred)) return null;
+		for (const f of content.foci_preferred) {
+			if (
+				typeof f !== "object" ||
+				f === null ||
+				typeof (f as { type?: unknown }).type !== "string"
+			) {
+				return null;
+			}
+		}
+	}
+	// Mirror SDK `checkSessionsMembershipData`: if `created_ts`, `scope`, or
+	// `m.call.intent` are present they must be of the expected type; otherwise
+	// the SDK rejects the event entirely. (The SDK does NOT type-check
+	// `expires` — see the note above for non-numeric `expires`.)
+	if (
+		content.created_ts !== undefined &&
+		typeof content.created_ts !== "number"
+	) {
+		return null;
+	}
+	if (content.scope !== undefined && typeof content.scope !== "string") {
+		return null;
+	}
+	const callIntent = (content as Record<string, unknown>)["m.call.intent"];
+	if (callIntent !== undefined && typeof callIntent !== "string") {
+		return null;
+	}
+	const createdTs = content.created_ts ?? ev.getTs();
+	// The SDK does not type-check `expires`. Mirror its `expires ?? 4h`: a
+	// nullish value (absent or null) uses the 4h default, a number is used
+	// as-is, and any other (non-numeric) value becomes NaN so this function
+	// honors its `number | null` return type rather than leaking a string via
+	// `number + string` concatenation. NaN flows through as never-expiring
+	// everywhere: `NaN <= now` is false (treated live) and
+	// `Number.isFinite(NaN)` is false (excluded from expiry scheduling),
+	// matching the SDK's `isExpired()` arithmetic.
+	const rawExpires: unknown = content.expires;
+	const expires =
+		rawExpires === undefined || rawExpires === null
+			? DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS
+			: typeof rawExpires === "number"
+				? rawExpires
+				: Number.NaN;
+	return (createdTs as number) + expires;
 }
 
 export type SummariesStore = Record<string, RoomSummary>;

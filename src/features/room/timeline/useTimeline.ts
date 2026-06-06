@@ -13,13 +13,21 @@ import {
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
+import {
+	createServerTimeTracker,
+	MATERIAL_OFFSET_CHANGE_MS,
+} from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { extractGifUrl } from "../../gif/gifUrl";
-import type { MembershipTransition, StateNotice } from "./stateNotice";
+import type {
+	MembershipTransition,
+	StateNotice,
+	SyntheticCallLeave,
+} from "./stateNotice";
 import {
 	buildMembershipTransition,
 	buildStateNotice,
-	computeSuppressedCallEventIds,
+	computeCallTimelineNotices,
 	isStateNoticeType,
 } from "./stateNotice";
 
@@ -129,6 +137,129 @@ function hasControlChar(s: string): boolean {
 		if (c < 0x20 || c === 0x7f) return true;
 	}
 	return false;
+}
+
+/**
+ * Synthetic event-ID prefix for a "left the call" notice that has no backing
+ * `MatrixEvent` (the membership lapsed by expiry). Real Matrix event IDs start
+ * with `$`, so this `~` prefix can never collide, and the full key is stable
+ * across rebuilds (same user + device + expiry) so the Solid store reconcile
+ * and group-expansion state survive re-evaluation.
+ */
+const SYNTHETIC_CALL_LEAVE_PREFIX = "~call-expiry-leave:";
+
+function syntheticCallLeaveId(leave: SyntheticCallLeave): string {
+	// userId (always) and deviceId (possibly) contain `:`, so encode each
+	// variable segment to keep the key collision-free for Solid's reconcile.
+	return `${SYNTHETIC_CALL_LEAVE_PREFIX}${encodeURIComponent(leave.userId)}:${encodeURIComponent(leave.deviceId)}:${leave.expiresAt}`;
+}
+
+function isSyntheticEventId(eventId: string): boolean {
+	return eventId.startsWith(SYNTHETIC_CALL_LEAVE_PREFIX);
+}
+
+/**
+ * Trim the oldest rows from the live-append store until the number of real
+ * (non-synthetic) rows is within `limit`. Synthetic expiry-leave rows are not
+ * part of the `TimelineWindow` and so don't count toward its limit, but any
+ * that fall within the trimmed leading run are removed too.
+ */
+function capStoreToRealLimit(draft: TimelineEvent[], limit: number): void {
+	let realCount = 0;
+	for (const r of draft) if (!isSyntheticEventId(r.eventId)) realCount++;
+	let excess = realCount - limit;
+	if (excess <= 0) return;
+	let cut = 0;
+	while (cut < draft.length && excess > 0) {
+		if (!isSyntheticEventId(draft[cut].eventId)) excess--;
+		cut++;
+	}
+	if (cut > 0) draft.splice(0, cut);
+}
+
+/**
+ * Two-pointer merge of `inserts` into `base`, both ascending by `timestamp`.
+ * An insert sorts *after* any base row sharing its timestamp: a row is emitted
+ * before `ev` only when its timestamp is strictly less than `ev.timestamp`, so
+ * an insert equal to `ev` is deferred until the next strictly-greater base row
+ * (or the tail, when it has no later base row). Returns a new array; neither
+ * input is mutated. Used to splice synthetic expiry-leave notices into the
+ * chronological displayable list at their anchor timestamp.
+ */
+export function mergeRowsByTimestamp(
+	base: readonly TimelineEvent[],
+	inserts: readonly TimelineEvent[],
+): TimelineEvent[] {
+	if (inserts.length === 0) return base.slice();
+	const out: TimelineEvent[] = [];
+	let i = 0;
+	for (const ev of base) {
+		while (i < inserts.length && inserts[i].timestamp < ev.timestamp) {
+			out.push(inserts[i]);
+			i++;
+		}
+		out.push(ev);
+	}
+	while (i < inserts.length) {
+		out.push(inserts[i]);
+		i++;
+	}
+	return out;
+}
+
+/**
+ * Build a displayable `TimelineEvent` for a synthesized expiry-based
+ * "left the call" notice. Resolves the subject name and avatar from current
+ * room state (call-member events carry no profile data), mirroring
+ * `callMemberNotice` / `callMemberAvatarUrl` in `stateNotice.ts`. All
+ * media/reaction/edit fields are neutral defaults — this row only ever renders
+ * as a grouped membership notice.
+ */
+function buildSyntheticCallLeaveEvent(
+	leave: SyntheticCallLeave,
+	room: Room,
+	client: MatrixClient,
+): TimelineEvent {
+	const member = room.getMember(leave.userId);
+	const subject = member?.name?.trim() || leave.userId;
+	const mxc = member?.getMxcAvatarUrl?.() ?? "";
+	const avatarUrl = mxc
+		? (client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null)
+		: null;
+	return {
+		eventId: syntheticCallLeaveId(leave),
+		senderId: leave.userId,
+		senderName: subject,
+		timestamp: leave.expiresAt,
+		type: CALL_MEMBER_EVENT_TYPE,
+		msgtype: "",
+		body: "",
+		format: null,
+		formattedBody: null,
+		imageUrl: null,
+		imageWidth: null,
+		imageHeight: null,
+		imageFullUrl: null,
+		imageMimetype: null,
+		imageSize: null,
+		imageFilename: null,
+		imageIsEncrypted: false,
+		isEncrypted: false,
+		isDecryptionFailure: false,
+		isEdited: false,
+		// Null-prototype maps for consistency with eventToTimelineEvent and to
+		// keep reaction-key lookups safe from prototype-pollution edge cases.
+		reactions: Object.create(null) as TimelineEvent["reactions"],
+		myReactions: Object.create(null) as TimelineEvent["myReactions"],
+		status: null,
+		stateNotice: { text: `${subject} left the call`, icon: "leave" },
+		membershipTransition: {
+			kind: "call_leave",
+			userId: leave.userId,
+			subject,
+			avatarUrl,
+		},
+	};
 }
 
 function eventToTimelineEvent(
@@ -637,6 +768,45 @@ export function useTimeline(
 	// forward by this count to capture the deferred events.
 	let deferredLiveCount = 0;
 
+	// Server-clock tracker so expiry-based call-leave synthesis is robust to
+	// client clock skew (the homeserver populated `created_ts` / `expires`
+	// against its own clock). Seeded from window events on every rebuild and
+	// updated from live events; latest sample wins (see `serverTime.ts`).
+	const serverTime = createServerTimeTracker();
+
+	// Single pending timer that re-runs `rebuildEventsFromWindow` when the next
+	// known MatrixRTC membership expires, so a synthetic "left the call" notice
+	// appears the moment the membership lapses (no follow-up event arrives).
+	// Guarded by `roomGeneration` so a timer armed before a room switch is
+	// ignored when it fires.
+	let callExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+	// `setTimeout` delays must fit in a signed 32-bit int; clamp defensively.
+	const MAX_TIMEOUT_DELAY = 2_147_483_647;
+	// Small grace so the timer fires after `now > expiresAt`, not exactly at
+	// it, and the re-evaluation reliably sees the membership as expired.
+	const CALL_EXPIRY_GRACE_MS = 50;
+
+	function clearCallExpiryTimer(): void {
+		if (callExpiryTimer !== null) {
+			clearTimeout(callExpiryTimer);
+			callExpiryTimer = null;
+		}
+	}
+
+	function scheduleCallExpiryRefresh(room: Room, nextExpiry: number): void {
+		clearCallExpiryTimer();
+		const gen = roomGeneration;
+		const delay = Math.min(
+			Math.max(0, nextExpiry - serverTime.now() + CALL_EXPIRY_GRACE_MS),
+			MAX_TIMEOUT_DELAY,
+		);
+		callExpiryTimer = setTimeout(() => {
+			callExpiryTimer = null;
+			if (roomGeneration !== gen || currentRoomId !== room.roomId) return;
+			rebuildEventsFromWindow(room);
+		}, delay);
+	}
+
 	/** Find a raw MatrixEvent in the current window by ID */
 	function findWindowEvent(eventId: string): MatrixEvent | undefined {
 		if (!currentTimelineWindow) return undefined;
@@ -647,13 +817,45 @@ export function useTimeline(
 	function rebuildEventsFromWindow(room: Room): void {
 		if (!currentTimelineWindow) return;
 		const matrixEvents = currentTimelineWindow.getEvents();
+		// Seed/refresh the server-clock offset from the loaded window before
+		// computing expiry, so the first paint uses the corrected clock.
+		for (const e of matrixEvents) serverTime.sampleFromEvent(e);
 		// Per-device call memberships are reconciled into per-user liveness so
-		// duplicate joins / premature leaves are hidden (#215).
-		const suppressedCallIds = computeSuppressedCallEventIds(matrixEvents);
+		// duplicate joins / premature leaves are hidden, and memberships that
+		// lapsed by expiry with no follow-up event get a synthesized
+		// "left the call" notice (#215 / #219).
+		const now = serverTime.now();
+		const { suppressed, syntheticLeaves, nextExpiry } =
+			computeCallTimelineNotices(matrixEvents, now);
 		const displayable = matrixEvents
-			.filter((e) => isDisplayable(e, room, suppressedCallIds) && e.getId())
-			.map((e) => eventToTimelineEvent(e, room, client, suppressedCallIds));
-		setEvents(reconcile(displayable, { key: "eventId", merge: false }));
+			.filter((e) => isDisplayable(e, room, suppressed) && e.getId())
+			.map((e) => eventToTimelineEvent(e, room, client, suppressed));
+		// Merge synthetic expiry leaves (sorted ascending by `expiresAt`) into
+		// the chronological displayable list. A synthetic leave is placed after
+		// any real event sharing its timestamp so an explicit event at the same
+		// instant renders first.
+		const merged = mergeSyntheticLeaves(displayable, syntheticLeaves, room);
+		setEvents(reconcile(merged, { key: "eventId", merge: false }));
+
+		clearCallExpiryTimer();
+		if (nextExpiry !== null) scheduleCallExpiryRefresh(room, nextExpiry);
+	}
+
+	/**
+	 * Merge `synthetic` expiry-leave notices into the already chronological
+	 * `displayable` list. Synthetic rows sort after real rows at an equal
+	 * timestamp (see {@link mergeRowsByTimestamp}).
+	 */
+	function mergeSyntheticLeaves(
+		displayable: TimelineEvent[],
+		synthetic: readonly SyntheticCallLeave[],
+		room: Room,
+	): TimelineEvent[] {
+		if (synthetic.length === 0) return displayable;
+		const built = synthetic
+			.map((leave) => buildSyntheticCallLeaveEvent(leave, room, client))
+			.sort((a, b) => a.timestamp - b.timestamp);
+		return mergeRowsByTimestamp(displayable, built);
 	}
 
 	/** Remove store events that the window has evicted from its backward end.
@@ -670,15 +872,34 @@ export function useTimeline(
 			const id = e.getId();
 			if (id) windowIds.add(id);
 		}
+		// Oldest timestamp still in the window. A synthetic expiry-leave row has
+		// no window id, so it's evicted by its anchor timestamp instead: kept
+		// while it's still within the window's time range, trimmed once the
+		// window has slid past it.
+		const oldestWindowTs = windowEvents[0]?.getTs() ?? Number.NEGATIVE_INFINITY;
 
 		setEvents(
 			produce((draft) => {
-				let trimTo = 0;
-				while (trimTo < draft.length && !windowIds.has(draft[trimTo].eventId)) {
-					trimTo++;
+				// The window holds the most recent slice of the timeline, so the
+				// store's evicted rows form a leading region ending at the first
+				// real row still in the window. Within that region, drop evicted
+				// real rows and synthetic rows anchored before the window; keep
+				// synthetic rows still in range. Rows from the boundary onward are
+				// all in-window reals or later (in-range) synthetics.
+				let boundary = draft.length;
+				for (let i = 0; i < draft.length; i++) {
+					const id = draft[i].eventId;
+					if (!isSyntheticEventId(id) && windowIds.has(id)) {
+						boundary = i;
+						break;
+					}
 				}
-				if (trimTo > 0) {
-					draft.splice(0, trimTo);
+				for (let i = boundary - 1; i >= 0; i--) {
+					const row = draft[i];
+					const evicted = isSyntheticEventId(row.eventId)
+						? row.timestamp < oldestWindowTs
+						: true;
+					if (evicted) draft.splice(i, 1);
 				}
 			}),
 		);
@@ -698,6 +919,9 @@ export function useTimeline(
 		currentTimelineWindow = null;
 		deferredLiveCount = 0;
 		followingLive = true;
+		// Drop any pending expiry-leave timer from the previous room; the new
+		// room re-arms its own from the first rebuild.
+		clearCallExpiryTimer();
 		setLoading(true);
 		setLoadingOlder(false);
 		setLoadingNewer(false);
@@ -1209,6 +1433,14 @@ export function useTimeline(
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
 
+		// Keep the server-clock offset fresh from live traffic so call-leave
+		// expiry math (below / on the rebuild timer) tracks the homeserver.
+		const offsetBefore = serverTime.getOffsetMs();
+		serverTime.sampleFromEvent(event);
+		const offsetChangedMaterially =
+			Math.abs(serverTime.getOffsetMs() - offsetBefore) >=
+			MATERIAL_OFFSET_CHANGE_MS;
+
 		// Only extend the window when following live. When the user has
 		// scrolled up, withhold new events to keep the window stable and
 		// prevent eviction of events the user is viewing.
@@ -1219,6 +1451,17 @@ export function useTimeline(
 			// Track that the window is behind live for ANY skipped event
 			// (displayable, reaction, edit, state), not just displayable ones.
 			setCanLoadNewer(true);
+		}
+
+		// A material server-clock correction (e.g. the loaded window lacked
+		// `unsigned.age` so the offset was 0, and this live event finally
+		// supplies it) invalidates the already-armed expiry timer's delay and
+		// can flip whether a membership reads as expired. Rebuild from the
+		// (now-extended) window so synthetic leaves and the timer are recomputed
+		// against the corrected clock; this also displays the just-arrived event.
+		if (offsetChangedMaterially && followingLive && currentTimelineWindow) {
+			rebuildEventsFromWindow(room);
+			return;
 		}
 
 		// Handle reaction events by updating the target message's reactions
@@ -1262,20 +1505,46 @@ export function useTimeline(
 			return;
 		}
 
-		// Per-device call memberships are reconciled into per-user liveness so a
-		// duplicate join / premature leave that arrives live is hidden, matching
-		// the bulk rebuild (#215). Liveness is causal, so deciding the new event
-		// from the full window never changes an already-rendered prior event.
-		let suppressedCallIds: ReadonlySet<string> | undefined;
-		if (event.getType() === CALL_MEMBER_EVENT_TYPE && currentTimelineWindow) {
-			const windowEvents = currentTimelineWindow.getEvents();
-			const ordered = windowEvents.some((e) => e === event)
-				? windowEvents
-				: [...windowEvents, event];
-			suppressedCallIds = computeSuppressedCallEventIds(ordered);
+		// A live MatrixRTC call-member event can change both per-user liveness
+		// (suppressed duplicate joins / premature leaves) and the set of
+		// synthesized expiry leaves, so recompute the whole window — rather
+		// than incrementally pushing a single row — to keep notices and the
+		// expiry timer consistent with the bulk rebuild (#215 / #219).
+		// Liveness is causal, so this never rewrites a correct earlier row.
+		if (event.getType() === CALL_MEMBER_EVENT_TYPE) {
+			if (followingLive && currentTimelineWindow) {
+				rebuildEventsFromWindow(room);
+				return;
+			}
+			// Degraded (scrolled up, or no window after a failed load): fall
+			// back to single-event suppression so a duplicate/premature live
+			// leave is still hidden; synthetic expiry leaves are recomputed on
+			// the next full rebuild.
+			let suppressedCallIds: ReadonlySet<string> | undefined;
+			if (currentTimelineWindow) {
+				const windowEvents = currentTimelineWindow.getEvents();
+				const ordered = windowEvents.some((e) => e === event)
+					? windowEvents
+					: [...windowEvents, event];
+				suppressedCallIds = computeCallTimelineNotices(
+					ordered,
+					serverTime.now(),
+				).suppressed;
+			}
+			if (!isDisplayable(event, room, suppressedCallIds)) return;
+			if (!event.getId() || !followingLive) return;
+			setEvents(
+				produce((draft) => {
+					draft.push(
+						eventToTimelineEvent(event, room, client, suppressedCallIds),
+					);
+					capStoreToRealLimit(draft, windowLimit);
+				}),
+			);
+			return;
 		}
 
-		if (!isDisplayable(event, room, suppressedCallIds)) {
+		if (!isDisplayable(event, room)) {
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {
@@ -1304,15 +1573,11 @@ export function useTimeline(
 
 		setEvents(
 			produce((draft) => {
-				draft.push(
-					eventToTimelineEvent(event, room, client, suppressedCallIds),
-				);
+				draft.push(eventToTimelineEvent(event, room, client));
 				// Keep the store bounded to match the TimelineWindow's limit.
 				// The window evicts internally, but the store is updated
 				// independently for live events.
-				if (draft.length > windowLimit) {
-					draft.splice(0, draft.length - windowLimit);
-				}
+				capStoreToRealLimit(draft, windowLimit);
 			}),
 		);
 	}
@@ -1560,6 +1825,7 @@ export function useTimeline(
 	client.on(RoomMemberEvent.Typing, onTyping);
 
 	onCleanup(() => {
+		clearCallExpiryTimer();
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
 		client.off(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
