@@ -236,8 +236,10 @@ export interface CallTimelineNotices {
 	suppressed: Set<string>;
 	/**
 	 * Synthetic "left the call" notices for memberships that lapsed by expiry
-	 * (as of `now`) without a follow-up event — one per user, anchored at the
-	 * moment their last live device expired.
+	 * (as of `now`) without a follow-up event — one per expiry-based departure
+	 * (per user, per lapse), anchored at the moment that user's last live device
+	 * expired. A user who lapses, rejoins, then lapses again within the window
+	 * therefore yields more than one entry.
 	 */
 	syntheticLeaves: SyntheticCallLeave[];
 	/**
