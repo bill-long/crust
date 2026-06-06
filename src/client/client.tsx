@@ -73,9 +73,15 @@ interface ClientContextValue {
 	 * recovery key input dialog should call setRecoveryKeyResolver to
 	 * register themselves.
 	 */
-	requestRecoveryKey: () => Promise<Uint8Array<ArrayBuffer> | null>;
+	requestRecoveryKey: (
+		validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
+	) => Promise<Uint8Array<ArrayBuffer> | null>;
 	setRecoveryKeyResolver: (
-		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
+		resolver:
+			| ((
+					validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
+			  ) => Promise<Uint8Array<ArrayBuffer> | null>)
+			| null,
 	) => void;
 	/** Clear cached secret storage key so the next access re-prompts.
 	 *  Call from error handlers when a secret-storage operation fails. */
@@ -106,24 +112,33 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		cachedSecretStorageKey = null;
 	};
 
-	// Pluggable resolver for when the user needs to enter their recovery key
+	// Pluggable resolver for when the user needs to enter their recovery key.
+	// The optional validate callback lets the dialog reject a well-formed but
+	// incorrect key (and re-prompt) before it is used to encrypt secrets.
 	let recoveryKeyResolver:
-		| (() => Promise<Uint8Array<ArrayBuffer> | null>)
+		| ((
+				validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
+		  ) => Promise<Uint8Array<ArrayBuffer> | null>)
 		| null = null;
 
 	const setRecoveryKeyResolver = (
-		resolver: (() => Promise<Uint8Array<ArrayBuffer> | null>) | null,
+		resolver:
+			| ((
+					validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
+			  ) => Promise<Uint8Array<ArrayBuffer> | null>)
+			| null,
 	): void => {
 		recoveryKeyResolver = resolver;
 	};
 
-	const requestRecoveryKey =
-		async (): Promise<Uint8Array<ArrayBuffer> | null> => {
-			if (recoveryKeyResolver) {
-				return recoveryKeyResolver();
-			}
-			return null;
-		};
+	const requestRecoveryKey = async (
+		validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
+	): Promise<Uint8Array<ArrayBuffer> | null> => {
+		if (recoveryKeyResolver) {
+			return recoveryKeyResolver(validate);
+		}
+		return null;
+	};
 
 	const matrixClient = createClient({
 		baseUrl: props.session.homeserverUrl,
@@ -146,10 +161,6 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 					return [cachedSecretStorageKeyId, cachedSecretStorageKey];
 				}
 
-				// Prompt user for recovery key
-				const key = await requestRecoveryKey();
-				if (!key) return null;
-
 				// Prefer the account's default key ID; fall back to first available
 				const availableKeys = Object.keys(opts.keys);
 				if (availableKeys.length === 0) return null;
@@ -159,6 +170,23 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 					defaultKeyId && defaultKeyId in opts.keys
 						? defaultKeyId
 						: availableKeys[0];
+				const keyInfo = opts.keys[keyId];
+
+				// Prompt user for recovery key, validating it against the chosen
+				// key's metadata before it is used to encrypt/store secrets. A
+				// well-formed but incorrect key would otherwise corrupt existing
+				// secret storage when used on a write path (see issue #205).
+				const key = await requestRecoveryKey(async (candidate) => {
+					try {
+						return await matrixClient.secretStorage.checkKey(
+							candidate,
+							keyInfo,
+						);
+					} catch {
+						return false;
+					}
+				});
+				if (!key) return null;
 
 				// Cache for successive calls within the same operation
 				cachedSecretStorageKeyId = keyId;

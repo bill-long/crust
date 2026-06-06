@@ -22,31 +22,49 @@ const RecoveryKeyInput: Component = () => {
 	const [isPrompting, setIsPrompting] = createSignal(false);
 	const [inputValue, setInputValue] = createSignal("");
 	const [errorText, setErrorText] = createSignal("");
+	const [isChecking, setIsChecking] = createSignal(false);
 	const errorId = "recovery-key-error";
 
 	// All pending resolve functions for concurrent SDK requests
 	let pendingResolvers: Array<(key: Uint8Array<ArrayBuffer> | null) => void> =
 		[];
+	// Validator supplied with the first request of a batch; used to reject a
+	// well-formed but incorrect key before resolving (issue #205).
+	let pendingValidate:
+		| ((key: Uint8Array<ArrayBuffer>) => Promise<boolean>)
+		| null = null;
+	// Generation token: bumped whenever a prompt batch opens or settles, so an
+	// in-flight async validation from a superseded batch cannot resolve a newer
+	// one if the user cancels and a fresh SDK request arrives mid-check.
+	let batchId = 0;
 
 	const resolveWith = (key: Uint8Array<ArrayBuffer> | null): void => {
 		const resolvers = pendingResolvers;
 		pendingResolvers = [];
+		pendingValidate = null;
+		batchId++;
 		setIsPrompting(false);
 		setInputValue("");
 		setErrorText("");
+		setIsChecking(false);
 		for (const resolve of resolvers) {
 			resolve(key);
 		}
 	};
 
-	const resolver = (): Promise<Uint8Array<ArrayBuffer> | null> => {
+	const resolver = (
+		validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
+	): Promise<Uint8Array<ArrayBuffer> | null> => {
 		return new Promise((resolve) => {
 			pendingResolvers.push(resolve);
 			if (pendingResolvers.length === 1) {
 				// First request — show the dialog
+				pendingValidate = validate ?? null;
+				batchId++;
 				setIsPrompting(true);
 				setInputValue("");
 				setErrorText("");
+				setIsChecking(false);
 			}
 		});
 	};
@@ -61,21 +79,48 @@ const RecoveryKeyInput: Component = () => {
 		resolveWith(null);
 	});
 
-	const handleSubmit = (): void => {
+	const handleSubmit = async (): Promise<void> => {
+		if (isChecking()) return;
 		const raw = inputValue().replace(/\s+/g, " ").trim();
 		if (!raw) {
 			setErrorText("Please enter your recovery key.");
 			return;
 		}
 
+		let keyBytes: Uint8Array<ArrayBuffer>;
 		try {
-			const keyBytes = decodeRecoveryKey(raw);
-			resolveWith(keyBytes);
+			keyBytes = decodeRecoveryKey(raw);
 		} catch {
 			setErrorText(
 				"Invalid recovery key. Check that you entered it correctly.",
 			);
+			return;
 		}
+
+		const validate = pendingValidate;
+		if (validate) {
+			const submittedBatch = batchId;
+			setIsChecking(true);
+			let valid = false;
+			try {
+				valid = await validate(keyBytes);
+			} catch {
+				valid = false;
+			}
+			// A concurrent cancel/cleanup (and possibly a fresh SDK request)
+			// may have superseded this prompt while we were checking; bail out
+			// without resolving so we never hand a stale key to a newer batch.
+			if (batchId !== submittedBatch) return;
+			setIsChecking(false);
+			if (!valid) {
+				setErrorText(
+					"Incorrect recovery key. Check that you entered it correctly.",
+				);
+				return;
+			}
+		}
+
+		resolveWith(keyBytes);
 	};
 
 	const handleCancel = (): void => {
@@ -112,7 +157,7 @@ const RecoveryKeyInput: Component = () => {
 							setErrorText("");
 						}}
 						onKeyDown={(e) => {
-							if (e.key === "Enter") handleSubmit();
+							if (e.key === "Enter") void handleSubmit();
 						}}
 						placeholder="Enter your recovery key"
 						aria-label="Recovery key"
@@ -139,10 +184,13 @@ const RecoveryKeyInput: Component = () => {
 						</button>
 						<button
 							type="button"
-							onClick={handleSubmit}
+							onClick={() => void handleSubmit()}
+							aria-busy={isChecking()}
 							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 						>
-							Unlock
+							<Show when={isChecking()} fallback="Unlock">
+								Checking…
+							</Show>
 						</button>
 					</div>
 				</div>
