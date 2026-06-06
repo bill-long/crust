@@ -149,7 +149,9 @@ function hasControlChar(s: string): boolean {
 const SYNTHETIC_CALL_LEAVE_PREFIX = "~call-expiry-leave:";
 
 function syntheticCallLeaveId(leave: SyntheticCallLeave): string {
-	return `${SYNTHETIC_CALL_LEAVE_PREFIX}${leave.userId}:${leave.deviceId}:${leave.expiresAt}`;
+	// userId (always) and deviceId (possibly) contain `:`, so encode each
+	// variable segment to keep the key collision-free for Solid's reconcile.
+	return `${SYNTHETIC_CALL_LEAVE_PREFIX}${encodeURIComponent(leave.userId)}:${encodeURIComponent(leave.deviceId)}:${leave.expiresAt}`;
 }
 
 function isSyntheticEventId(eventId: string): boolean {

@@ -476,7 +476,7 @@ describe("useTimeline", () => {
 			).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
 			const synthetic = events[events.length - 1];
 			expect(synthetic.eventId).toBe(
-				`~call-expiry-leave:@alice:test:A:${expiresAt}`,
+				`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
 			);
 			expect(synthetic.timestamp).toBe(expiresAt);
 			expect(synthetic.membershipTransition?.kind).toBe("call_leave");
@@ -536,7 +536,7 @@ describe("useTimeline", () => {
 					events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
 				).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
 				expect(events[events.length - 1].eventId).toBe(
-					`~call-expiry-leave:@alice:test:A:${expiresAt}`,
+					`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
 				);
 			});
 		} finally {
@@ -606,7 +606,9 @@ describe("useTimeline", () => {
 			expect(events.some((e) => e.eventId === "$live")).toBe(true);
 			expect(
 				events.some(
-					(e) => e.eventId === `~call-expiry-leave:@alice:test:A:${expiresAt}`,
+					(e) =>
+						e.eventId ===
+						`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
 				),
 			).toBe(true);
 		});
