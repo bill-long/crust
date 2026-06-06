@@ -19,6 +19,7 @@ import type { MembershipTransition, StateNotice } from "./stateNotice";
 import {
 	buildMembershipTransition,
 	buildStateNotice,
+	computeSuppressedCallEventIds,
 	isStateNoticeType,
 } from "./stateNotice";
 
@@ -134,6 +135,7 @@ function eventToTimelineEvent(
 	event: MatrixEvent,
 	room: Room,
 	client: MatrixClient,
+	suppressedCallIds?: ReadonlySet<string>,
 ): TimelineEvent {
 	// `event.getContent()` auto-applies a replacing event's
 	// `m.new_content` regardless of the replacement's status. For
@@ -338,10 +340,16 @@ function eventToTimelineEvent(
 	// Pre-compute the one-line notice for state events (joins, name
 	// changes, etc.). Null for regular messages and for state events
 	// that carry no user-visible change (e.g. join->join with the
-	// same display name and avatar).
-	const stateNotice = isStateNoticeType(event.getType())
-		? buildStateNotice(event, room)
-		: null;
+	// same display name and avatar). A call-member event reconciled
+	// away as a per-device duplicate / premature leave is treated like
+	// a no-op transition so it never renders a notice (see #215).
+	const isSuppressedCall =
+		event.getType() === CALL_MEMBER_EVENT_TYPE &&
+		(suppressedCallIds?.has(event.getId() ?? "") ?? false);
+	const stateNotice =
+		!isSuppressedCall && isStateNoticeType(event.getType())
+			? buildStateNotice(event, room)
+			: null;
 	const membershipTransition =
 		stateNotice !== null &&
 		(event.getType() === "m.room.member" ||
@@ -381,7 +389,11 @@ function eventToTimelineEvent(
 	};
 }
 
-function isDisplayable(event: MatrixEvent, room: Room): boolean {
+function isDisplayable(
+	event: MatrixEvent,
+	room: Room,
+	suppressedCallIds?: ReadonlySet<string>,
+): boolean {
 	const type = event.getType();
 	const isStateNotice = isStateNoticeType(type);
 	if (
@@ -400,6 +412,14 @@ function isDisplayable(event: MatrixEvent, room: Room): boolean {
 	// profile change). This keeps the invariant that every displayable
 	// state event has a renderable text.
 	if (isStateNotice) {
+		// A call-member event reconciled away as a per-device duplicate /
+		// premature leave carries no notice, so it isn't displayable (#215).
+		if (
+			type === CALL_MEMBER_EVENT_TYPE &&
+			(suppressedCallIds?.has(event.getId() ?? "") ?? false)
+		) {
+			return false;
+		}
 		return buildStateNotice(event, room) !== null;
 	}
 	// Locally-redacted-pending events: matrix-js-sdk's `markLocallyRedacted`
@@ -627,9 +647,12 @@ export function useTimeline(
 	function rebuildEventsFromWindow(room: Room): void {
 		if (!currentTimelineWindow) return;
 		const matrixEvents = currentTimelineWindow.getEvents();
+		// Per-device call memberships are reconciled into per-user liveness so
+		// duplicate joins / premature leaves are hidden (#215).
+		const suppressedCallIds = computeSuppressedCallEventIds(matrixEvents);
 		const displayable = matrixEvents
-			.filter((e) => isDisplayable(e, room) && e.getId())
-			.map((e) => eventToTimelineEvent(e, room, client));
+			.filter((e) => isDisplayable(e, room, suppressedCallIds) && e.getId())
+			.map((e) => eventToTimelineEvent(e, room, client, suppressedCallIds));
 		setEvents(reconcile(displayable, { key: "eventId", merge: false }));
 	}
 
@@ -1005,6 +1028,16 @@ export function useTimeline(
 	}
 
 	function handleRedaction(room: Room, redactedId: string): void {
+		// Redacting a call-member event can change per-user liveness (e.g. the
+		// only visible join is redacted, so a previously-suppressed sibling
+		// device's join should now surface). The incremental path below only
+		// touches existing rows and can't restore a hidden sibling, so rebuild
+		// the whole window to recompute suppression (#215).
+		const redactedSource = findWindowEvent(redactedId);
+		if (redactedSource?.getType() === CALL_MEMBER_EVENT_TYPE) {
+			rebuildEventsFromWindow(room);
+			return;
+		}
 		setEvents(
 			produce((draft) => {
 				const idx = draft.findIndex((e) => e.eventId === redactedId);
@@ -1229,7 +1262,20 @@ export function useTimeline(
 			return;
 		}
 
-		if (!isDisplayable(event, room)) {
+		// Per-device call memberships are reconciled into per-user liveness so a
+		// duplicate join / premature leave that arrives live is hidden, matching
+		// the bulk rebuild (#215). Liveness is causal, so deciding the new event
+		// from the full window never changes an already-rendered prior event.
+		let suppressedCallIds: ReadonlySet<string> | undefined;
+		if (event.getType() === CALL_MEMBER_EVENT_TYPE && currentTimelineWindow) {
+			const windowEvents = currentTimelineWindow.getEvents();
+			const ordered = windowEvents.some((e) => e === event)
+				? windowEvents
+				: [...windowEvents, event];
+			suppressedCallIds = computeSuppressedCallEventIds(ordered);
+		}
+
+		if (!isDisplayable(event, room, suppressedCallIds)) {
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {
@@ -1258,7 +1304,9 @@ export function useTimeline(
 
 		setEvents(
 			produce((draft) => {
-				draft.push(eventToTimelineEvent(event, room, client));
+				draft.push(
+					eventToTimelineEvent(event, room, client, suppressedCallIds),
+				);
 				// Keep the store bounded to match the TimelineWindow's limit.
 				// The window evicts internally, but the store is updated
 				// independently for live events.

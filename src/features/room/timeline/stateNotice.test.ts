@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildMembershipTransition,
 	buildStateNotice,
+	computeSuppressedCallEventIds,
 	isStateNoticeType,
 	STATE_NOTICE_TYPES,
 } from "./stateNotice";
@@ -14,6 +15,7 @@ interface FakeEventInit {
 	content?: Record<string, unknown>;
 	prevContent?: Record<string, unknown>;
 	redacted?: boolean;
+	id?: string;
 }
 
 function makeEvent(init: FakeEventInit): MatrixEvent {
@@ -24,6 +26,7 @@ function makeEvent(init: FakeEventInit): MatrixEvent {
 		getContent: () => init.content ?? {},
 		getPrevContent: () => init.prevContent ?? {},
 		isRedacted: () => init.redacted ?? false,
+		getId: () => init.id,
 	};
 	return e as unknown as MatrixEvent;
 }
@@ -781,5 +784,121 @@ describe("buildMembershipTransition", () => {
 			isRedacted: () => false,
 		} as unknown as MatrixEvent;
 		expect(buildMembershipTransition(e, makeRoom(), fakeClient)).toBeNull();
+	});
+});
+
+describe("computeSuppressedCallEventIds", () => {
+	const CALL = "org.matrix.msc3401.call.member";
+
+	function callBlob(deviceId: string): Record<string, unknown> {
+		return {
+			application: "m.call",
+			call_id: "",
+			device_id: deviceId,
+			focus_active: { type: "livekit" },
+		};
+	}
+
+	function join(id: string, sender: string, deviceId: string): MatrixEvent {
+		return makeEvent({
+			type: CALL,
+			id,
+			sender,
+			content: callBlob(deviceId),
+			prevContent: {},
+		});
+	}
+
+	function leave(id: string, sender: string, deviceId: string): MatrixEvent {
+		return makeEvent({
+			type: CALL,
+			id,
+			sender,
+			content: {},
+			prevContent: callBlob(deviceId),
+		});
+	}
+
+	it("does not suppress a lone join or its matching last-device leave", () => {
+		const ids = computeSuppressedCallEventIds([
+			join("j1", "@alice:test", "A"),
+			leave("l1", "@alice:test", "A"),
+		]);
+		expect(ids.size).toBe(0);
+	});
+
+	it("suppresses a duplicate join from a second device", () => {
+		const ids = computeSuppressedCallEventIds([
+			join("j1", "@alice:test", "A"),
+			join("j2", "@alice:test", "B"),
+		]);
+		expect([...ids]).toEqual(["j2"]);
+	});
+
+	it("suppresses a premature leave while another device stays in the call", () => {
+		// Alice joins from A and B, then A leaves (B still live), then B leaves.
+		const ids = computeSuppressedCallEventIds([
+			join("j1", "@alice:test", "A"),
+			join("j2", "@alice:test", "B"),
+			leave("l1", "@alice:test", "A"),
+			leave("l2", "@alice:test", "B"),
+		]);
+		// j2 (dup join) and l1 (premature leave) hidden; j1 + l2 (last) shown.
+		expect([...ids].sort()).toEqual(["j2", "l1"]);
+	});
+
+	it("tracks per-user liveness independently", () => {
+		const ids = computeSuppressedCallEventIds([
+			join("aj", "@alice:test", "A"),
+			join("bj", "@bob:test", "B"),
+			leave("al", "@alice:test", "A"),
+			leave("bl", "@bob:test", "B"),
+		]);
+		// Each user's single device join/leave is their first/last → nothing hidden.
+		expect(ids.size).toBe(0);
+	});
+
+	it("re-shows a join after the user fully left and rejoined", () => {
+		const ids = computeSuppressedCallEventIds([
+			join("j1", "@alice:test", "A"),
+			leave("l1", "@alice:test", "A"),
+			join("j2", "@alice:test", "A"),
+		]);
+		expect(ids.size).toBe(0);
+	});
+
+	it("ignores non-call events and events with no sender", () => {
+		const noSender = makeEvent({
+			type: CALL,
+			id: "x",
+			sender: undefined,
+			content: callBlob("A"),
+			prevContent: {},
+		});
+		// getSender defaults to @alice in the helper, so force it null here.
+		(noSender as unknown as { getSender: () => string | null }).getSender =
+			() => null;
+		const ids = computeSuppressedCallEventIds([
+			makeEvent({ type: "m.room.message", id: "m1" }),
+			noSender,
+		]);
+		expect(ids.size).toBe(0);
+	});
+
+	it("ignores redacted call-member events in liveness", () => {
+		// Alice's device-A join is redacted, so it must not occupy her liveness;
+		// the device-B join is then her first live device and stays visible.
+		const ids = computeSuppressedCallEventIds([
+			makeEvent({
+				type: CALL,
+				id: "j1",
+				sender: "@alice:test",
+				content: callBlob("A"),
+				prevContent: {},
+				redacted: true,
+			}),
+			join("j2", "@alice:test", "B"),
+		]);
+		expect(ids.size).toBe(0);
 	});
 });
