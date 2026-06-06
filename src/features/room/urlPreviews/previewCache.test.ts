@@ -47,6 +47,22 @@ describe("previewCache", () => {
 		expect(result?.title).toBe("Hi");
 	});
 
+	it("captures og:type when present", async () => {
+		const { client } = makeClient(async () => ({
+			"og:title": "Clip",
+			"og:type": "video.other",
+			"og:image": "mxc://example.com/v",
+		}));
+		const result = await getOrFetchPreview(client, "https://example.com", 0);
+		expect(result?.type).toBe("video.other");
+	});
+
+	it("omits type when og:type is absent", async () => {
+		const { client } = makeClient(async () => ({ "og:title": "Hi" }));
+		const result = await getOrFetchPreview(client, "https://example.com", 0);
+		expect(result?.type).toBeUndefined();
+	});
+
 	it("returns null when nothing useful is present", async () => {
 		const { client } = makeClient(async () => ({}));
 		expect(

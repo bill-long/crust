@@ -10,6 +10,8 @@ export interface UrlPreviewData {
 	title?: string;
 	description?: string;
 	site?: string;
+	/** OpenGraph `og:type` (e.g. "video.other", "article"), when present. */
+	type?: string;
 	image?: {
 		/** mxc:// URL only. External http(s) images are dropped for privacy. */
 		mxcUrl: string;
@@ -90,6 +92,7 @@ function normalizePreview(raw: unknown): UrlPreviewData | null {
 	const title = readString(obj, "og:title");
 	const description = readString(obj, "og:description");
 	const site = readString(obj, "og:site_name");
+	const type = readString(obj, "og:type");
 
 	const rawImage = readString(obj, "og:image");
 	let image: UrlPreviewData["image"];
@@ -108,6 +111,7 @@ function normalizePreview(raw: unknown): UrlPreviewData | null {
 	if (title) data.title = title;
 	if (description) data.description = description;
 	if (site) data.site = site;
+	if (type) data.type = type;
 	if (image) data.image = image;
 	return Object.freeze(data);
 }
