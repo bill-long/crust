@@ -235,6 +235,202 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("reconciles per-device call memberships into per-user notices", async () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		const blob = (deviceId: string) => ({
+			application: "m.call",
+			call_id: "",
+			device_id: deviceId,
+			focus_active: { type: "livekit" },
+		});
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$m", "@alice:test", "hi", 1000),
+			// Alice joins from device A (shown) then device B (duplicate, hidden).
+			{
+				eventId: "$j1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_A",
+				content: blob("A"),
+				prevContent: {},
+				ts: 2000,
+			},
+			{
+				eventId: "$j2",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_B",
+				content: blob("B"),
+				prevContent: {},
+				ts: 3000,
+			},
+			// Device A leaves while B is still in the call (premature, hidden),
+			// then device B leaves (last device, shown).
+			{
+				eventId: "$l1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_A",
+				content: {},
+				prevContent: blob("A"),
+				ts: 4000,
+			},
+			{
+				eventId: "$l2",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_B",
+				content: {},
+				prevContent: blob("B"),
+				ts: 5000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			// message + one join notice + one leave notice; the duplicate join
+			// ($j2) and premature leave ($l1) are reconciled away.
+			expect(events.length).toBe(3);
+			const ids = events.map((e) => e.eventId);
+			expect(ids).toEqual(["$m", "$j1", "$l2"]);
+			const notices = events
+				.filter((e) => e.stateNotice)
+				.map((e) => e.stateNotice?.text);
+			expect(notices).toEqual([
+				"@alice:test joined the call",
+				"@alice:test left the call",
+			]);
+		});
+	});
+
+	it("reconciles per-device call memberships arriving as live events", async () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		const blob = (deviceId: string) => ({
+			application: "m.call",
+			call_id: "",
+			device_id: deviceId,
+			focus_active: { type: "livekit" },
+		});
+		const callEvent = (
+			id: string,
+			content: Record<string, unknown>,
+			prevContent: Record<string, unknown>,
+			ts: number,
+		) =>
+			createMatrixEvent({
+				eventId: id,
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test",
+				content,
+				prevContent,
+				ts,
+			});
+
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$m", "@alice:test", "hi", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			// Device A joins (shown), device B joins (duplicate, hidden).
+			appendLive(client, roomA, callEvent("$j1", blob("A"), {}, 2000));
+			appendLive(client, roomA, callEvent("$j2", blob("B"), {}, 3000));
+			// Device A leaves while B is still live (premature, hidden), then B
+			// leaves (last device, shown).
+			appendLive(client, roomA, callEvent("$l1", {}, blob("A"), 4000));
+			appendLive(client, roomA, callEvent("$l2", {}, blob("B"), 5000));
+
+			expect(events.map((e) => e.eventId)).toEqual(["$m", "$j1", "$l2"]);
+			expect(
+				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+			).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
+		});
+	});
+
+	it("rebuilds call notices when a shown join is redacted, surfacing a sibling", async () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		const blob = (deviceId: string) => ({
+			application: "m.call",
+			call_id: "",
+			device_id: deviceId,
+			focus_active: { type: "livekit" },
+		});
+		// Device A join is shown; device B join is suppressed as a duplicate.
+		const j1: import("../../../test/mockClient").MockEvent = {
+			eventId: "$j1",
+			roomId: "!roomA:test",
+			sender: "@alice:test",
+			type: CALL,
+			stateKey: "@alice:test_A",
+			content: blob("A"),
+			prevContent: {},
+			ts: 2000,
+		};
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$m", "@alice:test", "hi", 1000),
+			j1,
+			{
+				eventId: "$j2",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_B",
+				content: blob("B"),
+				prevContent: {},
+				ts: 3000,
+			},
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			// Only the device-A join shows; device-B is the hidden duplicate.
+			expect(events.map((e) => e.eventId)).toEqual(["$m", "$j1"]);
+
+			// Redact the shown device-A join. The reconciliation must rebuild and
+			// surface the previously-suppressed device-B join.
+			j1.redacted = true;
+			const redaction = createMatrixEvent({
+				eventId: "$red",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.redaction",
+				content: {},
+				ts: 4000,
+				redacts: "$j1",
+			});
+			appendLive(client, roomA, redaction);
+
+			expect(events.map((e) => e.eventId)).toEqual(["$m", "$j2"]);
+			expect(events[1].stateNotice?.text).toBe("@alice:test joined the call");
+		});
+	});
+
 	it("includes state events as state-notice timeline items", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
