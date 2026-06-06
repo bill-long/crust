@@ -178,6 +178,36 @@ function capStoreToRealLimit(draft: TimelineEvent[], limit: number): void {
 }
 
 /**
+ * Two-pointer merge of `inserts` into `base`, both ascending by `timestamp`.
+ * An insert sorts *after* any base row sharing its timestamp: a row is emitted
+ * before `ev` only when its timestamp is strictly less than `ev.timestamp`, so
+ * an insert equal to `ev` is deferred until the next strictly-greater base row
+ * (or the tail, when it has no later base row). Returns a new array; neither
+ * input is mutated. Used to splice synthetic expiry-leave notices into the
+ * chronological displayable list at their anchor timestamp.
+ */
+export function mergeRowsByTimestamp(
+	base: readonly TimelineEvent[],
+	inserts: readonly TimelineEvent[],
+): TimelineEvent[] {
+	if (inserts.length === 0) return base.slice();
+	const out: TimelineEvent[] = [];
+	let i = 0;
+	for (const ev of base) {
+		while (i < inserts.length && inserts[i].timestamp < ev.timestamp) {
+			out.push(inserts[i]);
+			i++;
+		}
+		out.push(ev);
+	}
+	while (i < inserts.length) {
+		out.push(inserts[i]);
+		i++;
+	}
+	return out;
+}
+
+/**
  * Build a displayable `TimelineEvent` for a synthesized expiry-based
  * "left the call" notice. Resolves the subject name and avatar from current
  * room state (call-member events carry no profile data), mirroring
@@ -810,9 +840,9 @@ export function useTimeline(
 	}
 
 	/**
-	 * Two-pointer merge of `synthetic` expiry-leave notices into the already
-	 * chronological `displayable` list (both ascending by timestamp). Synthetic
-	 * rows sort after real rows at an equal timestamp.
+	 * Merge `synthetic` expiry-leave notices into the already chronological
+	 * `displayable` list. Synthetic rows sort after real rows at an equal
+	 * timestamp (see {@link mergeRowsByTimestamp}).
 	 */
 	function mergeSyntheticLeaves(
 		displayable: TimelineEvent[],
@@ -823,20 +853,7 @@ export function useTimeline(
 		const built = synthetic
 			.map((leave) => buildSyntheticCallLeaveEvent(leave, room, client))
 			.sort((a, b) => a.timestamp - b.timestamp);
-		const out: TimelineEvent[] = [];
-		let i = 0;
-		for (const ev of displayable) {
-			while (i < built.length && built[i].timestamp < ev.timestamp) {
-				out.push(built[i]);
-				i++;
-			}
-			out.push(ev);
-		}
-		while (i < built.length) {
-			out.push(built[i]);
-			i++;
-		}
-		return out;
+		return mergeRowsByTimestamp(displayable, built);
 	}
 
 	/** Remove store events that the window has evicted from its backward end.

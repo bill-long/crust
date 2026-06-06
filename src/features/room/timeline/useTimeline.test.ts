@@ -14,7 +14,63 @@ import {
 	encryptedMessage,
 	textMessage,
 } from "../../../test/mockClient";
-import { useTimeline } from "./useTimeline";
+import type { TimelineEvent } from "./useTimeline";
+import { mergeRowsByTimestamp, useTimeline } from "./useTimeline";
+
+const row = (eventId: string, timestamp: number): TimelineEvent =>
+	({ eventId, timestamp }) as unknown as TimelineEvent;
+
+describe("mergeRowsByTimestamp", () => {
+	const ids = (rows: TimelineEvent[]) => rows.map((r) => r.eventId);
+
+	it("places an insert after a base row sharing its timestamp", () => {
+		const out = mergeRowsByTimestamp(
+			[row("R100", 100), row("R200", 200), row("R300", 300)],
+			[row("S200", 200)],
+		);
+		// S200 sorts after the equal-ts R200 and BEFORE the later R300.
+		expect(ids(out)).toEqual(["R100", "R200", "S200", "R300"]);
+	});
+
+	it("places an equal-ts insert at the tail when it has no later base row", () => {
+		const out = mergeRowsByTimestamp(
+			[row("R100", 100), row("R200", 200)],
+			[row("S200", 200)],
+		);
+		expect(ids(out)).toEqual(["R100", "R200", "S200"]);
+	});
+
+	it("inserts strictly between base rows and keeps stacked equal inserts ordered", () => {
+		expect(
+			ids(
+				mergeRowsByTimestamp(
+					[row("R100", 100), row("R300", 300)],
+					[row("S200", 200)],
+				),
+			),
+		).toEqual(["R100", "S200", "R300"]);
+		expect(
+			ids(
+				mergeRowsByTimestamp(
+					[row("Ra", 200), row("Rb", 200), row("Rc", 300)],
+					[row("S1", 200), row("S2", 200)],
+				),
+			),
+		).toEqual(["Ra", "Rb", "S1", "S2", "Rc"]);
+	});
+
+	it("appends inserts later than every base row, and is a no-op with none", () => {
+		expect(
+			ids(
+				mergeRowsByTimestamp(
+					[row("R100", 100), row("R200", 200)],
+					[row("S500", 500)],
+				),
+			),
+		).toEqual(["R100", "R200", "S500"]);
+		expect(ids(mergeRowsByTimestamp([row("R1", 1)], []))).toEqual(["R1"]);
+	});
+});
 
 /** Run a test inside createRoot with proper error propagation. */
 function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
