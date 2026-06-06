@@ -14,6 +14,7 @@ import {
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { formatFullDateTime } from "./dateFormatting";
 import { formatReactors } from "./reactionFormatting";
+import { StateNoticeIcon } from "./StateNoticeIcon";
 import type { TimelineEvent } from "./useTimeline";
 
 function reactionLabel(
@@ -474,18 +475,27 @@ const TimelineItem: Component<{
 			fallback={
 				<div
 					data-event-id={ev.eventId}
-					class="group flex items-center gap-2 px-4 py-0.5 text-xs text-text-muted italic"
+					class="group flex items-center gap-3 px-4 py-0.5 hover:bg-surface-1/50"
 					role="note"
 				>
-					<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
-					<span
-						class="max-w-[80%] truncate"
-						title={`${ev.stateNotice?.text ?? ""} • ${fullDateTime()}`}
-					>
-						{ev.stateNotice?.text}
+					<div class="flex w-8 shrink-0 justify-center text-text-faint">
+						<StateNoticeIcon variant={ev.stateNotice?.icon ?? "info"} />
+					</div>
+					<div class="flex min-w-0 flex-1 items-baseline gap-2">
+						<span
+							class="min-w-0 flex-1 truncate text-xs text-text-muted"
+							title={`${ev.stateNotice?.text ?? ""} • ${fullDateTime()}`}
+						>
+							{ev.stateNotice?.text}
+						</span>
+						<span
+							class="shrink-0 text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100"
+							aria-hidden="true"
+						>
+							{formattedTime()}
+						</span>
 						<span class="sr-only"> • {fullDateTime()}</span>
-					</span>
-					<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
+					</div>
 				</div>
 			}
 		>

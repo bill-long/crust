@@ -1403,11 +1403,8 @@ const TimelineView: Component<{
 													onOpenImage={setLightboxEventId}
 												/>
 												<Show when={showCollapseControl()}>
-													<div class="flex items-center gap-2 px-4 py-0.5 text-xs text-text-muted italic">
-														<span
-															class="h-px flex-1 bg-border-subtle"
-															aria-hidden="true"
-														/>
+													<div class="flex items-center gap-3 px-4 py-0.5">
+														<div class="w-8 shrink-0" aria-hidden="true" />
 														<button
 															type="button"
 															aria-expanded="true"
@@ -1415,14 +1412,10 @@ const TimelineView: Component<{
 																const g = group();
 																if (g) collapseGroup(g);
 															}}
-															class="rounded px-1 not-italic transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+															class="rounded text-left text-xs text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 														>
 															Show less
 														</button>
-														<span
-															class="h-px flex-1 bg-border-subtle"
-															aria-hidden="true"
-														/>
 													</div>
 												</Show>
 											</Match>

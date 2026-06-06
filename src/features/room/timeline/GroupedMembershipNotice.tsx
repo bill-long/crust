@@ -1,6 +1,10 @@
 import { type Component, createMemo, For, Show } from "solid-js";
 import { summarizeMembershipGroup } from "./membershipGrouping";
-import type { MembershipTransitionKind } from "./stateNotice";
+import { StateNoticeIcon } from "./StateNoticeIcon";
+import {
+	iconForTransitionKind,
+	type MembershipTransitionKind,
+} from "./stateNotice";
 
 export interface GroupedMember {
 	userId: string;
@@ -55,15 +59,17 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 	return (
 		<div
 			data-event-id={props.leaderEventId}
-			class="group flex items-center gap-2 px-4 py-0.5 text-xs text-text-muted italic"
+			class="flex items-center gap-3 px-4 py-0.5 hover:bg-surface-1/50"
 			role="note"
 		>
-			<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
+			<div class="flex w-8 shrink-0 justify-center text-text-faint">
+				<StateNoticeIcon variant={iconForTransitionKind(props.kind)} />
+			</div>
 			<button
 				type="button"
 				onClick={() => props.onExpand()}
 				aria-expanded="false"
-				class="flex max-w-[80%] items-center gap-2 rounded px-1 not-italic text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+				class="group/btn flex min-w-0 flex-1 items-center gap-2 rounded text-left text-xs text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 			>
 				<span class="flex shrink-0 -space-x-1.5" aria-hidden="true">
 					<For each={stack()}>
@@ -87,9 +93,9 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 						)}
 					</For>
 				</span>
-				<span class="truncate">{summary()}</span>
+				<span class="min-w-0 truncate">{summary()}</span>
 				<svg
-					class="h-3 w-3 shrink-0 transition-transform group-hover:translate-y-px"
+					class="h-3 w-3 shrink-0 transition-transform group-hover/btn:translate-y-px"
 					viewBox="0 0 24 24"
 					fill="none"
 					stroke="currentColor"
@@ -101,7 +107,6 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 					<polyline points="6 9 12 15 18 9" />
 				</svg>
 			</button>
-			<span class="h-px flex-1 bg-border-subtle" aria-hidden="true" />
 		</div>
 	);
 };
