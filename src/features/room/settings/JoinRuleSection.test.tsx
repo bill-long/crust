@@ -168,6 +168,15 @@ describe("JoinRuleSection allow list", () => {
 		).toBe("true");
 	});
 
+	it("shows a read-only empty message when restricted with no allowed spaces and no permission", () => {
+		setup({
+			join: { join_rule: JoinRule.Restricted, allow: [] },
+			canJoinRules: false,
+		});
+		expect(screen.getByText("No spaces are allowed to join.")).toBeTruthy();
+		expect(screen.queryByText(/add a space below/)).toBeNull();
+	});
+
 	it("renders resiliently when the allow list contains malformed entries", () => {
 		// null, non-object, and missing-room_id entries must not crash the UI.
 		setup({
@@ -234,5 +243,18 @@ describe("normalizeAllow", () => {
 	it("returns an empty array for non-array input", () => {
 		expect(normalizeAllow(undefined)).toEqual([]);
 		expect(normalizeAllow({})).toEqual([]);
+	});
+
+	it("collapses duplicate room IDs to the first occurrence", () => {
+		expect(
+			normalizeAllow([
+				{ room_id: "!a:x", type: "m.room_membership" },
+				{ room_id: "!a:x", type: "m.room_membership" },
+				{ room_id: "!b:x", type: "m.room_membership" },
+			]),
+		).toEqual([
+			{ room_id: "!a:x", type: "m.room_membership" },
+			{ room_id: "!b:x", type: "m.room_membership" },
+		]);
 	});
 });

@@ -72,17 +72,22 @@ function sameAllow(
  * entries, non-objects, missing/non-string `room_id`); drop those so the
  * editor never renders or writes a bad entry. A missing or unrecognized
  * `type` defaults to `m.room_membership` (validated against the spec's
- * allow types) so writes always carry a valid type.
+ * allow types) so writes always carry a valid type. Duplicate `room_id`s
+ * are collapsed to the first occurrence so the editor shows one row per
+ * space and Remove can't delete several entries at once.
  */
 const VALID_ALLOW_TYPES = new Set<string>(Object.values(RestrictedAllowType));
 
 function normalizeAllow(raw: unknown): AllowEntry[] {
 	if (!Array.isArray(raw)) return [];
 	const out: AllowEntry[] = [];
+	const seen = new Set<string>();
 	for (const entry of raw) {
 		if (!entry || typeof entry !== "object") continue;
 		const roomId = (entry as { room_id?: unknown }).room_id;
 		if (typeof roomId !== "string" || roomId.length === 0) continue;
+		if (seen.has(roomId)) continue;
+		seen.add(roomId);
 		const type = (entry as { type?: unknown }).type;
 		out.push({
 			room_id: roomId,
@@ -253,8 +258,13 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 						when={effectiveAllow().length > 0}
 						fallback={
 							<p class="mb-2 text-xs text-text-muted">
-								No spaces selected yet. Members can only join by invite until
-								you add a space below.
+								<Show
+									when={perms.canSetJoinRules()}
+									fallback="No spaces are allowed to join."
+								>
+									No spaces selected yet. Members can only join by invite until
+									you add a space below.
+								</Show>
 							</p>
 						}
 					>
