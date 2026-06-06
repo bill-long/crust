@@ -13,7 +13,10 @@ import {
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
-import { createServerTimeTracker } from "../../../client/serverTime";
+import {
+	createServerTimeTracker,
+	MATERIAL_OFFSET_CHANGE_MS,
+} from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { extractGifUrl } from "../../gif/gifUrl";
 import type {
@@ -1411,7 +1414,11 @@ export function useTimeline(
 
 		// Keep the server-clock offset fresh from live traffic so call-leave
 		// expiry math (below / on the rebuild timer) tracks the homeserver.
+		const offsetBefore = serverTime.getOffsetMs();
 		serverTime.sampleFromEvent(event);
+		const offsetChangedMaterially =
+			Math.abs(serverTime.getOffsetMs() - offsetBefore) >=
+			MATERIAL_OFFSET_CHANGE_MS;
 
 		// Only extend the window when following live. When the user has
 		// scrolled up, withhold new events to keep the window stable and
@@ -1423,6 +1430,17 @@ export function useTimeline(
 			// Track that the window is behind live for ANY skipped event
 			// (displayable, reaction, edit, state), not just displayable ones.
 			setCanLoadNewer(true);
+		}
+
+		// A material server-clock correction (e.g. the loaded window lacked
+		// `unsigned.age` so the offset was 0, and this live event finally
+		// supplies it) invalidates the already-armed expiry timer's delay and
+		// can flip whether a membership reads as expired. Rebuild from the
+		// (now-extended) window so synthetic leaves and the timer are recomputed
+		// against the corrected clock; this also displays the just-arrived event.
+		if (offsetChangedMaterially && followingLive && currentTimelineWindow) {
+			rebuildEventsFromWindow(room);
+			return;
 		}
 
 		// Handle reaction events by updating the target message's reactions

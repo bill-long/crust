@@ -544,6 +544,74 @@ describe("useTimeline", () => {
 		}
 	});
 
+	it("reschedules and surfaces the expiry leave when a live event corrects the clock", async () => {
+		const CALL = "org.matrix.msc3401.call.member";
+		// Membership joined "now" with a 3s expiry — live at load. The loaded
+		// events carry no `unsigned.age`, so the server-time offset starts at 0.
+		const createdTs = Date.now();
+		const expiresAt = createdTs + 3000;
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$m", "@alice:test", "hi", createdTs - 1000),
+			{
+				eventId: "$j1",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: CALL,
+				stateKey: "@alice:test_A",
+				content: {
+					application: "m.call",
+					call_id: "",
+					device_id: "A",
+					focus_active: { type: "livekit" },
+					created_ts: createdTs,
+					expires: 3000,
+				},
+				prevContent: {},
+				ts: createdTs,
+			},
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			// Offset 0, membership still live — only the join shows.
+			expect(
+				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+			).toEqual(["@alice:test joined the call"]);
+
+			// A live message that materially corrects the clock forward (server
+			// ~10s ahead). The rebuild it triggers re-evaluates expiry against the
+			// corrected now, which is now past the membership's expiry.
+			const liveMsg = createFakeEvent(
+				"!roomA:test",
+				"$live",
+				"@bob:test",
+				"hello",
+				createdTs + 100,
+			);
+			(liveMsg as unknown as { event: unknown }).event = {
+				unsigned: { age: 1 },
+			};
+			(liveMsg as unknown as { localTimestamp: number }).localTimestamp =
+				liveMsg.getTs() - 10000;
+			appendLive(client, roomA, liveMsg);
+
+			expect(
+				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
+			).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
+			expect(events.some((e) => e.eventId === "$live")).toBe(true);
+			expect(
+				events.some(
+					(e) => e.eventId === `~call-expiry-leave:@alice:test:A:${expiresAt}`,
+				),
+			).toBe(true);
+		});
+	});
+
 	it("includes state events as state-notice timeline items", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
