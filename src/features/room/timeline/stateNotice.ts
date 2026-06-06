@@ -1,5 +1,8 @@
 import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
-import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import {
+	CALL_MEMBER_EVENT_TYPE,
+	callMembershipExpiresAt,
+} from "../../../client/summaries";
 
 /**
  * Derived text for a non-message state event (m.room.member, m.room.name,
@@ -173,7 +176,7 @@ function hasCallMembership(content: Record<string, unknown>): boolean {
  *  - This is a single-event diff and is per-device: a user joining/leaving
  *    from two devices produces two transitions here. Per-device duplicates
  *    and premature leaves are reconciled into per-user liveness at the
- *    timeline layer by {@link computeSuppressedCallEventIds}, which hides the
+ *    timeline layer by {@link computeCallTimelineNotices}, which hides the
  *    redundant notices.
  *  - Expiry-based leaves (a membership lapsing without a follow-up event)
  *    produce no event and therefore no notice. Only explicit transitions are
@@ -209,62 +212,198 @@ function callTransitionDeviceId(event: MatrixEvent): string {
 }
 
 /**
- * Reconcile per-device MatrixRTC call memberships into per-user liveness so the
- * timeline only shows a "joined the call" notice when a user goes from zero to
- * one live device, and a "left the call" notice when their last live device
- * leaves. Returns the set of call-member event IDs whose notice should be
- * suppressed (a duplicate join while already present on another device, or a
- * premature leave while still present on another device).
+ * A "left the call" notice that has no backing `MatrixEvent` because the
+ * membership lapsed by expiry (`created_ts + (expires ?? 4h)` passing) with no
+ * follow-up state event. Anchored at `expiresAt` (server time, the same time
+ * base as surrounding events' `getTs()`), keyed by the last device that lapsed.
+ */
+export interface SyntheticCallLeave {
+	/** Matrix user ID whose last live membership lapsed. */
+	userId: string;
+	/** Device ID of that last-lapsing membership (for a stable synthetic key). */
+	deviceId: string;
+	/** Absolute server-time ms at which the user's last device expired. */
+	expiresAt: number;
+}
+
+export interface CallTimelineNotices {
+	/**
+	 * Call-member event IDs whose notice must be hidden: a duplicate join
+	 * while already present on another device, a premature leave while still
+	 * present on another device, or a redundant explicit leave for a device
+	 * that had already lapsed by expiry.
+	 */
+	suppressed: Set<string>;
+	/**
+	 * Synthetic "left the call" notices for memberships that lapsed by expiry
+	 * (as of `now`) without a follow-up event — one per user, anchored at the
+	 * moment their last live device expired.
+	 */
+	syntheticLeaves: SyntheticCallLeave[];
+	/**
+	 * Earliest future (`> now`) membership expiry among still-live devices, or
+	 * `null` when none — used by the timeline to schedule a re-evaluation so a
+	 * synthetic leave appears the instant the membership lapses.
+	 */
+	nextExpiry: number | null;
+}
+
+/**
+ * Reconcile per-device MatrixRTC call memberships into per-user liveness,
+ * expiry-aware, producing everything the timeline needs to render accurate
+ * call join/leave notices:
+ *
+ *  - `suppressed`: redundant explicit notices to hide (duplicate join,
+ *    premature leave, or a late explicit leave for an already-expired device).
+ *  - `syntheticLeaves`: "left the call" notices to synthesize for memberships
+ *    that lapsed by expiry with no follow-up event (issue #215 / #219).
+ *  - `nextExpiry`: when to re-run this pass so a future expiry surfaces.
  *
  * `events` MUST be in timeline (chronological ascending) order. Liveness is
- * causal/forward — a later event never changes an earlier event's decision —
- * so this is safe to recompute over the full loaded window on both a bulk
- * rebuild and an incremental live append.
+ * processed forward, expiring any device whose membership lapsed before each
+ * subsequent event so a later explicit leave of a *different* device is judged
+ * against the user's actually-live devices (not stale expired ones). A final
+ * sweep up to `now` emits synthetic leaves for memberships that have since
+ * lapsed.
  *
- * Addresses the per-device duplication / premature-leave limitation noted in
- * `classifyCallTransition` (issue #215). Expiry-based leaves (a membership
- * lapsing with no follow-up event) are out of scope here and tracked
- * separately — they produce no event to suppress or surface.
+ * Expiry is only computed for the modern flat MSC4143 ROOM-slot shape (via
+ * {@link callMembershipExpiresAt}); legacy/device-less or malformed
+ * memberships are treated as never-expiring, so they only ever leave via an
+ * explicit empty event (never a synthetic notice), matching `summaries.ts`.
+ *
+ * A periodic membership refresh (active->active, which carries a fresh
+ * `expires`) updates the device's expiry in place, so a still-connected user
+ * never gets a premature synthetic leave.
  */
-export function computeSuppressedCallEventIds(
+export function computeCallTimelineNotices(
 	events: readonly MatrixEvent[],
-): Set<string> {
+	now: number,
+): CallTimelineNotices {
 	const suppressed = new Set<string>();
-	const liveDevices = new Map<string, Set<string>>();
+	const syntheticLeaves: SyntheticCallLeave[] = [];
+	// userId -> (deviceId -> absolute expiry ms; Infinity = never-expiring).
+	const live = new Map<string, Map<string, number>>();
+	// userId -> devices that had an active membership event somewhere in this
+	// window. Lets an explicit leave for an already-ended device be recognized
+	// as redundant, while a leave whose join is *before* the loaded window
+	// (device never seen) still renders.
+	const seen = new Map<string, Set<string>>();
+
+	// Expire every live device whose expiry has passed `threshold`, in
+	// ascending-expiry order, recording a synthetic leave each time a user's
+	// last device lapses. `inclusive` selects `<= threshold` (the final sweep
+	// at `now`) vs `< threshold` (between events, so a real event at exactly a
+	// device's expiry — e.g. a refresh — wins the tie and keeps it alive).
+	function sweepExpired(threshold: number, inclusive: boolean): void {
+		const expired: { user: string; device: string; exp: number }[] = [];
+		for (const [user, devices] of live) {
+			for (const [device, exp] of devices) {
+				if (inclusive ? exp <= threshold : exp < threshold) {
+					expired.push({ user, device, exp });
+				}
+			}
+		}
+		if (expired.length === 0) return;
+		// Ascending expiry so each user's last-removed (latest-expiring) device
+		// is the one that empties it — the correct synthetic-leave anchor.
+		expired.sort((a, b) => a.exp - b.exp);
+		for (const { user, device, exp } of expired) {
+			const devices = live.get(user);
+			if (!devices?.has(device)) continue;
+			devices.delete(device);
+			if (devices.size === 0) {
+				live.delete(user);
+				syntheticLeaves.push({
+					userId: user,
+					deviceId: device,
+					expiresAt: exp,
+				});
+			}
+		}
+	}
+
 	for (const event of events) {
 		if (event.getType() !== CALL_MEMBER_EVENT_TYPE) continue;
-		// A redacted call-member event renders no notice (buildStateNotice bails
-		// on redacted state events), so it must not affect liveness either —
-		// otherwise a redacted leave would still drop a device and mis-suppress
-		// later notices.
+		// A redacted call-member event renders no notice (buildStateNotice
+		// bails on redacted state events), so it must not affect liveness.
 		if (typeof event.isRedacted === "function" && event.isRedacted()) {
 			continue;
 		}
-		const transition = classifyCallTransition(event);
-		if (!transition) continue;
 		const sender = event.getSender();
 		if (!sender) continue;
+		const content = event.getContent() as Record<string, unknown>;
+		const prev = getPrevContent(event);
+		const active = hasCallMembership(content);
+		const prevActive = hasCallMembership(prev);
+		if (!active && !prevActive) continue;
 		const eventId = event.getId();
-		const deviceId = callTransitionDeviceId(event);
+		const device = callTransitionDeviceId(event);
 
-		let devices = liveDevices.get(sender);
-		if (!devices) {
-			devices = new Set<string>();
-			liveDevices.set(sender, devices);
-		}
+		// Expire devices that lapsed strictly before this event so the
+		// duplicate-join / premature-leave decisions below are expiry-aware.
+		sweepExpired(event.getTs(), false);
 
-		if (transition === "call_join") {
-			const alreadyPresent = devices.size > 0;
-			devices.add(deviceId);
-			// A join while another device is already live is a duplicate.
-			if (alreadyPresent && eventId) suppressed.add(eventId);
-		} else {
-			devices.delete(deviceId);
-			// A leave while another device is still live is premature.
-			if (devices.size > 0 && eventId) suppressed.add(eventId);
+		let devices = live.get(sender);
+		if (active) {
+			const wasPresent = devices !== undefined && devices.size > 0;
+			if (!devices) {
+				devices = new Map<string, number>();
+				live.set(sender, devices);
+			}
+			let seenDevices = seen.get(sender);
+			if (!seenDevices) {
+				seenDevices = new Set<string>();
+				seen.set(sender, seenDevices);
+			}
+			seenDevices.add(device);
+			const expRaw = callMembershipExpiresAt(event);
+			// Non-finite (null shape, or NaN from non-numeric `expires`) ->
+			// never-expiring, so it only leaves via an explicit empty event.
+			const exp =
+				expRaw !== null && Number.isFinite(expRaw)
+					? expRaw
+					: Number.POSITIVE_INFINITY;
+			// Latest membership wins: a refresh extends/updates the expiry.
+			devices.set(device, exp);
+			// A join transition (prev inactive) while the user already had a
+			// live device is a per-device duplicate.
+			if (!prevActive && wasPresent && eventId) suppressed.add(eventId);
+		} else if (devices?.has(device)) {
+			devices.delete(device);
+			if (devices.size === 0) {
+				// Last live device left explicitly — the notice renders.
+				live.delete(sender);
+			} else if (eventId) {
+				// Another device is still live — premature.
+				suppressed.add(eventId);
+			}
+		} else if (devices && devices.size > 0) {
+			// This device already ended (lapsed by expiry, or left) but the user
+			// is still live on another device — premature, suppress.
+			if (eventId) suppressed.add(eventId);
+		} else if (eventId && seen.get(sender)?.has(device)) {
+			// The user is no longer live and this device was seen earlier in this
+			// window — the leave is redundant (the device already lapsed by
+			// expiry or left). A device whose join is *before* the loaded window
+			// was never seen, so its leave falls through and renders.
+			suppressed.add(eventId);
 		}
 	}
-	return suppressed;
+
+	// Emit synthetic leaves for memberships that have lapsed by expiry as of
+	// `now` with no follow-up event.
+	sweepExpired(now, true);
+
+	let nextExpiry: number | null = null;
+	for (const devices of live.values()) {
+		for (const exp of devices.values()) {
+			if (Number.isFinite(exp) && exp > now) {
+				if (nextExpiry === null || exp < nextExpiry) nextExpiry = exp;
+			}
+		}
+	}
+
+	return { suppressed, syntheticLeaves, nextExpiry };
 }
 
 function callMemberNotice(event: MatrixEvent, room: Room): StateNotice | null {
