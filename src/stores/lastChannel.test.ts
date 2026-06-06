@@ -42,4 +42,20 @@ describe("lastChannel store", () => {
 			"!s:example.com": "!r:example.com",
 		});
 	});
+
+	it("does not return inherited Object.prototype members for unset keys", () => {
+		expect(getLastChannel("toString")).toBeUndefined();
+		expect(getLastChannel("__proto__")).toBeUndefined();
+		expect(getLastChannel("constructor")).toBeUndefined();
+	});
+
+	it("treats prototype-polluting keys as plain own entries without polluting", () => {
+		setLastChannel("__proto__", "!evil:example.com");
+		setLastChannel("toString", "!ts:example.com");
+		expect(getLastChannel("__proto__")).toBe("!evil:example.com");
+		expect(getLastChannel("toString")).toBe("!ts:example.com");
+		// Global prototype must be untouched.
+		expect(({} as Record<string, unknown>).evil).toBeUndefined();
+		expect(typeof {}.toString).toBe("function");
+	});
 });

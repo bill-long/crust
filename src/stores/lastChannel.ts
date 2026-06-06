@@ -3,15 +3,22 @@ import { createSignal } from "solid-js";
 const STORAGE_KEY = "crust:last-channel";
 
 // Map of space room ID -> the room ID the user last viewed within that space.
+// Room IDs are external data, so use null-prototype maps to keep lookups and
+// writes safe from prototype-pollution edge cases (e.g. `__proto__`,
+// `toString`) — consistent with the timeline reaction maps.
 type LastChannelMap = Record<string, string>;
+
+function emptyMap(): LastChannelMap {
+	return Object.create(null) as LastChannelMap;
+}
 
 function load(): LastChannelMap {
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return {};
+		if (!raw) return emptyMap();
 		const parsed: unknown = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) return {};
-		const out: LastChannelMap = {};
+		if (typeof parsed !== "object" || parsed === null) return emptyMap();
+		const out = emptyMap();
 		for (const [key, value] of Object.entries(
 			parsed as Record<string, unknown>,
 		)) {
@@ -19,7 +26,7 @@ function load(): LastChannelMap {
 		}
 		return out;
 	} catch {
-		return {};
+		return emptyMap();
 	}
 }
 
@@ -46,7 +53,7 @@ export function setLastChannel(spaceId: string, roomId: string): void {
 	let next: LastChannelMap | undefined;
 	setState((prev) => {
 		if (prev[spaceId] === roomId) return prev;
-		next = { ...prev, [spaceId]: roomId };
+		next = Object.assign(emptyMap(), prev, { [spaceId]: roomId });
 		return next;
 	});
 	if (next) save(next);
@@ -54,7 +61,7 @@ export function setLastChannel(spaceId: string, roomId: string): void {
 
 /** Test-only: reset in-memory state and clear persistence. */
 export function _resetLastChannelsForTests(): void {
-	setState({});
+	setState(emptyMap());
 	try {
 		localStorage.removeItem(STORAGE_KEY);
 	} catch {
