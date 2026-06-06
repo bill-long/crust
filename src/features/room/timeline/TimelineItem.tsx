@@ -480,7 +480,7 @@ const TimelineItem: Component<{
 							{ev.stateNotice?.text}
 						</span>
 						<span
-							class="shrink-0 text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+							class="shrink-0 text-[10px] text-text-muted select-none"
 							aria-hidden="true"
 						>
 							{formattedTime()}
@@ -525,7 +525,7 @@ const TimelineItem: Component<{
 					fallback={
 						<div class="flex w-8 shrink-0 items-start justify-center">
 							<span
-								class="text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+								class="text-[10px] text-text-muted opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
 								title={fullDateTime()}
 								aria-hidden="true"
 							>
@@ -554,7 +554,7 @@ const TimelineItem: Component<{
 							<span class="text-sm font-semibold text-text-emphasis">
 								{ev.senderName.trim() || "Unknown"}
 							</span>
-							<span class="text-xs text-text-faint" title={fullDateTime()}>
+							<span class="text-xs text-text-muted" title={fullDateTime()}>
 								{formattedTime()}
 							</span>
 							<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
@@ -600,7 +600,7 @@ const TimelineItem: Component<{
 													{ev.body ||
 														(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
 													<Show when={ev.isEdited}>
-														<span class="ml-1 text-xs text-text-faint">
+														<span class="ml-1 text-xs text-text-disabled">
 															(edited)
 														</span>
 													</Show>
@@ -654,7 +654,7 @@ const TimelineItem: Component<{
 															height={ev.imageHeight}
 														/>
 														<Show when={ev.isEdited}>
-															<span class="ml-1 text-xs text-text-faint">
+															<span class="ml-1 text-xs text-text-disabled">
 																(edited)
 															</span>
 														</Show>

@@ -119,7 +119,7 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 				</svg>
 			</button>
 			<span
-				class="shrink-0 text-[10px] text-text-faint opacity-0 transition-opacity select-none group-hover:opacity-100 group-focus-within:opacity-100"
+				class="shrink-0 text-[10px] text-text-muted select-none"
 				title={fullDateTime()}
 				aria-hidden="true"
 			>

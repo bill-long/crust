@@ -1263,7 +1263,7 @@ const TimelineView: Component<{
 								</div>
 							</Show>
 							<Show when={!loading() && !canLoadOlder() && events.length > 0}>
-								<div class="py-3 text-center text-xs text-text-faint">
+								<div class="py-3 text-center text-xs text-text-disabled">
 									Beginning of conversation
 								</div>
 							</Show>
@@ -1303,16 +1303,16 @@ const TimelineView: Component<{
 								return (
 									<div>
 										<Show when={shouldShowDateSeparator(events, indexAcc())}>
-											<div class="flex items-center gap-3 px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-faint uppercase select-none">
+											<div class="flex items-center gap-3 px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-muted uppercase select-none">
 												<div
-													class="h-px flex-1 bg-border-subtle"
+													class="h-px flex-1 bg-border-default"
 													aria-hidden="true"
 												/>
 												<span>
 													{formatDateSeparatorLabel(event.timestamp, dayTick())}
 												</span>
 												<div
-													class="h-px flex-1 bg-border-subtle"
+													class="h-px flex-1 bg-border-default"
 													aria-hidden="true"
 												/>
 											</div>
