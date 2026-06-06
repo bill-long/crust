@@ -388,7 +388,7 @@ const MessageBody: Component<{
 				<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
 					{props.body}
 					<Show when={props.isEdited}>
-						<span class="ml-1 text-xs text-text-faint">(edited)</span>
+						<span class="ml-1 text-xs text-text-disabled">(edited)</span>
 					</Show>
 				</p>
 			}
@@ -397,7 +397,7 @@ const MessageBody: Component<{
 				<div class="message-body break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
 					<div innerHTML={html()} />
 					<Show when={props.isEdited}>
-						<span class="ml-1 text-xs text-text-faint">(edited)</span>
+						<span class="ml-1 text-xs text-text-disabled">(edited)</span>
 					</Show>
 				</div>
 			)}
