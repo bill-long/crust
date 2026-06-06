@@ -167,11 +167,71 @@ describe("JoinRuleSection allow list", () => {
 			client as unknown as {
 				__emit: (event: string, ...args: unknown[]) => void;
 			}
-		).__emit(ClientEvent.Room, {});
+		).__emit(ClientEvent.Room, beta);
 
 		await waitFor(() =>
 			expect(screen.getByRole("button", { name: "+ Beta" })).toBeTruthy(),
 		);
+	});
+
+	it("refreshes candidates when a declared parent space syncs in (parent link)", async () => {
+		const GAMMA = "!gamma:example.com";
+		const room = createMockRoom(ROOM, [], [], { name: "Room" });
+		room.__setStateEvent("m.room.join_rules", "", {
+			join_rule: JoinRule.Restricted,
+		});
+		// This room declares Gamma as a parent, but Gamma isn't synced yet.
+		room.__setStateEvent("m.space.parent", GAMMA, { via: ["example.com"] });
+		const client = createMockClient(new Map([[ROOM, room]]));
+		render(() => (
+			<JoinRuleSection
+				client={client as unknown as MatrixClient}
+				roomId={ROOM}
+			/>
+		));
+		expect(screen.queryByRole("button", { name: "+ Gamma" })).toBeNull();
+
+		// Gamma syncs in as a space and the room-added event fires.
+		const gamma = createMockRoom(GAMMA, [], [], { name: "Gamma" });
+		gamma.__setIsSpace(true);
+		client.__setRooms(
+			new Map([
+				[ROOM, room],
+				[GAMMA, gamma],
+			]),
+		);
+		(
+			client as unknown as {
+				__emit: (event: string, ...args: unknown[]) => void;
+			}
+		).__emit(ClientEvent.Room, gamma);
+
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "+ Gamma" })).toBeTruthy(),
+		);
+	});
+
+	it("ignores ClientEvent.Room for rooms unrelated to this room", async () => {
+		const { client, beta } = setup({ linkBeta: false });
+		// Make Beta a candidate in *current state* without firing its own
+		// event, so the candidate memo is stale until something bumps it.
+		beta.__setStateEvent("m.space.child", ROOM, { via: ["example.com"] });
+		expect(screen.queryByRole("button", { name: "+ Beta" })).toBeNull();
+
+		// An unrelated space syncing in must NOT trigger a recompute — if it
+		// did (the pre-filter behavior) the stale Beta candidate would surface.
+		const other = createMockRoom("!other:example.com", [], [], {
+			name: "Other",
+		});
+		other.__setIsSpace(true);
+		(
+			client as unknown as {
+				__emit: (event: string, ...args: unknown[]) => void;
+			}
+		).__emit(ClientEvent.Room, other);
+
+		await Promise.resolve();
+		expect(screen.queryByRole("button", { name: "+ Beta" })).toBeNull();
 	});
 
 	it("resets the optimistic overlay when the target room changes", () => {

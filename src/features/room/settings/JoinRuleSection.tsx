@@ -5,6 +5,7 @@ import {
 	type MatrixClient,
 	type MatrixEvent,
 	RestrictedAllowType,
+	type Room,
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import {
@@ -205,11 +206,38 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 	// A declared parent space may only become resolvable (known room, and
 	// recognized as a space) once it finishes syncing — which doesn't
 	// necessarily fire a child-link event keyed to this room. Recompute when
-	// a room is added so such parents surface as candidates.
-	props.client.on(ClientEvent.Room, bumpSpaceTick);
+	// such a room is added. ClientEvent.Room fires once per room during
+	// initial sync, so only react when the new room is actually a space
+	// related to this room (it lists this room as a child, or this room
+	// declares it as a parent) to avoid O(rooms) recomputes.
+	const onRoomAdded = (room: Room): void => {
+		if (!room?.isSpaceRoom?.()) return;
+		const rid = roomId();
+		const child = room.currentState?.getStateEvents?.("m.space.child", rid) as
+			| MatrixEvent
+			| null
+			| undefined;
+		const childVia = (child?.getContent() as { via?: unknown } | undefined)
+			?.via;
+		if (Array.isArray(childVia) && childVia.length > 0) {
+			bumpSpaceTick();
+			return;
+		}
+		const self = props.client.getRoom(rid);
+		if (!self) return;
+		for (const ev of self.currentState.getStateEvents("m.space.parent")) {
+			if (ev.getStateKey?.() !== room.roomId) continue;
+			const via = (ev.getContent() as { via?: unknown }).via;
+			if (Array.isArray(via) && via.length > 0) {
+				bumpSpaceTick();
+				return;
+			}
+		}
+	};
+	props.client.on(ClientEvent.Room, onRoomAdded);
 	onCleanup(() => {
 		props.client.off(RoomStateEvent.Events, onSpaceState);
-		props.client.off(ClientEvent.Room, bumpSpaceTick);
+		props.client.off(ClientEvent.Room, onRoomAdded);
 	});
 
 	const candidates = createMemo(() => {
