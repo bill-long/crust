@@ -55,7 +55,9 @@ registerRoute(
 // click, so the "never auto-reload a live session" guarantee holds.
 sw.addEventListener("message", (event) => {
 	if ((event.data as { type?: string } | null)?.type === "SKIP_WAITING") {
-		sw.skipWaiting();
+		// skipWaiting() is async; keep the worker alive until it resolves so a
+		// user-initiated update isn't dropped if the SW is terminated early.
+		event.waitUntil(sw.skipWaiting());
 	}
 });
 
