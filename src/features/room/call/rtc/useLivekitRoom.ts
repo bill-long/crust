@@ -32,6 +32,8 @@ export interface RtcParticipant {
 	identity: string;
 	/** Resolved Matrix display name (or userId, or identity as fallback). */
 	displayName: string;
+	/** Resolved HTTP avatar URL (mxc → media), or null when none is known. */
+	avatarUrl: string | null;
 	/** True when LiveKit reports the participant in the active-speakers list. */
 	isSpeaking: boolean;
 	/** True when the participant has muted their microphone publication. */
@@ -272,15 +274,24 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		return allOk;
 	};
 
-	const resolveDisplayName = (identity: string): string => {
+	const resolveIdentity = (
+		identity: string,
+	): { displayName: string; avatarUrl: string | null } => {
 		// LiveKit identity is the MatrixRTC backend identity. Map back through
-		// the membership list to a userId, then resolve a display name.
+		// the membership list to a userId, then resolve the member's display
+		// name and avatar from a single profile lookup.
 		const membership = opts
 			.memberships()
 			.find((m) => m.rtcBackendIdentity === identity);
-		if (!membership) return identity;
+		if (!membership) return { displayName: identity, avatarUrl: null };
 		const user = opts.client.getUser(membership.userId);
-		return user?.displayName ?? membership.userId;
+		const mxc = user?.avatarUrl;
+		return {
+			displayName: user?.displayName ?? membership.userId,
+			avatarUrl: mxc
+				? (opts.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null)
+				: null,
+		};
 	};
 
 	const snapshotParticipants = (r: LivekitRoom): void => {
@@ -289,6 +300,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		const reuseOrBuild = (
 			identity: string,
 			displayName: string,
+			avatarUrl: string | null,
 			isSpeaking: boolean,
 			isMuted: boolean,
 			isLocal: boolean,
@@ -298,6 +310,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			if (
 				prev &&
 				prev.displayName === displayName &&
+				prev.avatarUrl === avatarUrl &&
 				prev.isSpeaking === isSpeaking &&
 				prev.isMuted === isMuted &&
 				prev.isLocal === isLocal
@@ -307,6 +320,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const next: RtcParticipant = {
 				identity,
 				displayName,
+				avatarUrl,
 				isSpeaking,
 				isMuted,
 				isLocal,
@@ -315,10 +329,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			return next;
 		};
 		const out: RtcParticipant[] = [];
+		const localInfo = resolveIdentity(r.localParticipant.identity);
 		out.push(
 			reuseOrBuild(
 				r.localParticipant.identity,
-				resolveDisplayName(r.localParticipant.identity),
+				localInfo.displayName,
+				localInfo.avatarUrl,
 				speakingIds.has(r.localParticipant.identity),
 				r.localParticipant.isMicrophoneEnabled === false,
 				true,
@@ -328,10 +344,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const micPub = Array.from(p.audioTrackPublications.values()).find(
 				(pub) => pub.source === "microphone",
 			);
+			const info = resolveIdentity(p.identity);
 			out.push(
 				reuseOrBuild(
 					p.identity,
-					resolveDisplayName(p.identity),
+					info.displayName,
+					info.avatarUrl,
 					speakingIds.has(p.identity),
 					micPub?.isMuted ?? true,
 					false,
