@@ -10,6 +10,11 @@ import {
 	NOTIFY_CHANNEL_NAME,
 	type NotifyPong,
 } from "./features/notifications/notifyChannel";
+import {
+	buildNotificationCopy,
+	type PushPayload,
+	trimmedField,
+} from "./features/notifications/pushCopy";
 
 // `self` is typed as a generic WorkerGlobalScope by the WebWorker lib; narrow
 // it to the service-worker scope so registration/clients are typed.
@@ -70,46 +75,6 @@ sw.addEventListener("message", (event) => {
 
 // ─── Background Web Push ───
 
-interface PushPayload {
-	event_id?: string;
-	room_id?: string;
-	room_name?: string;
-	room_alias?: string;
-	sender?: string;
-	sender_display_name?: string;
-	type?: string;
-	unread?: number;
-	content?: { body?: string; msgtype?: string };
-}
-
-/** Describe an event's content for a notification, mirroring the in-app
- *  notification copy in useNotifications.ts. `isText` distinguishes a literal
- *  message body (joined to the sender with ": ") from an action phrase like
- *  "sent an image" (joined with a space). */
-function describeContent(payload: PushPayload): {
-	isText: boolean;
-	text: string;
-} {
-	const content = payload.content;
-	switch (content?.msgtype) {
-		case "m.image":
-			return { isText: false, text: "sent an image" };
-		case "m.file":
-			return { isText: false, text: "sent a file" };
-		case "m.audio":
-			return { isText: false, text: "sent an audio file" };
-		case "m.video":
-			return { isText: false, text: "sent a video" };
-		default: {
-			const body =
-				typeof content?.body === "string" ? content.body.slice(0, 200) : "";
-			// Encrypted rooms: the homeserver/Sygnal forward ciphertext only, so
-			// no readable body is present — fall back to a generic label.
-			return { isText: true, text: body || "New message" };
-		}
-	}
-}
-
 /** True when a window client belongs to this app, so unrelated same-origin
  *  tabs (e.g. Cinny at "/") don't suppress notifications or get hijacked on
  *  click. `registration.scope` is the app's full base URL with a trailing
@@ -121,13 +86,6 @@ function describeContent(payload: PushPayload): {
  *  same-origin navigations), so Crust effectively owns it. */
 function isAppWindow(client: WindowClient): boolean {
 	return client.url.startsWith(sw.registration.scope);
-}
-
-/** Trim a push-payload field, tolerating non-string values: the payload is
- *  user-influenced JSON typed only by assertion, so a non-string (number,
- *  object, …) must not reach `.trim()` (which would throw). */
-function trimmedField(value: unknown): string {
-	return typeof value === "string" ? value.trim() : "";
 }
 
 function setBadge(count: number): void {
@@ -247,22 +205,9 @@ async function handlePush(event: PushEvent): Promise<void> {
 
 	// Trim user-controlled room/sender names so whitespace-only values don't
 	// produce blank notification titles (matches the in-app path in
-	// useNotifications.ts, which trims room/member names). `trimmedField`
-	// tolerates non-string payload values.
-	const sender =
-		trimmedField(payload.sender_display_name) ||
-		trimmedField(payload.sender) ||
-		"Someone";
-	const room =
-		trimmedField(payload.room_name) || trimmedField(payload.room_alias);
-	const { isText, text } = describeContent(payload);
-	const senderLine = isText ? `${sender}: ${text}` : `${sender} ${text}`;
-	// In a named room/space, lead with the room and attribute the message to the
-	// sender. In a DM (no distinct room name), the title is the sender, so the
-	// body is just the message/action without repeating the sender.
-	const inRoom = room !== "" && room !== sender;
-	const title = inRoom ? room : sender;
-	const body = inRoom ? senderLine : text;
+	// useNotifications.ts). buildNotificationCopy resolves the title/body,
+	// including the encrypted-room and DM cases. See pushCopy.ts.
+	const { title, body } = buildNotificationCopy(payload);
 
 	// `renotify` (re-alert when replacing a same-tag notification) is a valid
 	// Notifications API option but missing from the current lib typings.
