@@ -6,6 +6,10 @@ import {
 	precacheAndRoute,
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
+import {
+	NOTIFY_CHANNEL_NAME,
+	type NotifyPong,
+} from "./features/notifications/notifyChannel";
 
 // `self` is typed as a generic WorkerGlobalScope by the WebWorker lib; narrow
 // it to the service-worker scope so registration/clients are typed.
@@ -114,6 +118,73 @@ function setBadge(count: number): void {
 	else nav.clearAppBadge?.().catch(() => {});
 }
 
+// Max time to wait for an open client to confirm it will surface the event
+// in-app before falling back to showing the background notification ourselves.
+// Kept short so push handling stays snappy; biasing toward showing on timeout
+// favours never-missing over the rare duplicate (same-tag notifications
+// replace each other, so a duplicate is cheap).
+const NOTIFY_PING_TIMEOUT_MS = 500;
+
+/** Ask open app clients whether any of them will surface this event in-app.
+ *  Returns true only if a live client replies `canNotify: true` within the
+ *  timeout. An open tab that can't notify — login page, suspended/discarded
+ *  tab (its JS is frozen, so it never replies), or one with desktop
+ *  notifications disabled — does not suppress the background notification,
+ *  closing the silent-drop gap. Fail-open: any error (e.g. BroadcastChannel
+ *  construction failing in a restricted environment) resolves `false` so the
+ *  background notification still shows rather than being silently dropped. */
+function aClientWillNotify(): Promise<boolean> {
+	if (typeof BroadcastChannel === "undefined") return Promise.resolve(false);
+	return new Promise<boolean>((resolve) => {
+		let channel: BroadcastChannel | undefined;
+		let nonce: string;
+		try {
+			channel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+			nonce = crypto.randomUUID();
+		} catch {
+			// If the channel was constructed before the throw, close it so it
+			// doesn't leak; then fail open.
+			try {
+				channel?.close();
+			} catch {
+				// best-effort
+			}
+			resolve(false);
+			return;
+		}
+		let timer: ReturnType<typeof setTimeout>;
+		let settled = false;
+		const finish = (result: boolean): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			try {
+				channel.close();
+			} catch {
+				// best-effort; nothing actionable if close() throws
+			}
+			resolve(result);
+		};
+		channel.onmessage = (e: MessageEvent) => {
+			const data = e.data as NotifyPong | null;
+			if (
+				data?.type === "pong" &&
+				data.nonce === nonce &&
+				data.canNotify === true
+			) {
+				finish(true);
+			}
+		};
+		timer = setTimeout(() => finish(false), NOTIFY_PING_TIMEOUT_MS);
+		try {
+			channel.postMessage({ type: "ping", nonce });
+		} catch {
+			// Couldn't ask any client — fall back to showing the notification.
+			finish(false);
+		}
+	});
+}
+
 async function handlePush(event: PushEvent): Promise<void> {
 	if (!event.data) return;
 	let payload: PushPayload;
@@ -145,9 +216,13 @@ async function handlePush(event: PushEvent): Promise<void> {
 		type: "window",
 		includeUncontrolled: true,
 	});
-	// If a Crust window is open, the in-app notification path already handles
-	// alerting; skip here to avoid duplicate notifications.
-	if (windows.some(isAppWindow)) return;
+	// If a Crust window is open AND a live client confirms it will surface this
+	// event in-app, skip here to avoid a duplicate. A client only confirms when
+	// it is synced and either focused (user sees it live) or able to show a
+	// desktop notification; an open-but-incapable tab (login page, suspended/
+	// discarded tab, or desktop notifications disabled) won't confirm, so the
+	// background notification still shows. See useNotifications.ts.
+	if (windows.some(isAppWindow) && (await aClientWillNotify())) return;
 
 	// Trim user-controlled room/sender names so whitespace-only values don't
 	// produce blank notification titles (matches the in-app path in

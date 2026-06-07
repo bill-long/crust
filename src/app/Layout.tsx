@@ -476,7 +476,7 @@ const Layout: Component = () => {
 		return params.roomId;
 	};
 
-	useNotifications(client, summaries, activeRoomId);
+	useNotifications(client, summaries, activeRoomId, syncState);
 	const pushConfig = useConfig().push;
 	useWebPushSync(client, pushConfig);
 

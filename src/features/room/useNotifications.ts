@@ -7,8 +7,15 @@ import {
 	RoomEvent,
 } from "matrix-js-sdk";
 import { onCleanup } from "solid-js";
+import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
 import { userSettings } from "../../stores/settings";
+import {
+	type CanNotifyInput,
+	computeCanNotify,
+	NOTIFY_CHANNEL_NAME,
+	type NotifyPing,
+} from "../notifications/notifyChannel";
 import { playNotificationSound, primeAudioContext } from "./notificationSound";
 
 /**
@@ -32,6 +39,7 @@ export function useNotifications(
 	client: MatrixClient,
 	summaries: SummariesStore,
 	activeRoomId: () => string | undefined,
+	syncState: () => AppSyncState,
 ): void {
 	// No-op in non-browser runtimes (SSR, tests, prerender)
 	if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -200,9 +208,72 @@ export function useNotifications(
 	client.on(RoomEvent.Timeline, onTimeline);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
 
+	// Background-push coordination: the service worker broadcasts a `ping`
+	// before showing a background notification. Reply whether this client will
+	// surface the event in-app, so the SW suppresses its own notification only
+	// then — closing the gap where an open-but-hidden tab with desktop
+	// notifications off would otherwise drop the alert silently. A client can
+	// surface the event when it is "live" (initial sync complete, processing
+	// live timeline events) and either focused (the user sees it live) or able
+	// to show a desktop notification. We gate on the app's "live" syncState
+	// rather than the SDK's raw SyncState.Syncing because Syncing can fire
+	// during initial sync before the first Prepared, when no live events flow
+	// yet — replying canNotify then would re-open the silent-drop gap at
+	// startup. See src/client/client.tsx onSync and src/sw.ts handlePush.
+	//
+	// This is a coarse, per-client signal, not a per-event one: when unfocused,
+	// the in-app path only pops a desktop notification for "loud" (sound/
+	// highlight) events, so a bare-notify event can still be suppressed here
+	// while desktop notifications are enabled. Closing that residual requires
+	// per-event coordination (the deferred event_id-based dedupe in issue #230);
+	// keeping the desktop-enabled check avoids double-alerting loud events,
+	// which is the more disruptive failure mode.
+	let notifyChannel: BroadcastChannel | undefined;
+	if ("BroadcastChannel" in window) {
+		// Fail-open: a restricted context can throw on construction. If it does,
+		// skip channel wiring (the SW falls back to showing the notification
+		// itself) rather than letting the error abort hook setup in Layout.
+		try {
+			notifyChannel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+		} catch {
+			notifyChannel = undefined;
+		}
+	}
+	if (notifyChannel) {
+		notifyChannel.onmessage = (e: MessageEvent) => {
+			const data = e.data as NotifyPing | null;
+			if (data?.type !== "ping" || typeof data.nonce !== "string") return;
+			const hasNotificationApi = "Notification" in window;
+			const s = userSettings();
+			const input: CanNotifyInput = {
+				live: syncState() === "live",
+				focused: isAppFocused(),
+				desktopNotificationsEnabled: s.desktopNotifications,
+				notificationPermissionGranted:
+					hasNotificationApi && Notification.permission === "granted",
+			};
+			const canNotify = computeCanNotify(input);
+			try {
+				notifyChannel?.postMessage({
+					type: "pong",
+					nonce: data.nonce,
+					canNotify,
+				});
+			} catch {
+				// Fail-open: if the reply can't be sent (restricted context), the
+				// SW times out waiting and shows the notification itself.
+			}
+		};
+	}
+
 	onCleanup(() => {
 		client.removeListener(RoomEvent.Timeline, onTimeline);
 		client.removeListener(MatrixEventEvent.Decrypted, onDecrypted);
+		try {
+			notifyChannel?.close();
+		} catch {
+			// best-effort cleanup; nothing actionable if close() throws
+		}
 		pendingDecryption.clear();
 		for (const notif of activeNotifications) {
 			notif.close();
