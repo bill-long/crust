@@ -104,15 +104,16 @@ function setBadge(count: number): void {
 // replace each other, so a duplicate is cheap).
 const NOTIFY_PING_TIMEOUT_MS = 500;
 
-/** Ask open app clients whether any of them will surface this event in-app.
- *  Returns true only if a live client replies `canNotify: true` within the
- *  timeout. An open tab that can't notify — login page, suspended/discarded
- *  tab (its JS is frozen, so it never replies), or one with desktop
- *  notifications disabled — does not suppress the background notification,
+/** Ask open app clients whether any of them will surface this specific event
+ *  in-app. Returns true only if a live client replies `canNotify: true` for the
+ *  given `eventId` within the timeout. An open tab that can't or won't surface
+ *  *this* event — login page, suspended/discarded tab (its JS is frozen, so it
+ *  never replies), desktop notifications disabled, or a bare-notify event the
+ *  in-app path doesn't pop — does not suppress the background notification,
  *  closing the silent-drop gap. Fail-open: any error (e.g. BroadcastChannel
  *  construction failing in a restricted environment) resolves `false` so the
  *  background notification still shows rather than being silently dropped. */
-function aClientWillNotify(): Promise<boolean> {
+function aClientWillNotify(eventId: string): Promise<boolean> {
 	if (typeof BroadcastChannel === "undefined") return Promise.resolve(false);
 	return new Promise<boolean>((resolve) => {
 		let channel: BroadcastChannel | undefined;
@@ -156,7 +157,7 @@ function aClientWillNotify(): Promise<boolean> {
 		};
 		timer = setTimeout(() => finish(false), NOTIFY_PING_TIMEOUT_MS);
 		try {
-			channel.postMessage({ type: "ping", nonce });
+			channel.postMessage({ type: "ping", nonce, eventId });
 		} catch {
 			// Couldn't ask any client — fall back to showing the notification.
 			finish(false);
@@ -185,7 +186,8 @@ async function handlePush(event: PushEvent): Promise<void> {
 	// be a non-empty, non-whitespace string before it flows into the
 	// notification tag / click route (also drops non-string values).
 	const roomId = trimmedField(payload.room_id);
-	if (roomId === "" || trimmedField(payload.event_id) === "") return;
+	const eventId = trimmedField(payload.event_id);
+	if (roomId === "" || eventId === "") return;
 
 	// Crust shares its origin with other apps (e.g. Cinny at "/", the homeserver
 	// at "/_matrix/"), so `includeUncontrolled` window clients can include
@@ -196,12 +198,13 @@ async function handlePush(event: PushEvent): Promise<void> {
 		includeUncontrolled: true,
 	});
 	// If a Crust window is open AND a live client confirms it will surface this
-	// event in-app, skip here to avoid a duplicate. A client only confirms when
-	// it is synced and either focused (user sees it live) or able to show a
-	// desktop notification; an open-but-incapable tab (login page, suspended/
-	// discarded tab, or desktop notifications disabled) won't confirm, so the
+	// specific event in-app, skip here to avoid a duplicate. A client only
+	// confirms when it is synced and either focused (user sees it live) or it
+	// popped a desktop notification for this event; an open-but-incapable tab
+	// (login page, suspended/discarded tab, desktop notifications disabled) or a
+	// bare-notify event the in-app path doesn't pop won't confirm, so the
 	// background notification still shows. See useNotifications.ts.
-	if (windows.some(isAppWindow) && (await aClientWillNotify())) return;
+	if (windows.some(isAppWindow) && (await aClientWillNotify(eventId))) return;
 
 	// Trim user-controlled room/sender names so whitespace-only values don't
 	// produce blank notification titles (matches the in-app path in
