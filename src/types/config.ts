@@ -100,11 +100,58 @@ export interface CrustConfig {
 		url: string;
 	};
 	gif: GifConfig;
+	push: PushConfig;
 	branding: {
 		name: string;
 		logoUrl: string;
 		primaryColor: string;
 	};
+}
+
+export interface PushConfig {
+	/**
+	 * VAPID application server public key (the "Application Server Key" emitted
+	 * by `vapid --gen --applicationServerKey`), as an unpadded URL-safe base64
+	 * string. Required for the browser to subscribe to Web Push.
+	 */
+	vapidPublicKey: string;
+	/**
+	 * Full URL of the Sygnal push gateway's notify endpoint, e.g.
+	 * `https://strange.pizza/_matrix/push/v1/notify`. The homeserver POSTs
+	 * notifications here; the client passes it as the pusher `data.url`.
+	 */
+	gatewayUrl: string;
+	/**
+	 * Pusher `app_id` — must exactly match the key under `apps:` in the
+	 * operator's `sygnal.yaml` for the webpush pushkin.
+	 */
+	appId: string;
+}
+
+const defaultPushConfig: PushConfig = {
+	vapidPublicKey: "",
+	gatewayUrl: "",
+	appId: "",
+};
+
+function normalizePush(raw: unknown): PushConfig {
+	if (typeof raw !== "object" || raw === null) {
+		return { ...defaultPushConfig };
+	}
+	const obj = raw as Record<string, unknown>;
+	const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+	return {
+		vapidPublicKey: str(obj.vapidPublicKey),
+		gatewayUrl: str(obj.gatewayUrl),
+		appId: str(obj.appId),
+	};
+}
+
+/** Whether the operator has supplied everything needed for Web Push. */
+export function isPushConfigured(push: PushConfig): boolean {
+	return (
+		push.vapidPublicKey !== "" && push.gatewayUrl !== "" && push.appId !== ""
+	);
 }
 
 function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
@@ -198,6 +245,7 @@ export function normalizeConfig(raw: unknown): CrustConfig {
 				: true,
 		elementCall: normalizeElementCall(obj.elementCall),
 		gif: normalizeGifConfig(obj.gif),
+		push: normalizePush(obj.push),
 		branding: normalizeBranding(obj.branding),
 	};
 }

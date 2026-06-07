@@ -22,3 +22,21 @@ location /crust/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
+
+# ── Optional: background Web Push gateway (Sygnal) ──
+# Only needed if you run the `push` compose profile (see deploy/README.md).
+#
+# This MUST be placed in the same server block as the existing `/_matrix/`
+# location that proxies to the homeserver. nginx matches the longest prefix,
+# so `/_matrix/push/` takes precedence over `/_matrix/` regardless of order and
+# routes the push-gateway notify endpoint to Sygnal instead of the homeserver.
+#
+# The URL below is what clients register as `push.gatewayUrl` in config.json:
+#   https://strange.pizza/_matrix/push/v1/notify
+location /_matrix/push/ {
+    proxy_pass http://127.0.0.1:8084/_matrix/push/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}

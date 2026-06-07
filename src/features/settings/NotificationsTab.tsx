@@ -4,13 +4,27 @@ import {
 	PushRuleKind,
 	RuleId,
 } from "matrix-js-sdk";
-import { type Component, createSignal, onCleanup, onMount } from "solid-js";
+import {
+	type Component,
+	createSignal,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
+import { useConfig } from "../../app/ConfigProvider";
 import { useClient } from "../../client/client";
 import { updateSetting, userSettings } from "../../stores/settings";
+import { isPushConfigured } from "../../types/config";
+import {
+	disableWebPush,
+	enableWebPush,
+	isPushSupported,
+} from "../notifications/webPush";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 const NotificationsTab: Component = () => {
 	const { client } = useClient();
+	const config = useConfig();
 
 	const notificationsSupported =
 		typeof window !== "undefined" && "Notification" in window;
@@ -39,6 +53,51 @@ const NotificationsTab: Component = () => {
 
 	const permissionDenied =
 		notificationsSupported && Notification.permission === "denied";
+
+	// Background Web Push (notifications while the app is closed).
+	const pushSupported = isPushSupported();
+	const pushAvailable = pushSupported && isPushConfigured(config.push);
+	const [pushBusy, setPushBusy] = createSignal(false);
+	const [pushError, setPushError] = createSignal<string | null>(null);
+
+	const handleBackgroundPushToggle = (checked: boolean): void => {
+		if (pushBusy()) return;
+		setPushError(null);
+		if (!checked) {
+			setPushBusy(true);
+			disableWebPush(client, config.push)
+				.catch(() => {})
+				.finally(() => {
+					updateSetting("backgroundNotifications", false);
+					setPushBusy(false);
+				});
+			return;
+		}
+		setPushBusy(true);
+		enableWebPush(client, config.push)
+			.then(() => {
+				updateSetting("backgroundNotifications", true);
+			})
+			.catch((err: unknown) => {
+				updateSetting("backgroundNotifications", false);
+				setPushError(
+					err instanceof Error
+						? err.message
+						: "Failed to enable background notifications",
+				);
+			})
+			.finally(() => setPushBusy(false));
+	};
+
+	const backgroundPushDescription = (): string => {
+		if (!pushSupported) {
+			return "Background notifications are not supported in this browser";
+		}
+		if (!isPushConfigured(config.push)) {
+			return "Background notifications are not configured by this server";
+		}
+		return "Receive notifications even when Crust is closed";
+	};
 
 	// @room mention suppression — reads from push rules, reactive to updates
 	const [suppressAtRoom, setSuppressAtRoom] = createSignal(false);
@@ -126,6 +185,26 @@ const NotificationsTab: Component = () => {
 					checked={userSettings().desktopNotifications}
 					onChange={handleDesktopNotifToggle}
 				/>
+			</section>
+
+			{/* Background (Web Push) */}
+			<section>
+				<SectionHeading>Background Notifications</SectionHeading>
+				<ToggleRow
+					label="Enable background notifications"
+					description={backgroundPushDescription()}
+					checked={userSettings().backgroundNotifications}
+					onChange={handleBackgroundPushToggle}
+					disabled={
+						pushBusy() ||
+						(!pushAvailable && !userSettings().backgroundNotifications)
+					}
+				/>
+				<Show when={pushError()}>
+					<p class="mt-1 text-xs text-danger-text" role="alert">
+						{pushError()}
+					</p>
+				</Show>
 			</section>
 
 			{/* Sounds */}
