@@ -41,11 +41,23 @@ registerRoute(
 	}),
 );
 
-// Deliberately do NOT skipWaiting()/clientsClaim(): a new worker stays in
-// "waiting" until every tab is closed, so deploys never force-reload a live
-// session (e.g. mid-call) and a running client keeps serving its matching
+// Deliberately do NOT skipWaiting()/clientsClaim() automatically: a new worker
+// stays in "waiting" until every tab is closed, so deploys never force-reload a
+// live session (e.g. mid-call) and a running client keeps serving its matching
 // hashed chunks from the still-active precache. Updates apply on the next cold
 // start. Push delivery and subscription work without claiming the page.
+//
+// The one exception is a strictly user-initiated update: the in-app
+// "Update available" prompt (src/app/UpdatePrompt.tsx) messages the waiting
+// worker via workbox-window's messageSkipWaiting (a {type:"SKIP_WAITING"}
+// postMessage). Only then do we skipWaiting, after which workbox-window
+// reloads the page on `controllerchange`. This never fires without an explicit
+// click, so the "never auto-reload a live session" guarantee holds.
+sw.addEventListener("message", (event) => {
+	if ((event.data as { type?: string } | null)?.type === "SKIP_WAITING") {
+		sw.skipWaiting();
+	}
+});
 
 // ─── Background Web Push ───
 

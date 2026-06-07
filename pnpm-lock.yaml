@@ -32,6 +32,9 @@ importers:
       virtua:
         specifier: ^0.49.1
         version: 0.49.1(solid-js@1.9.12)
+      workbox-window:
+        specifier: ^7.4.1
+        version: 7.4.1
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.4.13
