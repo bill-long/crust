@@ -89,7 +89,7 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 	// decide whether to encrypt outgoing messages — and is reliable for a
 	// joined, synced room, which is the only state a call is reachable
 	// from. The remaining edge (encryption enabled AFTER mount) is handled
-	// by the `RoomStateEvent.Events` listener above, which flips the signal
+	// by the `RoomStateEvent.Events` listener below, which flips the signal
 	// and forces the `enabled` memo to re-gate (a brief reconnect). We do
 	// NOT default the unknown case to "encrypted": that would build a
 	// bridge `ensureBridge` then keeps via its `e2ee() !== null`
@@ -211,13 +211,15 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 		e2ee,
 	});
 
-	// Builds and installs the E2EE bridge if not already present.
-	// Used by both the Join click handler AND the joined-on-mount
-	// recovery effect below. Returns `true` if a bridge is now installed
-	// (existed already or was built successfully), `false` if the build
-	// threw or the controller unmounted mid-build. On the unmount path
-	// the freshly-built ctx is disposed inline — DO NOT setE2ee() because
-	// the signal would outlive the owner with nothing else to dispose it.
+	// Ensures media E2EE is set up before join when the room requires it.
+	// Used by both the Join click handler AND the joined-on-mount recovery
+	// effect below. Returns `true` when it is safe to proceed with the join:
+	// either the room is unencrypted (no bridge needed — plaintext media,
+	// matching peers) or a bridge is now installed (existed already or was
+	// built successfully). Returns `false` only if the build threw or the
+	// controller unmounted mid-build. On the unmount path the freshly-built
+	// ctx is disposed inline — DO NOT setE2ee() because the signal would
+	// outlive the owner with nothing else to dispose it.
 	const ensureBridge = async (): Promise<boolean> => {
 		// Unencrypted room: no media E2EE (plaintext, matching peers).
 		// Returning true (without building a bridge) lets the join
@@ -352,10 +354,12 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 
 	const requestJoin = async (): Promise<void> => {
 		if (bridgeInitializing()) return;
-		// Build the E2EE bridge BEFORE rtc.join() so the bridge listener
-		// is wired before joinRoomSession (Phase-4 invariant 2) and the
-		// LiveKit Room sees the e2ee accessor as non-null on its very
-		// first reactive read.
+		// Ensure media E2EE is set up BEFORE rtc.join() when the room
+		// requires it, so the bridge listener is wired before
+		// joinRoomSession (Phase-4 invariant 2) and the LiveKit Room sees
+		// the e2ee accessor as non-null on its very first reactive read.
+		// In an unencrypted room ensureBridge() is a no-op and returns
+		// true (plaintext media, matching peers).
 		const ok = await ensureBridge();
 		if (!ok) return;
 		if (unmounted) return;
