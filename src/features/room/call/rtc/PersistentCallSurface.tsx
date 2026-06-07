@@ -2,6 +2,7 @@ import { type Component, Show } from "solid-js";
 import { useConfig } from "../../../../app/ConfigProvider";
 import { useClient } from "../../../../client/client";
 import { activeCallRoomId } from "../../../../stores/activeCall";
+import { CallOverlayController } from "./CallOverlayController";
 import { CallSessionController } from "./CallSessionController";
 
 /**
@@ -52,11 +53,18 @@ export const PersistentCallSurface: Component = () => {
 	return (
 		<Show when={activeCallRoomId()} keyed>
 			{(rid) => (
-				<CallSessionController
-					roomId={rid}
-					roomName={() => summaries[rid]?.name?.trim() || "this room"}
-					elementCallUrl={config.elementCall.url}
-				/>
+				<>
+					<CallSessionController
+						roomId={rid}
+						roomName={() => summaries[rid]?.name?.trim() || "this room"}
+						elementCallUrl={config.elementCall.url}
+					/>
+					{/* Owns the floating voice-overlay (Document PiP) window
+					    lifecycle. Mounted here so it shares the call's lifetime:
+					    when the call ends the keyed <Show> unmounts this and the
+					    controller's onCleanup closes any open overlay window. */}
+					<CallOverlayController />
+				</>
 			)}
 		</Show>
 	);

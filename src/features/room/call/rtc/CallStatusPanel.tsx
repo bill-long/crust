@@ -3,9 +3,15 @@ import { type Component, createMemo, Show } from "solid-js";
 import { useDecodedParams } from "../../../../app/useDecodedParams";
 import type { SummariesStore } from "../../../../client/summaries";
 import { activeCallRoomId } from "../../../../stores/activeCall";
+import {
+	closeOverlay,
+	overlayOpen,
+	requestOpenOverlay,
+} from "../../../../stores/callOverlay";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
 import { appModalOpen } from "../../../../stores/modalStack";
 import { currentCallSession } from "./callSessionStore";
+import { isDocumentPipSupported } from "./pipSupport";
 import { pickReturnToCallRoute } from "./returnToCallRoute";
 
 /**
@@ -143,6 +149,16 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 		s.requestClose();
 	};
 
+	// The floating voice overlay (Document PiP) is only available in browsers
+	// that support the API (Chromium 116+). Stable per session.
+	const pipSupported = isDocumentPipSupported();
+	const toggleOverlay = (): void => {
+		// Called directly from the click handler so the PiP open keeps the
+		// user activation the API requires.
+		if (overlayOpen()) closeOverlay();
+		else requestOpenOverlay();
+	};
+
 	return (
 		<Show when={visibleSession()}>
 			{(s) => {
@@ -178,6 +194,50 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 								</span>
 							</span>
 						</button>
+						<Show when={pipSupported}>
+							<button
+								type="button"
+								onClick={(e) => {
+									e.stopPropagation();
+									toggleOverlay();
+								}}
+								aria-pressed={overlayOpen()}
+								title={
+									overlayOpen()
+										? "Close the floating voice overlay"
+										: "Pop out a floating voice overlay"
+								}
+								aria-label={
+									overlayOpen()
+										? "Close floating voice overlay"
+										: "Open floating voice overlay"
+								}
+								class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-pressed:bg-surface-2 aria-pressed:text-text-primary any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+							>
+								<svg
+									class="h-4 w-4"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									{/* Picture-in-picture: outer screen + solid inset panel */}
+									<rect x="2" y="4" width="20" height="16" rx="2" />
+									<rect
+										x="12"
+										y="11"
+										width="8"
+										height="6"
+										rx="1"
+										fill="currentColor"
+										stroke="none"
+									/>
+								</svg>
+							</button>
+						</Show>
 						<button
 							type="button"
 							onClick={(e) => {

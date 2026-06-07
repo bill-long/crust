@@ -5,6 +5,11 @@ import {
 	_resetActiveCallForTests,
 	setActiveCallRoomId,
 } from "../../../../stores/activeCall";
+import {
+	_resetCallOverlayForTests,
+	setOverlayHandlers,
+	setOverlayWindow,
+} from "../../../../stores/callOverlay";
 import { setCryptoDialogOpen } from "../../../../stores/cryptoActions";
 import {
 	_resetAppModalStackForTests,
@@ -58,6 +63,9 @@ describe("CallStatusPanel", () => {
 		setCryptoDialogOpen(false);
 		navigateMock.mockReset();
 		mockParams = {};
+		_resetCallOverlayForTests();
+		delete (window as unknown as { documentPictureInPicture?: unknown })
+			.documentPictureInPicture;
 	});
 
 	it("renders nothing when no active call is set", () => {
@@ -242,5 +250,66 @@ describe("CallStatusPanel", () => {
 		fake.setRtcStatus("error");
 		await flush();
 		expect(label.textContent).toBe("Error");
+	});
+
+	describe("floating overlay trigger", () => {
+		const TRIGGER_NAME = /floating voice overlay/i;
+
+		function enablePipSupport(): void {
+			(
+				window as unknown as { documentPictureInPicture: unknown }
+			).documentPictureInPicture = {
+				requestWindow: () => Promise.resolve({} as Window),
+			};
+		}
+
+		function activeCall(): void {
+			const fake = track(makeFakeCallSession({ roomId: "!call:example.com" }));
+			publishCallSession(fake.api);
+			setActiveCallRoomId("!call:example.com");
+		}
+
+		it("hides the trigger when the PiP API is unsupported", () => {
+			activeCall();
+			render(() => <CallStatusPanel summaries={emptySummaries()} />);
+			expect(screen.queryByRole("button", { name: TRIGGER_NAME })).toBeNull();
+		});
+
+		it("shows the trigger and opens the overlay on click when supported", () => {
+			enablePipSupport();
+			const openSpy = vi.fn();
+			const closeSpy = vi.fn();
+			setOverlayHandlers(openSpy, closeSpy);
+			activeCall();
+			render(() => <CallStatusPanel summaries={emptySummaries()} />);
+			const btn = screen.getByRole("button", {
+				name: "Open floating voice overlay",
+			});
+			expect((btn as HTMLButtonElement).getAttribute("aria-pressed")).toBe(
+				"false",
+			);
+			btn.click();
+			expect(openSpy).toHaveBeenCalledTimes(1);
+			expect(closeSpy).not.toHaveBeenCalled();
+		});
+
+		it("reflects open state and closes the overlay on click", () => {
+			enablePipSupport();
+			const openSpy = vi.fn();
+			const closeSpy = vi.fn();
+			setOverlayHandlers(openSpy, closeSpy);
+			setOverlayWindow({} as Window); // mark overlay open
+			activeCall();
+			render(() => <CallStatusPanel summaries={emptySummaries()} />);
+			const btn = screen.getByRole("button", {
+				name: "Close floating voice overlay",
+			});
+			expect((btn as HTMLButtonElement).getAttribute("aria-pressed")).toBe(
+				"true",
+			);
+			btn.click();
+			expect(closeSpy).toHaveBeenCalledTimes(1);
+			expect(openSpy).not.toHaveBeenCalled();
+		});
 	});
 });
