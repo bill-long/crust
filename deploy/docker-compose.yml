@@ -39,3 +39,18 @@ services:
       # Loopback only; the host's nginx proxies
       # /_matrix/push/ -> 127.0.0.1:8084/_matrix/push/.
       - "127.0.0.1:8084:5000"
+    # The upstream image's built-in healthcheck calls `curl`, which is not
+    # installed in the image, so the container always reports "unhealthy"
+    # despite working. Override it to probe /health with python3 (present in
+    # the image).
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
