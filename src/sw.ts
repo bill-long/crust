@@ -98,6 +98,13 @@ function isAppWindow(client: WindowClient): boolean {
 	return client.url.startsWith(sw.registration.scope);
 }
 
+/** Trim a push-payload field, tolerating non-string values: the payload is
+ *  user-influenced JSON typed only by assertion, so a non-string (number,
+ *  object, …) must not reach `.trim()` (which would throw). */
+function trimmedField(value: unknown): string {
+	return typeof value === "string" ? value.trim() : "";
+}
+
 function setBadge(count: number): void {
 	const nav = navigator as WorkerNavigator & {
 		setAppBadge?: (n?: number) => Promise<void>;
@@ -124,7 +131,11 @@ async function handlePush(event: PushEvent): Promise<void> {
 	// Counts-only pushes (e.g. badge clears) carry no event_id. The pusher is
 	// registered with events_only so Sygnal drops these before delivery, but
 	// guard anyway so the browser never shows an empty "updated in background".
-	if (!payload.event_id || !payload.room_id) return;
+	// The payload is user-influenced JSON: `trimmedField` requires each id to
+	// be a non-empty, non-whitespace string before it flows into the
+	// notification tag / click route (also drops non-string values).
+	const roomId = trimmedField(payload.room_id);
+	if (roomId === "" || trimmedField(payload.event_id) === "") return;
 
 	// Crust shares its origin with other apps (e.g. Cinny at "/", the homeserver
 	// at "/_matrix/"), so `includeUncontrolled` window clients can include
@@ -138,25 +149,33 @@ async function handlePush(event: PushEvent): Promise<void> {
 	// alerting; skip here to avoid duplicate notifications.
 	if (windows.some(isAppWindow)) return;
 
-	const sender = payload.sender_display_name || payload.sender || "Someone";
-	const room = payload.room_name || payload.room_alias;
+	// Trim user-controlled room/sender names so whitespace-only values don't
+	// produce blank notification titles (matches the in-app path in
+	// useNotifications.ts, which trims room/member names). `trimmedField`
+	// tolerates non-string payload values.
+	const sender =
+		trimmedField(payload.sender_display_name) ||
+		trimmedField(payload.sender) ||
+		"Someone";
+	const room =
+		trimmedField(payload.room_name) || trimmedField(payload.room_alias);
 	const { isText, text } = describeContent(payload);
 	const senderLine = isText ? `${sender}: ${text}` : `${sender} ${text}`;
 	// In a named room/space, lead with the room and attribute the message to the
 	// sender. In a DM (no distinct room name), the title is the sender, so the
 	// body is just the message/action without repeating the sender.
-	const inRoom = !!room && room !== sender;
-	const title = inRoom ? (room as string) : sender;
+	const inRoom = room !== "" && room !== sender;
+	const title = inRoom ? room : sender;
 	const body = inRoom ? senderLine : text;
 
 	// `renotify` (re-alert when replacing a same-tag notification) is a valid
 	// Notifications API option but missing from the current lib typings.
 	const options: NotificationOptions & { renotify?: boolean } = {
 		body,
-		tag: payload.room_id,
+		tag: roomId,
 		icon: `${import.meta.env.BASE_URL}pwa-192.png`,
 		badge: `${import.meta.env.BASE_URL}pwa-192.png`,
-		data: { roomId: payload.room_id },
+		data: { roomId },
 		renotify: true,
 	};
 	await sw.registration.showNotification(title, options);
@@ -166,8 +185,21 @@ sw.addEventListener("push", (event) => {
 	event.waitUntil(handlePush(event));
 });
 
+/** Build the in-app deep link for a room, falling back to the app root if the
+ *  roomId can't be encoded (e.g. a malformed string with a lone surrogate,
+ *  which would make encodeURIComponent throw URIError). */
+function roomUrl(roomId: string | undefined): string {
+	if (!roomId) return base;
+	try {
+		return `${base}home/${encodeURIComponent(roomId)}`;
+	} catch {
+		return base;
+	}
+}
+
 async function openRoom(roomId: string | undefined): Promise<void> {
-	const url = roomId ? `${base}home/${encodeURIComponent(roomId)}` : base;
+	const url = roomUrl(roomId);
+	const hasTarget = url !== base;
 	const windows = await sw.clients.matchAll({
 		type: "window",
 		includeUncontrolled: true,
@@ -177,7 +209,7 @@ async function openRoom(roomId: string | undefined): Promise<void> {
 	const appWindow = windows.find(isAppWindow);
 	if (appWindow) {
 		await appWindow.focus();
-		if (roomId) {
+		if (hasTarget) {
 			try {
 				await appWindow.navigate(url);
 			} catch {
