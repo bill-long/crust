@@ -1,7 +1,5 @@
 import { type Component, createEffect, createSignal, on, Show } from "solid-js";
 
-export { isDirectVideoUrl } from "./videoUrl";
-
 /**
  * Click-to-load inline video player for direct-media URLs (e.g. a raw
  * `.mp4` link that has no OpenGraph preview).
@@ -79,7 +77,6 @@ const InlineVideo: Component<{ url: string }> = (props) => {
 				{/* biome-ignore lint/a11y/useMediaCaption: remote third-party
 				    media has no caption track available. */}
 				<video
-					src={props.url}
 					controls
 					autoplay
 					preload="none"
@@ -90,6 +87,11 @@ const InlineVideo: Component<{ url: string }> = (props) => {
 						// play. Set via ref because it's absent from Solid's typed
 						// VideoHTMLAttributes.
 						el.setAttribute("playsinline", "");
+						// Assign `src` last so the first media request is issued
+						// only after `referrerpolicy` is in place. The component
+						// unmounts the <video> when `props.url` changes (the reset
+						// effect clears `activated`), so a one-time read is safe.
+						el.src = props.url;
 					}}
 					class="mt-1 block aspect-video w-full max-w-md rounded bg-surface-0 object-contain"
 					onError={() => setLoadError(true)}

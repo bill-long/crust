@@ -16,9 +16,14 @@ const VIDEO_EXTENSIONS: readonly string[] = [
 ];
 
 /**
- * True iff `url` is an http(s) link whose path ends in a known direct-video
+ * True iff `url` is an `https:` link whose path ends in a known direct-video
  * extension. The query string and fragment are ignored so signed CDN links
  * (Discord attachment URLs carry `?ex=&is=&hm=`) are still recognized.
+ *
+ * `https:` only: the inline player's CSP (`media-src ... https:`) and the
+ * mixed-content rules of an HTTPS-served app would block an `http:` source
+ * anyway, so treating `http:` links as playable would only produce a broken
+ * player. This mirrors the `https:`-only check in `gifUrl.ts`.
  *
  * Extension sniffing on the path is simple but imperfect — a more accurate
  * check would HEAD the URL for its `Content-Type`, but that would leak the
@@ -32,7 +37,7 @@ export function isDirectVideoUrl(url: string): boolean {
 	} catch {
 		return false;
 	}
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+	if (parsed.protocol !== "https:") {
 		return false;
 	}
 	const path = parsed.pathname.toLowerCase();

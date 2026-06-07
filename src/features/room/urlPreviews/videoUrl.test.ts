@@ -44,7 +44,8 @@ describe("isDirectVideoUrl", () => {
 		);
 	});
 
-	it("rejects non-http(s) schemes", () => {
+	it("rejects non-https schemes", () => {
+		expect(isDirectVideoUrl("http://example.com/clip.mp4")).toBe(false);
 		expect(isDirectVideoUrl("ftp://example.com/clip.mp4")).toBe(false);
 		expect(isDirectVideoUrl("data:video/mp4;base64,AAAA")).toBe(false);
 	});
