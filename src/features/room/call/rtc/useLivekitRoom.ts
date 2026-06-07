@@ -32,6 +32,8 @@ export interface RtcParticipant {
 	identity: string;
 	/** Resolved Matrix display name (or userId, or identity as fallback). */
 	displayName: string;
+	/** Resolved HTTP avatar URL (mxc → media), or null when none is known. */
+	avatarUrl: string | null;
 	/** True when LiveKit reports the participant in the active-speakers list. */
 	isSpeaking: boolean;
 	/** True when the participant has muted their microphone publication. */
@@ -283,12 +285,25 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		return user?.displayName ?? membership.userId;
 	};
 
+	const resolveAvatarUrl = (identity: string): string | null => {
+		// Mirrors resolveDisplayName: map the LiveKit identity back to a Matrix
+		// userId via the membership list, then resolve the member's avatar.
+		const membership = opts
+			.memberships()
+			.find((m) => m.rtcBackendIdentity === identity);
+		if (!membership) return null;
+		const mxc = opts.client.getUser(membership.userId)?.avatarUrl;
+		if (!mxc) return null;
+		return opts.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null;
+	};
+
 	const snapshotParticipants = (r: LivekitRoom): void => {
 		const speakingIds = new Set(r.activeSpeakers.map((p) => p.identity));
 		const seen = new Set<string>();
 		const reuseOrBuild = (
 			identity: string,
 			displayName: string,
+			avatarUrl: string | null,
 			isSpeaking: boolean,
 			isMuted: boolean,
 			isLocal: boolean,
@@ -298,6 +313,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			if (
 				prev &&
 				prev.displayName === displayName &&
+				prev.avatarUrl === avatarUrl &&
 				prev.isSpeaking === isSpeaking &&
 				prev.isMuted === isMuted &&
 				prev.isLocal === isLocal
@@ -307,6 +323,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const next: RtcParticipant = {
 				identity,
 				displayName,
+				avatarUrl,
 				isSpeaking,
 				isMuted,
 				isLocal,
@@ -319,6 +336,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			reuseOrBuild(
 				r.localParticipant.identity,
 				resolveDisplayName(r.localParticipant.identity),
+				resolveAvatarUrl(r.localParticipant.identity),
 				speakingIds.has(r.localParticipant.identity),
 				r.localParticipant.isMicrophoneEnabled === false,
 				true,
@@ -332,6 +350,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				reuseOrBuild(
 					p.identity,
 					resolveDisplayName(p.identity),
+					resolveAvatarUrl(p.identity),
 					speakingIds.has(p.identity),
 					micPub?.isMuted ?? true,
 					false,

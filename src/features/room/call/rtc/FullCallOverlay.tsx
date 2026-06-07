@@ -2,7 +2,9 @@ import {
 	type Component,
 	createEffect,
 	createMemo,
+	createSignal,
 	For,
+	on,
 	onCleanup,
 	onMount,
 	Show,
@@ -464,6 +466,14 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 		props.livekit.videoTracks().get(props.participant.identity),
 	);
 
+	const [avatarFailed, setAvatarFailed] = createSignal(false);
+	createEffect(
+		on(
+			() => props.participant.avatarUrl,
+			() => setAvatarFailed(false),
+		),
+	);
+
 	createEffect(() => {
 		const e = entry();
 		const el = videoEl;
@@ -499,12 +509,27 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 				muted
 			/>
 			<Show when={!entry()}>
-				<div
-					aria-hidden="true"
-					class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-3 text-lg font-semibold text-text-emphasis"
+				<Show
+					when={!avatarFailed() && props.participant.avatarUrl}
+					fallback={
+						<div
+							aria-hidden="true"
+							class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-3 text-lg font-semibold text-text-emphasis"
+						>
+							{(props.participant.displayName.trim()[0] ?? "?").toUpperCase()}
+						</div>
+					}
 				>
-					{(props.participant.displayName.trim()[0] ?? "?").toUpperCase()}
-				</div>
+					{(url) => (
+						<img
+							src={url()}
+							alt=""
+							aria-hidden="true"
+							class="h-12 w-12 rounded-full object-cover"
+							onError={() => setAvatarFailed(true)}
+						/>
+					)}
+				</Show>
 			</Show>
 			<div class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-black/40 px-2 py-1 text-xs text-white">
 				<span class="min-w-0 truncate">

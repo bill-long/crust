@@ -138,6 +138,7 @@ function createClient(): {
 		getOpenIdToken: ReturnType<typeof vi.fn>;
 		getUser: ReturnType<typeof vi.fn>;
 		getDeviceId: ReturnType<typeof vi.fn>;
+		mxcUrlToHttp: ReturnType<typeof vi.fn>;
 	};
 } {
 	return {
@@ -150,6 +151,10 @@ function createClient(): {
 			})),
 			getUser: vi.fn(() => ({ displayName: "Alice" })),
 			getDeviceId: vi.fn(() => "DEVABC123"),
+			mxcUrlToHttp: vi.fn(
+				(mxc: string, w?: number, h?: number) =>
+					`https://media.example.com/${mxc.replace("mxc://", "")}?w=${w}&h=${h}`,
+			),
 		},
 	};
 }
@@ -491,6 +496,81 @@ describe("useLivekitRoom", () => {
 		await waitFor(() => result.status() === "connected");
 		const remote = result.participants().find((p) => !p.isLocal);
 		expect(remote?.displayName).toBe("Bob");
+	});
+
+	it("resolves participant avatar url via membership rtcBackendIdentity", async () => {
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@bob:example.com"
+				? { displayName: "Bob", avatarUrl: "mxc://example.com/bob" }
+				: null,
+		);
+		const memberships: CallMembership[] = [
+			{
+				rtcBackendIdentity: "remote-bid",
+				userId: "@bob:example.com",
+				deviceId: "BBB",
+			} as unknown as CallMembership,
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.avatarUrl).toContain("example.com/bob");
+	});
+
+	it("resolves a null avatar url when the member has no avatar", async () => {
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
+		);
+		const memberships: CallMembership[] = [
+			{
+				rtcBackendIdentity: "remote-bid",
+				userId: "@bob:example.com",
+				deviceId: "BBB",
+			} as unknown as CallMembership,
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.avatarUrl).toBeNull();
+		expect(client.mxcUrlToHttp).not.toHaveBeenCalled();
 	});
 
 	it("surfaces JWT fetch errors as error status", async () => {
