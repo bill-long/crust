@@ -1,3 +1,4 @@
+import { type MatrixEvent, RoomStateEvent } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -59,6 +60,53 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 	props,
 ) => {
 	const { client } = useClient();
+
+	// Whether this call's Matrix room is encrypted, gating per-participant
+	// media E2EE. The VALUE is sourced authoritatively from the room's
+	// `m.room.encryption` state via `client.getRoom(...).hasEncryptionStateEvent()`
+	// — the same `client.getRoom` source the join gate uses (`useRtcSession`
+	// `joinBlockReason`) — NOT the `summaries` store's `isEncrypted`, which is
+	// optimistically hard-coded `false` for freshly created/joined rooms until
+	// the real state syncs (summaries.ts) and would let an encrypted room
+	// transiently publish plaintext. It is wrapped in a signal and refreshed
+	// on `RoomStateEvent.Events` so the `enabled` memo / bridge effects below
+	// re-evaluate if encryption is enabled after mount. Encryption is
+	// permanent once set, so we only ever flip to `true`.
+	//
+	// MatrixRTC per-participant media E2EE is only used when the room itself
+	// is encrypted. In an UNENCRYPTED room the other clients (Element Call /
+	// Cinny) send plaintext media — Element Call ties `encryptMedia` to the
+	// room's encryption system (EC CallViewModel `getE2eeKeyProvider`). If
+	// Crust unconditionally encrypted its outbound media here, it would be the
+	// only encrypted stream in a plaintext call: peers can't decrypt it and
+	// hear garbled noise, while we still decode their plaintext fine.
+	//
+	// Unknown room: a room missing from the store seeds `false` AND
+	// independently blocks the join (the same `getRoom` null check in
+	// `joinBlockReason`), so no media is published in that case. For a
+	// non-null room, `hasEncryptionStateEvent()` is the authoritative,
+	// ecosystem-standard encryption check — the same call Element uses to
+	// decide whether to encrypt outgoing messages — and is reliable for a
+	// joined, synced room, which is the only state a call is reachable
+	// from. The remaining edge (encryption enabled AFTER mount) is handled
+	// by the `RoomStateEvent.Events` listener below, which flips the signal
+	// and forces the `enabled` memo to re-gate (a brief reconnect). We do
+	// NOT default the unknown case to "encrypted": that would build a
+	// bridge `ensureBridge` then keeps via its `e2ee() !== null`
+	// short-circuit, re-encrypting alone if the room is actually
+	// unencrypted — reintroducing the garbled-audio bug this fixes.
+	const [roomEncrypted, setRoomEncrypted] = createSignal(
+		client.getRoom(props.roomId)?.hasEncryptionStateEvent() ?? false,
+	);
+	const onRoomStateEvent = (event: MatrixEvent): void => {
+		if (event.getType() !== "m.room.encryption") return;
+		if (event.getRoomId() !== props.roomId) return;
+		if (client.getRoom(props.roomId)?.hasEncryptionStateEvent() === true) {
+			setRoomEncrypted(true);
+		}
+	};
+	client.on(RoomStateEvent.Events, onRoomStateEvent);
+	onCleanup(() => client.off(RoomStateEvent.Events, onRoomStateEvent));
 
 	// Phase 4 E2EE bridge — created lazily on the first Join click so
 	// the LiveKit chunk + the e2ee worker stay deferred until the user
@@ -145,13 +193,16 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 				!leaveRequested() &&
 				rtc.status() === "joined" &&
 				rtc.activeFocus() !== null &&
-				// Hold the LiveKit connect until the E2EE bridge exists.
-				// Otherwise a "joined-on-mount" mount (controller re-opens
-				// after a non-Leave dismiss, hot reload, or route flip
-				// while MatrixRTC still reports `isJoined()` true) would
-				// race ahead and `r.connect()` WITHOUT
-				// `setE2EEEnabled(true)` — publishing media in the clear.
-				e2ee() !== null,
+				// Hold the LiveKit connect until the E2EE bridge exists,
+				// but ONLY for encrypted rooms. Otherwise a
+				// "joined-on-mount" mount (controller re-opens after a
+				// non-Leave dismiss, hot reload, or route flip while
+				// MatrixRTC still reports `isJoined()` true) would race
+				// ahead and `r.connect()` WITHOUT `setE2EEEnabled(true)` —
+				// publishing media in the clear. For an unencrypted room we
+				// never build a bridge (plaintext media is correct), so
+				// requiring e2ee() would deadlock the connect.
+				(!roomEncrypted() || e2ee() !== null),
 		),
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
@@ -160,14 +211,20 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 		e2ee,
 	});
 
-	// Builds and installs the E2EE bridge if not already present.
-	// Used by both the Join click handler AND the joined-on-mount
-	// recovery effect below. Returns `true` if a bridge is now installed
-	// (existed already or was built successfully), `false` if the build
-	// threw or the controller unmounted mid-build. On the unmount path
-	// the freshly-built ctx is disposed inline — DO NOT setE2ee() because
-	// the signal would outlive the owner with nothing else to dispose it.
+	// Ensures media E2EE is set up before join when the room requires it.
+	// Used by both the Join click handler AND the joined-on-mount recovery
+	// effect below. Returns `true` when it is safe to proceed with the join:
+	// either the room is unencrypted (no bridge needed — plaintext media,
+	// matching peers) or a bridge is now installed (existed already or was
+	// built successfully). Returns `false` only if the build threw or the
+	// controller unmounted mid-build. On the unmount path the freshly-built
+	// ctx is disposed inline — DO NOT setE2ee() because the signal would
+	// outlive the owner with nothing else to dispose it.
 	const ensureBridge = async (): Promise<boolean> => {
+		// Unencrypted room: no media E2EE (plaintext, matching peers).
+		// Returning true (without building a bridge) lets the join
+		// proceed with `e2ee()` null → manageMediaKeys false.
+		if (!roomEncrypted()) return true;
 		if (e2ee() !== null) return true;
 		setBridgeInitError(null);
 		setBridgeInitializing(true);
@@ -206,6 +263,8 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 	createEffect(() => {
 		if (unmounted) return;
 		if (rtc.status() !== "joined") return;
+		// Unencrypted rooms never use a bridge (plaintext media).
+		if (!roomEncrypted()) return;
 		if (e2ee() !== null) return;
 		if (bridgeInitializing()) return;
 		// Halt auto-retry after a failure: ensureBridge sets
@@ -295,10 +354,12 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 
 	const requestJoin = async (): Promise<void> => {
 		if (bridgeInitializing()) return;
-		// Build the E2EE bridge BEFORE rtc.join() so the bridge listener
-		// is wired before joinRoomSession (Phase-4 invariant 2) and the
-		// LiveKit Room sees the e2ee accessor as non-null on its very
-		// first reactive read.
+		// Ensure media E2EE is set up BEFORE rtc.join() when the room
+		// requires it, so the bridge listener is wired before
+		// joinRoomSession (Phase-4 invariant 2) and the LiveKit Room sees
+		// the e2ee accessor as non-null on its very first reactive read.
+		// In an unencrypted room ensureBridge() is a no-op and returns
+		// true (plaintext media, matching peers).
 		const ok = await ensureBridge();
 		if (!ok) return;
 		if (unmounted) return;
