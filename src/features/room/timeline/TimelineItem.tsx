@@ -11,7 +11,9 @@ import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
 } from "../urlPreviews/extractUrls";
+import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
+import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { formatReactors } from "./reactionFormatting";
 import { StateNoticeIcon } from "./StateNoticeIcon";
@@ -428,13 +430,36 @@ const TimelineItem: Component<{
 
 	// Memoize URL extraction at the component top level (not inside a
 	// JSX IIFE) so the reactive primitive is created exactly once for
-	// the lifetime of this TimelineItem instance.
-	const previewUrls = createMemo<string[]>(() => {
-		if (!userSettings().urlPreviews) return [];
+	// the lifetime of this TimelineItem instance. Extraction runs once
+	// when either link-enrichment feature is enabled; the results are
+	// then split into OpenGraph-preview URLs and direct-video URLs.
+	const messageUrls = createMemo<string[]>(() => {
+		if (!userSettings().urlPreviews && !userSettings().inlineMediaPlayers) {
+			return [];
+		}
 		if (ev.msgtype !== "m.text" && ev.msgtype !== "m.emote") return [];
 		return ev.format === "org.matrix.custom.html" && ev.formattedBody
 			? extractUrlsFromHtml(ev.formattedBody)
 			: extractUrlsFromText(ev.body);
+	});
+
+	// Direct-media links rendered as a click-to-load inline player.
+	const videoUrls = createMemo<string[]>(() =>
+		userSettings().inlineMediaPlayers
+			? messageUrls().filter(isDirectVideoUrl)
+			: [],
+	);
+
+	// OpenGraph preview cards. Direct-video URLs are excluded only when the
+	// inline player will render them instead (a raw media URL never returns
+	// useful `/preview_url` metadata, so fetching a preview is wasted). When
+	// inline players are disabled, those URLs fall back to the preview path —
+	// preserving the pre-feature behavior for that settings combination.
+	const previewUrls = createMemo<string[]>(() => {
+		if (!userSettings().urlPreviews) return [];
+		return userSettings().inlineMediaPlayers
+			? messageUrls().filter((u) => !isDirectVideoUrl(u))
+			: messageUrls();
 	});
 
 	// Cap visible read-receipt avatars and roll the rest into a "+N"
@@ -629,6 +654,13 @@ const TimelineItem: Component<{
 																ts={() => ev.timestamp}
 																disabled={() => previewUrls().length === 0}
 															/>
+															<Show when={videoUrls().length > 0}>
+																<div class="mt-1 flex flex-col gap-1">
+																	<For each={videoUrls()}>
+																		{(url) => <InlineVideo url={url} />}
+																	</For>
+																</div>
+															</Show>
 														</>
 													);
 												}

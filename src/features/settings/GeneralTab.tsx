@@ -264,6 +264,12 @@ const GeneralTab: Component = () => {
 						void pushLocalUrlPreviewSetting(client, v);
 					}}
 				/>
+				<ToggleRow
+					label="Inline video players"
+					description="Show a click-to-load player for direct video links (e.g. .mp4). Playing contacts the third-party site directly."
+					checked={userSettings().inlineMediaPlayers}
+					onChange={(v) => updateSetting("inlineMediaPlayers", v)}
+				/>
 			</section>
 		</div>
 	);

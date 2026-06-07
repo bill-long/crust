@@ -26,6 +26,14 @@ export interface UserSettings {
 	 */
 	urlPreviews: boolean;
 	/**
+	 * Whether to render a click-to-load inline HTML5 player for direct video
+	 * links (e.g. raw `.mp4` URLs) in messages. The player never contacts the
+	 * third-party origin until the user clicks play; this flag only controls
+	 * whether the poster/player is offered at all. Distinct from `urlPreviews`,
+	 * which governs homeserver-proxied OpenGraph cards.
+	 */
+	inlineMediaPlayers: boolean;
+	/**
 	 * `MediaDeviceInfo.deviceId` to use as the native RTC microphone, or
 	 * empty string for the system default. Consumed by the Phase 2 LiveKit
 	 * room wrapper (#122).
@@ -73,6 +81,7 @@ const defaults: UserSettings = {
 	backgroundNotifications: false,
 	notificationSound: true,
 	urlPreviews: true,
+	inlineMediaPlayers: true,
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
 	micMode: "voice-activity",
@@ -126,6 +135,11 @@ function load(): UserSettings {
 				defaults.notificationSound,
 			),
 			urlPreviews: loadBool(obj, "urlPreviews", defaults.urlPreviews),
+			inlineMediaPlayers: loadBool(
+				obj,
+				"inlineMediaPlayers",
+				defaults.inlineMediaPlayers,
+			),
 			rtcMicDeviceId:
 				typeof obj.rtcMicDeviceId === "string"
 					? obj.rtcMicDeviceId
