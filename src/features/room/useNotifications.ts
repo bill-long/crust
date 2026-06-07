@@ -247,7 +247,7 @@ export function useNotifications(
 	// notification for the event. A bare-notify event (no sound/highlight tweak)
 	// while unfocused is never popped in-app, so the client does not confirm and
 	// the SW still shows its background notification. Loud events the in-app
-	// path pops are recorded in `surfacedEventIds`; a same-tag (roomId)
+	// path pops are recorded in the surfaced-event tracker; a same-tag (roomId)
 	// notification means even a race (push handled before the live event) just
 	// replaces rather than duplicates.
 	let notifyChannel: BroadcastChannel | undefined;
