@@ -377,7 +377,7 @@ export const FullCallOverlay: Component = () => {
 							</div>
 						</Show>
 
-						<div class="rounded border border-border-subtle bg-surface-1 p-4">
+						<div class="flex min-h-64 flex-1 flex-col rounded border border-border-subtle bg-surface-1 p-4">
 							<div class="flex items-center justify-between">
 								<div class="text-xs uppercase tracking-wide text-text-disabled">
 									Participants (
@@ -415,7 +415,7 @@ export const FullCallOverlay: Component = () => {
 								}
 							>
 								<div
-									class="mt-2 grid auto-rows-fr gap-2"
+									class="mt-2 grid min-h-0 flex-1 gap-2 overflow-auto [grid-auto-rows:minmax(8rem,1fr)]"
 									classList={{
 										"grid-cols-1": s().livekit.participants().length <= 1,
 										"grid-cols-2":
@@ -484,7 +484,7 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 
 	return (
 		<div
-			class="relative flex aspect-video min-h-0 items-center justify-center overflow-hidden rounded border bg-surface-2"
+			class="relative flex min-h-0 items-center justify-center overflow-hidden rounded border bg-surface-2"
 			classList={{
 				"border-success": props.participant.isSpeaking,
 				"border-border-subtle": !props.participant.isSpeaking,
