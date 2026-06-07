@@ -118,7 +118,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 				target="_blank"
 				rel="noreferrer noopener"
 				aria-label={ariaLabel()}
-				class="mt-1 flex max-w-xl flex-col overflow-hidden rounded-md border border-border-subtle bg-surface-2 no-underline transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+				class="mt-1 flex max-w-md flex-col overflow-hidden rounded-md border border-border-subtle bg-surface-2 no-underline transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
 			>
 				{/* Reserve aspect-ratio space from intrinsic w/h so the hero
 				    image loading does not shift layout. */}
