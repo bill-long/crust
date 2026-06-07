@@ -50,14 +50,20 @@ function bytesEqual(a: ArrayBuffer | null | undefined, b: Uint8Array): boolean {
 /** Resolve the active service-worker registration, rejecting if none becomes
  *  ready within the timeout (e.g. in dev, where the SW is disabled). */
 async function getReadyRegistration(): Promise<ServiceWorkerRegistration> {
-	const ready = navigator.serviceWorker.ready;
-	const timeout = new Promise<never>((_, reject) =>
-		setTimeout(
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(
 			() => reject(new Error("Service worker is not available")),
 			SW_READY_TIMEOUT_MS,
-		),
-	);
-	return Promise.race([ready, timeout]);
+		);
+	});
+	try {
+		return await Promise.race([navigator.serviceWorker.ready, timeout]);
+	} finally {
+		// Clear the timer once the race settles so it doesn't dangle for the
+		// full timeout after `ready` has already won.
+		clearTimeout(timer);
+	}
 }
 
 function buildPusher(cfg: PushConfig, sub: PushSubscription): IPusherRequest {
@@ -110,6 +116,21 @@ export async function enableWebPush(
 	if (!isPushConfigured(cfg)) {
 		throw new Error("Push notifications are not configured by this server");
 	}
+	// Validate the operator gateway URL up front: a malformed value would
+	// otherwise "succeed" locally and only fail later at delivery time.
+	let gatewayUrl: URL;
+	try {
+		gatewayUrl = new URL(cfg.gatewayUrl);
+	} catch {
+		throw new Error(
+			"Push notifications are misconfigured (invalid gateway URL)",
+		);
+	}
+	if (gatewayUrl.protocol !== "https:" && gatewayUrl.protocol !== "http:") {
+		throw new Error(
+			"Push notifications are misconfigured (invalid gateway URL)",
+		);
+	}
 
 	const permission = await Notification.requestPermission();
 	if (permission !== "granted") {
@@ -117,7 +138,26 @@ export async function enableWebPush(
 	}
 
 	const registration = await getReadyRegistration();
-	const appServerKey = urlBase64ToUint8Array(cfg.vapidPublicKey);
+	let appServerKey: Uint8Array<ArrayBuffer>;
+	try {
+		appServerKey = urlBase64ToUint8Array(cfg.vapidPublicKey);
+	} catch {
+		// `cfg.vapidPublicKey` comes from operator config.json; a malformed /
+		// mis-padded base64 value makes atob throw a cryptic DOMException.
+		// Surface a clear, actionable message instead.
+		throw new Error(
+			"Push notifications are misconfigured (invalid VAPID public key)",
+		);
+	}
+	// A VAPID application server key is the 65-byte uncompressed P-256 point
+	// (0x04 || X || Y). A well-formed-base64 value of the wrong shape decodes
+	// fine but would fail with a cryptic subscribe() DOMException downstream —
+	// reject it here with the same clear message.
+	if (appServerKey.length !== 65 || appServerKey[0] !== 0x04) {
+		throw new Error(
+			"Push notifications are misconfigured (invalid VAPID public key)",
+		);
+	}
 
 	let sub = await registration.pushManager.getSubscription();
 	if (sub) {
@@ -125,15 +165,43 @@ export async function enableWebPush(
 		if (!bytesEqual(existingKey, appServerKey)) {
 			// VAPID key changed (or unknown) — the old subscription can't be
 			// reused; drop it and create a fresh one.
-			await sub.unsubscribe();
+			// Remove the stale pusher (keyed by the OLD p256dh) before dropping
+			// the subscription, so the homeserver doesn't retain a pusher
+			// pointing at the now-dead endpoint. The new subscription has a new
+			// p256dh, so `append: false` on the later setPusher won't replace it.
+			const oldP256dh = sub.toJSON().keys?.p256dh;
+			if (oldP256dh && cfg.appId) {
+				try {
+					await client.removePusher(oldP256dh, cfg.appId);
+				} catch {
+					// best-effort; a stale pusher self-heals (gateway 410 → removal)
+				}
+			}
+			// Best-effort: if unsubscribe rejects, the subscribe() below surfaces a
+			// clear error rather than a raw DOMException leaking from here.
+			try {
+				await sub.unsubscribe();
+			} catch {
+				// ignore; handled by the subscribe() failure path
+			}
 			sub = null;
 		}
 	}
 	if (!sub) {
-		sub = await registration.pushManager.subscribe({
-			userVisibleOnly: true,
-			applicationServerKey: appServerKey,
-		});
+		try {
+			sub = await registration.pushManager.subscribe({
+				userVisibleOnly: true,
+				applicationServerKey: appServerKey,
+			});
+		} catch (err) {
+			// The push service validates the key at subscribe-time and can reject
+			// a structurally-valid-but-unaccepted key (or fail transiently) with a
+			// low-level DOMException; map it to an actionable message.
+			throw new Error(
+				"Could not subscribe to push notifications. The server's VAPID key may be invalid.",
+				{ cause: err },
+			);
+		}
 	}
 
 	await client.setPusher(buildPusher(cfg, sub));
@@ -167,5 +235,11 @@ export async function disableWebPush(
 			// subscription expired); proceed to unsubscribe regardless.
 		}
 	}
-	await sub.unsubscribe();
+	try {
+		await sub.unsubscribe();
+	} catch {
+		// Best-effort (per this function's contract): a rejecting unsubscribe
+		// (transient push-service error, pending unsubscribe) shouldn't surface
+		// a raw DOMException; the subscription self-heals on a later call.
+	}
 }
