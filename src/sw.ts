@@ -54,11 +54,18 @@ registerRoute(
 // reloads the page on `controllerchange`. This never fires without an explicit
 // click, so the "never auto-reload a live session" guarantee holds.
 sw.addEventListener("message", (event) => {
-	if ((event.data as { type?: string } | null)?.type === "SKIP_WAITING") {
-		// skipWaiting() is async; keep the worker alive until it resolves so a
-		// user-initiated update isn't dropped if the SW is terminated early.
-		event.waitUntil(sw.skipWaiting());
-	}
+	if ((event.data as { type?: string } | null)?.type !== "SKIP_WAITING") return;
+	// Only honor the update trigger from a client within this SW's scope (a
+	// Crust window), not an unrelated same-origin tab (e.g. Cinny at "/").
+	// `event.source` is the posting client; the scope check mirrors isAppWindow
+	// (`"url" in source` narrows out ServiceWorker/MessagePort, which lack it).
+	const source = event.source;
+	const inScope =
+		!!source && "url" in source && source.url.startsWith(sw.registration.scope);
+	if (!inScope) return;
+	// skipWaiting() is async; keep the worker alive until it resolves so a
+	// user-initiated update isn't dropped if the SW is terminated early.
+	event.waitUntil(sw.skipWaiting());
 });
 
 // ─── Background Web Push ───
