@@ -5,9 +5,9 @@ import {
 	MatrixEventEvent,
 	type Room,
 	RoomEvent,
-	SyncState,
 } from "matrix-js-sdk";
 import { onCleanup } from "solid-js";
+import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
 import { userSettings } from "../../stores/settings";
 import {
@@ -37,6 +37,7 @@ export function useNotifications(
 	client: MatrixClient,
 	summaries: SummariesStore,
 	activeRoomId: () => string | undefined,
+	syncState: () => AppSyncState,
 ): void {
 	// No-op in non-browser runtimes (SSR, tests, prerender)
 	if (typeof window === "undefined" || typeof document === "undefined") return;
@@ -210,9 +211,13 @@ export function useNotifications(
 	// surface the event in-app, so the SW suppresses its own notification only
 	// then — closing the gap where an open-but-hidden tab with desktop
 	// notifications off would otherwise drop the alert silently. A client can
-	// surface the event when it is synced (receiving live timeline events) and
-	// either focused (the user sees it live) or able to show a desktop
-	// notification. See src/sw.ts handlePush.
+	// surface the event when it is "live" (initial sync complete, processing
+	// live timeline events) and either focused (the user sees it live) or able
+	// to show a desktop notification. We gate on the app's "live" syncState
+	// rather than the SDK's raw SyncState.Syncing because Syncing can fire
+	// during initial sync before the first Prepared, when no live events flow
+	// yet — replying canNotify then would re-open the silent-drop gap at
+	// startup. See src/client/client.tsx onSync and src/sw.ts handlePush.
 	//
 	// This is a coarse, per-client signal, not a per-event one: when unfocused,
 	// the in-app path only pops a desktop notification for "loud" (sound/
@@ -227,13 +232,13 @@ export function useNotifications(
 		notifyChannel.onmessage = (e: MessageEvent) => {
 			const data = e.data as NotifyPing | null;
 			if (data?.type !== "ping" || typeof data.nonce !== "string") return;
-			const synced = client.getSyncState() === SyncState.Syncing;
+			const live = syncState() === "live";
 			const s = userSettings();
 			const canDesktop =
 				s.desktopNotifications &&
 				"Notification" in window &&
 				Notification.permission === "granted";
-			const canNotify = synced && (isAppFocused() || canDesktop);
+			const canNotify = live && (isAppFocused() || canDesktop);
 			notifyChannel?.postMessage({
 				type: "pong",
 				nonce: data.nonce,
