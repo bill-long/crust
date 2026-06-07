@@ -73,6 +73,7 @@ import { updateSetting, userSettings } from "../stores/settings";
 import type { CryptoAction } from "../types/crypto";
 import { stripBasePath } from "./basePath";
 import { useConfig } from "./ConfigProvider";
+import { dmCanonicalTarget } from "./dmRoute";
 import { useDecodedParams } from "./useDecodedParams";
 
 const MEMBERS_WIDTH_KEY = "crust_members_width";
@@ -479,6 +480,25 @@ const Layout: Component = () => {
 	useNotifications(client, summaries, activeRoomId, syncState);
 	const pushConfig = useConfig().push;
 	useWebPushSync(client, pushConfig);
+
+	// Canonicalize `/home/<dmId>` to `/dm/<dmId>` once summaries know the room
+	// is a direct message. In-app navigation already routes DMs to `/dm/`
+	// (RoomList.navigateToRoom), but deep links and service-worker push opens
+	// (src/sw.ts always builds `/home/<roomId>`, since the push payload carries
+	// no is-DM hint) can land on the non-canonical `/home/` route. `isDirect`
+	// may be false/undefined before sync, so this runs as an effect and
+	// re-canonicalizes when the store learns the room is direct. `replace: true`
+	// avoids leaving a `/home/<dmId>` entry in history. After redirecting, the
+	// path starts with `/dm/`, so dmCanonicalTarget returns null (no loop).
+	createEffect(() => {
+		const roomId = params.roomId;
+		const target = dmCanonicalTarget(
+			relativePath(),
+			roomId,
+			roomId ? summaries[roomId]?.isDirect : undefined,
+		);
+		if (target) navigate(target, { replace: true });
+	});
 
 	const handleLogout = async (): Promise<void> => {
 		// Tear down any active call BEFORE logging out so the controller's
