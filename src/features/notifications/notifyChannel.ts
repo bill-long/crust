@@ -25,3 +25,26 @@ export interface NotifyPong {
 	 *  notification). */
 	canNotify: boolean;
 }
+
+export interface CanNotifyInput {
+	/** The app has completed initial sync (post-Prepared) and is processing
+	 *  live timeline events. Mirrors AppSyncState === "live". */
+	live: boolean;
+	/** The app window is focused, so the user sees incoming messages live. */
+	focused: boolean;
+	/** The user's desktopNotifications setting is enabled. */
+	desktopNotificationsEnabled: boolean;
+	/** Notification permission has been granted (and the API is available). */
+	notificationPermissionGranted: boolean;
+}
+
+/** Decide whether this client will surface a pushed event in-app, mirroring the
+ *  in-app notification path's gating. The client confirms (so the SW suppresses
+ *  its background notification) only when the app is live AND either focused
+ *  (the user sees the message live) or able to pop a desktop notification.
+ *  Pure so it can be unit-tested without a DOM / service-worker harness. */
+export function computeCanNotify(input: CanNotifyInput): boolean {
+	const canDesktop =
+		input.desktopNotificationsEnabled && input.notificationPermissionGranted;
+	return input.live && (input.focused || canDesktop);
+}

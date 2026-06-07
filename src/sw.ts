@@ -136,14 +136,22 @@ const NOTIFY_PING_TIMEOUT_MS = 500;
 function aClientWillNotify(): Promise<boolean> {
 	if (typeof BroadcastChannel === "undefined") return Promise.resolve(false);
 	return new Promise<boolean>((resolve) => {
-		let channel: BroadcastChannel;
+		let channel: BroadcastChannel | undefined;
+		let nonce: string;
 		try {
 			channel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+			nonce = crypto.randomUUID();
 		} catch {
+			// If the channel was constructed before the throw, close it so it
+			// doesn't leak; then fail open.
+			try {
+				channel?.close();
+			} catch {
+				// best-effort
+			}
 			resolve(false);
 			return;
 		}
-		const nonce = crypto.randomUUID();
 		let timer: ReturnType<typeof setTimeout>;
 		let settled = false;
 		const finish = (result: boolean): void => {

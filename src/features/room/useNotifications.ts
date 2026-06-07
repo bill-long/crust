@@ -11,6 +11,8 @@ import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
 import { userSettings } from "../../stores/settings";
 import {
+	type CanNotifyInput,
+	computeCanNotify,
 	NOTIFY_CHANNEL_NAME,
 	type NotifyPing,
 } from "../notifications/notifyChannel";
@@ -228,29 +230,50 @@ export function useNotifications(
 	// which is the more disruptive failure mode.
 	let notifyChannel: BroadcastChannel | undefined;
 	if ("BroadcastChannel" in window) {
-		notifyChannel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+		// Fail-open: a restricted context can throw on construction. If it does,
+		// skip channel wiring (the SW falls back to showing the notification
+		// itself) rather than letting the error abort hook setup in Layout.
+		try {
+			notifyChannel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+		} catch {
+			notifyChannel = undefined;
+		}
+	}
+	if (notifyChannel) {
 		notifyChannel.onmessage = (e: MessageEvent) => {
 			const data = e.data as NotifyPing | null;
 			if (data?.type !== "ping" || typeof data.nonce !== "string") return;
-			const live = syncState() === "live";
+			const hasNotificationApi = "Notification" in window;
 			const s = userSettings();
-			const canDesktop =
-				s.desktopNotifications &&
-				"Notification" in window &&
-				Notification.permission === "granted";
-			const canNotify = live && (isAppFocused() || canDesktop);
-			notifyChannel?.postMessage({
-				type: "pong",
-				nonce: data.nonce,
-				canNotify,
-			});
+			const input: CanNotifyInput = {
+				live: syncState() === "live",
+				focused: isAppFocused(),
+				desktopNotificationsEnabled: s.desktopNotifications,
+				notificationPermissionGranted:
+					hasNotificationApi && Notification.permission === "granted",
+			};
+			const canNotify = computeCanNotify(input);
+			try {
+				notifyChannel?.postMessage({
+					type: "pong",
+					nonce: data.nonce,
+					canNotify,
+				});
+			} catch {
+				// Fail-open: if the reply can't be sent (restricted context), the
+				// SW times out waiting and shows the notification itself.
+			}
 		};
 	}
 
 	onCleanup(() => {
 		client.removeListener(RoomEvent.Timeline, onTimeline);
 		client.removeListener(MatrixEventEvent.Decrypted, onDecrypted);
-		notifyChannel?.close();
+		try {
+			notifyChannel?.close();
+		} catch {
+			// best-effort cleanup; nothing actionable if close() throws
+		}
 		pendingDecryption.clear();
 		for (const notif of activeNotifications) {
 			notif.close();
