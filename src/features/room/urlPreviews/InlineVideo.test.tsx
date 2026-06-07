@@ -29,6 +29,7 @@ describe("InlineVideo", () => {
 		expect(video?.getAttribute("src")).toBe("https://example.com/clip.mp4");
 		expect(video?.getAttribute("preload")).toBe("none");
 		expect(video?.getAttribute("referrerpolicy")).toBe("no-referrer");
+		expect(video?.getAttribute("playsinline")).not.toBeNull();
 	});
 
 	it("shows an Open link fallback when the video errors", () => {

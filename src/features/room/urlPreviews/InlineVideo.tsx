@@ -79,18 +79,17 @@ const InlineVideo: Component<{ url: string }> = (props) => {
 				<video
 					controls
 					autoplay
+					playsinline
 					preload="none"
 					ref={(el) => {
 						el.setAttribute("referrerpolicy", "no-referrer");
-						// `playsinline` keeps playback in the reserved box on iOS
-						// Safari, which otherwise forces a `<video>` fullscreen on
-						// play. Set via ref because it's absent from Solid's typed
-						// VideoHTMLAttributes.
-						el.setAttribute("playsinline", "");
 						// Assign `src` last so the first media request is issued
-						// only after `referrerpolicy` is in place. The component
-						// unmounts the <video> when `props.url` changes (the reset
-						// effect clears `activated`), so a one-time read is safe.
+						// only after `referrerpolicy` is in place. `referrerpolicy`
+						// is set via ref because it's absent from Solid's typed
+						// VideoHTMLAttributes (unlike `playsinline`, set above).
+						// The component unmounts the <video> when `props.url`
+						// changes (the reset effect clears `activated`), so a
+						// one-time read is safe.
 						el.src = props.url;
 					}}
 					class="mt-1 block aspect-video w-full max-w-md rounded bg-surface-0 object-contain"
