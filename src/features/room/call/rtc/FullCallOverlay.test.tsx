@@ -292,6 +292,37 @@ describe("FullCallOverlay", () => {
 		expect(status.textContent).toBe("Error: foci offline");
 	});
 
+	it("renders a participant avatar image when avatarUrl is set and the initial otherwise", () => {
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([
+			{
+				identity: "a",
+				displayName: "Amon",
+				avatarUrl: "https://media.example.com/amon",
+				isSpeaking: false,
+				isMuted: false,
+				isLocal: true,
+			},
+			{
+				identity: "b",
+				displayName: "Bea",
+				avatarUrl: null,
+				isSpeaking: false,
+				isMuted: false,
+				isLocal: false,
+			},
+		]);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+
+		const grid = screen.getByTestId("participant-grid");
+		const avatars = grid.querySelectorAll("img");
+		expect(avatars.length).toBe(1);
+		expect(avatars[0].getAttribute("src")).toContain("amon");
+		// The avatar-less participant falls back to the uppercase initial.
+		expect(screen.getByText("B")).toBeTruthy();
+	});
+
 	it("restores focus to the previous focus owner on cleanup", async () => {
 		const prev = document.createElement("button");
 		prev.textContent = "outside";

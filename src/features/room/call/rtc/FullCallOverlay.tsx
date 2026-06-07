@@ -418,6 +418,7 @@ export const FullCallOverlay: Component = () => {
 							>
 								<div
 									class="mt-2 grid min-h-0 flex-1 gap-2 overflow-auto [grid-auto-rows:minmax(8rem,1fr)]"
+									data-testid="participant-grid"
 									classList={{
 										"grid-cols-1": s().livekit.participants().length <= 1,
 										"grid-cols-2":
