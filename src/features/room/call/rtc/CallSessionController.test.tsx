@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import type { MatrixClient } from "matrix-js-sdk";
+import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import { createRoot, createSignal, type Setter } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -128,14 +128,32 @@ import { CallSessionController } from "./CallSessionController";
 
 const flush = (): Promise<void> => new Promise((r) => queueMicrotask(r));
 
-function renderController(): { unmount: () => void } {
+function renderController(opts?: { encrypted?: boolean }): {
+	unmount: () => void;
+	setEncrypted: (v: boolean) => void;
+	emitRoomState: (event: MatrixEvent) => void;
+} {
+	let encrypted = opts?.encrypted ?? true;
+	let roomStateHandler: ((event: MatrixEvent) => void) | null = null;
 	const [syncState] = createSignal<AppSyncState>("live");
 	const [cryptoState] = createSignal<CryptoState>("ready");
 	const summaries = {} as SummariesStore;
 	const result = render(() => (
 		<ClientContext.Provider
 			value={{
-				client: {} as MatrixClient,
+				client: {
+					// roomEncrypted() reads the authoritative room state, not
+					// the summaries store (which can be optimistically false).
+					getRoom: () => ({
+						hasEncryptionStateEvent: () => encrypted,
+					}),
+					// Capture the RoomStateEvent.Events listener so tests can
+					// emit a late-arriving m.room.encryption event.
+					on: (_event: string, handler: (e: MatrixEvent) => void) => {
+						roomStateHandler = handler;
+					},
+					off: () => {},
+				} as unknown as MatrixClient,
 				syncState,
 				cryptoState,
 				summaries,
@@ -161,7 +179,13 @@ function renderController(): { unmount: () => void } {
 			/>
 		</ClientContext.Provider>
 	));
-	return result;
+	return {
+		...result,
+		setEncrypted: (v: boolean) => {
+			encrypted = v;
+		},
+		emitRoomState: (event: MatrixEvent) => roomStateHandler?.(event),
+	};
 }
 
 describe("CallSessionController", () => {
@@ -210,6 +234,71 @@ describe("CallSessionController", () => {
 		expect(hooksState.createE2EE.mock.invocationCallOrder[0]).toBeLessThan(
 			hooksState.rtcJoin.mock.invocationCallOrder[0],
 		);
+	});
+
+	it("requestJoin in an UNENCRYPTED room skips the E2EE bridge (plaintext media, matching peers)", async () => {
+		renderController({ encrypted: false });
+		const s = currentCallSession();
+		expect(s).not.toBeNull();
+		await s?.requestJoin();
+		// No bridge is built — media stays plaintext so peers (who also
+		// don't encrypt in an unencrypted room) can decode our audio.
+		expect(hooksState.createE2EE).not.toHaveBeenCalled();
+		expect(hooksState.rtcJoin).toHaveBeenCalledTimes(1);
+	});
+
+	it("joined-on-mount in an ENCRYPTED room builds the E2EE bridge (recovery path)", async () => {
+		renderController({ encrypted: true });
+		// Simulate the controller mounting while MatrixRTC already reports
+		// joined (close-without-leave, hot reload). The recovery effect
+		// should build the bridge because the room is encrypted.
+		hooksState.setRtcStatus("joined");
+		await flush();
+		expect(hooksState.createE2EE).toHaveBeenCalledTimes(1);
+	});
+
+	it("joined-on-mount in an UNENCRYPTED room does NOT build the E2EE bridge", async () => {
+		renderController({ encrypted: false });
+		hooksState.setRtcStatus("joined");
+		await flush();
+		// Plaintext call: the recovery effect must not build a bridge,
+		// otherwise we would re-encrypt alone and peers hear noise.
+		expect(hooksState.createE2EE).not.toHaveBeenCalled();
+	});
+
+	it("late-arriving m.room.encryption builds the bridge (reactive re-gate)", async () => {
+		const { setEncrypted, emitRoomState } = renderController({
+			encrypted: false,
+		});
+		hooksState.setRtcStatus("joined");
+		await flush();
+		expect(hooksState.createE2EE).not.toHaveBeenCalled();
+		// Room becomes encrypted after mount; the m.room.encryption state
+		// event arrives → roomEncrypted flips true → recovery effect builds
+		// the bridge so media is encrypted before reconnect.
+		setEncrypted(true);
+		emitRoomState({
+			getType: () => "m.room.encryption",
+			getRoomId: () => "!room:example.com",
+		} as unknown as MatrixEvent);
+		await flush();
+		expect(hooksState.createE2EE).toHaveBeenCalledTimes(1);
+	});
+
+	it("ignores m.room.encryption events for OTHER rooms", async () => {
+		const { setEncrypted, emitRoomState } = renderController({
+			encrypted: false,
+		});
+		hooksState.setRtcStatus("joined");
+		await flush();
+		setEncrypted(true);
+		// Wrong room id — must not flip our gate.
+		emitRoomState({
+			getType: () => "m.room.encryption",
+			getRoomId: () => "!other:example.com",
+		} as unknown as MatrixEvent);
+		await flush();
+		expect(hooksState.createE2EE).not.toHaveBeenCalled();
 	});
 
 	it("requestJoin is a no-op while bridgeInitializing is true", async () => {
