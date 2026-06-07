@@ -5,10 +5,15 @@ import {
 	MatrixEventEvent,
 	type Room,
 	RoomEvent,
+	SyncState,
 } from "matrix-js-sdk";
 import { onCleanup } from "solid-js";
 import type { SummariesStore } from "../../client/summaries";
 import { userSettings } from "../../stores/settings";
+import {
+	NOTIFY_CHANNEL_NAME,
+	type NotifyPing,
+} from "../notifications/notifyChannel";
 import { playNotificationSound, primeAudioContext } from "./notificationSound";
 
 /**
@@ -200,9 +205,47 @@ export function useNotifications(
 	client.on(RoomEvent.Timeline, onTimeline);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
 
+	// Background-push coordination: the service worker broadcasts a `ping`
+	// before showing a background notification. Reply whether this client will
+	// surface the event in-app, so the SW suppresses its own notification only
+	// then — closing the gap where an open-but-hidden tab with desktop
+	// notifications off would otherwise drop the alert silently. A client can
+	// surface the event when it is synced (receiving live timeline events) and
+	// either focused (the user sees it live) or able to show a desktop
+	// notification. See src/sw.ts handlePush.
+	//
+	// This is a coarse, per-client signal, not a per-event one: when unfocused,
+	// the in-app path only pops a desktop notification for "loud" (sound/
+	// highlight) events, so a bare-notify event can still be suppressed here
+	// while desktop notifications are enabled. Closing that residual requires
+	// per-event coordination (the deferred event_id-based dedupe in issue #230);
+	// keeping the desktop-enabled check avoids double-alerting loud events,
+	// which is the more disruptive failure mode.
+	let notifyChannel: BroadcastChannel | undefined;
+	if ("BroadcastChannel" in window) {
+		notifyChannel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+		notifyChannel.onmessage = (e: MessageEvent) => {
+			const data = e.data as NotifyPing | null;
+			if (data?.type !== "ping" || typeof data.nonce !== "string") return;
+			const synced = client.getSyncState() === SyncState.Syncing;
+			const s = userSettings();
+			const canDesktop =
+				s.desktopNotifications &&
+				"Notification" in window &&
+				Notification.permission === "granted";
+			const canNotify = synced && (isAppFocused() || canDesktop);
+			notifyChannel?.postMessage({
+				type: "pong",
+				nonce: data.nonce,
+				canNotify,
+			});
+		};
+	}
+
 	onCleanup(() => {
 		client.removeListener(RoomEvent.Timeline, onTimeline);
 		client.removeListener(MatrixEventEvent.Decrypted, onDecrypted);
+		notifyChannel?.close();
 		pendingDecryption.clear();
 		for (const notif of activeNotifications) {
 			notif.close();
