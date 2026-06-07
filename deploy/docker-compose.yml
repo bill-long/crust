@@ -42,14 +42,15 @@ services:
     # The upstream image's built-in healthcheck calls `curl`, which is not
     # installed in the image, so the container always reports "unhealthy"
     # despite working. Override it to probe /health with python3 (present in
-    # the image).
+    # the image). Use 127.0.0.1 (not localhost) to match Sygnal's IPv4 bind
+    # (0.0.0.0) and avoid an IPv6 (::1) resolution mismatch.
     healthcheck:
       test:
         [
           "CMD",
           "python3",
           "-c",
-          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:5000/health').status==200 else 1)",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/health').status==200 else 1)",
         ]
       interval: 30s
       timeout: 5s
