@@ -13,6 +13,7 @@ import { userSettings } from "../../stores/settings";
 import {
 	type CanNotifyInput,
 	computeCanNotify,
+	createSurfacedEventTracker,
 	NOTIFY_CHANNEL_NAME,
 	type NotifyPing,
 } from "../notifications/notifyChannel";
@@ -53,6 +54,14 @@ export function useNotifications(
 
 	// Track active notifications for cleanup on unmount
 	const activeNotifications = new Set<Notification>();
+
+	// Per-event dedupe with the background-push service worker (issue #242):
+	// event_ids this client has actually surfaced in-app (popped a desktop
+	// notification for). The SW pings with the pushed event_id and suppresses
+	// its own background notification only when a client confirms it surfaced
+	// that specific event. Bounded so a long-lived session can't grow without
+	// limit.
+	const surfacedEvents = createSurfacedEventTracker();
 
 	function isAppFocused(): boolean {
 		return !document.hidden && document.hasFocus();
@@ -119,7 +128,7 @@ export function useNotifications(
 		}
 	}
 
-	function showNotification(event: MatrixEvent, room: Room): void {
+	function showNotification(event: MatrixEvent, room: Room): boolean {
 		try {
 			const notif = new Notification(room.name?.trim() || "Room", {
 				body: buildBody(event, room),
@@ -136,8 +145,10 @@ export function useNotifications(
 				navigate(isDm ? `/dm/${encoded}` : `/home/${encoded}`);
 				notif.close();
 			};
+			return true;
 		} catch {
 			// Browser blocked or Notification API unavailable
+			return false;
 		}
 	}
 
@@ -158,7 +169,13 @@ export function useNotifications(
 		const hasHighlight = actions.tweaks?.highlight === true;
 
 		if ((hasSound || hasHighlight) && shouldShowDesktopNotification()) {
-			showNotification(event, room);
+			// Record the event as surfaced only when the notification was
+			// actually created, so the SW's per-event dedupe doesn't suppress a
+			// background notification for an event we failed to pop.
+			const eventId = event.getId();
+			if (showNotification(event, room) && eventId) {
+				surfacedEvents.record(eventId);
+			}
 		}
 		if (hasSound && userSettings().notificationSound) {
 			playNotificationSound();
@@ -216,20 +233,23 @@ export function useNotifications(
 	// then — closing the gap where an open-but-hidden tab with desktop
 	// notifications off would otherwise drop the alert silently. A client can
 	// surface the event when it is "live" (initial sync complete, processing
-	// live timeline events) and either focused (the user sees it live) or able
-	// to show a desktop notification. We gate on the app's "live" syncState
+	// live timeline events) and either focused (the user sees it live) or it
+	// popped a desktop notification for the event. We gate on the app's "live"
+	// syncState
 	// rather than the SDK's raw SyncState.Syncing because Syncing can fire
 	// during initial sync before the first Prepared, when no live events flow
 	// yet — replying canNotify then would re-open the silent-drop gap at
 	// startup. See src/client/client.tsx onSync and src/sw.ts handlePush.
 	//
-	// This is a coarse, per-client signal, not a per-event one: when unfocused,
-	// the in-app path only pops a desktop notification for "loud" (sound/
-	// highlight) events, so a bare-notify event can still be suppressed here
-	// while desktop notifications are enabled. Closing that residual requires
-	// per-event coordination (the deferred event_id-based dedupe in issue #230);
-	// keeping the desktop-enabled check avoids double-alerting loud events,
-	// which is the more disruptive failure mode.
+	// This coordinates per-event (issue #242): the ping carries the pushed
+	// event_id, and a client confirms only when it will surface *that* event —
+	// it is focused (the user sees it live) or it actually popped a desktop
+	// notification for the event. A bare-notify event (no sound/highlight tweak)
+	// while unfocused is never popped in-app, so the client does not confirm and
+	// the SW still shows its background notification. Loud events the in-app
+	// path pops are recorded in the surfaced-event tracker; a same-tag (roomId)
+	// notification means even a race (push handled before the live event) just
+	// replaces rather than duplicates.
 	let notifyChannel: BroadcastChannel | undefined;
 	if ("BroadcastChannel" in window) {
 		// Fail-open: a restricted context can throw on construction. If it does,
@@ -253,6 +273,8 @@ export function useNotifications(
 				desktopNotificationsEnabled: s.desktopNotifications,
 				notificationPermissionGranted:
 					hasNotificationApi && Notification.permission === "granted",
+				eventSurfacedInApp:
+					typeof data.eventId === "string" && surfacedEvents.has(data.eventId),
 			};
 			const canNotify = computeCanNotify(input);
 			try {
@@ -277,6 +299,7 @@ export function useNotifications(
 			// best-effort cleanup; nothing actionable if close() throws
 		}
 		pendingDecryption.clear();
+		surfacedEvents.clear();
 		for (const notif of activeNotifications) {
 			notif.close();
 		}
