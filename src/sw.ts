@@ -130,11 +130,19 @@ const NOTIFY_PING_TIMEOUT_MS = 500;
  *  timeout. An open tab that can't notify — login page, suspended/discarded
  *  tab (its JS is frozen, so it never replies), or one with desktop
  *  notifications disabled — does not suppress the background notification,
- *  closing the silent-drop gap. */
+ *  closing the silent-drop gap. Fail-open: any error (e.g. BroadcastChannel
+ *  construction failing in a restricted environment) resolves `false` so the
+ *  background notification still shows rather than being silently dropped. */
 function aClientWillNotify(): Promise<boolean> {
 	if (typeof BroadcastChannel === "undefined") return Promise.resolve(false);
 	return new Promise<boolean>((resolve) => {
-		const channel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+		let channel: BroadcastChannel;
+		try {
+			channel = new BroadcastChannel(NOTIFY_CHANNEL_NAME);
+		} catch {
+			resolve(false);
+			return;
+		}
 		const nonce = crypto.randomUUID();
 		let timer: ReturnType<typeof setTimeout>;
 		let settled = false;
@@ -142,7 +150,11 @@ function aClientWillNotify(): Promise<boolean> {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			channel.close();
+			try {
+				channel.close();
+			} catch {
+				// best-effort; nothing actionable if close() throws
+			}
 			resolve(result);
 		};
 		channel.onmessage = (e: MessageEvent) => {
@@ -156,7 +168,12 @@ function aClientWillNotify(): Promise<boolean> {
 			}
 		};
 		timer = setTimeout(() => finish(false), NOTIFY_PING_TIMEOUT_MS);
-		channel.postMessage({ type: "ping", nonce });
+		try {
+			channel.postMessage({ type: "ping", nonce });
+		} catch {
+			// Couldn't ask any client — fall back to showing the notification.
+			finish(false);
+		}
 	});
 }
 
