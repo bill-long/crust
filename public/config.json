@@ -9,6 +9,11 @@
 		"trendingOnOpen": true,
 		"maxRating": "g"
 	},
+	"push": {
+		"vapidPublicKey": "",
+		"gatewayUrl": "",
+		"appId": ""
+	},
 	"branding": {
 		"name": "Crust",
 		"logoUrl": "/favicon.svg",

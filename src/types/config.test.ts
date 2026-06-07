@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { normalizeConfig } from "./config";
+import { isPushConfigured, normalizeConfig } from "./config";
 
 const GIF_ENV_VARS = [
 	"VITE_GIF_API_KEY",
@@ -201,5 +201,45 @@ describe("normalizeConfig elementCall url validation", () => {
 		expect(callUrl("")).toBe("");
 		expect(callUrl("   ")).toBe("");
 		expect(warnSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("normalizeConfig push", () => {
+	it("defaults to an empty (unconfigured) push block", () => {
+		const push = normalizeConfig({}).push;
+		expect(push).toEqual({ vapidPublicKey: "", gatewayUrl: "", appId: "" });
+		expect(isPushConfigured(push)).toBe(false);
+	});
+
+	it("reads and trims push fields from config.json", () => {
+		const push = normalizeConfig({
+			push: {
+				vapidPublicKey: "  BHDunEhVBbl  ",
+				gatewayUrl: "  https://sygnal.example/_matrix/push/v1/notify  ",
+				appId: "  pizza.strange.crust.webpush  ",
+			},
+		}).push;
+		expect(push).toEqual({
+			vapidPublicKey: "BHDunEhVBbl",
+			gatewayUrl: "https://sygnal.example/_matrix/push/v1/notify",
+			appId: "pizza.strange.crust.webpush",
+		});
+		expect(isPushConfigured(push)).toBe(true);
+	});
+
+	it("ignores non-string push fields", () => {
+		const push = normalizeConfig({
+			push: { vapidPublicKey: 123, gatewayUrl: null, appId: ["x"] },
+		}).push;
+		expect(push).toEqual({ vapidPublicKey: "", gatewayUrl: "", appId: "" });
+	});
+
+	it("is not configured when any field is missing", () => {
+		expect(
+			isPushConfigured(
+				normalizeConfig({ push: { vapidPublicKey: "k", gatewayUrl: "u" } })
+					.push,
+			),
+		).toBe(false);
 	});
 });

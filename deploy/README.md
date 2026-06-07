@@ -85,6 +85,83 @@ After editing, no restart is needed - nginx serves it on the next request, and
 the bundled cache headers (`expires -1` for `config.json`) ensure clients
 re-fetch it on reload.
 
+## Background push notifications (Sygnal + Web Push)
+
+Crust is a PWA and can deliver **background** notifications (while the app is
+closed) via a self-hosted [Sygnal](https://github.com/matrix-org/sygnal) push
+gateway using its `webpush` pushkin. This is optional — without it, Crust still
+shows in-app desktop notifications while open.
+
+Topology: browser ⟶ (Push API subscription) ⟶ homeserver pusher ⟶
+`https://strange.pizza/_matrix/push/v1/notify` ⟶ nginx ⟶ Sygnal ⟶ the
+browser's push service ⟶ the service worker shows the notification.
+
+The Continuwuity homeserver implements pushers and POSTs notifications to the
+gateway URL the client registers, so no homeserver changes are needed.
+
+### 1. Generate VAPID keys
+
+VAPID keys identify this gateway to browser push services. They are free,
+self-generated, and never expire. Generate them once with the Sygnal image:
+
+```bash
+cd ~/crust
+mkdir -p vapid
+docker run --rm -v "$PWD/vapid:/vapid" -w /vapid \
+  --entrypoint vapid matrixdotorg/sygnal:latest --gen --applicationServerKey
+```
+
+This writes `vapid/private_key.pem` (+ `public_key.pem`) and prints an
+**Application Server Key** string. Copy that string — it goes in `config.json`
+below. (Re-derive it later with the same command's `--applicationServerKey`
+output if lost.)
+
+### 2. Configure Sygnal
+
+```bash
+# Copy the example and edit the contact email (the app_id default already
+# matches the config.json below):
+curl -fsSLO https://raw.githubusercontent.com/bill-long/crust/main/deploy/sygnal.yaml.example
+mv sygnal.yaml.example sygnal.yaml
+$EDITOR sygnal.yaml   # set vapid_contact_email
+```
+
+### 3. Point Crust at the gateway
+
+Add a `push` block to `config.json` (served to clients). The `appId` MUST match
+the app key in `sygnal.yaml`, and `vapidPublicKey` is the Application Server Key
+from step 1:
+
+```json
+"push": {
+  "vapidPublicKey": "BHDunEhVBbl-lVD3ICUfxPlIavtUGZtlMQ5fGCgkstZ...",
+  "gatewayUrl": "https://strange.pizza/_matrix/push/v1/notify",
+  "appId": "pizza.strange.crust.webpush"
+}
+```
+
+### 4. Route the gateway through nginx
+
+Add the `/_matrix/push/` location from `nginx-location.conf.example` to the
+`strange.pizza` server block (alongside the existing `/_matrix/` location), then
+`sudo nginx -t && sudo systemctl reload nginx`.
+
+### 5. Start Sygnal
+
+```bash
+docker compose --profile push up -d
+```
+
+> Use `--profile push` on every `docker compose up` (and `pull`) once enabled,
+> otherwise compose will stop the `sygnal` container as out-of-profile.
+
+Verify: `curl -sS https://strange.pizza/_matrix/push/v1/notify` should return a
+JSON error from Sygnal (e.g. method/parse error), confirming nginx reaches the
+gateway. (Omit `-f`: a bare GET returns HTTP 4xx, which `-f` would turn into a
+silent failure with no body.) Then toggle **Settings → Notifications →
+Background notifications** in Crust, accept the browser permission prompt, close
+the app, and send yourself a message from another device.
+
 ## Changing the sub-path
 
 The GHCR image is built with `VITE_BASE_PATH=/crust/`. To host under a

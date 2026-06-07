@@ -19,3 +19,23 @@ services:
       # Bind to loopback only; TLS terminated by the host's nginx,
       # which proxies /crust/ -> 127.0.0.1:8083/.
       - "127.0.0.1:8083:80"
+
+  # Optional push gateway for background Web Push notifications.
+  # Only started when the "push" profile is enabled, e.g.
+  #   docker compose --profile push up -d
+  # Requires ./sygnal.yaml and ./vapid/private_key.pem on the host
+  # (see deploy/README.md "Background push notifications").
+  sygnal:
+    image: matrixdotorg/sygnal:latest
+    container_name: sygnal
+    restart: unless-stopped
+    profiles: ["push"]
+    environment:
+      SYGNAL_CONF: /sygnal.yaml
+    volumes:
+      - ./sygnal.yaml:/sygnal.yaml:ro
+      - ./vapid:/vapid:ro
+    ports:
+      # Loopback only; the host's nginx proxies
+      # /_matrix/push/ -> 127.0.0.1:8084/_matrix/push/.
+      - "127.0.0.1:8084:5000"

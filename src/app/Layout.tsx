@@ -30,6 +30,8 @@ import {
 	buildShortcodeLookup,
 	useImagePacks,
 } from "../features/emoji/useImagePacks";
+import { useWebPushSync } from "../features/notifications/useWebPushSync";
+import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallButton } from "../features/room/call/CallButton";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
@@ -67,8 +69,10 @@ import { triggerCryptoAction } from "../stores/cryptoActions";
 import { setLastChannel } from "../stores/lastChannel";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
+import { updateSetting, userSettings } from "../stores/settings";
 import type { CryptoAction } from "../types/crypto";
 import { stripBasePath } from "./basePath";
+import { useConfig } from "./ConfigProvider";
 import { useDecodedParams } from "./useDecodedParams";
 
 const MEMBERS_WIDTH_KEY = "crust_members_width";
@@ -473,6 +477,8 @@ const Layout: Component = () => {
 	};
 
 	useNotifications(client, summaries, activeRoomId);
+	const pushConfig = useConfig().push;
+	useWebPushSync(client, pushConfig);
 
 	const handleLogout = async (): Promise<void> => {
 		// Tear down any active call BEFORE logging out so the controller's
@@ -481,6 +487,21 @@ const Layout: Component = () => {
 		// the session). Per rubber-duck #2 on Phase 7B.
 		setActiveCallRoomId(null);
 		closeNotificationSound();
+		// Best-effort: remove this account's Web Push pusher and unsubscribe
+		// before the session is invalidated, so a logged-out (or switched)
+		// account doesn't keep receiving background notifications.
+		if (userSettings().backgroundNotifications) {
+			try {
+				await disableWebPush(client, pushConfig);
+			} catch {
+				// Non-fatal; proceed with logout regardless.
+			}
+			// Clear the per-device preference so the next account to log in on
+			// this browser doesn't silently inherit background push (settings
+			// are shared across accounts in localStorage). The new account must
+			// opt in explicitly.
+			updateSetting("backgroundNotifications", false);
+		}
 		try {
 			await client.logout(true);
 		} catch {

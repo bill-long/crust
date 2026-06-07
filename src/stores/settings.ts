@@ -11,6 +11,12 @@ export interface UserSettings {
 	timeFormat: "12h" | "24h";
 	/** Whether desktop notifications are enabled. */
 	desktopNotifications: boolean;
+	/**
+	 * Whether background Web Push notifications are enabled (delivered via the
+	 * service worker + push gateway even when the app is closed). Distinct from
+	 * `desktopNotifications`, which only fires while the app is open.
+	 */
+	backgroundNotifications: boolean;
 	/** Whether to play a sound for incoming messages in other rooms. */
 	notificationSound: boolean;
 	/**
@@ -64,6 +70,7 @@ const defaults: UserSettings = {
 	zoomLevel: 100,
 	timeFormat: "12h",
 	desktopNotifications: false,
+	backgroundNotifications: false,
 	notificationSound: true,
 	urlPreviews: true,
 	rtcMicDeviceId: "",
@@ -107,6 +114,11 @@ function load(): UserSettings {
 				obj,
 				"desktopNotifications",
 				defaults.desktopNotifications,
+			),
+			backgroundNotifications: loadBool(
+				obj,
+				"backgroundNotifications",
+				defaults.backgroundNotifications,
 			),
 			notificationSound: loadBool(
 				obj,
