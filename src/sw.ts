@@ -262,7 +262,12 @@ sw.addEventListener("push", (event) => {
 
 /** Build the in-app deep link for a room, falling back to the app root if the
  *  roomId can't be encoded (e.g. a malformed string with a lone surrogate,
- *  which would make encodeURIComponent throw URIError). */
+ *  which would make encodeURIComponent throw URIError).
+ *
+ *  Always uses the `/home/` route: the push payload carries no is-DM hint and
+ *  the worker has no SDK/m.direct access, so it can't pick `/dm/` here. The app
+ *  canonicalizes `/home/<dmId>` to `/dm/<dmId>` after load once summaries know
+ *  the room is direct (see the createEffect in src/app/Layout.tsx). */
 function roomUrl(roomId: string | undefined): string {
 	if (!roomId) return base;
 	try {
