@@ -18,6 +18,7 @@ import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
+import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
 
 /** Auth guard — redirects to /login if no session, otherwise boots the Matrix client. */
@@ -188,6 +189,7 @@ const App: Component = () => {
 					</Route>
 				</Route>
 			</Router>
+			<UpdatePrompt />
 		</ConfigProvider>
 	);
 };
