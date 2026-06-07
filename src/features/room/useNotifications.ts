@@ -90,7 +90,9 @@ export function useNotifications(
 		const sender = memberName || senderId || "Someone";
 
 		if (event.isDecryptionFailure()) {
-			return `${sender}: Encrypted message`;
+			// Lock indicator matches the background-push copy in pushCopy.ts for
+			// a consistent "can't show encrypted content" message across paths.
+			return `${sender}: 🔒 Encrypted message`;
 		}
 
 		const content = event.getContent();
