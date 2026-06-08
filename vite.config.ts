@@ -31,7 +31,10 @@ export default defineConfig({
 				name: "Crust",
 				short_name: "Crust",
 				description: "A fast, Discord-class Matrix chat client.",
-				theme_color: "#e33e7f",
+				// Dark title-bar color (surface-1) so the installed-app title
+				// bar's auto-chosen text stays readable, focused or unfocused.
+				// The brand pink is the in-app accent, not the OS chrome color.
+				theme_color: "#171717",
 				background_color: "#0a0a0a",
 				display: "standalone",
 				// Honor the configurable base path (default "/", e.g. "/crust/").
