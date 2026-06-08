@@ -20,12 +20,12 @@ function inlineStyleSheet(sheet: CSSStyleSheet, target: Document): boolean {
 	try {
 		// Accessing cssRules throws a SecurityError for cross-origin sheets.
 		const rules = sheet.cssRules;
-		let css = "";
+		const parts: string[] = [];
 		for (let i = 0; i < rules.length; i++) {
-			css += rules[i].cssText;
+			parts.push(rules[i].cssText);
 		}
 		const style = target.createElement("style");
-		style.textContent = css;
+		style.textContent = parts.join("");
 		target.head.appendChild(style);
 		return true;
 	} catch {
