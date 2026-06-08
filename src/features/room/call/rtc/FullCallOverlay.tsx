@@ -470,7 +470,7 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 	const [avatarFailed, setAvatarFailed] = createSignal(false);
 	createEffect(
 		on(
-			() => props.participant.avatarUrl,
+			() => props.participant.avatarUrlLarge,
 			() => setAvatarFailed(false),
 		),
 	);
@@ -495,7 +495,7 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 
 	return (
 		<div
-			class="relative flex min-h-0 items-center justify-center overflow-hidden rounded border bg-surface-2"
+			class="relative flex min-h-0 items-center justify-center overflow-hidden rounded border bg-surface-2 [container-type:size]"
 			classList={{
 				"border-success": props.participant.isSpeaking,
 				"border-border-subtle": !props.participant.isSpeaking,
@@ -511,11 +511,11 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 			/>
 			<Show when={!entry()}>
 				<Show
-					when={!avatarFailed() && props.participant.avatarUrl}
+					when={!avatarFailed() && props.participant.avatarUrlLarge}
 					fallback={
 						<div
 							aria-hidden="true"
-							class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-3 text-lg font-semibold text-text-emphasis"
+							class="flex aspect-square w-[clamp(3rem,45cqmin,14rem)] items-center justify-center rounded-full bg-surface-3 font-semibold text-text-emphasis text-[clamp(1rem,18cqmin,4rem)]"
 						>
 							{(props.participant.displayName.trim()[0] ?? "?").toUpperCase()}
 						</div>
@@ -526,7 +526,7 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 							src={url()}
 							alt=""
 							aria-hidden="true"
-							class="h-12 w-12 rounded-full object-cover"
+							class="aspect-square w-[clamp(3rem,45cqmin,14rem)] rounded-full object-cover"
 							onError={() => setAvatarFailed(true)}
 						/>
 					)}

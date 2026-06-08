@@ -28,6 +28,7 @@ function participant(over: Partial<RtcParticipant>): RtcParticipant {
 		identity: "id",
 		displayName: "Someone",
 		avatarUrl: null,
+		avatarUrlLarge: null,
 		isSpeaking: false,
 		isMuted: false,
 		isLocal: false,
