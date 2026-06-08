@@ -12,6 +12,7 @@ import { ClientProvider, useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
 import { LoginPage } from "../features/auth/LoginPage";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
+import { OverlayRoute } from "../features/room/call/rtc/OverlayRoute";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
@@ -179,6 +180,11 @@ const App: Component = () => {
 		<ConfigProvider>
 			<Router base={routerBase}>
 				<Route path="/login" component={LoginPage} />
+				{/* Standalone overlay window contents (the desktop two-window
+				    overlay). Top-level + session-free: it mirrors call state from
+				    the main window over a BroadcastChannel rather than booting a
+				    client of its own. */}
+				<Route path="/overlay" component={OverlayRoute} />
 				<Route path="/" component={AuthGuard}>
 					<Route path="/" component={SyncGate}>
 						<Route path="/" component={HomePage} />

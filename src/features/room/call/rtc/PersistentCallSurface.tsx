@@ -2,6 +2,7 @@ import { type Component, Show } from "solid-js";
 import { useConfig } from "../../../../app/ConfigProvider";
 import { useClient } from "../../../../client/client";
 import { activeCallRoomId } from "../../../../stores/activeCall";
+import { CallOverlayBroadcaster } from "./CallOverlayBroadcaster";
 import { CallOverlayController } from "./CallOverlayController";
 import { CallSessionController } from "./CallSessionController";
 
@@ -51,21 +52,28 @@ export const PersistentCallSurface: Component = () => {
 	const config = useConfig();
 
 	return (
-		<Show when={activeCallRoomId()} keyed>
-			{(rid) => (
-				<>
-					<CallSessionController
-						roomId={rid}
-						roomName={() => summaries[rid]?.name?.trim() || "this room"}
-						elementCallUrl={config.elementCall.url}
-					/>
-					{/* Owns the floating voice-overlay (Document PiP) window
-					    lifecycle. Mounted here so it shares the call's lifetime:
-					    when the call ends the keyed <Show> unmounts this and the
-					    controller's onCleanup closes any open overlay window. */}
-					<CallOverlayController />
-				</>
-			)}
-		</Show>
+		<>
+			{/* Producer for the separate desktop overlay window. Mounted
+			    unconditionally (outside the keyed <Show>) so it keeps answering
+			    overlay handshakes and broadcasts an idle snapshot even when no
+			    call is active. Renders nothing. */}
+			<CallOverlayBroadcaster />
+			<Show when={activeCallRoomId()} keyed>
+				{(rid) => (
+					<>
+						<CallSessionController
+							roomId={rid}
+							roomName={() => summaries[rid]?.name?.trim() || "this room"}
+							elementCallUrl={config.elementCall.url}
+						/>
+						{/* Owns the floating voice-overlay (Document PiP) window
+						    lifecycle. Mounted here so it shares the call's lifetime:
+						    when the call ends the keyed <Show> unmounts this and the
+						    controller's onCleanup closes any open overlay window. */}
+						<CallOverlayController />
+					</>
+				)}
+			</Show>
+		</>
 	);
 };
