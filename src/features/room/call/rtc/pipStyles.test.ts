@@ -56,4 +56,33 @@ describe("copyStylesIntoPipDocument", () => {
 		const target = makeTargetDoc();
 		expect(() => copyStylesIntoPipDocument(emptySource, target)).not.toThrow();
 	});
+
+	it("falls back to a <link> when a sheet's cssRules access throws", () => {
+		const style = document.createElement("style");
+		style.textContent = ".x{color:red}";
+		document.head.appendChild(style);
+		appended.push(style);
+
+		// Simulate a cross-origin sheet: cssRules throws, but href is present.
+		const sheet = style.sheet as CSSStyleSheet;
+		Object.defineProperty(sheet, "cssRules", {
+			configurable: true,
+			get() {
+				throw new DOMException("blocked", "SecurityError");
+			},
+		});
+		Object.defineProperty(sheet, "href", {
+			configurable: true,
+			value: "https://cdn.example.com/app.css",
+		});
+
+		const target = makeTargetDoc();
+		copyStylesIntoPipDocument(document, target);
+
+		const link = target.head.querySelector<HTMLLinkElement>(
+			'link[rel="stylesheet"]',
+		);
+		expect(link).not.toBeNull();
+		expect(link?.getAttribute("href")).toBe("https://cdn.example.com/app.css");
+	});
 });

@@ -11,9 +11,9 @@
  *
  * Same-origin sheets (Tailwind's output + `global.css`, whether injected as a
  * `<style>` in dev or served as a `<link>` in prod) expose `cssRules`, so we
- * inline them into a single `<style>`. The `<link>` fallback covers any sheet
- * whose `cssRules` access throws (e.g. a cross-origin sheet), so we never drop
- * styling silently.
+ * inline each one into its own `<style>` element in the PiP head. The `<link>`
+ * fallback covers any sheet whose `cssRules` access throws (e.g. a cross-origin
+ * sheet), so we never drop styling silently.
  */
 
 function inlineStyleSheet(sheet: CSSStyleSheet, target: Document): boolean {
@@ -37,15 +37,17 @@ function linkStyleSheet(sheet: CSSStyleSheet, target: Document): void {
 	if (!sheet.href) return;
 	const link = target.createElement("link");
 	link.rel = "stylesheet";
-	if (sheet.media.mediaText) link.media = sheet.media.mediaText;
+	if (sheet.media?.mediaText) link.media = sheet.media.mediaText;
 	link.href = sheet.href;
 	target.head.appendChild(link);
 }
 
 /**
  * Mirror every stylesheet from `source` into `target`'s head, plus the `<html>`
- * inline style (carries `zoom` / `--app-zoom`), class list, `lang`, and
- * `color-scheme`, so the PiP document matches the main app's theme and scale.
+ * inline style (carries `zoom` / `--app-zoom`), class list, and `lang`, so the
+ * PiP document matches the main app's theme and scale. The active color scheme
+ * carries over through the copied stylesheets and the mirrored inline style — it
+ * is not copied as a separate attribute.
  */
 export function copyStylesIntoPipDocument(
 	source: Document,

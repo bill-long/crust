@@ -135,4 +135,30 @@ describe("CallOverlayController", () => {
 		expect(win.close).toHaveBeenCalledTimes(1);
 		expect(overlayOpen()).toBe(false);
 	});
+
+	it("clears state without re-closing when the user closes the PiP window", async () => {
+		const win = makeFakeWindow();
+		installPip(() => Promise.resolve(win));
+		render(() => <CallOverlayController />);
+
+		requestOpenOverlay();
+		await flush();
+		expect(overlayOpen()).toBe(true);
+
+		// The window emits 'pagehide' when the user closes it directly. Grab the
+		// registered handler and invoke it.
+		const addEventListener = win.addEventListener as unknown as ReturnType<
+			typeof vi.fn
+		>;
+		const pagehideCall = addEventListener.mock.calls.find(
+			(c) => c[0] === "pagehide",
+		);
+		expect(pagehideCall).toBeTruthy();
+		(pagehideCall?.[1] as () => void)();
+
+		// State is cleared, but we must NOT call close() on an already-closing
+		// window (teardown(false)).
+		expect(overlayOpen()).toBe(false);
+		expect(win.close).not.toHaveBeenCalled();
+	});
 });
