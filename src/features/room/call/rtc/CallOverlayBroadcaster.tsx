@@ -6,6 +6,7 @@ import {
 	INACTIVE_SNAPSHOT,
 } from "./callOverlayBridge";
 import { currentCallSession } from "./callSessionStore";
+import { closeNativeOverlay } from "./nativeOverlay";
 
 /**
  * Producer half of the two-window call overlay. Lives in the main app window
@@ -23,13 +24,19 @@ export const CallOverlayBroadcaster: Component = () => {
 	const buildSnapshot = (): CallOverlaySnapshot => {
 		const session = currentCallSession();
 		if (!session) return INACTIVE_SNAPSHOT;
+		// Read the mic state once, up front, so the broadcasting effect always
+		// tracks it — even if the local participant isn't currently in the
+		// LiveKit list. Reading it only inside the (conditional) local-row branch
+		// below would drop the dependency in that window, so a mute toggle
+		// wouldn't republish and the overlay would show a stale mute state.
+		const micOn = voiceMicEnabled();
 		const participants = session.livekit.participants().map((p) => ({
 			identity: p.identity,
 			displayName: p.displayName,
 			avatarUrl: p.avatarUrl,
 			isLocal: p.isLocal,
 			// Local mic: voice store is the responsive source of truth.
-			isMuted: p.isLocal ? !voiceMicEnabled() : p.isMuted,
+			isMuted: p.isLocal ? !micOn : p.isMuted,
 			isSpeaking: p.isSpeaking,
 		}));
 		return {
@@ -71,6 +78,9 @@ export const CallOverlayBroadcaster: Component = () => {
 		} else if (wasActive) {
 			wasActive = false;
 			producer.publish(snapshot);
+			// The call ended: tear down the native overlay window too (no-op in
+			// a browser). The PiP overlay is closed separately by its controller.
+			void closeNativeOverlay();
 		}
 	});
 

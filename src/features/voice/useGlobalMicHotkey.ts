@@ -1,10 +1,17 @@
 import { createEffect, on, onCleanup } from "solid-js";
+import { isNativeShell } from "../../app/nativeShell";
 import { type MicHotkey, userSettings } from "../../stores/settings";
 import { micHotkeyCaptureActive, setMicHotkeyHeld } from "../../stores/voice";
+import { isTypingTarget } from "./typingTarget";
 
 /**
  * Global push-to-talk / push-to-mute hotkey listener (Phase 6 of #122
  * — issue #108). Mount once at the app root.
+ *
+ * BROWSER-ONLY: in the desktop shell a separate OS-level keyboard-hook
+ * sidecar (`useNativeMicHotkey`) is the single authoritative input path in
+ * every focus state, so this DOM listener short-circuits there to avoid a
+ * second writer of the held state. In a plain browser it is the sole path.
  *
  * - No listeners attached when `micMode` is `"voice-activity"` or
  *   `micHotkey` is unbound — zero overhead in the default case.
@@ -37,27 +44,6 @@ const MODIFIER_CODES_FOR: Record<
 
 const RELEASE_DEBOUNCE_MS = 30;
 
-function isTypingTarget(target: EventTarget | null): boolean {
-	if (!(target instanceof Element)) return false;
-	const tag = target.tagName;
-	if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
-	// Match any "editable" contenteditable ancestor. Listing the editable
-	// values explicitly (rather than `[contenteditable]` alone) is critical
-	// for nested cases like rich-editor widgets: a `contenteditable="false"`
-	// island inside a `contenteditable="true"` host must NOT shadow the
-	// editable host above it — bare `[contenteditable]` followed by
-	// `closest()` would stop at the `false` element and incorrectly report
-	// the target as non-typing.
-	if (
-		target.closest(
-			'[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]',
-		)
-	) {
-		return true;
-	}
-	return false;
-}
-
 function comboIsHeld(combo: MicHotkey, pressed: ReadonlySet<string>): boolean {
 	if (combo.ctrl && !MODIFIER_CODES_FOR.ctrl.some((c) => pressed.has(c)))
 		return false;
@@ -75,6 +61,9 @@ function comboIsHeld(combo: MicHotkey, pressed: ReadonlySet<string>): boolean {
 }
 
 export function useGlobalMicHotkey(): void {
+	// Desktop shell uses the OS-hook sidecar (`useNativeMicHotkey`) as the sole
+	// held-state writer; don't attach the DOM listener there.
+	if (isNativeShell()) return;
 	createEffect(
 		on(
 			() => {
@@ -144,7 +133,11 @@ export function useGlobalMicHotkey(): void {
 					applyHeld(comboIsHeld(hotkey, pressed));
 				};
 
-				const onBlur = (): void => forceClearHeld();
+				// Clear held when the window loses focus so a key held during
+				// alt-tab doesn't keep the mic keyed.
+				const onBlur = (): void => {
+					forceClearHeld();
+				};
 
 				window.addEventListener("keydown", onKeyDown, { capture: true });
 				window.addEventListener("keyup", onKeyUp, { capture: true });

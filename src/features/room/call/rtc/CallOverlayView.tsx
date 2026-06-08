@@ -41,7 +41,10 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 				"bg-surface-0/80 backdrop-blur-md": props.translucent,
 			}}
 		>
-			<header class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface-1 px-2">
+			<header
+				data-tauri-drag-region
+				class="flex h-10 shrink-0 select-none items-center justify-between gap-2 border-b border-border-subtle bg-surface-1 px-2"
+			>
 				<span class="flex min-w-0 items-center gap-1.5">
 					<span
 						aria-hidden="true"
