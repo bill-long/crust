@@ -32,8 +32,12 @@ export interface RtcParticipant {
 	identity: string;
 	/** Resolved Matrix display name (or userId, or identity as fallback). */
 	displayName: string;
-	/** Resolved HTTP avatar URL (mxc → media), or null when none is known. */
+	/** Small (96px) avatar URL for compact surfaces (e.g. the PiP panel rows). */
 	avatarUrl: string | null;
+	/** Large (448px) avatar URL for the full call tile, which renders the
+	 *  avatar large and scales it with the participant count. Null together
+	 *  with `avatarUrl` (both derive from the same mxc). */
+	avatarUrlLarge: string | null;
 	/** True when LiveKit reports the participant in the active-speakers list. */
 	isSpeaking: boolean;
 	/** True when the participant has muted their microphone publication. */
@@ -276,20 +280,43 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 	const resolveIdentity = (
 		identity: string,
-	): { displayName: string; avatarUrl: string | null } => {
+	): {
+		displayName: string;
+		avatarUrl: string | null;
+		avatarUrlLarge: string | null;
+	} => {
 		// LiveKit identity is the MatrixRTC backend identity. Map back through
 		// the membership list to a userId, then resolve the member's display
 		// name and avatar from a single profile lookup.
 		const membership = opts
 			.memberships()
 			.find((m) => m.rtcBackendIdentity === identity);
-		if (!membership) return { displayName: identity, avatarUrl: null };
+		if (!membership) {
+			return { displayName: identity, avatarUrl: null, avatarUrlLarge: null };
+		}
 		const user = opts.client.getUser(membership.userId);
 		const mxc = user?.avatarUrl;
 		return {
 			displayName: user?.displayName ?? membership.userId,
+			// Small crop for compact surfaces (PiP panel rows at ~32px).
 			avatarUrl: mxc
 				? (opts.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null)
+				: null,
+			// The full call tile renders this avatar large (up to 14rem ≈ 224px
+			// CSS, ~448px on a 2× display) and scales it with the participant
+			// count, so request a high-res thumbnail to stay crisp instead of
+			// upscaling the small one.
+			//
+			// 448 is a deliberate single size optimized for the common 1–2
+			// person call on a HiDPI display (the case that looked blurriest).
+			// We intentionally do NOT tier the size by participant count: that
+			// would re-fetch every avatar whenever someone joins/leaves (the
+			// tier — and thus the URL — would change), causing flicker and more
+			// requests. On large calls the tiles shrink so the browser
+			// downscales these crops; the only cost is a modest one-time
+			// overfetch, which we accept in favour of never upscaling.
+			avatarUrlLarge: mxc
+				? (opts.client.mxcUrlToHttp(mxc, 448, 448, "crop") ?? null)
 				: null,
 		};
 	};
@@ -301,6 +328,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			identity: string,
 			displayName: string,
 			avatarUrl: string | null,
+			avatarUrlLarge: string | null,
 			isSpeaking: boolean,
 			isMuted: boolean,
 			isLocal: boolean,
@@ -311,6 +339,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				prev &&
 				prev.displayName === displayName &&
 				prev.avatarUrl === avatarUrl &&
+				prev.avatarUrlLarge === avatarUrlLarge &&
 				prev.isSpeaking === isSpeaking &&
 				prev.isMuted === isMuted &&
 				prev.isLocal === isLocal
@@ -321,6 +350,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				identity,
 				displayName,
 				avatarUrl,
+				avatarUrlLarge,
 				isSpeaking,
 				isMuted,
 				isLocal,
@@ -335,6 +365,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				r.localParticipant.identity,
 				localInfo.displayName,
 				localInfo.avatarUrl,
+				localInfo.avatarUrlLarge,
 				speakingIds.has(r.localParticipant.identity),
 				r.localParticipant.isMicrophoneEnabled === false,
 				true,
@@ -350,6 +381,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					p.identity,
 					info.displayName,
 					info.avatarUrl,
+					info.avatarUrlLarge,
 					speakingIds.has(p.identity),
 					micPub?.isMuted ?? true,
 					false,

@@ -534,6 +534,22 @@ describe("useLivekitRoom", () => {
 		await waitFor(() => result.status() === "connected");
 		const remote = result.participants().find((p) => !p.isLocal);
 		expect(remote?.avatarUrl).toContain("example.com/bob");
+		expect(remote?.avatarUrlLarge).toContain("example.com/bob");
+		// Compact surfaces (PiP panel rows) use the small 96px crop; the full
+		// call tile renders the avatar large and scales it, so a separate
+		// high-res 448px crop avoids upscaling blur.
+		expect(client.mxcUrlToHttp).toHaveBeenCalledWith(
+			"mxc://example.com/bob",
+			96,
+			96,
+			"crop",
+		);
+		expect(client.mxcUrlToHttp).toHaveBeenCalledWith(
+			"mxc://example.com/bob",
+			448,
+			448,
+			"crop",
+		);
 	});
 
 	it("resolves a null avatar url when the member has no avatar", async () => {
