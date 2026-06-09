@@ -32,6 +32,14 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    # Read-only repo access; no write scopes — the write-capable token lives
+    # only in the separate `release` job. `actions: read` is granted defensively
+    # for the dependency caches: in practice the cache/artifact services use the
+    # Actions runtime token (not GITHUB_TOKEN), but this matches GitHub's
+    # documented default permissions and is harmless.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v5
 
@@ -88,13 +96,21 @@ jobs:
         with:
           projectPath: desktop
 
+      # Stage both installers into one flat directory so the uploaded artifact
+      # has a predictable, flat layout (independent of upload-artifact's
+      # least-common-ancestor path handling) for the release job to consume.
+      - name: Stage installers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-installers | Out-Null
+          Copy-Item desktop/src-tauri/target/release/bundle/msi/*.msi dist-installers/
+          Copy-Item desktop/src-tauri/target/release/bundle/nsis/*-setup.exe dist-installers/
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: crust-desktop-installers
-          path: |
-            desktop/src-tauri/target/release/bundle/msi/*.msi
-            desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: dist-installers
           if-no-files-found: error
 
   release:
@@ -117,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          assets=(installers/msi/*.msi installers/nsis/*-setup.exe)
+          assets=(installers/*.msi installers/*-setup.exe)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets with --clobber."
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
