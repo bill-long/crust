@@ -64,6 +64,7 @@ import {
 } from "../features/space/leaveSpaceChildren";
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
+import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { setLastChannel } from "../stores/lastChannel";
@@ -374,6 +375,9 @@ const Layout: Component = () => {
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
 	useGlobalMicHotkey();
+	// Desktop shell only: drive the held state from an OS-level keyboard hook so
+	// push-to-talk/mute works while a game is focused. No-ops in a browser.
+	useNativeMicHotkey();
 	const params = useDecodedParams<{ roomId?: string; spaceId?: string }>();
 	const navigate = useNavigate();
 	const location = useLocation();

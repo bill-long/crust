@@ -1,5 +1,6 @@
 import { useNavigate } from "@solidjs/router";
-import { type Component, createMemo, Show } from "solid-js";
+import { type Component, createMemo, onCleanup, onMount, Show } from "solid-js";
+import { isNativeShell } from "../../../../app/nativeShell";
 import { useDecodedParams } from "../../../../app/useDecodedParams";
 import type { SummariesStore } from "../../../../client/summaries";
 import { activeCallRoomId } from "../../../../stores/activeCall";
@@ -11,6 +12,12 @@ import {
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
 import { appModalOpen } from "../../../../stores/modalStack";
 import { currentCallSession } from "./callSessionStore";
+import {
+	closeNativeOverlay,
+	nativeOverlayOpen,
+	openNativeOverlay,
+	syncNativeOverlayOpen,
+} from "./nativeOverlay";
 import { isDocumentPipSupported } from "./pipSupport";
 import { pickReturnToCallRoute } from "./returnToCallRoute";
 
@@ -149,12 +156,53 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 		s.requestClose();
 	};
 
-	// The floating voice overlay (Document PiP) is only available in browsers
-	// that support the API (Chromium 116+). Stable per session.
-	const pipSupported = isDocumentPipSupported();
+	// The voice overlay has two backends: a native always-on-top window in the
+	// desktop shell, or a Document Picture-in-Picture window in supporting
+	// browsers (Chromium 116+). Native takes precedence when present. Both are
+	// stable per session.
+	const native = isNativeShell();
+	const overlayAvailable = native || isDocumentPipSupported();
+	const overlayIsOpen = (): boolean =>
+		native ? nativeOverlayOpen() : overlayOpen();
+
+	// The native window can be closed from its own chrome / a global hotkey,
+	// which this window can't observe. Reconcile the button state on mount and
+	// whenever the main window regains focus (e.g. after the overlay is closed
+	// via its Ctrl+Shift+L hotkey, focus returns here).
+	onMount(() => {
+		if (!native) return;
+		void syncNativeOverlayOpen();
+		const onFocus = (): void => void syncNativeOverlayOpen();
+		window.addEventListener("focus", onFocus);
+		onCleanup(() => window.removeEventListener("focus", onFocus));
+	});
+
+	let nativeToggleInFlight = false;
+	const toggleNativeOverlay = async (): Promise<void> => {
+		// Serialize toggles: a second click while one is in flight would read the
+		// same reconciled state and issue a duplicate open/close, losing a toggle.
+		if (nativeToggleInFlight) return;
+		nativeToggleInFlight = true;
+		try {
+			// Reconcile with the real window state first so a button whose signal
+			// drifted (overlay closed out-of-band) still opens on a single click
+			// instead of issuing a no-op close.
+			await syncNativeOverlayOpen();
+			if (nativeOverlayOpen()) await closeNativeOverlay();
+			else await openNativeOverlay();
+		} finally {
+			nativeToggleInFlight = false;
+		}
+	};
+
 	const toggleOverlay = (): void => {
-		// Called directly from the click handler so the PiP open keeps the
-		// user activation the API requires.
+		// Called directly from the click handler so the PiP open keeps the user
+		// activation the API requires. The native path is a plain async command
+		// (no activation requirement), so fire-and-forget is fine there.
+		if (native) {
+			void toggleNativeOverlay();
+			return;
+		}
 		if (overlayOpen()) closeOverlay();
 		else requestOpenOverlay();
 	};
@@ -194,21 +242,21 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 								</span>
 							</span>
 						</button>
-						<Show when={pipSupported}>
+						<Show when={overlayAvailable}>
 							<button
 								type="button"
 								onClick={(e) => {
 									e.stopPropagation();
 									toggleOverlay();
 								}}
-								aria-pressed={overlayOpen()}
+								aria-pressed={overlayIsOpen()}
 								title={
-									overlayOpen()
+									overlayIsOpen()
 										? "Close the floating voice overlay"
 										: "Pop out a floating voice overlay"
 								}
 								aria-label={
-									overlayOpen()
+									overlayIsOpen()
 										? "Close floating voice overlay"
 										: "Open floating voice overlay"
 								}
