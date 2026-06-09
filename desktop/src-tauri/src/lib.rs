@@ -2,7 +2,7 @@
 //
 // The main window loads the Crust app. On request (a Tauri command invoked by
 // the in-app call pop-out button, or a global hotkey) it spawns a SECOND
-// always-on-top, transparent, chromeless window pointing at the app''s
+// always-on-top, transparent, chromeless window pointing at the app's
 // `/overlay` route. Both windows share an origin, so the app bridges live call
 // state between them over a BroadcastChannel (no Rust involvement in the data).
 //

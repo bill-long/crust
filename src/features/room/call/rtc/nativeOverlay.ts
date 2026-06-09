@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { isNativeShell } from "../../../../app/nativeShell";
 import { invokeTauri } from "../../../../app/tauri";
 
 /**
@@ -22,6 +23,9 @@ export function nativeOverlayOpen(): boolean {
 
 /** Open the native overlay window (idempotent on the Rust side). */
 export async function openNativeOverlay(): Promise<void> {
+	// Only the native shell has the overlay window; outside it, don't flip the
+	// optimistic signal (the invoke is a no-op there and nothing actually opens).
+	if (!isNativeShell()) return;
 	try {
 		await invokeTauri("open_overlay");
 		setNativeOverlayOpen(true);
@@ -32,6 +36,7 @@ export async function openNativeOverlay(): Promise<void> {
 
 /** Close the native overlay window (idempotent on the Rust side). */
 export async function closeNativeOverlay(): Promise<void> {
+	if (!isNativeShell()) return;
 	try {
 		await invokeTauri("close_overlay");
 		setNativeOverlayOpen(false);
@@ -46,6 +51,7 @@ export async function closeNativeOverlay(): Promise<void> {
  * observe directly). Call on mount, on window focus, and before toggling.
  */
 export async function syncNativeOverlayOpen(): Promise<void> {
+	if (!isNativeShell()) return;
 	try {
 		const open = await invokeTauri<boolean>("overlay_is_open");
 		setNativeOverlayOpen(open === true);

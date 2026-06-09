@@ -191,11 +191,6 @@ export interface CallOverlayProducer {
 /**
  * Create the producer side (main app window). Answers "request" handshakes with
  * the latest snapshot so a newly-opened overlay populates immediately, and
- * forwards "leave" commands to `onLeave`.
- */
-/**
- * Create the producer side (main app window). Answers "request" handshakes with
- * the latest snapshot so a newly-opened overlay populates immediately, and
  * honours a "leave" command only when it is addressed to THIS producer's id —
  * so hanging up from an overlay can never end a different tab's call.
  */

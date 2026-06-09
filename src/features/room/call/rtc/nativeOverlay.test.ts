@@ -10,11 +10,13 @@ import {
 type InvokeMock = ReturnType<typeof vi.fn>;
 
 function installTauri(invoke: InvokeMock): void {
+	(window as { isTauri?: boolean }).isTauri = true;
 	(window as { __TAURI__?: unknown }).__TAURI__ = { core: { invoke } };
 }
 
 describe("nativeOverlay", () => {
 	afterEach(() => {
+		(window as { isTauri?: boolean }).isTauri = undefined;
 		(window as { __TAURI__?: unknown }).__TAURI__ = undefined;
 		_resetNativeOverlayForTests();
 		vi.restoreAllMocks();
@@ -45,13 +47,12 @@ describe("nativeOverlay", () => {
 		expect(nativeOverlayOpen()).toBe(true);
 	});
 
-	it("is a harmless no-op outside the native shell", async () => {
-		// No window.__TAURI__ installed.
+	it("is a no-op outside the native shell", async () => {
+		// No window.isTauri / __TAURI__ installed.
 		await openNativeOverlay();
-		// The optimistic signal still flips, but no invoke throws.
-		expect(nativeOverlayOpen()).toBe(true);
+		// Outside the native shell the signal must NOT flip — nothing opened.
+		expect(nativeOverlayOpen()).toBe(false);
 		await syncNativeOverlayOpen();
-		// overlay_is_open returns undefined -> treated as closed.
 		expect(nativeOverlayOpen()).toBe(false);
 	});
 });
