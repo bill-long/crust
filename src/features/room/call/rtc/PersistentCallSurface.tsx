@@ -54,9 +54,12 @@ export const PersistentCallSurface: Component = () => {
 	return (
 		<>
 			{/* Producer for the separate desktop overlay window. Mounted
-			    unconditionally (outside the keyed <Show>) so it keeps answering
-			    overlay handshakes and broadcasts an idle snapshot even when no
-			    call is active. Renders nothing. */}
+			    unconditionally (outside the keyed <Show>) so it survives the
+			    call-end transition: during an active call it answers overlay
+			    handshakes and republishes on changes, and it emits one final
+			    inactive snapshot when the call ends. While idle it stays silent,
+			    so an idle tab can't clobber a calling tab's snapshot. Renders
+			    nothing. */}
 			<CallOverlayBroadcaster />
 			<Show when={activeCallRoomId()} keyed>
 				{(rid) => (
