@@ -90,3 +90,37 @@ export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
 				(b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0),
 		);
 }
+
+/**
+ * Rollup unread + highlight counts for everything shown under Home — i.e. the
+ * user's DMs plus orphan (non-space) rooms. Used to badge the Home button in
+ * the spaces sidebar so unread DMs/rooms are visible while a space is selected.
+ *
+ * Counts exactly the rooms `getDmRooms` + `getOrphanRooms` return (joined DMs,
+ * plus joined non-space rooms that aren't a child of any joined space), but in
+ * a single linear pass with no sorting/array allocation since only the totals
+ * are needed.
+ */
+export function getHomeUnreadRollup(summaries: SummariesStore): {
+	unread: number;
+	highlight: number;
+} {
+	const spacedRoomIds = new Set<string>();
+	for (const s of Object.values(summaries)) {
+		if (s.isSpace && s.membership === "join") {
+			for (const childId of s.children) spacedRoomIds.add(childId);
+		}
+	}
+
+	let unread = 0;
+	let highlight = 0;
+	for (const s of Object.values(summaries)) {
+		if (s.membership !== "join" || s.isSpace) continue;
+		// DMs always count; non-DM (orphan) rooms count only when they don't
+		// belong to a space — those are rolled up under their space instead.
+		if (!s.isDirect && spacedRoomIds.has(s.roomId)) continue;
+		unread += s.unreadCount;
+		highlight += s.highlightCount;
+	}
+	return { unread, highlight };
+}
