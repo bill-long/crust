@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal, type ParentComponent } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -364,5 +370,65 @@ describe("SpacesSidebar last-viewed channel (#226)", () => {
 		expect(navigateMock).toHaveBeenCalledWith(
 			`/space/${encodeURIComponent(spaceId)}`,
 		);
+	});
+});
+
+describe("SpacesSidebar Home unread badge", () => {
+	function dm(roomId: string, unread: number, highlight = 0): RoomSummary {
+		const s = makeRoomSummary(roomId, roomId);
+		s.isDirect = true;
+		s.unreadCount = unread;
+		s.highlightCount = highlight;
+		return s;
+	}
+
+	function renderHome(seed: RoomSummary[]): void {
+		render(() => (
+			<Wrapper client={createMockClient()} seed={seed}>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+	}
+
+	function homeBadge(): HTMLElement | null {
+		const home = screen.getByRole("button", { name: "Home" });
+		return within(home).queryByRole("status");
+	}
+
+	it("renders no badge when there are no unread home rooms", () => {
+		renderHome([dm("!dm:example.com", 0)]);
+		expect(homeBadge()).toBeNull();
+	});
+
+	it("sums unread across DMs and orphan rooms", () => {
+		const orphan = makeRoomSummary("!orphan:example.com", "orphan");
+		orphan.unreadCount = 3;
+		renderHome([dm("!dm:example.com", 2), orphan]);
+		const badge = homeBadge();
+		expect(badge?.textContent).toBe("5");
+		expect(badge?.getAttribute("aria-label")).toBe("5 unread");
+		expect(badge?.className).toContain("bg-indicator");
+		expect(badge?.className).not.toContain("bg-danger");
+	});
+
+	it("caps the displayed count at 99+", () => {
+		renderHome([dm("!dm:example.com", 150)]);
+		expect(homeBadge()?.textContent).toBe("99+");
+	});
+
+	it("uses the danger color and a highlighted label when there are highlights", () => {
+		renderHome([dm("!dm:example.com", 2, 1)]);
+		const badge = homeBadge();
+		expect(badge?.getAttribute("aria-label")).toBe("2 unread, 1 highlighted");
+		expect(badge?.className).toContain("bg-danger");
+	});
+
+	it("does not count space-child rooms (rolled up under their space)", () => {
+		const space = makeSpaceSummary("!alpha:example.com", "Alpha");
+		space.children = ["!child:example.com"];
+		const child = makeRoomSummary("!child:example.com", "child");
+		child.unreadCount = 7;
+		renderHome([space, child, dm("!dm:example.com", 2)]);
+		expect(homeBadge()?.textContent).toBe("2");
 	});
 });

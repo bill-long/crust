@@ -12,6 +12,7 @@ import {
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import {
+	getHomeUnreadRollup,
 	getSpaceRooms,
 	getSpaces,
 	getSpaceUnreadRollup,
@@ -62,6 +63,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 
 	const spaces = createMemo(() => getSpaces(summaries));
 	const homeSelected = () => !params.spaceId;
+	const homeRollup = createMemo(() => getHomeUnreadRollup(summaries));
 	const neverSelected = () => false;
 
 	// Navigate to a space, re-opening the last-viewed channel when one is
@@ -92,7 +94,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 					<button
 						type="button"
 						onClick={() => navigate("/home")}
-						class={`peer flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
+						class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
 							homeSelected()
 								? "rounded-xl bg-surface-2 text-text-primary"
 								: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -115,6 +117,19 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 								d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"
 							/>
 						</svg>
+
+						{/* Unread badge for DMs / home rooms */}
+						<Show when={homeRollup().unread > 0}>
+							<span
+								class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
+									homeRollup().highlight > 0 ? "bg-danger" : "bg-indicator"
+								}`}
+								role="status"
+								aria-label={`${homeRollup().unread} unread${homeRollup().highlight > 0 ? `, ${homeRollup().highlight} highlighted` : ""}`}
+							>
+								{homeRollup().unread > 99 ? "99+" : homeRollup().unread}
+							</span>
+						</Show>
 					</button>
 				</SidebarItem>
 
