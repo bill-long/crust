@@ -98,8 +98,8 @@ export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
  *
  * Counts exactly the rooms `getDmRooms` + `getOrphanRooms` return (joined DMs,
  * plus joined non-space rooms that aren't a child of any joined space), in
- * linear time (two passes over the store) with no sorting or array allocation
- * since only the totals are needed.
+ * linear time (two passes over the store). Unlike those two selectors it does
+ * not sort or build a result array, since only the totals are needed.
  */
 export function getHomeUnreadRollup(summaries: SummariesStore): {
 	unread: number;
