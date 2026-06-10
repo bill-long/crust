@@ -85,6 +85,10 @@ describe("readDirectMap", () => {
 		const map = readDirectMap(client);
 		expect(Object.getPrototypeOf(map)).toBeNull();
 		expect(map["@a:server"]).toEqual(["!ok:server"]);
+		// The "__proto__" key is retained as an ordinary own entry (not the
+		// prototype), so it round-trips rather than being silently dropped.
+		expect(Object.hasOwn(map, "__proto__")).toBe(true);
+		expect(map.__proto__).toEqual(["!evil:server"]);
 		// Object's prototype was not polluted.
 		expect(({} as Record<string, unknown>).__proto__).toBe(Object.prototype);
 	});

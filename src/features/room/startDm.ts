@@ -21,7 +21,9 @@ export function readDirectMap(client: MatrixClient): DirectMap {
 	// key like "__proto__" must become a normal entry, not pollute Object's
 	// prototype.
 	const map: DirectMap = Object.create(null);
-	if (!content) return map;
+	// Defensive: the content is server-controlled and may be malformed. Only a
+	// non-null object is safe to enumerate (Object.entries(null) throws).
+	if (!content || typeof content !== "object") return map;
 	for (const [userId, rooms] of Object.entries(content)) {
 		if (Array.isArray(rooms)) {
 			map[userId] = rooms.filter((r): r is string => typeof r === "string");
