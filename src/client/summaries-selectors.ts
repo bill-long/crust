@@ -97,9 +97,9 @@ export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
  * the spaces sidebar so unread DMs/rooms are visible while a space is selected.
  *
  * Counts exactly the rooms `getDmRooms` + `getOrphanRooms` return (joined DMs,
- * plus joined non-space rooms that aren't a child of any joined space), but in
- * a single linear pass with no sorting/array allocation since only the totals
- * are needed.
+ * plus joined non-space rooms that aren't a child of any joined space), in
+ * linear time (two passes over the store) with no sorting or array allocation
+ * since only the totals are needed.
  */
 export function getHomeUnreadRollup(summaries: SummariesStore): {
 	unread: number;
