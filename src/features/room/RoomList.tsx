@@ -26,6 +26,7 @@ import {
 	useSpaceHierarchy,
 } from "../space/useSpaceHierarchy";
 import { CreateRoomDialog } from "./CreateRoomDialog";
+import { NewDmDialog } from "./NewDmDialog";
 
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
@@ -350,6 +351,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 		setCreateOpen(false);
 	};
 
+	const [newDmOpen, setNewDmOpen] = createSignal(false);
+	const openNewDm = (): void => {
+		setNewDmOpen(true);
+	};
+	const closeNewDm = (): void => {
+		setNewDmOpen(false);
+	};
+
 	const navigateToRoom = (roomId: string): void => {
 		const room = summaries[roomId];
 		if (!room) return;
@@ -398,6 +407,29 @@ const RoomList: Component<RoomListProps> = (props) => {
 							</svg>
 						</button>
 					)}
+				</Show>
+				<Show when={isHome()}>
+					<button
+						type="button"
+						onClick={openNewDm}
+						aria-label="New direct message"
+						title="New direct message"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+					>
+						<svg
+							aria-hidden="true"
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" />
+						</svg>
+					</button>
 				</Show>
 				<button
 					type="button"
@@ -552,6 +584,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 				onClose={closeCreate}
 				spaceId={params.spaceId}
 			/>
+			<NewDmDialog client={client} open={newDmOpen} onClose={closeNewDm} />
 		</aside>
 	);
 };

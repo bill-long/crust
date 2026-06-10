@@ -341,6 +341,13 @@ export interface OptimisticJoinInfo {
 	 * `m.room.create` state event.
 	 */
 	isSpace?: boolean;
+	/**
+	 * Marks the new entry as a direct message. Used when the user just
+	 * started a DM so it appears under "Direct Messages" in the room list
+	 * before /sync (and the `m.direct` account-data update) deliver the
+	 * authoritative `isDirect` flag.
+	 */
+	isDirect?: boolean;
 }
 
 export function createSummariesStore(client: MatrixClient): {
@@ -433,6 +440,12 @@ export function createSummariesStore(client: MatrixClient): {
 			if (info.isSpace === true && existing.isSpace !== true) {
 				setSummaries(roomId, "isSpace", true);
 			}
+			// Same forward-only promotion for isDirect: a caller that just
+			// joined/created a DM can flip a stale non-DM entry to a DM, but
+			// we never demote an authoritative isDirect:true to false.
+			if (info.isDirect === true && existing.isDirect !== true) {
+				setSummaries(roomId, "isDirect", true);
+			}
 			return;
 		}
 		setSummaries(
@@ -446,7 +459,7 @@ export function createSummariesStore(client: MatrixClient): {
 					highlightCount: 0,
 					membership: "join",
 					isEncrypted: false,
-					isDirect: false,
+					isDirect: info.isDirect === true,
 					isSpace: info.isSpace === true,
 					kind: "text",
 					callActive: false,
