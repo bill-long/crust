@@ -1,27 +1,44 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { updateAppBadge } from "./appBadge";
 
-type BadgeNav = Navigator & {
-	setAppBadge?: (n?: number) => Promise<void>;
-	clearAppBadge?: () => Promise<void>;
-};
+const BADGE_METHODS = ["setAppBadge", "clearAppBadge"] as const;
+type BadgeMethod = (typeof BADGE_METHODS)[number];
+
+/**
+ * Install a stub Badging API method as a *configurable own* property on
+ * `navigator`, so afterEach can delete it to fully restore the original state —
+ * revealing any prototype-provided implementation rather than leaving a stale
+ * own property behind (jsdom doesn't implement these methods, but a browser
+ * test env might). Returns the spy for assertions.
+ */
+function stubBadge(
+	name: BadgeMethod,
+	reject = false,
+): ReturnType<typeof vi.fn> {
+	const spy = reject
+		? vi.fn().mockRejectedValue(new Error("denied"))
+		: vi.fn().mockResolvedValue(undefined);
+	Object.defineProperty(navigator, name, {
+		value: spy,
+		configurable: true,
+		writable: true,
+	});
+	return spy;
+}
 
 afterEach(() => {
-	// `delete navigator.setAppBadge` is rejected by TS (the Badging API methods
-	// are typed as required on Navigator), so delete through an index-typed view.
-	const nav = navigator as unknown as Record<string, unknown>;
-	delete nav.setAppBadge;
-	delete nav.clearAppBadge;
+	for (const name of BADGE_METHODS) {
+		if (Object.hasOwn(navigator, name)) {
+			delete (navigator as unknown as Record<string, unknown>)[name];
+		}
+	}
 	vi.restoreAllMocks();
 });
 
 describe("updateAppBadge", () => {
 	it("sets the badge to the count when positive", () => {
-		const nav = navigator as BadgeNav;
-		const setAppBadge = vi.fn().mockResolvedValue(undefined);
-		const clearAppBadge = vi.fn().mockResolvedValue(undefined);
-		nav.setAppBadge = setAppBadge;
-		nav.clearAppBadge = clearAppBadge;
+		const setAppBadge = stubBadge("setAppBadge");
+		const clearAppBadge = stubBadge("clearAppBadge");
 
 		updateAppBadge(5);
 
@@ -30,11 +47,8 @@ describe("updateAppBadge", () => {
 	});
 
 	it("clears the badge when the count is zero", () => {
-		const nav = navigator as BadgeNav;
-		const setAppBadge = vi.fn().mockResolvedValue(undefined);
-		const clearAppBadge = vi.fn().mockResolvedValue(undefined);
-		nav.setAppBadge = setAppBadge;
-		nav.clearAppBadge = clearAppBadge;
+		const setAppBadge = stubBadge("setAppBadge");
+		const clearAppBadge = stubBadge("clearAppBadge");
 
 		updateAppBadge(0);
 
@@ -43,11 +57,8 @@ describe("updateAppBadge", () => {
 	});
 
 	it("clears the badge for a negative count rather than setting it", () => {
-		const nav = navigator as BadgeNav;
-		const setAppBadge = vi.fn().mockResolvedValue(undefined);
-		const clearAppBadge = vi.fn().mockResolvedValue(undefined);
-		nav.setAppBadge = setAppBadge;
-		nav.clearAppBadge = clearAppBadge;
+		const setAppBadge = stubBadge("setAppBadge");
+		const clearAppBadge = stubBadge("clearAppBadge");
 
 		updateAppBadge(-1);
 
@@ -56,8 +67,7 @@ describe("updateAppBadge", () => {
 	});
 
 	it("swallows a rejected badge promise", async () => {
-		const nav = navigator as BadgeNav;
-		nav.setAppBadge = vi.fn().mockRejectedValue(new Error("denied"));
+		stubBadge("setAppBadge", true);
 
 		// Must not throw synchronously...
 		expect(() => updateAppBadge(3)).not.toThrow();

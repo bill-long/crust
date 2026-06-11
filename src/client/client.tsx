@@ -20,7 +20,7 @@ import {
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
 import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
-import type { Session } from "../stores/session";
+import { loadSession, type Session } from "../stores/session";
 import { updateAppBadge } from "./appBadge";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
@@ -329,11 +329,15 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		if (typeof document !== "undefined") {
 			document.removeEventListener("visibilitychange", reassertBadgeOnVisible);
 		}
-		// Clear the badge on teardown (e.g. logout) so a stale unread count
-		// doesn't linger on the taskbar icon after the session ends. A still-open
-		// window for the same account re-asserts its own count on next visibility
-		// or unread change, so this won't permanently clobber other windows.
-		updateAppBadge(0);
+		// Clear the badge only when the session has actually ended, not on a
+		// plain reload or window close. Every logout path (Layout.handleLogout,
+		// App.handleForceLogout, and the expired-session effect) calls
+		// clearSession() before this unmount, so loadSession() is null then; on a
+		// reload the session persists, so we leave the badge for the next load /
+		// other open windows rather than wiping a still-valid count.
+		if (loadSession() === null) {
+			updateAppBadge(0);
+		}
 		detachUrlPreviewSync?.();
 		detachUrlPreviewSync = null;
 		cleanupSummaries();
