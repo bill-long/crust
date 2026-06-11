@@ -543,8 +543,13 @@ const RoomPane: Component<{
 						props.onToggleMembers();
 						// Return focus to the toggle that opened the drawer.
 						// Deferred so it runs after Kobalte's own focus handling.
+						// Guard against the room pane unmounting between schedule
+						// and microtask (e.g. a route change while closing).
 						const el = membersToggleEl;
-						if (el) queueMicrotask(() => el.focus());
+						if (el)
+							queueMicrotask(() => {
+								if (document.body.contains(el)) el.focus();
+							});
 					}
 				}}
 			>
