@@ -92,6 +92,28 @@ export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
 }
 
 /**
+ * Total unread notification count across every joined room — the same quantity
+ * the push gateway reports as `counts.unread` and sends in the push payload's
+ * `unread` field (see `PushPayload`). Used to drive the OS/taskbar app badge
+ * from in-app state so it updates the moment unread counts change (e.g. a
+ * message is read), rather than only when a push arrives. See the
+ * service-worker badge path in `src/sw.ts`.
+ *
+ * Spaces are skipped (their own notification count is not shown to the user;
+ * unread for a space's rooms is counted on the rooms themselves), but unlike
+ * `getHomeUnreadRollup` this counts space-child rooms too — the badge reflects
+ * everything unread, not just what's visible under Home.
+ */
+export function getTotalUnread(summaries: SummariesStore): number {
+	let unread = 0;
+	for (const s of Object.values(summaries)) {
+		if (s.membership !== "join" || s.isSpace) continue;
+		unread += s.unreadCount;
+	}
+	return unread;
+}
+
+/**
  * Rollup unread + highlight counts for everything shown under Home — i.e. the
  * user's DMs plus orphan (non-space) rooms. Used to badge the Home button in
  * the spaces sidebar so unread DMs/rooms are visible while a space is selected.

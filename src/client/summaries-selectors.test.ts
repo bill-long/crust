@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "./summaries";
-import { getHomeUnreadRollup } from "./summaries-selectors";
+import { getHomeUnreadRollup, getTotalUnread } from "./summaries-selectors";
 
 function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 	return {
@@ -67,5 +67,32 @@ describe("getHomeUnreadRollup", () => {
 			room({ roomId: "!dm", isDirect: true, unreadCount: 2 }),
 		]);
 		expect(getHomeUnreadRollup(s)).toEqual({ unread: 2, highlight: 0 });
+	});
+});
+
+describe("getTotalUnread", () => {
+	it("returns zero for an empty store", () => {
+		expect(getTotalUnread(store([]))).toBe(0);
+	});
+
+	it("sums unread across all joined rooms, including space children", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!child"] }),
+			room({ roomId: "!child", unreadCount: 5 }),
+			room({ roomId: "!dm", isDirect: true, unreadCount: 2 }),
+			room({ roomId: "!orphan", unreadCount: 3 }),
+		]);
+		// Unlike getHomeUnreadRollup, the space child is counted here.
+		expect(getTotalUnread(s)).toBe(10);
+	});
+
+	it("excludes spaces' own count and non-joined rooms", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, unreadCount: 7 }),
+			room({ roomId: "!invited", membership: "invite", unreadCount: 9 }),
+			room({ roomId: "!left", membership: "leave", unreadCount: 9 }),
+			room({ roomId: "!dm", isDirect: true, unreadCount: 4 }),
+		]);
+		expect(getTotalUnread(s)).toBe(4);
 	});
 });

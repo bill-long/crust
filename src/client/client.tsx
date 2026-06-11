@@ -8,6 +8,7 @@ import {
 import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
 import {
 	createContext,
+	createEffect,
 	createSignal,
 	onCleanup,
 	onMount,
@@ -20,6 +21,7 @@ import {
 } from "../features/crypto/useCryptoStatus";
 import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
 import type { Session } from "../stores/session";
+import { updateAppBadge } from "./appBadge";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
 	clearCryptoStores,
@@ -35,6 +37,7 @@ import {
 	type OptimisticJoinInfo,
 	type SummariesStore,
 } from "./summaries";
+import { getTotalUnread } from "./summaries-selectors";
 
 export type AppSyncState =
 	| "initial"
@@ -218,6 +221,14 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		optimisticallyMarkLeft,
 	} = createSummariesStore(matrixClient);
 
+	// Keep the OS/taskbar app badge in sync with live unread state while this
+	// window is open, so it clears the moment a message is read rather than
+	// staying stale until the next push (see #269). The service worker handles
+	// the closed-app case from push payloads (`src/sw.ts`).
+	createEffect(() => {
+		updateAppBadge(getTotalUnread(summaries));
+	});
+
 	const onSync = (state: SyncState): void => {
 		// "logged-out" is terminal — don't let later sync events overwrite it
 		if (syncState() === "logged-out") return;
@@ -284,6 +295,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	onCleanup(() => {
 		disposed = true;
+		// Clear the badge on teardown (e.g. logout) so a stale unread count
+		// doesn't linger on the taskbar icon after the session ends.
+		updateAppBadge(0);
 		detachUrlPreviewSync?.();
 		detachUrlPreviewSync = null;
 		cleanupSummaries();
