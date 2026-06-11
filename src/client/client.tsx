@@ -251,6 +251,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	const reassertBadgeOnVisible = (): void => {
 		if (typeof document === "undefined") return;
 		if (document.visibilityState !== "visible" || !hasPrepared()) return;
+		// Mirror the effect: once the session has ended the badge stays cleared,
+		// so a tab switch between logout and unmount can't flash the stale count.
+		if (syncState() === "logged-out") return;
 		updateAppBadge(getTotalUnread(summaries));
 	};
 	if (typeof document !== "undefined") {

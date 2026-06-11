@@ -7,7 +7,9 @@ type BadgeNav = Navigator & {
 };
 
 afterEach(() => {
-	const nav = navigator as BadgeNav;
+	// `delete navigator.setAppBadge` is rejected by TS (the Badging API methods
+	// are typed as required on Navigator), so delete through an index-typed view.
+	const nav = navigator as unknown as Record<string, unknown>;
 	delete nav.setAppBadge;
 	delete nav.clearAppBadge;
 	vi.restoreAllMocks();
