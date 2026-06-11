@@ -209,7 +209,10 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	const [syncState, setSyncState] = createSignal<AppSyncState>("initial");
 	const [cryptoState, setCryptoState] = createSignal<CryptoState>("loading");
-	let hasPrepared = false;
+	// Reactive so the app-badge effect below can gate on it: until the first
+	// /sync has prepared and populated `summaries`, the store is empty and the
+	// badge must not be touched (see the effect comment).
+	const [hasPrepared, setHasPrepared] = createSignal(false);
 	let disposed = false;
 	let detachUrlPreviewSync: (() => void) | null = null;
 
@@ -226,8 +229,33 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	// staying stale until the next push (see #269). The service worker handles
 	// the closed-app case from push payloads (`src/sw.ts`).
 	createEffect(() => {
+		// Session ended: clear immediately rather than waiting for unmount.
+		if (syncState() === "logged-out") {
+			updateAppBadge(0);
+			return;
+		}
+		// Until the first /sync has prepared, `summaries` is empty and
+		// getTotalUnread would be 0 — writing that would wrongly clear a badge
+		// the service worker set from a background push before we know the real
+		// count. Leave the badge untouched until we have authoritative data.
+		if (!hasPrepared()) return;
 		updateAppBadge(getTotalUnread(summaries));
 	});
+
+	// The OS app badge is a single resource shared by every window/tab. Another
+	// window clearing it on teardown — or the service worker writing a push
+	// count — can leave this window's badge stale. Re-assert our authoritative
+	// count whenever we become visible, so the window the user is actually
+	// looking at always wins. No-op before the first sync (nothing authoritative
+	// yet) and harmless if the Badging API is unavailable.
+	const reassertBadgeOnVisible = (): void => {
+		if (typeof document === "undefined") return;
+		if (document.visibilityState !== "visible" || !hasPrepared()) return;
+		updateAppBadge(getTotalUnread(summaries));
+	};
+	if (typeof document !== "undefined") {
+		document.addEventListener("visibilitychange", reassertBadgeOnVisible);
+	}
 
 	const onSync = (state: SyncState): void => {
 		// "logged-out" is terminal — don't let later sync events overwrite it
@@ -235,7 +263,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 		switch (state) {
 			case SyncState.Prepared:
-				hasPrepared = true;
+				setHasPrepared(true);
 				initSummaries();
 				if (!detachUrlPreviewSync && !disposed) {
 					detachUrlPreviewSync = attachUrlPreviewAccountDataSync(matrixClient);
@@ -243,13 +271,13 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				setSyncState("live");
 				break;
 			case SyncState.Syncing:
-				if (hasPrepared) {
+				if (hasPrepared()) {
 					setSyncState("live");
 				}
 				break;
 			case SyncState.Catchup:
 			case SyncState.Reconnecting:
-				if (hasPrepared) {
+				if (hasPrepared()) {
 					setSyncState("catching-up");
 				}
 				break;
@@ -295,8 +323,13 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	onCleanup(() => {
 		disposed = true;
+		if (typeof document !== "undefined") {
+			document.removeEventListener("visibilitychange", reassertBadgeOnVisible);
+		}
 		// Clear the badge on teardown (e.g. logout) so a stale unread count
-		// doesn't linger on the taskbar icon after the session ends.
+		// doesn't linger on the taskbar icon after the session ends. A still-open
+		// window for the same account re-asserts its own count on next visibility
+		// or unread change, so this won't permanently clobber other windows.
 		updateAppBadge(0);
 		detachUrlPreviewSync?.();
 		detachUrlPreviewSync = null;
