@@ -1,4 +1,11 @@
-import { type Component, createSignal, type JSX, onCleanup } from "solid-js";
+import {
+	type Component,
+	createSignal,
+	type JSX,
+	onCleanup,
+	Show,
+} from "solid-js";
+import { isMobile } from "../stores/viewport";
 
 const STORAGE_KEY = "crust_pane_widths";
 
@@ -126,6 +133,9 @@ export const ResizableLayout: Component<{
 	/** Optional slot rendered immediately above the user bar in the
 	 * sidebar column (e.g. an active-call status panel). */
 	callStatus?: JSX.Element;
+	/** On mobile (single-pane) layouts, whether to show the main pane
+	 * (a room is selected) instead of the sidebar/room-list pane. */
+	showMainOnMobile: () => boolean;
 }> = (props) => {
 	const initial = loadWidths();
 	const [spacesWidth, setSpacesWidth] = createSignal(initial.spaces);
@@ -143,52 +153,87 @@ export const ResizableLayout: Component<{
 	const sidebarWidth = () => spacesWidth() + roomListWidth() + DIVIDER_WIDTH;
 
 	return (
-		<div class="flex min-h-0 flex-1">
-			{/* Left sidebar: spaces + room list + user bar */}
-			<div
-				class="flex shrink-0 flex-col"
-				style={{ width: `${sidebarWidth()}px` }}
-			>
-				<div class="flex min-h-0 flex-1">
-					<div
-						style={{ width: `${spacesWidth()}px` }}
-						class="shrink-0 overflow-hidden"
-					>
-						{props.spaces}
+		<Show when={!isMobile()} fallback={<MobileLayout {...props} />}>
+			<div class="flex min-h-0 flex-1">
+				{/* Left sidebar: spaces + room list + user bar */}
+				<div
+					class="flex shrink-0 flex-col"
+					style={{ width: `${sidebarWidth()}px` }}
+				>
+					<div class="flex min-h-0 flex-1">
+						<div
+							style={{ width: `${spacesWidth()}px` }}
+							class="shrink-0 overflow-hidden"
+						>
+							{props.spaces}
+						</div>
+						<ResizeDivider
+							onDrag={(d) =>
+								setSpacesWidth((w) => clamp(w + d, MIN_SPACES, MAX_SPACES))
+							}
+							onDragEnd={persist}
+							value={spacesWidth()}
+							min={MIN_SPACES}
+							max={MAX_SPACES}
+							label="Resize spaces sidebar"
+						/>
+						<div
+							style={{ width: `${roomListWidth()}px` }}
+							class="shrink-0 overflow-hidden"
+						>
+							{props.roomList}
+						</div>
 					</div>
-					<ResizeDivider
-						onDrag={(d) =>
-							setSpacesWidth((w) => clamp(w + d, MIN_SPACES, MAX_SPACES))
-						}
-						onDragEnd={persist}
-						value={spacesWidth()}
-						min={MIN_SPACES}
-						max={MAX_SPACES}
-						label="Resize spaces sidebar"
-					/>
-					<div
-						style={{ width: `${roomListWidth()}px` }}
-						class="shrink-0 overflow-hidden"
-					>
-						{props.roomList}
-					</div>
+					{props.callStatus}
+					{props.userBar}
 				</div>
-				{props.callStatus}
-				{props.userBar}
+				{/* Resize divider between sidebar and main */}
+				<ResizeDivider
+					onDrag={(d) =>
+						setRoomListWidth((w) => clamp(w + d, MIN_ROOM_LIST, MAX_ROOM_LIST))
+					}
+					onDragEnd={persist}
+					value={roomListWidth()}
+					min={MIN_ROOM_LIST}
+					max={MAX_ROOM_LIST}
+					label="Resize sidebar"
+				/>
+				{/* Main content area */}
+				<div class="min-w-0 flex-1">{props.main}</div>
 			</div>
-			{/* Resize divider between sidebar and main */}
-			<ResizeDivider
-				onDrag={(d) =>
-					setRoomListWidth((w) => clamp(w + d, MIN_ROOM_LIST, MAX_ROOM_LIST))
-				}
-				onDragEnd={persist}
-				value={roomListWidth()}
-				min={MIN_ROOM_LIST}
-				max={MAX_ROOM_LIST}
-				label="Resize sidebar"
-			/>
-			{/* Main content area */}
+		</Show>
+	);
+};
+
+/**
+ * Single-pane layout used below the `md` breakpoint. Only one pane is visible
+ * at a time, driven by the active route: the sidebar (spaces rail + room list)
+ * when no room is selected, or the main room view (full width) when one is.
+ * Resize dividers are dropped — there's nothing to resize in a single column.
+ */
+const MobileLayout: Component<{
+	spaces: JSX.Element;
+	roomList: JSX.Element;
+	main: JSX.Element;
+	userBar?: JSX.Element;
+	callStatus?: JSX.Element;
+	showMainOnMobile: () => boolean;
+}> = (props) => {
+	return (
+		<Show
+			when={props.showMainOnMobile()}
+			fallback={
+				<div class="flex min-h-0 flex-1 flex-col">
+					<div class="flex min-h-0 flex-1">
+						<div class="w-16 shrink-0 overflow-hidden">{props.spaces}</div>
+						<div class="min-w-0 flex-1 overflow-hidden">{props.roomList}</div>
+					</div>
+					{props.callStatus}
+					{props.userBar}
+				</div>
+			}
+		>
 			<div class="min-w-0 flex-1">{props.main}</div>
-		</div>
+		</Show>
 	);
 };
