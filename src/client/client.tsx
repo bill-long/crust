@@ -266,8 +266,14 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 		switch (state) {
 			case SyncState.Prepared:
-				setHasPrepared(true);
+				// Populate `summaries` before flipping the prepared flag the badge
+				// effect gates on, so the effect never observes hasPrepared=true with
+				// an empty store (which would clear an SW-set badge). createEffect is
+				// deferred so this is already safe today; the ordering makes the
+				// "prepared implies summaries populated" invariant explicit and robust
+				// if the effect ever becomes synchronous.
 				initSummaries();
+				setHasPrepared(true);
 				if (!detachUrlPreviewSync && !disposed) {
 					detachUrlPreviewSync = attachUrlPreviewAccountDataSync(matrixClient);
 				}
