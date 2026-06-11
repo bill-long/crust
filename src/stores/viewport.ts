@@ -20,7 +20,17 @@ const mql = createMatcher();
 const [isMobile, setIsMobile] = createSignal(mql?.matches ?? false);
 
 if (mql) {
-	mql.addEventListener("change", (e) => setIsMobile(e.matches));
+	const onChange = (e: MediaQueryListEvent): void => {
+		setIsMobile(e.matches);
+	};
+	// Safari < 14 and some older WebKit builds only expose the deprecated
+	// `addListener` rather than `addEventListener("change", …)`. Feature-detect
+	// so viewport detection doesn't throw (and silently break) on those engines.
+	if (typeof mql.addEventListener === "function") {
+		mql.addEventListener("change", onChange);
+	} else {
+		mql.addListener(onChange);
+	}
 }
 
 /** Whether the viewport is narrow enough to use the single-pane mobile layout. */

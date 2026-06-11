@@ -826,8 +826,10 @@ const Layout: Component = () => {
 	// split in two: on desktop it's the persisted inline-column preference
 	// (`membersPaneVisible`, saved to localStorage); on mobile it's an
 	// ephemeral slide-over drawer that must not touch — or be driven by — that
-	// persisted preference. `mobileMembersOpen` is reset on every room change so
-	// a drawer left open can't occlude the next room's timeline.
+	// persisted preference. `mobileMembersOpen` is reset whenever the room
+	// changes (so a drawer left open can't occlude the next room's timeline)
+	// and whenever the breakpoint flips (so a drawer opened on mobile, then
+	// crossed to desktop and back, doesn't silently auto-reopen).
 	const [mobileMembersOpen, setMobileMembersOpen] = createSignal(false);
 	const membersVisible = (): boolean =>
 		isMobile() ? mobileMembersOpen() : membersPaneVisible();
@@ -837,6 +839,7 @@ const Layout: Component = () => {
 	};
 	createEffect(() => {
 		roomId();
+		isMobile();
 		setMobileMembersOpen(false);
 	});
 
