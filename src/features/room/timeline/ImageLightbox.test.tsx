@@ -25,6 +25,7 @@ function mkImage(overrides: Partial<LightboxImage> = {}): LightboxImage {
 		senderName: "Alice",
 		timestamp: 1_700_000_000_000,
 		isEncrypted: false,
+		encryptedFile: null,
 		...overrides,
 	};
 }
@@ -59,7 +60,19 @@ function setup(
 	return { onClose, onPrev, onNext, setOpen, setImage };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.unstubAllGlobals();
+});
+
+/** A structurally-valid EncryptedFile descriptor (not used for real crypto here). */
+const SAMPLE_ENCRYPTED_FILE = {
+	url: "mxc://example.com/ciphertext",
+	key: { k: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+	iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+	hashes: { sha256: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+	v: "v2",
+};
 
 describe("ImageLightbox", () => {
 	it("renders the image and metadata when open", () => {
@@ -119,19 +132,51 @@ describe("ImageLightbox", () => {
 		expect(screen.getByLabelText("Next image")).toBeTruthy();
 	});
 
-	it("Download button is disabled for encrypted images and shows a tooltip", () => {
-		setup({ image: mkImage({ isEncrypted: true }) });
+	it("Download button is disabled while an encrypted image is decrypting", () => {
+		// Hold the ciphertext fetch open so the decrypt stays in-flight.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => new Promise(() => {})),
+		);
+		setup({
+			image: mkImage({
+				isEncrypted: true,
+				encryptedFile: SAMPLE_ENCRYPTED_FILE,
+			}),
+		});
 		const btn = screen.getByLabelText("Download image") as HTMLButtonElement;
 		expect(btn.disabled).toBe(true);
-		expect(btn.title).toMatch(/Encrypted/);
+		expect(btn.title).toMatch(/Decrypting/);
 	});
 
-	it("Encrypted image shows unsupported placeholder, not an <img>", () => {
-		setup({ image: mkImage({ isEncrypted: true }) });
+	it("Encrypted image shows a decrypting state, not a ciphertext <img>", () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => new Promise(() => {})),
+		);
+		setup({
+			image: mkImage({
+				isEncrypted: true,
+				encryptedFile: SAMPLE_ENCRYPTED_FILE,
+			}),
+		});
 		expect(screen.queryByAltText("kitten.png")).toBeNull();
-		expect(
-			screen.getByText(/Full-size preview of encrypted images/i),
-		).toBeTruthy();
+		expect(screen.getByText(/Decrypting/i)).toBeTruthy();
+	});
+
+	it("Encrypted image with a missing descriptor fails closed (no ciphertext)", () => {
+		// isEncrypted but no usable encryptedFile (malformed content.file): must
+		// not render or expose the ciphertext fullUrl anywhere.
+		const fetchSpy = vi.fn();
+		vi.stubGlobal("fetch", fetchSpy);
+		setup({ image: mkImage({ isEncrypted: true, encryptedFile: null }) });
+
+		expect(screen.queryByAltText("kitten.png")).toBeNull();
+		expect(screen.getByText(/couldn't decrypt image/i)).toBeTruthy();
+		const btn = screen.getByLabelText("Download image") as HTMLButtonElement;
+		expect(btn.disabled).toBe(true);
+		expect(screen.queryByLabelText("Open in new tab")).toBeNull();
+		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 
 	it("'0' resets to fit, '1' zooms to 100%", () => {
@@ -155,8 +200,17 @@ describe("ImageLightbox", () => {
 		expect(a.getAttribute("target")).toBe("_blank");
 	});
 
-	it("Open-in-new-tab is hidden for encrypted images", () => {
-		setup({ image: mkImage({ isEncrypted: true }) });
+	it("Open-in-new-tab is hidden while an encrypted image is decrypting", () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(() => new Promise(() => {})),
+		);
+		setup({
+			image: mkImage({
+				isEncrypted: true,
+				encryptedFile: SAMPLE_ENCRYPTED_FILE,
+			}),
+		});
 		expect(screen.queryByLabelText("Open in new tab")).toBeNull();
 	});
 });

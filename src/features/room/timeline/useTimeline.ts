@@ -19,6 +19,10 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { extractGifUrl } from "../../gif/gifUrl";
+import {
+	type EncryptedFileInfo,
+	parseEncryptedFile,
+} from "../composer/media/attachmentCrypto";
 import type {
 	MembershipTransition,
 	StateNotice,
@@ -88,11 +92,21 @@ export interface TimelineEvent {
 	imageFilename: string | null;
 	/**
 	 * True when the image is an encrypted attachment (source was
-	 * `content.file`, not `content.url`). The lightbox uses this to
-	 * show an unsupported-decryption placeholder rather than a broken
-	 * `<img>` of ciphertext.
+	 * `content.file`, not `content.url`). When set, `imageUrl`/`imageFullUrl`
+	 * point at *ciphertext*: consumers must download + decrypt it (via
+	 * `imageEncryptedFile` / {@link createDecryptedObjectUrl}) or fail closed,
+	 * never render or download those URLs directly.
 	 */
 	imageIsEncrypted: boolean;
+	/**
+	 * Validated EncryptedFile descriptor for an encrypted `m.image`, used to
+	 * download + decrypt the attachment for display. Null for plain images and
+	 * non-image events. May ALSO be null when `imageIsEncrypted === true` if
+	 * `content.file` is malformed/incomplete (missing key/iv/hash) — downstream
+	 * UI must treat that as a fail-closed "can't decrypt" case, never rendering
+	 * the ciphertext.
+	 */
+	imageEncryptedFile: EncryptedFileInfo | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -244,6 +258,7 @@ function buildSyntheticCallLeaveEvent(
 		imageSize: null,
 		imageFilename: null,
 		imageIsEncrypted: false,
+		imageEncryptedFile: null,
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,
@@ -509,6 +524,10 @@ function eventToTimelineEvent(
 		imageSize: infoSize,
 		imageFilename,
 		imageIsEncrypted: isPlainImage && imageIsEncrypted,
+		imageEncryptedFile:
+			isPlainImage && imageIsEncrypted
+				? parseEncryptedFile(content.file)
+				: null,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,

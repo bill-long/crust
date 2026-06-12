@@ -1217,6 +1217,7 @@ const TimelineView: Component<{
 			senderName: e.senderName,
 			timestamp: e.timestamp,
 			isEncrypted: e.imageIsEncrypted,
+			encryptedFile: e.imageEncryptedFile,
 		};
 	});
 	const hasPrev = (): boolean => lightboxIndex() > 0;

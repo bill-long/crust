@@ -54,6 +54,7 @@ function mkEvent(eventId: string, body: string, ts: number): TimelineEvent {
 		imageSize: null,
 		imageFilename: null,
 		imageIsEncrypted: false,
+		imageEncryptedFile: null,
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,

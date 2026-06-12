@@ -4,13 +4,17 @@ import {
 	createMemo,
 	createSignal,
 	createUniqueId,
+	Match,
 	on,
 	onCleanup,
 	Show,
+	Switch,
 } from "solid-js";
 import { formatBytes } from "../../../lib/formatBytes";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
+import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
+import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -26,6 +30,11 @@ export interface LightboxImage {
 	senderName: string;
 	timestamp: number;
 	isEncrypted: boolean;
+	/**
+	 * EncryptedFile descriptor when `isEncrypted`. `fullUrl` then points at the
+	 * ciphertext; the lightbox downloads + decrypts it for display/download.
+	 */
+	encryptedFile: EncryptedFileInfo | null;
 }
 
 interface ImageLightboxProps {
@@ -104,6 +113,55 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	let previousFocus: HTMLElement | null = null;
 
 	const titleId = createUniqueId();
+
+	// Encrypted images: download the ciphertext (`fullUrl`) and decrypt it to a
+	// blob URL for display / download / open. Plain images use `fullUrl`
+	// directly. Only active while an encrypted image is shown.
+	const decrypted = createDecryptedObjectUrl(
+		() => {
+			const img = props.image();
+			return img?.encryptedFile ? img.fullUrl : null;
+		},
+		() => props.image()?.encryptedFile ?? null,
+		() => props.image()?.mimetype ?? null,
+	);
+	/**
+	 * The URL to actually render/download. `isEncrypted` is authoritative: for
+	 * any encrypted image we only ever expose the decrypted blob (null until it
+	 * decrypts, and forever null when the descriptor is missing/invalid), never
+	 * `fullUrl` — which for encrypted events is the ciphertext.
+	 */
+	const displaySrc = (): string | null => {
+		const img = props.image();
+		if (!img) return null;
+		if (!img.isEncrypted) return img.fullUrl;
+		// Encrypted: only ever the decrypted blob, and only when a valid
+		// descriptor actually produced one. `encryptedFile` (not just a possibly
+		// stale `decrypted.url()`) gates it, so a malformed encrypted image can't
+		// surface ciphertext or a previous image's blob.
+		return img.encryptedFile ? decrypted.url() : null;
+	};
+
+	/**
+	 * Open the image in a new tab. For encrypted images, mint a *fresh* object
+	 * URL from the decrypted blob and revoke it on a delay — the lightbox's own
+	 * managed URL is revoked on unmount / image change, which would break a tab
+	 * still loading it. Plain images just open their http URL.
+	 */
+	const openInNewTab = (): void => {
+		const img = props.image();
+		if (!img) return;
+		if (img.isEncrypted) {
+			const blob = decrypted.blob();
+			if (!blob) return;
+			const url = URL.createObjectURL(blob);
+			window.open(url, "_blank", "noopener,noreferrer");
+			// Long enough for the new tab to fetch the blob into its own context.
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		} else {
+			window.open(img.fullUrl, "_blank", "noopener,noreferrer");
+		}
+	};
 
 	// Natural (intrinsic) image dimensions, set from `<img>` onLoad
 	// or from metadata when known.
@@ -470,7 +528,8 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		tryClose();
 	};
 
-	// Download via fetch -> blob with sanitized filename. On failure,
+	// Download with a sanitized filename: the decrypted Blob for encrypted
+	// images, or a fetched Blob of the http URL for plain ones. On failure,
 	// surface an inline error; the user can still use "Open in new tab"
 	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
@@ -483,9 +542,25 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 			fallbackName,
 		);
 		try {
-			const res = await fetch(img.fullUrl, { credentials: "omit" });
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const blob = await res.blob();
+			// Encrypted: use the already-decrypted Blob directly — never the
+			// ciphertext, and no fetch of the managed `blob:` URL (which is
+			// revoked on unmount/image change and could race the download).
+			// Plain: fetch the http URL to get a Blob the download attr can save.
+			let blob: Blob;
+			if (img.isEncrypted) {
+				const decryptedBlob = decrypted.blob();
+				if (!decryptedBlob) {
+					setDownloadError("Download failed: image is not ready");
+					return;
+				}
+				blob = decryptedBlob;
+			} else {
+				const res = await fetch(img.fullUrl, { credentials: "omit" });
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				blob = await res.blob();
+			}
+			// Fresh object URL for the download anchor, independent of the hook's
+			// managed URL so it can't be revoked out from under the download.
 			const objUrl = URL.createObjectURL(blob);
 			const a = document.createElement("a");
 			a.href = objUrl;
@@ -646,11 +721,14 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<button
 										type="button"
 										onClick={handleDownload}
-										disabled={img().isEncrypted}
+										disabled={img().isEncrypted && !displaySrc()}
 										title={
-											img().isEncrypted
-												? "Encrypted image download not yet supported"
-												: "Download"
+											img().isEncrypted &&
+											(!img().encryptedFile || decrypted.failed())
+												? "Image can't be decrypted"
+												: img().isEncrypted && !displaySrc()
+													? "Decrypting…"
+													: "Download"
 										}
 										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
 										aria-label="Download image"
@@ -668,28 +746,58 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 											<line x1="12" y1="15" x2="12" y2="3" />
 										</svg>
 									</button>
-									<Show when={!img().isEncrypted}>
-										<a
-											href={img().fullUrl}
-											target="_blank"
-											rel="noopener noreferrer"
-											class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-											aria-label="Open in new tab"
-										>
-											<span class="sr-only">Open in new tab</span>
-											<svg
-												class="h-5 w-5"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												aria-hidden="true"
-											>
-												<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-												<polyline points="15 3 21 3 21 9" />
-												<line x1="10" y1="14" x2="21" y2="3" />
-											</svg>
-										</a>
+									<Show when={displaySrc()}>
+										{(src) => {
+											// New nodes per call — a single shared JSX node can't live
+											// in both Show branches.
+											const renderOpenIcon = () => (
+												<>
+													<span class="sr-only">Open in new tab</span>
+													<svg
+														class="h-5 w-5"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="2"
+														aria-hidden="true"
+													>
+														<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+														<polyline points="15 3 21 3 21 9" />
+														<line x1="10" y1="14" x2="21" y2="3" />
+													</svg>
+												</>
+											);
+											const openClass =
+												"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover";
+											// Encrypted: a button minting a fresh, independently-revoked
+											// blob URL (the displaySrc blob is revoked on unmount and
+											// would break the opened tab). Plain: a normal anchor.
+											return (
+												<Show
+													when={!props.image()?.isEncrypted}
+													fallback={
+														<button
+															type="button"
+															onClick={openInNewTab}
+															class={openClass}
+															aria-label="Open in new tab"
+														>
+															{renderOpenIcon()}
+														</button>
+													}
+												>
+													<a
+														href={src()}
+														target="_blank"
+														rel="noopener noreferrer"
+														class={openClass}
+														aria-label="Open in new tab"
+													>
+														{renderOpenIcon()}
+													</a>
+												</Show>
+											);
+										}}
 									</Show>
 								</>
 							)}
@@ -754,48 +862,61 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						fallback={<div class="text-text-muted">No image</div>}
 					>
 						{(img) => (
-							<Show
-								when={!img().isEncrypted}
-								fallback={
-									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
-										<div class="mb-1 font-semibold text-text-primary">
-											Encrypted image
-										</div>
-										<p>
-											Full-size preview of encrypted images isn't supported yet.
-										</p>
-									</div>
-								}
-							>
-								<Show
-									when={!imgLoadError()}
-									fallback={
-										<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
-											<div class="mb-1 font-semibold text-text-primary">
-												Couldn't load image
-											</div>
-											<p>The full-resolution image failed to load.</p>
-										</div>
+							<Switch>
+								{/* Encrypted with no usable descriptor (malformed
+								    `content.file`) or a failed download/verify/decrypt →
+								    fail closed. `isEncrypted` is authoritative so we never
+								    fall through to rendering the ciphertext `fullUrl`. */}
+								<Match
+									when={
+										img().isEncrypted &&
+										(!img().encryptedFile || decrypted.failed())
 									}
 								>
-									<img
-										ref={imgRef}
-										src={img().fullUrl}
-										alt={img().filename ?? "Image"}
-										onLoad={onImgLoad}
-										onError={onImgError}
-										draggable={false}
-										style={{
-											transform: transformStyle(),
-											"transform-origin": "center center",
-											"max-width": "none",
-											"max-height": "none",
-											"will-change": "transform",
-										}}
-										class="block"
-									/>
-								</Show>
-							</Show>
+									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
+										<div class="mb-1 font-semibold text-text-primary">
+											Couldn't decrypt image
+										</div>
+										<p>
+											This encrypted image could not be decrypted or failed its
+											integrity check.
+										</p>
+									</div>
+								</Match>
+								{/* Encrypted: still downloading / decrypting. */}
+								<Match when={img().isEncrypted && !decrypted.url()}>
+									<div class="text-text-muted">Decrypting…</div>
+								</Match>
+								{/* Plain image failed to load. */}
+								<Match when={imgLoadError()}>
+									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
+										<div class="mb-1 font-semibold text-text-primary">
+											Couldn't load image
+										</div>
+										<p>The full-resolution image failed to load.</p>
+									</div>
+								</Match>
+								<Match when={displaySrc()}>
+									{(src) => (
+										<img
+											ref={imgRef}
+											src={src()}
+											alt={img().filename ?? "Image"}
+											onLoad={onImgLoad}
+											onError={onImgError}
+											draggable={false}
+											style={{
+												transform: transformStyle(),
+												"transform-origin": "center center",
+												"max-width": "none",
+												"max-height": "none",
+												"will-change": "transform",
+											}}
+											class="block"
+										/>
+									)}
+								</Match>
+							</Switch>
 						)}
 					</Show>
 				</div>
