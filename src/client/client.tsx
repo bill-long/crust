@@ -8,6 +8,7 @@ import {
 import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
 import {
 	createContext,
+	createEffect,
 	createSignal,
 	onCleanup,
 	onMount,
@@ -19,7 +20,8 @@ import {
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
 import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
-import type { Session } from "../stores/session";
+import { loadSession, type Session } from "../stores/session";
+import { updateAppBadge } from "./appBadge";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
 	clearCryptoStores,
@@ -35,6 +37,7 @@ import {
 	type OptimisticJoinInfo,
 	type SummariesStore,
 } from "./summaries";
+import { getTotalUnread } from "./summaries-selectors";
 
 export type AppSyncState =
 	| "initial"
@@ -206,7 +209,10 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	const [syncState, setSyncState] = createSignal<AppSyncState>("initial");
 	const [cryptoState, setCryptoState] = createSignal<CryptoState>("loading");
-	let hasPrepared = false;
+	// Reactive so the app-badge effect below can gate on it: until the first
+	// /sync has prepared and populated `summaries`, the store is empty and the
+	// badge must not be touched (see the effect comment).
+	const [hasPrepared, setHasPrepared] = createSignal(false);
 	let disposed = false;
 	let detachUrlPreviewSync: (() => void) | null = null;
 
@@ -218,27 +224,69 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		optimisticallyMarkLeft,
 	} = createSummariesStore(matrixClient);
 
+	// Keep the OS/taskbar app badge in sync with live unread state while this
+	// window is open, so it clears the moment a message is read rather than
+	// staying stale until the next push (see #269). The service worker handles
+	// the closed-app case from push payloads (`src/sw.ts`).
+	createEffect(() => {
+		// Session ended: clear immediately rather than waiting for unmount.
+		if (syncState() === "logged-out") {
+			updateAppBadge(0);
+			return;
+		}
+		// Until the first /sync has prepared, `summaries` is empty and
+		// getTotalUnread would be 0 — writing that would wrongly clear a badge
+		// the service worker set from a background push before we know the real
+		// count. Leave the badge untouched until we have authoritative data.
+		if (!hasPrepared()) return;
+		updateAppBadge(getTotalUnread(summaries));
+	});
+
+	// The OS app badge is a single resource shared by every window/tab. Another
+	// window clearing it on teardown — or the service worker writing a push
+	// count — can leave this window's badge stale. Re-assert our authoritative
+	// count whenever we become visible, so the window the user is actually
+	// looking at always wins. No-op before the first sync (nothing authoritative
+	// yet) and harmless if the Badging API is unavailable.
+	const reassertBadgeOnVisible = (): void => {
+		if (typeof document === "undefined") return;
+		if (document.visibilityState !== "visible" || !hasPrepared()) return;
+		// Mirror the effect: once the session has ended the badge stays cleared,
+		// so a tab switch between logout and unmount can't flash the stale count.
+		if (syncState() === "logged-out") return;
+		updateAppBadge(getTotalUnread(summaries));
+	};
+	if (typeof document !== "undefined") {
+		document.addEventListener("visibilitychange", reassertBadgeOnVisible);
+	}
+
 	const onSync = (state: SyncState): void => {
 		// "logged-out" is terminal — don't let later sync events overwrite it
 		if (syncState() === "logged-out") return;
 
 		switch (state) {
 			case SyncState.Prepared:
-				hasPrepared = true;
+				// Populate `summaries` before flipping the prepared flag the badge
+				// effect gates on, so the effect never observes hasPrepared=true with
+				// an empty store (which would clear an SW-set badge). createEffect is
+				// deferred so this is already safe today; the ordering makes the
+				// "prepared implies summaries populated" invariant explicit and robust
+				// if the effect ever becomes synchronous.
 				initSummaries();
+				setHasPrepared(true);
 				if (!detachUrlPreviewSync && !disposed) {
 					detachUrlPreviewSync = attachUrlPreviewAccountDataSync(matrixClient);
 				}
 				setSyncState("live");
 				break;
 			case SyncState.Syncing:
-				if (hasPrepared) {
+				if (hasPrepared()) {
 					setSyncState("live");
 				}
 				break;
 			case SyncState.Catchup:
 			case SyncState.Reconnecting:
-				if (hasPrepared) {
+				if (hasPrepared()) {
 					setSyncState("catching-up");
 				}
 				break;
@@ -284,6 +332,18 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 
 	onCleanup(() => {
 		disposed = true;
+		if (typeof document !== "undefined") {
+			document.removeEventListener("visibilitychange", reassertBadgeOnVisible);
+		}
+		// Clear the badge only when the session has actually ended, not on a
+		// plain reload or window close. Every logout path (Layout.handleLogout,
+		// App.handleForceLogout, and the expired-session effect) calls
+		// clearSession() before this unmount, so loadSession() is null then; on a
+		// reload the session persists, so we leave the badge for the next load /
+		// other open windows rather than wiping a still-valid count.
+		if (loadSession() === null) {
+			updateAppBadge(0);
+		}
 		detachUrlPreviewSync?.();
 		detachUrlPreviewSync = null;
 		cleanupSummaries();
