@@ -92,11 +92,22 @@ export function createDecryptedObjectUrl(
 		}
 	});
 
+	// `createResource` keeps the previous resolved value while a new source is
+	// loading. Expose only the value for the *current, settled* source: null
+	// while loading or when there's no source. Otherwise switching between
+	// encrypted images would briefly leak the previous image's blob via
+	// url()/blob()/failed() instead of showing a decrypting placeholder.
+	const current = (): DecryptState | null => {
+		if (!source() || state.loading) return null;
+		return state() ?? null;
+	};
+
 	const [url, setUrl] = createSignal<string | null>(null);
 	// Mint a fresh object URL when a decrypted blob arrives; revoke the prior
-	// one. onCleanup covers unmount and the final value.
+	// one (also clears it while a new decrypt is loading). onCleanup covers
+	// unmount and the final value.
 	createEffect(() => {
-		const s = state();
+		const s = current();
 		const next = s && "blob" in s ? URL.createObjectURL(s.blob) : null;
 		setUrl((prev) => {
 			if (prev) URL.revokeObjectURL(prev);
@@ -104,19 +115,19 @@ export function createDecryptedObjectUrl(
 		});
 	});
 	onCleanup(() => {
-		const current = url();
-		if (current) URL.revokeObjectURL(current);
+		const value = url();
+		if (value) URL.revokeObjectURL(value);
 	});
 
 	return {
 		url,
 		blob: () => {
-			const s = state();
+			const s = current();
 			return s && "blob" in s ? s.blob : null;
 		},
 		loading: () => state.loading,
 		failed: () => {
-			const s = state();
+			const s = current();
 			return !!s && "failed" in s;
 		},
 	};
