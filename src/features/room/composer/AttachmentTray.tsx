@@ -1,5 +1,6 @@
 import { type Component, For, Show } from "solid-js";
 import { formatBytes } from "../../../lib/formatBytes";
+import { sanitizeFilename } from "./media/filename";
 import type { PendingAttachment } from "./media/types";
 
 function kindIcon(kind: PendingAttachment["kind"]): string {
@@ -30,6 +31,7 @@ const AttachmentTray: Component<{
 			<For each={props.attachments}>
 				{(att) => {
 					const uploading = (): boolean => att.status === "uploading";
+					const name = sanitizeFilename(att.file.name);
 					return (
 						<div class="flex items-start gap-3 rounded bg-surface-2/50 p-2">
 							<div class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded bg-surface-3">
@@ -53,7 +55,7 @@ const AttachmentTray: Component<{
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center gap-2">
 									<p class="min-w-0 flex-1 truncate text-xs text-text-secondary">
-										{att.file.name || "file"}
+										{name}
 									</p>
 									<span class="shrink-0 text-xs text-text-disabled">
 										{formatBytes(att.file.size)}
@@ -63,7 +65,7 @@ const AttachmentTray: Component<{
 										class="shrink-0 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary disabled:opacity-40"
 										onClick={() => props.onRemove(att.id)}
 										disabled={uploading()}
-										aria-label={`Remove ${att.file.name || "attachment"}`}
+										aria-label={`Remove ${name}`}
 									>
 										✕
 									</button>
@@ -76,14 +78,14 @@ const AttachmentTray: Component<{
 									}
 									placeholder="Add a caption…"
 									disabled={uploading()}
-									aria-label={`Caption for ${att.file.name || "attachment"}`}
+									aria-label={`Caption for ${name}`}
 									class="mt-1 w-full rounded bg-surface-2 px-2 py-1 text-xs text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover disabled:opacity-60"
 								/>
 								<Show when={uploading()}>
 									<div
 										class="mt-1 h-1 w-full overflow-hidden rounded bg-surface-3"
 										role="progressbar"
-										aria-label={`Upload progress for ${att.file.name || "attachment"}`}
+										aria-label={`Upload progress for ${name}`}
 										aria-valuemin={0}
 										aria-valuemax={100}
 										aria-valuenow={Math.round(att.progress * 100)}

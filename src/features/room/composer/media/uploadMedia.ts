@@ -2,6 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import { formatBytes } from "../../../../lib/formatBytes";
 import type { TimelineEvent } from "../../timeline/useTimeline";
+import { sanitizeFilename } from "./filename";
 import { inspectImage, type Thumbnail } from "./imageProcessing";
 import {
 	assertCanSendMedia,
@@ -83,7 +84,7 @@ export async function uploadAndSend(
 	await validateSize(client, file);
 
 	const kind = attachment.kind;
-	const filename = file.name || "file";
+	const filename = sanitizeFilename(file.name);
 
 	// Image-only: decode once for intrinsic dimensions + an optional thumbnail.
 	// Both are best-effort — a decode/thumbnail failure still sends the full
