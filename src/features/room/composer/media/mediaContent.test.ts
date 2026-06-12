@@ -160,6 +160,43 @@ describe("buildMediaContent", () => {
 		expect(info.thumbnail_info).toMatchObject({ w: 800, h: 600, size: 500 });
 	});
 
+	it("throws when neither file nor contentUri is supplied (fail closed)", () => {
+		expect(() =>
+			buildMediaContent({
+				kind: "file",
+				filename: "doc.pdf",
+				mimetype: "application/pdf",
+				size: 10,
+			}),
+		).toThrow(/exactly one of file/i);
+	});
+
+	it("throws when both file and contentUri are supplied", () => {
+		expect(() =>
+			buildMediaContent({
+				kind: "image",
+				contentUri: "mxc://srv/abc",
+				file: encFile("full"),
+				filename: "cat.png",
+				mimetype: "image/png",
+				size: 1,
+			}),
+		).toThrow(/exactly one of file/i);
+	});
+
+	it("throws when a thumbnail has neither file nor contentUri", () => {
+		expect(() =>
+			buildMediaContent({
+				kind: "image",
+				contentUri: "mxc://srv/full",
+				filename: "big.jpg",
+				mimetype: "image/jpeg",
+				size: 9000,
+				thumbnail: { mimetype: "image/jpeg", size: 500, w: 800, h: 600 },
+			}),
+		).toThrow(/thumbnail must have exactly one/i);
+	});
+
 	it("attaches a reply relation (relation only, no body prefix)", () => {
 		const replyTo = {
 			eventId: "$reply",
