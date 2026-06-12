@@ -551,12 +551,37 @@ const Composer: Component<{
 
 		// Normal send mode
 
+		// Compute the trailing-text payload from the original input and snapshot
+		// the draft, then clear the composer up front — mirroring the text-only
+		// path — so a slow attachment upload can't race the textarea and wipe
+		// text the user types while the upload is in flight.
+		const hasText = msg.length > 0;
+		const currentMentions = hasText ? reconcileMentions(msg) : [];
+		const emoji = hasText ? findCustomEmoji(msg, shortcodeLookup()) : [];
+		const draft = text();
+		const draftMentions = mentions();
+		setText("");
+		setError(null);
+		setMentions([]);
+		setMentionQuery(null);
+		setEmojiPickerOpen(false);
+		requestAnimationFrame(autoResize);
+
+		// Restore the trailing text on failure, but only if the user hasn't
+		// already started a new message in the meantime.
+		const restoreDraft = (): void => {
+			if (!text()) {
+				setText(draft);
+				setMentions(draftMentions);
+				requestAnimationFrame(autoResize);
+			}
+		};
+
 		// Send any queued attachments first. The reply relation is attached to
 		// the first event only (whether that's an attachment or the trailing
 		// text) so we don't emit one reply per file.
 		let replyConsumed = false;
 		if (attachments().length > 0) {
-			setError(null);
 			setSending(true);
 			stopTyping();
 			let allOk = true;
@@ -587,14 +612,15 @@ const Composer: Component<{
 					});
 				}
 			}
-			// Leave failed attachments in the tray; don't also send the text so
-			// the user can retry without losing it.
+			// Leave failed attachments in the tray and restore the trailing text
+			// so the user can retry without losing it.
 			if (!allOk) {
+				restoreDraft();
 				setSending(false);
 				restoreFocus();
 				return;
 			}
-			if (!msg) {
+			if (!hasText) {
 				setSending(false);
 				props.onSent?.();
 				restoreFocus();
@@ -603,8 +629,6 @@ const Composer: Component<{
 			// Otherwise fall through to send the trailing text message.
 		}
 
-		const currentMentions = reconcileMentions(msg);
-		const emoji = findCustomEmoji(msg, shortcodeLookup());
 		const { body, formatted_body } = formatMarkdown(
 			msg,
 			currentMentions,
@@ -641,16 +665,8 @@ const Composer: Component<{
 			};
 		}
 
-		const draft = text();
-		const draftMentions = mentions();
-		setText("");
-		setError(null);
-		setMentions([]);
-		setMentionQuery(null);
-		setEmojiPickerOpen(false);
 		setSending(true);
 		stopTyping();
-		requestAnimationFrame(autoResize);
 
 		try {
 			await client.sendMessage(
@@ -659,21 +675,11 @@ const Composer: Component<{
 			);
 			props.onSent?.();
 		} catch (e) {
-			if (!text()) {
-				setText(draft);
-				setMentions(draftMentions);
-			}
+			restoreDraft();
 			setError(e instanceof Error ? e.message : "Failed to send message");
-			requestAnimationFrame(autoResize);
 		} finally {
 			setSending(false);
-			if (
-				!document.activeElement ||
-				document.activeElement === document.body ||
-				document.activeElement === textareaRef
-			) {
-				textareaRef?.focus();
-			}
+			restoreFocus();
 		}
 	};
 
