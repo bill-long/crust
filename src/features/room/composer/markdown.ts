@@ -62,10 +62,12 @@ function isSafeLinkUrl(url: string): boolean {
  * Sentinel that fences off already-rendered fragments from later passes. We
  * use U+FFFF — a permanent Unicode noncharacter that never appears in real
  * text — rather than U+FFFD (the replacement char), which legitimately shows
- * up in user input from decoding errors. Dropping our sentinel from input
- * (below) must not lose characters the plain `body` still carries, so we
- * neutralize only U+FFFF and leave U+FFFD intact. Mirrors the receive-side
- * sentinels in `plainTextToHtml` (`MessageBody.tsx`).
+ * up in user input from decoding errors. `formatMarkdown` strips U+FFFF from
+ * the input below so it can't collide with our `PH<idx>PH` tokens; because
+ * U+FFFF never appears in real text, dropping it loses nothing the plain
+ * `body` keeps. U+FFFD is deliberately left intact so the HTML and plaintext
+ * renderings stay in sync. Mirrors the receive-side sentinels in
+ * `plainTextToHtml` (`MessageBody.tsx`).
  */
 const PH = "￿";
 
@@ -129,7 +131,7 @@ function formatInline(line: string, ctx: InlineContext): string {
 		const permalink = `https://matrix.to/#/${encodeURIComponent(mention.userId)}`;
 		const token = protect(
 			ctx,
-			`<a href="${escapeHtml(permalink)}">${escapedName}</a>`,
+			`<a href="${escapeAttr(permalink)}">${escapedName}</a>`,
 		);
 		let matched = false;
 		s = s.replace(pattern, (_m, prefix: string) => {
