@@ -15,6 +15,7 @@ import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
+import { EncryptedImage } from "./EncryptedImage";
 import { formatReactors } from "./reactionFormatting";
 import { StateNoticeIcon } from "./StateNoticeIcon";
 import type { TimelineEvent } from "./useTimeline";
@@ -710,7 +711,19 @@ const TimelineItem: Component<{
 											ev.status === null &&
 											!!ev.imageFullUrl &&
 											!!props.onOpenImage;
-										const imgEl = (
+										// Encrypted images can't be rendered from their (scaled)
+										// ciphertext URL — download + decrypt the full file and
+										// show the plaintext blob instead.
+										const imgEl = ev.imageIsEncrypted ? (
+											<EncryptedImage
+												httpUrl={ev.imageFullUrl}
+												file={ev.imageEncryptedFile}
+												mimetype={ev.imageMimetype}
+												alt={ev.body?.trim() || "Image"}
+												reserveWidth={imageReserveDims().w}
+												reserveHeight={imageReserveDims().h}
+											/>
+										) : (
 											<img
 												src={ev.imageUrl ?? ""}
 												alt={ev.body?.trim() || "Image"}

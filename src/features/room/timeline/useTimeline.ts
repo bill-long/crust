@@ -19,6 +19,10 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { extractGifUrl } from "../../gif/gifUrl";
+import {
+	type EncryptedFileInfo,
+	parseEncryptedFile,
+} from "../composer/media/attachmentCrypto";
 import type {
 	MembershipTransition,
 	StateNotice,
@@ -93,6 +97,12 @@ export interface TimelineEvent {
 	 * `<img>` of ciphertext.
 	 */
 	imageIsEncrypted: boolean;
+	/**
+	 * Validated EncryptedFile descriptor for an encrypted `m.image`, used to
+	 * download + decrypt the attachment for display. Null for plain images and
+	 * non-image events. Present alongside `imageIsEncrypted === true`.
+	 */
+	imageEncryptedFile: EncryptedFileInfo | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -244,6 +254,7 @@ function buildSyntheticCallLeaveEvent(
 		imageSize: null,
 		imageFilename: null,
 		imageIsEncrypted: false,
+		imageEncryptedFile: null,
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,
@@ -509,6 +520,10 @@ function eventToTimelineEvent(
 		imageSize: infoSize,
 		imageFilename,
 		imageIsEncrypted: isPlainImage && imageIsEncrypted,
+		imageEncryptedFile:
+			isPlainImage && imageIsEncrypted
+				? parseEncryptedFile(content.file)
+				: null,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,

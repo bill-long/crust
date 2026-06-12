@@ -982,6 +982,74 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("projects a validated EncryptedFile descriptor for encrypted m.image", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$plain",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: { msgtype: "m.image", body: "p.png", url: "mxc://test/plain" },
+				ts: 1000,
+			},
+			{
+				eventId: "$enc",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "e.png",
+					file: {
+						url: "mxc://test/enc",
+						key: { k: "a-key" },
+						iv: "an-iv",
+						hashes: { sha256: "a-hash" },
+						v: "v2",
+					},
+				},
+				ts: 2000,
+			},
+			{
+				eventId: "$bad",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: "b.png",
+					file: { url: "mxc://test/bad", key: { k: "x" } },
+				},
+				ts: 3000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			expect(events[0].imageIsEncrypted).toBe(false);
+			expect(events[0].imageEncryptedFile).toBeNull();
+
+			expect(events[1].imageIsEncrypted).toBe(true);
+			expect(events[1].imageEncryptedFile).toEqual({
+				url: "mxc://test/enc",
+				key: { k: "a-key" },
+				iv: "an-iv",
+				hashes: { sha256: "a-hash" },
+				v: "v2",
+			});
+
+			expect(events[2].imageIsEncrypted).toBe(true);
+			expect(events[2].imageEncryptedFile).toBeNull();
+		});
+	});
+
 	it("falls back to content.body when content.filename is empty/whitespace", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			{

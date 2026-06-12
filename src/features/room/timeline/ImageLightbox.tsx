@@ -4,13 +4,17 @@ import {
 	createMemo,
 	createSignal,
 	createUniqueId,
+	Match,
 	on,
 	onCleanup,
 	Show,
+	Switch,
 } from "solid-js";
 import { formatBytes } from "../../../lib/formatBytes";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
+import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
+import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -26,6 +30,11 @@ export interface LightboxImage {
 	senderName: string;
 	timestamp: number;
 	isEncrypted: boolean;
+	/**
+	 * EncryptedFile descriptor when `isEncrypted`. `fullUrl` then points at the
+	 * ciphertext; the lightbox downloads + decrypts it for display/download.
+	 */
+	encryptedFile: EncryptedFileInfo | null;
 }
 
 interface ImageLightboxProps {
@@ -104,6 +113,24 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	let previousFocus: HTMLElement | null = null;
 
 	const titleId = createUniqueId();
+
+	// Encrypted images: download the ciphertext (`fullUrl`) and decrypt it to a
+	// blob URL for display / download / open. Plain images use `fullUrl`
+	// directly. Only active while an encrypted image is shown.
+	const decrypted = createDecryptedObjectUrl(
+		() => {
+			const img = props.image();
+			return img?.encryptedFile ? img.fullUrl : null;
+		},
+		() => props.image()?.encryptedFile ?? null,
+		() => props.image()?.mimetype ?? null,
+	);
+	/** The URL to actually render/download: decrypted blob for encrypted, else the raw url. */
+	const displaySrc = (): string | null => {
+		const img = props.image();
+		if (!img) return null;
+		return img.encryptedFile ? decrypted.url() : img.fullUrl;
+	};
 
 	// Natural (intrinsic) image dimensions, set from `<img>` onLoad
 	// or from metadata when known.
@@ -482,8 +509,15 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 			img.filename ?? fallbackName,
 			fallbackName,
 		);
+		// For encrypted images download the already-decrypted blob, never the
+		// ciphertext. The blob URL is valid while the lightbox is open.
+		const src = img.encryptedFile ? decrypted.url() : img.fullUrl;
+		if (!src) {
+			setDownloadError("Download failed: image is not ready");
+			return;
+		}
 		try {
-			const res = await fetch(img.fullUrl, { credentials: "omit" });
+			const res = await fetch(src, { credentials: "omit" });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const blob = await res.blob();
 			const objUrl = URL.createObjectURL(blob);
@@ -646,10 +680,10 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<button
 										type="button"
 										onClick={handleDownload}
-										disabled={img().isEncrypted}
+										disabled={!!img().encryptedFile && !decrypted.url()}
 										title={
-											img().isEncrypted
-												? "Encrypted image download not yet supported"
+											img().encryptedFile && !decrypted.url()
+												? "Decrypting…"
 												: "Download"
 										}
 										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
@@ -668,28 +702,30 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 											<line x1="12" y1="15" x2="12" y2="3" />
 										</svg>
 									</button>
-									<Show when={!img().isEncrypted}>
-										<a
-											href={img().fullUrl}
-											target="_blank"
-											rel="noopener noreferrer"
-											class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-											aria-label="Open in new tab"
-										>
-											<span class="sr-only">Open in new tab</span>
-											<svg
-												class="h-5 w-5"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												aria-hidden="true"
+									<Show when={displaySrc()}>
+										{(src) => (
+											<a
+												href={src()}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+												aria-label="Open in new tab"
 											>
-												<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-												<polyline points="15 3 21 3 21 9" />
-												<line x1="10" y1="14" x2="21" y2="3" />
-											</svg>
-										</a>
+												<span class="sr-only">Open in new tab</span>
+												<svg
+													class="h-5 w-5"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													aria-hidden="true"
+												>
+													<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+													<polyline points="15 3 21 3 21 9" />
+													<line x1="10" y1="14" x2="21" y2="3" />
+												</svg>
+											</a>
+										)}
 									</Show>
 								</>
 							)}
@@ -754,48 +790,53 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						fallback={<div class="text-text-muted">No image</div>}
 					>
 						{(img) => (
-							<Show
-								when={!img().isEncrypted}
-								fallback={
+							<Switch>
+								{/* Encrypted: download + decrypt failed → fail closed. */}
+								<Match when={img().encryptedFile && decrypted.failed()}>
 									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
 										<div class="mb-1 font-semibold text-text-primary">
-											Encrypted image
+											Couldn't decrypt image
 										</div>
 										<p>
-											Full-size preview of encrypted images isn't supported yet.
+											This encrypted image could not be decrypted or failed its
+											integrity check.
 										</p>
 									</div>
-								}
-							>
-								<Show
-									when={!imgLoadError()}
-									fallback={
-										<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
-											<div class="mb-1 font-semibold text-text-primary">
-												Couldn't load image
-											</div>
-											<p>The full-resolution image failed to load.</p>
+								</Match>
+								{/* Encrypted: still downloading / decrypting. */}
+								<Match when={img().encryptedFile && !decrypted.url()}>
+									<div class="text-text-muted">Decrypting…</div>
+								</Match>
+								{/* Plain image failed to load. */}
+								<Match when={imgLoadError()}>
+									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
+										<div class="mb-1 font-semibold text-text-primary">
+											Couldn't load image
 										</div>
-									}
-								>
-									<img
-										ref={imgRef}
-										src={img().fullUrl}
-										alt={img().filename ?? "Image"}
-										onLoad={onImgLoad}
-										onError={onImgError}
-										draggable={false}
-										style={{
-											transform: transformStyle(),
-											"transform-origin": "center center",
-											"max-width": "none",
-											"max-height": "none",
-											"will-change": "transform",
-										}}
-										class="block"
-									/>
-								</Show>
-							</Show>
+										<p>The full-resolution image failed to load.</p>
+									</div>
+								</Match>
+								<Match when={displaySrc()}>
+									{(src) => (
+										<img
+											ref={imgRef}
+											src={src()}
+											alt={img().filename ?? "Image"}
+											onLoad={onImgLoad}
+											onError={onImgError}
+											draggable={false}
+											style={{
+												transform: transformStyle(),
+												"transform-origin": "center center",
+												"max-width": "none",
+												"max-height": "none",
+												"will-change": "transform",
+											}}
+											class="block"
+										/>
+									)}
+								</Match>
+							</Switch>
 						)}
 					</Show>
 				</div>
