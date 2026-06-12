@@ -8,6 +8,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { formatBytes } from "../../../lib/formatBytes";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 
@@ -50,19 +51,6 @@ const DRAG_THRESHOLD_PX = 4;
 
 function clamp(n: number, lo: number, hi: number): number {
 	return Math.max(lo, Math.min(hi, n));
-}
-
-function formatBytes(n: number): string {
-	if (!Number.isFinite(n) || n < 0) return "";
-	if (n < 1024) return `${n} B`;
-	const units = ["KB", "MB", "GB"];
-	let v = n / 1024;
-	let i = 0;
-	while (v >= 1024 && i < units.length - 1) {
-		v /= 1024;
-		i++;
-	}
-	return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`;
 }
 
 function formatTimestamp(ts: number, hourFmt: "12h" | "24h"): string {

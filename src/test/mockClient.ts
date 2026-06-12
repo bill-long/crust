@@ -209,6 +209,7 @@ export function createMockRoom(
 	const canSendStateByType = new Map<string, boolean>();
 	let canInviteFlag = true;
 	let isSpaceFlag = false;
+	let isEncryptedFlag = false;
 	const currentState = {
 		getStateEvents: (type: string, stateKey?: string) => {
 			const typeMap = stateEventStore.get(type);
@@ -239,6 +240,7 @@ export function createMockRoom(
 		getMembers: () => [...memberState],
 		canInvite: (_userId: string) => canInviteFlag,
 		isSpaceRoom: () => isSpaceFlag,
+		hasEncryptionStateEvent: () => isEncryptedFlag,
 		findEventById: (eventId: string) =>
 			matrixEvents.find((e) => e.getId() === eventId) ?? null,
 		on: (event: string, handler: (...args: unknown[]) => void) => {
@@ -267,6 +269,9 @@ export function createMockRoom(
 		},
 		__setIsSpace: (value: boolean) => {
 			isSpaceFlag = value;
+		},
+		__setEncrypted: (value: boolean) => {
+			isEncryptedFlag = value;
 		},
 		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);
@@ -368,6 +373,7 @@ export function createMockClient(
 		uploadContent: vi
 			.fn()
 			.mockResolvedValue({ content_uri: "mxc://example.com/avatar" }),
+		getMediaConfig: vi.fn().mockResolvedValue({}),
 		getDomain: () => "example.com",
 		sendTyping: vi.fn().mockResolvedValue(undefined),
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
