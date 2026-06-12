@@ -105,11 +105,12 @@ async function uploadBlob(
 
 /**
  * Upload a single queued attachment and send it as the appropriate media
- * event. For images this probes dimensions and, when large, generates and
- * uploads a thumbnail first. In encrypted rooms the file (and thumbnail) bytes
- * are AES-256-CTR encrypted and the event carries `content.file` /
- * `info.thumbnail_file` instead of cleartext urls. Returns the sent event
- * content for assertion/testing.
+ * event. For images this probes dimensions and generates a thumbnail; the full
+ * file is uploaded first and the thumbnail only after it succeeds (best-effort),
+ * so a failed full upload can't orphan a thumbnail on the server. In encrypted
+ * rooms the file (and thumbnail) bytes are AES-256-CTR encrypted and the event
+ * carries `content.file` / `info.thumbnail_file` instead of cleartext urls.
+ * Returns the sent event content for assertion/testing.
  */
 export async function uploadAndSend(
 	client: MatrixClient,

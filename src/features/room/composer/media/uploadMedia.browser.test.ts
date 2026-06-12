@@ -124,9 +124,11 @@ describe("uploadAndSend (encrypted room)", () => {
 		expect(thumbFile).toBeDefined();
 		expect(thumbFile.url).toBe("mxc://srv/1");
 
-		// The thumbnail ciphertext (second upload) decrypts back to the stub bytes.
+		// The thumbnail ciphertext (second upload) decrypts back to the stub bytes,
+		// and like the full file it leaks no filename to the server.
 		const thumbUpload = uploads[1];
 		expect(thumbUpload.opts.type).toBe("application/octet-stream");
+		expect(thumbUpload.opts.name).toBeUndefined();
 		const parsed = parseEncryptedFile(thumbFile);
 		const decrypted = await decryptAttachment(
 			await thumbUpload.blob.arrayBuffer(),
