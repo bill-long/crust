@@ -534,8 +534,16 @@ const Composer: Component<{
 				.split("\n")
 				.map((l) => `${prefix}${l}`)
 				.join("\n");
+			const value = `${head}${prefixed}${after}`;
+			// With no selection, keep a collapsed caret at its original spot,
+			// shifted by the single prefix inserted ahead of it, so the next
+			// keystroke continues typing instead of overwriting the line.
+			if (sel === "") {
+				const caret = before.length + prefix.length;
+				return { value, selStart: caret, selEnd: caret };
+			}
 			return {
-				value: `${head}${prefixed}${after}`,
+				value,
 				selStart: head.length,
 				selEnd: head.length + prefixed.length,
 			};

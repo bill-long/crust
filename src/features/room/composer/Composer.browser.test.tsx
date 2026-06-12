@@ -231,6 +231,26 @@ describe("Composer formatting toolbar", () => {
 		expect(ta.value).toBe("- a\n- b");
 	});
 
+	it("keeps a collapsed caret after the prefix when there is no selection", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "ab");
+		ta.focus();
+		ta.setSelectionRange(2, 2); // collapsed caret at end, no selection
+		(getByLabelText("Quote") as HTMLButtonElement).click();
+		// Selection restore happens in a rAF, so wait a frame before asserting it.
+		await new Promise<void>((r) => requestAnimationFrame(() => r()));
+		expect(ta.value).toBe("> ab");
+		// Caret stays at the original position shifted by the "> " prefix (2),
+		// collapsed — so the next keystroke continues typing, not overwrites.
+		expect(ta.selectionStart).toBe(4);
+		expect(ta.selectionEnd).toBe(4);
+	});
+
 	it("wraps the selection on Ctrl+B", async () => {
 		const { container } = render(() => (
 			<TestClientProvider client={makeClient()}>
