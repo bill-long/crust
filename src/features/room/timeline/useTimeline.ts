@@ -291,7 +291,11 @@ function buildReplySnippet(parent: MatrixEvent): string {
 		snippet = filename ? `📎 ${filename}` : "📎 File";
 	} else {
 		const body = typeof content.body === "string" ? content.body : "";
-		snippet = stripReplyFallback(body).split("\n")[0]?.trim() ?? "";
+		// Only the first line is needed; avoid allocating a full split() array
+		// for a potentially large parent body.
+		const stripped = stripReplyFallback(body);
+		const nl = stripped.indexOf("\n");
+		snippet = (nl === -1 ? stripped : stripped.slice(0, nl)).trim();
 	}
 	snippet = stripControlChars(snippet).trim();
 	return snippet.length > REPLY_SNIPPET_MAX

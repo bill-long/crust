@@ -794,19 +794,25 @@ const TimelineItem: Component<{
 										// Encrypted images can't be rendered from their (scaled)
 										// ciphertext URL — download + decrypt the full file and
 										// show the plaintext blob instead.
+										// Alt text: the validated `mediaFilename` is already single-line
+										// and control-char-safe, unlike the raw `body` (which for a
+										// captioned image is the multi-line caption). Using the filename
+										// also avoids screen readers double-announcing the caption, which
+										// renders as adjacent visible text below.
+										const altText = ev.mediaFilename || "Image";
 										const imgEl = ev.mediaIsEncrypted ? (
 											<EncryptedImage
 												httpUrl={ev.mediaFullUrl}
 												file={ev.mediaEncryptedFile}
 												mimetype={ev.mediaMimetype}
-												alt={ev.body?.trim() || "Image"}
+												alt={altText}
 												reserveWidth={mediaReserveDims().w}
 												reserveHeight={mediaReserveDims().h}
 											/>
 										) : (
 											<img
 												src={ev.mediaUrl ?? ""}
-												alt={ev.body?.trim() || "Image"}
+												alt={altText}
 												width={mediaReserveDims().w}
 												height={mediaReserveDims().h}
 												class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
