@@ -92,9 +92,10 @@ export interface TimelineEvent {
 	imageFilename: string | null;
 	/**
 	 * True when the image is an encrypted attachment (source was
-	 * `content.file`, not `content.url`). The lightbox uses this to
-	 * show an unsupported-decryption placeholder rather than a broken
-	 * `<img>` of ciphertext.
+	 * `content.file`, not `content.url`). When set, `imageUrl`/`imageFullUrl`
+	 * point at *ciphertext*: consumers must download + decrypt it (via
+	 * `imageEncryptedFile` / {@link createDecryptedObjectUrl}) or fail closed,
+	 * never render or download those URLs directly.
 	 */
 	imageIsEncrypted: boolean;
 	/**
