@@ -713,7 +713,8 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										onClick={handleDownload}
 										disabled={img().isEncrypted && !displaySrc()}
 										title={
-											img().isEncrypted && !img().encryptedFile
+											img().isEncrypted &&
+											(!img().encryptedFile || decrypted.failed())
 												? "Image can't be decrypted"
 												: img().isEncrypted && !displaySrc()
 													? "Decrypting…"
