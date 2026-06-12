@@ -105,7 +105,10 @@ export const MediaVideo: Component<{
 						// biome-ignore lint/a11y/useMediaCaption: received media has no caption track.
 						<video
 							controls
-							preload="metadata"
+							// `none`: don't fetch the video bytes until the user presses
+							// play, so a timeline of many videos doesn't burst N requests
+							// on render. The poster still shows.
+							preload="none"
 							playsinline
 							src={url()}
 							poster={props.posterUrl ?? undefined}

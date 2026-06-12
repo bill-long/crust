@@ -65,7 +65,10 @@ export const MediaAudio: Component<{
 		<audio
 			controls
 			autoplay={autoplay}
-			preload="metadata"
+			// `none`: a timeline of many plain audio messages shouldn't each fetch
+			// metadata on render. The decrypted (autoplay) path already holds the
+			// blob, so this only gates the plain, not-yet-played case.
+			preload="none"
 			src={src}
 			aria-label={props.label}
 			class="mt-1 block h-12 w-full max-w-[min(100%,28rem)]"
