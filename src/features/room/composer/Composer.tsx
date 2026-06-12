@@ -416,6 +416,11 @@ const Composer: Component<{
 				setEmojiPickerOpen(false);
 				setGifPickerOpen(false);
 				clearAttachments();
+				// A send pinned to the previous room may still be in flight; reset
+				// the busy flag so the newly selected room's composer is usable.
+				// That send's own completion writes are gated on still being on
+				// its room, so they won't clobber this fresh state.
+				setSending(false);
 				requestAnimationFrame(autoResize);
 			},
 		),
@@ -470,10 +475,15 @@ const Composer: Component<{
 		const msg = text().trim();
 		if ((!msg && attachments().length === 0) || sending()) return;
 
-		// Pin the target room for the whole send: uploads await, and the user
-		// could switch rooms mid-send — without this, later attachments (or the
-		// trailing text) would be delivered to whichever room is current now.
+		// Pin the target room (and reply target) for the whole send: uploads
+		// await, and the user could switch rooms mid-send. The composer is a
+		// single reused instance with shared signals, so we (a) deliver to the
+		// pinned room and (b) gate every completion-time write on still being on
+		// that room, so a send that finishes after the user navigated away can't
+		// clobber the newly selected room's composer.
 		const roomId = props.roomId;
+		const replyTo = props.replyTo;
+		const onThisRoom = (): boolean => props.roomId === roomId;
 
 		// Edit mode: send m.replace event
 		if (props.editingEvent) {
@@ -528,22 +538,20 @@ const Composer: Component<{
 					roomId,
 					content as unknown as RoomMessageEventContent,
 				);
-				props.onSent?.();
+				if (onThisRoom()) props.onSent?.();
 			} catch (e) {
-				if (!text()) {
-					setText(draft);
-					setMentions(draftMentions);
+				if (onThisRoom()) {
+					if (!text()) {
+						setText(draft);
+						setMentions(draftMentions);
+					}
+					setError(e instanceof Error ? e.message : "Failed to edit message");
+					requestAnimationFrame(autoResize);
 				}
-				setError(e instanceof Error ? e.message : "Failed to edit message");
-				requestAnimationFrame(autoResize);
 			} finally {
-				setSending(false);
-				if (
-					!document.activeElement ||
-					document.activeElement === document.body ||
-					document.activeElement === textareaRef
-				) {
-					textareaRef?.focus();
+				if (onThisRoom()) {
+					setSending(false);
+					restoreFocus();
 				}
 			}
 			return;
@@ -567,10 +575,10 @@ const Composer: Component<{
 		setEmojiPickerOpen(false);
 		requestAnimationFrame(autoResize);
 
-		// Restore the trailing text on failure, but only if the user hasn't
-		// already started a new message in the meantime.
+		// Restore the trailing text on failure, but only if we're still on the
+		// send's room and the user hasn't already started a new message.
 		const restoreDraft = (): void => {
-			if (!text()) {
+			if (onThisRoom() && !text()) {
 				setText(draft);
 				setMentions(draftMentions);
 				requestAnimationFrame(autoResize);
@@ -593,15 +601,16 @@ const Composer: Component<{
 				});
 				try {
 					await uploadAndSend(client, roomId, att, {
-						replyTo: replyConsumed ? null : props.replyTo,
+						replyTo: replyConsumed ? null : replyTo,
 						onProgress: (p) => updateAttachment(att.id, { progress: p }),
 					});
 					// Clear the reply at the source once an event has carried it,
 					// so a retry after a partial failure doesn't re-attach it and
-					// emit a second reply.
-					if (props.replyTo && !replyConsumed) {
+					// emit a second reply. Only touch the parent's reply state if
+					// we're still on this room (else we'd clear another room's reply).
+					if (replyTo && !replyConsumed) {
 						replyConsumed = true;
-						props.onCancelReply?.();
+						if (onThisRoom()) props.onCancelReply?.();
 					}
 					removeAttachment(att.id);
 				} catch (e) {
@@ -616,14 +625,18 @@ const Composer: Component<{
 			// so the user can retry without losing it.
 			if (!allOk) {
 				restoreDraft();
-				setSending(false);
-				restoreFocus();
+				if (onThisRoom()) {
+					setSending(false);
+					restoreFocus();
+				}
 				return;
 			}
 			if (!hasText) {
-				setSending(false);
-				props.onSent?.();
-				restoreFocus();
+				if (onThisRoom()) {
+					setSending(false);
+					props.onSent?.();
+					restoreFocus();
+				}
 				return;
 			}
 			// Otherwise fall through to send the trailing text message.
@@ -649,11 +662,8 @@ const Composer: Component<{
 		}
 
 		// Add reply metadata if replying (unless an attachment already carried it)
-		if (props.replyTo && !replyConsumed) {
-			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
-				props.replyTo,
-				roomId,
-			);
+		if (replyTo && !replyConsumed) {
+			const { bodyPrefix, htmlPrefix } = buildReplyFallback(replyTo, roomId);
 			const replyHtmlBody =
 				(content.formatted_body as string | undefined) ??
 				escapeHtml(content.body as string).replace(/\n/g, "<br>");
@@ -661,7 +671,7 @@ const Composer: Component<{
 			content.format = "org.matrix.custom.html";
 			content.formatted_body = htmlPrefix + replyHtmlBody;
 			content["m.relates_to"] = {
-				"m.in_reply_to": { event_id: props.replyTo.eventId },
+				"m.in_reply_to": { event_id: replyTo.eventId },
 			};
 		}
 
@@ -673,13 +683,17 @@ const Composer: Component<{
 				roomId,
 				content as unknown as RoomMessageEventContent,
 			);
-			props.onSent?.();
+			if (onThisRoom()) props.onSent?.();
 		} catch (e) {
 			restoreDraft();
-			setError(e instanceof Error ? e.message : "Failed to send message");
+			if (onThisRoom()) {
+				setError(e instanceof Error ? e.message : "Failed to send message");
+			}
 		} finally {
-			setSending(false);
-			restoreFocus();
+			if (onThisRoom()) {
+				setSending(false);
+				restoreFocus();
+			}
 		}
 	};
 
