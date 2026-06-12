@@ -528,7 +528,8 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		tryClose();
 	};
 
-	// Download via fetch -> blob with sanitized filename. On failure,
+	// Download with a sanitized filename: the decrypted Blob for encrypted
+	// images, or a fetched Blob of the http URL for plain ones. On failure,
 	// surface an inline error; the user can still use "Open in new tab"
 	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
@@ -540,17 +541,26 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 			img.filename ?? fallbackName,
 			fallbackName,
 		);
-		// For encrypted images download the already-decrypted blob, never the
-		// ciphertext. The blob URL is valid while the lightbox is open.
-		const src = displaySrc();
-		if (!src) {
-			setDownloadError("Download failed: image is not ready");
-			return;
-		}
 		try {
-			const res = await fetch(src, { credentials: "omit" });
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const blob = await res.blob();
+			// Encrypted: use the already-decrypted Blob directly — never the
+			// ciphertext, and no fetch of the managed `blob:` URL (which is
+			// revoked on unmount/image change and could race the download).
+			// Plain: fetch the http URL to get a Blob the download attr can save.
+			let blob: Blob;
+			if (img.isEncrypted) {
+				const decryptedBlob = decrypted.blob();
+				if (!decryptedBlob) {
+					setDownloadError("Download failed: image is not ready");
+					return;
+				}
+				blob = decryptedBlob;
+			} else {
+				const res = await fetch(img.fullUrl, { credentials: "omit" });
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				blob = await res.blob();
+			}
+			// Fresh object URL for the download anchor, independent of the hook's
+			// managed URL so it can't be revoked out from under the download.
 			const objUrl = URL.createObjectURL(blob);
 			const a = document.createElement("a");
 			a.href = objUrl;
