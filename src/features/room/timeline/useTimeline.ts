@@ -100,7 +100,10 @@ export interface TimelineEvent {
 	/**
 	 * Validated EncryptedFile descriptor for an encrypted `m.image`, used to
 	 * download + decrypt the attachment for display. Null for plain images and
-	 * non-image events. Present alongside `imageIsEncrypted === true`.
+	 * non-image events. May ALSO be null when `imageIsEncrypted === true` if
+	 * `content.file` is malformed/incomplete (missing key/iv/hash) — downstream
+	 * UI must treat that as a fail-closed "can't decrypt" case, never rendering
+	 * the ciphertext.
 	 */
 	imageEncryptedFile: EncryptedFileInfo | null;
 	isEncrypted: boolean;

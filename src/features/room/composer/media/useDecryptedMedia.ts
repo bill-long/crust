@@ -15,6 +15,12 @@ import { decryptAttachment, type EncryptedFileInfo } from "./attachmentCrypto";
 export interface DecryptedMedia {
 	/** Object URL of the decrypted blob, or null while loading / on failure. */
 	url: () => string | null;
+	/**
+	 * The decrypted Blob itself, or null while loading / on failure. Lets a
+	 * consumer mint its own object URL with an independent lifetime (e.g. an
+	 * "open in new tab" that must outlive this hook's managed URL).
+	 */
+	blob: () => Blob | null;
 	loading: () => boolean;
 	/** True when download, hash-verify, or decryption failed (fail closed). */
 	failed: () => boolean;
@@ -46,23 +52,27 @@ export function createDecryptedObjectUrl(
 	const source = createMemo<{
 		httpUrl: string;
 		file: EncryptedFileInfo;
+		mimetype: string | null;
 	} | null>((prev) => {
 		const url = httpUrl();
 		const f = file();
 		if (!url || !f) return null;
-		// Compare every field that affects the download + decrypt + verify, so a
-		// re-projection that changes key material or the expected hash (not just
-		// the IV) can never reuse a stale descriptor and bypass the hash check.
+		const mt = mimetype?.() ?? null;
+		// Compare every field that affects the download + decrypt + verify + blob
+		// type, so a re-projection that changes key material, the expected hash,
+		// or the mimetype can never reuse a stale descriptor (which would bypass
+		// the hash check or keep the wrong Blob type).
 		if (
 			prev &&
 			prev.httpUrl === url &&
 			prev.file.iv === f.iv &&
 			prev.file.key.k === f.key.k &&
-			prev.file.hashes.sha256 === f.hashes.sha256
+			prev.file.hashes.sha256 === f.hashes.sha256 &&
+			prev.mimetype === mt
 		) {
 			return prev;
 		}
-		return { httpUrl: url, file: f };
+		return { httpUrl: url, file: f, mimetype: mt };
 	}, null);
 
 	const [state] = createResource(source, async (src): Promise<DecryptState> => {
@@ -71,9 +81,11 @@ export function createDecryptedObjectUrl(
 			if (!res.ok) return { failed: true };
 			const ciphertext = await res.arrayBuffer();
 			const plaintext = await decryptAttachment(ciphertext, src.file);
-			const type = mimetype?.();
 			return {
-				blob: new Blob([plaintext], type ? { type } : undefined),
+				blob: new Blob(
+					[plaintext],
+					src.mimetype ? { type: src.mimetype } : undefined,
+				),
 			};
 		} catch {
 			return { failed: true };
@@ -98,6 +110,10 @@ export function createDecryptedObjectUrl(
 
 	return {
 		url,
+		blob: () => {
+			const s = state();
+			return s && "blob" in s ? s.blob : null;
+		},
 		loading: () => state.loading,
 		failed: () => {
 			const s = state();

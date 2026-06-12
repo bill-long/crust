@@ -142,6 +142,27 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		return img.encryptedFile ? decrypted.url() : null;
 	};
 
+	/**
+	 * Open the image in a new tab. For encrypted images, mint a *fresh* object
+	 * URL from the decrypted blob and revoke it on a delay — the lightbox's own
+	 * managed URL is revoked on unmount / image change, which would break a tab
+	 * still loading it. Plain images just open their http URL.
+	 */
+	const openInNewTab = (): void => {
+		const img = props.image();
+		if (!img) return;
+		if (img.isEncrypted) {
+			const blob = decrypted.blob();
+			if (!blob) return;
+			const url = URL.createObjectURL(blob);
+			window.open(url, "_blank", "noopener,noreferrer");
+			// Long enough for the new tab to fetch the blob into its own context.
+			setTimeout(() => URL.revokeObjectURL(url), 60_000);
+		} else {
+			window.open(img.fullUrl, "_blank", "noopener,noreferrer");
+		}
+	};
+
 	// Natural (intrinsic) image dimensions, set from `<img>` onLoad
 	// or from metadata when known.
 	const [naturalSize, setNaturalSize] = createSignal<{
@@ -715,29 +736,57 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										</svg>
 									</button>
 									<Show when={displaySrc()}>
-										{(src) => (
-											<a
-												href={src()}
-												target="_blank"
-												rel="noopener noreferrer"
-												class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-												aria-label="Open in new tab"
-											>
-												<span class="sr-only">Open in new tab</span>
-												<svg
-													class="h-5 w-5"
-													viewBox="0 0 24 24"
-													fill="none"
-													stroke="currentColor"
-													stroke-width="2"
-													aria-hidden="true"
+										{(src) => {
+											// New nodes per call — a single shared JSX node can't live
+											// in both Show branches.
+											const renderOpenIcon = () => (
+												<>
+													<span class="sr-only">Open in new tab</span>
+													<svg
+														class="h-5 w-5"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="2"
+														aria-hidden="true"
+													>
+														<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+														<polyline points="15 3 21 3 21 9" />
+														<line x1="10" y1="14" x2="21" y2="3" />
+													</svg>
+												</>
+											);
+											const openClass =
+												"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover";
+											// Encrypted: a button minting a fresh, independently-revoked
+											// blob URL (the displaySrc blob is revoked on unmount and
+											// would break the opened tab). Plain: a normal anchor.
+											return (
+												<Show
+													when={!props.image()?.isEncrypted}
+													fallback={
+														<button
+															type="button"
+															onClick={openInNewTab}
+															class={openClass}
+															aria-label="Open in new tab"
+														>
+															{renderOpenIcon()}
+														</button>
+													}
 												>
-													<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-													<polyline points="15 3 21 3 21 9" />
-													<line x1="10" y1="14" x2="21" y2="3" />
-												</svg>
-											</a>
-										)}
+													<a
+														href={src()}
+														target="_blank"
+														rel="noopener noreferrer"
+														class={openClass}
+														aria-label="Open in new tab"
+													>
+														{renderOpenIcon()}
+													</a>
+												</Show>
+											);
+										}}
 									</Show>
 								</>
 							)}
