@@ -17,7 +17,11 @@ import {
 	micEnabled as voiceMicEnabled,
 } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
-import type { LivekitRoomApi, RtcParticipant } from "./useLivekitRoom";
+import type {
+	LivekitRoomApi,
+	RtcParticipant,
+	VideoTrackEntry,
+} from "./useLivekitRoom";
 
 const FOCUSABLE_SELECTOR =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -52,6 +56,34 @@ const FOCUSABLE_SELECTOR =
  */
 export const FullCallOverlay: Component = () => {
 	const session = createMemo(() => currentCallSession());
+
+	// Active remote screen shares, one labelled tile each. Intentionally depends
+	// ONLY on `screenShareTracks()` (not `participants()`): the sharer's display
+	// name is resolved reactively inside `ScreenShareTile`, so this memo — and
+	// thus the `<For>` row identities — stays stable across active-speaker / mute
+	// snapshots. Recomputing here on every snapshot would make `<For>` dispose
+	// and rebuild each tile, detaching/reattaching the screen <video> (the same
+	// flicker the hook's `participantCache` avoids for camera tiles). Empty (and
+	// thus invisible) until a participant publishes a `Track.Source.ScreenShare`.
+	const screenShares = createMemo<
+		{ identity: string; entry: VideoTrackEntry }[]
+	>(() => {
+		const s = session();
+		if (!s) return [];
+		const shares = s.livekit.screenShareTracks();
+		if (shares.size === 0) return [];
+		return [...shares.entries()].map(([identity, entry]) => ({
+			identity,
+			entry,
+		}));
+	});
+
+	// Total tiles rendered in the grid (camera/avatar tiles + screen shares),
+	// used to pick the column count.
+	const tileCount = createMemo(
+		() =>
+			(session()?.livekit.participants().length ?? 0) + screenShares().length,
+	);
 
 	let regionRef: HTMLElement | undefined;
 	let leaveButtonRef: HTMLButtonElement | undefined;
@@ -420,16 +452,23 @@ export const FullCallOverlay: Component = () => {
 									class="mt-2 grid min-h-0 flex-1 gap-2 overflow-auto [grid-auto-rows:minmax(8rem,1fr)]"
 									data-testid="participant-grid"
 									classList={{
-										"grid-cols-1": s().livekit.participants().length <= 1,
-										"grid-cols-2":
-											s().livekit.participants().length >= 2 &&
-											s().livekit.participants().length <= 4,
-										"grid-cols-3": s().livekit.participants().length >= 5,
+										"grid-cols-1": tileCount() <= 1,
+										"grid-cols-2": tileCount() >= 2 && tileCount() <= 4,
+										"grid-cols-3": tileCount() >= 5,
 									}}
 								>
 									<For each={s().livekit.participants()}>
 										{(p) => (
 											<ParticipantTile participant={p} livekit={s().livekit} />
+										)}
+									</For>
+									<For each={screenShares()}>
+										{(share) => (
+											<ScreenShareTile
+												identity={share.identity}
+												entry={share.entry}
+												livekit={s().livekit}
+											/>
 										)}
 									</For>
 								</div>
@@ -556,6 +595,83 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 						<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
 					</svg>
 				</Show>
+			</div>
+		</div>
+	);
+};
+
+interface ScreenShareTileProps {
+	/** LiveKit identity of the participant sharing their screen. */
+	identity: string;
+	entry: VideoTrackEntry;
+	livekit: LivekitRoomApi;
+}
+
+/**
+ * Renders a remote participant's screen-share track as its own tile in the
+ * call grid. Unlike {@link ParticipantTile} (which crops camera video with
+ * `object-cover`), the shared screen is shown with `object-contain` on a black
+ * backdrop so no content is clipped, matching how Element/Cinny present a
+ * share. The label doubles as the "X is sharing their screen" indicator.
+ *
+ * The sharer's name is resolved reactively from the participant list (rather
+ * than passed in) so an active-speaker / display-name update refreshes the
+ * label without remounting the tile and re-attaching the video.
+ *
+ * Screen-share audio (if any) is played by the LiveKit hook's hidden `<audio>`
+ * sinks, so this `<video>` stays `muted` to avoid double playback.
+ */
+const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
+	let videoEl: HTMLVideoElement | undefined;
+
+	const sharer = createMemo(
+		() =>
+			props.livekit.participants().find((p) => p.identity === props.identity)
+				?.displayName ?? props.identity,
+	);
+
+	createEffect(() => {
+		// Track `props.entry` reactively so a replaced screen-share publication
+		// (e.g. the sharer restarts the share) re-attaches to the same element.
+		const track = props.entry.track;
+		const el = videoEl;
+		if (!el) return;
+		track.attach(el);
+		onCleanup(() => {
+			try {
+				track.detach(el);
+			} catch {
+				// Track may already be stopped during teardown; safe to ignore.
+			}
+		});
+	});
+
+	return (
+		<div class="relative flex min-h-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-black [container-type:size]">
+			<video
+				ref={videoEl}
+				class="h-full w-full object-contain"
+				autoplay
+				playsinline
+				muted
+			/>
+			<div class="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-black/40 px-2 py-1 text-xs text-white">
+				<svg
+					class="h-3.5 w-3.5 shrink-0"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					role="img"
+					aria-label="Screen share"
+				>
+					<rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+					<line x1="8" y1="21" x2="16" y2="21" />
+					<line x1="12" y1="17" x2="12" y2="21" />
+				</svg>
+				<span class="min-w-0 truncate">{sharer()}’s screen</span>
 			</div>
 		</div>
 	);

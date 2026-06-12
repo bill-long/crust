@@ -43,7 +43,11 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 		},
 		Track: {
 			Kind: { Audio: "audio", Video: "video" },
-			Source: { Camera: "camera", Microphone: "microphone" },
+			Source: {
+				Camera: "camera",
+				Microphone: "microphone",
+				ScreenShare: "screen_share",
+			},
 		},
 	};
 	const jwtMock = vi.fn(async () => ({ url: "wss://sfu", jwt: "JWT" }));
@@ -812,7 +816,7 @@ describe("useLivekitRoom", () => {
 		expect(result.videoTracks().has("remote-x")).toBe(false);
 	});
 
-	it("non-camera video publications are ignored (e.g. screen-share)", async () => {
+	it("remote screen-share TrackSubscribed populates screenShareTracks (not videoTracks); TrackUnsubscribed removes it", async () => {
 		const fakeRoom = createFakeRoom();
 		roomFactory.current = () => fakeRoom;
 		const { client } = createClient();
@@ -829,13 +833,100 @@ describe("useLivekitRoom", () => {
 			}),
 		);
 		await waitFor(() => result.status() === "connected");
+		const shareTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const sharePub = { source: "screen_share", trackSid: "ss-sid" };
+		fakeRoom.emit("trackSubscribed", shareTrack, sharePub, {
+			identity: "remote-1",
+		});
+		// Screen-share lands in its own map, never the camera map.
+		expect(result.screenShareTracks().get("remote-1")?.track).toBe(shareTrack);
+		expect(result.screenShareTracks().get("remote-1")?.sid).toBe("ss-sid");
+		expect(result.videoTracks().has("remote-1")).toBe(false);
+
+		fakeRoom.emit("trackUnsubscribed", shareTrack, sharePub, {
+			identity: "remote-1",
+		});
+		expect(result.screenShareTracks().has("remote-1")).toBe(false);
+	});
+
+	it("a participant can have a camera and screen-share entry at the same time", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const camTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const shareTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
 		fakeRoom.emit(
 			"trackSubscribed",
-			{ kind: "video" },
+			camTrack,
+			{ source: "camera", trackSid: "cam-sid" },
+			{ identity: "remote-1" },
+		);
+		fakeRoom.emit(
+			"trackSubscribed",
+			shareTrack,
 			{ source: "screen_share", trackSid: "ss-sid" },
 			{ identity: "remote-1" },
 		);
+		expect(result.videoTracks().get("remote-1")?.track).toBe(camTrack);
+		expect(result.screenShareTracks().get("remote-1")?.track).toBe(shareTrack);
+
+		// Disconnect purges BOTH the camera and screen-share entries.
+		fakeRoom.emit("participantDisconnected", { identity: "remote-1" });
 		expect(result.videoTracks().has("remote-1")).toBe(false);
+		expect(result.screenShareTracks().has("remote-1")).toBe(false);
+	});
+
+	it("scans already-subscribed remote screen-share publications on connect", async () => {
+		const fakeRoom = createFakeRoom();
+		const shareTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		// A remote participant already sharing their screen before our
+		// TrackSubscribed listener attaches (call already in progress).
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map([
+				[
+					"ss-pub",
+					{
+						source: "screen_share",
+						videoTrack: shareTrack,
+						isSubscribed: true,
+						trackSid: "ss-pub",
+					},
+				],
+			]),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		expect(result.screenShareTracks().get("remote-bid")?.track).toBe(
+			shareTrack,
+		);
 	});
 
 	it("does not reconnect when only videoDeviceId changes", async () => {

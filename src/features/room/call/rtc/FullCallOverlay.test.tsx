@@ -325,6 +325,56 @@ describe("FullCallOverlay", () => {
 		expect(screen.getByText("B")).toBeTruthy();
 	});
 
+	it("renders a labelled screen-share tile that attaches the shared track", () => {
+		const attach = vi.fn();
+		const detach = vi.fn();
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([
+			{
+				identity: "a",
+				displayName: "Amon",
+				avatarUrl: null,
+				avatarUrlLarge: null,
+				isSpeaking: false,
+				isMuted: false,
+				isLocal: false,
+			},
+		]);
+		fake.setLivekitScreenShareTracks(
+			new Map([["a", { track: { attach, detach } as never, sid: "ss-1" }]]),
+		);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+
+		const grid = screen.getByTestId("participant-grid");
+		// One participant tile + one screen-share tile, each with a <video>.
+		expect(grid.querySelectorAll("video").length).toBe(2);
+		// The screen-share tile attaches the shared track to its element.
+		expect(attach).toHaveBeenCalledTimes(1);
+		// The tile is labelled with the sharer's name and carries an indicator.
+		expect(grid.textContent).toContain("Amon");
+		expect(grid.textContent).toContain("screen");
+		expect(screen.getByLabelText("Screen share")).toBeTruthy();
+	});
+
+	it("does not render a screen-share tile when no screen share is active", () => {
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([
+			{
+				identity: "a",
+				displayName: "Amon",
+				avatarUrl: null,
+				avatarUrlLarge: null,
+				isSpeaking: false,
+				isMuted: false,
+				isLocal: false,
+			},
+		]);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		expect(screen.queryByLabelText("Screen share")).toBeNull();
+	});
+
 	it("restores focus to the previous focus owner on cleanup", async () => {
 		const prev = document.createElement("button");
 		prev.textContent = "outside";
