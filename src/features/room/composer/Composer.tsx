@@ -7,6 +7,7 @@ import {
 	createSignal,
 	on,
 	onCleanup,
+	onMount,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
@@ -98,6 +99,15 @@ const Composer: Component<{
 	onCancelEdit?: () => void;
 	onSent?: () => void;
 	packs: ImagePack[];
+	/**
+	 * Hands the parent the composer's file-queue seam so out-of-composer
+	 * entry points (e.g. TimelineView's drag-and-drop overlay) can enqueue
+	 * files into the same queue the attach button and paste use. Registered
+	 * once on mount; the closure reads `props` reactively, so the single
+	 * registration stays correct across room switches (the composer is one
+	 * reused instance).
+	 */
+	onEnqueueReady?: (enqueue: (files: Iterable<File>) => void) => void;
 }> = (props) => {
 	const { client } = useClient();
 	const [text, setText] = createSignal("");
@@ -123,6 +133,22 @@ const Composer: Component<{
 			return;
 		}
 		setAttachments((prev) => [...prev, ...list.map(createPendingAttachment)]);
+	};
+
+	// Expose the enqueue seam to the parent so the room view's drag-and-drop
+	// overlay can feed dropped files into this same queue.
+	onMount(() => props.onEnqueueReady?.(enqueueFiles));
+
+	let fileInputRef: HTMLInputElement | undefined;
+
+	/** Queue files chosen via the attach button's hidden file input. */
+	const onFileInputChange = (
+		e: Event & { currentTarget: HTMLInputElement },
+	): void => {
+		const input = e.currentTarget;
+		if (input.files) enqueueFiles(input.files);
+		// Reset so picking the same file again still fires `change`.
+		input.value = "";
 	};
 
 	const updateAttachment = (
@@ -854,9 +880,32 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-20 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-28 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
 					rows={1}
 				/>
+				{/* Attach file button (hidden when editing — edits can't carry
+				    attachments). The hidden input accepts images and arbitrary
+				    files; non-media files are classified as m.file at send. */}
+				<Show when={!props.editingEvent}>
+					<input
+						ref={(el) => {
+							fileInputRef = el;
+						}}
+						type="file"
+						multiple
+						data-composer-file-input
+						class="hidden"
+						onChange={onFileInputChange}
+					/>
+					<button
+						type="button"
+						class="absolute right-16 bottom-2.5 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+						onClick={() => fileInputRef?.click()}
+						aria-label="Attach file"
+					>
+						📎
+					</button>
+				</Show>
 				{/* GIF picker button (only when GIF search is available and not editing) */}
 				<Show when={gifConfig.available() && !props.editingEvent}>
 					<button

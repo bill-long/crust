@@ -247,6 +247,49 @@ const TimelineView: Component<{
 	);
 	const [paginationStatus, setPaginationStatus] = createSignal("");
 
+	// --- Drag-and-drop file attachments ---
+	// The drop target is the whole room view, but the file queue lives in the
+	// composer. The composer hands us its enqueue seam via `onEnqueueReady`;
+	// dropped files go through the same path as paste / the attach button
+	// (which gates encrypted rooms and edit mode in one place).
+	const [isDraggingFiles, setIsDraggingFiles] = createSignal(false);
+	// dragenter/dragleave fire per child element, so a boolean would flicker as
+	// the cursor crosses internal boundaries. Track nesting depth instead.
+	let dragDepth = 0;
+	let enqueueFiles: ((files: Iterable<File>) => void) | undefined;
+
+	// `dataTransfer.types` is a frozen string array; checked on every dragover,
+	// so avoid allocating a copy per event.
+	const dragHasFiles = (e: DragEvent): boolean =>
+		!!e.dataTransfer && e.dataTransfer.types.includes("Files");
+
+	const onDragEnter = (e: DragEvent): void => {
+		if (!dragHasFiles(e)) return;
+		e.preventDefault();
+		dragDepth++;
+		setIsDraggingFiles(true);
+	};
+	const onDragOver = (e: DragEvent): void => {
+		if (!dragHasFiles(e)) return;
+		// Required, or the browser treats the element as a non-drop-zone and
+		// never fires `drop`.
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+	};
+	const onDragLeave = (e: DragEvent): void => {
+		if (!dragHasFiles(e)) return;
+		dragDepth = Math.max(0, dragDepth - 1);
+		if (dragDepth === 0) setIsDraggingFiles(false);
+	};
+	const onDrop = (e: DragEvent): void => {
+		if (!dragHasFiles(e)) return;
+		e.preventDefault();
+		dragDepth = 0;
+		setIsDraggingFiles(false);
+		const files = e.dataTransfer?.files;
+		if (files && files.length > 0) enqueueFiles?.(files);
+	};
+
 	// Announce backward pagination state changes for screen readers.
 	// Forward pagination has its own aria-live region at the spinner.
 	createEffect(
@@ -596,6 +639,10 @@ const TimelineView: Component<{
 				setWantsBottom(true);
 				setReplyTo(null);
 				setEditingEvent(null);
+				// Clear any in-progress drag overlay so a drag that started in the
+				// previous room doesn't leave a stuck overlay on the new one.
+				setIsDraggingFiles(false);
+				dragDepth = 0;
 				pagingOlderToken++;
 				setPagingOlder(false);
 				settleAtBottom();
@@ -1190,7 +1237,27 @@ const TimelineView: Component<{
 	};
 
 	return (
-		<main class="flex h-full flex-col">
+		<main
+			class="relative flex h-full flex-col"
+			on:dragenter={onDragEnter}
+			on:dragover={onDragOver}
+			on:dragleave={onDragLeave}
+			on:drop={onDrop}
+		>
+			{/* Drag-over overlay. `pointer-events-none` is essential: it keeps the
+			    overlay from becoming the drag target, so crossing onto it doesn't
+			    fire a dragleave on the content below and flicker the overlay. The
+			    drop still bubbles up to <main> from the child under the cursor. */}
+			<Show when={isDraggingFiles()}>
+				<div
+					class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-surface-1/80"
+					aria-hidden="true"
+				>
+					<div class="rounded-xl border-2 border-dashed border-accent-hover bg-surface-2/90 px-8 py-6 text-sm font-medium text-text-emphasis shadow-lg">
+						Drop files to upload
+					</div>
+				</div>
+			</Show>
 			{/* Timeline */}
 			<Show
 				when={!loading() || events.length > 0}
@@ -1530,6 +1597,9 @@ const TimelineView: Component<{
 				onSent={() => {
 					setReplyTo(null);
 					setEditingEvent(null);
+				}}
+				onEnqueueReady={(fn) => {
+					enqueueFiles = fn;
 				}}
 				packs={packs()}
 			/>
