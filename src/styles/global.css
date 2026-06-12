@@ -217,19 +217,6 @@ body {
 	margin: 0.25rem 0;
 	color: var(--color-text-muted);
 }
-.message-body mx-reply {
-	display: block;
-	border-left: 3px solid var(--color-text-faint);
-	padding-left: 0.75rem;
-	margin-bottom: 0.25rem;
-	color: var(--color-text-muted);
-	font-size: 0.85em;
-}
-.message-body mx-reply blockquote {
-	border-left: none;
-	padding-left: 0;
-	margin: 0;
-}
 .message-body ul {
 	list-style: disc;
 	padding-left: 1.5em;

@@ -411,8 +411,9 @@ describe("useTimeline media projection", () => {
 					},
 					ts: 1500,
 				},
-				// A control char in the FILENAME must be normalized the same way as the
-				// body before the diff gate, or a caption identical to the filename leaks.
+				// A control-char-bearing filename isn't a usable explicit filename
+				// (consistent with mediaFilename's policy), so it's treated as 'no
+				// filename' and no caption is surfaced.
 				{
 					eventId: "$ctrlFilename",
 					roomId: "!roomA:test",

@@ -109,6 +109,15 @@ function sanitizeMatrixHtml(
 	const div = document.createElement("div");
 	div.innerHTML = clean;
 
+	// Strip the legacy in-band rich-reply fallback. The `m.in_reply_to` relation
+	// now drives the quoted reply context (see `ReplyContext` in TimelineItem),
+	// so rendering the `<mx-reply>` block here too would show the quote twice.
+	// Mirrors how the plain-text `> ` fallback is stripped in `plainTextToHtml`.
+	// Remove the whole node (with its blockquote children), not just the tag.
+	for (const reply of div.querySelectorAll("mx-reply")) {
+		reply.remove();
+	}
+
 	// Process images: only keep data-mx-emoticon with mxc:// src (strip tracking pixels)
 	for (const img of div.querySelectorAll("img")) {
 		const src = img.getAttribute("src");

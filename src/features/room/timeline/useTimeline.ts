@@ -566,26 +566,25 @@ function eventToTimelineEvent(
 	// `filename` is absent, `body` *is* the filename, so there's no caption).
 	// Control chars are stripped; multi-line captions are preserved. Scoped to
 	// `m.image` — the file/video/audio renderers show the filename as a label.
+	const trimmedImageFilename =
+		content.msgtype === "m.image" && typeof content.filename === "string"
+			? content.filename.trim()
+			: "";
+	// Consistent with `mediaFilename`'s policy: a control-char-bearing filename
+	// (including newlines) isn't a usable explicit filename, so treat it as "no
+	// filename" — `body` is then the de-facto filename and there's no caption.
+	// This also keeps the filename control-char-free, so comparing it to the
+	// sanitized caption below can't mismatch on chars sanitization would erase.
 	const hasImageFilename =
-		content.msgtype === "m.image" &&
-		typeof content.filename === "string" &&
-		content.filename.trim().length > 0;
-	// Normalize BOTH the body and the filename through the same sanitizer before
-	// the "differs from filename" comparison: otherwise control chars / CRLF that
-	// only one side carries (e.g. a filename with a stray control char) make the
-	// `!==` pass and surface a caption that's effectively just the filename.
+		trimmedImageFilename.length > 0 && !hasControlChar(trimmedImageFilename);
 	const cleanedCaption =
 		typeof content.body === "string"
 			? sanitizeMultiline(content.body).trim()
 			: "";
-	const cleanedFilename =
-		hasImageFilename && typeof content.filename === "string"
-			? sanitizeMultiline(content.filename).trim()
-			: "";
 	const mediaCaption =
 		hasImageFilename &&
 		cleanedCaption.length > 0 &&
-		cleanedCaption !== cleanedFilename
+		cleanedCaption !== trimmedImageFilename
 			? cleanedCaption
 			: null;
 
