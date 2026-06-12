@@ -1002,9 +1002,9 @@ describe("useTimeline", () => {
 					body: "e.png",
 					file: {
 						url: "mxc://test/enc",
-						key: { k: "a-key" },
-						iv: "an-iv",
-						hashes: { sha256: "a-hash" },
+						key: { k: "A".repeat(43) },
+						iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+						hashes: { sha256: "A".repeat(43) },
 						v: "v2",
 					},
 				},
@@ -1039,9 +1039,9 @@ describe("useTimeline", () => {
 			expect(events[1].imageIsEncrypted).toBe(true);
 			expect(events[1].imageEncryptedFile).toEqual({
 				url: "mxc://test/enc",
-				key: { k: "a-key" },
-				iv: "an-iv",
-				hashes: { sha256: "a-hash" },
+				key: { k: "A".repeat(43) },
+				iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+				hashes: { sha256: "A".repeat(43) },
 				v: "v2",
 			});
 

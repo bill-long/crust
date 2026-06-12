@@ -92,20 +92,25 @@ describe("decryptAttachment", () => {
 });
 
 describe("parseEncryptedFile", () => {
+	// base64 that decodes to the required sizes: 32-byte key, 16-byte IV,
+	// 32-byte SHA-256.
+	const KEY32 = "A".repeat(43);
+	const HASH32 = "A".repeat(43);
+	const IV16 = "AAAAAAAAAAAAAAAAAAAAAA==";
 	const valid = {
 		url: "mxc://example.com/x",
-		key: { k: "abc" },
-		iv: "def",
-		hashes: { sha256: "ghi" },
+		key: { k: KEY32 },
+		iv: IV16,
+		hashes: { sha256: HASH32 },
 		v: "v2",
 	};
 
 	it("accepts a well-formed encrypted file", () => {
 		expect(parseEncryptedFile(valid)).toEqual({
 			url: "mxc://example.com/x",
-			key: { k: "abc" },
-			iv: "def",
-			hashes: { sha256: "ghi" },
+			key: { k: KEY32 },
+			iv: IV16,
+			hashes: { sha256: HASH32 },
 			v: "v2",
 		});
 	});
@@ -116,5 +121,27 @@ describe("parseEncryptedFile", () => {
 		expect(parseEncryptedFile({ ...valid, key: {} })).toBeNull();
 		expect(parseEncryptedFile({ ...valid, iv: "" })).toBeNull();
 		expect(parseEncryptedFile({ ...valid, hashes: {} })).toBeNull();
+	});
+
+	it("rejects wrong-size / non-base64 crypto material up front", () => {
+		// Key/IV/hash that decode to the wrong byte length.
+		expect(parseEncryptedFile({ ...valid, key: { k: "AAAA" } })).toBeNull();
+		expect(parseEncryptedFile({ ...valid, iv: "AAAA" })).toBeNull();
+		expect(
+			parseEncryptedFile({ ...valid, hashes: { sha256: "AAAA" } }),
+		).toBeNull();
+		// Not decodable base64 at all.
+		expect(parseEncryptedFile({ ...valid, key: { k: "!!!!" } })).toBeNull();
+		// Pathologically long input is rejected by the char cap.
+		expect(
+			parseEncryptedFile({ ...valid, key: { k: "A".repeat(100000) } }),
+		).toBeNull();
+	});
+
+	it("rejects an explicitly-unsupported protocol version", () => {
+		expect(parseEncryptedFile({ ...valid, v: "v1" })).toBeNull();
+		// Absent v is tolerated (older content) and normalizes to undefined.
+		const { v: _v, ...noVersion } = valid;
+		expect(parseEncryptedFile(noVersion)?.v).toBeUndefined();
 	});
 });

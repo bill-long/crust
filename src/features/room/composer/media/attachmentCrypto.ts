@@ -50,6 +50,21 @@ function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
 	return bytes;
 }
 
+/**
+ * True when `value` is base64 (any alphabet/padding) that decodes to exactly
+ * `bytes` bytes. Caps the input length first so a pathological/huge string from
+ * untrusted event content can't drive a large `atob()` allocation.
+ */
+function isBase64OfLength(value: string, bytes: number): boolean {
+	const maxChars = Math.ceil(bytes / 3) * 4 + 4;
+	if (value.length === 0 || value.length > maxChars) return false;
+	try {
+		return decodeBase64(value).length === bytes;
+	} catch {
+		return false;
+	}
+}
+
 /** Encode bytes as standard, unpadded base64 (Matrix's hash encoding). */
 function encodeBase64Unpadded(bytes: Uint8Array): string {
 	let binary = "";
@@ -68,24 +83,29 @@ function encodeBase64Unpadded(bytes: Uint8Array): string {
 export function parseEncryptedFile(value: unknown): EncryptedFileInfo | null {
 	if (!value || typeof value !== "object") return null;
 	const file = value as Record<string, unknown>;
-	const { url, iv } = file;
+	const { url, iv, v } = file;
 	const key = file.key as Record<string, unknown> | undefined;
 	const hashes = file.hashes as Record<string, unknown> | undefined;
 	if (typeof url !== "string" || url.length === 0) return null;
-	if (!key || typeof key.k !== "string" || key.k.length === 0) return null;
-	if (typeof iv !== "string" || iv.length === 0) return null;
-	if (
-		!hashes ||
-		typeof hashes.sha256 !== "string" ||
-		hashes.sha256.length === 0
-	)
-		return null;
+	// Reject explicitly-unsupported protocol versions (the spec requires "v2");
+	// tolerate an absent `v` for older content.
+	if (typeof v === "string" && v !== "v2") return null;
+	if (!key || typeof key.k !== "string") return null;
+	if (typeof iv !== "string") return null;
+	if (!hashes || typeof hashes.sha256 !== "string") return null;
+	// Validate that the crypto material decodes to the sizes AES-256-CTR /
+	// SHA-256 require (key 32B, IV 16B, hash 32B). Doing it here means malformed
+	// or oversized untrusted event content fails closed *before* a wasted fetch
+	// and decrypt, rather than only throwing inside decryptAttachment.
+	if (!isBase64OfLength(key.k, 32)) return null;
+	if (!isBase64OfLength(iv, 16)) return null;
+	if (!isBase64OfLength(hashes.sha256, 32)) return null;
 	return {
 		url,
 		key: { k: key.k },
 		iv,
 		hashes: { sha256: hashes.sha256 },
-		v: typeof file.v === "string" ? file.v : undefined,
+		v: typeof v === "string" ? v : undefined,
 	};
 }
 
