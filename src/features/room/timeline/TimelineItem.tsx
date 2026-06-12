@@ -170,6 +170,34 @@ const FailedReactionPills: Component<{
 	);
 };
 
+/**
+ * Quoted reply-context block shown above a message that replies to another
+ * event. Resolved from the `m.in_reply_to` relation (see useTimeline's
+ * `replyTo*` projection) so it renders for every message type — text, image,
+ * media, GIF — not just legacy `> `-prefixed text. Falls back to a generic
+ * line when the parent isn't resolvable (not in any loaded timeline).
+ */
+const ReplyContext: Component<{
+	sender: string | null;
+	snippet: string | null;
+}> = (props) => {
+	return (
+		<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
+			<Show
+				when={props.sender}
+				fallback={<span class="italic">In reply to a message</span>}
+			>
+				<div class="truncate">
+					<span class="font-medium text-text-muted">{props.sender}</span>
+					<Show when={props.snippet}>
+						<span>{`: ${props.snippet}`}</span>
+					</Show>
+				</div>
+			</Show>
+		</div>
+	);
+};
+
 function unsupportedLabel(msgtype: string): string {
 	switch (msgtype) {
 		case "m.video":
@@ -624,6 +652,15 @@ const TimelineItem: Component<{
 									<p class="text-sm italic text-text-disabled">Decrypting…</p>
 								}
 							>
+								{/* Reply context for ALL message types, resolved from the
+								    m.in_reply_to relation (media sends carry no `> ` body
+								    prefix). Sits above the image / text / media render. */}
+								<Show when={ev.replyToId}>
+									<ReplyContext
+										sender={ev.replyToSender}
+										snippet={ev.replyToBody}
+									/>
+								</Show>
 								<Show
 									when={
 										(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
@@ -654,6 +691,9 @@ const TimelineItem: Component<{
 															file={ev.mediaEncryptedFile}
 															mimetype={ev.mediaMimetype}
 															posterUrl={ev.mediaPosterUrl}
+															thumbnailUrl={ev.mediaThumbnailUrl}
+															thumbnailFile={ev.mediaThumbnailFile}
+															thumbnailMimetype={ev.mediaThumbnailMimetype}
 															label={ev.mediaFilename || "Video"}
 															isEncrypted={ev.mediaIsEncrypted}
 															reserveWidth={ev.mediaWidth}
@@ -714,21 +754,12 @@ const TimelineItem: Component<{
 														</>
 													);
 												}
-												// Extract reply context from body prefix if present
-												const isReply = ev.body.startsWith("> ");
-												const replyPreview = isReply
-													? ev.body
-															.split("\n")[0]
-															.replace(/^> <([^>]+)> /, "$1: ")
-															.replace(/^> /, "")
-													: null;
+												// Reply context for GIF rows is rendered by the shared
+												// ReplyContext block above (resolved from the
+												// m.in_reply_to relation), so the legacy `> ` body-prefix
+												// parse that used to live here is gone.
 												return (
 													<>
-														<Show when={replyPreview}>
-															<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
-																{replyPreview}
-															</div>
-														</Show>
 														<InlineGif
 															url={gifUrl}
 															alt="GIF"
@@ -782,8 +813,7 @@ const TimelineItem: Component<{
 												loading="lazy"
 											/>
 										);
-										if (!isOpenableImage) return imgEl;
-										return (
+										const imageBlock = isOpenableImage ? (
 											<button
 												type="button"
 												onClick={() => props.onOpenImage?.(ev.eventId)}
@@ -792,6 +822,23 @@ const TimelineItem: Component<{
 											>
 												{imgEl}
 											</button>
+										) : (
+											imgEl
+										);
+										// Caption (m.image only): the spec stores the filename in
+										// `content.filename` and the caption in `content.body`; the
+										// projection surfaces `mediaCaption` only when the two differ,
+										// so it renders beneath the image. Stickers never set it.
+										// Auto-escaped as text content (no XSS); multi-line preserved.
+										return (
+											<>
+												{imageBlock}
+												<Show when={ev.mediaCaption}>
+													<p class="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+														{ev.mediaCaption}
+													</p>
+												</Show>
+											</>
 										);
 									})()}
 								</Show>

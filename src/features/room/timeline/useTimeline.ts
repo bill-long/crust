@@ -23,6 +23,7 @@ import {
 	type EncryptedFileInfo,
 	parseEncryptedFile,
 } from "../composer/media/attachmentCrypto";
+import { stripReplyFallback } from "../urlPreviews/replyFallback";
 import type {
 	MembershipTransition,
 	StateNotice,
@@ -108,6 +109,33 @@ export interface TimelineEvent {
 	 */
 	mediaFilename: string | null;
 	/**
+	 * Caption text for an `m.image`, taken from `content.body` when the
+	 * send carried an explicit `content.filename` *and* `body` differs from
+	 * it (the spec-correct shape: filename in `filename`, caption in `body`).
+	 * Null when there is no separate caption (no `filename`, or `body`
+	 * equals the filename). Control chars are stripped; multi-line captions
+	 * are preserved. Only populated for `m.image`.
+	 */
+	mediaCaption: string | null;
+	/**
+	 * Ciphertext http URL of an encrypted `m.video`'s thumbnail, resolved
+	 * from `info.thumbnail_file.url`. Points at *ciphertext*: the renderer
+	 * downloads + decrypts it (via {@link createDecryptedObjectUrl}) for a
+	 * poster, or fails open to no poster — never renders it directly. Null
+	 * for plain video (which uses {@link TimelineEvent.mediaPosterUrl}) and
+	 * non-video events.
+	 */
+	mediaThumbnailUrl: string | null;
+	/**
+	 * Validated EncryptedFile descriptor for an encrypted `m.video`'s
+	 * thumbnail (`info.thumbnail_file`), used to decrypt the poster. Null
+	 * when absent or malformed (the poster then simply doesn't render —
+	 * poster decode is best-effort and never blocks playback).
+	 */
+	mediaThumbnailFile: EncryptedFileInfo | null;
+	/** Plaintext mimetype of the encrypted thumbnail, from `info.thumbnail_info.mimetype`. */
+	mediaThumbnailMimetype: string | null;
+	/**
 	 * True when the attachment is encrypted (source was `content.file`, not
 	 * `content.url`). When set, {@link TimelineEvent.mediaUrl} /
 	 * {@link TimelineEvent.mediaFullUrl} point at *ciphertext*: consumers must
@@ -129,6 +157,30 @@ export interface TimelineEvent {
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
+	/**
+	 * Event ID this message is a reply to, from
+	 * `m.relates_to.m.in_reply_to.event_id`. Null when the message isn't a
+	 * reply. Drives the quoted reply-context block in `TimelineItem` for all
+	 * message types (text, image, media, GIF) — media sends carry only this
+	 * relation (no legacy `> ` body prefix), so the context is resolved from
+	 * the relation rather than the body.
+	 */
+	replyToId: string | null;
+	/**
+	 * Resolved display name of the replied-to event's sender, or its raw
+	 * user ID, control-char-guarded. Null when {@link TimelineEvent.replyToId}
+	 * is set but the parent event isn't currently resolvable (not in any
+	 * loaded timeline) — the renderer then shows a generic "in reply to a
+	 * message" affordance instead.
+	 */
+	replyToSender: string | null;
+	/**
+	 * One-line snippet of the replied-to event for the quoted context:
+	 * the parent's first body line (reply-fallback stripped) for text, or a
+	 * short media label (e.g. "📷 Image") for attachments. Truncated and
+	 * control-char-stripped. Null when the parent isn't resolvable.
+	 */
+	replyToBody: string | null;
 	reactions: Record<string, ReactionAggregate>;
 	myReactions: Record<string, string>;
 	/**
@@ -164,12 +216,87 @@ export interface TimelineEvent {
 // Used to guard user-controlled strings that flow into UI labels (filenames,
 // the lightbox header, download attributes, etc.) so a CR/LF/NUL/etc. can't
 // corrupt rendering or downstream consumers.
+// ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F) — the single
+// boundary both `hasControlChar` (reject) and `stripControlChars` (sanitize)
+// key off, so the policy can't drift between them.
+function isControlCharCode(c: number): boolean {
+	return c < 0x20 || c === 0x7f;
+}
+
 function hasControlChar(s: string): boolean {
 	for (let i = 0; i < s.length; i++) {
-		const c = s.charCodeAt(i);
-		if (c < 0x20 || c === 0x7f) return true;
+		if (isControlCharCode(s.charCodeAt(i))) return true;
 	}
 	return false;
+}
+
+// Strip ASCII control chars from a single-line string destined for a UI label,
+// leaving the rest intact. Unlike `hasControlChar` (which rejects wholesale),
+// this sanitizes a snippet so a stray control char can't corrupt rendering
+// while still showing the surrounding text. Newlines are control chars and so
+// are removed — callers that want multi-line text use `sanitizeMultiline`.
+function stripControlChars(s: string): string {
+	let out = "";
+	for (let i = 0; i < s.length; i++) {
+		if (!isControlCharCode(s.charCodeAt(i))) out += s[i];
+	}
+	return out;
+}
+
+// Sanitize multi-line user text (an image caption) for display: normalize
+// CRLF/CR to LF and keep newlines (the caption renders with `whitespace-pre-wrap`)
+// while stripping every other control char that could corrupt rendering.
+function sanitizeMultiline(s: string): string {
+	const normalized = s.replace(/\r\n?/g, "\n");
+	let out = "";
+	for (let i = 0; i < normalized.length; i++) {
+		const c = normalized.charCodeAt(i);
+		if (c === 0x0a || !isControlCharCode(c)) out += normalized[i];
+	}
+	return out;
+}
+
+// Upper bound on a reply snippet's length so a huge parent body can't bloat
+// the projection or the rendered quote line (which is also CSS-truncated).
+const REPLY_SNIPPET_MAX = 100;
+
+/**
+ * Build a one-line snippet of a replied-to (parent) event for the quoted
+ * reply-context block. Media parents get a short labelled placeholder (the
+ * filename for files, a generic icon label otherwise) since their `body` is a
+ * filename/caption, not prose; text/emote/notice parents get their first body
+ * line with the reply fallback stripped. The result is control-char-stripped
+ * and length-capped.
+ */
+function buildReplySnippet(parent: MatrixEvent): string {
+	const content = parent.getContent();
+	const type = parent.getType();
+	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
+	const filename =
+		typeof content.filename === "string" && content.filename.trim().length > 0
+			? content.filename.trim()
+			: typeof content.body === "string" && content.body.trim().length > 0
+				? content.body.trim()
+				: null;
+	let snippet: string;
+	if (type === "m.sticker") {
+		snippet = "Sticker";
+	} else if (msgtype === "m.image") {
+		snippet = "📷 Image";
+	} else if (msgtype === "m.video") {
+		snippet = "🎬 Video";
+	} else if (msgtype === "m.audio") {
+		snippet = "🔊 Audio";
+	} else if (msgtype === "m.file") {
+		snippet = filename ? `📎 ${filename}` : "📎 File";
+	} else {
+		const body = typeof content.body === "string" ? content.body : "";
+		snippet = stripReplyFallback(body).split("\n")[0]?.trim() ?? "";
+	}
+	snippet = stripControlChars(snippet).trim();
+	return snippet.length > REPLY_SNIPPET_MAX
+		? `${snippet.slice(0, REPLY_SNIPPET_MAX)}…`
+		: snippet;
 }
 
 /**
@@ -277,11 +404,18 @@ function buildSyntheticCallLeaveEvent(
 		mediaMimetype: null,
 		mediaSize: null,
 		mediaFilename: null,
+		mediaCaption: null,
+		mediaThumbnailUrl: null,
+		mediaThumbnailFile: null,
+		mediaThumbnailMimetype: null,
 		mediaIsEncrypted: false,
 		mediaEncryptedFile: null,
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,
+		replyToId: null,
+		replyToSender: null,
+		replyToBody: null,
 		// Null-prototype maps for consistency with eventToTimelineEvent and to
 		// keep reaction-key lookups safe from prototype-pollution edge cases.
 		reactions: Object.create(null) as TimelineEvent["reactions"],
@@ -393,8 +527,8 @@ function eventToTimelineEvent(
 			: null;
 
 	// Plain video poster from the cleartext `info.thumbnail_url`. Encrypted
-	// videos carry a ciphertext `thumbnail_file` instead; decoding that is
-	// deferred (#286), so the encrypted-video renderer shows a placeholder.
+	// videos carry a ciphertext `thumbnail_file` instead, decoded separately
+	// into the `mediaThumbnail*` fields below — never from this cleartext URL.
 	const mediaPosterUrl =
 		content.msgtype === "m.video" &&
 		!mediaIsEncrypted &&
@@ -403,6 +537,74 @@ function eventToTimelineEvent(
 			? (client.mxcUrlToHttp(content.info.thumbnail_url, 800, 600, "scale") ??
 				null)
 			: null;
+
+	// Encrypted-video poster source: the ciphertext `info.thumbnail_file`
+	// (an EncryptedFile block, like `content.file`). Parsed + resolved here so
+	// the renderer can download + decrypt it for a real poster before play.
+	// Best-effort: a malformed descriptor leaves these null and the renderer
+	// just shows no poster — it never blocks playback or renders ciphertext.
+	const mediaThumbnailFile =
+		content.msgtype === "m.video" && mediaIsEncrypted
+			? parseEncryptedFile(content.info?.thumbnail_file)
+			: null;
+	const mediaThumbnailUrl = mediaThumbnailFile
+		? (client.mxcUrlToHttp(mediaThumbnailFile.url) ?? null)
+		: null;
+	const mediaThumbnailMimetype =
+		mediaThumbnailFile &&
+		typeof content.info?.thumbnail_info?.mimetype === "string"
+			? content.info.thumbnail_info.mimetype
+			: null;
+
+	// Image caption: spec-correct sends put the filename in `content.filename`
+	// and the caption in `content.body`. So a caption exists only when an
+	// explicit non-empty `filename` is present AND `body` differs from it (when
+	// `filename` is absent, `body` *is* the filename, so there's no caption).
+	// Control chars are stripped; multi-line captions are preserved. Scoped to
+	// `m.image` — the file/video/audio renderers show the filename as a label.
+	const explicitFilename =
+		content.msgtype === "m.image" &&
+		typeof content.filename === "string" &&
+		content.filename.trim().length > 0
+			? content.filename.trim()
+			: null;
+	// Compare and emit the *same* normalized value (control-stripped + trimmed)
+	// so the "body differs from filename" gate can't pass on a difference that
+	// sanitization then erases — which would surface a caption equal to the
+	// filename.
+	const cleanedCaption =
+		typeof content.body === "string"
+			? sanitizeMultiline(content.body).trim()
+			: "";
+	const mediaCaption =
+		explicitFilename &&
+		cleanedCaption.length > 0 &&
+		cleanedCaption !== explicitFilename
+			? cleanedCaption
+			: null;
+
+	// Reply context: resolve the parent of an `m.in_reply_to` relation so the
+	// renderer can show a quoted snippet for ALL message types (media sends
+	// carry only this relation, no legacy `> ` body prefix). When the parent
+	// isn't in any loaded timeline, keep the id but leave sender/body null so
+	// the renderer shows a generic affordance.
+	const inReplyToRaw = content["m.relates_to"]?.["m.in_reply_to"]?.event_id;
+	const replyToId =
+		typeof inReplyToRaw === "string" && inReplyToRaw.length > 0
+			? inReplyToRaw
+			: null;
+	let replyToSender: string | null = null;
+	let replyToBody: string | null = null;
+	if (replyToId) {
+		const parent = room.findEventById(replyToId);
+		if (parent) {
+			const parentSender = parent.getSender() ?? "";
+			const rawName = room.getMember(parentSender)?.name?.trim();
+			replyToSender =
+				rawName && !hasControlChar(rawName) ? rawName : parentSender || null;
+			replyToBody = buildReplySnippet(parent) || null;
+		}
+	}
 
 	// Intrinsic dimensions, used by `TimelineItem` to reserve the layout box
 	// before the media decodes. Gated on msgtype / type so events with an
@@ -565,6 +767,10 @@ function eventToTimelineEvent(
 		mediaMimetype: infoMime,
 		mediaSize: infoSize,
 		mediaFilename,
+		mediaCaption,
+		mediaThumbnailUrl,
+		mediaThumbnailFile,
+		mediaThumbnailMimetype,
 		mediaIsEncrypted: hasMediaSource && mediaIsEncrypted,
 		mediaEncryptedFile:
 			hasMediaSource && mediaIsEncrypted
@@ -573,6 +779,9 @@ function eventToTimelineEvent(
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,
+		replyToId,
+		replyToSender,
+		replyToBody,
 		reactions,
 		myReactions,
 		status: event.status ?? null,

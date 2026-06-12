@@ -211,7 +211,7 @@ describe("useTimeline media projection", () => {
 		});
 	});
 
-	it("never derives a poster from an encrypted video's thumbnail", async () => {
+	it("never derives the cleartext poster URL for an encrypted video", async () => {
 		const roomA = createMockRoom("!roomA:test", [
 			{
 				eventId: "$encVideo",
@@ -232,7 +232,8 @@ describe("useTimeline media projection", () => {
 						mimetype: "video/mp4",
 						size: 10,
 						// A cleartext thumbnail_url shouldn't be trusted as a poster on an
-						// encrypted event; encrypted thumbnails (thumbnail_file) are deferred.
+						// encrypted event. The encrypted poster path uses thumbnail_file
+						// (the mediaThumbnail* fields), never this cleartext URL.
 						thumbnail_url: "mxc://test/leak",
 					},
 				},
@@ -309,6 +310,426 @@ describe("useTimeline media projection", () => {
 			expect(enc.mediaIsEncrypted).toBe(true);
 			expect(enc.mediaEncryptedFile).not.toBeNull();
 			expect(enc.mediaFullUrl).toBe(`${HTTP}/test/encsticker`);
+		});
+	});
+
+	describe("image captions (#286)", () => {
+		it("surfaces content.body as a caption only when filename is present and differs", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				// Caption present: filename + a differing body.
+				{
+					eventId: "$captioned",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "Look at this sunset 🌅",
+						filename: "sunset.png",
+						url: "mxc://test/sunset",
+						info: { mimetype: "image/png", w: 100, h: 100 },
+					},
+					ts: 1000,
+				},
+				// No caption: body equals the filename.
+				{
+					eventId: "$noCaption",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "photo.png",
+						filename: "photo.png",
+						url: "mxc://test/photo",
+						info: { mimetype: "image/png", w: 100, h: 100 },
+					},
+					ts: 2000,
+				},
+				// No explicit filename: body IS the filename, so it's not a caption.
+				{
+					eventId: "$legacy",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "old-client.png",
+						url: "mxc://test/legacy",
+						info: { mimetype: "image/png", w: 100, h: 100 },
+					},
+					ts: 3000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const [captioned, noCaption, legacy] = events;
+				expect(captioned.mediaCaption).toBe("Look at this sunset 🌅");
+				expect(noCaption.mediaCaption).toBeNull();
+				expect(legacy.mediaCaption).toBeNull();
+			});
+		});
+
+		it("strips control chars from a caption and never sets one for non-image attachments", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$ctrl",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						// A non-newline control char (BEL) in the caption is stripped.
+						body: "line\u0007one",
+						filename: "img.png",
+						url: "mxc://test/ctrl",
+						info: { mimetype: "image/png", w: 10, h: 10 },
+					},
+					ts: 1000,
+				},
+				// Multi-line captions keep their newlines (CRLF normalized to LF)
+				// since the caption renders with whitespace-pre-wrap.
+				{
+					eventId: "$multiline",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "first line\r\nsecond line",
+						filename: "img2.png",
+						url: "mxc://test/multiline",
+						info: { mimetype: "image/png", w: 10, h: 10 },
+					},
+					ts: 1500,
+				},
+				// A file with a differing body is a caption per spec, but captions are
+				// scoped to m.image in the renderer, so the projection leaves it null.
+				{
+					eventId: "$fileCaption",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.file",
+						body: "see attached",
+						filename: "report.pdf",
+						url: "mxc://test/doc",
+						info: { mimetype: "application/pdf", size: 1 },
+					},
+					ts: 2000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const ctrl = events.find((e) => e.eventId === "$ctrl");
+				const multiline = events.find((e) => e.eventId === "$multiline");
+				const fileCaption = events.find((e) => e.eventId === "$fileCaption");
+				expect(ctrl?.mediaCaption).toBe("lineone");
+				expect(multiline?.mediaCaption).toBe("first line\nsecond line");
+				expect(fileCaption?.mediaCaption).toBeNull();
+			});
+		});
+	});
+
+	describe("reply context (#286)", () => {
+		it("resolves sender + snippet from the m.in_reply_to relation, including media replies", async () => {
+			const roomA = createMockRoom(
+				"!roomA:test",
+				[
+					{
+						eventId: "$parentText",
+						roomId: "!roomA:test",
+						sender: "@bob:test",
+						type: "m.room.message",
+						content: { msgtype: "m.text", body: "the original question" },
+						ts: 1000,
+					},
+					// A media (image) event sent as a reply — carries only the relation,
+					// no `> ` body prefix.
+					{
+						eventId: "$mediaReply",
+						roomId: "!roomA:test",
+						sender: "@alice:test",
+						type: "m.room.message",
+						content: {
+							msgtype: "m.image",
+							body: "answer.png",
+							filename: "answer.png",
+							url: "mxc://test/answer",
+							info: { mimetype: "image/png", w: 10, h: 10 },
+							"m.relates_to": { "m.in_reply_to": { event_id: "$parentText" } },
+						},
+						ts: 2000,
+					},
+				],
+				[{ userId: "@bob:test", name: "Bob" }],
+			);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const reply = events.find((e) => e.eventId === "$mediaReply");
+				expect(reply?.replyToId).toBe("$parentText");
+				expect(reply?.replyToSender).toBe("Bob");
+				expect(reply?.replyToBody).toBe("the original question");
+			});
+		});
+
+		it("labels a media parent and strips the parent's own reply fallback", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$parentVideo",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.video",
+						body: "clip.mp4",
+						filename: "clip.mp4",
+						url: "mxc://test/clip",
+						info: { mimetype: "video/mp4", size: 1 },
+					},
+					ts: 1000,
+				},
+				{
+					eventId: "$replyToVideo",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "nice clip",
+						"m.relates_to": { "m.in_reply_to": { event_id: "$parentVideo" } },
+					},
+					ts: 2000,
+				},
+				// Parent is itself a reply: its body carries a fallback that must be
+				// stripped so the snippet shows the real text, not the quote preamble.
+				{
+					eventId: "$parentReply",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "> <@bob:test> earlier\n\nactual content",
+					},
+					ts: 3000,
+				},
+				{
+					eventId: "$replyToReply",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "agreed",
+						"m.relates_to": { "m.in_reply_to": { event_id: "$parentReply" } },
+					},
+					ts: 4000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const toVideo = events.find((e) => e.eventId === "$replyToVideo");
+				expect(toVideo?.replyToBody).toBe("🎬 Video");
+
+				const toReply = events.find((e) => e.eventId === "$replyToReply");
+				expect(toReply?.replyToBody).toBe("actual content");
+			});
+		});
+
+		it("keeps replyToId but leaves sender/body null when the parent isn't loaded", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$orphanReply",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "replying to something off-screen",
+						"m.relates_to": {
+							"m.in_reply_to": { event_id: "$notInWindow" },
+						},
+					},
+					ts: 1000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				expect(events[0].replyToId).toBe("$notInWindow");
+				expect(events[0].replyToSender).toBeNull();
+				expect(events[0].replyToBody).toBeNull();
+			});
+		});
+	});
+
+	describe("encrypted video poster (#286)", () => {
+		const validFile = (url: string) => ({
+			url,
+			key: { k: "A".repeat(43) },
+			iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+			hashes: { sha256: "A".repeat(43) },
+			v: "v2",
+		});
+
+		it("parses info.thumbnail_file into the mediaThumbnail* fields", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$encVideo",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.video",
+						body: "secret.mp4",
+						file: validFile("mxc://test/encvid"),
+						info: {
+							mimetype: "video/mp4",
+							size: 10,
+							thumbnail_file: validFile("mxc://test/encthumb"),
+							thumbnail_info: { mimetype: "image/jpeg", w: 320, h: 240 },
+						},
+					},
+					ts: 1000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const [video] = events;
+				expect(video.mediaIsEncrypted).toBe(true);
+				expect(video.mediaThumbnailUrl).toBe(`${HTTP}/test/encthumb`);
+				expect(video.mediaThumbnailFile).toEqual(
+					validFile("mxc://test/encthumb"),
+				);
+				expect(video.mediaThumbnailMimetype).toBe("image/jpeg");
+				// The cleartext poster URL stays null on an encrypted event.
+				expect(video.mediaPosterUrl).toBeNull();
+			});
+		});
+
+		it("fails closed to null thumbnail fields on a malformed thumbnail_file", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$badThumb",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.video",
+						body: "secret.mp4",
+						file: validFile("mxc://test/encvid"),
+						info: {
+							mimetype: "video/mp4",
+							size: 10,
+							// Malformed: key too short to be a 32-byte AES key.
+							thumbnail_file: { url: "mxc://test/badthumb", key: { k: "x" } },
+							thumbnail_info: { mimetype: "image/jpeg" },
+						},
+					},
+					ts: 1000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const [video] = events;
+				expect(video.mediaThumbnailFile).toBeNull();
+				expect(video.mediaThumbnailUrl).toBeNull();
+				expect(video.mediaThumbnailMimetype).toBeNull();
+			});
+		});
+
+		it("never sets thumbnail fields for a plain video", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$plainVideo",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.video",
+						body: "clip.mp4",
+						url: "mxc://test/vid",
+						info: {
+							mimetype: "video/mp4",
+							size: 10,
+							thumbnail_url: "mxc://test/poster",
+						},
+					},
+					ts: 1000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const [video] = events;
+				expect(video.mediaThumbnailFile).toBeNull();
+				expect(video.mediaThumbnailUrl).toBeNull();
+				expect(video.mediaPosterUrl).toBe(`${HTTP}/test/poster`);
+			});
 		});
 	});
 });
