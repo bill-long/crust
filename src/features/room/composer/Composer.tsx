@@ -573,6 +573,7 @@ const Composer: Component<{
 		setMentions([]);
 		setMentionQuery(null);
 		setEmojiPickerOpen(false);
+		setGifPickerOpen(false);
 		requestAnimationFrame(autoResize);
 
 		// Restore the trailing text on failure, but only if we're still on the
@@ -594,6 +595,9 @@ const Composer: Component<{
 			stopTyping();
 			let allOk = true;
 			for (const att of [...attachments()]) {
+				// The user can remove a still-queued attachment from the tray while
+				// an earlier one uploads; skip anything no longer in the queue.
+				if (!attachments().some((a) => a.id === att.id)) continue;
 				updateAttachment(att.id, {
 					status: "uploading",
 					progress: 0,
