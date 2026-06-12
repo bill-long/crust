@@ -45,8 +45,9 @@ export async function makeThumbnail(
 	const th = Math.max(1, Math.round(height * scale));
 
 	const bitmap = await createImageBitmap(file);
+	const useOffscreen = typeof OffscreenCanvas !== "undefined";
 	let canvas: HTMLCanvasElement | OffscreenCanvas;
-	if (typeof OffscreenCanvas !== "undefined") {
+	if (useOffscreen) {
 		canvas = new OffscreenCanvas(tw, th);
 	} else {
 		canvas = document.createElement("canvas");
@@ -68,11 +69,14 @@ export async function makeThumbnail(
 	const mimetype = keepAlpha ? "image/png" : "image/jpeg";
 
 	let blob: Blob;
-	if (canvas instanceof OffscreenCanvas) {
+	// Guard the `instanceof` with the same capability flag — referencing
+	// OffscreenCanvas directly would throw a ReferenceError where it's undefined.
+	if (useOffscreen && canvas instanceof OffscreenCanvas) {
 		blob = await canvas.convertToBlob({ type: mimetype, quality: 0.85 });
 	} else {
+		const el = canvas as HTMLCanvasElement;
 		blob = await new Promise<Blob>((resolve, reject) => {
-			canvas.toBlob(
+			el.toBlob(
 				(b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
 				mimetype,
 				0.85,

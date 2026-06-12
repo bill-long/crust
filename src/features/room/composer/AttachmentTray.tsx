@@ -83,6 +83,7 @@ const AttachmentTray: Component<{
 									<div
 										class="mt-1 h-1 w-full overflow-hidden rounded bg-surface-3"
 										role="progressbar"
+										aria-label={`Upload progress for ${att.file.name || "attachment"}`}
 										aria-valuemin={0}
 										aria-valuemax={100}
 										aria-valuenow={Math.round(att.progress * 100)}
