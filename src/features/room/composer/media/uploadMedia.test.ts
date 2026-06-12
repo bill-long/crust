@@ -1,7 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../../test/mockClient";
-import { EncryptedRoomUnsupportedError } from "./mediaContent";
 import type { PendingAttachment } from "./types";
 import { uploadAndSend, validateSize } from "./uploadMedia";
 
@@ -22,9 +21,8 @@ vi.mock("./imageProcessing", () => ({
 
 const ROOM = "!r:test";
 
-function setup(opts?: { encrypted?: boolean; uploadSize?: number }) {
+function setup(opts?: { uploadSize?: number }) {
 	const room = createMockRoom(ROOM, [], []);
-	if (opts?.encrypted) room.__setEncrypted(true);
 	const client = createMockClient(new Map([[ROOM, room]]));
 	if (opts?.uploadSize !== undefined) {
 		client.getMediaConfig = vi
@@ -179,15 +177,6 @@ describe("uploadAndSend", () => {
 		expect(client.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("rejects sends to encrypted rooms", async () => {
-		const { client } = setup({ encrypted: true });
-		const file = new File([new Uint8Array(10)], "cat.png", {
-			type: "image/png",
-		});
-		await expect(
-			uploadAndSend(client, ROOM, attachment(file, "image")),
-		).rejects.toBeInstanceOf(EncryptedRoomUnsupportedError);
-		expect(client.uploadContent).not.toHaveBeenCalled();
-		expect(client.sendMessage).not.toHaveBeenCalled();
-	});
+	// The encrypted-room path (ciphertext upload + content.file) needs real
+	// WebCrypto and is covered end-to-end in uploadMedia.browser.test.ts.
 });

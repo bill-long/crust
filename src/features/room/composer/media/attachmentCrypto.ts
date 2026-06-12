@@ -9,8 +9,8 @@
  *
  * matrix-js-sdk does not bundle attachment crypto and there is no
  * `matrix-encrypt-attachment` dependency, so this is the project's own
- * implementation. Phase 4 (encrypt on send) reuses the base64 helpers and the
- * EncryptedFileInfo shape here.
+ * implementation. The send-side counterpart {@link encryptAttachment} lives
+ * here too and shares the base64 helpers and the EncryptedFile shapes.
  *
  * @see https://spec.matrix.org/v1.11/client-server-api/#sending-encrypted-attachments
  */
@@ -31,6 +31,34 @@ export interface EncryptedFileInfo {
 	hashes: { sha256: string };
 	/** Protocol version (`"v2"`). */
 	v?: string;
+}
+
+/**
+ * The full Matrix `EncryptedFile` block emitted on send (`content.file` /
+ * `info.thumbnail_file`). Unlike the read-side {@link EncryptedFileInfo} — which
+ * keeps only the `k` we need to decrypt — this carries the complete JWK Matrix
+ * and Element expect. It is a structural superset of `EncryptedFileInfo`, so the
+ * receive path ({@link parseEncryptedFile} / {@link decryptAttachment}) accepts
+ * it unchanged, which is what makes the encrypt→decrypt round-trip work.
+ */
+export interface EncryptedFile {
+	/** mxc:// URI of the ciphertext (filled by the caller after upload). */
+	url: string;
+	/** Full AES-256-CTR key as a JWK. */
+	key: {
+		alg: "A256CTR";
+		ext: true;
+		/** Raw key material, base64url unpadded. */
+		k: string;
+		key_ops: ["encrypt", "decrypt"];
+		kty: "oct";
+	};
+	/** 16-byte AES-CTR initial counter block, base64 unpadded. */
+	iv: string;
+	/** Ciphertext hashes; only SHA-256 is computed/required. */
+	hashes: { sha256: string };
+	/** Protocol version. */
+	v: "v2";
 }
 
 /**
@@ -65,13 +93,18 @@ function isBase64OfLength(value: string, bytes: number): boolean {
 	}
 }
 
-/** Encode bytes as standard, unpadded base64 (Matrix's hash encoding). */
+/** Encode bytes as standard, unpadded base64 (Matrix's hash/iv encoding). */
 function encodeBase64Unpadded(bytes: Uint8Array): string {
 	let binary = "";
 	for (let i = 0; i < bytes.length; i++) {
 		binary += String.fromCharCode(bytes[i]);
 	}
 	return btoa(binary).replace(/=+$/, "");
+}
+
+/** Encode bytes as URL-safe, unpadded base64 (the JWK `k` encoding). */
+function encodeBase64Url(bytes: Uint8Array): string {
+	return encodeBase64Unpadded(bytes).replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 /**
@@ -152,4 +185,56 @@ export async function decryptAttachment(
 		cryptoKey,
 		ciphertext,
 	);
+}
+
+/**
+ * Encrypt plaintext bytes for a Matrix encrypted attachment: the inverse of
+ * {@link decryptAttachment}. Mints a fresh 256-bit AES-CTR key and 16-byte IV,
+ * encrypts, and computes the SHA-256 of the *ciphertext* so the receiver can
+ * fail closed on tampering. Returns the ciphertext to upload plus the
+ * {@link EncryptedFile} descriptor — minus its `url`, which the caller fills in
+ * once the ciphertext is uploaded.
+ *
+ * @param plaintext the cleartext file bytes
+ * @returns the ciphertext to upload and the (url-less) EncryptedFile descriptor
+ */
+export async function encryptAttachment(
+	plaintext: ArrayBuffer,
+): Promise<{ ciphertext: ArrayBuffer; file: Omit<EncryptedFile, "url"> }> {
+	const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+	// 16-byte counter block: a random 64-bit nonce in the high 8 bytes, the
+	// low 8 bytes (the counter) zeroed — matching the 64-bit counter length
+	// the decrypt path uses, so the full plaintext stays within counter range.
+	const counter = new Uint8Array(16);
+	counter.set(crypto.getRandomValues(new Uint8Array(8)), 0);
+
+	const cryptoKey = await crypto.subtle.importKey(
+		"raw",
+		keyBytes,
+		{ name: "AES-CTR" },
+		true,
+		["encrypt"],
+	);
+	const ciphertext = await crypto.subtle.encrypt(
+		{ name: "AES-CTR", counter, length: 64 },
+		cryptoKey,
+		plaintext,
+	);
+
+	const digest = await crypto.subtle.digest("SHA-256", ciphertext);
+	return {
+		ciphertext,
+		file: {
+			key: {
+				alg: "A256CTR",
+				ext: true,
+				k: encodeBase64Url(keyBytes),
+				key_ops: ["encrypt", "decrypt"],
+				kty: "oct",
+			},
+			iv: encodeBase64Unpadded(counter),
+			hashes: { sha256: encodeBase64Unpadded(new Uint8Array(digest)) },
+			v: "v2",
+		},
+	};
 }

@@ -117,8 +117,8 @@ describe("Composer attach-file button", () => {
 		expect(input.value).toBe("");
 	});
 
-	it("rejects files in an encrypted room (Phase 0 gate) and queues nothing", async () => {
-		const { container, findByRole, queryByLabelText } = render(() => (
+	it("queues files in an encrypted room (Phase 4: send path encrypts them)", async () => {
+		const { container, findByLabelText, queryByRole } = render(() => (
 			<TestClientProvider client={makeClient()}>
 				<Composer roomId={ENC_ROOM} packs={[]} />
 			</TestClientProvider>
@@ -130,9 +130,9 @@ describe("Composer attach-file button", () => {
 
 		pickFiles(input, [new File(["a"], "secret.png", { type: "image/png" })]);
 
-		const alert = await findByRole("alert");
-		expect(alert.textContent ?? "").toMatch(/encrypted rooms isn't supported/i);
-		expect(queryByLabelText("Remove secret.png")).toBeNull();
+		// The attachment queues like any other room — no "unsupported" error.
+		await findByLabelText("Remove secret.png");
+		expect(queryByRole("alert")).toBeNull();
 	});
 
 	it("ignores files enqueued via the seam while editing", async () => {

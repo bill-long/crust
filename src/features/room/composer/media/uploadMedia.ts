@@ -2,13 +2,10 @@ import type { MatrixClient } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import { formatBytes } from "../../../../lib/formatBytes";
 import type { TimelineEvent } from "../../timeline/useTimeline";
+import { type EncryptedFile, encryptAttachment } from "./attachmentCrypto";
 import { sanitizeFilename } from "./filename";
 import { inspectImage, type Thumbnail } from "./imageProcessing";
-import {
-	assertCanSendMedia,
-	buildMediaContent,
-	classifyFile,
-} from "./mediaContent";
+import { buildMediaContent, classifyFile } from "./mediaContent";
 import type { PendingAttachment } from "./types";
 
 /** Per-client cache of the homeserver's `m.upload.size` (null = no limit advertised). */
@@ -65,10 +62,54 @@ export interface UploadAndSendOptions {
 }
 
 /**
+ * Result of uploading one blob: a plain mxc url or an EncryptedFile. The field
+ * names match {@link BuildMediaContentArgs} (and its `thumbnail`) so the result
+ * spreads straight into either.
+ */
+type UploadedBlob = { contentUri: string } | { file: EncryptedFile };
+
+/**
+ * Upload a blob's bytes and return how to reference them. In encrypted rooms we
+ * encrypt the bytes first and upload opaque ciphertext as
+ * `application/octet-stream` with no filename — the server never sees the real
+ * type or name — returning the full {@link EncryptedFile}. Otherwise we upload
+ * the cleartext blob with its real type/name and return the mxc url.
+ */
+async function uploadBlob(
+	client: MatrixClient,
+	blob: Blob,
+	opts: {
+		encrypted: boolean;
+		type: string;
+		name?: string;
+		progressHandler?: (p: { loaded: number; total: number }) => void;
+	},
+): Promise<UploadedBlob> {
+	if (opts.encrypted) {
+		const { ciphertext, file } = await encryptAttachment(
+			await blob.arrayBuffer(),
+		);
+		const resp = await client.uploadContent(new Blob([ciphertext]), {
+			type: "application/octet-stream",
+			progressHandler: opts.progressHandler,
+		});
+		return { file: { ...file, url: resp.content_uri } };
+	}
+	const resp = await client.uploadContent(blob, {
+		type: opts.type,
+		name: opts.name,
+		progressHandler: opts.progressHandler,
+	});
+	return { contentUri: resp.content_uri };
+}
+
+/**
  * Upload a single queued attachment and send it as the appropriate media
  * event. For images this probes dimensions and, when large, generates and
- * uploads a thumbnail first. Encrypted rooms are rejected here (Phase 4 lifts
- * that). Returns the sent event content for assertion/testing.
+ * uploads a thumbnail first. In encrypted rooms the file (and thumbnail) bytes
+ * are AES-256-CTR encrypted and the event carries `content.file` /
+ * `info.thumbnail_file` instead of cleartext urls. Returns the sent event
+ * content for assertion/testing.
  */
 export async function uploadAndSend(
 	client: MatrixClient,
@@ -78,7 +119,9 @@ export async function uploadAndSend(
 ): Promise<RoomMessageEventContent> {
 	const room = client.getRoom(roomId);
 	if (!room) throw new Error("Room not found");
-	assertCanSendMedia(room);
+	// Authoritative encryption decision, made once at send time from the pinned
+	// room: encrypted rooms get the ciphertext path, everything else plain.
+	const encrypted = room.hasEncryptionStateEvent();
 
 	const file = attachment.file;
 	await validateSize(client, file);
@@ -104,9 +147,11 @@ export async function uploadAndSend(
 		}
 	}
 
+	const mimetype = file.type || "application/octet-stream";
 	opts.onProgress?.(0);
-	const resp = await client.uploadContent(file, {
-		type: file.type || "application/octet-stream",
+	const uploaded = await uploadBlob(client, file, {
+		encrypted,
+		type: mimetype,
 		name: filename,
 		progressHandler: (p) => {
 			if (p.total > 0) opts.onProgress?.(p.loaded / p.total);
@@ -116,33 +161,33 @@ export async function uploadAndSend(
 
 	// Best-effort thumbnail upload, only after the full upload succeeded — so a
 	// full-upload failure never leaves an unreferenced thumbnail on the server.
-	let thumbContentUri: string | undefined;
+	let thumbUploaded: UploadedBlob | undefined;
 	if (thumbnail) {
 		try {
-			const thumbResp = await client.uploadContent(thumbnail.blob, {
+			thumbUploaded = await uploadBlob(client, thumbnail.blob, {
+				encrypted,
 				type: thumbnail.mimetype,
 				name: `thumb-${filename}`,
 			});
-			thumbContentUri = thumbResp.content_uri;
 		} catch {
 			thumbnail = null;
-			thumbContentUri = undefined;
+			thumbUploaded = undefined;
 		}
 	}
 
 	const content = buildMediaContent({
 		kind,
-		contentUri: resp.content_uri,
+		...uploaded,
 		filename,
-		mimetype: file.type || "application/octet-stream",
+		mimetype,
 		size: file.size,
 		caption: attachment.caption,
 		width,
 		height,
 		thumbnail:
-			thumbnail && thumbContentUri
+			thumbnail && thumbUploaded
 				? {
-						contentUri: thumbContentUri,
+						...thumbUploaded,
 						mimetype: thumbnail.mimetype,
 						size: thumbnail.blob.size,
 						w: thumbnail.width,

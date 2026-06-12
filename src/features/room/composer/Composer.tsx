@@ -26,7 +26,6 @@ import {
 	formatMarkdown,
 	type Mention,
 } from "./markdown";
-import { ENCRYPTED_UNSUPPORTED_MESSAGE } from "./media/mediaContent";
 import type { PendingAttachment } from "./media/types";
 import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
 
@@ -125,13 +124,8 @@ const Composer: Component<{
 		if (props.editingEvent) return;
 		const list = Array.from(files);
 		if (list.length === 0) return;
-		// Gate encrypted rooms here, at the single seam all entry points share,
-		// so the file is rejected with immediate feedback rather than queuing,
-		// captioning, and only failing at send time. (Phase 4 lifts this.)
-		if (client.getRoom(props.roomId)?.hasEncryptionStateEvent()) {
-			setError(ENCRYPTED_UNSUPPORTED_MESSAGE);
-			return;
-		}
+		// Encrypted and unencrypted rooms both accept attachments; the send path
+		// (uploadAndSend) encrypts when the room is encrypted.
 		setAttachments((prev) => [...prev, ...list.map(createPendingAttachment)]);
 	};
 

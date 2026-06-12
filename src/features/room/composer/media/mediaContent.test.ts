@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "../../timeline/useTimeline";
+import type { EncryptedFile } from "./attachmentCrypto";
 import {
-	assertCanSendMedia,
 	buildMediaContent,
 	classifyFile,
-	EncryptedRoomUnsupportedError,
 	msgtypeForKind,
 } from "./mediaContent";
 
@@ -107,6 +106,60 @@ describe("buildMediaContent", () => {
 		expect(c.msgtype).toBe("m.file");
 	});
 
+	const encFile = (k: string): EncryptedFile => ({
+		url: `mxc://srv/${k}`,
+		key: {
+			alg: "A256CTR",
+			ext: true,
+			k: "A".repeat(43),
+			key_ops: ["encrypt", "decrypt"],
+			kty: "oct",
+		},
+		iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+		hashes: { sha256: "A".repeat(43) },
+		v: "v2",
+	});
+
+	it("emits content.file (not url) for an encrypted attachment", () => {
+		const file = encFile("full");
+		const c = buildMediaContent({
+			kind: "image",
+			file,
+			filename: "cat.png",
+			mimetype: "image/png",
+			size: 1234,
+			width: 800,
+			height: 600,
+		}) as unknown as Record<string, unknown>;
+		expect(c.file).toEqual(file);
+		expect(c.url).toBeUndefined();
+		// `info` stays cleartext so receivers can read mimetype/size/dimensions.
+		expect(c.info).toMatchObject({ w: 800, h: 600, mimetype: "image/png" });
+	});
+
+	it("emits info.thumbnail_file (not thumbnail_url) for an encrypted thumbnail", () => {
+		const file = encFile("full");
+		const thumbFile = encFile("thumb");
+		const c = buildMediaContent({
+			kind: "image",
+			file,
+			filename: "big.jpg",
+			mimetype: "image/jpeg",
+			size: 9000,
+			thumbnail: {
+				file: thumbFile,
+				mimetype: "image/jpeg",
+				size: 500,
+				w: 800,
+				h: 600,
+			},
+		}) as unknown as Record<string, unknown>;
+		const info = c.info as Record<string, unknown>;
+		expect(info.thumbnail_file).toEqual(thumbFile);
+		expect(info.thumbnail_url).toBeUndefined();
+		expect(info.thumbnail_info).toMatchObject({ w: 800, h: 600, size: 500 });
+	});
+
 	it("attaches a reply relation (relation only, no body prefix)", () => {
 		const replyTo = {
 			eventId: "$reply",
@@ -126,19 +179,5 @@ describe("buildMediaContent", () => {
 		});
 		// Body is not prefixed with quote lines.
 		expect(c.body).toBe("cat.png");
-	});
-});
-
-describe("assertCanSendMedia", () => {
-	it("throws for encrypted rooms", () => {
-		const room = { hasEncryptionStateEvent: () => true } as never;
-		expect(() => assertCanSendMedia(room)).toThrow(
-			EncryptedRoomUnsupportedError,
-		);
-	});
-
-	it("passes for unencrypted rooms", () => {
-		const room = { hasEncryptionStateEvent: () => false } as never;
-		expect(() => assertCanSendMedia(room)).not.toThrow();
 	});
 });

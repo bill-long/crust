@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
 	decryptAttachment,
 	type EncryptedFileInfo,
+	encryptAttachment,
 	parseEncryptedFile,
 } from "./attachmentCrypto";
 
@@ -23,8 +24,12 @@ function bytesToBase64Url(bytes: Uint8Array): string {
 	return bytesToBase64Unpadded(bytes).replace(/\+/g, "-").replace(/\//g, "_");
 }
 
-/** Encrypt plaintext exactly as a Matrix client would, returning the descriptor. */
-async function encryptAttachment(
+/**
+ * Encrypt plaintext exactly as a Matrix client would, returning the descriptor.
+ * Independent of our own {@link encryptAttachment} so the decrypt tests below
+ * exercise the read path against a reference encryptor, not our encoder.
+ */
+async function encryptLikeMatrix(
 	plaintext: Uint8Array,
 ): Promise<{ file: EncryptedFileInfo; ciphertext: ArrayBuffer }> {
 	const keyBytes = crypto.getRandomValues(new Uint8Array(32));
@@ -60,14 +65,14 @@ async function encryptAttachment(
 describe("decryptAttachment", () => {
 	it("round-trips AES-CTR ciphertext back to the original plaintext", async () => {
 		const plaintext = new TextEncoder().encode("the quick brown fox 🦊");
-		const { file, ciphertext } = await encryptAttachment(plaintext);
+		const { file, ciphertext } = await encryptLikeMatrix(plaintext);
 
 		const decrypted = await decryptAttachment(ciphertext, file);
 		expect(new Uint8Array(decrypted)).toEqual(plaintext);
 	});
 
 	it("fails closed when the declared hash doesn't match the ciphertext", async () => {
-		const { file, ciphertext } = await encryptAttachment(
+		const { file, ciphertext } = await encryptLikeMatrix(
 			new Uint8Array([1, 2, 3, 4, 5]),
 		);
 		const tampered: EncryptedFileInfo = {
@@ -80,7 +85,7 @@ describe("decryptAttachment", () => {
 	});
 
 	it("fails closed when the ciphertext bytes are tampered", async () => {
-		const { file, ciphertext } = await encryptAttachment(
+		const { file, ciphertext } = await encryptLikeMatrix(
 			new Uint8Array([9, 8, 7, 6]),
 		);
 		const corrupted = ciphertext.slice(0);
@@ -143,5 +148,46 @@ describe("parseEncryptedFile", () => {
 		// Absent v is tolerated (older content) and normalizes to undefined.
 		const { v: _v, ...noVersion } = valid;
 		expect(parseEncryptedFile(noVersion)?.v).toBeUndefined();
+	});
+});
+
+describe("encryptAttachment", () => {
+	it("produces a descriptor the read path accepts and decrypts (round-trip)", async () => {
+		const plaintext = new TextEncoder().encode("the quick brown fox 🦊");
+		const { ciphertext, file } = await encryptAttachment(plaintext.buffer);
+
+		// Ciphertext differs from plaintext but keeps the same byte length
+		// (AES-CTR is a stream cipher).
+		expect(ciphertext.byteLength).toBe(plaintext.byteLength);
+		expect(new Uint8Array(ciphertext)).not.toEqual(plaintext);
+
+		// The url-less descriptor + an uploaded url is a valid EncryptedFile that
+		// the Phase 3 read path validates and decrypts back to the original.
+		const full = { ...file, url: "mxc://example.com/ciphertext" };
+		const parsed = parseEncryptedFile(full);
+		expect(parsed).not.toBeNull();
+		const decrypted = await decryptAttachment(ciphertext, parsed as never);
+		expect(new Uint8Array(decrypted)).toEqual(plaintext);
+	});
+
+	it("emits a well-formed A256CTR JWK and v2 descriptor", async () => {
+		const { file } = await encryptAttachment(new Uint8Array([1, 2, 3]).buffer);
+		expect(file.v).toBe("v2");
+		expect(file.key).toMatchObject({
+			alg: "A256CTR",
+			ext: true,
+			kty: "oct",
+			key_ops: ["encrypt", "decrypt"],
+		});
+		// Key 32B, IV 16B decode (base64url tolerant decode handled by read path).
+		expect(file.iv.length).toBeGreaterThan(0);
+		expect(file.hashes.sha256.length).toBeGreaterThan(0);
+	});
+
+	it("mints a fresh key and IV per call", async () => {
+		const a = await encryptAttachment(new Uint8Array([0]).buffer);
+		const b = await encryptAttachment(new Uint8Array([0]).buffer);
+		expect(a.file.key.k).not.toBe(b.file.key.k);
+		expect(a.file.iv).not.toBe(b.file.iv);
 	});
 });
