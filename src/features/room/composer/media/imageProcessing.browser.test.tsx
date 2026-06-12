@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeThumbnail, probeImage } from "./imageProcessing";
+import { inspectImage } from "./imageProcessing";
 
 /** Render a solid-colour image of the given size to a PNG blob. */
 async function makeImageBlob(w: number, h: number): Promise<Blob> {
@@ -18,22 +18,22 @@ async function makeImageBlob(w: number, h: number): Promise<Blob> {
 	);
 }
 
-describe("probeImage", () => {
-	it("returns intrinsic dimensions", async () => {
+describe("inspectImage", () => {
+	it("returns intrinsic dimensions and no thumbnail when it fits the box", async () => {
 		const blob = await makeImageBlob(640, 480);
-		expect(await probeImage(blob)).toEqual({ width: 640, height: 480 });
-	});
-});
-
-describe("makeThumbnail", () => {
-	it("returns null when the image already fits the box", async () => {
-		const blob = await makeImageBlob(400, 300);
-		expect(await makeThumbnail(blob, { w: 800, h: 600 })).toBeNull();
+		const result = await inspectImage(blob, { w: 800, h: 600 });
+		expect(result.width).toBe(640);
+		expect(result.height).toBe(480);
+		expect(result.thumbnail).toBeNull();
 	});
 
 	it("downscales a large image while preserving aspect ratio", async () => {
 		const blob = await makeImageBlob(1600, 1200);
-		const thumb = await makeThumbnail(blob, { w: 800, h: 600 });
+		const result = await inspectImage(blob, { w: 800, h: 600 });
+		// Source dimensions are reported even when a thumbnail is produced.
+		expect(result.width).toBe(1600);
+		expect(result.height).toBe(1200);
+		const thumb = result.thumbnail;
 		expect(thumb).not.toBeNull();
 		if (!thumb) return;
 		expect(thumb.width).toBe(800);

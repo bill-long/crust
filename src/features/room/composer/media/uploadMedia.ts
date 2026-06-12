@@ -2,7 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import { formatBytes } from "../../../../lib/formatBytes";
 import type { TimelineEvent } from "../../timeline/useTimeline";
-import { makeThumbnail, probeImage } from "./imageProcessing";
+import { inspectImage, type Thumbnail } from "./imageProcessing";
 import {
 	assertCanSendMedia,
 	buildMediaContent,
@@ -85,26 +85,27 @@ export async function uploadAndSend(
 	const kind = attachment.kind;
 	const filename = file.name || "file";
 
-	// Image-only: intrinsic dimensions + optional thumbnail. The thumbnail is
-	// best-effort — if generating or uploading it fails we still send the full
-	// image rather than failing the whole attachment.
+	// Image-only: decode once for intrinsic dimensions + an optional thumbnail.
+	// Both are best-effort — a decode/thumbnail failure still sends the full
+	// image (without w/h or thumbnail) rather than failing the whole attachment.
 	let width = attachment.width;
 	let height = attachment.height;
-	let thumbnail: Awaited<ReturnType<typeof makeThumbnail>> = null;
+	let thumbnail: Thumbnail | null = null;
 	let thumbContentUri: string | undefined;
 	if (kind === "image") {
-		if (width === undefined || height === undefined) {
-			const dims = await probeImage(file);
-			width = dims.width;
-			height = dims.height;
-		}
 		try {
-			thumbnail = await makeThumbnail(file);
-			if (thumbnail) {
-				const thumbResp = await client.uploadContent(thumbnail.blob, {
-					type: thumbnail.mimetype,
-					name: `thumb-${filename}`,
-				});
+			const inspection = await inspectImage(file);
+			width = inspection.width;
+			height = inspection.height;
+			if (inspection.thumbnail) {
+				const thumbResp = await client.uploadContent(
+					inspection.thumbnail.blob,
+					{
+						type: inspection.thumbnail.mimetype,
+						name: `thumb-${filename}`,
+					},
+				);
+				thumbnail = inspection.thumbnail;
 				thumbContentUri = thumbResp.content_uri;
 			}
 		} catch {

@@ -95,7 +95,9 @@ const AttachmentTray: Component<{
 									</div>
 								</Show>
 								<Show when={att.status === "error" && att.error}>
-									<p class="mt-1 text-xs text-danger-text">{att.error}</p>
+									<p class="mt-1 text-xs text-danger-text" role="alert">
+										{att.error}
+									</p>
 								</Show>
 							</div>
 						</div>

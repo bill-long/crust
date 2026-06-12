@@ -5,15 +5,18 @@ import { EncryptedRoomUnsupportedError } from "./mediaContent";
 import type { PendingAttachment } from "./types";
 import { uploadAndSend, validateSize } from "./uploadMedia";
 
-// Stub the canvas-backed helpers so the image path runs under jsdom.
+// Stub the canvas-backed helper so the image path runs under jsdom.
 vi.mock("./imageProcessing", () => ({
 	THUMBNAIL_MAX: { w: 800, h: 600 },
-	probeImage: vi.fn().mockResolvedValue({ width: 1600, height: 1200 }),
-	makeThumbnail: vi.fn().mockResolvedValue({
-		blob: new Blob(["thumb"], { type: "image/jpeg" }),
-		width: 800,
-		height: 600,
-		mimetype: "image/jpeg",
+	inspectImage: vi.fn().mockResolvedValue({
+		width: 1600,
+		height: 1200,
+		thumbnail: {
+			blob: new Blob(["thumb"], { type: "image/jpeg" }),
+			width: 800,
+			height: 600,
+			mimetype: "image/jpeg",
+		},
 	}),
 }));
 

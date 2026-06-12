@@ -15,36 +15,40 @@ export interface Thumbnail {
 	mimetype: string;
 }
 
-/** Probe an image file's intrinsic pixel dimensions. */
-export async function probeImage(
-	file: Blob,
-): Promise<{ width: number; height: number }> {
-	const bitmap = await createImageBitmap(file);
-	try {
-		return { width: bitmap.width, height: bitmap.height };
-	} finally {
-		bitmap.close();
-	}
+/**
+ * Result of inspecting an image for upload: its intrinsic dimensions plus an
+ * optional downscaled thumbnail (`null` when the image already fits the box).
+ */
+export interface ImageInspection {
+	width: number;
+	height: number;
+	thumbnail: Thumbnail | null;
 }
 
 /**
- * Produce a downscaled thumbnail for an image that exceeds the thumbnail box.
- * Returns `null` when the image already fits (the full upload doubles as its
- * own thumbnail in that case). Output is JPEG unless the source has an alpha
- * channel format (PNG/WebP), which we keep as PNG to preserve transparency.
+ * Decode an image once to read its intrinsic dimensions and, when it exceeds
+ * the thumbnail box, render a downscaled thumbnail from the same bitmap. The
+ * thumbnail is JPEG unless the source has an alpha-capable format (PNG/WebP),
+ * which we keep as PNG to preserve transparency.
  */
-export async function makeThumbnail(
+export async function inspectImage(
 	file: Blob,
 	max: { w: number; h: number } = THUMBNAIL_MAX,
-): Promise<Thumbnail | null> {
-	const { width, height } = await probeImage(file);
-	if (width <= max.w && height <= max.h) return null;
+): Promise<ImageInspection> {
+	const bitmap = await createImageBitmap(file);
+	const width = bitmap.width;
+	const height = bitmap.height;
+
+	// Fits the box → no separate thumbnail; the full upload is its own thumb.
+	if (width <= max.w && height <= max.h) {
+		bitmap.close();
+		return { width, height, thumbnail: null };
+	}
 
 	const scale = Math.min(max.w / width, max.h / height);
 	const tw = Math.max(1, Math.round(width * scale));
 	const th = Math.max(1, Math.round(height * scale));
 
-	const bitmap = await createImageBitmap(file);
 	const useOffscreen = typeof OffscreenCanvas !== "undefined";
 	let canvas: HTMLCanvasElement | OffscreenCanvas;
 	if (useOffscreen) {
@@ -60,7 +64,7 @@ export async function makeThumbnail(
 		| null;
 	if (!ctx) {
 		bitmap.close();
-		return null;
+		return { width, height, thumbnail: null };
 	}
 	ctx.drawImage(bitmap, 0, 0, tw, th);
 	bitmap.close();
@@ -84,5 +88,9 @@ export async function makeThumbnail(
 		});
 	}
 
-	return { blob, width: tw, height: th, mimetype };
+	return {
+		width,
+		height,
+		thumbnail: { blob, width: tw, height: th, mimetype },
+	};
 }
