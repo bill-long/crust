@@ -411,6 +411,22 @@ describe("useTimeline media projection", () => {
 					},
 					ts: 1500,
 				},
+				// A control char in the FILENAME must be normalized the same way as the
+				// body before the diff gate, or a caption identical to the filename leaks.
+				{
+					eventId: "$ctrlFilename",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "photo.png",
+						filename: "photo\u0007.png",
+						url: "mxc://test/ctrlfn",
+						info: { mimetype: "image/png", w: 10, h: 10 },
+					},
+					ts: 1800,
+				},
 				// A file with a differing body is a caption per spec, but captions are
 				// scoped to m.image in the renderer, so the projection leaves it null.
 				{
@@ -441,9 +457,11 @@ describe("useTimeline media projection", () => {
 				const ctrl = events.find((e) => e.eventId === "$ctrl");
 				const multiline = events.find((e) => e.eventId === "$multiline");
 				const fileCaption = events.find((e) => e.eventId === "$fileCaption");
+				const ctrlFilename = events.find((e) => e.eventId === "$ctrlFilename");
 				expect(ctrl?.mediaCaption).toBe("lineone");
 				expect(multiline?.mediaCaption).toBe("first line\nsecond line");
 				expect(fileCaption?.mediaCaption).toBeNull();
+				expect(ctrlFilename?.mediaCaption).toBeNull();
 			});
 		});
 	});

@@ -566,24 +566,26 @@ function eventToTimelineEvent(
 	// `filename` is absent, `body` *is* the filename, so there's no caption).
 	// Control chars are stripped; multi-line captions are preserved. Scoped to
 	// `m.image` — the file/video/audio renderers show the filename as a label.
-	const explicitFilename =
+	const hasImageFilename =
 		content.msgtype === "m.image" &&
 		typeof content.filename === "string" &&
-		content.filename.trim().length > 0
-			? content.filename.trim()
-			: null;
-	// Compare and emit the *same* normalized value (control-stripped + trimmed)
-	// so the "body differs from filename" gate can't pass on a difference that
-	// sanitization then erases — which would surface a caption equal to the
-	// filename.
+		content.filename.trim().length > 0;
+	// Normalize BOTH the body and the filename through the same sanitizer before
+	// the "differs from filename" comparison: otherwise control chars / CRLF that
+	// only one side carries (e.g. a filename with a stray control char) make the
+	// `!==` pass and surface a caption that's effectively just the filename.
 	const cleanedCaption =
 		typeof content.body === "string"
 			? sanitizeMultiline(content.body).trim()
 			: "";
+	const cleanedFilename =
+		hasImageFilename && typeof content.filename === "string"
+			? sanitizeMultiline(content.filename).trim()
+			: "";
 	const mediaCaption =
-		explicitFilename &&
+		hasImageFilename &&
 		cleanedCaption.length > 0 &&
-		cleanedCaption !== explicitFilename
+		cleanedCaption !== cleanedFilename
 			? cleanedCaption
 			: null;
 
