@@ -459,6 +459,89 @@ const Composer: Component<{
 		el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
 	};
 
+	// --- Formatting toolbar ---
+	// All helpers read the live `text()` signal and the textarea selection at
+	// call time, then restore focus + caret in a rAF (mirroring onEmojiSelect).
+	// They mutate only the shared `text()` signal — no new cross-room state.
+
+	/**
+	 * Apply a pure text transform to the current selection. `transform` receives
+	 * the selected text plus the text before/after it and returns the new full
+	 * value with the selection range to restore.
+	 */
+	const applyFormat = (
+		transform: (
+			sel: string,
+			before: string,
+			after: string,
+		) => { value: string; selStart: number; selEnd: number },
+	): void => {
+		const el = textareaRef;
+		if (!el) return;
+		const value = text();
+		const start = el.selectionStart;
+		const end = el.selectionEnd;
+		const result = transform(
+			value.slice(start, end),
+			value.slice(0, start),
+			value.slice(end),
+		);
+		setText(result.value);
+		autoResize();
+		// Don't run mention detection here: formatting never inserts an `@`
+		// trigger, and the caret hasn't moved to its new spot yet (that happens
+		// in the rAF below), so detecting now would read a stale position.
+		requestAnimationFrame(() => {
+			if (!textareaRef) return;
+			textareaRef.focus();
+			textareaRef.setSelectionRange(result.selStart, result.selEnd);
+		});
+	};
+
+	/** Wrap the selection in `marker` on each side (e.g. `**`, `*`, `` ` ``). */
+	const wrapInline = (marker: string): void => {
+		applyFormat((sel, before, after) => {
+			const inner = before.length + marker.length;
+			return {
+				value: `${before}${marker}${sel}${marker}${after}`,
+				selStart: inner,
+				selEnd: inner + sel.length,
+			};
+		});
+	};
+
+	/** Insert a `[label](url)` link template, selecting the `url` placeholder. */
+	const insertLink = (): void => {
+		applyFormat((sel, before, after) => {
+			const label = sel || "text";
+			const url = "url";
+			const urlStart = before.length + 1 + label.length + 2; // "[" label "]("
+			return {
+				value: `${before}[${label}](${url})${after}`,
+				selStart: urlStart,
+				selEnd: urlStart + url.length,
+			};
+		});
+	};
+
+	/** Prefix every line touched by the selection with `prefix` (lists/quotes). */
+	const prefixLines = (prefix: string): void => {
+		applyFormat((sel, before, after) => {
+			const lineStart = before.lastIndexOf("\n") + 1;
+			const head = before.slice(0, lineStart);
+			const region = before.slice(lineStart) + sel;
+			const prefixed = region
+				.split("\n")
+				.map((l) => `${prefix}${l}`)
+				.join("\n");
+			return {
+				value: `${head}${prefixed}${after}`,
+				selStart: head.length,
+				selEnd: head.length + prefixed.length,
+			};
+		});
+	};
+
 	const sendTyping = (): void => {
 		const now = Date.now();
 		if (now - lastTypingSentAt < TYPING_RESEND_MS) return;
@@ -725,6 +808,22 @@ const Composer: Component<{
 		// Picker gets first dibs on keyboard events
 		if (handlePickerKey(e)) return;
 
+		// Formatting shortcuts (Ctrl/Cmd). Skip while an IME composition is
+		// active so we don't hijack composition-confirming keystrokes.
+		if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.isComposing) {
+			const k = e.key.toLowerCase();
+			if (e.shiftKey && k === "x") {
+				e.preventDefault();
+				wrapInline("~~");
+				return;
+			}
+			if (!e.shiftKey && (k === "b" || k === "i" || k === "e")) {
+				e.preventDefault();
+				wrapInline(k === "b" ? "**" : k === "i" ? "*" : "`");
+				return;
+			}
+		}
+
 		if (e.key === "Escape" && props.editingEvent) {
 			e.preventDefault();
 			stopTyping();
@@ -814,6 +913,79 @@ const Composer: Component<{
 					onCaptionChange={(id, caption) => updateAttachment(id, { caption })}
 				/>
 			</Show>
+			{/* preventDefault on mousedown keeps focus (and thus the selection)
+			    on the textarea when a button is pressed, so the wrap helpers read
+			    a live selection and the textarea's blur side effects don't fire. */}
+			<div
+				role="toolbar"
+				aria-label="Text formatting"
+				class="mb-1.5 flex items-center gap-0.5 text-text-disabled"
+				onMouseDown={(e) => e.preventDefault()}
+			>
+				<button
+					type="button"
+					class="h-7 w-7 rounded font-bold transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Bold (Ctrl+B)"
+					title="Bold (Ctrl+B)"
+					onClick={() => wrapInline("**")}
+				>
+					B
+				</button>
+				<button
+					type="button"
+					class="h-7 w-7 rounded italic transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Italic (Ctrl+I)"
+					title="Italic (Ctrl+I)"
+					onClick={() => wrapInline("*")}
+				>
+					I
+				</button>
+				<button
+					type="button"
+					class="h-7 w-7 rounded line-through transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Strikethrough (Ctrl+Shift+X)"
+					title="Strikethrough (Ctrl+Shift+X)"
+					onClick={() => wrapInline("~~")}
+				>
+					S
+				</button>
+				<button
+					type="button"
+					class="h-7 w-7 rounded font-mono text-xs transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Inline code (Ctrl+E)"
+					title="Inline code (Ctrl+E)"
+					onClick={() => wrapInline("`")}
+				>
+					{"<>"}
+				</button>
+				<button
+					type="button"
+					class="h-7 w-7 rounded transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Link"
+					title="Link"
+					onClick={insertLink}
+				>
+					🔗
+				</button>
+				<button
+					type="button"
+					class="h-7 w-7 rounded transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Bulleted list"
+					title="Bulleted list"
+					onClick={() => prefixLines("- ")}
+				>
+					☰
+				</button>
+				<button
+					type="button"
+					class="h-7 w-7 rounded transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					aria-label="Quote"
+					title="Quote"
+					onClick={() => prefixLines("> ")}
+				>
+					❝
+				</button>
+			</div>
 			<div class="relative">
 				<MentionPicker
 					items={filteredMembers()}
