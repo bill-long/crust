@@ -6,7 +6,7 @@
  * send path (AES-256-CTR + SHA-256 of the ciphertext).
  */
 
-import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { MediaAudio } from "./MediaAudio";
@@ -180,7 +180,7 @@ describe("encrypted MediaFile", () => {
 
 		fireEvent.click(await findByLabelText(/download report\.pdf/i));
 
-		await vi.waitFor(() => expect(anchorClick).toHaveBeenCalled());
+		await waitFor(() => expect(anchorClick).toHaveBeenCalled());
 		expect(createObjUrl).toHaveBeenCalledTimes(1);
 		expect(createObjUrl.mock.calls[0][0]).toBeInstanceOf(Blob);
 	});

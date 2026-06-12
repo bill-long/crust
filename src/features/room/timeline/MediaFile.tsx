@@ -37,13 +37,13 @@ export const MediaFile: Component<{
 	const sizeLabel = (): string =>
 		props.size !== null ? formatBytes(props.size) : "";
 
-	const triggerSave = (blob: Blob): void => {
+	const triggerSave = (blob: Blob, filename: string): void => {
 		const objUrl = URL.createObjectURL(blob);
 		const a = document.createElement("a");
 		a.href = objUrl;
 		// `filename` comes from untrusted event content — strip path separators
 		// and control chars before using it as the saved name.
-		a.download = sanitizeFilename(props.filename);
+		a.download = sanitizeFilename(filename);
 		document.body.appendChild(a);
 		a.click();
 		a.remove();
@@ -56,23 +56,30 @@ export const MediaFile: Component<{
 	const downloadEncrypted = async (): Promise<void> => {
 		if (busy()) return;
 		setError(null);
+		// Snapshot every input before the first await: the descriptor, URL,
+		// mimetype, and name must stay consistent for the whole download even if
+		// an edit rewrites this event's content mid-flight (otherwise we could
+		// decrypt old ciphertext with a new key, or save with a mismatched
+		// type/name).
+		const url = props.httpUrl;
+		const file = props.file;
+		const mimetype = props.mimetype;
+		const filename = props.filename;
 		// `isEncrypted` is authoritative, so a null descriptor means a malformed
 		// `content.file` — there is nothing safe to download.
-		if (!props.httpUrl || !props.file) {
+		if (!url || !file) {
 			setError("This file can't be decrypted.");
 			return;
 		}
 		setBusy(true);
 		try {
-			const res = await fetch(props.httpUrl, { credentials: "omit" });
+			const res = await fetch(url, { credentials: "omit" });
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const ciphertext = await res.arrayBuffer();
-			const plaintext = await decryptAttachment(ciphertext, props.file);
+			const plaintext = await decryptAttachment(ciphertext, file);
 			triggerSave(
-				new Blob(
-					[plaintext],
-					props.mimetype ? { type: props.mimetype } : undefined,
-				),
+				new Blob([plaintext], mimetype ? { type: mimetype } : undefined),
+				filename,
 			);
 		} catch {
 			setError("Couldn't download file.");
