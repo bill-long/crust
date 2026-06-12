@@ -18,12 +18,16 @@ import { GifPicker } from "../../gif/GifPicker";
 import { useGifConfig } from "../../gif/gifConfig";
 import type { GifItem } from "../../gif/types";
 import type { TimelineEvent } from "../timeline/useTimeline";
+import { AttachmentTray } from "./AttachmentTray";
 import {
 	type CustomEmoji,
 	escapeHtml,
 	formatMarkdown,
 	type Mention,
 } from "./markdown";
+import { ENCRYPTED_UNSUPPORTED_MESSAGE } from "./media/mediaContent";
+import type { PendingAttachment } from "./media/types";
+import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
 
 function buildReplyFallback(
 	replyTo: TimelineEvent,
@@ -103,7 +107,69 @@ const Composer: Component<{
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
+	const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
 	const gifConfig = useGifConfig();
+
+	/** Queue raw files for upload. The shared seam for paste / attach / drop. */
+	const enqueueFiles = (files: Iterable<File>): void => {
+		if (props.editingEvent) return;
+		const list = Array.from(files);
+		if (list.length === 0) return;
+		// Gate encrypted rooms here, at the single seam all entry points share,
+		// so the file is rejected with immediate feedback rather than queuing,
+		// captioning, and only failing at send time. (Phase 4 lifts this.)
+		if (client.getRoom(props.roomId)?.hasEncryptionStateEvent()) {
+			setError(ENCRYPTED_UNSUPPORTED_MESSAGE);
+			return;
+		}
+		setAttachments((prev) => [...prev, ...list.map(createPendingAttachment)]);
+	};
+
+	const updateAttachment = (
+		id: string,
+		patch: Partial<PendingAttachment>,
+	): void => {
+		setAttachments((prev) =>
+			prev.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+		);
+	};
+
+	const removeAttachment = (id: string): void => {
+		setAttachments((prev) => {
+			const found = prev.find((a) => a.id === id);
+			if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl);
+			return prev.filter((a) => a.id !== id);
+		});
+	};
+
+	const clearAttachments = (): void => {
+		setAttachments((prev) => {
+			for (const a of prev) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+			return [];
+		});
+	};
+
+	/** Pull any image blobs out of a paste and queue them. */
+	const onPaste = (e: ClipboardEvent): void => {
+		const items = e.clipboardData?.items;
+		if (!items) return;
+		const files: File[] = [];
+		let hasText = false;
+		// DataTransferItemList is index-accessed, not reliably iterable.
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i];
+			if (item.kind === "string") hasText = true;
+			if (item.kind === "file" && item.type.startsWith("image/")) {
+				const file = item.getAsFile();
+				if (file) files.push(file);
+			}
+		}
+		if (files.length === 0) return;
+		// Only suppress the textarea's default when the clipboard is image-only;
+		// if text was pasted alongside the image, let the native paste insert it.
+		if (!hasText) e.preventDefault();
+		enqueueFiles(files);
+	};
 
 	// Memoize shortcode lookup to avoid rebuilding on every send
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
@@ -322,6 +388,9 @@ const Composer: Component<{
 				setMentionQuery(null);
 				setGifPickerOpen(false);
 				if (ev) {
+					// Edits can't carry attachments; discard any queued so the
+					// tray doesn't linger un-sendable during the edit.
+					clearAttachments();
 					setText(ev.body);
 					requestAnimationFrame(() => {
 						autoResize();
@@ -346,14 +415,21 @@ const Composer: Component<{
 				setMentionQuery(null);
 				setEmojiPickerOpen(false);
 				setGifPickerOpen(false);
+				clearAttachments();
+				// A send pinned to the previous room may still be in flight; reset
+				// the busy flag so the newly selected room's composer is usable.
+				// That send's own completion writes are gated on still being on
+				// its room, so they won't clobber this fresh state.
+				setSending(false);
 				requestAnimationFrame(autoResize);
 			},
 		),
 	);
 
-	// Stop typing on unmount
+	// Stop typing and release preview object URLs on unmount
 	onCleanup(() => {
 		stopTyping();
+		clearAttachments();
 	});
 
 	const autoResize = (): void => {
@@ -385,9 +461,29 @@ const Composer: Component<{
 		}
 	};
 
+	const restoreFocus = (): void => {
+		if (
+			!document.activeElement ||
+			document.activeElement === document.body ||
+			document.activeElement === textareaRef
+		) {
+			textareaRef?.focus();
+		}
+	};
+
 	const send = async (): Promise<void> => {
 		const msg = text().trim();
-		if (!msg || sending()) return;
+		if ((!msg && attachments().length === 0) || sending()) return;
+
+		// Pin the target room (and reply target) for the whole send: uploads
+		// await, and the user could switch rooms mid-send. The composer is a
+		// single reused instance with shared signals, so we (a) deliver to the
+		// pinned room and (b) gate every completion-time write on still being on
+		// that room, so a send that finishes after the user navigated away can't
+		// clobber the newly selected room's composer.
+		const roomId = props.roomId;
+		const replyTo = props.replyTo;
+		const onThisRoom = (): boolean => props.roomId === roomId;
 
 		// Edit mode: send m.replace event
 		if (props.editingEvent) {
@@ -439,33 +535,117 @@ const Composer: Component<{
 
 			try {
 				await client.sendMessage(
-					props.roomId,
+					roomId,
 					content as unknown as RoomMessageEventContent,
 				);
-				props.onSent?.();
+				if (onThisRoom()) props.onSent?.();
 			} catch (e) {
-				if (!text()) {
-					setText(draft);
-					setMentions(draftMentions);
+				if (onThisRoom()) {
+					if (!text()) {
+						setText(draft);
+						setMentions(draftMentions);
+					}
+					setError(e instanceof Error ? e.message : "Failed to edit message");
+					requestAnimationFrame(autoResize);
 				}
-				setError(e instanceof Error ? e.message : "Failed to edit message");
-				requestAnimationFrame(autoResize);
 			} finally {
-				setSending(false);
-				if (
-					!document.activeElement ||
-					document.activeElement === document.body ||
-					document.activeElement === textareaRef
-				) {
-					textareaRef?.focus();
+				if (onThisRoom()) {
+					setSending(false);
+					restoreFocus();
 				}
 			}
 			return;
 		}
 
 		// Normal send mode
-		const currentMentions = reconcileMentions(msg);
-		const emoji = findCustomEmoji(msg, shortcodeLookup());
+
+		// Compute the trailing-text payload from the original input and snapshot
+		// the draft, then clear the composer up front — mirroring the text-only
+		// path — so a slow attachment upload can't race the textarea and wipe
+		// text the user types while the upload is in flight.
+		const hasText = msg.length > 0;
+		const currentMentions = hasText ? reconcileMentions(msg) : [];
+		const emoji = hasText ? findCustomEmoji(msg, shortcodeLookup()) : [];
+		const draft = text();
+		const draftMentions = mentions();
+		setText("");
+		setError(null);
+		setMentions([]);
+		setMentionQuery(null);
+		setEmojiPickerOpen(false);
+		setGifPickerOpen(false);
+		requestAnimationFrame(autoResize);
+
+		// Restore the trailing text on failure, but only if we're still on the
+		// send's room and the user hasn't already started a new message.
+		const restoreDraft = (): void => {
+			if (onThisRoom() && !text()) {
+				setText(draft);
+				setMentions(draftMentions);
+				requestAnimationFrame(autoResize);
+			}
+		};
+
+		// Send any queued attachments first. The reply relation is attached to
+		// the first event only (whether that's an attachment or the trailing
+		// text) so we don't emit one reply per file.
+		let replyConsumed = false;
+		if (attachments().length > 0) {
+			setSending(true);
+			stopTyping();
+			let allOk = true;
+			for (const att of [...attachments()]) {
+				// The user can remove a still-queued attachment from the tray while
+				// an earlier one uploads; skip anything no longer in the queue.
+				if (!attachments().some((a) => a.id === att.id)) continue;
+				updateAttachment(att.id, {
+					status: "uploading",
+					progress: 0,
+					error: undefined,
+				});
+				try {
+					await uploadAndSend(client, roomId, att, {
+						replyTo: replyConsumed ? null : replyTo,
+						onProgress: (p) => updateAttachment(att.id, { progress: p }),
+					});
+					// Clear the reply at the source once an event has carried it,
+					// so a retry after a partial failure doesn't re-attach it and
+					// emit a second reply. Only touch the parent's reply state if
+					// we're still on this room (else we'd clear another room's reply).
+					if (replyTo && !replyConsumed) {
+						replyConsumed = true;
+						if (onThisRoom()) props.onCancelReply?.();
+					}
+					removeAttachment(att.id);
+				} catch (e) {
+					allOk = false;
+					updateAttachment(att.id, {
+						status: "error",
+						error: e instanceof Error ? e.message : "Failed to upload file",
+					});
+				}
+			}
+			// Leave failed attachments in the tray and restore the trailing text
+			// so the user can retry without losing it.
+			if (!allOk) {
+				restoreDraft();
+				if (onThisRoom()) {
+					setSending(false);
+					restoreFocus();
+				}
+				return;
+			}
+			if (!hasText) {
+				if (onThisRoom()) {
+					setSending(false);
+					props.onSent?.();
+					restoreFocus();
+				}
+				return;
+			}
+			// Otherwise fall through to send the trailing text message.
+		}
+
 		const { body, formatted_body } = formatMarkdown(
 			msg,
 			currentMentions,
@@ -485,12 +665,9 @@ const Composer: Component<{
 			};
 		}
 
-		// Add reply metadata if replying
-		if (props.replyTo) {
-			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
-				props.replyTo,
-				props.roomId,
-			);
+		// Add reply metadata if replying (unless an attachment already carried it)
+		if (replyTo && !replyConsumed) {
+			const { bodyPrefix, htmlPrefix } = buildReplyFallback(replyTo, roomId);
 			const replyHtmlBody =
 				(content.formatted_body as string | undefined) ??
 				escapeHtml(content.body as string).replace(/\n/g, "<br>");
@@ -498,42 +675,28 @@ const Composer: Component<{
 			content.format = "org.matrix.custom.html";
 			content.formatted_body = htmlPrefix + replyHtmlBody;
 			content["m.relates_to"] = {
-				"m.in_reply_to": { event_id: props.replyTo.eventId },
+				"m.in_reply_to": { event_id: replyTo.eventId },
 			};
 		}
 
-		const draft = text();
-		const draftMentions = mentions();
-		setText("");
-		setError(null);
-		setMentions([]);
-		setMentionQuery(null);
-		setEmojiPickerOpen(false);
 		setSending(true);
 		stopTyping();
-		requestAnimationFrame(autoResize);
 
 		try {
 			await client.sendMessage(
-				props.roomId,
+				roomId,
 				content as unknown as RoomMessageEventContent,
 			);
-			props.onSent?.();
+			if (onThisRoom()) props.onSent?.();
 		} catch (e) {
-			if (!text()) {
-				setText(draft);
-				setMentions(draftMentions);
+			restoreDraft();
+			if (onThisRoom()) {
+				setError(e instanceof Error ? e.message : "Failed to send message");
 			}
-			setError(e instanceof Error ? e.message : "Failed to send message");
-			requestAnimationFrame(autoResize);
 		} finally {
-			setSending(false);
-			if (
-				!document.activeElement ||
-				document.activeElement === document.body ||
-				document.activeElement === textareaRef
-			) {
-				textareaRef?.focus();
+			if (onThisRoom()) {
+				setSending(false);
+				restoreFocus();
 			}
 		}
 	};
@@ -624,6 +787,13 @@ const Composer: Component<{
 					{error()}
 				</div>
 			</Show>
+			<Show when={attachments().length > 0}>
+				<AttachmentTray
+					attachments={attachments()}
+					onRemove={removeAttachment}
+					onCaptionChange={(id, caption) => updateAttachment(id, { caption })}
+				/>
+			</Show>
 			<div class="relative">
 				<MentionPicker
 					items={filteredMembers()}
@@ -676,6 +846,7 @@ const Composer: Component<{
 					onKeyUp={() => detectMention()}
 					onClick={() => detectMention()}
 					onKeyDown={onKeyDown}
+					onPaste={onPaste}
 					placeholder={props.editingEvent ? "Edit message…" : "Send a message…"}
 					role={pickerRendered() ? "combobox" : undefined}
 					aria-label={props.editingEvent ? "Edit message" : "Message"}

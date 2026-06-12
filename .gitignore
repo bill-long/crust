@@ -37,3 +37,4 @@ pnpm-debug.log*
 investigate-*.mjs
 smoke-*.png
 smoke-output.txt
+*.stackdump
