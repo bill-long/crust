@@ -116,15 +116,32 @@ export const MediaFile: Component<{
 			fallback={
 				// Plain file: a direct download anchor. `httpUrl` is the plaintext
 				// media URL (same source the inline <img> uses for plain images).
-				<a
-					href={props.httpUrl ?? "#"}
-					download={sanitizeFilename(props.filename)}
-					class={chipClass}
-					aria-label={`Download ${props.filename}${sizeLabel() ? `, ${sizeLabel()}` : ""}`}
+				// A malformed/empty MXC leaves no URL, so show an unavailable chip
+				// rather than a dead `href="#"` link (matching the audio/video paths).
+				<Show
+					when={props.httpUrl}
+					fallback={
+						<div class={`${chipClass} cursor-default hover:bg-surface-2`}>
+							<DownloadIcon />
+							<FileMeta />
+							<span class="ml-auto text-xs text-text-disabled">
+								Unavailable
+							</span>
+						</div>
+					}
 				>
-					<DownloadIcon />
-					<FileMeta />
-				</a>
+					{(url) => (
+						<a
+							href={url()}
+							download={sanitizeFilename(props.filename)}
+							class={chipClass}
+							aria-label={`Download ${props.filename}${sizeLabel() ? `, ${sizeLabel()}` : ""}`}
+						>
+							<DownloadIcon />
+							<FileMeta />
+						</a>
+					)}
+				</Show>
 			}
 		>
 			<div class="mt-1 flex max-w-[min(100%,24rem)] flex-col gap-1">
