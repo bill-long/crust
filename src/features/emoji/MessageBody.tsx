@@ -1,6 +1,7 @@
 import DOMPurify from "dompurify";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, Show } from "solid-js";
+import { escapeAttr, escapeHtml } from "../../lib/htmlEscape";
 import {
 	canonicalizeUrl,
 	trimUrlTail,
@@ -350,18 +351,6 @@ function plainTextToHtml(
 	}
 
 	return result.join("").replace(/\n/g, "<br>");
-}
-
-function escapeHtml(str: string): string {
-	return str
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
-
-function escapeAttr(str: string): string {
-	return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
 /**

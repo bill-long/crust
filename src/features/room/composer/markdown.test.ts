@@ -170,10 +170,17 @@ describe("formatMarkdown — mentions & emoji", () => {
 });
 
 describe("formatMarkdown — sentinel safety", () => {
-	it("strips a user-typed replacement char without corrupting output", () => {
-		// Only the sentinel char is dropped; the literal digits it surrounded
-		// remain as ordinary text (no placeholder collision).
-		expect(html("**b**�0�")).toBe("<strong>b</strong>0");
+	it("preserves U+FFFD (replacement char) so HTML matches the plain body", () => {
+		// U+FFFD legitimately appears in user input from decoding errors; it must
+		// survive into formatted_body, not be dropped (else HTML clients would
+		// show different text than plaintext clients).
+		expect(html("**b** �")).toBe("<strong>b</strong> �");
+	});
+
+	it("neutralizes the U+FFFF sentinel without corrupting placeholder output", () => {
+		// A user-typed sentinel (U+FFFF) is stripped so it can't collide with our
+		// `PH<idx>PH` tokens; the surrounding text is otherwise untouched.
+		expect(html("**b**￿0￿")).toBe("<strong>b</strong>0");
 	});
 });
 

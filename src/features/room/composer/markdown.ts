@@ -17,6 +17,10 @@
  * Crust's own renderer round-trips them; Element parses the same set.
  */
 
+import { escapeAttr, escapeHtml } from "../../../lib/htmlEscape";
+
+export { escapeHtml };
+
 export interface Mention {
 	userId: string;
 	displayName: string;
@@ -30,19 +34,6 @@ export interface CustomEmoji {
 export interface FormatResult {
 	body: string;
 	formatted_body: string | null;
-}
-
-export function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
-
-/** Escape only the characters unsafe inside a double-quoted attribute value. */
-function escapeAttr(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
 
 /** Regex-escape a string for literal use in `new RegExp`. */
@@ -67,8 +58,16 @@ function isSafeLinkUrl(url: string): boolean {
 	}
 }
 
-/** Sentinel used to fence off already-rendered fragments from later passes. */
-const PH = "�";
+/**
+ * Sentinel that fences off already-rendered fragments from later passes. We
+ * use U+FFFF — a permanent Unicode noncharacter that never appears in real
+ * text — rather than U+FFFD (the replacement char), which legitimately shows
+ * up in user input from decoding errors. Dropping our sentinel from input
+ * (below) must not lose characters the plain `body` still carries, so we
+ * neutralize only U+FFFF and leave U+FFFD intact. Mirrors the receive-side
+ * sentinels in `plainTextToHtml` (`MessageBody.tsx`).
+ */
+const PH = "￿";
 
 interface InlineContext {
 	mentions: Mention[];
@@ -115,8 +114,8 @@ function formatInline(line: string, ctx: InlineContext): string {
 		},
 	);
 
-	// Escape the remaining text; placeholder tokens (`�<digits>�`)
-	// are left untouched by escaping.
+	// Escape the remaining text; placeholder tokens (`PH<digits>PH`) contain
+	// only the sentinel and digits, so escaping leaves them untouched.
 	s = escapeHtml(s);
 
 	// Mentions @DisplayName → permalink pill. Boundary-checked on both sides
