@@ -125,11 +125,21 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		() => props.image()?.encryptedFile ?? null,
 		() => props.image()?.mimetype ?? null,
 	);
-	/** The URL to actually render/download: decrypted blob for encrypted, else the raw url. */
+	/**
+	 * The URL to actually render/download. `isEncrypted` is authoritative: for
+	 * any encrypted image we only ever expose the decrypted blob (null until it
+	 * decrypts, and forever null when the descriptor is missing/invalid), never
+	 * `fullUrl` — which for encrypted events is the ciphertext.
+	 */
 	const displaySrc = (): string | null => {
 		const img = props.image();
 		if (!img) return null;
-		return img.encryptedFile ? decrypted.url() : img.fullUrl;
+		if (!img.isEncrypted) return img.fullUrl;
+		// Encrypted: only ever the decrypted blob, and only when a valid
+		// descriptor actually produced one. `encryptedFile` (not just a possibly
+		// stale `decrypted.url()`) gates it, so a malformed encrypted image can't
+		// surface ciphertext or a previous image's blob.
+		return img.encryptedFile ? decrypted.url() : null;
 	};
 
 	// Natural (intrinsic) image dimensions, set from `<img>` onLoad
@@ -511,7 +521,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		);
 		// For encrypted images download the already-decrypted blob, never the
 		// ciphertext. The blob URL is valid while the lightbox is open.
-		const src = img.encryptedFile ? decrypted.url() : img.fullUrl;
+		const src = displaySrc();
 		if (!src) {
 			setDownloadError("Download failed: image is not ready");
 			return;
@@ -680,11 +690,13 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<button
 										type="button"
 										onClick={handleDownload}
-										disabled={!!img().encryptedFile && !decrypted.url()}
+										disabled={img().isEncrypted && !displaySrc()}
 										title={
-											img().encryptedFile && !decrypted.url()
-												? "Decrypting…"
-												: "Download"
+											img().isEncrypted && !img().encryptedFile
+												? "Image can't be decrypted"
+												: img().isEncrypted && !displaySrc()
+													? "Decrypting…"
+													: "Download"
 										}
 										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
 										aria-label="Download image"
@@ -791,8 +803,16 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 					>
 						{(img) => (
 							<Switch>
-								{/* Encrypted: download + decrypt failed → fail closed. */}
-								<Match when={img().encryptedFile && decrypted.failed()}>
+								{/* Encrypted with no usable descriptor (malformed
+								    `content.file`) or a failed download/verify/decrypt →
+								    fail closed. `isEncrypted` is authoritative so we never
+								    fall through to rendering the ciphertext `fullUrl`. */}
+								<Match
+									when={
+										img().isEncrypted &&
+										(!img().encryptedFile || decrypted.failed())
+									}
+								>
 									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
 										<div class="mb-1 font-semibold text-text-primary">
 											Couldn't decrypt image
@@ -804,7 +824,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									</div>
 								</Match>
 								{/* Encrypted: still downloading / decrypting. */}
-								<Match when={img().encryptedFile && !decrypted.url()}>
+								<Match when={img().isEncrypted && !decrypted.url()}>
 									<div class="text-text-muted">Decrypting…</div>
 								</Match>
 								{/* Plain image failed to load. */}

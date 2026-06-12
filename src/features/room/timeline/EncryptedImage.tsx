@@ -25,10 +25,21 @@ export const EncryptedImage: Component<{
 		() => props.mimetype,
 	);
 
-	const reserveStyle = (): Record<string, string> =>
-		props.reserveWidth && props.reserveHeight
-			? { "aspect-ratio": `${props.reserveWidth} / ${props.reserveHeight}` }
-			: {};
+	// Reserve the *same* box the decrypted <img> will occupy so the row doesn't
+	// jump when the image arrives. Scale intrinsic dims into the image's max box
+	// (max-w 24rem / max-h 16rem); fall back to a default box when dims unknown.
+	const MAX_W = 384;
+	const MAX_H = 256;
+	const reserveStyle = (): Record<string, string> => {
+		const w = props.reserveWidth;
+		const h = props.reserveHeight;
+		if (!w || !h) return { width: "10rem", height: "8rem" };
+		const scale = Math.min(MAX_W / w, MAX_H / h, 1);
+		return {
+			width: `${Math.round(w * scale)}px`,
+			height: `${Math.round(h * scale)}px`,
+		};
+	};
 
 	return (
 		<Switch>
@@ -36,7 +47,7 @@ export const EncryptedImage: Component<{
 			    download/verify/decrypt — fail closed rather than spinning forever. */}
 			<Match when={!props.file || !props.httpUrl || media.failed()}>
 				<div
-					class="mt-1 flex max-h-64 max-w-[min(100%,24rem)] items-center justify-center rounded bg-surface-2 px-4 py-6 text-center text-xs text-text-disabled"
+					class="mt-1 flex max-w-[min(100%,24rem)] items-center justify-center rounded bg-surface-2 p-4 text-center text-xs text-text-disabled"
 					style={reserveStyle()}
 				>
 					Couldn't decrypt image
@@ -56,7 +67,7 @@ export const EncryptedImage: Component<{
 			</Match>
 			<Match when={true}>
 				<div
-					class="mt-1 flex max-h-64 w-40 max-w-[min(100%,24rem)] items-center justify-center rounded bg-surface-2 px-4 py-6 text-center text-xs text-text-disabled"
+					class="mt-1 flex max-w-[min(100%,24rem)] items-center justify-center rounded bg-surface-2 p-4 text-center text-xs text-text-disabled"
 					style={reserveStyle()}
 					aria-busy="true"
 				>

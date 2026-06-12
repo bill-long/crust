@@ -164,6 +164,21 @@ describe("ImageLightbox", () => {
 		expect(screen.getByText(/Decrypting/i)).toBeTruthy();
 	});
 
+	it("Encrypted image with a missing descriptor fails closed (no ciphertext)", () => {
+		// isEncrypted but no usable encryptedFile (malformed content.file): must
+		// not render or expose the ciphertext fullUrl anywhere.
+		const fetchSpy = vi.fn();
+		vi.stubGlobal("fetch", fetchSpy);
+		setup({ image: mkImage({ isEncrypted: true, encryptedFile: null }) });
+
+		expect(screen.queryByAltText("kitten.png")).toBeNull();
+		expect(screen.getByText(/couldn't decrypt image/i)).toBeTruthy();
+		const btn = screen.getByLabelText("Download image") as HTMLButtonElement;
+		expect(btn.disabled).toBe(true);
+		expect(screen.queryByLabelText("Open in new tab")).toBeNull();
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
 	it("'0' resets to fit, '1' zooms to 100%", () => {
 		setup();
 		const dialog = screen.getByRole("dialog");

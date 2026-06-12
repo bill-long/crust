@@ -50,7 +50,18 @@ export function createDecryptedObjectUrl(
 		const url = httpUrl();
 		const f = file();
 		if (!url || !f) return null;
-		if (prev && prev.httpUrl === url && prev.file.iv === f.iv) return prev;
+		// Compare every field that affects the download + decrypt + verify, so a
+		// re-projection that changes key material or the expected hash (not just
+		// the IV) can never reuse a stale descriptor and bypass the hash check.
+		if (
+			prev &&
+			prev.httpUrl === url &&
+			prev.file.iv === f.iv &&
+			prev.file.key.k === f.key.k &&
+			prev.file.hashes.sha256 === f.hashes.sha256
+		) {
+			return prev;
+		}
 		return { httpUrl: url, file: f };
 	}, null);
 
