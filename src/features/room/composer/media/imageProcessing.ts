@@ -69,7 +69,12 @@ export async function inspectImage(
 	ctx.drawImage(bitmap, 0, 0, tw, th);
 	bitmap.close();
 
-	const keepAlpha = file.type === "image/png" || file.type === "image/webp";
+	// PNG/WebP/GIF can carry transparency; encode their thumbnails as PNG so we
+	// don't flatten alpha onto an opaque background.
+	const keepAlpha =
+		file.type === "image/png" ||
+		file.type === "image/webp" ||
+		file.type === "image/gif";
 	const mimetype = keepAlpha ? "image/png" : "image/jpeg";
 
 	let blob: Blob;

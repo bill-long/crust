@@ -88,12 +88,13 @@ describe("validateSize", () => {
 });
 
 describe("uploadAndSend", () => {
-	it("uploads thumbnail + full image and sends an m.image", async () => {
+	it("uploads full image then thumbnail and sends an m.image", async () => {
 		const { client } = setup();
 		const upload = client.uploadContent as ReturnType<typeof vi.fn>;
+		// Full file is uploaded first, thumbnail second.
 		upload
-			.mockResolvedValueOnce({ content_uri: "mxc://srv/thumb" })
-			.mockResolvedValueOnce({ content_uri: "mxc://srv/full" });
+			.mockResolvedValueOnce({ content_uri: "mxc://srv/full" })
+			.mockResolvedValueOnce({ content_uri: "mxc://srv/thumb" });
 
 		const file = new File([new Uint8Array(50)], "cat.png", {
 			type: "image/png",
@@ -139,10 +140,10 @@ describe("uploadAndSend", () => {
 	it("still sends the full image when the thumbnail upload fails (best-effort)", async () => {
 		const { client } = setup();
 		const upload = client.uploadContent as ReturnType<typeof vi.fn>;
-		// First call is the thumbnail (rejects), second is the full image.
+		// Full file uploads first (succeeds), then the thumbnail upload fails.
 		upload
-			.mockRejectedValueOnce(new Error("thumb upload failed"))
-			.mockResolvedValueOnce({ content_uri: "mxc://srv/full" });
+			.mockResolvedValueOnce({ content_uri: "mxc://srv/full" })
+			.mockRejectedValueOnce(new Error("thumb upload failed"));
 
 		const file = new File([new Uint8Array(50)], "cat.png", {
 			type: "image/png",
@@ -159,6 +160,23 @@ describe("uploadAndSend", () => {
 			(content.info as Record<string, unknown>).thumbnail_url,
 		).toBeUndefined();
 		expect(client.sendMessage).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not upload a thumbnail when the full image upload fails", async () => {
+		const { client } = setup();
+		const upload = client.uploadContent as ReturnType<typeof vi.fn>;
+		// The first (full image) upload fails outright.
+		upload.mockRejectedValueOnce(new Error("full upload failed"));
+
+		const file = new File([new Uint8Array(50)], "cat.png", {
+			type: "image/png",
+		});
+		await expect(
+			uploadAndSend(client, ROOM, attachment(file, "image")),
+		).rejects.toThrow(/full upload failed/i);
+		// Only the full upload was attempted — no orphaned thumbnail MXC.
+		expect(upload).toHaveBeenCalledTimes(1);
+		expect(client.sendMessage).not.toHaveBeenCalled();
 	});
 
 	it("rejects sends to encrypted rooms", async () => {

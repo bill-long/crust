@@ -86,32 +86,21 @@ export async function uploadAndSend(
 	const kind = attachment.kind;
 	const filename = sanitizeFilename(file.name);
 
-	// Image-only: decode once for intrinsic dimensions + an optional thumbnail.
-	// Both are best-effort — a decode/thumbnail failure still sends the full
-	// image (without w/h or thumbnail) rather than failing the whole attachment.
+	// Image-only: decode once for intrinsic dimensions + an optional thumbnail
+	// blob. Best-effort — a decode failure still sends the full image (without
+	// w/h or thumbnail). We don't upload the thumbnail yet; the full file goes
+	// first so a failed full upload can't orphan a thumbnail MXC.
 	let width = attachment.width;
 	let height = attachment.height;
 	let thumbnail: Thumbnail | null = null;
-	let thumbContentUri: string | undefined;
 	if (kind === "image") {
 		try {
 			const inspection = await inspectImage(file);
 			width = inspection.width;
 			height = inspection.height;
-			if (inspection.thumbnail) {
-				const thumbResp = await client.uploadContent(
-					inspection.thumbnail.blob,
-					{
-						type: inspection.thumbnail.mimetype,
-						name: `thumb-${filename}`,
-					},
-				);
-				thumbnail = inspection.thumbnail;
-				thumbContentUri = thumbResp.content_uri;
-			}
+			thumbnail = inspection.thumbnail;
 		} catch {
 			thumbnail = null;
-			thumbContentUri = undefined;
 		}
 	}
 
@@ -124,6 +113,22 @@ export async function uploadAndSend(
 		},
 	});
 	opts.onProgress?.(1);
+
+	// Best-effort thumbnail upload, only after the full upload succeeded — so a
+	// full-upload failure never leaves an unreferenced thumbnail on the server.
+	let thumbContentUri: string | undefined;
+	if (thumbnail) {
+		try {
+			const thumbResp = await client.uploadContent(thumbnail.blob, {
+				type: thumbnail.mimetype,
+				name: `thumb-${filename}`,
+			});
+			thumbContentUri = thumbResp.content_uri;
+		} catch {
+			thumbnail = null;
+			thumbContentUri = undefined;
+		}
+	}
 
 	const content = buildMediaContent({
 		kind,

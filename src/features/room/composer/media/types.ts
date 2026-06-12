@@ -19,7 +19,11 @@ export interface PendingAttachment {
 	previewUrl: string | null;
 	/** Optional per-attachment caption. */
 	caption: string;
-	/** Intrinsic dimensions, populated for images once probed. */
+	/**
+	 * Optional caller-provided intrinsic dimensions. The upload path probes
+	 * images itself, so these are only a fallback and are not populated by the
+	 * queue today.
+	 */
 	width?: number;
 	height?: number;
 	status: AttachmentStatus;
