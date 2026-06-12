@@ -1,12 +1,5 @@
-import {
-	type Component,
-	createEffect,
-	createSignal,
-	type JSX,
-	on,
-	onCleanup,
-	Show,
-} from "solid-js";
+import { Popover } from "@kobalte/core/popover";
+import { type Component, createSignal, type JSX, Show } from "solid-js";
 import { HotkeyCaptureButton } from "../features/voice/HotkeyCaptureButton";
 import { updateSetting, userSettings } from "../stores/settings";
 import { micEnabled, toggleUserWantsMic, userWantsMic } from "../stores/voice";
@@ -108,69 +101,53 @@ const SplitAudioButton: Component<{
 	menuContent: JSX.Element;
 }> = (props) => {
 	const [menuOpen, setMenuOpen] = createSignal(false);
-	let containerRef: HTMLDivElement | undefined;
-
-	// Outside-click listener. Safe to attach synchronously because the
-	// opening mousedown fires before onClick → setMenuOpen(true), so
-	// the listener is never reached by the opening click's mousedown.
-	createEffect(
-		on(menuOpen, (open) => {
-			if (!open) return;
-			const handler = (e: MouseEvent): void => {
-				if (containerRef && !containerRef.contains(e.target as Node)) {
-					setMenuOpen(false);
-				}
-			};
-			document.addEventListener("mousedown", handler);
-			onCleanup(() => {
-				document.removeEventListener("mousedown", handler);
-			});
-		}),
-	);
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") setMenuOpen(false);
-	};
 
 	return (
-		// biome-ignore lint/a11y/useSemanticElements: flex split-button layout prevents fieldset use
-		<div
-			class="relative flex"
-			ref={containerRef}
-			role="group"
-			onKeyDown={handleKeyDown}
+		// Kobalte Popover renders the drop-up in a portal (top overlay layer)
+		// so it can't be clipped by the sidebar's overflow or covered by the
+		// CallStatusPanel that docks above the UserBar while in a call.
+		<Popover
+			open={menuOpen()}
+			onOpenChange={setMenuOpen}
+			placement="top-start"
+			gutter={6}
 		>
-			{/* Main toggle */}
-			<button
-				type="button"
-				onClick={props.onToggle}
-				class={`flex h-8 w-8 items-center justify-center rounded-l transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
-					props.active
-						? "text-danger-text hover:bg-surface-3"
-						: "text-text-muted hover:bg-surface-3 hover:text-text-primary"
-				}`}
-				aria-label={props.label}
+			{/* Anchor the popover to the whole split button so it left-aligns
+			    with the group's edge, while only the chevron triggers it. */}
+			<Popover.Anchor
+				class="flex"
+				role="group"
+				aria-label={`${props.label} controls`}
 			>
-				{props.icon}
-			</button>
-			{/* Dropdown arrow */}
-			<button
-				type="button"
-				onClick={() => setMenuOpen((v) => !v)}
-				class="flex h-8 w-4 items-center justify-center rounded-r transition-colors text-text-muted hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-				aria-label={`${props.label} options`}
-				aria-expanded={menuOpen()}
-			>
-				<ChevronUpIcon />
-			</button>
+				{/* Main toggle */}
+				<button
+					type="button"
+					onClick={props.onToggle}
+					class={`flex h-8 w-8 items-center justify-center rounded-l transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+						props.active
+							? "text-danger-text hover:bg-surface-3"
+							: "text-text-muted hover:bg-surface-3 hover:text-text-primary"
+					}`}
+					aria-label={props.label}
+				>
+					{props.icon}
+				</button>
+				{/* Dropdown arrow */}
+				<Popover.Trigger
+					class="flex h-8 w-4 items-center justify-center rounded-r transition-colors text-text-muted hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					aria-label={`${props.label} options`}
+				>
+					<ChevronUpIcon />
+				</Popover.Trigger>
+			</Popover.Anchor>
 
 			{/* Drop-up menu */}
-			<Show when={menuOpen()}>
-				<div class="absolute bottom-full left-0 z-30 mb-1 min-w-48 rounded-lg bg-surface-3 p-3 shadow-xl">
+			<Popover.Portal>
+				<Popover.Content class="z-50 min-w-48 rounded-lg bg-surface-3 p-3 shadow-xl focus:outline-none">
 					{props.menuContent}
-				</div>
-			</Show>
-		</div>
+				</Popover.Content>
+			</Popover.Portal>
+		</Popover>
 	);
 };
 
