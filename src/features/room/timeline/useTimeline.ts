@@ -59,54 +59,73 @@ export interface TimelineEvent {
 	body: string;
 	format: string | null;
 	formattedBody: string | null;
-	imageUrl: string | null;
 	/**
-	 * Intrinsic pixel dimensions of `imageUrl`, parsed from
-	 * `content.info.w` / `content.info.h` for `m.image` / `m.sticker`
-	 * events. Used by the renderer to reserve layout space *before*
-	 * the image loads — eliminates the "row grows on image load" jump
-	 * that confuses the virtualizer on hard refresh.
+	 * Scaled (thumbnail) http URL of the media, for the inline `<img>` of an
+	 * `m.image` / `m.sticker` / GIF row. Only meaningful for images; the
+	 * video / audio / file renderers use {@link TimelineEvent.mediaFullUrl}
+	 * instead. Null when the content has no usable mxc URL.
+	 */
+	mediaUrl: string | null;
+	/**
+	 * Intrinsic pixel dimensions of the media, parsed from
+	 * `content.info.w` / `content.info.h` for `m.image` / `m.sticker` /
+	 * `m.video` events (and GIF-URL `m.text`). Used by the renderer to
+	 * reserve layout space *before* the media loads — eliminates the
+	 * "row grows on load" jump that confuses the virtualizer on hard refresh.
 	 * Null when either dimension is missing, non-numeric, non-finite,
 	 * or non-positive.
 	 */
-	imageWidth: number | null;
-	imageHeight: number | null;
+	mediaWidth: number | null;
+	mediaHeight: number | null;
 	/**
-	 * Full-resolution http URL for the image, suitable for the lightbox.
-	 * Built from the same mxc URI as `imageUrl` but without scale/thumb
-	 * params. Only populated for `m.image` (not `m.sticker`, not GIF
-	 * text) so the lightbox gallery doesn't accidentally include
-	 * sticker-only or third-party gif rows. Null when the content has
-	 * no usable mxc URL.
+	 * Full-resolution http URL of the media, built from the same mxc URI
+	 * as {@link TimelineEvent.mediaUrl} but without scale/thumb params. For
+	 * images it's the lightbox source; for `m.video` / `m.audio` / `m.file`
+	 * it's the bytes the player loads or the download fetches; for an encrypted
+	 * `m.sticker` it's the ciphertext the renderer decrypts. Populated for the
+	 * attachment msgtypes (`m.image` / `m.video` / `m.audio` / `m.file`) and
+	 * `m.sticker` — NOT for GIF text. The image lightbox gallery keys off
+	 * `msgtype === "m.image"`, so stickers and gif rows are excluded from it
+	 * regardless. Null when the content has no usable mxc URL. When
+	 * {@link TimelineEvent.mediaIsEncrypted}, this points at *ciphertext*.
 	 */
-	imageFullUrl: string | null;
+	mediaFullUrl: string | null;
+	/**
+	 * Scaled (thumbnail) http poster URL for an `m.video`, from
+	 * `content.info.thumbnail_url`. Only populated for *plain* video (an
+	 * encrypted `thumbnail_file` is ciphertext and isn't decoded here). Null
+	 * otherwise.
+	 */
+	mediaPosterUrl: string | null;
 	/** Mimetype from `content.info.mimetype`, e.g. `"image/png"`. */
-	imageMimetype: string | null;
+	mediaMimetype: string | null;
 	/** Byte size from `content.info.size`, when present. */
-	imageSize: number | null;
+	mediaSize: number | null;
 	/**
 	 * User-facing filename: prefers `content.filename` (newer Matrix
 	 * spec), falls back to `content.body` when it looks like a filename
 	 * (non-empty, contains no newlines). Null otherwise.
 	 */
-	imageFilename: string | null;
+	mediaFilename: string | null;
 	/**
-	 * True when the image is an encrypted attachment (source was
-	 * `content.file`, not `content.url`). When set, `imageUrl`/`imageFullUrl`
-	 * point at *ciphertext*: consumers must download + decrypt it (via
-	 * `imageEncryptedFile` / {@link createDecryptedObjectUrl}) or fail closed,
-	 * never render or download those URLs directly.
+	 * True when the attachment is encrypted (source was `content.file`, not
+	 * `content.url`). When set, {@link TimelineEvent.mediaUrl} /
+	 * {@link TimelineEvent.mediaFullUrl} point at *ciphertext*: consumers must
+	 * download + decrypt it (via {@link TimelineEvent.mediaEncryptedFile} /
+	 * {@link createDecryptedObjectUrl}) or fail closed, never render or download
+	 * those URLs directly.
 	 */
-	imageIsEncrypted: boolean;
+	mediaIsEncrypted: boolean;
 	/**
-	 * Validated EncryptedFile descriptor for an encrypted `m.image`, used to
-	 * download + decrypt the attachment for display. Null for plain images and
-	 * non-image events. May ALSO be null when `imageIsEncrypted === true` if
-	 * `content.file` is malformed/incomplete (missing key/iv/hash) — downstream
-	 * UI must treat that as a fail-closed "can't decrypt" case, never rendering
-	 * the ciphertext.
+	 * Validated EncryptedFile descriptor for an encrypted attachment
+	 * (`m.image` / `m.video` / `m.audio` / `m.file`), used to download + decrypt
+	 * it for display / playback / download. Null for plain attachments and
+	 * non-attachment events. May ALSO be null when `mediaIsEncrypted === true`
+	 * if `content.file` is malformed/incomplete (missing key/iv/hash) —
+	 * downstream UI must treat that as a fail-closed "can't decrypt" case, never
+	 * rendering the ciphertext.
 	 */
-	imageEncryptedFile: EncryptedFileInfo | null;
+	mediaEncryptedFile: EncryptedFileInfo | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -250,15 +269,16 @@ function buildSyntheticCallLeaveEvent(
 		body: "",
 		format: null,
 		formattedBody: null,
-		imageUrl: null,
-		imageWidth: null,
-		imageHeight: null,
-		imageFullUrl: null,
-		imageMimetype: null,
-		imageSize: null,
-		imageFilename: null,
-		imageIsEncrypted: false,
-		imageEncryptedFile: null,
+		mediaUrl: null,
+		mediaWidth: null,
+		mediaHeight: null,
+		mediaFullUrl: null,
+		mediaPosterUrl: null,
+		mediaMimetype: null,
+		mediaSize: null,
+		mediaFilename: null,
+		mediaIsEncrypted: false,
+		mediaEncryptedFile: null,
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,
@@ -308,8 +328,8 @@ function eventToTimelineEvent(
 	const sender = event.getSender() ?? "";
 	const member = room.getMember(sender);
 
-	let imageUrl: string | null = null;
-	let imageFullUrl: string | null = null;
+	let mediaUrl: string | null = null;
+	let mediaFullUrl: string | null = null;
 	const encryptedMxc =
 		typeof content.file?.url === "string" && content.file.url.length > 0
 			? content.file.url
@@ -319,22 +339,31 @@ function eventToTimelineEvent(
 			? content.url
 			: null;
 	const mxcUrl = plainMxc || encryptedMxc;
-	const imageIsEncrypted = !plainMxc && encryptedMxc !== null;
+	const mediaIsEncrypted = !plainMxc && encryptedMxc !== null;
 	if (mxcUrl) {
-		imageUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
-		imageFullUrl = client.mxcUrlToHttp(mxcUrl) ?? null;
+		mediaUrl = client.mxcUrlToHttp(mxcUrl, 800, 600, "scale") ?? null;
+		mediaFullUrl = client.mxcUrlToHttp(mxcUrl) ?? null;
 	}
 
-	// Image metadata used by the lightbox. Only meaningful for true
-	// m.image events — sticker/GIF rows aren't part of the gallery so
-	// we don't bother populating these fields for them.
-	const isPlainImage = content.msgtype === "m.image";
+	// Media metadata (mimetype / size / filename / encrypted descriptor),
+	// populated for every event that renders from a media source: the attachment
+	// msgtypes (so the file/video/audio renderers and the image lightbox can read
+	// it) plus `m.sticker` (which renders as an image and may be encrypted — it
+	// must fail closed / decrypt rather than render its ciphertext URL). GIF-URL
+	// `m.text` rows aren't media sources in this sense, so they don't get these
+	// fields.
+	const isAttachment =
+		content.msgtype === "m.image" ||
+		content.msgtype === "m.video" ||
+		content.msgtype === "m.audio" ||
+		content.msgtype === "m.file";
+	const hasMediaSource = isAttachment || event.getType() === "m.sticker";
 	const infoMime =
-		isPlainImage && typeof content.info?.mimetype === "string"
+		hasMediaSource && typeof content.info?.mimetype === "string"
 			? content.info.mimetype
 			: null;
 	const infoSize =
-		isPlainImage &&
+		hasMediaSource &&
 		typeof content.info?.size === "number" &&
 		Number.isFinite(content.info.size) &&
 		content.info.size >= 0
@@ -345,47 +374,59 @@ function eventToTimelineEvent(
 	// fallback to `content.body` even though the latter may carry a
 	// usable filename.
 	const rawFilename =
-		isPlainImage &&
+		hasMediaSource &&
 		typeof content.filename === "string" &&
 		content.filename.trim().length > 0
 			? content.filename
-			: isPlainImage && typeof content.body === "string"
+			: hasMediaSource && typeof content.body === "string"
 				? content.body
 				: null;
 	// Treat whitespace-only, multi-line, or otherwise control-char-bearing
-	// bodies as "no filename" — `m.image` events often carry a caption-style
+	// bodies as "no filename" — attachment events often carry a caption-style
 	// body that isn't actually a filename, and any ASCII control char
 	// (LF, CR, NUL, DEL, etc.) would corrupt UI labels / the lightbox header
 	// if used directly.
 	const trimmedFilename = rawFilename?.trim();
-	const imageFilename =
+	const mediaFilename =
 		trimmedFilename && !hasControlChar(trimmedFilename)
 			? trimmedFilename
 			: null;
 
-	// Image / sticker intrinsic dimensions, used by `TimelineItem` to
-	// reserve the layout box before the image decodes. Gated on
-	// msgtype / type so non-image events with an `info` block (e.g. an
-	// uncommon m.file payload that happens to carry a `w`/`h`) don't
-	// produce misleading non-null values on the event projection.
-	// Also accept m.text messages whose entire body is a recognized
-	// GIF provider URL (our Composer attaches `info.w/h` to those so
-	// the GIF row can reserve its box exactly like m.image does).
+	// Plain video poster from the cleartext `info.thumbnail_url`. Encrypted
+	// videos carry a ciphertext `thumbnail_file` instead; decoding that is
+	// deferred (#286), so the encrypted-video renderer shows a placeholder.
+	const mediaPosterUrl =
+		content.msgtype === "m.video" &&
+		!mediaIsEncrypted &&
+		typeof content.info?.thumbnail_url === "string" &&
+		content.info.thumbnail_url.length > 0
+			? (client.mxcUrlToHttp(content.info.thumbnail_url, 800, 600, "scale") ??
+				null)
+			: null;
+
+	// Intrinsic dimensions, used by `TimelineItem` to reserve the layout box
+	// before the media decodes. Gated on msgtype / type so events with an
+	// `info` block but no visual box (e.g. an m.file that happens to carry a
+	// `w`/`h`) don't produce misleading non-null values. Covers image / sticker
+	// / video, plus m.text messages whose entire body is a recognized GIF
+	// provider URL (our Composer attaches `info.w/h` to those so the GIF row
+	// can reserve its box exactly like m.image does).
 	const bodyForGifCheck = typeof content.body === "string" ? content.body : "";
 	const isGifText =
 		content.msgtype === "m.text" && extractGifUrl(bodyForGifCheck) !== null;
-	const isImageLike =
+	const hasIntrinsicBox =
 		content.msgtype === "m.image" ||
+		content.msgtype === "m.video" ||
 		event.getType() === "m.sticker" ||
 		isGifText;
-	const rawW = isImageLike ? content.info?.w : undefined;
-	const rawH = isImageLike ? content.info?.h : undefined;
+	const rawW = hasIntrinsicBox ? content.info?.w : undefined;
+	const rawH = hasIntrinsicBox ? content.info?.h : undefined;
 	const validW = typeof rawW === "number" && Number.isFinite(rawW) && rawW > 0;
 	const validH = typeof rawH === "number" && Number.isFinite(rawH) && rawH > 0;
 	// All-or-nothing: a single dimension can't reserve a usable
 	// aspect-ratio box, so only expose dims when both are valid.
-	const imageWidth = validW && validH ? rawW : null;
-	const imageHeight = validW && validH ? rawH : null;
+	const mediaWidth = validW && validH ? rawW : null;
+	const mediaHeight = validW && validH ? rawH : null;
 
 	// Aggregate reactions from SDK relations. Exclude failed (NOT_SENT)
 	// and cancelled relations so a failed local-echo reaction does not
@@ -516,16 +557,17 @@ function eventToTimelineEvent(
 			typeof content.formatted_body === "string"
 				? content.formatted_body
 				: null,
-		imageUrl,
-		imageWidth,
-		imageHeight,
-		imageFullUrl: isPlainImage ? imageFullUrl : null,
-		imageMimetype: infoMime,
-		imageSize: infoSize,
-		imageFilename,
-		imageIsEncrypted: isPlainImage && imageIsEncrypted,
-		imageEncryptedFile:
-			isPlainImage && imageIsEncrypted
+		mediaUrl,
+		mediaWidth,
+		mediaHeight,
+		mediaFullUrl: hasMediaSource ? mediaFullUrl : null,
+		mediaPosterUrl,
+		mediaMimetype: infoMime,
+		mediaSize: infoSize,
+		mediaFilename,
+		mediaIsEncrypted: hasMediaSource && mediaIsEncrypted,
+		mediaEncryptedFile:
+			hasMediaSource && mediaIsEncrypted
 				? parseEncryptedFile(content.file)
 				: null,
 		isEncrypted: event.isEncrypted(),

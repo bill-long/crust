@@ -10,7 +10,7 @@ import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
  * placeholder rather than a broken `<img>` of ciphertext.
  */
 export const EncryptedImage: Component<{
-	/** Unscaled ciphertext http URL (the projection's `imageFullUrl`). */
+	/** Unscaled ciphertext http URL (the projection's `mediaFullUrl`). */
 	httpUrl: string | null;
 	file: EncryptedFileInfo | null;
 	mimetype: string | null;

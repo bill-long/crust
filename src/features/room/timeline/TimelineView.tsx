@@ -1185,7 +1185,7 @@ const TimelineView: Component<{
 	);
 	const imageGallery = createMemo<TimelineEvent[]>(() =>
 		events.filter(
-			(e) => e.msgtype === "m.image" && e.status === null && !!e.imageFullUrl,
+			(e) => e.msgtype === "m.image" && e.status === null && !!e.mediaFullUrl,
 		),
 	);
 	const lightboxIndex = createMemo<number>(() => {
@@ -1205,19 +1205,19 @@ const TimelineView: Component<{
 		const idx = lightboxIndex();
 		if (idx < 0) return null;
 		const e = imageGallery()[idx];
-		if (!e?.imageFullUrl) return null;
+		if (!e?.mediaFullUrl) return null;
 		return {
 			eventId: e.eventId,
-			fullUrl: e.imageFullUrl,
-			mimetype: e.imageMimetype,
-			size: e.imageSize,
-			filename: e.imageFilename,
-			width: e.imageWidth,
-			height: e.imageHeight,
+			fullUrl: e.mediaFullUrl,
+			mimetype: e.mediaMimetype,
+			size: e.mediaSize,
+			filename: e.mediaFilename,
+			width: e.mediaWidth,
+			height: e.mediaHeight,
 			senderName: e.senderName,
 			timestamp: e.timestamp,
-			isEncrypted: e.imageIsEncrypted,
-			encryptedFile: e.imageEncryptedFile,
+			isEncrypted: e.mediaIsEncrypted,
+			encryptedFile: e.mediaEncryptedFile,
 		};
 	});
 	const hasPrev = (): boolean => lightboxIndex() > 0;
