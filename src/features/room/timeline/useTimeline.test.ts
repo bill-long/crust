@@ -846,21 +846,21 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(6);
-			expect(events[0].imageWidth).toBe(1920);
-			expect(events[0].imageHeight).toBe(1080);
-			expect(events[1].imageWidth).toBe(128);
-			expect(events[1].imageHeight).toBe(256);
-			expect(events[2].imageWidth).toBeNull();
-			expect(events[2].imageHeight).toBeNull();
+			expect(events[0].mediaWidth).toBe(1920);
+			expect(events[0].mediaHeight).toBe(1080);
+			expect(events[1].mediaWidth).toBe(128);
+			expect(events[1].mediaHeight).toBe(256);
+			expect(events[2].mediaWidth).toBeNull();
+			expect(events[2].mediaHeight).toBeNull();
 			// "640" is a string, not a number → rejected. h=0 is non-positive.
-			expect(events[3].imageWidth).toBeNull();
-			expect(events[3].imageHeight).toBeNull();
+			expect(events[3].mediaWidth).toBeNull();
+			expect(events[3].mediaHeight).toBeNull();
 			// NaN and negative both rejected.
-			expect(events[4].imageWidth).toBeNull();
-			expect(events[4].imageHeight).toBeNull();
+			expect(events[4].mediaWidth).toBeNull();
+			expect(events[4].mediaHeight).toBeNull();
 			// Half-valid: missing one dim ⇒ both null (all-or-nothing).
-			expect(events[5].imageWidth).toBeNull();
-			expect(events[5].imageHeight).toBeNull();
+			expect(events[5].mediaWidth).toBeNull();
+			expect(events[5].mediaHeight).toBeNull();
 		});
 	});
 
@@ -906,10 +906,10 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[0].imageWidth).toBeNull();
-			expect(events[0].imageHeight).toBeNull();
-			expect(events[1].imageWidth).toBeNull();
-			expect(events[1].imageHeight).toBeNull();
+			expect(events[0].mediaWidth).toBeNull();
+			expect(events[0].mediaHeight).toBeNull();
+			expect(events[1].mediaWidth).toBeNull();
+			expect(events[1].mediaHeight).toBeNull();
 		});
 	});
 
@@ -970,15 +970,15 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(3);
-			expect(events[0].imageUrl).toBeNull();
-			expect(events[0].imageFullUrl).toBeNull();
-			expect(events[0].imageIsEncrypted).toBe(false);
-			expect(events[1].imageUrl).toBeNull();
-			expect(events[1].imageFullUrl).toBeNull();
-			expect(events[1].imageIsEncrypted).toBe(false);
-			expect(events[2].imageUrl).not.toBeNull();
-			expect(events[2].imageFullUrl).not.toBeNull();
-			expect(events[2].imageIsEncrypted).toBe(true);
+			expect(events[0].mediaUrl).toBeNull();
+			expect(events[0].mediaFullUrl).toBeNull();
+			expect(events[0].mediaIsEncrypted).toBe(false);
+			expect(events[1].mediaUrl).toBeNull();
+			expect(events[1].mediaFullUrl).toBeNull();
+			expect(events[1].mediaIsEncrypted).toBe(false);
+			expect(events[2].mediaUrl).not.toBeNull();
+			expect(events[2].mediaFullUrl).not.toBeNull();
+			expect(events[2].mediaIsEncrypted).toBe(true);
 		});
 	});
 
@@ -1033,11 +1033,11 @@ describe("useTimeline", () => {
 			);
 			await flushPromises();
 
-			expect(events[0].imageIsEncrypted).toBe(false);
-			expect(events[0].imageEncryptedFile).toBeNull();
+			expect(events[0].mediaIsEncrypted).toBe(false);
+			expect(events[0].mediaEncryptedFile).toBeNull();
 
-			expect(events[1].imageIsEncrypted).toBe(true);
-			expect(events[1].imageEncryptedFile).toEqual({
+			expect(events[1].mediaIsEncrypted).toBe(true);
+			expect(events[1].mediaEncryptedFile).toEqual({
 				url: "mxc://test/enc",
 				key: { k: "A".repeat(43) },
 				iv: "AAAAAAAAAAAAAAAAAAAAAA==",
@@ -1045,8 +1045,8 @@ describe("useTimeline", () => {
 				v: "v2",
 			});
 
-			expect(events[2].imageIsEncrypted).toBe(true);
-			expect(events[2].imageEncryptedFile).toBeNull();
+			expect(events[2].mediaIsEncrypted).toBe(true);
+			expect(events[2].mediaEncryptedFile).toBeNull();
 		});
 	});
 
@@ -1104,9 +1104,9 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(3);
-			expect(events[0].imageFilename).toBe("photo.png");
-			expect(events[1].imageFilename).toBe("shot.jpg");
-			expect(events[2].imageFilename).toBe("real.png");
+			expect(events[0].mediaFilename).toBe("photo.png");
+			expect(events[1].mediaFilename).toBe("shot.jpg");
+			expect(events[2].mediaFilename).toBe("real.png");
 		});
 	});
 
@@ -1173,10 +1173,10 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(4);
-			expect(events[0].imageFilename).toBeNull();
-			expect(events[1].imageFilename).toBeNull();
-			expect(events[2].imageFilename).toBeNull();
-			expect(events[3].imageFilename).toBe("fine name.png");
+			expect(events[0].mediaFilename).toBeNull();
+			expect(events[1].mediaFilename).toBeNull();
+			expect(events[2].mediaFilename).toBeNull();
+			expect(events[3].mediaFilename).toBe("fine name.png");
 		});
 	});
 
@@ -1251,14 +1251,14 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(4);
-			expect(events[0].imageWidth).toBe(480);
-			expect(events[0].imageHeight).toBe(270);
-			expect(events[1].imageWidth).toBe(320);
-			expect(events[1].imageHeight).toBe(240);
-			expect(events[2].imageWidth).toBeNull();
-			expect(events[2].imageHeight).toBeNull();
-			expect(events[3].imageWidth).toBeNull();
-			expect(events[3].imageHeight).toBeNull();
+			expect(events[0].mediaWidth).toBe(480);
+			expect(events[0].mediaHeight).toBe(270);
+			expect(events[1].mediaWidth).toBe(320);
+			expect(events[1].mediaHeight).toBe(240);
+			expect(events[2].mediaWidth).toBeNull();
+			expect(events[2].mediaHeight).toBeNull();
+			expect(events[3].mediaWidth).toBeNull();
+			expect(events[3].mediaHeight).toBeNull();
 		});
 	});
 

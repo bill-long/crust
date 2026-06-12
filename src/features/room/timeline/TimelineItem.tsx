@@ -1,7 +1,15 @@
 import { Popover } from "@kobalte/core/popover";
 import type { MatrixClient } from "matrix-js-sdk";
 import { EventStatus } from "matrix-js-sdk";
-import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import {
+	type Component,
+	createMemo,
+	createSignal,
+	For,
+	Match,
+	Show,
+	Switch,
+} from "solid-js";
 import { userSettings } from "../../../stores/settings";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -16,6 +24,9 @@ import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
+import { MediaAudio } from "./MediaAudio";
+import { MediaFile } from "./MediaFile";
+import { MediaVideo } from "./MediaVideo";
 import { formatReactors } from "./reactionFormatting";
 import { StateNoticeIcon } from "./StateNoticeIcon";
 import type { TimelineEvent } from "./useTimeline";
@@ -409,20 +420,20 @@ const TimelineItem: Component<{
 		return s === EventStatus.QUEUED || s === EventStatus.ENCRYPTING;
 	});
 
-	// Maximum rendered dimensions for image / sticker messages. The
-	// browser combines the `width` / `height` HTML attributes (intrinsic
-	// aspect-ratio) with CSS `max-w-[min(100%,24rem)]` + `max-h-64` to
-	// reserve the *correct* layout box before the image decodes — this
-	// is what prevents the virtualizer overlap from #67. We pass the raw
-	// intrinsic dims (not pre-scaled) so the reserved box and the
-	// post-decode rendered box agree under the same CSS constraints.
-	// Fallback to a 3:2 box when intrinsic dims are missing so we
-	// reserve *something* instead of zero height.
+	// Maximum rendered dimensions for image / sticker messages (the inline
+	// <img>; video reserves its own box inside MediaVideo). The browser
+	// combines the `width` / `height` HTML attributes (intrinsic aspect-ratio)
+	// with CSS `max-w-[min(100%,24rem)]` + `max-h-64` to reserve the *correct*
+	// layout box before the image decodes — this is what prevents the
+	// virtualizer overlap from #67. We pass the raw intrinsic dims (not
+	// pre-scaled) so the reserved box and the post-decode rendered box agree
+	// under the same CSS constraints. Fallback to a 3:2 box when intrinsic dims
+	// are missing so we reserve *something* instead of zero height.
 	const IMAGE_FALLBACK_W = 384;
 	const IMAGE_FALLBACK_H = 256;
-	const imageReserveDims = createMemo<{ w: number; h: number }>(() => {
-		const w = ev.imageWidth;
-		const h = ev.imageHeight;
+	const mediaReserveDims = createMemo<{ w: number; h: number }>(() => {
+		const w = ev.mediaWidth;
+		const h = ev.mediaHeight;
 		if (w === null || h === null) {
 			return { w: IMAGE_FALLBACK_W, h: IMAGE_FALLBACK_H };
 		}
@@ -616,21 +627,59 @@ const TimelineItem: Component<{
 								<Show
 									when={
 										(ev.msgtype === "m.image" || ev.type === "m.sticker") &&
-										ev.imageUrl
+										ev.mediaUrl
 									}
 									fallback={
 										<Show
 											when={ev.msgtype === "m.text" || ev.msgtype === "m.emote"}
 											fallback={
-												<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
-													{ev.body ||
-														(ev.msgtype ? unsupportedLabel(ev.msgtype) : "")}
-													<Show when={ev.isEdited}>
-														<span class="ml-1 text-xs text-text-disabled">
-															(edited)
-														</span>
-													</Show>
-												</p>
+												<Switch
+													fallback={
+														<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+															{ev.body ||
+																(ev.msgtype
+																	? unsupportedLabel(ev.msgtype)
+																	: "")}
+															<Show when={ev.isEdited}>
+																<span class="ml-1 text-xs text-text-disabled">
+																	(edited)
+																</span>
+															</Show>
+														</p>
+													}
+												>
+													<Match when={ev.msgtype === "m.video"}>
+														<MediaVideo
+															httpUrl={ev.mediaFullUrl}
+															file={ev.mediaEncryptedFile}
+															mimetype={ev.mediaMimetype}
+															posterUrl={ev.mediaPosterUrl}
+															label={ev.mediaFilename || "Video"}
+															isEncrypted={ev.mediaIsEncrypted}
+															reserveWidth={ev.mediaWidth}
+															reserveHeight={ev.mediaHeight}
+														/>
+													</Match>
+													<Match when={ev.msgtype === "m.audio"}>
+														<MediaAudio
+															httpUrl={ev.mediaFullUrl}
+															file={ev.mediaEncryptedFile}
+															mimetype={ev.mediaMimetype}
+															label={ev.mediaFilename || "Audio"}
+															isEncrypted={ev.mediaIsEncrypted}
+														/>
+													</Match>
+													<Match when={ev.msgtype === "m.file"}>
+														<MediaFile
+															httpUrl={ev.mediaFullUrl}
+															file={ev.mediaEncryptedFile}
+															mimetype={ev.mediaMimetype}
+															filename={ev.mediaFilename || "file"}
+															size={ev.mediaSize}
+															isEncrypted={ev.mediaIsEncrypted}
+														/>
+													</Match>
+												</Switch>
 											}
 										>
 											{(() => {
@@ -683,8 +732,8 @@ const TimelineItem: Component<{
 														<InlineGif
 															url={gifUrl}
 															alt="GIF"
-															width={ev.imageWidth}
-															height={ev.imageHeight}
+															width={ev.mediaWidth}
+															height={ev.mediaHeight}
 														/>
 														<Show when={ev.isEdited}>
 															<span class="ml-1 text-xs text-text-disabled">
@@ -709,26 +758,26 @@ const TimelineItem: Component<{
 										const isOpenableImage =
 											ev.msgtype === "m.image" &&
 											ev.status === null &&
-											!!ev.imageFullUrl &&
+											!!ev.mediaFullUrl &&
 											!!props.onOpenImage;
 										// Encrypted images can't be rendered from their (scaled)
 										// ciphertext URL — download + decrypt the full file and
 										// show the plaintext blob instead.
-										const imgEl = ev.imageIsEncrypted ? (
+										const imgEl = ev.mediaIsEncrypted ? (
 											<EncryptedImage
-												httpUrl={ev.imageFullUrl}
-												file={ev.imageEncryptedFile}
-												mimetype={ev.imageMimetype}
+												httpUrl={ev.mediaFullUrl}
+												file={ev.mediaEncryptedFile}
+												mimetype={ev.mediaMimetype}
 												alt={ev.body?.trim() || "Image"}
-												reserveWidth={imageReserveDims().w}
-												reserveHeight={imageReserveDims().h}
+												reserveWidth={mediaReserveDims().w}
+												reserveHeight={mediaReserveDims().h}
 											/>
 										) : (
 											<img
-												src={ev.imageUrl ?? ""}
+												src={ev.mediaUrl ?? ""}
 												alt={ev.body?.trim() || "Image"}
-												width={imageReserveDims().w}
-												height={imageReserveDims().h}
+												width={mediaReserveDims().w}
+												height={mediaReserveDims().h}
 												class="mt-1 block h-auto w-auto max-h-64 max-w-[min(100%,24rem)] rounded object-contain"
 												loading="lazy"
 											/>
@@ -738,7 +787,7 @@ const TimelineItem: Component<{
 											<button
 												type="button"
 												onClick={() => props.onOpenImage?.(ev.eventId)}
-												aria-label={`Open image${ev.imageFilename ? `: ${ev.imageFilename}` : ""} in full-screen viewer`}
+												aria-label={`Open image${ev.mediaFilename ? `: ${ev.mediaFilename}` : ""} in full-screen viewer`}
 												class="inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 align-top focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0"
 											>
 												{imgEl}

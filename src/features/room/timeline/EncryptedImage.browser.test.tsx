@@ -107,7 +107,7 @@ describe("EncryptedImage", () => {
 	});
 
 	it("fails closed (no spinner) when the encrypted descriptor is missing", async () => {
-		// A malformed `content.file` projects to imageEncryptedFile=null while the
+		// A malformed `content.file` projects to mediaEncryptedFile=null while the
 		// image is still flagged encrypted — must show an error, not spin forever.
 		const fetchSpy = vi.fn();
 		vi.stubGlobal("fetch", fetchSpy);
