@@ -225,6 +225,40 @@ body {
 	list-style: decimal;
 	padding-left: 1.5em;
 }
+.message-body li {
+	margin: 0.1em 0;
+}
+/* Tailwind's preflight flattens heading sizing/weight; restore a compact,
+   chat-appropriate scale for headings sent in formatted_body. */
+.message-body h1,
+.message-body h2,
+.message-body h3,
+.message-body h4,
+.message-body h5,
+.message-body h6 {
+	font-weight: 600;
+	line-height: 1.25;
+	margin: 0.4em 0 0.2em;
+}
+.message-body h1 {
+	font-size: 1.4em;
+}
+.message-body h2 {
+	font-size: 1.25em;
+}
+.message-body h3 {
+	font-size: 1.1em;
+}
+.message-body h4,
+.message-body h5,
+.message-body h6 {
+	font-size: 1em;
+}
+.message-body del,
+.message-body s,
+.message-body strike {
+	text-decoration: line-through;
+}
 
 /* Pinned-message jump flash — applied to the row when the user clicks
    "Jump to" in the pinned-messages panel. A short, low-intensity

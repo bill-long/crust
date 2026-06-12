@@ -163,3 +163,108 @@ describe("Composer attach-file button", () => {
 		expect(queryByLabelText("Remove drop.png")).toBeNull();
 	});
 });
+
+describe("Composer formatting toolbar", () => {
+	/** Get the composer textarea. */
+	function getTextarea(container: HTMLElement): HTMLTextAreaElement {
+		const ta = container.querySelector<HTMLTextAreaElement>(
+			"[data-composer-textarea]",
+		);
+		if (!ta) throw new Error("no textarea");
+		return ta;
+	}
+
+	/** Set the controlled textarea's value via a real input event. */
+	function typeValue(ta: HTMLTextAreaElement, value: string): void {
+		ta.value = value;
+		ta.dispatchEvent(new Event("input", { bubbles: true }));
+	}
+
+	it("exposes a labelled toolbar with formatting buttons", () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const toolbar = container.querySelector('[role="toolbar"]');
+		expect(toolbar?.getAttribute("aria-label")).toBe("Text formatting");
+		for (const label of [
+			"Bold (Ctrl/Cmd+B)",
+			"Italic (Ctrl/Cmd+I)",
+			"Strikethrough (Ctrl/Cmd+Shift+X)",
+			"Inline code (Ctrl/Cmd+E)",
+			"Link",
+			"Bulleted list",
+			"Quote",
+		]) {
+			expect(getByLabelText(label)).toBeTruthy();
+		}
+	});
+
+	it("wraps the current selection in ** when Bold is clicked", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "hello world");
+		ta.focus();
+		ta.setSelectionRange(0, 5); // "hello"
+		(getByLabelText("Bold (Ctrl/Cmd+B)") as HTMLButtonElement).click();
+		await tick();
+		expect(ta.value).toBe("**hello** world");
+	});
+
+	it("prefixes selected lines with '- ' when Bulleted list is clicked", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "a\nb");
+		ta.focus();
+		ta.setSelectionRange(0, 3); // both lines
+		(getByLabelText("Bulleted list") as HTMLButtonElement).click();
+		await tick();
+		expect(ta.value).toBe("- a\n- b");
+	});
+
+	it("keeps a collapsed caret after the prefix when there is no selection", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "ab");
+		ta.focus();
+		ta.setSelectionRange(2, 2); // collapsed caret at end, no selection
+		(getByLabelText("Quote") as HTMLButtonElement).click();
+		// Selection restore happens in a rAF, so wait a frame before asserting it.
+		await new Promise<void>((r) => requestAnimationFrame(() => r()));
+		expect(ta.value).toBe("> ab");
+		// Caret stays at the original position shifted by the "> " prefix (2),
+		// collapsed — so the next keystroke continues typing, not overwrites.
+		expect(ta.selectionStart).toBe(4);
+		expect(ta.selectionEnd).toBe(4);
+	});
+
+	it("wraps the selection on Ctrl+B", async () => {
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "word");
+		ta.focus();
+		ta.setSelectionRange(0, 4);
+		ta.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true }),
+		);
+		await tick();
+		expect(ta.value).toBe("**word**");
+	});
+});

@@ -12,11 +12,64 @@ vi.mock("solid-refresh", () => ({
 }));
 
 import { createMockClient } from "../../test/mockClient";
+import { formatMarkdown } from "../room/composer/markdown";
 import { MessageBody } from "./MessageBody";
 
 afterEach(cleanup);
 
 const client = createMockClient() as unknown as MatrixClient;
+
+/** Compose markdown then render it the way the timeline would, returning the
+ *  rendered container so we can assert the HTML survives DOMPurify. */
+function renderComposed(text: string) {
+	const { body, formatted_body } = formatMarkdown(text);
+	const { container } = render(() => (
+		<MessageBody
+			body={body}
+			format={formatted_body ? "org.matrix.custom.html" : null}
+			formattedBody={formatted_body}
+			isEdited={false}
+			client={client}
+			shortcodeLookup={new Map()}
+		/>
+	));
+	return container;
+}
+
+describe("MessageBody — Phase 6 markdown round-trip through DOMPurify", () => {
+	it("strikethrough survives as <del>", () => {
+		const c = renderComposed("~~gone~~");
+		expect(c.querySelector("del")).not.toBeNull();
+		expect(c.textContent).toContain("gone");
+	});
+
+	it("unordered list survives as <ul><li>", () => {
+		const c = renderComposed("- one\n- two");
+		expect(c.querySelectorAll("ul li").length).toBe(2);
+	});
+
+	it("ordered list keeps its start attribute", () => {
+		const c = renderComposed("3. a\n4. b");
+		expect(c.querySelector("ol")?.getAttribute("start")).toBe("3");
+	});
+
+	it("heading survives as <h2>", () => {
+		const c = renderComposed("## Title");
+		expect(c.querySelector("h2")?.textContent).toBe("Title");
+	});
+
+	it("markdown link survives as a safe anchor opening in a new tab", () => {
+		const c = renderComposed("[site](https://example.com)");
+		const a = c.querySelector("a");
+		expect(a?.getAttribute("href")).toBe("https://example.com");
+		expect(a?.getAttribute("target")).toBe("_blank");
+	});
+
+	it("blockquote survives", () => {
+		const c = renderComposed("> quoted");
+		expect(c.querySelector("blockquote")?.textContent).toContain("quoted");
+	});
+});
 
 describe("MessageBody rich-reply fallback", () => {
 	it("strips the <mx-reply> block so relation-driven reply context isn't duplicated", () => {
