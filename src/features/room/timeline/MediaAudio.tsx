@@ -38,10 +38,14 @@ export const MediaAudio: Component<{
 
 	// Reset the click-to-load gate if the underlying media changes (e.g. an edit
 	// rewrites the attachment while this component instance is reused), so a new
-	// ciphertext is never auto-downloaded without a fresh user click.
+	// ciphertext is never auto-downloaded without a fresh user click. Track every
+	// field the decrypt depends on — URL, key/iv/hash, and mimetype — mirroring
+	// createDecryptedObjectUrl's cache key, so a descriptor swap that reuses the
+	// same URL still re-gates.
 	createEffect(
 		on(
-			() => props.httpUrl,
+			() =>
+				`${props.httpUrl}|${props.file?.iv ?? ""}|${props.file?.key.k ?? ""}|${props.file?.hashes.sha256 ?? ""}|${props.mimetype ?? ""}`,
 			() => setActivated(false),
 			{ defer: true },
 		),

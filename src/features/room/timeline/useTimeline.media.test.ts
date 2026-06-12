@@ -253,4 +253,62 @@ describe("useTimeline media projection", () => {
 			expect(events[0].mediaPosterUrl).toBeNull();
 		});
 	});
+
+	it("flags an encrypted m.sticker so it decrypts instead of rendering ciphertext", async () => {
+		const roomA = createMockRoom("!roomA:test", [
+			// Plain sticker (uses the m.sticker type, not a msgtype).
+			{
+				eventId: "$plainSticker",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.sticker",
+				content: {
+					body: "wave",
+					url: "mxc://test/plainsticker",
+					info: { w: 128, h: 128, mimetype: "image/png" },
+				},
+				ts: 1000,
+			},
+			// Encrypted sticker: carries content.file (ciphertext), no content.url.
+			{
+				eventId: "$encSticker",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.sticker",
+				content: {
+					body: "secret",
+					file: {
+						url: "mxc://test/encsticker",
+						key: { k: "A".repeat(43) },
+						iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+						hashes: { sha256: "A".repeat(43) },
+						v: "v2",
+					},
+					info: { w: 128, h: 128, mimetype: "image/png" },
+				},
+				ts: 2000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const [plain, enc] = events;
+
+			expect(plain.mediaIsEncrypted).toBe(false);
+			expect(plain.mediaEncryptedFile).toBeNull();
+
+			// The authoritative flag is set and the descriptor parses, so the
+			// renderer decrypts rather than pointing an <img> at the ciphertext.
+			expect(enc.mediaIsEncrypted).toBe(true);
+			expect(enc.mediaEncryptedFile).not.toBeNull();
+			expect(enc.mediaFullUrl).toBe(`${HTTP}/test/encsticker`);
+		});
+	});
 });
