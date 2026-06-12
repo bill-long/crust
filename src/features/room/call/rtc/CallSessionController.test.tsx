@@ -110,6 +110,7 @@ vi.mock("./useLivekitRoom", () => ({
 		localCamEnabled: () => false,
 		setLocalCamEnabled: async () => {},
 		videoTracks: () => new Map(),
+		screenShareTracks: () => new Map(),
 		disconnect: hooksState.livekitDisconnect as unknown as () => Promise<void>,
 		audioBlocked: () => false,
 		resumeAudio: async () => {},

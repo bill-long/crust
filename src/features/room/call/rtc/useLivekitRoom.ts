@@ -123,11 +123,18 @@ export interface LivekitRoomApi {
 	setLocalCamEnabled: (enabled: boolean) => Promise<void>;
 	/**
 	 * Map of LiveKit participant identity → its camera VideoTrack entry.
-	 * Only camera-source publications are stored (screen-share is excluded
-	 * here for now). Tiles consume this and attach the track to their own
-	 * `<video>` ref.
+	 * Only camera-source publications are stored; screen-share lives in the
+	 * separate `screenShareTracks` map so a participant can show both at once.
+	 * Tiles consume this and attach the track to their own `<video>` ref.
 	 */
 	videoTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
+	/**
+	 * Map of LiveKit participant identity → its screen-share VideoTrack entry.
+	 * Populated for remote `Track.Source.ScreenShare` publications so the call
+	 * UI can render a dedicated screen-share tile. Local screen-share
+	 * publishing is out of scope (see #271).
+	 */
+	screenShareTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/** Disconnects, stops local mic, detaches all audio. Idempotent. */
 	disconnect: () => Promise<void>;
 	/**
@@ -185,6 +192,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	const [videoTracks, setVideoTracks] = createSignal<
 		ReadonlyMap<string, VideoTrackEntry>
 	>(new Map());
+	const [screenShareTracks, setScreenShareTracks] = createSignal<
+		ReadonlyMap<string, VideoTrackEntry>
+	>(new Map());
 	const [audioBlocked, setAudioBlocked] = createSignal(false);
 
 	let room: LivekitRoom | null = null;
@@ -236,6 +246,14 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	const videoTrackMap = new Map<string, VideoTrackEntry>();
 	const publishVideoTracks = (): void => {
 		setVideoTracks(new Map(videoTrackMap));
+	};
+	// Separate mirror for screen-share video, keyed by participant identity.
+	// Kept apart from the camera map so a participant can have BOTH a camera
+	// tile and a screen-share tile at once, and so screen-share rendering
+	// (object-contain, dedicated tile) is independent of the camera path.
+	const screenShareTrackMap = new Map<string, VideoTrackEntry>();
+	const publishScreenShareTracks = (): void => {
+		setScreenShareTracks(new Map(screenShareTrackMap));
 	};
 	// Cache of participant records keyed by identity. `snapshotParticipants`
 	// reuses an existing object reference when none of its fields changed so
@@ -430,31 +448,69 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		attachments.delete(sid);
 	};
 
-	// Insert / replace the video track for a participant identity. Tile
-	// components own the <video> ref and call `track.attach(el)` reactively
-	// when this map updates — central DOM attachment is intentionally NOT
-	// done here.
-	const upsertVideoTrack = (
+	// Insert / replace the video track for a participant identity in `map`.
+	// Tile components own the <video> ref and call `track.attach(el)`
+	// reactively when the map's signal updates — central DOM attachment is
+	// intentionally NOT done here. Shared by the camera and screen-share maps.
+	const upsertVideoEntry = (
+		map: Map<string, VideoTrackEntry>,
+		publish: () => void,
 		identity: string,
 		track: LocalVideoTrack | RemoteVideoTrack,
 		sid: string,
 	): void => {
-		const prev = videoTrackMap.get(identity);
+		const prev = map.get(identity);
 		if (prev && prev.sid === sid && prev.track === track) return;
-		videoTrackMap.set(identity, { track, sid });
-		publishVideoTracks();
+		map.set(identity, { track, sid });
+		publish();
 	};
 
 	// Remove the video track for an identity IF the stored entry matches the
 	// publication that's going away. Late stale-publication events from a
 	// device restart or transient unpublish/republish must NOT wipe a fresh
-	// replacement that landed first.
-	const removeVideoTrackIfMatches = (identity: string, sid: string): void => {
-		const prev = videoTrackMap.get(identity);
+	// replacement that landed first. Shared by the camera and screen-share maps.
+	const removeVideoEntryIfMatches = (
+		map: Map<string, VideoTrackEntry>,
+		publish: () => void,
+		identity: string,
+		sid: string,
+	): void => {
+		const prev = map.get(identity);
 		if (!prev || prev.sid !== sid) return;
-		videoTrackMap.delete(identity);
-		publishVideoTracks();
+		map.delete(identity);
+		publish();
 	};
+
+	const upsertVideoTrack = (
+		identity: string,
+		track: LocalVideoTrack | RemoteVideoTrack,
+		sid: string,
+	): void =>
+		upsertVideoEntry(videoTrackMap, publishVideoTracks, identity, track, sid);
+	const removeVideoTrackIfMatches = (identity: string, sid: string): void =>
+		removeVideoEntryIfMatches(videoTrackMap, publishVideoTracks, identity, sid);
+	const upsertScreenShareTrack = (
+		identity: string,
+		track: RemoteVideoTrack,
+		sid: string,
+	): void =>
+		upsertVideoEntry(
+			screenShareTrackMap,
+			publishScreenShareTracks,
+			identity,
+			track,
+			sid,
+		);
+	const removeScreenShareTrackIfMatches = (
+		identity: string,
+		sid: string,
+	): void =>
+		removeVideoEntryIfMatches(
+			screenShareTrackMap,
+			publishScreenShareTracks,
+			identity,
+			sid,
+		);
 
 	// Reconcile the local participant's camera publication into `videoTrackMap`
 	// only. Called from `LocalTrackPublished` and `LocalTrackUnpublished` so
@@ -505,6 +561,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		if (videoTrackMap.size > 0) {
 			videoTrackMap.clear();
 			publishVideoTracks();
+		}
+		if (screenShareTrackMap.size > 0) {
+			screenShareTrackMap.clear();
+			publishScreenShareTracks();
 		}
 		setLocalCamEnabledSignal(false);
 	};
@@ -672,16 +732,23 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 						participant: { identity: string },
 					) => {
 						if (track.kind === lk.Track.Kind.Audio) {
+							// Covers both microphone and screen-share audio — the
+							// hidden <audio> sink plays whatever source it carries.
 							attachAudioTrack(track as RemoteAudioTrack, publication);
-						} else if (
-							track.kind === lk.Track.Kind.Video &&
-							publication.source === lk.Track.Source.Camera
-						) {
-							upsertVideoTrack(
-								participant.identity,
-								track as RemoteVideoTrack,
-								publication.trackSid,
-							);
+						} else if (track.kind === lk.Track.Kind.Video) {
+							if (publication.source === lk.Track.Source.Camera) {
+								upsertVideoTrack(
+									participant.identity,
+									track as RemoteVideoTrack,
+									publication.trackSid,
+								);
+							} else if (publication.source === lk.Track.Source.ScreenShare) {
+								upsertScreenShareTrack(
+									participant.identity,
+									track as RemoteVideoTrack,
+									publication.trackSid,
+								);
+							}
 						}
 						snapshotParticipants(r);
 					},
@@ -697,14 +764,18 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					) => {
 						if (track.kind === lk.Track.Kind.Audio) {
 							detachAudioTrack(publication.trackSid);
-						} else if (
-							track.kind === lk.Track.Kind.Video &&
-							publication.source === lk.Track.Source.Camera
-						) {
-							removeVideoTrackIfMatches(
-								participant.identity,
-								publication.trackSid,
-							);
+						} else if (track.kind === lk.Track.Kind.Video) {
+							if (publication.source === lk.Track.Source.Camera) {
+								removeVideoTrackIfMatches(
+									participant.identity,
+									publication.trackSid,
+								);
+							} else if (publication.source === lk.Track.Source.ScreenShare) {
+								removeScreenShareTrackIfMatches(
+									participant.identity,
+									publication.trackSid,
+								);
+							}
 						}
 						snapshotParticipants(r);
 					},
@@ -718,6 +789,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					// this participant may have been deferred by their disconnect.
 					if (videoTrackMap.delete(participant.identity)) {
 						publishVideoTracks();
+					}
+					if (screenShareTrackMap.delete(participant.identity)) {
+						publishScreenShareTracks();
 					}
 					snapshotParticipants(r);
 				}),
@@ -836,11 +910,19 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 						attachAudioTrack(pub.audioTrack as RemoteAudioTrack, pub);
 					}
 				}
-				// Same race for video: a remote camera publication that landed
-				// before our TrackSubscribed listener won't fire one for us.
+				// Same race for video: a remote camera or screen-share publication
+				// that landed before our TrackSubscribed listener won't fire one
+				// for us.
 				for (const pub of p.videoTrackPublications.values()) {
-					if (pub.isSubscribed && pub.videoTrack && pub.source === "camera") {
+					if (!pub.isSubscribed || !pub.videoTrack) continue;
+					if (pub.source === "camera") {
 						upsertVideoTrack(
+							p.identity,
+							pub.videoTrack as RemoteVideoTrack,
+							pub.trackSid,
+						);
+					} else if (pub.source === "screen_share") {
+						upsertScreenShareTrack(
 							p.identity,
 							pub.videoTrack as RemoteVideoTrack,
 							pub.trackSid,
@@ -1145,6 +1227,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		localCamEnabled,
 		setLocalCamEnabled,
 		videoTracks,
+		screenShareTracks,
 		disconnect,
 		audioBlocked,
 		resumeAudio,

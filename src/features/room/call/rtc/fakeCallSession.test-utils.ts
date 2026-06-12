@@ -43,6 +43,7 @@ interface FakeCallSession {
 	setLivekitAudioBlocked: Setter<boolean>;
 	setLivekitLocalCamEnabled: Setter<boolean>;
 	setLivekitVideoTracks: Setter<ReadonlyMap<string, VideoTrackEntry>>;
+	setLivekitScreenShareTracks: Setter<ReadonlyMap<string, VideoTrackEntry>>;
 	setBridgeInitializing: Setter<boolean>;
 	setBridgeInitError: Setter<Error | null>;
 	setLeaving: Setter<boolean>;
@@ -97,6 +98,9 @@ function makeFakeCallSessionImpl(
 	const [livekitVideoTracks, setLivekitVideoTracks] = createSignal<
 		ReadonlyMap<string, VideoTrackEntry>
 	>(new Map());
+	const [livekitScreenShareTracks, setLivekitScreenShareTracks] = createSignal<
+		ReadonlyMap<string, VideoTrackEntry>
+	>(new Map());
 	const [bridgeInitializing, setBridgeInitializing] = createSignal(false);
 	const [bridgeInitError, setBridgeInitError] = createSignal<Error | null>(
 		null,
@@ -132,6 +136,7 @@ function makeFakeCallSessionImpl(
 		localCamEnabled: livekitLocalCamEnabled,
 		setLocalCamEnabled: livekitSetLocalCamEnabled,
 		videoTracks: livekitVideoTracks,
+		screenShareTracks: livekitScreenShareTracks,
 		disconnect: livekitDisconnect,
 		audioBlocked: livekitAudioBlocked,
 		resumeAudio: livekitResumeAudio,
@@ -165,6 +170,7 @@ function makeFakeCallSessionImpl(
 		setLivekitAudioBlocked,
 		setLivekitLocalCamEnabled,
 		setLivekitVideoTracks,
+		setLivekitScreenShareTracks,
 		setBridgeInitializing,
 		setBridgeInitError,
 		setLeaving,
