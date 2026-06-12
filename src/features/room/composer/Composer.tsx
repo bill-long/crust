@@ -925,8 +925,8 @@ const Composer: Component<{
 				<button
 					type="button"
 					class="h-7 w-7 rounded font-bold transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Bold (Ctrl+B)"
-					title="Bold (Ctrl+B)"
+					aria-label="Bold (Ctrl/Cmd+B)"
+					title="Bold (Ctrl/Cmd+B)"
 					onClick={() => wrapInline("**")}
 				>
 					B
@@ -934,8 +934,8 @@ const Composer: Component<{
 				<button
 					type="button"
 					class="h-7 w-7 rounded italic transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Italic (Ctrl+I)"
-					title="Italic (Ctrl+I)"
+					aria-label="Italic (Ctrl/Cmd+I)"
+					title="Italic (Ctrl/Cmd+I)"
 					onClick={() => wrapInline("*")}
 				>
 					I
@@ -943,8 +943,8 @@ const Composer: Component<{
 				<button
 					type="button"
 					class="h-7 w-7 rounded line-through transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Strikethrough (Ctrl+Shift+X)"
-					title="Strikethrough (Ctrl+Shift+X)"
+					aria-label="Strikethrough (Ctrl/Cmd+Shift+X)"
+					title="Strikethrough (Ctrl/Cmd+Shift+X)"
 					onClick={() => wrapInline("~~")}
 				>
 					S
@@ -952,8 +952,8 @@ const Composer: Component<{
 				<button
 					type="button"
 					class="h-7 w-7 rounded font-mono text-xs transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Inline code (Ctrl+E)"
-					title="Inline code (Ctrl+E)"
+					aria-label="Inline code (Ctrl/Cmd+E)"
+					title="Inline code (Ctrl/Cmd+E)"
 					onClick={() => wrapInline("`")}
 				>
 					{"<>"}

@@ -189,10 +189,10 @@ describe("Composer formatting toolbar", () => {
 		const toolbar = container.querySelector('[role="toolbar"]');
 		expect(toolbar?.getAttribute("aria-label")).toBe("Text formatting");
 		for (const label of [
-			"Bold (Ctrl+B)",
-			"Italic (Ctrl+I)",
-			"Strikethrough (Ctrl+Shift+X)",
-			"Inline code (Ctrl+E)",
+			"Bold (Ctrl/Cmd+B)",
+			"Italic (Ctrl/Cmd+I)",
+			"Strikethrough (Ctrl/Cmd+Shift+X)",
+			"Inline code (Ctrl/Cmd+E)",
 			"Link",
 			"Bulleted list",
 			"Quote",
@@ -211,7 +211,7 @@ describe("Composer formatting toolbar", () => {
 		typeValue(ta, "hello world");
 		ta.focus();
 		ta.setSelectionRange(0, 5); // "hello"
-		(getByLabelText("Bold (Ctrl+B)") as HTMLButtonElement).click();
+		(getByLabelText("Bold (Ctrl/Cmd+B)") as HTMLButtonElement).click();
 		await tick();
 		expect(ta.value).toBe("**hello** world");
 	});
