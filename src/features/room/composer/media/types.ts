@@ -1,4 +1,5 @@
 import type { TimelineEvent } from "../../timeline/useTimeline";
+import type { EncryptedFile } from "./attachmentCrypto";
 
 /** Broad media category derived from a file's MIME type. */
 export type AttachmentKind = "image" | "video" | "audio" | "file";
@@ -38,7 +39,10 @@ export interface MediaInfo {
 	h?: number;
 	mimetype: string;
 	size: number;
+	/** mxc:// of a cleartext thumbnail (unencrypted rooms). */
 	thumbnail_url?: string;
+	/** EncryptedFile for the thumbnail ciphertext (encrypted rooms). */
+	thumbnail_file?: EncryptedFile;
 	thumbnail_info?: {
 		w: number;
 		h: number;
@@ -50,8 +54,17 @@ export interface MediaInfo {
 /** Arguments for {@link buildMediaContent}. */
 export interface BuildMediaContentArgs {
 	kind: AttachmentKind;
-	/** mxc:// URI returned from uploading the file. */
-	contentUri: string;
+	/**
+	 * mxc:// URI of the uploaded cleartext file (unencrypted rooms). Mutually
+	 * exclusive with `file`; supply exactly one.
+	 */
+	contentUri?: string;
+	/**
+	 * EncryptedFile for the uploaded ciphertext (encrypted rooms), emitted as
+	 * `content.file` in place of `content.url`. Mutually exclusive with
+	 * `contentUri`.
+	 */
+	file?: EncryptedFile;
 	filename: string;
 	mimetype: string;
 	size: number;
@@ -59,7 +72,10 @@ export interface BuildMediaContentArgs {
 	width?: number;
 	height?: number;
 	thumbnail?: {
-		contentUri: string;
+		/** mxc:// of the cleartext thumbnail; mutually exclusive with `file`. */
+		contentUri?: string;
+		/** EncryptedFile for the thumbnail ciphertext (encrypted rooms). */
+		file?: EncryptedFile;
 		mimetype: string;
 		size: number;
 		w: number;

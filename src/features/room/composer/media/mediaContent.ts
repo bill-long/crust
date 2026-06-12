@@ -1,20 +1,21 @@
-import type { Room } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import type { AttachmentKind, BuildMediaContentArgs, MediaInfo } from "./types";
 
-/** User-facing message for the Phase 0 encrypted-room limitation. */
-export const ENCRYPTED_UNSUPPORTED_MESSAGE =
-	"Sending attachments to encrypted rooms isn't supported yet";
-
 /**
- * Thrown when media is queued for an encrypted room. Phase 0 ships
- * unencrypted-room support only; the encrypt path (and removal of this
- * guard) lands in Phase 4. Callers surface the message to the user.
+ * Require exactly one of an encrypted `file` and a cleartext `contentUri`.
+ * `file`/`contentUri` are both optional in the args so a caller can supply
+ * either, but emitting both (or neither) yields malformed event content
+ * (`url: undefined`, or a `url` *and* a `file`). Fail closed instead.
  */
-export class EncryptedRoomUnsupportedError extends Error {
-	constructor() {
-		super(ENCRYPTED_UNSUPPORTED_MESSAGE);
-		this.name = "EncryptedRoomUnsupportedError";
+function assertExactlyOneSource(
+	file: unknown,
+	contentUri: unknown,
+	what: string,
+): void {
+	if (!file === !contentUri) {
+		throw new Error(
+			`buildMediaContent: ${what} must have exactly one of file / contentUri`,
+		);
 	}
 }
 
@@ -42,22 +43,17 @@ export function msgtypeForKind(kind: AttachmentKind): string {
 }
 
 /**
- * Throw if the room is encrypted. Centralizes the Phase 0 limitation so
- * Phase 4 can lift it in exactly one place.
- */
-export function assertCanSendMedia(room: Room): void {
-	if (room.hasEncryptionStateEvent()) {
-		throw new EncryptedRoomUnsupportedError();
-	}
-}
-
-/**
  * Build the event content for a media send. `body` carries the caption when
  * present (falling back to the filename), while `filename` is always set so
  * receivers that prefer it (see useTimeline's filename handling) display the
  * real name. When replying we attach only the reply relation — unlike text
  * sends we don't prepend a quoted body, since prefixing a filename with quote
  * lines is meaningless and rich clients render the reply from the relation.
+ *
+ * For encrypted rooms the caller passes `file` (and `thumbnail.file`): we emit
+ * `content.file` / `info.thumbnail_file` (the ciphertext EncryptedFile blocks)
+ * instead of `content.url` / `info.thumbnail_url`. The `info` block stays
+ * cleartext either way so receivers can read the mimetype/size/dimensions.
  */
 export function buildMediaContent(
 	args: BuildMediaContentArgs,
@@ -65,6 +61,7 @@ export function buildMediaContent(
 	const {
 		kind,
 		contentUri,
+		file,
 		filename,
 		mimetype,
 		size,
@@ -75,11 +72,21 @@ export function buildMediaContent(
 		replyTo,
 	} = args;
 
+	// Fail closed on malformed input: emitting neither (or both) of file/url
+	// would produce invalid event content rather than a clear error.
+	assertExactlyOneSource(file, contentUri, "attachment");
+
 	const info: MediaInfo = { mimetype, size };
 	if (typeof width === "number" && width > 0) info.w = width;
 	if (typeof height === "number" && height > 0) info.h = height;
 	if (thumbnail) {
-		info.thumbnail_url = thumbnail.contentUri;
+		assertExactlyOneSource(thumbnail.file, thumbnail.contentUri, "thumbnail");
+		// Encrypted thumbnail → `thumbnail_file`; cleartext → `thumbnail_url`.
+		if (thumbnail.file) {
+			info.thumbnail_file = thumbnail.file;
+		} else {
+			info.thumbnail_url = thumbnail.contentUri;
+		}
 		info.thumbnail_info = {
 			w: thumbnail.w,
 			h: thumbnail.h,
@@ -93,9 +100,14 @@ export function buildMediaContent(
 		msgtype: msgtypeForKind(kind),
 		body: trimmedCaption || filename,
 		filename,
-		url: contentUri,
 		info,
 	};
+	// Encrypted attachments carry ciphertext via `file`; plain ones via `url`.
+	if (file) {
+		content.file = file;
+	} else {
+		content.url = contentUri;
+	}
 
 	if (replyTo) {
 		content["m.relates_to"] = {
