@@ -24,8 +24,14 @@ const MAX_H = 256;
  * shown until the user clicks, at which point {@link createDecryptedObjectUrl}
  * downloads the ciphertext, verifies + decrypts it, and the player renders the
  * decrypted blob. A malformed descriptor or a hash/decrypt failure fails closed
- * to an error box rather than ever touching the ciphertext URL. (The encrypted
- * poster — `info.thumbnail_file` — is deferred, see #286.)
+ * to an error box rather than ever touching the ciphertext URL.
+ *
+ * When an encrypted video carries an encrypted poster (`info.thumbnail_file`),
+ * it's downloaded + decrypted *eagerly* (best-effort, fail-open: a poster
+ * failure just leaves no poster, never blocks playback or shows ciphertext) and
+ * shown on the placeholder and the playing `<video>`. This mirrors the eager
+ * decrypt-on-mount of {@link EncryptedImage}; the timeline virtualizer bounds
+ * the fan-out to on-screen rows.
  *
  * Either way the box is reserved from the cleartext `info.w/h` before load so
  * the virtualizer doesn't reflow.
@@ -37,6 +43,16 @@ export const MediaVideo: Component<{
 	mimetype: string | null;
 	/** Cleartext poster URL (plain video only); null otherwise. */
 	posterUrl: string | null;
+	/**
+	 * Encrypted poster source (encrypted video only): the ciphertext http URL
+	 * of `info.thumbnail_file`. Decrypted eagerly into a poster blob. Null when
+	 * the video is plain or carries no encrypted thumbnail.
+	 */
+	thumbnailUrl?: string | null;
+	/** Validated EncryptedFile descriptor for the encrypted poster, or null. */
+	thumbnailFile?: EncryptedFileInfo | null;
+	/** Plaintext mimetype of the encrypted poster (sets the blob type). */
+	thumbnailMimetype?: string | null;
 	/** Accessible name for the player. */
 	label: string;
 	/** Authoritative: when true, `httpUrl` is ciphertext and must be decrypted. */
@@ -67,6 +83,17 @@ export const MediaVideo: Component<{
 		() => (props.isEncrypted && activated() ? props.httpUrl : null),
 		() => props.file,
 		() => props.mimetype,
+	);
+
+	// Encrypted poster: decrypt the thumbnail eagerly (not gated on the play
+	// click — the poster is shown *before* play) so the placeholder and the
+	// playing <video> can use a real frame. Best-effort and fail-open: on any
+	// download/verify/decrypt failure `poster.url()` stays null and we simply
+	// render no poster — playback is unaffected and ciphertext is never shown.
+	const poster = createDecryptedObjectUrl(
+		() => (props.isEncrypted ? (props.thumbnailUrl ?? null) : null),
+		() => props.thumbnailFile ?? null,
+		() => props.thumbnailMimetype ?? null,
 	);
 
 	// Reserve the same box the player will occupy, scaling intrinsic dims into
@@ -140,6 +167,7 @@ export const MediaVideo: Component<{
 							autoplay
 							playsinline
 							src={url()}
+							poster={poster.url() ?? undefined}
 							width={props.reserveWidth ?? undefined}
 							height={props.reserveHeight ?? undefined}
 							aria-label={props.label}
@@ -157,7 +185,8 @@ export const MediaVideo: Component<{
 						Decrypting…
 					</div>
 				</Match>
-				{/* Idle: reserved placeholder with a play button (click-to-load). */}
+				{/* Idle: reserved placeholder with a play button (click-to-load).
+				    Shows the decrypted poster behind the play icon when available. */}
 				<Match when={true}>
 					<button
 						type="button"
@@ -166,7 +195,17 @@ export const MediaVideo: Component<{
 						onClick={() => setActivated(true)}
 						aria-label={`Play video: ${props.label}`}
 					>
-						<span class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-0/70 text-text-primary transition-colors group-hover:bg-surface-0/90">
+						<Show when={poster.url()}>
+							{(posterUrl) => (
+								<img
+									src={posterUrl()}
+									alt=""
+									aria-hidden="true"
+									class="absolute inset-0 h-full w-full object-cover"
+								/>
+							)}
+						</Show>
+						<span class="relative flex h-12 w-12 items-center justify-center rounded-full bg-surface-0/70 text-text-primary transition-colors group-hover:bg-surface-0/90">
 							<svg
 								class="h-6 w-6"
 								viewBox="0 0 24 24"

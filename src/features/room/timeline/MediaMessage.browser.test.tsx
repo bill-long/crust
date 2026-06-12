@@ -123,6 +123,102 @@ describe("encrypted MediaVideo", () => {
 		await findByText(/couldn't decrypt video/i);
 		expect(queryByLabelText("clip.mp4")).toBeNull();
 	});
+
+	it("decrypts info.thumbnail_file eagerly and shows it as a poster before play", async () => {
+		// Distinct keys/ciphertexts for the video and its thumbnail, served by
+		// URL so the eager poster decrypt and the click-gated video decrypt each
+		// resolve their own bytes.
+		const video = await encryptAttachment(
+			new TextEncoder().encode("video-bytes"),
+		);
+		const thumb = await encryptAttachment(
+			// A real PNG header so the decrypted blob is a plausible image.
+			new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) =>
+				url.includes("thumb")
+					? new Response(thumb.ciphertext, { status: 200 })
+					: new Response(video.ciphertext, { status: 200 }),
+			),
+		);
+
+		const { container, findByLabelText } = render(() => (
+			<MediaVideo
+				httpUrl="https://hs.example/cipher-video"
+				file={video.file}
+				mimetype="video/mp4"
+				posterUrl={null}
+				thumbnailUrl="https://hs.example/cipher-thumb"
+				thumbnailFile={thumb.file}
+				thumbnailMimetype="image/png"
+				label="clip.mp4"
+				isEncrypted={true}
+				reserveWidth={320}
+				reserveHeight={240}
+			/>
+		));
+
+		// The poster image appears on the idle placeholder before any play click,
+		// sourced from the decrypted blob (not the ciphertext URL).
+		await waitFor(() => {
+			const posterImg = container.querySelector("img");
+			expect(posterImg?.getAttribute("src")).toMatch(/^blob:/);
+		});
+
+		// And it carries through to the playing <video> as the poster attribute.
+		fireEvent.click(await findByLabelText("Play video: clip.mp4"));
+		const playing = (await findByLabelText("clip.mp4")) as HTMLVideoElement;
+		expect(playing.getAttribute("src")).toMatch(/^blob:/);
+		await waitFor(() =>
+			expect(playing.getAttribute("poster")).toMatch(/^blob:/),
+		);
+	});
+
+	it("fails open (no poster, play affordance intact) when the thumbnail is tampered", async () => {
+		const video = await encryptAttachment(
+			new TextEncoder().encode("video-bytes"),
+		);
+		const thumb = await encryptAttachment(new Uint8Array([1, 2, 3, 4]));
+		const corruptedThumb = thumb.ciphertext.slice(0);
+		new Uint8Array(corruptedThumb)[0] ^= 0xff;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (url: string) =>
+				url.includes("thumb")
+					? new Response(corruptedThumb, { status: 200 })
+					: new Response(video.ciphertext, { status: 200 }),
+			),
+		);
+
+		const { container, findByLabelText } = render(() => (
+			<MediaVideo
+				httpUrl="https://hs.example/cipher-video"
+				file={video.file}
+				mimetype="video/mp4"
+				posterUrl={null}
+				thumbnailUrl="https://hs.example/cipher-thumb"
+				thumbnailFile={thumb.file}
+				thumbnailMimetype="image/png"
+				label="clip.mp4"
+				isEncrypted={true}
+				reserveWidth={320}
+				reserveHeight={240}
+			/>
+		));
+
+		// The tampered thumbnail decrypt fails (fail-open): no poster <img> on the
+		// placeholder, and the video still plays — with no poster attribute — once
+		// activated. By the time the playing <video> appears the poster decrypt has
+		// settled, so a missing poster reflects the fail-open, not a race.
+		const play = await findByLabelText("Play video: clip.mp4");
+		expect(container.querySelector("img")).toBeNull();
+		fireEvent.click(play);
+		const playing = (await findByLabelText("clip.mp4")) as HTMLVideoElement;
+		expect(playing.getAttribute("src")).toMatch(/^blob:/);
+		expect(playing.getAttribute("poster")).toBeNull();
+	});
 });
 
 describe("encrypted MediaAudio", () => {
