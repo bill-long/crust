@@ -268,3 +268,74 @@ describe("Composer formatting toolbar", () => {
 		expect(ta.value).toBe("**word**");
 	});
 });
+
+describe("Composer preview toggle", () => {
+	function getTextarea(container: HTMLElement): HTMLTextAreaElement {
+		const ta = container.querySelector<HTMLTextAreaElement>(
+			"[data-composer-textarea]",
+		);
+		if (!ta) throw new Error("no textarea");
+		return ta;
+	}
+
+	function typeValue(ta: HTMLTextAreaElement, value: string): void {
+		ta.value = value;
+		ta.dispatchEvent(new Event("input", { bubbles: true }));
+	}
+
+	it("renders the draft through MessageBody only while the preview is open", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "**bold**");
+
+		// Hidden by default.
+		expect(
+			container.querySelector('[aria-label="Message preview"]'),
+		).toBeNull();
+
+		(getByLabelText("Preview") as HTMLButtonElement).click();
+		await tick();
+
+		const region = container.querySelector('[aria-label="Message preview"]');
+		expect(region).not.toBeNull();
+		// Byte-identical to the receive path: the formatted_body renders <strong>.
+		expect(region?.querySelector("strong")?.textContent).toBe("bold");
+	});
+
+	it("reflects open/closed state via aria-pressed", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		getTextarea(container); // ensure mounted
+		const btn = getByLabelText("Preview") as HTMLButtonElement;
+		expect(btn.getAttribute("aria-pressed")).toBe("false");
+		btn.click();
+		await tick();
+		expect(btn.getAttribute("aria-pressed")).toBe("true");
+		btn.click();
+		await tick();
+		expect(btn.getAttribute("aria-pressed")).toBe("false");
+		expect(
+			container.querySelector('[aria-label="Message preview"]'),
+		).toBeNull();
+	});
+
+	it("shows a placeholder when the draft is empty", async () => {
+		const { container, getByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		getTextarea(container);
+		(getByLabelText("Preview") as HTMLButtonElement).click();
+		await tick();
+		const region = container.querySelector('[aria-label="Message preview"]');
+		expect(region?.textContent).toContain("Nothing to preview");
+	});
+});

@@ -13,6 +13,7 @@ import {
 import { useClient } from "../../../client/client";
 import { createPicker } from "../../../components/picker/Picker";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
+import { MessageBody } from "../../emoji/MessageBody";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { buildShortcodeLookup } from "../../emoji/useImagePacks";
 import { GifPicker } from "../../gif/GifPicker";
@@ -116,6 +117,7 @@ const Composer: Component<{
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
+	const [previewOpen, setPreviewOpen] = createSignal(false);
 	const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
 	const gifConfig = useGifConfig();
 
@@ -193,6 +195,22 @@ const Composer: Component<{
 
 	// Memoize shortcode lookup to avoid rebuilding on every send
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
+
+	// Live preview: render the in-progress draft through the SAME send→receive
+	// pipeline a real message takes (formatMarkdown → MessageBody), so what the
+	// user previews is byte-identical to what recipients render. Computed only
+	// when the preview is open; returns null for an empty draft so the panel can
+	// show a placeholder instead of an empty box.
+	const previewContent = createMemo(() => {
+		if (!previewOpen()) return null;
+		const msg = text();
+		if (!msg.trim()) return null;
+		return formatMarkdown(
+			msg,
+			reconcileMentions(msg),
+			findCustomEmoji(msg, shortcodeLookup()),
+		);
+	});
 
 	let textareaRef: HTMLTextAreaElement | undefined;
 	let emojiButtonRef: HTMLButtonElement | undefined;
@@ -435,6 +453,7 @@ const Composer: Component<{
 				setMentionQuery(null);
 				setEmojiPickerOpen(false);
 				setGifPickerOpen(false);
+				setPreviewOpen(false);
 				clearAttachments();
 				// A send pinned to the previous room may still be in flight; reset
 				// the busy flag so the newly selected room's composer is usable.
@@ -993,7 +1012,52 @@ const Composer: Component<{
 				>
 					❝
 				</button>
+				{/* Toggle a live render of the draft through the receive-side
+				    pipeline. Stable accessible name + aria-pressed (not a changing
+				    label) so screen readers announce the on/off state once. */}
+				<button
+					type="button"
+					class="ml-auto h-7 rounded px-2 text-xs transition-colors hover:bg-surface-3 hover:text-text-secondary"
+					classList={{
+						"bg-surface-3": previewOpen(),
+						"text-text-secondary": previewOpen(),
+					}}
+					aria-label="Preview"
+					aria-pressed={previewOpen()}
+					title="Preview formatted message"
+					onClick={() => setPreviewOpen((v) => !v)}
+				>
+					Preview
+				</button>
 			</div>
+			<Show when={previewOpen()}>
+				<section
+					class="mb-1.5 max-h-40 overflow-y-auto rounded-lg border border-border-subtle bg-surface-2 px-4 py-2.5"
+					aria-label="Message preview"
+				>
+					<Show
+						when={previewContent()}
+						fallback={
+							<p class="text-sm italic text-text-disabled">
+								Nothing to preview
+							</p>
+						}
+					>
+						{(content) => (
+							<MessageBody
+								body={content().body}
+								format={
+									content().formatted_body ? "org.matrix.custom.html" : null
+								}
+								formattedBody={content().formatted_body}
+								isEdited={false}
+								client={client}
+								shortcodeLookup={shortcodeLookup()}
+							/>
+						)}
+					</Show>
+				</section>
+			</Show>
 			<div class="relative">
 				<MentionPicker
 					items={filteredMembers()}
