@@ -1018,7 +1018,10 @@ const Composer: Component<{
 				<button
 					type="button"
 					class="ml-auto h-7 rounded px-2 text-xs transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					classList={{ "bg-surface-3 text-text-secondary": previewOpen() }}
+					classList={{
+						"bg-surface-3": previewOpen(),
+						"text-text-secondary": previewOpen(),
+					}}
 					aria-label="Preview"
 					aria-pressed={previewOpen()}
 					title="Preview formatted message"
