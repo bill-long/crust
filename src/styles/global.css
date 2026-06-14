@@ -10,6 +10,8 @@ html {
 	   and keep this one, rather than dropping the whole declaration (which,
 	   with overflow:hidden, would collapse the layout). */
 	height: calc(100vh / var(--app-zoom, 1));
+	/* biome-ignore lint/suspicious/noDuplicateProperties: intentional dvh
+	   progressive-enhancement over the 100vh fallback above */
 	height: calc(100dvh / var(--app-zoom, 1));
 	overflow: hidden;
 }
