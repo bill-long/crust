@@ -30,7 +30,7 @@ const UpdatePrompt: Component = () => {
 	return (
 		<Show when={needRefresh()}>
 			<div
-				class="fixed bottom-4 left-4 z-50 w-80 rounded-lg border border-border-subtle bg-surface-3 p-4 shadow-xl"
+				class="fixed bottom-4 left-4 right-4 z-50 rounded-lg border border-border-subtle bg-surface-3 p-4 shadow-xl sm:right-auto sm:w-80"
 				role="status"
 				aria-live="polite"
 			>

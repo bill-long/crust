@@ -1,9 +1,18 @@
 @import "tailwindcss";
 
 /* Zoom-aware viewport containment: html height compensates for CSS zoom
-   so that children using h-full fill exactly the visible viewport. */
+   so that children using h-full fill exactly the visible viewport. Uses dvh
+   (dynamic viewport height) so the layout tracks mobile browser chrome and the
+   on-screen keyboard (paired with interactive-widget=resizes-content in the
+   viewport meta) — otherwise the bottom composer is pushed under the keyboard. */
 html {
+	/* 100vh fallback first: browsers without dvh support discard the dvh line
+	   and keep this one, rather than dropping the whole declaration (which,
+	   with overflow:hidden, would collapse the layout). */
 	height: calc(100vh / var(--app-zoom, 1));
+	/* biome-ignore lint/suspicious/noDuplicateProperties: intentional dvh
+	   progressive-enhancement over the 100vh fallback above */
+	height: calc(100dvh / var(--app-zoom, 1));
 	overflow: hidden;
 }
 
