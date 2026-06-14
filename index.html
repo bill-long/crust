@@ -2,7 +2,14 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<!-- interactive-widget=resizes-content makes the on-screen keyboard
+		     shrink the layout viewport (and thus 100dvh) instead of overlaying
+		     content, so the bottom composer stays above the keyboard on mobile
+		     rather than being pushed underneath it. -->
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+		/>
 		<!-- Dark theme-color (surface-1) so the installed-app title bar's
 		     auto-chosen text color stays readable, including when the window
 		     is unfocused. The brand pink is the in-app accent, not the OS
