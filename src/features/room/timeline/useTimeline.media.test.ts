@@ -621,6 +621,182 @@ describe("useTimeline media projection", () => {
 				expect(events[0].replyToBody).toBeNull();
 			});
 		});
+
+		it("projects a plain thumbnail url for an image/sticker parent", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$parentImage",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "pic.png",
+						url: "mxc://test/pic",
+						info: { mimetype: "image/png", w: 10, h: 10 },
+					},
+					ts: 1000,
+				},
+				{
+					eventId: "$parentSticker",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.sticker",
+					content: {
+						body: "wave",
+						url: "mxc://test/sticker",
+						info: { mimetype: "image/png", w: 10, h: 10 },
+					},
+					ts: 1100,
+				},
+				{
+					eventId: "$replyToImage",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "which one?",
+						"m.relates_to": { "m.in_reply_to": { event_id: "$parentImage" } },
+					},
+					ts: 2000,
+				},
+				{
+					eventId: "$replyToSticker",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "cute",
+						"m.relates_to": { "m.in_reply_to": { event_id: "$parentSticker" } },
+					},
+					ts: 2100,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const toImage = events.find((e) => e.eventId === "$replyToImage");
+				expect(toImage?.replyToThumbUrl).toBe(
+					"https://example.com/_matrix/media/v3/download/test/pic",
+				);
+				expect(toImage?.replyToThumbEncryptedFile).toBeNull();
+				expect(toImage?.replyToThumbMimetype).toBeNull();
+
+				const toSticker = events.find((e) => e.eventId === "$replyToSticker");
+				expect(toSticker?.replyToThumbUrl).toBe(
+					"https://example.com/_matrix/media/v3/download/test/sticker",
+				);
+			});
+		});
+
+		it("projects a ciphertext url + encrypted descriptor for an encrypted image parent", async () => {
+			const validFile = (url: string) => ({
+				url,
+				key: { k: "A".repeat(43) },
+				iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+				hashes: { sha256: "A".repeat(43) },
+				v: "v2",
+			});
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$parentEncImage",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.image",
+						body: "secret.png",
+						file: validFile("mxc://test/encpic"),
+						info: { mimetype: "image/png", w: 10, h: 10 },
+					},
+					ts: 1000,
+				},
+				{
+					eventId: "$replyToEncImage",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "this one",
+						"m.relates_to": {
+							"m.in_reply_to": { event_id: "$parentEncImage" },
+						},
+					},
+					ts: 2000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const reply = events.find((e) => e.eventId === "$replyToEncImage");
+				expect(reply?.replyToThumbUrl).toBe(
+					"https://example.com/_matrix/media/v3/download/test/encpic",
+				);
+				expect(reply?.replyToThumbEncryptedFile).not.toBeNull();
+				expect(reply?.replyToThumbMimetype).toBe("image/png");
+			});
+		});
+
+		it("leaves the thumbnail null for non-image parents", async () => {
+			const roomA = createMockRoom("!roomA:test", [
+				{
+					eventId: "$parentVideo2",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.video",
+						body: "clip.mp4",
+						url: "mxc://test/clip2",
+						info: { mimetype: "video/mp4", size: 1 },
+					},
+					ts: 1000,
+				},
+				{
+					eventId: "$replyToVideo2",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "nice",
+						"m.relates_to": { "m.in_reply_to": { event_id: "$parentVideo2" } },
+					},
+					ts: 2000,
+				},
+			]);
+
+			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+			await withRoot(async () => {
+				const { events } = useTimeline(
+					client as unknown as MatrixClient,
+					() => "!roomA:test",
+				);
+				await flushPromises();
+
+				const reply = events.find((e) => e.eventId === "$replyToVideo2");
+				expect(reply?.replyToThumbUrl).toBeNull();
+				expect(reply?.replyToThumbEncryptedFile).toBeNull();
+			});
+		});
 	});
 
 	describe("encrypted video poster (#286)", () => {

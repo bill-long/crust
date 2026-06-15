@@ -181,6 +181,25 @@ export interface TimelineEvent {
 	 * control-char-stripped. Null when the parent isn't resolvable.
 	 */
 	replyToBody: string | null;
+	/**
+	 * Scaled (thumbnail) http URL of the replied-to event's media, shown as a
+	 * tiny preview in the quoted reply-context block so the reply visually
+	 * identifies *which* image it answers. Populated only when the parent is an
+	 * `m.image` or `m.sticker`; null otherwise (text/video/audio/file keep just
+	 * the {@link TimelineEvent.replyToBody} label). For an *encrypted* parent
+	 * this points at *ciphertext* — the renderer must download + decrypt it via
+	 * {@link TimelineEvent.replyToThumbEncryptedFile} and fail closed, never
+	 * rendering the ciphertext as an `<img>`.
+	 */
+	replyToThumbUrl: string | null;
+	/**
+	 * Parsed `content.file` of an encrypted replied-to image/sticker, used to
+	 * decrypt {@link TimelineEvent.replyToThumbUrl}. Null for plain parents and
+	 * when the encrypted descriptor is malformed (fail closed — no thumbnail).
+	 */
+	replyToThumbEncryptedFile: EncryptedFileInfo | null;
+	/** Plaintext mimetype of the replied-to image/sticker, from `info.mimetype`. */
+	replyToThumbMimetype: string | null;
 	reactions: Record<string, ReactionAggregate>;
 	myReactions: Record<string, string>;
 	/**
@@ -420,6 +439,9 @@ function buildSyntheticCallLeaveEvent(
 		replyToId: null,
 		replyToSender: null,
 		replyToBody: null,
+		replyToThumbUrl: null,
+		replyToThumbEncryptedFile: null,
+		replyToThumbMimetype: null,
 		// Null-prototype maps for consistency with eventToTimelineEvent and to
 		// keep reaction-key lookups safe from prototype-pollution edge cases.
 		reactions: Object.create(null) as TimelineEvent["reactions"],
@@ -600,6 +622,9 @@ function eventToTimelineEvent(
 			: null;
 	let replyToSender: string | null = null;
 	let replyToBody: string | null = null;
+	let replyToThumbUrl: string | null = null;
+	let replyToThumbEncryptedFile: EncryptedFileInfo | null = null;
+	let replyToThumbMimetype: string | null = null;
 	if (replyToId) {
 		const parent = room.findEventById(replyToId);
 		if (parent) {
@@ -608,6 +633,44 @@ function eventToTimelineEvent(
 			replyToSender =
 				rawName && !hasControlChar(rawName) ? rawName : parentSender || null;
 			replyToBody = buildReplySnippet(parent) || null;
+
+			// Thumbnail preview for image/sticker parents so the reply visually
+			// identifies which media it answers. Same plain-vs-encrypted mxc
+			// derivation as the main media projection below; everything else
+			// (text/video/audio/file) keeps just the text label. Fail closed:
+			// an encrypted parent with a malformed `content.file` leaves the
+			// thumb url null so we never render ciphertext.
+			const parentContent = parent.getContent();
+			const isImageish =
+				parent.getType() === "m.sticker" || parentContent.msgtype === "m.image";
+			if (isImageish) {
+				const parentPlainMxc =
+					typeof parentContent.url === "string" && parentContent.url.length > 0
+						? parentContent.url
+						: null;
+				const parentEncryptedMxc =
+					typeof parentContent.file?.url === "string" &&
+					parentContent.file.url.length > 0
+						? parentContent.file.url
+						: null;
+				if (parentPlainMxc) {
+					replyToThumbUrl =
+						client.mxcUrlToHttp(parentPlainMxc, 96, 96, "scale") ?? null;
+				} else if (parentEncryptedMxc) {
+					const encryptedFile = parseEncryptedFile(parentContent.file);
+					if (encryptedFile) {
+						// Encrypted media can't use server-side thumbnailing (the
+						// ciphertext is opaque); resolve the full ciphertext url and
+						// let the renderer decrypt + downscale via CSS.
+						replyToThumbUrl = client.mxcUrlToHttp(parentEncryptedMxc) ?? null;
+						replyToThumbEncryptedFile = encryptedFile;
+						replyToThumbMimetype =
+							typeof parentContent.info?.mimetype === "string"
+								? parentContent.info.mimetype
+								: null;
+					}
+				}
+			}
 		}
 	}
 
@@ -787,6 +850,9 @@ function eventToTimelineEvent(
 		replyToId,
 		replyToSender,
 		replyToBody,
+		replyToThumbUrl,
+		replyToThumbEncryptedFile,
+		replyToThumbMimetype,
 		reactions,
 		myReactions,
 		status: event.status ?? null,

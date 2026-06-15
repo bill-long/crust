@@ -66,6 +66,9 @@ function mkEvent(eventId: string, body: string, ts: number): TimelineEvent {
 		replyToId: null,
 		replyToSender: null,
 		replyToBody: null,
+		replyToThumbUrl: null,
+		replyToThumbEncryptedFile: null,
+		replyToThumbMimetype: null,
 		reactions: {},
 		myReactions: {},
 		status: null,
@@ -653,6 +656,44 @@ describe("TimelineView (browser)", () => {
 			})
 			.not.toContain("Alice joined the room");
 		expect(m.container.textContent).toContain("Alice, Bob and 2 others joined");
+		m.unmount();
+	});
+
+	// Clicking a message's reply-context block jumps to + flashes the
+	// original message (the same scroll/flash path the pinned panel uses).
+	it("clicking the reply context flashes the replied-to message", async () => {
+		const roomId = "!reply:example.com";
+		const parent = mkEvent("$parent", "the original question", 1700000000000);
+		const reply: TimelineEvent = {
+			...mkEvent("$reply", "see above", 1700000001000),
+			replyToId: "$parent",
+			replyToSender: "Alice",
+			replyToBody: "the original question",
+		};
+		harness.setRoomState(roomId, { events: [parent, reply] });
+		const m = mount(roomId);
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toMatch(/see above/);
+
+		const btn = m.container.querySelector<HTMLButtonElement>(
+			'button[aria-label="Jump to replied message"]',
+		);
+		expect(btn).toBeTruthy();
+		btn?.click();
+
+		await expect
+			.poll(
+				() =>
+					m.container
+						.querySelector('[data-event-id="$parent"]')
+						?.classList.contains("flash-pin") ?? false,
+				{ timeout: 2000, interval: 50 },
+			)
+			.toBe(true);
 		m.unmount();
 	});
 });

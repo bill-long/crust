@@ -15,6 +15,8 @@ import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
+import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
+import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
@@ -171,23 +173,76 @@ const FailedReactionPills: Component<{
 };
 
 /**
+ * Tiny media thumbnail shown inside {@link ReplyContext} for image/sticker
+ * parents. Plain media renders straight from the scaled http url; encrypted
+ * media downloads + decrypts the ciphertext (via {@link createDecryptedObjectUrl})
+ * and fails closed — rendering nothing rather than the ciphertext url — so the
+ * text label still identifies the reply target.
+ */
+const ReplyThumb: Component<{
+	url: string;
+	file: EncryptedFileInfo | null;
+	mimetype: string | null;
+}> = (props) => {
+	const cls = "size-9 shrink-0 rounded object-cover bg-surface-2";
+	return (
+		<Show
+			when={props.file}
+			fallback={<img src={props.url} alt="" loading="lazy" class={cls} />}
+		>
+			{(file) => {
+				const media = createDecryptedObjectUrl(
+					() => props.url,
+					() => file(),
+					() => props.mimetype,
+				);
+				return (
+					<Show when={media.url()}>
+						{(url) => <img src={url()} alt="" loading="lazy" class={cls} />}
+					</Show>
+				);
+			}}
+		</Show>
+	);
+};
+
+/**
  * Quoted reply-context block shown above a message that replies to another
  * event. Resolved from the `m.in_reply_to` relation (see useTimeline's
  * `replyTo*` projection) so it renders for every message type — text, image,
  * media, GIF — not just legacy `> `-prefixed text. Falls back to a generic
  * line when the parent isn't resolvable (not in any loaded timeline).
+ *
+ * When the parent IS resolvable (`eventId` set) the block is a button that
+ * jumps to + flashes the original message; otherwise it's a static line (there
+ * is nothing to jump to). Image/sticker parents also show a tiny thumbnail so
+ * the reply visually identifies which media it answers.
  */
 const ReplyContext: Component<{
+	eventId: string | null;
 	sender: string | null;
 	snippet: string | null;
+	thumbUrl: string | null;
+	thumbEncryptedFile: EncryptedFileInfo | null;
+	thumbMimetype: string | null;
+	onJump: (eventId: string) => void;
 }> = (props) => {
-	return (
-		<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
+	const body = (
+		<div class="flex min-w-0 items-center gap-1.5">
+			<Show when={props.thumbUrl}>
+				{(url) => (
+					<ReplyThumb
+						url={url()}
+						file={props.thumbEncryptedFile}
+						mimetype={props.thumbMimetype}
+					/>
+				)}
+			</Show>
 			<Show
 				when={props.sender}
 				fallback={<span class="italic">In reply to a message</span>}
 			>
-				<div class="truncate">
+				<div class="min-w-0 truncate">
 					<span class="font-medium text-text-muted">{props.sender}</span>
 					<Show when={props.snippet}>
 						<span>{`: ${props.snippet}`}</span>
@@ -195,6 +250,27 @@ const ReplyContext: Component<{
 				</div>
 			</Show>
 		</div>
+	);
+	return (
+		<Show
+			when={props.eventId}
+			fallback={
+				<div class="mb-1 border-l-2 border-border-strong pl-2 text-xs text-text-disabled">
+					{body}
+				</div>
+			}
+		>
+			{(eventId) => (
+				<button
+					type="button"
+					onClick={() => props.onJump(eventId())}
+					aria-label="Jump to replied message"
+					class="mb-1 block w-full cursor-pointer rounded-sm border-l-2 border-border-strong pl-2 text-left text-xs text-text-disabled hover:bg-surface-2"
+				>
+					{body}
+				</button>
+			)}
+		</Show>
 	);
 };
 
@@ -364,6 +440,7 @@ const TimelineItem: Component<{
 	isOwnMessage: boolean;
 	onReact: (key: string) => void;
 	onReply: () => void;
+	onJumpToReply: (eventId: string) => void;
 	onEdit: () => void;
 	onDelete: () => void;
 	onTogglePin?: () => void;
@@ -657,8 +734,13 @@ const TimelineItem: Component<{
 								    prefix). Sits above the image / text / media render. */}
 								<Show when={ev.replyToId}>
 									<ReplyContext
+										eventId={ev.replyToId}
 										sender={ev.replyToSender}
 										snippet={ev.replyToBody}
+										thumbUrl={ev.replyToThumbUrl}
+										thumbEncryptedFile={ev.replyToThumbEncryptedFile}
+										thumbMimetype={ev.replyToThumbMimetype}
+										onJump={props.onJumpToReply}
 									/>
 								</Show>
 								<Show
