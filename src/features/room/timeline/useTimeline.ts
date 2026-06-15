@@ -182,14 +182,16 @@ export interface TimelineEvent {
 	 */
 	replyToBody: string | null;
 	/**
-	 * Scaled (thumbnail) http URL of the replied-to event's media, shown as a
-	 * tiny preview in the quoted reply-context block so the reply visually
-	 * identifies *which* image it answers. Populated only when the parent is an
-	 * `m.image` or `m.sticker`; null otherwise (text/video/audio/file keep just
-	 * the {@link TimelineEvent.replyToBody} label). For an *encrypted* parent
-	 * this points at *ciphertext* — the renderer must download + decrypt it via
-	 * {@link TimelineEvent.replyToThumbEncryptedFile} and fail closed, never
-	 * rendering the ciphertext as an `<img>`.
+	 * Thumbnail http URL of the replied-to event's media, shown as a tiny
+	 * preview in the quoted reply-context block so the reply visually identifies
+	 * *which* image it answers. Populated only when the parent is an `m.image`
+	 * or `m.sticker`; null otherwise (text/video/audio/file keep just the
+	 * {@link TimelineEvent.replyToBody} label). Scaled server-side for plain
+	 * media. For an *encrypted* parent this is the *unscaled ciphertext* URL
+	 * (server-side thumbnailing can't apply to opaque ciphertext) — the renderer
+	 * must download + decrypt it via {@link TimelineEvent.replyToThumbEncryptedFile},
+	 * downscale via CSS, and fail closed, never rendering the ciphertext as an
+	 * `<img>`.
 	 */
 	replyToThumbUrl: string | null;
 	/**

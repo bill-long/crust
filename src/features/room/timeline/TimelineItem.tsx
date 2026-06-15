@@ -210,13 +210,16 @@ const ReplyThumb: Component<{
  * Quoted reply-context block shown above a message that replies to another
  * event. Resolved from the `m.in_reply_to` relation (see useTimeline's
  * `replyTo*` projection) so it renders for every message type — text, image,
- * media, GIF — not just legacy `> `-prefixed text. Falls back to a generic
- * line when the parent isn't resolvable (not in any loaded timeline).
+ * media, GIF — not just legacy `> `-prefixed text. When the parent isn't in any
+ * loaded timeline the sender/snippet are null and it shows a generic
+ * "In reply to a message" line.
  *
- * When the parent IS resolvable (`eventId` set) the block is a button that
- * jumps to + flashes the original message; otherwise it's a static line (there
- * is nothing to jump to). Image/sticker parents also show a tiny thumbnail so
- * the reply visually identifies which media it answers.
+ * Whenever `eventId` is set (i.e. the message is a reply at all) the block is a
+ * button that jumps to + flashes the original — even if the parent isn't
+ * currently loaded, since the click drives `jumpToEvent`, which loads an
+ * anchored window on demand. The non-interactive fallback only applies when
+ * `eventId` is null. Image/sticker parents also show a tiny thumbnail so the
+ * reply visually identifies which media it answers.
  */
 const ReplyContext: Component<{
 	eventId: string | null;
