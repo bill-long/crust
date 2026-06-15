@@ -1,6 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { useTimeline } from "./useTimeline";
 
@@ -676,6 +676,9 @@ describe("useTimeline media projection", () => {
 			]);
 
 			const client = createMockClient(new Map([["!roomA:test", roomA]]));
+			// Spy so we can assert a *scaled* thumbnail was requested — the mock's
+			// mxcUrlToHttp ignores w/h, so the returned URL alone can't prove it.
+			const toHttp = vi.spyOn(client, "mxcUrlToHttp");
 
 			await withRoot(async () => {
 				const { events } = useTimeline(
@@ -690,10 +693,17 @@ describe("useTimeline media projection", () => {
 				);
 				expect(toImage?.replyToThumbEncryptedFile).toBeNull();
 				expect(toImage?.replyToThumbMimetype).toBeNull();
+				expect(toHttp).toHaveBeenCalledWith("mxc://test/pic", 96, 96, "scale");
 
 				const toSticker = events.find((e) => e.eventId === "$replyToSticker");
 				expect(toSticker?.replyToThumbUrl).toBe(
 					"https://example.com/_matrix/media/v3/download/test/sticker",
+				);
+				expect(toHttp).toHaveBeenCalledWith(
+					"mxc://test/sticker",
+					96,
+					96,
+					"scale",
 				);
 			});
 		});

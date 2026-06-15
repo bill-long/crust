@@ -198,7 +198,12 @@ export interface TimelineEvent {
 	 * when the encrypted descriptor is malformed (fail closed — no thumbnail).
 	 */
 	replyToThumbEncryptedFile: EncryptedFileInfo | null;
-	/** Plaintext mimetype of the replied-to image/sticker, from `info.mimetype`. */
+	/**
+	 * Plaintext mimetype (`info.mimetype`) used to decrypt
+	 * {@link TimelineEvent.replyToThumbEncryptedFile}. Only set for *encrypted*
+	 * image/sticker parents; null for plain parents (whose `replyToThumbUrl` is
+	 * shown directly, no mimetype needed) and all non-image parents.
+	 */
 	replyToThumbMimetype: string | null;
 	reactions: Record<string, ReactionAggregate>;
 	myReactions: Record<string, string>;
