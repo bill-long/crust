@@ -177,7 +177,10 @@ export function makeTimelineHarnessRef(): TimelineHarness {
 						return Promise.resolve();
 					},
 					pendingScrollToId,
-					consumePendingScrollToId: () => {},
+					// Clear the pending target like the real hook does after the
+					// view scrolls/flashes, so a later `events` update doesn't
+					// retrigger the scroll/flash effect (which reads both signals).
+					consumePendingScrollToId: () => setPendingScrollToId(null),
 					setFollowingLive: () => {},
 					typingUsers: () => [] as { userId: string; displayName: string }[],
 					getSourceEvent: () => null,

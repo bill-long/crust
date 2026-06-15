@@ -265,7 +265,7 @@ const ReplyContext: Component<{
 					type="button"
 					onClick={() => props.onJump(eventId())}
 					aria-label="Jump to replied message"
-					class="mb-1 block w-full cursor-pointer rounded-sm border-l-2 border-border-strong pl-2 text-left text-xs text-text-disabled hover:bg-surface-2"
+					class="mb-1 block w-full cursor-pointer rounded-sm border-l-2 border-border-strong pl-2 text-left text-xs text-text-disabled transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 				>
 					{body}
 				</button>
