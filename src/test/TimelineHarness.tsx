@@ -123,6 +123,12 @@ export function makeTimelineHarnessRef(): TimelineHarness {
 				const [loadingNewer, setLoadingNewer] = createSignal(false);
 				const [canLoadOlder, setCanLoadOlder] = createSignal(false);
 				const [canLoadNewer, setCanLoadNewer] = createSignal(false);
+				// Mirrors the real hook: jumpToEvent publishes a pending scroll
+				// target the view consumes to scroll + flash the row. `equals:
+				// false` so repeat jumps to the same id still fire the effect.
+				const [pendingScrollToId, setPendingScrollToId] = createSignal<
+					string | null
+				>(null, { equals: false });
 
 				const sync = (rid: string): void => {
 					const snap = getOrCreate(rid);
@@ -166,9 +172,15 @@ export function makeTimelineHarnessRef(): TimelineHarness {
 					},
 					loadNewerMessages: () => Promise.resolve(),
 					jumpToLive: () => {},
-					jumpToEvent: () => Promise.resolve(),
-					pendingScrollToId: () => null,
-					consumePendingScrollToId: () => {},
+					jumpToEvent: (eventId: string) => {
+						setPendingScrollToId(eventId);
+						return Promise.resolve();
+					},
+					pendingScrollToId,
+					// Clear the pending target like the real hook does after the
+					// view scrolls/flashes, so a later `events` update doesn't
+					// retrigger the scroll/flash effect (which reads both signals).
+					consumePendingScrollToId: () => setPendingScrollToId(null),
 					setFollowingLive: () => {},
 					typingUsers: () => [] as { userId: string; displayName: string }[],
 					getSourceEvent: () => null,

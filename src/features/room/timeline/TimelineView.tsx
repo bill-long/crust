@@ -1419,6 +1419,10 @@ const TimelineView: Component<{
 													onTogglePin={() => props.onTogglePin?.(event.eventId)}
 													onReact={(key) => onReact(event.eventId, key)}
 													onReply={() => setReplyTo(event)}
+													onJumpToReply={(id) => {
+														setWantsBottom(false);
+														void jumpToEvent(id);
+													}}
 													onEdit={() => onEdit(event)}
 													onDelete={() => onDelete(event.eventId)}
 													onRetry={() => onRetry(event.eventId)}
