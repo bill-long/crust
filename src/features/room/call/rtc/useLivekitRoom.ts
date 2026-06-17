@@ -137,9 +137,12 @@ export interface LivekitRoomApi {
 	 */
 	setLocalScreenShareEnabled: (enabled: boolean) => Promise<void>;
 	/**
-	 * Whether this browser can capture a display (`getDisplayMedia` exists in a
-	 * secure context). False on most mobile browsers — the UI hides the
-	 * screen-share control rather than offering a dead button.
+	 * Whether `navigator.mediaDevices.getDisplayMedia` is present — a coarse
+	 * capability check, false on most mobile browsers, so the UI hides the
+	 * screen-share control rather than offering a dead button. Presence alone
+	 * doesn't guarantee success: an insecure context or a user-cancelled picker
+	 * still rejects at call time, which {@link setLocalScreenShareEnabled}
+	 * handles by reverting the toggle + surfacing the error.
 	 */
 	screenShareSupported: boolean;
 	/**
@@ -217,9 +220,11 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// keeps the button in sync.
 	const [localScreenShareEnabled, setLocalScreenShareEnabledSignal] =
 		createSignal(false);
-	// Whether this browser can capture a display at all. Most mobile browsers
-	// (and insecure contexts) don't implement getDisplayMedia, so the UI hides
-	// the screen-share button and the publish path fails closed.
+	// Coarse capability check: is `getDisplayMedia` even present? It's absent on
+	// most mobile browsers, so the UI hides the screen-share button. Presence
+	// doesn't guarantee a successful capture (an insecure context or cancelled
+	// picker still rejects at call time) — `setLocalScreenShareEnabled` handles
+	// that by reverting the toggle and surfacing the error.
 	const screenShareSupported =
 		typeof navigator !== "undefined" &&
 		typeof navigator.mediaDevices?.getDisplayMedia === "function";
