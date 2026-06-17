@@ -639,6 +639,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			publishScreenShareTracks();
 		}
 		setLocalCamEnabledSignal(false);
+		// Same rationale as camera: clear screen-share intent so a leftover
+		// `true` can't drive an unexpected publish on the next connect. Doubly
+		// important here — re-capturing a display needs a fresh user gesture, so
+		// a stale desired=true would just make the reconcile loop fail.
 		setLocalScreenShareEnabledSignal(false);
 	};
 
