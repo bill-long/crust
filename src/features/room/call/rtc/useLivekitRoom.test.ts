@@ -80,8 +80,10 @@ interface FakeRoom {
 		identity: string;
 		isMicrophoneEnabled: boolean;
 		isCameraEnabled: boolean;
+		isScreenShareEnabled: boolean;
 		setMicrophoneEnabled: ReturnType<typeof vi.fn>;
 		setCameraEnabled: ReturnType<typeof vi.fn>;
+		setScreenShareEnabled: ReturnType<typeof vi.fn>;
 		audioTrackPublications: Map<string, unknown>;
 		videoTrackPublications: Map<string, unknown>;
 	};
@@ -99,12 +101,16 @@ function createFakeRoom(opts?: {
 		identity: "local-id",
 		isMicrophoneEnabled: false,
 		isCameraEnabled: false,
+		isScreenShareEnabled: false,
 		setMicrophoneEnabled: vi.fn(async (enabled: boolean) => {
 			if (opts?.enableMicImpl) await opts.enableMicImpl();
 			localParticipant.isMicrophoneEnabled = enabled;
 		}),
 		setCameraEnabled: vi.fn(async (enabled: boolean) => {
 			localParticipant.isCameraEnabled = enabled;
+		}),
+		setScreenShareEnabled: vi.fn(async (enabled: boolean) => {
+			localParticipant.isScreenShareEnabled = enabled;
 		}),
 		audioTrackPublications: new Map(),
 		videoTrackPublications: new Map(),
@@ -175,6 +181,14 @@ beforeEach(() => {
 	roomFactory.lastOptions = null;
 	jwtMock.mockReset();
 	jwtMock.mockResolvedValue({ url: "wss://sfu", jwt: "JWT" });
+	// jsdom has no navigator.mediaDevices; provide getDisplayMedia so the
+	// screen-share feature-detect (`screenShareSupported`) is true by default.
+	// The "unsupported" test deletes it before rendering.
+	Object.defineProperty(navigator, "mediaDevices", {
+		value: { getDisplayMedia: vi.fn(async () => ({})) },
+		configurable: true,
+		writable: true,
+	});
 });
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -711,6 +725,140 @@ describe("useLivekitRoom", () => {
 		fakeRoom.emit("localTrackUnpublished");
 		expect(result.localCamEnabled()).toBe(false);
 		expect(result.videoTracks().has("local-id")).toBe(false);
+	});
+
+	it("setLocalScreenShareEnabled(true) calls setScreenShareEnabled and populates screenShareTracks for the local identity", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		expect(result.localScreenShareEnabled()).toBe(false);
+		await result.setLocalScreenShareEnabled(true);
+		expect(
+			fakeRoom.localParticipant.setScreenShareEnabled,
+		).toHaveBeenCalledWith(true, { audio: true });
+		expect(result.localScreenShareEnabled()).toBe(true);
+		// LiveKit publishes the local screen-share track; reconcile puts it in
+		// screenShareTracks (not videoTracks) under the local identity.
+		const localTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		fakeRoom.localParticipant.videoTrackPublications.set("pub-local-share", {
+			source: "screen_share",
+			videoTrack: localTrack,
+			isSubscribed: true,
+			trackSid: "pub-local-share",
+		});
+		fakeRoom.emit("localTrackPublished");
+		expect(result.screenShareTracks().get("local-id")?.track).toBe(localTrack);
+		expect(result.videoTracks().has("local-id")).toBe(false);
+	});
+
+	it("native Stop sharing (LocalTrackUnpublished with no share pub) syncs localScreenShareEnabled back to false", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		await result.setLocalScreenShareEnabled(true);
+		const localTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		fakeRoom.localParticipant.videoTrackPublications.set("pub-local-share", {
+			source: "screen_share",
+			videoTrack: localTrack,
+			isSubscribed: true,
+			trackSid: "pub-local-share",
+		});
+		fakeRoom.emit("localTrackPublished");
+		expect(result.screenShareTracks().has("local-id")).toBe(true);
+		expect(result.localScreenShareEnabled()).toBe(true);
+
+		// User clicks the browser's native "Stop sharing": LiveKit unpublishes
+		// and isScreenShareEnabled goes false WITHOUT going through our toggle.
+		fakeRoom.localParticipant.isScreenShareEnabled = false;
+		fakeRoom.localParticipant.videoTrackPublications.clear();
+		fakeRoom.emit("localTrackUnpublished");
+		expect(result.localScreenShareEnabled()).toBe(false);
+		expect(result.screenShareTracks().has("local-id")).toBe(false);
+	});
+
+	it("setLocalScreenShareEnabled reverts the optimistic flag and surfaces error when the picker is cancelled", async () => {
+		const fakeRoom = createFakeRoom();
+		fakeRoom.localParticipant.setScreenShareEnabled.mockImplementation(
+			async () => {
+				throw new Error("Permission denied");
+			},
+		);
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		await result.setLocalScreenShareEnabled(true);
+		expect(result.localScreenShareEnabled()).toBe(false);
+		expect(result.error()?.message).toContain("Permission denied");
+	});
+
+	it("reports screenShareSupported=false and fails closed when getDisplayMedia is absent", async () => {
+		// Simulate a browser without display capture (most mobile browsers).
+		Object.defineProperty(navigator, "mediaDevices", {
+			value: {},
+			configurable: true,
+			writable: true,
+		});
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		expect(result.screenShareSupported).toBe(false);
+		await result.setLocalScreenShareEnabled(true);
+		expect(
+			fakeRoom.localParticipant.setScreenShareEnabled,
+		).not.toHaveBeenCalled();
+		expect(result.localScreenShareEnabled()).toBe(false);
+		expect(result.error()?.message).toContain("supported");
 	});
 
 	it("remote camera TrackSubscribed adds a videoTracks entry; TrackUnsubscribed removes it", async () => {
