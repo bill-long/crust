@@ -322,6 +322,54 @@ export const FullCallOverlay: Component = () => {
 												? "Stop camera"
 												: "Start camera"}
 										</button>
+										<Show when={s().livekit.screenShareSupported}>
+											<button
+												type="button"
+												onClick={() =>
+													void s().livekit.setLocalScreenShareEnabled(
+														!s().livekit.localScreenShareEnabled(),
+													)
+												}
+												disabled={s().livekit.status() !== "connected"}
+												aria-pressed={s().livekit.localScreenShareEnabled()}
+												class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-semibold text-text-emphasis transition-colors hover:bg-surface-3 disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
+												title={
+													s().livekit.localScreenShareEnabled()
+														? "Stop sharing"
+														: "Share screen"
+												}
+												aria-label={
+													s().livekit.localScreenShareEnabled()
+														? "Stop sharing"
+														: "Share screen"
+												}
+											>
+												<svg
+													class="h-4 w-4"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<rect
+														x="2"
+														y="3"
+														width="20"
+														height="14"
+														rx="2"
+														ry="2"
+													/>
+													<line x1="8" y1="21" x2="16" y2="21" />
+													<line x1="12" y1="17" x2="12" y2="21" />
+												</svg>
+												{s().livekit.localScreenShareEnabled()
+													? "Stop sharing"
+													: "Share screen"}
+											</button>
+										</Show>
 										<button
 											type="button"
 											ref={leaveButtonRef}
@@ -624,11 +672,16 @@ interface ScreenShareTileProps {
 const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 	let videoEl: HTMLVideoElement | undefined;
 
-	const sharer = createMemo(
-		() =>
-			props.livekit.participants().find((p) => p.identity === props.identity)
-				?.displayName ?? props.identity,
-	);
+	// Label resolves reactively from the participant list so a display-name /
+	// active-speaker update refreshes it without remounting the tile. The
+	// local participant's own outgoing share reads as "Your screen".
+	const label = createMemo(() => {
+		const p = props.livekit
+			.participants()
+			.find((part) => part.identity === props.identity);
+		if (p?.isLocal) return "Your screen";
+		return `${p?.displayName ?? props.identity}’s screen`;
+	});
 
 	createEffect(() => {
 		// Track `props.entry` reactively so a replaced screen-share publication
@@ -671,7 +724,7 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 					<line x1="8" y1="21" x2="16" y2="21" />
 					<line x1="12" y1="17" x2="12" y2="21" />
 				</svg>
-				<span class="min-w-0 truncate">{sharer()}’s screen</span>
+				<span class="min-w-0 truncate">{label()}</span>
 			</div>
 		</div>
 	);

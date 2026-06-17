@@ -122,6 +122,27 @@ export interface LivekitRoomApi {
 	 */
 	setLocalCamEnabled: (enabled: boolean) => Promise<void>;
 	/**
+	 * The user's *desired* screen-share publish state — flips immediately on
+	 * `setLocalScreenShareEnabled` for a responsive button, then a single-flight
+	 * loop drives LiveKit to match. Also synced back to false when the
+	 * publication ends (incl. the browser's native "Stop sharing"). Reset to
+	 * false on teardown.
+	 */
+	localScreenShareEnabled: Accessor<boolean>;
+	/**
+	 * Drive the local screen-share publish state. `true` opens the browser's
+	 * display picker (getDisplayMedia) and so must be called from a user
+	 * gesture. Optimistic + single-flight, mirroring {@link setLocalCamEnabled}.
+	 * No-ops (and surfaces an error) when {@link screenShareSupported} is false.
+	 */
+	setLocalScreenShareEnabled: (enabled: boolean) => Promise<void>;
+	/**
+	 * Whether this browser can capture a display (`getDisplayMedia` exists in a
+	 * secure context). False on most mobile browsers — the UI hides the
+	 * screen-share control rather than offering a dead button.
+	 */
+	screenShareSupported: boolean;
+	/**
 	 * Map of LiveKit participant identity → its camera VideoTrack entry.
 	 * Only camera-source publications are stored; screen-share lives in the
 	 * separate `screenShareTracks` map so a participant can show both at once.
@@ -130,9 +151,9 @@ export interface LivekitRoomApi {
 	videoTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/**
 	 * Map of LiveKit participant identity → its screen-share VideoTrack entry.
-	 * Populated for remote `Track.Source.ScreenShare` publications so the call
-	 * UI can render a dedicated screen-share tile. Local screen-share
-	 * publishing is out of scope (see #271).
+	 * Populated for both remote `Track.Source.ScreenShare` publications and the
+	 * local participant's own outgoing share, so the call UI can render a
+	 * dedicated screen-share tile for each.
 	 */
 	screenShareTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/** Disconnects, stops local mic, detaches all audio. Idempotent. */
@@ -189,6 +210,19 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// Actual call-derived state: true while a camera publication is live.
 	// NOT persisted across teardown — see `resetCallDerivedState()`.
 	const [localCamEnabled, setLocalCamEnabledSignal] = createSignal(false);
+	// Desired local screen-share state. Like `localCamEnabled`, flips
+	// optimistically on intent and is reset on teardown. Unlike camera, it is
+	// ALSO synced back to false when the publication disappears (see
+	// `reconcileLocalScreenShare`) so the browser's native "Stop sharing" UI
+	// keeps the button in sync.
+	const [localScreenShareEnabled, setLocalScreenShareEnabledSignal] =
+		createSignal(false);
+	// Whether this browser can capture a display at all. Most mobile browsers
+	// (and insecure contexts) don't implement getDisplayMedia, so the UI hides
+	// the screen-share button and the publish path fails closed.
+	const screenShareSupported =
+		typeof navigator !== "undefined" &&
+		typeof navigator.mediaDevices?.getDisplayMedia === "function";
 	const [videoTracks, setVideoTracks] = createSignal<
 		ReadonlyMap<string, VideoTrackEntry>
 	>(new Map());
@@ -233,6 +267,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// sets this true; concurrent calls just update the desired-state signal
 	// and let the loop pick it up on its next iteration.
 	let cameraOpPending = false;
+	// Screen-share-toggle single-flight: same pattern as `cameraOpPending`.
+	let screenShareOpPending = false;
 	// Mic-toggle single-flight: same pattern as `cameraOpPending`. Driven by
 	// `createEffect` on `opts.micEnabled` (intent flips from the voice store
 	// → reconcile loop drives LiveKit to match). The outer trigger kicks off
@@ -491,7 +527,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		removeVideoEntryIfMatches(videoTrackMap, publishVideoTracks, identity, sid);
 	const upsertScreenShareTrack = (
 		identity: string,
-		track: RemoteVideoTrack,
+		track: LocalVideoTrack | RemoteVideoTrack,
 		sid: string,
 	): void =>
 		upsertVideoEntry(
@@ -545,6 +581,37 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		}
 	};
 
+	// Reconcile the local participant's screen-share publication into
+	// `screenShareTrackMap` so the user sees their own outgoing share as a tile.
+	// Called from `LocalTrackPublished` / `LocalTrackUnpublished`, mirroring
+	// `reconcileLocalCamera`.
+	//
+	// DELIBERATE INVERSION of `reconcileLocalCamera`: when no screen-share
+	// publication exists we ALSO write the desired-state signal to false. The
+	// only ways a local screen share ends are the app's Stop button (desired
+	// already false) or the browser's native "Stop sharing" UI (desired still
+	// true). Syncing false here keeps the toggle correct for the native case and
+	// prevents a later reconcile from re-prompting `getDisplayMedia`. This is
+	// safe — unlike camera, screen share cannot be re-enabled without a fresh
+	// user gesture, so there is no rapid enable→disable race to clobber.
+	const reconcileLocalScreenShare = (r: LivekitRoom): void => {
+		const sharePub = Array.from(
+			r.localParticipant.videoTrackPublications.values(),
+		).find((pub) => pub.source === "screen_share");
+		if (sharePub?.videoTrack) {
+			upsertScreenShareTrack(
+				r.localParticipant.identity,
+				sharePub.videoTrack as LocalVideoTrack,
+				sharePub.trackSid,
+			);
+		} else {
+			if (screenShareTrackMap.delete(r.localParticipant.identity)) {
+				publishScreenShareTracks();
+			}
+			if (localScreenShareEnabled()) setLocalScreenShareEnabledSignal(false);
+		}
+	};
+
 	// Reset call-derived UI state. Called from both `teardown()` (intentional
 	// disconnects) and the `Disconnected` event handler (unsolicited drops)
 	// so the participant list doesn't outlive the call. NOTE: mic intent
@@ -567,6 +634,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			publishScreenShareTracks();
 		}
 		setLocalCamEnabledSignal(false);
+		setLocalScreenShareEnabledSignal(false);
 	};
 
 	const teardown = async (): Promise<void> => {
@@ -713,6 +781,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				lk.RoomEvent.LocalTrackPublished,
 				ifLive(() => {
 					reconcileLocalCamera(r);
+					reconcileLocalScreenShare(r);
 					snapshotParticipants(r);
 				}),
 			);
@@ -720,6 +789,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				lk.RoomEvent.LocalTrackUnpublished,
 				ifLive(() => {
 					reconcileLocalCamera(r);
+					reconcileLocalScreenShare(r);
 					snapshotParticipants(r);
 				}),
 			);
@@ -1165,6 +1235,55 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		}
 	};
 
+	const setLocalScreenShareEnabled = async (
+		enabled: boolean,
+	): Promise<void> => {
+		// Fail closed where the browser can't capture a display (most mobile
+		// browsers): never optimistically flip the toggle, surface a clear error.
+		if (enabled && !screenShareSupported) {
+			setError(new Error("Screen sharing isn't supported on this device"));
+			return;
+		}
+		// Optimistic intent write + single-flight reconcile, mirroring
+		// `setLocalCamEnabled`. `setScreenShareEnabled(true)` opens the browser's
+		// display picker via getDisplayMedia, so this must run from the click's
+		// user gesture (it does — driven by the control-bar button).
+		setLocalScreenShareEnabledSignal(enabled);
+		const r = room;
+		if (!r) return;
+		if (screenShareOpPending) return;
+		screenShareOpPending = true;
+		try {
+			while (true) {
+				if (disposed) return;
+				const r2 = room;
+				if (!r2 || r2 !== r) return;
+				const desired = localScreenShareEnabled();
+				const actual = r2.localParticipant.isScreenShareEnabled === true;
+				if (actual === desired) return;
+				const myAttempt = attempt;
+				try {
+					await r2.localParticipant.setScreenShareEnabled(desired, {
+						audio: true,
+					});
+				} catch (e) {
+					if (disposed || myAttempt !== attempt || room !== r2) return;
+					// Revert the optimistic flip to actual SDK state, surface error.
+					// A user-cancelled display picker rejects here and correctly
+					// settles the toggle back to off.
+					setLocalScreenShareEnabledSignal(
+						r2.localParticipant.isScreenShareEnabled === true,
+					);
+					setError(e instanceof Error ? e : new Error(String(e)));
+					return;
+				}
+				if (disposed || myAttempt !== attempt || room !== r2) return;
+			}
+		} finally {
+			screenShareOpPending = false;
+		}
+	};
+
 	const explicitDisconnect = (): boolean => explicitDisconnectDepth > 0;
 
 	const disconnect = async (): Promise<void> => {
@@ -1226,6 +1345,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		participants,
 		localCamEnabled,
 		setLocalCamEnabled,
+		localScreenShareEnabled,
+		setLocalScreenShareEnabled,
+		screenShareSupported,
 		videoTracks,
 		screenShareTracks,
 		disconnect,

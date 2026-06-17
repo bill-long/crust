@@ -42,6 +42,7 @@ interface FakeCallSession {
 	setLivekitParticipants: Setter<readonly RtcParticipant[]>;
 	setLivekitAudioBlocked: Setter<boolean>;
 	setLivekitLocalCamEnabled: Setter<boolean>;
+	setLivekitLocalScreenShareEnabled: Setter<boolean>;
 	setLivekitVideoTracks: Setter<ReadonlyMap<string, VideoTrackEntry>>;
 	setLivekitScreenShareTracks: Setter<ReadonlyMap<string, VideoTrackEntry>>;
 	setBridgeInitializing: Setter<boolean>;
@@ -56,6 +57,7 @@ interface FakeCallSession {
 	livekitDisconnect: ReturnType<typeof vi.fn>;
 	livekitResumeAudio: ReturnType<typeof vi.fn>;
 	livekitSetLocalCamEnabled: ReturnType<typeof vi.fn>;
+	livekitSetLocalScreenShareEnabled: ReturnType<typeof vi.fn>;
 	livekitTeardownComplete: ReturnType<typeof vi.fn>;
 }
 
@@ -95,6 +97,8 @@ function makeFakeCallSessionImpl(
 	const [livekitAudioBlocked, setLivekitAudioBlocked] = createSignal(false);
 	const [livekitLocalCamEnabled, setLivekitLocalCamEnabled] =
 		createSignal(false);
+	const [livekitLocalScreenShareEnabled, setLivekitLocalScreenShareEnabled] =
+		createSignal(false);
 	const [livekitVideoTracks, setLivekitVideoTracks] = createSignal<
 		ReadonlyMap<string, VideoTrackEntry>
 	>(new Map());
@@ -115,6 +119,9 @@ function makeFakeCallSessionImpl(
 	const livekitDisconnect = vi.fn(async () => {});
 	const livekitResumeAudio = vi.fn(async () => {});
 	const livekitSetLocalCamEnabled = vi.fn(async (_enabled: boolean) => {});
+	const livekitSetLocalScreenShareEnabled = vi.fn(
+		async (_enabled: boolean) => {},
+	);
 	const livekitTeardownComplete = vi.fn(async () => {});
 
 	const rtc = {
@@ -135,6 +142,9 @@ function makeFakeCallSessionImpl(
 		participants: livekitParticipants,
 		localCamEnabled: livekitLocalCamEnabled,
 		setLocalCamEnabled: livekitSetLocalCamEnabled,
+		localScreenShareEnabled: livekitLocalScreenShareEnabled,
+		setLocalScreenShareEnabled: livekitSetLocalScreenShareEnabled,
+		screenShareSupported: true,
 		videoTracks: livekitVideoTracks,
 		screenShareTracks: livekitScreenShareTracks,
 		disconnect: livekitDisconnect,
@@ -169,6 +179,7 @@ function makeFakeCallSessionImpl(
 		setLivekitParticipants,
 		setLivekitAudioBlocked,
 		setLivekitLocalCamEnabled,
+		setLivekitLocalScreenShareEnabled,
 		setLivekitVideoTracks,
 		setLivekitScreenShareTracks,
 		setBridgeInitializing,
@@ -182,6 +193,7 @@ function makeFakeCallSessionImpl(
 		livekitDisconnect,
 		livekitResumeAudio,
 		livekitSetLocalCamEnabled,
+		livekitSetLocalScreenShareEnabled,
 		livekitTeardownComplete,
 	};
 }

@@ -236,6 +236,30 @@ describe("FullCallOverlay", () => {
 		expect(fake.livekitSetLocalCamEnabled).toHaveBeenCalledWith(true);
 	});
 
+	it("screen-share button calls setLocalScreenShareEnabled with the inverse of the current state", () => {
+		const fake = track(makeFakeCallSession());
+		fake.setRtcStatus("joined");
+		fake.setLivekitStatus("connected");
+		fake.setLivekitLocalScreenShareEnabled(false);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		const share = screen.getByRole("button", { name: "Share screen" });
+		share.click();
+		expect(fake.livekitSetLocalScreenShareEnabled).toHaveBeenCalledWith(true);
+	});
+
+	it("hides the screen-share button when getDisplayMedia is unsupported", () => {
+		const fake = track(makeFakeCallSession());
+		fake.setRtcStatus("joined");
+		fake.setLivekitStatus("connected");
+		// screenShareSupported is a static field on the fake's LivekitRoomApi;
+		// override it to model a browser without display capture.
+		fake.api.livekit.screenShareSupported = false;
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		expect(screen.queryByRole("button", { name: "Share screen" })).toBeNull();
+	});
+
 	it("surfaces the bridge-init error in an alert", () => {
 		const fake = track(makeFakeCallSession());
 		fake.setBridgeInitError(new Error("worker module load failed"));
