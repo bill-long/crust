@@ -554,9 +554,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		);
 
 	// Reconcile the local participant's camera publication into `videoTrackMap`
-	// only. Called from `LocalTrackPublished` / `LocalTrackUnpublished` (and the
-	// shared mute handler) so the local preview tile mounts/unmounts in sync
-	// with the SDK.
+	// only. Called from `LocalTrackPublished` / `LocalTrackUnpublished` so the
+	// local preview tile mounts/unmounts in sync with the SDK. Mute/unmute of an
+	// already-published camera is handled separately by `reconcileCameraMute`
+	// (wired to `TrackMuted` / `TrackUnmuted`).
 	//
 	// Treats a MUTED camera publication as "no video": LiveKit *mutes* (does not
 	// unpublish) the camera on `setCameraEnabled(false)` — only screen share
