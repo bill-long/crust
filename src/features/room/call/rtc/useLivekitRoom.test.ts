@@ -727,6 +727,125 @@ describe("useLivekitRoom", () => {
 		expect(result.videoTracks().has("local-id")).toBe(false);
 	});
 
+	it("muting the local camera reverts the tile to the avatar (LiveKit mutes, not unpublishes)", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		await result.setLocalCamEnabled(true);
+		const localTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const camPub = {
+			source: "camera",
+			videoTrack: localTrack,
+			isMuted: false,
+			trackSid: "pub-local-cam",
+		};
+		fakeRoom.localParticipant.videoTrackPublications.set(
+			"pub-local-cam",
+			camPub,
+		);
+		fakeRoom.emit("localTrackPublished");
+		expect(result.videoTracks().has("local-id")).toBe(true);
+
+		// Stop camera: LiveKit MUTES the publication (does not unpublish) and
+		// fires TrackMuted — the tile must drop the (frozen) video for the avatar.
+		camPub.isMuted = true;
+		fakeRoom.emit("trackMuted", camPub, { identity: "local-id" });
+		expect(result.videoTracks().has("local-id")).toBe(false);
+
+		// Start camera again: unmute re-adds the tile via TrackUnmuted.
+		camPub.isMuted = false;
+		fakeRoom.emit("trackUnmuted", camPub, { identity: "local-id" });
+		expect(result.videoTracks().get("local-id")?.track).toBe(localTrack);
+	});
+
+	it("muting/unmuting a remote camera removes/re-adds its videoTracks entry", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remoteTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const remotePub = {
+			source: "camera",
+			trackSid: "remote-sid",
+			videoTrack: remoteTrack,
+			isMuted: false,
+		};
+		fakeRoom.emit("trackSubscribed", remoteTrack, remotePub, {
+			identity: "remote-1",
+		});
+		expect(result.videoTracks().has("remote-1")).toBe(true);
+
+		remotePub.isMuted = true;
+		fakeRoom.emit("trackMuted", remotePub, { identity: "remote-1" });
+		expect(result.videoTracks().has("remote-1")).toBe(false);
+
+		remotePub.isMuted = false;
+		fakeRoom.emit("trackUnmuted", remotePub, { identity: "remote-1" });
+		expect(result.videoTracks().get("remote-1")?.track).toBe(remoteTrack);
+	});
+
+	it("skips a remote camera that is already muted at subscribe time, then adds it on unmute", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		// Remote joined with camera off: the track is subscribed but muted, so no
+		// tile video should be added (it would otherwise show a black frame).
+		const remoteTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const remotePub = {
+			source: "camera",
+			trackSid: "remote-sid",
+			videoTrack: remoteTrack,
+			isMuted: true,
+		};
+		fakeRoom.emit("trackSubscribed", remoteTrack, remotePub, {
+			identity: "remote-1",
+		});
+		expect(result.videoTracks().has("remote-1")).toBe(false);
+
+		// They turn their camera on → TrackUnmuted adds the tile.
+		remotePub.isMuted = false;
+		fakeRoom.emit("trackUnmuted", remotePub, { identity: "remote-1" });
+		expect(result.videoTracks().get("remote-1")?.track).toBe(remoteTrack);
+	});
+
 	it("setLocalScreenShareEnabled(true) calls setScreenShareEnabled and populates screenShareTracks for the local identity", async () => {
 		const fakeRoom = createFakeRoom();
 		roomFactory.current = () => fakeRoom;
