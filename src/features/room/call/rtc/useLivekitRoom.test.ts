@@ -809,6 +809,43 @@ describe("useLivekitRoom", () => {
 		expect(result.videoTracks().get("remote-1")?.track).toBe(remoteTrack);
 	});
 
+	it("skips a remote camera that is already muted at subscribe time, then adds it on unmute", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		// Remote joined with camera off: the track is subscribed but muted, so no
+		// tile video should be added (it would otherwise show a black frame).
+		const remoteTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+		const remotePub = {
+			source: "camera",
+			trackSid: "remote-sid",
+			videoTrack: remoteTrack,
+			isMuted: true,
+		};
+		fakeRoom.emit("trackSubscribed", remoteTrack, remotePub, {
+			identity: "remote-1",
+		});
+		expect(result.videoTracks().has("remote-1")).toBe(false);
+
+		// They turn their camera on → TrackUnmuted adds the tile.
+		remotePub.isMuted = false;
+		fakeRoom.emit("trackUnmuted", remotePub, { identity: "remote-1" });
+		expect(result.videoTracks().get("remote-1")?.track).toBe(remoteTrack);
+	});
+
 	it("setLocalScreenShareEnabled(true) calls setScreenShareEnabled and populates screenShareTracks for the local identity", async () => {
 		const fakeRoom = createFakeRoom();
 		roomFactory.current = () => fakeRoom;
