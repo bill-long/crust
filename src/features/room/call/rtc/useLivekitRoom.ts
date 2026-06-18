@@ -554,8 +554,15 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		);
 
 	// Reconcile the local participant's camera publication into `videoTrackMap`
-	// only. Called from `LocalTrackPublished` and `LocalTrackUnpublished` so
-	// the local preview tile mounts/unmounts in sync with the SDK.
+	// only. Called from `LocalTrackPublished` / `LocalTrackUnpublished` (and the
+	// shared mute handler) so the local preview tile mounts/unmounts in sync
+	// with the SDK.
+	//
+	// Treats a MUTED camera publication as "no video": LiveKit *mutes* (does not
+	// unpublish) the camera on `setCameraEnabled(false)` — only screen share
+	// unpublishes — so the publication and its `videoTrack` linger after Stop
+	// camera. Without the mute check the tile would keep a frozen/black <video>
+	// instead of reverting to the avatar.
 	//
 	// Intentionally does NOT touch `localCamEnabledSignal`. That signal
 	// represents the user's *desired* state and is owned exclusively by
@@ -571,7 +578,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		const camPub = Array.from(
 			r.localParticipant.videoTrackPublications.values(),
 		).find((pub) => pub.source === "camera");
-		if (camPub?.videoTrack) {
+		if (camPub?.videoTrack && !camPub.isMuted) {
 			upsertVideoTrack(
 				r.localParticipant.identity,
 				camPub.videoTrack as LocalVideoTrack,
@@ -583,6 +590,26 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				videoTrackMap.delete(r.localParticipant.identity);
 				publishVideoTracks();
 			}
+		}
+	};
+
+	// Show/hide a participant's camera tile when their camera publication is
+	// muted/unmuted. Driven by `TrackMuted` / `TrackUnmuted` for BOTH local and
+	// remote participants (the event carries the publication + participant), so
+	// a stopped camera reverts to the avatar on every tile rather than freezing
+	// on a black frame. Only the camera source toggles a video tile — screen
+	// share can't be muted (it unpublishes), and mic mute is reflected by
+	// `snapshotParticipants`, not here.
+	const reconcileCameraMute = (
+		publication: { source?: string; isMuted?: boolean; trackSid: string },
+		videoTrack: LocalVideoTrack | RemoteVideoTrack | undefined,
+		identity: string,
+	): void => {
+		if (publication.source !== "camera") return;
+		if (publication.isMuted || !videoTrack) {
+			removeVideoTrackIfMatches(identity, publication.trackSid);
+		} else {
+			upsertVideoTrack(identity, videoTrack, publication.trackSid);
 		}
 	};
 
@@ -780,11 +807,45 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			);
 			r.on(
 				lk.RoomEvent.TrackMuted,
-				ifLive(() => snapshotParticipants(r)),
+				ifLive(
+					(
+						publication: {
+							source?: string;
+							isMuted?: boolean;
+							trackSid: string;
+							videoTrack?: LocalVideoTrack | RemoteVideoTrack;
+						},
+						participant: { identity: string },
+					) => {
+						reconcileCameraMute(
+							publication,
+							publication.videoTrack,
+							participant.identity,
+						);
+						snapshotParticipants(r);
+					},
+				),
 			);
 			r.on(
 				lk.RoomEvent.TrackUnmuted,
-				ifLive(() => snapshotParticipants(r)),
+				ifLive(
+					(
+						publication: {
+							source?: string;
+							isMuted?: boolean;
+							trackSid: string;
+							videoTrack?: LocalVideoTrack | RemoteVideoTrack;
+						},
+						participant: { identity: string },
+					) => {
+						reconcileCameraMute(
+							publication,
+							publication.videoTrack,
+							participant.identity,
+						);
+						snapshotParticipants(r);
+					},
+				),
 			);
 			r.on(
 				lk.RoomEvent.LocalTrackPublished,
@@ -816,11 +877,16 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 							attachAudioTrack(track as RemoteAudioTrack, publication);
 						} else if (track.kind === lk.Track.Kind.Video) {
 							if (publication.source === lk.Track.Source.Camera) {
-								upsertVideoTrack(
-									participant.identity,
-									track as RemoteVideoTrack,
-									publication.trackSid,
-								);
+								// Skip a camera track that's already muted at subscribe
+								// time — TrackUnmuted re-adds it. Avoids a black tile for a
+								// remote who joined with their camera off.
+								if (!publication.isMuted) {
+									upsertVideoTrack(
+										participant.identity,
+										track as RemoteVideoTrack,
+										publication.trackSid,
+									);
+								}
 							} else if (publication.source === lk.Track.Source.ScreenShare) {
 								upsertScreenShareTrack(
 									participant.identity,
@@ -995,6 +1061,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				for (const pub of p.videoTrackPublications.values()) {
 					if (!pub.isSubscribed || !pub.videoTrack) continue;
 					if (pub.source === "camera") {
+						// Skip a muted camera (joined with camera off) — its tile shows
+						// the avatar until TrackUnmuted adds the track.
+						if (pub.isMuted) continue;
 						upsertVideoTrack(
 							p.identity,
 							pub.videoTrack as RemoteVideoTrack,
