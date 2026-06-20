@@ -207,6 +207,7 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 		memberships: rtc.memberships,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
 		videoDeviceId: createMemo(() => userSettings().rtcCamDeviceId),
+		screenShareQuality: createMemo(() => userSettings().rtcScreenShareQuality),
 		micEnabled: voiceMicEnabled,
 		e2ee,
 	});

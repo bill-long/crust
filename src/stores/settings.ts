@@ -46,6 +46,15 @@ export interface UserSettings {
 	 */
 	rtcCamDeviceId: string;
 	/**
+	 * Outgoing screen-share quality. Maps to a getDisplayMedia capture
+	 * constraint + encoder ceiling (see
+	 * `features/room/call/rtc/screenShareQuality.ts`). LiveKit's stock
+	 * default encodes screen shares at 1080p15 (~2.5 Mbps), which looks
+	 * choppy for motion-heavy shares; this lets the sharing user pick a
+	 * higher frame rate / bitrate, at the cost of more upload + CPU.
+	 */
+	rtcScreenShareQuality: ScreenShareQuality;
+	/**
 	 * Mic transmission mode (Phase 6 of #122 — issue #108).
 	 * - `"voice-activity"`: always transmit when not manually muted.
 	 * - `"push-to-talk"`: transmit only while `micHotkey` is held.
@@ -63,6 +72,9 @@ export interface UserSettings {
 	 */
 	micHotkey: MicHotkey | null;
 }
+
+/** Outgoing screen-share quality preset key. */
+export type ScreenShareQuality = "720p30" | "1080p30" | "1080p60";
 
 export interface MicHotkey {
 	ctrl: boolean;
@@ -84,6 +96,7 @@ const defaults: UserSettings = {
 	inlineMediaPlayers: true,
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
+	rtcScreenShareQuality: "1080p30",
 	micMode: "voice-activity",
 	micHotkey: null,
 };
@@ -148,6 +161,12 @@ function load(): UserSettings {
 				typeof obj.rtcCamDeviceId === "string"
 					? obj.rtcCamDeviceId
 					: defaults.rtcCamDeviceId,
+			rtcScreenShareQuality:
+				obj.rtcScreenShareQuality === "720p30" ||
+				obj.rtcScreenShareQuality === "1080p30" ||
+				obj.rtcScreenShareQuality === "1080p60"
+					? obj.rtcScreenShareQuality
+					: defaults.rtcScreenShareQuality,
 			micMode:
 				obj.micMode === "voice-activity" ||
 				obj.micMode === "push-to-talk" ||

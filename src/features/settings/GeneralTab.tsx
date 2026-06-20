@@ -9,6 +9,10 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import { updateSetting, userSettings } from "../../stores/settings";
+import {
+	SCREEN_SHARE_QUALITY_ORDER,
+	SCREEN_SHARE_QUALITY_SPECS,
+} from "../room/call/rtc/screenShareQuality";
 import { pushLocalUrlPreviewSetting } from "../room/urlPreviews/accountDataSync";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
@@ -39,6 +43,43 @@ function CamDeviceSelect(): ReturnType<Component> {
 			permissionConstraints={{ video: true }}
 			ariaLabel="Camera device"
 		/>
+	);
+}
+
+function ScreenShareQualitySelect(): ReturnType<Component> {
+	return (
+		<div class="flex items-center justify-between gap-4 py-2">
+			<div class="min-w-0 flex-1">
+				<div class="text-sm font-medium text-text-primary">
+					Screen share quality
+				</div>
+				<div class="text-xs text-text-muted">
+					Quality of your outgoing screen share. Higher frame rates look
+					smoother for games and motion, but use more upload bandwidth and CPU.
+					Applies to your next share.
+				</div>
+			</div>
+			<select
+				value={userSettings().rtcScreenShareQuality}
+				onChange={(e) =>
+					updateSetting(
+						"rtcScreenShareQuality",
+						e.currentTarget
+							.value as (typeof SCREEN_SHARE_QUALITY_ORDER)[number],
+					)
+				}
+				class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				aria-label="Screen share quality"
+			>
+				<For each={SCREEN_SHARE_QUALITY_ORDER}>
+					{(quality) => (
+						<option value={quality}>
+							{SCREEN_SHARE_QUALITY_SPECS[quality].label}
+						</option>
+					)}
+				</For>
+			</select>
+		</div>
 	);
 }
 
@@ -244,6 +285,7 @@ const GeneralTab: Component = () => {
 				<SectionHeading>Voice & Video</SectionHeading>
 				<MicDeviceSelect />
 				<CamDeviceSelect />
+				<ScreenShareQualitySelect />
 			</section>
 
 			{/* Privacy */}

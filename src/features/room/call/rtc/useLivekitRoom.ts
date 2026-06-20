@@ -18,7 +18,9 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import type { ScreenShareQuality } from "../../../../stores/settings";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
+import { screenShareQualitySpec } from "./screenShareQuality";
 
 export type LivekitConnectionStatus =
 	| "idle"
@@ -74,6 +76,14 @@ export interface UseLivekitRoomOptions {
 	 * Phase 2).
 	 */
 	videoDeviceId: Accessor<string>;
+	/**
+	 * Outgoing screen-share quality. Read at the moment a share starts (via
+	 * `setLocalScreenShareEnabled(true)`) to pick the capture constraint +
+	 * encoder ceiling — so changing it applies to the NEXT share, not one
+	 * already in progress. Optional: omitted in tests, where it falls back to
+	 * the default preset.
+	 */
+	screenShareQuality?: Accessor<ScreenShareQuality>;
 	/**
 	 * Loader for the livekit-client module. Defaults to a dynamic import so
 	 * the LiveKit chunk is only fetched on Join. Tests inject a synchronous
@@ -1342,9 +1352,18 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				if (actual === desired) return;
 				const myAttempt = attempt;
 				try {
-					await r2.localParticipant.setScreenShareEnabled(desired, {
-						audio: true,
-					});
+					// Read the quality fresh each enable so the picker's current
+					// value wins; the spec drives BOTH the capture frameRate (LiveKit
+					// caps capture at 30fps by default — 60 needs this) and the
+					// encoder ceiling (its stock default is a choppy 1080p15). The
+					// options are ignored on the disable path, so passing them
+					// unconditionally is harmless.
+					const spec = screenShareQualitySpec(opts.screenShareQuality?.());
+					await r2.localParticipant.setScreenShareEnabled(
+						desired,
+						{ audio: true, resolution: spec.resolution },
+						{ screenShareEncoding: spec.encoding },
+					);
 				} catch (e) {
 					if (disposed || myAttempt !== attempt || room !== r2) return;
 					// Revert the optimistic flip to actual SDK state, surface error.

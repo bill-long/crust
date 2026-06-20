@@ -865,9 +865,15 @@ describe("useLivekitRoom", () => {
 		await waitFor(() => result.status() === "connected");
 		expect(result.localScreenShareEnabled()).toBe(false);
 		await result.setLocalScreenShareEnabled(true);
+		// No `screenShareQuality` option is passed by this harness, so the hook
+		// falls back to the default (1080p30) capture constraint + encoding.
 		expect(
 			fakeRoom.localParticipant.setScreenShareEnabled,
-		).toHaveBeenCalledWith(true, { audio: true });
+		).toHaveBeenCalledWith(
+			true,
+			{ audio: true, resolution: { width: 1920, height: 1080, frameRate: 30 } },
+			{ screenShareEncoding: { maxBitrate: 5_000_000, maxFramerate: 30 } },
+		);
 		expect(result.localScreenShareEnabled()).toBe(true);
 		// LiveKit publishes the local screen-share track; reconcile puts it in
 		// screenShareTracks (not videoTracks) under the local identity.
@@ -881,6 +887,37 @@ describe("useLivekitRoom", () => {
 		fakeRoom.emit("localTrackPublished");
 		expect(result.screenShareTracks().get("local-id")?.track).toBe(localTrack);
 		expect(result.videoTracks().has("local-id")).toBe(false);
+	});
+
+	it("setLocalScreenShareEnabled passes the selected quality's capture + encoding (1080p60 needs the 60fps capture override)", async () => {
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				screenShareQuality: () => "1080p60",
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		await result.setLocalScreenShareEnabled(true);
+		expect(
+			fakeRoom.localParticipant.setScreenShareEnabled,
+		).toHaveBeenCalledWith(
+			true,
+			// frameRate: 60 in the capture constraint is essential — LiveKit's
+			// default screen-capture caps at 30fps, so the encoding alone wouldn't
+			// reach 60.
+			{ audio: true, resolution: { width: 1920, height: 1080, frameRate: 60 } },
+			{ screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 60 } },
+		);
 	});
 
 	it("native Stop sharing (LocalTrackUnpublished with no share pub) syncs localScreenShareEnabled back to false", async () => {
