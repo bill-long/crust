@@ -9,6 +9,7 @@ import {
 	createMemo,
 	createSignal,
 	onCleanup,
+	onMount,
 	Show,
 	untrack,
 } from "solid-js";
@@ -70,6 +71,7 @@ import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { setLastChannel } from "../stores/lastChannel";
+import { getLastRoom, setLastRoom } from "../stores/lastRoom";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { clearSession } from "../stores/session";
 import { updateSetting, userSettings } from "../stores/settings";
@@ -854,6 +856,55 @@ const Layout: Component = () => {
 		const sid = params.spaceId;
 		const rid = roomId();
 		if (sid && rid) setLastChannel(sid, rid);
+	});
+
+	// Remember the last room the user had open, across every section
+	// (home / space / DM), so the next cold launch reopens it instead of the
+	// empty home list (see restore-on-launch onMount below). Stored structurally
+	// (room + its space, if any) rather than as a raw route so the route can be
+	// rebuilt and re-validated against the live store on launch.
+	createEffect(() => {
+		const rid = roomId();
+		if (rid) setLastRoom(rid, params.spaceId);
+	});
+
+	// Restore the last room on a cold launch. The app boots on the bare root
+	// path ("/") with no room selected; reopen the room the user last had open
+	// so they resume where they left off rather than landing on the empty home
+	// list. Guards:
+	//   • Only acts at the root path, so deliberately navigating to "/home"
+	//     (the sidebar Home button) — or any other route — is never hijacked.
+	//   • Only restores a room that is still joined; a left/stale room is
+	//     skipped so we don't open a timeline the user can no longer see.
+	//   • Reopens under the original space only while that space still lists the
+	//     room as a joined child (mirrors SpacesSidebar.openSpace); otherwise
+	//     falls back to the section-agnostic home/DM route so a left space can't
+	//     strand the room under an empty room list / unhighlighted sidebar.
+	// Layout only mounts once SyncGate lets it through (syncState past
+	// "initial"), so `summaries` is populated by the time this runs.
+	onMount(() => {
+		if (relativePath() !== "/") return;
+		const last = getLastRoom();
+		if (!last) return;
+		const summary = summaries[last.roomId];
+		if (summary?.membership !== "join") return;
+		const sid = last.spaceId;
+		if (
+			sid &&
+			getSpaceRooms(summaries, sid).some((r) => r.roomId === last.roomId)
+		) {
+			navigate(
+				`/space/${encodeURIComponent(sid)}/${encodeURIComponent(last.roomId)}`,
+				{ replace: true },
+			);
+			return;
+		}
+		navigate(
+			summary.isDirect
+				? `/dm/${encodeURIComponent(last.roomId)}`
+				: `/home/${encodeURIComponent(last.roomId)}`,
+			{ replace: true },
+		);
 	});
 
 	// Reset Copy-link feedback whenever the active room changes so a "Copied!"
