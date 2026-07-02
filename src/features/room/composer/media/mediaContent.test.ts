@@ -218,3 +218,64 @@ describe("buildMediaContent", () => {
 		expect(c.body).toBe("cat.png");
 	});
 });
+
+describe("buildMediaContent voice notes", () => {
+	it("emits the MSC3245 marker blocks and info.duration", () => {
+		const c = buildMediaContent({
+			kind: "audio",
+			contentUri: "mxc://x/voice",
+			filename: "Voice message.ogg",
+			mimetype: "audio/ogg",
+			size: 4200,
+			voice: { durationMs: 6541, waveform: [0, 512, 1024] },
+		}) as unknown as Record<string, unknown>;
+		expect(c.msgtype).toBe("m.audio");
+		expect((c.info as Record<string, unknown>).duration).toBe(6541);
+		expect(c["org.matrix.msc3245.voice"]).toEqual({});
+		expect(c["org.matrix.msc1767.audio"]).toEqual({
+			duration: 6541,
+			waveform: [0, 512, 1024],
+		});
+		// MSC1767 text fallback mirrors the body.
+		expect(c["org.matrix.msc1767.text"]).toBe(c.body);
+	});
+
+	it("emits no voice blocks for a plain audio attachment", () => {
+		const c = buildMediaContent({
+			kind: "audio",
+			contentUri: "mxc://x/song",
+			filename: "song.mp3",
+			mimetype: "audio/mpeg",
+			size: 999,
+		}) as unknown as Record<string, unknown>;
+		expect(c["org.matrix.msc3245.voice"]).toBeUndefined();
+		expect(c["org.matrix.msc1767.audio"]).toBeUndefined();
+		expect((c.info as Record<string, unknown>).duration).toBeUndefined();
+	});
+
+	it("keeps voice blocks alongside an encrypted file source", () => {
+		const c = buildMediaContent({
+			kind: "audio",
+			file: {
+				url: "mxc://x/cipher",
+				key: {
+					k: "k",
+					alg: "A256CTR",
+					ext: true,
+					key_ops: ["encrypt", "decrypt"],
+					kty: "oct",
+				},
+				iv: "iv",
+				hashes: { sha256: "h" },
+				v: "v2",
+			},
+			filename: "Voice message.ogg",
+			mimetype: "audio/ogg",
+			size: 4200,
+			voice: { durationMs: 1200, waveform: [512] },
+		}) as unknown as Record<string, unknown>;
+		expect(c.file).toBeTruthy();
+		expect(c.url).toBeUndefined();
+		expect(c["org.matrix.msc3245.voice"]).toEqual({});
+	});
+});

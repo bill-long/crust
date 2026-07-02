@@ -4,6 +4,15 @@ import type { EncryptedFile } from "./attachmentCrypto";
 /** Broad media category derived from a file's MIME type. */
 export type AttachmentKind = "image" | "video" | "audio" | "file";
 
+/** MSC3245 voice-note metadata captured by the voice recorder; presence
+ *  marks an audio attachment as a voice message on the wire. */
+export interface VoiceMetadata {
+	/** Playback length in milliseconds. */
+	durationMs: number;
+	/** MSC3246 amplitude samples, integers 0..1024 (about 100 samples). */
+	waveform: number[];
+}
+
 /** Lifecycle of a queued attachment as it moves toward being sent. */
 export type AttachmentStatus = "ready" | "uploading" | "error";
 
@@ -31,12 +40,17 @@ export interface PendingAttachment {
 	/** Upload progress in the range 0..1. */
 	progress: number;
 	error?: string;
+	/** Set for recorder-produced voice notes; threads through to
+	 *  buildMediaContent's MSC3245 markers. */
+	voice?: VoiceMetadata;
 }
 
 /** Matrix `info` block for an image/video event, including optional thumbnail. */
 export interface MediaInfo {
 	w?: number;
 	h?: number;
+	/** Playback length in ms (audio/voice). */
+	duration?: number;
 	mimetype: string;
 	size: number;
 	/** mxc:// of a cleartext thumbnail (unencrypted rooms). */
@@ -83,4 +97,6 @@ export interface BuildMediaContentArgs {
 	};
 	/** Event being replied to, if any — attaches the reply relation. */
 	replyTo?: TimelineEvent | null;
+	/** MSC3245 voice-note metadata; emits the voice marker blocks. */
+	voice?: VoiceMetadata;
 }

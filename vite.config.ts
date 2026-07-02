@@ -82,7 +82,15 @@ export default defineConfig({
 					setupFiles: ["src/test/browserSetup.ts"],
 					browser: {
 						enabled: true,
-						provider: playwright(),
+						provider: playwright({
+							launchOptions: {
+								// Realtime AudioContexts otherwise stay suspended
+								// (resume() waits for a user gesture the harness never
+								// makes), flatlining Web Audio tests like the voice
+								// recorder's analyser.
+								args: ["--autoplay-policy=no-user-gesture-required"],
+							},
+						}),
 						headless: true,
 						instances: [{ browser: "chromium" }],
 					},

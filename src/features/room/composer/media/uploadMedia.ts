@@ -196,6 +196,7 @@ export async function uploadAndSend(
 					}
 				: undefined,
 		replyTo: opts.replyTo,
+		voice: attachment.voice,
 	});
 
 	await client.sendMessage(roomId, content);

@@ -5,6 +5,7 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
+	For,
 	on,
 	onCleanup,
 	onMount,
@@ -30,6 +31,10 @@ import {
 } from "./markdown";
 import type { PendingAttachment } from "./media/types";
 import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
+import {
+	createVoiceRecorder,
+	isVoiceRecordingSupported,
+} from "./media/voiceRecorder";
 
 function buildReplyFallback(
 	replyTo: TimelineEvent,
@@ -92,6 +97,12 @@ function findCustomEmoji(
 const TYPING_TIMEOUT_MS = 30_000;
 const TYPING_RESEND_MS = 25_000;
 
+/** mm:ss readout for the recording bar timer. */
+function formatRecordingTime(elapsedMs: number): string {
+	const s = Math.max(0, Math.floor(elapsedMs / 1000));
+	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 const Composer: Component<{
 	roomId: string;
 	replyTo?: TimelineEvent | null;
@@ -122,6 +133,69 @@ const Composer: Component<{
 	const [previewOpen, setPreviewOpen] = createSignal(false);
 	const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
 	const gifConfig = useGifConfig();
+
+	// Voice notes (MSC3245). Feature-detected once: the mic button is
+	// hidden entirely where MediaRecorder/AudioContext/getUserMedia are
+	// unavailable.
+	const voiceSupported = isVoiceRecordingSupported();
+	const voiceRecorder = createVoiceRecorder({
+		onMaxDuration: () => void stopAndSendVoice(),
+	});
+	onCleanup(() => voiceRecorder.dispose());
+
+	const startRecording = async (): Promise<void> => {
+		if (sending() || voiceRecorder.recording()) return;
+		setError(null);
+		try {
+			await voiceRecorder.start();
+		} catch {
+			setError("Couldn't access the microphone");
+		}
+	};
+
+	/** Stop the recording and send it as an MSC3245 voice note through the
+	 *  regular upload pipeline (encrypts in E2EE rooms). Same room/reply
+	 *  pinning as send(). */
+	const stopAndSendVoice = async (): Promise<void> => {
+		const roomId = props.roomId;
+		const replyTo = props.replyTo;
+		const onThisRoom = (): boolean => props.roomId === roomId;
+		const recorded = await voiceRecorder.stop();
+		if (!recorded || sending()) return;
+		const extension =
+			recorded.mimetype === "audio/ogg"
+				? "ogg"
+				: recorded.mimetype === "audio/mp4"
+					? "m4a"
+					: "webm";
+		const file = new File([recorded.blob], `Voice message.${extension}`, {
+			type: recorded.mimetype,
+		});
+		const attachment: PendingAttachment = {
+			...createPendingAttachment(file),
+			voice: recorded.voice,
+		};
+		setSending(true);
+		setError(null);
+		stopTyping();
+		try {
+			await uploadAndSend(client, roomId, attachment, {
+				replyTo: replyTo ?? undefined,
+			});
+			if (onThisRoom()) {
+				props.onCancelReply?.();
+				props.onSent?.();
+			}
+		} catch (e) {
+			if (onThisRoom()) {
+				setError(
+					e instanceof Error ? e.message : "Failed to send voice message",
+				);
+			}
+		} finally {
+			if (onThisRoom()) setSending(false);
+		}
+	};
 
 	/** Queue raw files for upload. The shared seam for paste / attach / drop. */
 	const enqueueFiles = (files: Iterable<File>): void => {
@@ -457,6 +531,7 @@ const Composer: Component<{
 				setGifPickerOpen(false);
 				setPollDialogOpen(false);
 				setPreviewOpen(false);
+				voiceRecorder.cancel();
 				clearAttachments();
 				// A send pinned to the previous room may still be in flight; reset
 				// the busy flag so the newly selected room's composer is usable.
@@ -1121,95 +1196,194 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-32 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					class={`w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover ${
+						props.editingEvent ? "pr-10" : "pr-44"
+					}`}
 					rows={1}
 				/>
-				{/* Poll button (hidden when editing - polls are new sends). */}
-				<Show when={!props.editingEvent}>
+				{/* Composer action strip: one flex row instead of per-button
+				    absolute offsets, so adding/hiding buttons never requires
+				    recomputing right-N positions or the textarea padding. */}
+				<div class="absolute bottom-2.5 right-2 flex items-center gap-1">
+					<Show when={voiceSupported && !props.editingEvent}>
+						<button
+							type="button"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							onClick={() => void startRecording()}
+							aria-label="Record voice message"
+						>
+							<svg
+								class="h-5 w-5"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<rect x="9" y="2" width="6" height="12" rx="3" />
+								<path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+								<path d="M12 18v4" />
+							</svg>
+						</button>
+					</Show>
+					{/* Poll button (hidden when editing - polls are new sends). */}
+					<Show when={!props.editingEvent}>
+						<button
+							type="button"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							onClick={() => {
+								setPollDialogOpen(true);
+								setGifPickerOpen(false);
+								setEmojiPickerOpen(false);
+							}}
+							aria-label="Create poll"
+							aria-haspopup="dialog"
+							aria-expanded={pollDialogOpen()}
+						>
+							<svg
+								class="h-5 w-5"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								aria-hidden="true"
+							>
+								<path d="M6 20V10" />
+								<path d="M12 20V4" />
+								<path d="M18 20v-6" />
+							</svg>
+						</button>
+					</Show>
+					{/* Attach file button (hidden when editing — edits can't carry
+					    attachments). The hidden input accepts images and arbitrary
+					    files; non-media files are classified as m.file at send. */}
+					<Show when={!props.editingEvent}>
+						<input
+							ref={(el) => {
+								fileInputRef = el;
+							}}
+							type="file"
+							multiple
+							data-composer-file-input
+							class="hidden"
+							onChange={onFileInputChange}
+						/>
+						<button
+							type="button"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							onClick={() => fileInputRef?.click()}
+							aria-label="Attach file"
+						>
+							📎
+						</button>
+					</Show>
+					{/* GIF picker button (only when GIF search is available and not editing) */}
+					<Show when={gifConfig.available() && !props.editingEvent}>
+						<button
+							ref={(el) => {
+								gifButtonRef = el;
+							}}
+							type="button"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							onClick={() => {
+								setGifPickerOpen((v) => !v);
+								setEmojiPickerOpen(false);
+							}}
+							aria-label="Open GIF picker"
+							aria-expanded={gifPickerOpen()}
+						>
+							GIF
+						</button>
+					</Show>
+					{/* Emoji picker button */}
 					<button
-						type="button"
-						class="absolute bottom-2.5 right-23 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-						onClick={() => {
-							setPollDialogOpen(true);
-							setGifPickerOpen(false);
-							setEmojiPickerOpen(false);
+						ref={(el) => {
+							emojiButtonRef = el;
 						}}
-						aria-label="Create poll"
-						aria-haspopup="dialog"
-						aria-expanded={pollDialogOpen()}
+						type="button"
+						class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+						onClick={() => {
+							setEmojiPickerOpen((v) => !v);
+							setGifPickerOpen(false);
+						}}
+						aria-label="Open emoji picker"
+						aria-expanded={emojiPickerOpen()}
 					>
-						<svg
-							class="h-5 w-5"
-							viewBox="0 0 24 24"
-							fill="none"
-							stroke="currentColor"
-							stroke-width="2"
-							stroke-linecap="round"
+						😀
+					</button>
+				</div>
+				{/* Recording bar: overlays the input area while capturing. */}
+				<Show when={voiceRecorder.recording()}>
+					<div class="absolute inset-0 z-10 flex items-center gap-2 rounded-lg bg-surface-2 px-3">
+						<span
+							class="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger motion-reduce:animate-none"
+							aria-hidden="true"
+						/>
+						{/* Announced once on entry; the ticking readout itself is a
+						    timer so screen readers don't chatter every 200ms. */}
+						<span class="sr-only" role="status">
+							Recording voice message
+						</span>
+						<span
+							role="timer"
+							class="shrink-0 text-sm tabular-nums text-text-secondary"
+						>
+							{formatRecordingTime(voiceRecorder.elapsedMs())}
+						</span>
+						<div
+							class="flex h-6 min-w-0 flex-1 items-center justify-end gap-px"
 							aria-hidden="true"
 						>
-							<path d="M6 20V10" />
-							<path d="M12 20V4" />
-							<path d="M18 20v-6" />
-						</svg>
-					</button>
+							<For each={voiceRecorder.liveAmplitudes()}>
+								{(amp) => (
+									<span
+										class="w-1 shrink-0 rounded-full bg-accent"
+										style={{
+											height: `${Math.round(Math.max(amp, 0.12) * 100)}%`,
+										}}
+									/>
+								)}
+							</For>
+						</div>
+						<button
+							type="button"
+							class="shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							onClick={() => voiceRecorder.cancel()}
+							aria-label="Cancel recording"
+						>
+							<svg
+								class="h-5 w-5"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								aria-hidden="true"
+							>
+								<path d="M18 6 6 18" />
+								<path d="m6 6 12 12" />
+							</svg>
+						</button>
+						<button
+							type="button"
+							class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							onClick={() => void stopAndSendVoice()}
+							aria-label="Send voice message"
+						>
+							<svg
+								class="h-4 w-4"
+								viewBox="0 0 24 24"
+								fill="currentColor"
+								aria-hidden="true"
+							>
+								<path d="m3 11 18-8-8 18-2-8-8-2z" />
+							</svg>
+						</button>
+					</div>
 				</Show>
-				{/* Attach file button (hidden when editing — edits can't carry
-				    attachments). The hidden input accepts images and arbitrary
-				    files; non-media files are classified as m.file at send. */}
-				<Show when={!props.editingEvent}>
-					<input
-						ref={(el) => {
-							fileInputRef = el;
-						}}
-						type="file"
-						multiple
-						data-composer-file-input
-						class="hidden"
-						onChange={onFileInputChange}
-					/>
-					<button
-						type="button"
-						class="absolute right-16 bottom-2.5 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-						onClick={() => fileInputRef?.click()}
-						aria-label="Attach file"
-					>
-						📎
-					</button>
-				</Show>
-				{/* GIF picker button (only when GIF search is available and not editing) */}
-				<Show when={gifConfig.available() && !props.editingEvent}>
-					<button
-						ref={(el) => {
-							gifButtonRef = el;
-						}}
-						type="button"
-						class="absolute bottom-2.5 right-9 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-						onClick={() => {
-							setGifPickerOpen((v) => !v);
-							setEmojiPickerOpen(false);
-						}}
-						aria-label="Open GIF picker"
-						aria-expanded={gifPickerOpen()}
-					>
-						GIF
-					</button>
-				</Show>
-				{/* Emoji picker button */}
-				<button
-					ref={(el) => {
-						emojiButtonRef = el;
-					}}
-					type="button"
-					class="absolute bottom-2.5 right-2 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					onClick={() => {
-						setEmojiPickerOpen((v) => !v);
-						setGifPickerOpen(false);
-					}}
-					aria-label="Open emoji picker"
-					aria-expanded={emojiPickerOpen()}
-				>
-					😀
-				</button>
 				{/* GIF picker popover */}
 				<Show when={gifPickerOpen()}>
 					<div class="absolute bottom-full right-0 z-20 mb-1">
