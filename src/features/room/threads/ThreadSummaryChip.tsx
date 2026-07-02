@@ -1,5 +1,5 @@
-import { type Component, createSignal, onCleanup, Show } from "solid-js";
-import { formatRelativeTime } from "../../../lib/relativeTime";
+import { type Component, Show } from "solid-js";
+import { formatRelativeTime, useMinuteTick } from "../../../lib/relativeTime";
 import type { ThreadSummary } from "./threadSummary";
 
 /**
@@ -8,20 +8,17 @@ import type { ThreadSummary } from "./threadSummary";
  * open-thread button when the thread panel lands (issue #303 step 3c).
  */
 
-/** Relative labels have minute granularity, so tick once a minute. */
-const TICK_MS = 60_000;
-
 export const ThreadSummaryChip: Component<{
 	thread: ThreadSummary;
-	/** Injectable clock for tests; when set, it wins over the ticker. */
+	/** Injectable clock for tests; when set, the ticker isn't subscribed. */
 	now?: number;
 }> = (props) => {
 	// Keeps the "Nm ago" label honest on quiet threads: the row only
 	// re-projects when the thread changes, so without a ticker the label
-	// would freeze at projection time.
-	const [tick, setTick] = createSignal(Date.now());
-	const timer = setInterval(() => setTick(Date.now()), TICK_MS);
-	onCleanup(() => clearInterval(timer));
+	// would freeze at projection time. The ticker is SHARED (one interval
+	// across all chips). `now` is a static test seam, so reading it once
+	// at setup is deliberate.
+	const tick = props.now === undefined ? useMinuteTick() : null;
 
 	const replyLabel = () =>
 		props.thread.replyCount === 1
@@ -29,7 +26,10 @@ export const ThreadSummaryChip: Component<{
 			: `${props.thread.replyCount} replies`;
 	const activity = () =>
 		props.thread.latestTs !== null
-			? formatRelativeTime(props.thread.latestTs, props.now ?? tick())
+			? formatRelativeTime(
+					props.thread.latestTs,
+					props.now ?? tick?.() ?? Date.now(),
+				)
 			: null;
 
 	return (
