@@ -229,7 +229,10 @@ export function createPollWatcher(
 				const current = watched.get(pollId);
 				if (!current || current.poll !== poll) return;
 				current.fetchFailed = true;
-				console.error("Poll response fetch failed:", e);
+				console.error(
+					`Poll response fetch failed for ${pollId} in ${poll.roomId}:`,
+					e,
+				);
 				recompute(pollId);
 			},
 		);
