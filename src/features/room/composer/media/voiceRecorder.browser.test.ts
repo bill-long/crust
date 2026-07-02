@@ -4,6 +4,7 @@ import {
 	isVoiceRecordingSupported,
 	toWireWaveform,
 	type VoiceRecorder,
+	type VoiceRecorderOptions,
 } from "./voiceRecorder";
 
 /**
@@ -20,7 +21,9 @@ afterEach(() => {
 	active = null;
 });
 
-function makeRecorderOverTone(): VoiceRecorder {
+function makeRecorderOverTone(
+	options?: Omit<VoiceRecorderOptions, "getStream">,
+): { recorder: VoiceRecorder; stream: MediaStream } {
 	const ctx = new AudioContext();
 	// Headless Chromium starts contexts suspended (no user gesture); a
 	// suspended source context would produce a silent stream.
@@ -31,10 +34,11 @@ function makeRecorderOverTone(): VoiceRecorder {
 	osc.connect(destination);
 	osc.start();
 	const recorder = createVoiceRecorder({
+		...options,
 		getStream: () => Promise.resolve(destination.stream),
 	});
 	active = { recorder, ctx };
-	return recorder;
+	return { recorder, stream: destination.stream };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -47,7 +51,7 @@ describe("createVoiceRecorder (browser)", () => {
 	});
 
 	it("records a clip with sane metadata", async () => {
-		const recorder = makeRecorderOverTone();
+		const { recorder } = makeRecorderOverTone();
 		await recorder.start();
 		expect(recorder.recording()).toBe(true);
 		await sleep(500);
@@ -76,7 +80,7 @@ describe("createVoiceRecorder (browser)", () => {
 	});
 
 	it("cancel discards the recording and stops the tracks", async () => {
-		const recorder = makeRecorderOverTone();
+		const { recorder } = makeRecorderOverTone();
 		await recorder.start();
 		await sleep(200);
 		recorder.cancel();
@@ -86,8 +90,68 @@ describe("createVoiceRecorder (browser)", () => {
 		expect(await recorder.stop()).toBeNull();
 	});
 
+	it("concurrent stop() calls share one recording (single-flight)", async () => {
+		const { recorder } = makeRecorderOverTone();
+		await recorder.start();
+		await sleep(300);
+		// Double-click on send, or the max-duration auto-stop racing a
+		// manual send: both callers must get the same delivered clip, not
+		// have the second clobber the first's onstop resolver.
+		const [a, b] = await Promise.all([recorder.stop(), recorder.stop()]);
+		expect(a).not.toBeNull();
+		expect(b).toBe(a);
+	});
+
+	it("cancel during an in-flight stop does not discard the recording", async () => {
+		const { recorder } = makeRecorderOverTone();
+		await recorder.start();
+		await sleep(300);
+		// A room switch cancels the recorder right after the user pressed
+		// send; the already-initiated stop must still deliver its audio.
+		const pending = recorder.stop();
+		recorder.cancel();
+		const result = await pending;
+		expect(result).not.toBeNull();
+		expect(result?.blob.size).toBeGreaterThan(0);
+		expect(recorder.recording()).toBe(false);
+	});
+
+	it("notifies the owner when a track ends externally and still delivers", async () => {
+		let interruptions = 0;
+		const { recorder, stream } = makeRecorderOverTone({
+			onInterrupted: () => {
+				interruptions++;
+			},
+		});
+		await recorder.start();
+		await sleep(300);
+		// Mic unplugged / permission revoked surfaces as "ended" on the
+		// track. The owner is told once, and the captured audio survives.
+		for (const track of stream.getTracks()) {
+			track.dispatchEvent(new Event("ended"));
+		}
+		expect(interruptions).toBe(1);
+		const result = await recorder.stop();
+		expect(result).not.toBeNull();
+		expect(result?.blob.size).toBeGreaterThan(0);
+	});
+
+	it("stop() resolves after the recorder already stopped spontaneously", async () => {
+		const { recorder, stream } = makeRecorderOverTone();
+		await recorder.start();
+		await sleep(300);
+		// Stopping the source track makes MediaRecorder stop on its own; a
+		// later stop() must not hang awaiting an onstop that already fired,
+		// and the partial capture still delivers.
+		for (const track of stream.getTracks()) track.stop();
+		await sleep(200);
+		const result = await recorder.stop();
+		expect(result).not.toBeNull();
+		expect(result?.blob.size).toBeGreaterThan(0);
+	});
+
 	it("the recorded clip decodes as real audio", async () => {
-		const recorder = makeRecorderOverTone();
+		const { recorder } = makeRecorderOverTone();
 		await recorder.start();
 		await sleep(500);
 		const result = await recorder.stop();

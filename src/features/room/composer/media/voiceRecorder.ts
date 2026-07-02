@@ -102,6 +102,10 @@ export interface VoiceRecorderOptions {
 	/** Called when MAX_RECORDING_MS elapses; the recording keeps its data
 	 *  and the callback decides (the composer sends it). */
 	onMaxDuration?: () => void;
+	/** Called when the recording is cut short from outside (mic unplugged,
+	 *  permission revoked, recorder error). Captured audio up to that point
+	 *  is preserved and retrievable via stop(). */
+	onInterrupted?: () => void;
 	/** Test seam: replaces getUserMedia. */
 	getStream?: () => Promise<MediaStream>;
 }
@@ -124,6 +128,15 @@ export function createVoiceRecorder(
 	let maxTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Guards double stop/cancel and stale async completions. */
 	let session = 0;
+	/**
+	 * Single-flight stop: concurrent stop() calls (double-click, the
+	 * max-duration auto-stop racing a manual send) share one promise
+	 * instead of clobbering each other's onstop resolver. Also blocks
+	 * cancel() from clearing chunks under an in-progress stop - a send the
+	 * user already initiated must deliver even if a room switch cancels
+	 * the recorder mid-flight.
+	 */
+	let stopInFlight: Promise<VoiceRecording | null> | null = null;
 
 	function releaseResources(): void {
 		if (sampleTimer !== null) {
@@ -171,71 +184,119 @@ export function createVoiceRecorder(
 			for (const track of acquired.getTracks()) track.stop();
 			return;
 		}
-		stream = acquired;
-		chunks = [];
-		amplitudes = [];
-		setLiveAmplitudes([]);
-		setElapsedMs(0);
+		// Any failure past this point (context limit, MediaRecorder
+		// constructor) must release the acquired mic - a leaked live track
+		// keeps the OS mic indicator lit with no recording UI in sight.
+		try {
+			stream = acquired;
+			chunks = [];
+			amplitudes = [];
+			setLiveAmplitudes([]);
+			setElapsedMs(0);
 
-		audioContext = new AudioContext();
-		// Strict-autoplay browsers can start the context suspended even
-		// though start() runs from a user gesture; a suspended context
-		// would flatline the analyser. Resume is cheap and idempotent.
-		if (audioContext.state === "suspended") {
-			void audioContext.resume().catch(() => {});
+			audioContext = new AudioContext();
+			// Strict-autoplay browsers can start the context suspended even
+			// though start() runs from a user gesture; a suspended context
+			// would flatline the analyser. Resume is cheap and idempotent.
+			if (audioContext.state === "suspended") {
+				void audioContext.resume().catch(() => {});
+			}
+			const source = audioContext.createMediaStreamSource(acquired);
+			analyser = audioContext.createAnalyser();
+			analyser.fftSize = 1024;
+			source.connect(analyser);
+			// Audio graphs render destination-driven: without a path to the
+			// context destination the analyser subgraph may never process.
+			// Route through a zero-gain node so it renders silently.
+			const mute = audioContext.createGain();
+			mute.gain.value = 0;
+			analyser.connect(mute);
+			mute.connect(audioContext.destination);
+
+			const mimeType = pickMimeType();
+			recorder = new MediaRecorder(
+				acquired,
+				mimeType ? { mimeType } : undefined,
+			);
+			recorder.ondataavailable = (e) => {
+				if (e.data.size > 0) chunks.push(e.data);
+			};
+			// A recording cut short from outside (mic unplugged, permission
+			// revoked, recorder failure): keep the captured chunks - stop()
+			// still delivers them - but tell the owner so the UI reacts.
+			// stop() detects the inactive recorder and skips waiting.
+			recorder.onerror = onExternalInterruption;
+			for (const track of acquired.getTracks()) {
+				track.addEventListener("ended", onExternalInterruption);
+			}
+			recorder.start();
+			startedAt = performance.now();
+			sampleTimer = setInterval(sampleAmplitude, SAMPLE_INTERVAL_MS);
+			maxTimer = setTimeout(() => {
+				options?.onMaxDuration?.();
+			}, MAX_RECORDING_MS);
+			setRecording(true);
+		} catch (e) {
+			for (const track of acquired.getTracks()) track.stop();
+			releaseResources();
+			throw e;
 		}
-		const source = audioContext.createMediaStreamSource(acquired);
-		analyser = audioContext.createAnalyser();
-		analyser.fftSize = 1024;
-		source.connect(analyser);
-		// Audio graphs render destination-driven: without a path to the
-		// context destination the analyser subgraph may never process.
-		// Route through a zero-gain node so it renders silently.
-		const mute = audioContext.createGain();
-		mute.gain.value = 0;
-		analyser.connect(mute);
-		mute.connect(audioContext.destination);
-
-		recorder = new MediaRecorder(
-			acquired,
-			pickMimeType() ? { mimeType: pickMimeType() } : undefined,
-		);
-		recorder.ondataavailable = (e) => {
-			if (e.data.size > 0) chunks.push(e.data);
-		};
-		recorder.start();
-		startedAt = performance.now();
-		sampleTimer = setInterval(sampleAmplitude, SAMPLE_INTERVAL_MS);
-		maxTimer = setTimeout(() => {
-			options?.onMaxDuration?.();
-		}, MAX_RECORDING_MS);
-		setRecording(true);
 	}
 
-	async function stop(): Promise<VoiceRecording | null> {
+	function onExternalInterruption(): void {
+		// A stop() in flight will finalize normally; otherwise notify the
+		// owner (it typically stops-and-sends what was captured).
+		if (stopInFlight) return;
+		if (!recording()) return;
+		options?.onInterrupted?.();
+	}
+
+	function stop(): Promise<VoiceRecording | null> {
+		// Single-flight: a second stop (double-click, auto-stop racing a
+		// manual send) shares the first call's outcome.
+		if (stopInFlight) return stopInFlight;
 		const active = recorder;
-		if (!active || !recording()) return null;
-		session++;
-		const durationMs = Math.round(performance.now() - startedAt);
-		const mimeType = active.mimeType || "audio/webm";
-		const stopped = new Promise<void>((resolve) => {
-			active.onstop = () => resolve();
-		});
-		active.stop();
-		await stopped;
-		const blob = new Blob(chunks, { type: mimeType });
-		const waveform = toWireWaveform(amplitudes);
-		releaseResources();
-		if (blob.size === 0) return null;
-		return {
-			blob,
-			// Strip codec parameters: event mimetypes carry the container.
-			mimetype: mimeType.split(";")[0],
-			voice: { durationMs, waveform },
-		};
+		if (!active || !recording()) return Promise.resolve(null);
+		stopInFlight = (async () => {
+			try {
+				session++;
+				const durationMs = Math.round(performance.now() - startedAt);
+				const mimeType = active.mimeType || "audio/webm";
+				// A spontaneously-stopped recorder (interruption) fires no
+				// further onstop; its chunks are already complete.
+				if (active.state !== "inactive") {
+					const stopped = new Promise<void>((resolve) => {
+						active.onstop = () => resolve();
+					});
+					try {
+						active.stop();
+					} catch {
+						// Raced into inactive between the check and the call.
+					}
+					await stopped;
+				}
+				const blob = new Blob(chunks, { type: mimeType });
+				const waveform = toWireWaveform(amplitudes);
+				if (blob.size === 0) return null;
+				return {
+					blob,
+					// Strip codec parameters: event mimetypes carry the container.
+					mimetype: mimeType.split(";")[0],
+					voice: { durationMs, waveform },
+				};
+			} finally {
+				releaseResources();
+				stopInFlight = null;
+			}
+		})();
+		return stopInFlight;
 	}
 
 	function cancel(): void {
+		// Never clear state under an in-flight stop: the user already
+		// initiated that send (e.g. a room switch right after pressing
+		// send), and the pinned-room delivery must complete.
+		if (stopInFlight) return;
 		session++;
 		if (recorder && recorder.state !== "inactive") {
 			recorder.onstop = null;

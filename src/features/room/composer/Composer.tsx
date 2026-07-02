@@ -5,7 +5,7 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
-	For,
+	Index,
 	on,
 	onCleanup,
 	onMount,
@@ -133,21 +133,34 @@ const Composer: Component<{
 	const [previewOpen, setPreviewOpen] = createSignal(false);
 	const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
 	const gifConfig = useGifConfig();
+	/** Measured width of the action strip; the textarea reserves exactly
+	 *  this so text never runs under the buttons regardless of which are
+	 *  visible. Initial value approximates the full strip pre-measure. */
+	const [stripWidth, setStripWidth] = createSignal(160);
 
 	// Voice notes (MSC3245). Feature-detected once: the mic button is
 	// hidden entirely where MediaRecorder/AudioContext/getUserMedia are
 	// unavailable.
 	const voiceSupported = isVoiceRecordingSupported();
+	/** Voice sends run on their own flag, NOT the shared `sending`: a text
+	 *  send in flight must never cause a completed recording to be
+	 *  discarded, and the two are independent requests. */
+	const [voiceSending, setVoiceSending] = createSignal(false);
 	const voiceRecorder = createVoiceRecorder({
 		onMaxDuration: () => void stopAndSendVoice(),
+		// Mic unplugged / permission revoked: deliver what was captured.
+		onInterrupted: () => void stopAndSendVoice(),
 	});
 	onCleanup(() => voiceRecorder.dispose());
 
 	const startRecording = async (): Promise<void> => {
-		if (sending() || voiceRecorder.recording()) return;
+		if (voiceRecorder.recording() || voiceSending()) return;
 		setError(null);
 		try {
 			await voiceRecorder.start();
+			// Keyboard focus moves into the recording bar (the composer
+			// input goes inert underneath it).
+			queueMicrotask(() => voiceSendButtonRef?.focus());
 		} catch {
 			setError("Couldn't access the microphone");
 		}
@@ -155,45 +168,68 @@ const Composer: Component<{
 
 	/** Stop the recording and send it as an MSC3245 voice note through the
 	 *  regular upload pipeline (encrypts in E2EE rooms). Same room/reply
-	 *  pinning as send(). */
+	 *  pinning as send(); a failed upload lands the attachment in the tray
+	 *  with the standard error/retry affordance instead of dropping it. */
 	const stopAndSendVoice = async (): Promise<void> => {
+		if (voiceSending()) return;
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
 		const onThisRoom = (): boolean => props.roomId === roomId;
-		const recorded = await voiceRecorder.stop();
-		if (!recorded || sending()) return;
-		const extension =
-			recorded.mimetype === "audio/ogg"
-				? "ogg"
-				: recorded.mimetype === "audio/mp4"
-					? "m4a"
-					: "webm";
-		const file = new File([recorded.blob], `Voice message.${extension}`, {
-			type: recorded.mimetype,
-		});
-		const attachment: PendingAttachment = {
-			...createPendingAttachment(file),
-			voice: recorded.voice,
-		};
-		setSending(true);
-		setError(null);
-		stopTyping();
+		setVoiceSending(true);
 		try {
-			await uploadAndSend(client, roomId, attachment, {
-				replyTo: replyTo ?? undefined,
-			});
-			if (onThisRoom()) {
-				props.onCancelReply?.();
-				props.onSent?.();
+			const recorded = await voiceRecorder.stop();
+			if (!recorded) {
+				if (onThisRoom()) setError("Nothing was recorded");
+				return;
 			}
-		} catch (e) {
-			if (onThisRoom()) {
-				setError(
-					e instanceof Error ? e.message : "Failed to send voice message",
-				);
+			const extension =
+				recorded.mimetype === "audio/ogg"
+					? "ogg"
+					: recorded.mimetype === "audio/mp4"
+						? "m4a"
+						: "webm";
+			const file = new File([recorded.blob], `Voice message.${extension}`, {
+				type: recorded.mimetype,
+			});
+			const attachment: PendingAttachment = {
+				...createPendingAttachment(file),
+				voice: recorded.voice,
+			};
+			setError(null);
+			stopTyping();
+			try {
+				await uploadAndSend(client, roomId, attachment, {
+					replyTo: replyTo ?? undefined,
+				});
+				// Don't fire onSent while an edit is active: TimelineView
+				// reads it as "edit complete" and would clear the edit the
+				// user is composing.
+				if (onThisRoom() && !props.editingEvent) {
+					props.onCancelReply?.();
+					props.onSent?.();
+				}
+			} catch (e) {
+				if (onThisRoom()) {
+					// Keep the recording recoverable: park it in the tray
+					// with the standard error state so the next send retries
+					// it (the voice metadata rides along).
+					setAttachments((prev) => [
+						...prev,
+						{
+							...attachment,
+							status: "error",
+							error:
+								e instanceof Error ? e.message : "Failed to send voice message",
+						},
+					]);
+					setError("Failed to send voice message - kept in the tray");
+				}
 			}
 		} finally {
-			if (onThisRoom()) setSending(false);
+			setVoiceSending(false);
+			// The recording bar (which held focus) is gone; hand focus back
+			// to the input rather than dropping it on <body>.
+			if (onThisRoom()) restoreFocus();
 		}
 	};
 
@@ -291,6 +327,7 @@ const Composer: Component<{
 	let textareaRef: HTMLTextAreaElement | undefined;
 	let emojiButtonRef: HTMLButtonElement | undefined;
 	let gifButtonRef: HTMLButtonElement | undefined;
+	let voiceSendButtonRef: HTMLButtonElement | undefined;
 	let lastTypingSentAt = 0;
 	let typingRoomId: string | null = null;
 
@@ -501,7 +538,11 @@ const Composer: Component<{
 				setMentions([]);
 				setMentionQuery(null);
 				setGifPickerOpen(false);
+				// Entering edit mode discards an active recording: the edit UI
+				// replaces the send affordances, and a voice send completing
+				// mid-edit would be misread as the edit completing.
 				if (ev) {
+					voiceRecorder.cancel();
 					// Edits can't carry attachments; discard any queued so the
 					// tray doesn't linger un-sendable during the edit.
 					clearAttachments();
@@ -1196,15 +1237,33 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class={`w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover ${
-						props.editingEvent ? "pr-10" : "pr-44"
-					}`}
+					inert={voiceRecorder.recording() || undefined}
+					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					style={{
+						// Reserve exactly the action strip's measured width, so
+						// the padding tracks whichever buttons are visible
+						// (editing, GIF availability, voice support).
+						"padding-right": `${stripWidth() + 12}px`,
+					}}
 					rows={1}
 				/>
 				{/* Composer action strip: one flex row instead of per-button
 				    absolute offsets, so adding/hiding buttons never requires
-				    recomputing right-N positions or the textarea padding. */}
-				<div class="absolute bottom-2.5 right-2 flex items-center gap-1">
+				    recomputing right-N positions or the textarea padding (the
+				    textarea reserves this strip's measured width). Inert while
+				    recording: the recording bar overlays it, and its buttons
+				    must not be reachable underneath. */}
+				<div
+					ref={(el) => {
+						const observer = new ResizeObserver(() => {
+							setStripWidth(el.offsetWidth);
+						});
+						observer.observe(el);
+						onCleanup(() => observer.disconnect());
+					}}
+					inert={voiceRecorder.recording() || undefined}
+					class="absolute bottom-2.5 right-2 flex items-center gap-1"
+				>
 					<Show when={voiceSupported && !props.editingEvent}>
 						<button
 							type="button"
@@ -1337,21 +1396,24 @@ const Composer: Component<{
 							class="flex h-6 min-w-0 flex-1 items-center justify-end gap-px"
 							aria-hidden="true"
 						>
-							<For each={voiceRecorder.liveAmplitudes()}>
+							<Index each={voiceRecorder.liveAmplitudes()}>
 								{(amp) => (
 									<span
 										class="w-1 shrink-0 rounded-full bg-accent"
 										style={{
-											height: `${Math.round(Math.max(amp, 0.12) * 100)}%`,
+											height: `${Math.round(Math.max(amp(), 0.12) * 100)}%`,
 										}}
 									/>
 								)}
-							</For>
+							</Index>
 						</div>
 						<button
 							type="button"
 							class="shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => voiceRecorder.cancel()}
+							onClick={() => {
+								voiceRecorder.cancel();
+								restoreFocus();
+							}}
 							aria-label="Cancel recording"
 						>
 							<svg
@@ -1368,6 +1430,9 @@ const Composer: Component<{
 							</svg>
 						</button>
 						<button
+							ref={(el) => {
+								voiceSendButtonRef = el;
+							}}
 							type="button"
 							class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							onClick={() => void stopAndSendVoice()}
