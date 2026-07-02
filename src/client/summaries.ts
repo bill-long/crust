@@ -585,6 +585,21 @@ export function createSummariesStore(client: MatrixClient): {
 		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void {
 		if (!room || !data.liveEvent) return;
+
+		// Sample server-time offset from every live event - INCLUDING
+		// thread-timeline emissions - before any other processing so
+		// subsequent calls in this handler use the freshest possible
+		// offset. If the offset shifted materially, re-evaluate every
+		// room's `callActive` and re-arm timers.
+		const prevOffset = serverTime.getOffsetMs();
+		if (
+			serverTime.sampleFromEvent(event) &&
+			Math.abs(serverTime.getOffsetMs() - prevOffset) >=
+				MATERIAL_OFFSET_CHANGE_MS
+		) {
+			refreshAllCallActive();
+		}
+
 		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true.
 		// Unread counts must still refresh (room badges sum per-thread
 		// counts, and the thread emission is what delivers the change), but
@@ -594,19 +609,6 @@ export function createSummariesStore(client: MatrixClient): {
 			if (!summaries[room.roomId]) upsertRoom(room);
 			updateUnreadCounts(room);
 			return;
-		}
-
-		// Sample server-time offset from every live event before any other
-		// processing so subsequent calls in this handler use the freshest
-		// possible offset. If the offset shifted materially, re-evaluate
-		// every room's `callActive` and re-arm timers.
-		const prevOffset = serverTime.getOffsetMs();
-		if (
-			serverTime.sampleFromEvent(event) &&
-			Math.abs(serverTime.getOffsetMs() - prevOffset) >=
-				MATERIAL_OFFSET_CHANGE_MS
-		) {
-			refreshAllCallActive();
 		}
 
 		// Ensure room exists in store before field-level updates
