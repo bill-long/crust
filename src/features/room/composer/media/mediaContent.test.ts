@@ -278,4 +278,19 @@ describe("buildMediaContent voice notes", () => {
 		expect(c.url).toBeUndefined();
 		expect(c["org.matrix.msc3245.voice"]).toEqual({});
 	});
+
+	it("rejects voice metadata on a non-audio kind (caller bug)", () => {
+		// Voice markers on m.image/m.file would be nonsensical wire content;
+		// the builder fails closed rather than emitting it.
+		expect(() =>
+			buildMediaContent({
+				kind: "image",
+				contentUri: "mxc://x/img",
+				filename: "photo.png",
+				mimetype: "image/png",
+				size: 100,
+				voice: { durationMs: 1000, waveform: [512] },
+			}),
+		).toThrow(/requires kind=audio/);
+	});
 });

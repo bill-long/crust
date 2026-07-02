@@ -275,6 +275,13 @@ export function createVoiceRecorder(
 				if (active.state !== "inactive") {
 					const stopped = new Promise<void>((resolve) => {
 						active.onstop = () => resolve();
+						// The recorder can go inactive (with its stop event
+						// already fired) between the outer state check and the
+						// handler assignment above; a re-check here means we
+						// never await an onstop that will not come. If it is
+						// mid-stop instead (event still queued), the handler
+						// is now attached and fires.
+						if (active.state === "inactive") resolve();
 					});
 					try {
 						active.stop();

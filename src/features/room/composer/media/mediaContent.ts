@@ -116,6 +116,11 @@ export function buildMediaContent(
 
 	// MSC3245 voice note: the rendering-hint marker plus the MSC1767 audio
 	// block (duration + MSC3246 waveform), matching Element's wire shape.
+	// Voice markers on a non-audio msgtype would be nonsensical wire
+	// content; fail closed on the caller bug (assertExactlyOneSource style).
+	if (args.voice && kind !== "audio") {
+		throw new Error("buildMediaContent: voice metadata requires kind=audio");
+	}
 	if (args.voice) {
 		info.duration = args.voice.durationMs;
 		content[MSC1767_AUDIO_KEY] = {
