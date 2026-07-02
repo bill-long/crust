@@ -78,10 +78,12 @@ describe("isThreadReply", () => {
 		expect(isThreadReply(state)).toBe(false);
 	});
 
-	it("is true for a relation the SDK attached to a thread (no wire m.thread)", () => {
-		// A reaction targeting a thread reply carries m.annotation on the
-		// wire; its thread membership arrives via setThreadId when the SDK
-		// routes it into the thread.
+	it("stays false for events the SDK merely ATTACHED to a thread", () => {
+		// The SDK dual-homes some events into both the room and the thread
+		// (e.g. a plain reply to a thread root) and attaches `.thread` /
+		// a thread id to them - they are main-timeline citizens. Only the
+		// wire m.thread relation is thread-only; relations arriving via
+		// thread timelines are Gate T's job.
 		const reaction = realEvent(
 			{
 				"m.relates_to": {
@@ -92,9 +94,25 @@ describe("isThreadReply", () => {
 			},
 			{ type: "m.reaction" },
 		);
-		expect(isThreadReply(reaction)).toBe(false);
 		reaction.setThreadId("$root");
-		expect(isThreadReply(reaction)).toBe(true);
+		expect(isThreadReply(reaction)).toBe(false);
+
+		const replyToRoot = realEvent({
+			msgtype: "m.text",
+			body: "reply to a thread root",
+			"m.relates_to": { "m.in_reply_to": { event_id: "$root" } },
+		});
+		replyToRoot.setThreadId("$root");
+		expect(isThreadReply(replyToRoot)).toBe(false);
+	});
+
+	it("recognizes the pre-stable io.element.thread rel_type", () => {
+		const ev = realEvent({
+			msgtype: "m.text",
+			body: "legacy thread reply",
+			"m.relates_to": { rel_type: "io.element.thread", event_id: "$root" },
+		});
+		expect(isThreadReply(ev)).toBe(true);
 	});
 });
 
