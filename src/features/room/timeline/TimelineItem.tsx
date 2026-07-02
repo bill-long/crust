@@ -443,6 +443,10 @@ const TimelineItem: Component<{
 	showHeader: boolean;
 	isOwnMessage: boolean;
 	onReact: (key: string) => void;
+	/** Cast/change the local user's poll vote (empty array = retraction). */
+	onVote: (answerIds: string[]) => void;
+	/** Close the poll (only offered when the snapshot says canEnd). */
+	onEndPoll: () => void;
 	onReply: () => void;
 	onJumpToReply: (eventId: string) => void;
 	onEdit: () => void;
@@ -772,7 +776,13 @@ const TimelineItem: Component<{
 													}
 												>
 													<Match when={ev.poll}>
-														{(poll) => <PollMessage poll={poll()} />}
+														{(poll) => (
+															<PollMessage
+																poll={poll()}
+																onVote={props.onVote}
+																onEndPoll={props.onEndPoll}
+															/>
+														)}
 													</Match>
 													<Match when={ev.msgtype === "m.video"}>
 														<MediaVideo

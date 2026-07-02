@@ -40,18 +40,22 @@ function realEventFrom(mock: MockEvent): MatrixEvent {
 	});
 }
 
-function makeStartEvent(eventId = POLL_ID): MatrixEvent {
+function makeStartEvent(options?: {
+	eventId?: string;
+	sender?: string;
+	maxSelections?: number;
+}): MatrixEvent {
 	return realEventFrom(
 		pollStartEvent(
 			ROOM_ID,
-			eventId,
-			"@alice:example.com",
+			options?.eventId ?? POLL_ID,
+			options?.sender ?? "@alice:example.com",
 			"Best pizza?",
 			[
 				{ id: "a", text: "Margherita" },
 				{ id: "b", text: "Pepperoni" },
 			],
-			{ ts: 1000 },
+			{ ts: 1000, maxSelections: options?.maxSelections },
 		),
 	);
 }
@@ -87,9 +91,12 @@ describe("createPollWatcher", () => {
 	let rootEvent: MatrixEvent;
 	let poll: Poll;
 
-	function setupPoll(responses: MatrixEvent[] = []): void {
+	function setupPoll(
+		responses: MatrixEvent[] = [],
+		options?: { sender?: string; maxSelections?: number },
+	): void {
 		client.relations.mockResolvedValue({ events: responses, nextBatch: null });
-		rootEvent = makeStartEvent();
+		rootEvent = makeStartEvent(options);
 		poll = new Poll(
 			rootEvent,
 			client as unknown as MatrixClient,
@@ -469,6 +476,351 @@ describe("createPollWatcher", () => {
 			makeResponse({ eventId: "$v2", sender: ME, answers: ["b"], ts: 8000 }),
 		);
 		expect(updates).toContain(POLL_ID);
+	});
+
+	it("applies a vote optimistically and clears the overlay on the remote echo", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		updates.length = 0;
+
+		const votePromise = watcher.votePoll(POLL_ID, ["a"]);
+		// Synchronous optimistic update, before the send resolves.
+		let snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.counts).toEqual({ a: 1, b: 0 });
+		expect(snapshot?.myAnswers).toEqual(["a"]);
+		expect(snapshot?.hasPendingVote).toBe(true);
+		expect(updates).toContain(POLL_ID);
+		expect(client.sendEvent).toHaveBeenCalledExactlyOnceWith(
+			ROOM_ID,
+			"org.matrix.msc3381.poll.response",
+			expect.objectContaining({
+				"m.relates_to": { rel_type: "m.reference", event_id: POLL_ID },
+				"org.matrix.msc3381.poll.response": { answers: ["a"] },
+			}),
+		);
+		await votePromise;
+
+		// Remote echo round-trips with the id the send resolved with; the
+		// overlay retires and the confirmed tally takes over seamlessly.
+		poll.onNewRelation(
+			makeResponse({ eventId: "$sent", sender: ME, answers: ["a"], ts: 5000 }),
+		);
+		snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.hasPendingVote).toBe(false);
+		expect(snapshot?.counts).toEqual({ a: 1, b: 0 });
+		expect(snapshot?.myAnswers).toEqual(["a"]);
+	});
+
+	it("lets a rapid second vote supersede the first pending one", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+
+		const first = watcher.votePoll(POLL_ID, ["a"]);
+		const second = watcher.votePoll(POLL_ID, ["b"]);
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.myAnswers).toEqual(["b"]);
+		expect(snapshot?.counts).toEqual({ a: 0, b: 1 });
+		await Promise.all([first, second]);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.myAnswers,
+		).toEqual(["b"]);
+	});
+
+	it("reverts a failed vote and offers its ballot for retry", async () => {
+		setupPoll([
+			makeResponse({
+				eventId: "$v0",
+				sender: ME,
+				answers: ["b"],
+				ts: 2000,
+			}),
+		]);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		client.sendEvent.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+
+		await watcher.votePoll(POLL_ID, ["a"]);
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		// Reverted to the confirmed ballot, with the failed one retryable.
+		expect(snapshot?.hasPendingVote).toBe(false);
+		expect(snapshot?.myAnswers).toEqual(["b"]);
+		expect(snapshot?.counts).toEqual({ a: 0, b: 1 });
+		expect(snapshot?.failedAnswers).toEqual(["a"]);
+		expect(consoleError).toHaveBeenCalled();
+		consoleError.mockRestore();
+
+		// A successful retry clears the failure surface.
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.failedAnswers,
+		).toBeNull();
+	});
+
+	it("sends a spoiled ballot for an empty retraction vote", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+
+		await watcher.votePoll(POLL_ID, []);
+		expect(client.sendEvent).toHaveBeenCalledOnce();
+		const [roomId, type, content] = client.sendEvent.mock.calls[0] as [
+			string,
+			string,
+			Record<string, { answers?: unknown }>,
+		];
+		expect(roomId).toBe(ROOM_ID);
+		expect(type).toBe("org.matrix.msc3381.poll.response");
+		// A spoiled ballot omits the answers array entirely.
+		expect(content["org.matrix.msc3381.poll.response"].answers).toBeUndefined();
+	});
+
+	it("ignores votes on polls without a watched SDK model", async () => {
+		await watcher.votePoll("$unknown", ["a"]);
+		expect(client.sendEvent).not.toHaveBeenCalled();
+	});
+
+	it("marks canEnd only for the poll creator while the poll is open", async () => {
+		// Poll created by the local test user.
+		client.relations.mockResolvedValue({ events: [], nextBatch: null });
+		rootEvent = realEventFrom(
+			pollStartEvent(ROOM_ID, POLL_ID, ME, "Mine?", [
+				{ id: "a", text: "A" },
+				{ id: "b", text: "B" },
+			]),
+		);
+		poll = new Poll(
+			rootEvent,
+			client as unknown as MatrixClient,
+			room as unknown as Room,
+		);
+		room.polls.set(poll.pollId, poll);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.canEnd,
+		).toBe(true);
+
+		poll.onNewRelation(makeEnd(ME, 5000));
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.canEnd,
+		).toBe(false);
+	});
+
+	it("does not offer canEnd to non-creators", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.canEnd,
+		).toBe(false);
+	});
+
+	it("holds the Ending state until the confirmed end event arrives", async () => {
+		setupPoll([], { sender: ME });
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		updates.length = 0;
+
+		const endPromise = watcher.endPoll(POLL_ID);
+		let snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.endPending).toBe(true);
+		// Undisclosed reveal is keyed off isEnded, which stays false until
+		// the confirmed end round-trips.
+		expect(snapshot?.isEnded).toBe(false);
+		await endPromise;
+		expect(client.sendEvent).toHaveBeenCalledExactlyOnceWith(
+			ROOM_ID,
+			"org.matrix.msc3381.poll.end",
+			expect.objectContaining({
+				"m.relates_to": { rel_type: "m.reference", event_id: POLL_ID },
+			}),
+		);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.endPending,
+		).toBe(true);
+
+		poll.onNewRelation(makeEnd(ME, 6000));
+		snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.isEnded).toBe(true);
+		expect(snapshot?.endPending).toBe(false);
+	});
+
+	it("refuses votes once the poll has ended or is being ended", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		poll.onNewRelation(makeEnd("@alice:example.com", 5000));
+		client.sendEvent.mockClear();
+
+		// A post-end vote would install an optimistic overlay the SDK's
+		// end-filtered relations could never retire.
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(client.sendEvent).not.toHaveBeenCalled();
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.hasPendingVote).toBe(false);
+		expect(snapshot?.totalVotes).toBe(0);
+		expect(snapshot?.canVote).toBe(false);
+	});
+
+	it("drops stale failure surfaces when the poll ends", async () => {
+		setupPoll([], { sender: ME });
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		// Both a vote send and an end send fail, leaving Retry rows.
+		client.sendEvent
+			.mockRejectedValueOnce(new Error("network"))
+			.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		await watcher.votePoll(POLL_ID, ["a"]);
+		await watcher.endPoll(POLL_ID);
+		consoleError.mockRestore();
+		let snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.failedAnswers).toEqual(["a"]);
+		expect(snapshot?.endFailed).toBe(true);
+
+		// The end then lands anyway (a successful retry from another
+		// session): every stale surface clears - the Retry rows can no
+		// longer accomplish anything.
+		poll.onNewRelation(makeEnd(ME, 5000));
+		snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.isEnded).toBe(true);
+		expect(snapshot?.failedAnswers).toBeNull();
+		expect(snapshot?.endFailed).toBe(false);
+	});
+
+	it("drops a stuck optimistic overlay when the poll ends", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		// The vote sends fine but its echo never lands in the relations
+		// (the SDK filters post-end responses out), so without the on-end
+		// cleanup the overlay would corrupt the final tally forever.
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.hasPendingVote,
+		).toBe(true);
+
+		poll.onNewRelation(makeEnd("@alice:example.com", 5000));
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.isEnded).toBe(true);
+		expect(snapshot?.hasPendingVote).toBe(false);
+		expect(snapshot?.totalVotes).toBe(0);
+		expect(snapshot?.myAnswers).toEqual([]);
+	});
+
+	it("clears a vote failure when a newer confirmed own ballot arrives", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		client.sendEvent.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		await watcher.votePoll(POLL_ID, ["a"]);
+		consoleError.mockRestore();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.failedAnswers,
+		).toEqual(["a"]);
+
+		// The user votes successfully from another device; retrying the
+		// stale ["a"] ballot would stomp it, so the failure clears.
+		poll.onNewRelation(
+			makeResponse({ eventId: "$phone", sender: ME, answers: ["b"], ts: 6000 }),
+		);
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.failedAnswers).toBeNull();
+		expect(snapshot?.myAnswers).toEqual(["b"]);
+	});
+
+	it("refuses to end a poll the local user did not create", async () => {
+		// setupPoll's creator is @alice, not the local @test user.
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		client.sendEvent.mockClear();
+
+		await watcher.endPoll(POLL_ID);
+		expect(client.sendEvent).not.toHaveBeenCalled();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.endPending,
+		).toBe(false);
+	});
+
+	it("clears a vote failure for the same ballot in a different order", async () => {
+		setupPoll(
+			[
+				makeResponse({
+					eventId: "$v0",
+					sender: ME,
+					answers: ["a", "b"],
+					ts: 2000,
+				}),
+			],
+			{ maxSelections: 2 },
+		);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		client.sendEvent.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		await watcher.votePoll(POLL_ID, ["b"]);
+		consoleError.mockRestore();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.failedAnswers,
+		).toEqual(["b"]);
+
+		// The confirmed ballot arrives re-ordered but identical as a set:
+		// the baseline comparison must NOT treat it as a newer vote... and a
+		// genuinely different ballot must clear the failure.
+		poll.onNewRelation(
+			makeResponse({
+				eventId: "$re",
+				sender: ME,
+				answers: ["b", "a"],
+				ts: 2500,
+			}),
+		);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.failedAnswers,
+		).toEqual(["b"]);
+		poll.onNewRelation(
+			makeResponse({ eventId: "$new", sender: ME, answers: ["a"], ts: 3000 }),
+		);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.failedAnswers,
+		).toBeNull();
+	});
+
+	it("surfaces a failed end without revealing results", async () => {
+		setupPoll([], { sender: ME });
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		client.sendEvent.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+
+		await watcher.endPoll(POLL_ID);
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.endPending).toBe(false);
+		expect(snapshot?.endFailed).toBe(true);
+		expect(snapshot?.isEnded).toBe(false);
+		expect(consoleError).toHaveBeenCalled();
+		consoleError.mockRestore();
+
+		// Retry succeeds and clears the failure surface.
+		await watcher.endPoll(POLL_ID);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.endFailed,
+		).toBe(false);
 	});
 
 	it("returns a throwaway snapshot for a room other than the watched one", () => {
