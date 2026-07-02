@@ -19,6 +19,12 @@ export const MSC1767_AUDIO_KEY = "org.matrix.msc1767.audio";
  *  renderer anyway, so truncation loses nothing visible. */
 const MAX_WAVEFORM_SAMPLES = 1024;
 
+/** Defensive cap on the accepted duration (6 hours, far beyond any real
+ *  voice note): a hostile duration like 1e12 ms would otherwise render an
+ *  enormous time string. Above the cap the duration is treated as
+ *  unreadable (null), so the renderer falls back to the decoded length. */
+const MAX_DURATION_MS = 6 * 60 * 60 * 1000;
+
 /** MSC3246 amplitude scale: integers 0..1024. */
 const WAVEFORM_SCALE = 1024;
 
@@ -71,7 +77,8 @@ export function parseVoiceInfo(content: unknown): VoiceInfo {
 	const durationMs =
 		typeof rawDuration === "number" &&
 		Number.isFinite(rawDuration) &&
-		rawDuration > 0
+		rawDuration > 0 &&
+		rawDuration <= MAX_DURATION_MS
 			? rawDuration
 			: null;
 

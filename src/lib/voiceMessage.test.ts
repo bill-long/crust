@@ -106,6 +106,13 @@ describe("parseVoiceInfo", () => {
 				info: {},
 			}),
 		],
+		[
+			"a hostile enormous duration",
+			voiceContent({
+				"org.matrix.msc1767.audio": { duration: 1e12 },
+				info: {},
+			}),
+		],
 	])("nulls unusable fields for %s", (_label, content) => {
 		const info = parseVoiceInfo(content);
 		expect(info.durationMs).toBeNull();

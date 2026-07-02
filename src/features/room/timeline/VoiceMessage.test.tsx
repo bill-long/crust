@@ -80,7 +80,7 @@ describe("VoiceMessage", () => {
 		});
 	});
 
-	it("loads on play and fails visibly when the fetch fails", async () => {
+	it("loads on play, fails visibly, and can be retried in place", async () => {
 		stubAudioContext();
 		const fetchSpy = vi
 			.spyOn(globalThis, "fetch")
@@ -93,21 +93,36 @@ describe("VoiceMessage", () => {
 				"Couldn't play voice message",
 			);
 		});
+		// A transient failure must not be terminal: Retry re-attempts the
+		// load without needing a row remount.
+		fireEvent.click(screen.getByText("Retry"));
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
 	});
 
-	it("fails closed for encrypted audio with a missing descriptor", async () => {
+	it("fails closed BEFORE any network I/O for a missing encrypted descriptor", () => {
+		// parseEncryptedFile already rejected the descriptor; downloading
+		// the (undecryptable) ciphertext would be wasted, unbounded I/O.
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		setup({ isEncrypted: true, file: null });
+		const alert = screen.getByRole("alert");
+		expect(alert.textContent).toContain("Couldn't decrypt voice message");
+		// No play button, no Retry (nothing can succeed), no fetch.
+		expect(screen.queryByLabelText("Play voice message")).toBeNull();
+		expect(screen.queryByText("Retry")).toBeNull();
+		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+
+	it("falls back to the decoded duration when the wire omits one", async () => {
 		stubAudioContext();
-		// A valid-looking fetch response whose ciphertext has no descriptor
-		// must never reach the decoder.
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
 			new Response(new ArrayBuffer(16), { status: 200 }),
 		);
-		setup({ isEncrypted: true, file: null });
+		setup({ durationMs: null });
+		expect(screen.getByText("-:--")).toBeTruthy();
 		fireEvent.click(screen.getByLabelText("Play voice message"));
+		// The stubbed decode reports a 2s buffer; the total must react.
 		await waitFor(() => {
-			expect(screen.getByRole("alert").textContent).toContain(
-				"Couldn't decrypt voice message",
-			);
+			expect(screen.getByText(/0:02/)).toBeTruthy();
 		});
 	});
 });
