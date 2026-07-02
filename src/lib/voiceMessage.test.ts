@@ -60,6 +60,17 @@ describe("parseVoiceInfo", () => {
 		expect(info.durationMs).toBe(6541);
 	});
 
+	it("falls back to info.duration when the msc1767 duration is invalid", () => {
+		// A present-but-hostile MSC value must not mask a usable
+		// info.duration (each candidate validates independently).
+		const info = parseVoiceInfo(
+			voiceContent({
+				"org.matrix.msc1767.audio": { duration: 1e13, waveform: [512] },
+			}),
+		);
+		expect(info.durationMs).toBe(6541);
+	});
+
 	it("clamps out-of-range waveform values", () => {
 		const info = parseVoiceInfo(
 			voiceContent({

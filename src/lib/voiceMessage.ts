@@ -28,6 +28,16 @@ const MAX_DURATION_MS = 6 * 60 * 60 * 1000;
 /** MSC3246 amplitude scale: integers 0..1024. */
 const WAVEFORM_SCALE = 1024;
 
+/** A usable wire duration: a finite positive number within the cap. */
+function validDurationMs(value: unknown): number | null {
+	return typeof value === "number" &&
+		Number.isFinite(value) &&
+		value > 0 &&
+		value <= MAX_DURATION_MS
+		? value
+		: null;
+}
+
 /**
  * True when event content is an MSC3245 voice message: an `m.audio`
  * message carrying the voice rendering-hint block.
@@ -77,14 +87,10 @@ export function parseVoiceInfo(content: unknown): VoiceInfo {
 			: null;
 
 	// Duration: prefer the MSC1767 block, fall back to info.duration.
-	const rawDuration = audioBlock?.duration ?? info?.duration;
+	// Each candidate is validated independently, so a present-but-hostile
+	// MSC value doesn't mask a usable info.duration.
 	const durationMs =
-		typeof rawDuration === "number" &&
-		Number.isFinite(rawDuration) &&
-		rawDuration > 0 &&
-		rawDuration <= MAX_DURATION_MS
-			? rawDuration
-			: null;
+		validDurationMs(audioBlock?.duration) ?? validDurationMs(info?.duration);
 
 	const rawWaveform = audioBlock?.waveform;
 	let waveform: number[] | null = null;
