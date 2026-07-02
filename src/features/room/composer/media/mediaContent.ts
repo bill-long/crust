@@ -1,6 +1,7 @@
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import {
 	MSC1767_AUDIO_KEY,
+	MSC1767_TEXT_KEY,
 	MSC3245_VOICE_KEY,
 } from "../../../../lib/voiceMessage";
 import type { AttachmentKind, BuildMediaContentArgs, MediaInfo } from "./types";
@@ -122,7 +123,7 @@ export function buildMediaContent(
 			waveform: args.voice.waveform,
 		};
 		content[MSC3245_VOICE_KEY] = {};
-		content["org.matrix.msc1767.text"] = content.body;
+		content[MSC1767_TEXT_KEY] = content.body;
 	}
 
 	if (replyTo) {

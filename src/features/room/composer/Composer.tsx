@@ -142,10 +142,11 @@ const Composer: Component<{
 	// hidden entirely where MediaRecorder/AudioContext/getUserMedia are
 	// unavailable.
 	const voiceSupported = isVoiceRecordingSupported();
-	/** Voice sends run on their own flag, NOT the shared `sending`: a text
-	 *  send in flight must never cause a completed recording to be
-	 *  discarded, and the two are independent requests. */
-	const [voiceSending, setVoiceSending] = createSignal(false);
+	/** Guards the STOP phase only (not the upload): a double-click on the
+	 *  bar's send button must not deliver the same recording twice, but
+	 *  once the clip is in hand the flag clears so the mic is immediately
+	 *  usable again and uploads from different rooms can overlap. */
+	const [voiceStopping, setVoiceStopping] = createSignal(false);
 	const voiceRecorder = createVoiceRecorder({
 		onMaxDuration: () => void stopAndSendVoice(),
 		// Mic unplugged / permission revoked: deliver what was captured.
@@ -154,8 +155,12 @@ const Composer: Component<{
 	onCleanup(() => voiceRecorder.dispose());
 
 	const startRecording = async (): Promise<void> => {
-		if (voiceRecorder.recording() || voiceSending()) return;
+		if (voiceRecorder.recording() || voiceStopping()) return;
 		setError(null);
+		// The recording bar overlays the input area; a picker left open
+		// would float above it and edit the hidden draft.
+		setEmojiPickerOpen(false);
+		setGifPickerOpen(false);
 		try {
 			await voiceRecorder.start();
 			// Keyboard focus moves into the recording bar (the composer
@@ -171,65 +176,69 @@ const Composer: Component<{
 	 *  pinning as send(); a failed upload lands the attachment in the tray
 	 *  with the standard error/retry affordance instead of dropping it. */
 	const stopAndSendVoice = async (): Promise<void> => {
-		if (voiceSending()) return;
+		if (voiceStopping()) return;
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
 		const onThisRoom = (): boolean => props.roomId === roomId;
-		setVoiceSending(true);
+		let attachment: PendingAttachment | null = null;
+		setVoiceStopping(true);
 		try {
 			const recorded = await voiceRecorder.stop();
-			if (!recorded) {
-				if (onThisRoom()) setError("Nothing was recorded");
-				return;
-			}
-			const extension =
-				recorded.mimetype === "audio/ogg"
-					? "ogg"
-					: recorded.mimetype === "audio/mp4"
-						? "m4a"
-						: "webm";
-			const file = new File([recorded.blob], `Voice message.${extension}`, {
-				type: recorded.mimetype,
-			});
-			const attachment: PendingAttachment = {
-				...createPendingAttachment(file),
-				voice: recorded.voice,
-			};
-			setError(null);
-			stopTyping();
-			try {
-				await uploadAndSend(client, roomId, attachment, {
-					replyTo: replyTo ?? undefined,
+			if (recorded) {
+				const extension =
+					recorded.mimetype === "audio/ogg"
+						? "ogg"
+						: recorded.mimetype === "audio/mp4"
+							? "m4a"
+							: "webm";
+				const file = new File([recorded.blob], `Voice message.${extension}`, {
+					type: recorded.mimetype,
 				});
-				// Don't fire onSent while an edit is active: TimelineView
-				// reads it as "edit complete" and would clear the edit the
-				// user is composing.
-				if (onThisRoom() && !props.editingEvent) {
-					props.onCancelReply?.();
-					props.onSent?.();
-				}
-			} catch (e) {
-				if (onThisRoom()) {
-					// Keep the recording recoverable: park it in the tray
-					// with the standard error state so the next send retries
-					// it (the voice metadata rides along).
-					setAttachments((prev) => [
-						...prev,
-						{
-							...attachment,
-							status: "error",
-							error:
-								e instanceof Error ? e.message : "Failed to send voice message",
-						},
-					]);
-					setError("Failed to send voice message - kept in the tray");
-				}
+				attachment = {
+					...createPendingAttachment(file),
+					voice: recorded.voice,
+				};
 			}
 		} finally {
-			setVoiceSending(false);
-			// The recording bar (which held focus) is gone; hand focus back
-			// to the input rather than dropping it on <body>.
-			if (onThisRoom()) restoreFocus();
+			setVoiceStopping(false);
+			// The recording bar (which held focus) disappears with the stop;
+			// hand focus back to the input now, not after the upload.
+			restoreFocus();
+		}
+		if (!attachment) {
+			if (onThisRoom()) setError("Nothing was recorded");
+			return;
+		}
+		setError(null);
+		stopTyping();
+		try {
+			await uploadAndSend(client, roomId, attachment, {
+				replyTo: replyTo ?? undefined,
+			});
+			// Don't fire onSent while an edit is active: TimelineView
+			// reads it as "edit complete" and would clear the edit the
+			// user is composing.
+			if (onThisRoom() && !props.editingEvent) {
+				props.onCancelReply?.();
+				props.onSent?.();
+			}
+		} catch (e) {
+			// Deliberately NOT gated on room or edit mode: the alternative
+			// to parking the failed recording is silently losing it. The
+			// tray belongs to the (shared) composer instance, so after a
+			// room switch the recording stays visible and removable, and a
+			// retry sends it to the currently selected room.
+			const failed = attachment;
+			setAttachments((prev) => [
+				...prev,
+				{
+					...failed,
+					status: "error",
+					error:
+						e instanceof Error ? e.message : "Failed to send voice message",
+				},
+			]);
+			setError("Failed to send voice message - kept in the tray");
 		}
 	};
 
@@ -544,7 +553,10 @@ const Composer: Component<{
 				if (ev) {
 					voiceRecorder.cancel();
 					// Edits can't carry attachments; discard any queued so the
-					// tray doesn't linger un-sendable during the edit.
+					// tray doesn't linger un-sendable during the edit. (One
+					// deliberate exception: a voice upload that FAILS during an
+					// edit still parks in the tray - losing the recording is
+					// worse than a tray entry that waits out the edit.)
 					clearAttachments();
 					setText(ev.body);
 					requestAnimationFrame(() => {
@@ -1061,11 +1073,14 @@ const Composer: Component<{
 			</Show>
 			{/* preventDefault on mousedown keeps focus (and thus the selection)
 			    on the textarea when a button is pressed, so the wrap helpers read
-			    a live selection and the textarea's blur side effects don't fire. */}
+			    a live selection and the textarea's blur side effects don't fire.
+			    Inert while recording: the recording bar hides the draft, and a
+			    toolbar action would silently edit text the user can't see. */}
 			<div
 				role="toolbar"
 				aria-label="Text formatting"
 				class="mb-1.5 flex items-center gap-0.5 text-text-disabled"
+				inert={voiceRecorder.recording() || undefined}
 				onMouseDown={(e) => e.preventDefault()}
 			>
 				<button
@@ -1319,7 +1334,7 @@ const Composer: Component<{
 							</svg>
 						</button>
 					</Show>
-					{/* Attach file button (hidden when editing — edits can't carry
+					{/* Attach file button (hidden when editing - edits can't carry
 					    attachments). The hidden input accepts images and arbitrary
 					    files; non-media files are classified as m.file at send. */}
 					<Show when={!props.editingEvent}>
@@ -1377,18 +1392,31 @@ const Composer: Component<{
 						😀
 					</button>
 				</div>
+				{/* Always mounted: live regions announce content CHANGES, so the
+				    text flips with the recording state (a region inserted with
+				    its text already present is typically never announced). */}
+				<span class="sr-only" role="status">
+					{voiceRecorder.recording() ? "Recording voice message" : ""}
+				</span>
 				{/* Recording bar: overlays the input area while capturing. */}
 				<Show when={voiceRecorder.recording()}>
-					<div class="absolute inset-0 z-10 flex items-center gap-2 rounded-lg bg-surface-2 px-3">
+					<fieldset
+						aria-label="Voice recording"
+						class="absolute inset-0 z-10 flex min-w-0 items-center gap-2 rounded-lg bg-surface-2 px-3"
+						onKeyDown={(e) => {
+							// The composer textarea (which owns the usual Escape
+							// handling) is inert under the bar; Esc cancels here.
+							if (e.key === "Escape") {
+								e.stopPropagation();
+								voiceRecorder.cancel();
+								restoreFocus();
+							}
+						}}
+					>
 						<span
 							class="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger motion-reduce:animate-none"
 							aria-hidden="true"
 						/>
-						{/* Announced once on entry; the ticking readout itself is a
-						    timer so screen readers don't chatter every 200ms. */}
-						<span class="sr-only" role="status">
-							Recording voice message
-						</span>
 						<span
 							role="timer"
 							class="shrink-0 text-sm tabular-nums text-text-secondary"
@@ -1450,7 +1478,7 @@ const Composer: Component<{
 								<path d="m3 11 18-8-8 18-2-8-8-2z" />
 							</svg>
 						</button>
-					</div>
+					</fieldset>
 				</Show>
 				{/* GIF picker popover */}
 				<Show when={gifPickerOpen()}>

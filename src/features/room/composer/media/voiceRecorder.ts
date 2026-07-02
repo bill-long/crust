@@ -156,9 +156,16 @@ export function createVoiceRecorder(
 		setRecording(false);
 	}
 
+	/** Reused across ticks: allocating 1KB per 100ms sample adds avoidable
+	 *  GC pressure over a long recording. Sized on start(). */
+	let sampleBuffer = new Uint8Array(0);
+
 	function sampleAmplitude(): void {
 		if (!analyser) return;
-		const data = new Uint8Array(analyser.fftSize);
+		if (sampleBuffer.length !== analyser.fftSize) {
+			sampleBuffer = new Uint8Array(analyser.fftSize);
+		}
+		const data = sampleBuffer;
 		analyser.getByteTimeDomainData(data);
 		// Peak deviation from the 128 midpoint, normalized to 0..1.
 		let peak = 0;
@@ -237,7 +244,8 @@ export function createVoiceRecorder(
 			}, MAX_RECORDING_MS);
 			setRecording(true);
 		} catch (e) {
-			for (const track of acquired.getTracks()) track.stop();
+			// `stream = acquired` was the try's first statement, so
+			// releaseResources() stops the acquired mic tracks too.
 			releaseResources();
 			throw e;
 		}
@@ -298,12 +306,20 @@ export function createVoiceRecorder(
 		// send), and the pinned-room delivery must complete.
 		if (stopInFlight) return;
 		session++;
-		if (recorder && recorder.state !== "inactive") {
+		if (recorder) {
+			// Detach ALL handlers, not just onstop: the cancelled recorder
+			// flushes its final chunk asynchronously, and a still-attached
+			// ondataavailable would push the discarded clip's bytes into
+			// `chunks` after a new start() has begun filling it.
 			recorder.onstop = null;
-			try {
-				recorder.stop();
-			} catch {
-				// Already stopped.
+			recorder.ondataavailable = null;
+			recorder.onerror = null;
+			if (recorder.state !== "inactive") {
+				try {
+					recorder.stop();
+				} catch {
+					// Already stopped.
+				}
 			}
 		}
 		chunks = [];
