@@ -1,4 +1,11 @@
-import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import {
+	type Component,
+	createMemo,
+	createSignal,
+	createUniqueId,
+	For,
+	Show,
+} from "solid-js";
 import type { PollSnapshot } from "./pollSnapshot";
 
 interface PollMessageProps {
@@ -16,10 +23,16 @@ interface PollMessageProps {
  *
  * Voting is optimistic: clicks call onVote and the watcher re-projects the
  * row with the pending ballot applied, so the UI updates immediately.
- * Single-select behaves like radios (re-clicking the selected option is a
- * no-op, no retraction - Element parity); multi-select behaves like
- * checkboxes capped at maxSelections, and unchecking the last selection
- * sends the MSC3381 spoiled-ballot retraction.
+ * Single-select renders as a radiogroup (re-clicking the selected option is
+ * a no-op, no retraction - Element parity) with roving tabindex and
+ * arrow-key focus movement; selection stays on click/Enter/Space so
+ * browsing options never fires votes. Multi-select renders as checkboxes
+ * capped at maxSelections, and unchecking the last selection sends the
+ * MSC3381 spoiled-ballot retraction.
+ *
+ * Non-votable states (ended, ending, no live SDK model yet, cap reached)
+ * use aria-disabled with a click guard rather than the disabled attribute,
+ * so the options stay in the tab order and remain perceivable.
  *
  * Result visibility follows the poll kind: disclosed polls show counts and
  * bars live, undisclosed polls hide them until the poll ends. The bar track
@@ -28,12 +41,16 @@ interface PollMessageProps {
  * (isEnded), never optimistically while endPending.
  */
 export const PollMessage: Component<PollMessageProps> = (props) => {
+	const hintId = createUniqueId();
 	const [confirmingEnd, setConfirmingEnd] = createSignal(false);
+	let cardRef: HTMLDivElement | undefined;
+	let endButtonRef: HTMLButtonElement | undefined;
+	let confirmButtonRef: HTMLButtonElement | undefined;
 	const showResults = createMemo(
 		() => props.poll.kind === "disclosed" || props.poll.isEnded,
 	);
 	const votingDisabled = createMemo(
-		() => props.poll.isEnded || props.poll.endPending,
+		() => !props.poll.canVote || props.poll.isEnded || props.poll.endPending,
 	);
 	const isMultiSelect = () => props.poll.maxSelections > 1;
 	const maxCount = createMemo(() => {
@@ -66,6 +83,13 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 			? "1 vote"
 			: `${props.poll.totalVotes} votes`;
 	});
+	/** Roving tabindex home for the single-select radiogroup: the checked
+	 *  option, or the first option before any vote. */
+	const rovingId = createMemo(() =>
+		isMultiSelect()
+			? null
+			: (props.poll.myAnswers[0] ?? props.poll.answers[0]?.id ?? null),
+	);
 
 	const toggleAnswer = (answerId: string): void => {
 		if (votingDisabled()) return;
@@ -85,8 +109,33 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 		}
 	};
 
+	/** Arrow-key focus movement within the single-select radiogroup.
+	 *  Deliberately moves focus WITHOUT selecting - selection here is a
+	 *  network send, so it stays on explicit Enter/Space/click. */
+	const onGroupKeyDown = (event: KeyboardEvent): void => {
+		if (isMultiSelect()) return;
+		const delta =
+			event.key === "ArrowDown" || event.key === "ArrowRight"
+				? 1
+				: event.key === "ArrowUp" || event.key === "ArrowLeft"
+					? -1
+					: 0;
+		if (delta === 0) return;
+		event.preventDefault();
+		const group = event.currentTarget as HTMLElement;
+		const radios = [...group.querySelectorAll<HTMLButtonElement>("button")];
+		const current = radios.indexOf(document.activeElement as HTMLButtonElement);
+		if (current === -1 || radios.length === 0) return;
+		radios[(current + delta + radios.length) % radios.length].focus();
+	};
+
 	return (
-		<div class="max-w-md rounded-lg border border-border-subtle bg-surface-2 p-3">
+		<div
+			ref={cardRef}
+			tabindex="-1"
+			aria-busy={props.poll.hasPendingVote}
+			class="max-w-md rounded-lg border border-border-subtle bg-surface-2 p-3 focus-visible:outline-none"
+		>
 			<div class="flex items-start gap-2">
 				<svg
 					class="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
@@ -108,12 +157,20 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 					<p class="text-xs text-text-muted">
 						{statusLine()}
 						<Show when={isMultiSelect() && !props.poll.isEnded}>
-							<span> · Choose up to {props.poll.maxSelections}</span>
+							<span id={hintId}>
+								{" "}
+								· Choose up to {props.poll.maxSelections}
+							</span>
 						</Show>
 					</p>
 				</div>
 			</div>
-			<ul class="mt-2 flex flex-col gap-2" aria-label="Poll options">
+			<ul
+				class="mt-2 flex flex-col gap-2"
+				aria-label="Poll options"
+				role={isMultiSelect() ? "group" : "radiogroup"}
+				onKeyDown={onGroupKeyDown}
+			>
 				<For each={props.poll.answers}>
 					{(answer) => {
 						// counts is zero-filled for every answer id (see
@@ -128,14 +185,33 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 							isMultiSelect() &&
 							!isMine() &&
 							props.poll.myAnswers.length >= props.poll.maxSelections;
+						const locked = () => votingDisabled() || capLocked();
 						return (
 							<li>
+								{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the
+								    role is dynamically "radio" or "checkbox", both of which
+								    support aria-checked; Biome can only see the implicit
+								    button role through the conditional expression. */}
 								<button
 									type="button"
-									class="w-full rounded p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover enabled:hover:bg-surface-3/60 disabled:cursor-default any-pointer-coarse:min-h-11"
-									disabled={votingDisabled() || capLocked()}
-									aria-pressed={isMine()}
-									onClick={() => toggleAnswer(answer.id)}
+									role={isMultiSelect() ? "checkbox" : "radio"}
+									aria-checked={isMine()}
+									// aria-disabled (not the disabled attribute) keeps
+									// locked options in the tab order and perceivable;
+									// toggleAnswer guards the actual interaction.
+									aria-disabled={locked()}
+									aria-describedby={
+										isMultiSelect() && !props.poll.isEnded ? hintId : undefined
+									}
+									tabindex={
+										isMultiSelect() || rovingId() === answer.id ? 0 : -1
+									}
+									class={`w-full rounded p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+										locked() ? "cursor-default" : "hover:bg-surface-3/60"
+									}`}
+									onClick={() => {
+										if (!capLocked()) toggleAnswer(answer.id);
+									}}
 								>
 									<span class="flex items-baseline justify-between gap-2 text-sm">
 										<span
@@ -207,9 +283,15 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 							when={confirmingEnd()}
 							fallback={
 								<button
+									ref={endButtonRef}
 									type="button"
 									class="rounded px-1 text-xs text-text-muted transition-colors hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-									onClick={() => setConfirmingEnd(true)}
+									onClick={() => {
+										setConfirmingEnd(true);
+										// The clicked button unmounts; keep keyboard
+										// focus in the flow by moving it to Confirm.
+										queueMicrotask(() => confirmButtonRef?.focus());
+									}}
 								>
 									End poll
 								</button>
@@ -220,11 +302,16 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 									End poll? Voting will stop.
 								</span>
 								<button
+									ref={confirmButtonRef}
 									type="button"
 									class="rounded px-1 font-medium text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => {
 										setConfirmingEnd(false);
 										props.onEndPoll();
+										// Both confirm controls unmount ("Ending…" text
+										// replaces them); park focus on the card so
+										// keyboard users don't fall back to <body>.
+										queueMicrotask(() => cardRef?.focus());
 									}}
 								>
 									Confirm
@@ -232,7 +319,10 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 								<button
 									type="button"
 									class="rounded px-1 text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-									onClick={() => setConfirmingEnd(false)}
+									onClick={() => {
+										setConfirmingEnd(false);
+										queueMicrotask(() => endButtonRef?.focus());
+									}}
 								>
 									Cancel
 								</button>

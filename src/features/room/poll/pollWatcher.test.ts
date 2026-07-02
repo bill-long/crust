@@ -643,6 +643,94 @@ describe("createPollWatcher", () => {
 		expect(snapshot?.endPending).toBe(false);
 	});
 
+	it("refuses votes once the poll has ended or is being ended", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		poll.onNewRelation(makeEnd("@alice:example.com", 5000));
+		client.sendEvent.mockClear();
+
+		// A post-end vote would install an optimistic overlay the SDK's
+		// end-filtered relations could never retire.
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(client.sendEvent).not.toHaveBeenCalled();
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.hasPendingVote).toBe(false);
+		expect(snapshot?.totalVotes).toBe(0);
+		expect(snapshot?.canVote).toBe(false);
+	});
+
+	it("drops stale failure surfaces when the poll ends", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		// Both a vote send and an end send fail, leaving Retry rows.
+		client.sendEvent
+			.mockRejectedValueOnce(new Error("network"))
+			.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		await watcher.votePoll(POLL_ID, ["a"]);
+		await watcher.endPoll(POLL_ID);
+		consoleError.mockRestore();
+		let snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.failedAnswers).toEqual(["a"]);
+		expect(snapshot?.endFailed).toBe(true);
+
+		// The end arrives (e.g. a moderator closed it): every stale surface
+		// clears - the Retry rows can no longer accomplish anything.
+		poll.onNewRelation(makeEnd("@alice:example.com", 5000));
+		snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.isEnded).toBe(true);
+		expect(snapshot?.failedAnswers).toBeNull();
+		expect(snapshot?.endFailed).toBe(false);
+	});
+
+	it("drops a stuck optimistic overlay when the poll ends", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		// The vote sends fine but its echo never lands in the relations
+		// (the SDK filters post-end responses out), so without the on-end
+		// cleanup the overlay would corrupt the final tally forever.
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.hasPendingVote,
+		).toBe(true);
+
+		poll.onNewRelation(makeEnd("@alice:example.com", 5000));
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.isEnded).toBe(true);
+		expect(snapshot?.hasPendingVote).toBe(false);
+		expect(snapshot?.totalVotes).toBe(0);
+		expect(snapshot?.myAnswers).toEqual([]);
+	});
+
+	it("clears a vote failure when a newer confirmed own ballot arrives", async () => {
+		setupPoll();
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		client.sendEvent.mockRejectedValueOnce(new Error("network"));
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		await watcher.votePoll(POLL_ID, ["a"]);
+		consoleError.mockRestore();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.failedAnswers,
+		).toEqual(["a"]);
+
+		// The user votes successfully from another device; retrying the
+		// stale ["a"] ballot would stomp it, so the failure clears.
+		poll.onNewRelation(
+			makeResponse({ eventId: "$phone", sender: ME, answers: ["b"], ts: 6000 }),
+		);
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.failedAnswers).toBeNull();
+		expect(snapshot?.myAnswers).toEqual(["b"]);
+	});
+
 	it("surfaces a failed end without revealing results", async () => {
 		setupPoll();
 		watcher.getSnapshot(rootEvent, room as unknown as Room);

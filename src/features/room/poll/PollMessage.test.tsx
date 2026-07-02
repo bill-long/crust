@@ -27,6 +27,7 @@ function snapshot(overrides?: Partial<PollSnapshot>): PollSnapshot {
 		counts: { a: 2, b: 1 },
 		totalVotes: 3,
 		myAnswers: [],
+		canVote: true,
 		hasPendingVote: false,
 		failedAnswers: null,
 		isEnded: false,
@@ -105,10 +106,46 @@ describe("PollMessage rendering", () => {
 	it("marks the local user's vote", () => {
 		setup({ myAnswers: ["b"] });
 		expect(screen.getByText("(your vote)")).toBeTruthy();
-		expect(optionButton("Pepperoni").getAttribute("aria-pressed")).toBe("true");
-		expect(optionButton("Margherita").getAttribute("aria-pressed")).toBe(
+		expect(optionButton("Pepperoni").getAttribute("aria-checked")).toBe("true");
+		expect(optionButton("Margherita").getAttribute("aria-checked")).toBe(
 			"false",
 		);
+	});
+
+	it("exposes radio semantics for single-select and checkbox for multi", () => {
+		const { container } = setup();
+		expect(
+			container
+				.querySelector('ul[aria-label="Poll options"]')
+				?.getAttribute("role"),
+		).toBe("radiogroup");
+		expect(optionButton("Margherita").getAttribute("role")).toBe("radio");
+		cleanup();
+		const { container: multi } = setup({ maxSelections: 2 });
+		expect(
+			multi
+				.querySelector('ul[aria-label="Poll options"]')
+				?.getAttribute("role"),
+		).toBe("group");
+		expect(optionButton("Margherita").getAttribute("role")).toBe("checkbox");
+	});
+
+	it("uses a roving tabindex in the single-select radiogroup", () => {
+		setup({ myAnswers: ["b"] });
+		expect(optionButton("Pepperoni").tabIndex).toBe(0);
+		expect(optionButton("Margherita").tabIndex).toBe(-1);
+	});
+
+	it("moves focus (without voting) on arrow keys in single-select", () => {
+		const { onVote } = setup();
+		const first = optionButton("Margherita");
+		first.focus();
+		fireEvent.keyDown(first, { key: "ArrowDown" });
+		expect(document.activeElement).toBe(optionButton("Pepperoni"));
+		fireEvent.keyDown(optionButton("Pepperoni"), { key: "ArrowDown" });
+		// Wraps around.
+		expect(document.activeElement).toBe(optionButton("Margherita"));
+		expect(onVote).not.toHaveBeenCalled();
 	});
 
 	it("pluralizes the vote count", () => {
@@ -170,7 +207,13 @@ describe("PollMessage voting", () => {
 			],
 			counts: { a: 1, b: 1, c: 0 },
 		});
-		expect(optionButton("Hawaiian").disabled).toBe(true);
+		// aria-disabled (not the disabled attribute) so the option stays in
+		// the tab order and perceivable; clicks are guarded instead.
+		const locked = optionButton("Hawaiian");
+		expect(locked.getAttribute("aria-disabled")).toBe("true");
+		expect(locked.tabIndex).toBe(0);
+		fireEvent.click(locked);
+		expect(onVote).not.toHaveBeenCalled();
 		fireEvent.click(optionButton("Pepperoni"));
 		expect(onVote).toHaveBeenCalledExactlyOnceWith(["a"]);
 	});
@@ -182,14 +225,30 @@ describe("PollMessage voting", () => {
 
 	it("disables voting once the poll has ended", () => {
 		const { onVote } = setup({ isEnded: true });
-		expect(optionButton("Margherita").disabled).toBe(true);
+		expect(optionButton("Margherita").getAttribute("aria-disabled")).toBe(
+			"true",
+		);
 		fireEvent.click(optionButton("Margherita"));
 		expect(onVote).not.toHaveBeenCalled();
 	});
 
 	it("disables voting while the poll is being ended", () => {
 		setup({ canEnd: true, endPending: true });
-		expect(optionButton("Margherita").disabled).toBe(true);
+		expect(optionButton("Margherita").getAttribute("aria-disabled")).toBe(
+			"true",
+		);
+	});
+
+	it("disables voting on provisional snapshots without a live SDK model", () => {
+		// canVote=false: a pending local-echo poll (or one still decrypting)
+		// has nothing to send a vote to yet - clicks must not be silently
+		// dropped by the watcher.
+		const { onVote } = setup({ canVote: false });
+		expect(optionButton("Margherita").getAttribute("aria-disabled")).toBe(
+			"true",
+		);
+		fireEvent.click(optionButton("Margherita"));
+		expect(onVote).not.toHaveBeenCalled();
 	});
 
 	it("surfaces a failed vote with a Retry that resubmits the same ballot", () => {
@@ -225,6 +284,20 @@ describe("PollMessage ending", () => {
 		fireEvent.click(screen.getByText("Cancel"));
 		expect(onEndPoll).not.toHaveBeenCalled();
 		expect(screen.getByText("End poll")).toBeTruthy();
+	});
+
+	it("keeps keyboard focus in the flow across the confirm swap", async () => {
+		setup({ canEnd: true });
+		const endButton = screen.getByText("End poll");
+		endButton.focus();
+		fireEvent.click(endButton);
+		await Promise.resolve();
+		// The clicked button unmounted; focus must land on Confirm, not
+		// fall back to <body>.
+		expect(document.activeElement).toBe(screen.getByText("Confirm"));
+		fireEvent.click(screen.getByText("Cancel"));
+		await Promise.resolve();
+		expect(document.activeElement).toBe(screen.getByText("End poll"));
 	});
 
 	it("shows the Ending state while the close is in flight", () => {

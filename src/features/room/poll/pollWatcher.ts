@@ -83,11 +83,21 @@ interface WatchedPoll {
 	 * object and only mutates/clears its own.
 	 */
 	pendingVote: { answers: string[]; sentEventId: string | null } | null;
-	/** Ballot of the last failed vote send, for the Retry affordance. */
-	failedVoteAnswers: string[] | null;
+	/**
+	 * The last failed vote send, for the Retry affordance. `baseline` is
+	 * the confirmed ballot at failure time: when the confirmed ballot later
+	 * changes (e.g. the user voted successfully from another device), the
+	 * failure is obsolete and clears, so its Retry can never stomp a newer
+	 * cross-device vote.
+	 */
+	failedVote: { answers: string[]; baseline: string[] } | null;
 	endPending: boolean;
 	endFailed: boolean;
 	detach(): void;
+}
+
+function sameBallot(a: readonly string[], b: readonly string[]): boolean {
+	return a.length === b.length && a.every((id, i) => id === b[i]);
 }
 
 /**
@@ -133,8 +143,17 @@ export function createPollWatcher(
 		) {
 			entry.pendingVote = null;
 		}
-		// A confirmed end retires the optimistic "Ending..." state.
-		if (entry.poll.isEnded) entry.endPending = false;
+		// A confirmed end retires ALL optimistic/failure vote state: the SDK
+		// filters post-end responses out of the relations, so an in-flight
+		// overlay could otherwise never clear (permanently corrupting the
+		// displayed final tally), and a vote-failure Retry / end-failure
+		// Retry can no longer accomplish anything.
+		if (entry.poll.isEnded) {
+			entry.endPending = false;
+			entry.endFailed = false;
+			entry.pendingVote = null;
+			entry.failedVote = null;
+		}
 		// With a pending vote but no fetched relations yet, tally over an
 		// empty response set so the optimistic ballot still shows; the real
 		// counts merge in when the fetch lands.
@@ -147,6 +166,16 @@ export function createPollWatcher(
 						entry.pendingVote?.answers,
 					)
 				: null;
+		// A vote failure is obsolete once the confirmed ballot moved past
+		// its baseline (a newer vote landed, e.g. from another device).
+		if (
+			entry.failedVote &&
+			!entry.pendingVote &&
+			tally &&
+			!sameBallot(tally.myAnswers, entry.failedVote.baseline)
+		) {
+			entry.failedVote = null;
+		}
 		const loadingResults = entry.relations
 			? entry.poll.isFetchingResponses
 			: !entry.fetchFailed;
@@ -160,8 +189,9 @@ export function createPollWatcher(
 				undecryptableCount: entry.poll.undecryptableRelationsCount,
 				loadingResults,
 				interaction: {
+					canVote: !entry.poll.isEnded && !entry.endPending,
 					hasPendingVote: entry.pendingVote !== null,
-					failedAnswers: entry.failedVoteAnswers,
+					failedAnswers: entry.failedVote?.answers ?? null,
 					endPending: entry.endPending,
 					endFailed: entry.endFailed,
 					canEnd:
@@ -258,7 +288,7 @@ export function createPollWatcher(
 			relations: null,
 			fetchFailed: false,
 			pendingVote: null,
-			failedVoteAnswers: null,
+			failedVote: null,
 			endPending: false,
 			endFailed: false,
 			detach() {
@@ -367,10 +397,14 @@ export function createPollWatcher(
 		async votePoll(pollId: string, answerIds: string[]): Promise<void> {
 			const entry = watched.get(pollId);
 			const room = watchedRoom;
-			// Voting needs a watched poll (an SDK model behind it); pending
-			// local-echo polls can't be voted on until they confirm.
-			if (!entry || !room) return;
-			entry.failedVoteAnswers = null;
+			// Voting needs a watched poll (an SDK model behind it) that is
+			// still open: the SDK filters post-end responses out of the
+			// relations, so a vote sent after (or racing) the end would
+			// install an overlay that can never clear. The renderer disables
+			// options in all of these states (snapshot.canVote); this is the
+			// fail-closed backstop.
+			if (!entry || !room || entry.poll.isEnded || entry.endPending) return;
+			entry.failedVote = null;
 			const pending = {
 				answers: answerIds,
 				sentEventId: null as string | null,
@@ -394,7 +428,19 @@ export function createPollWatcher(
 				const current = watched.get(pollId);
 				if (!current || current.pendingVote !== pending) return;
 				current.pendingVote = null;
-				current.failedVoteAnswers = answerIds;
+				// Baseline = the confirmed ballot right now; if it changes
+				// later (a newer vote landed, e.g. from another device), the
+				// failure is obsolete and recompute clears it.
+				current.failedVote = {
+					answers: answerIds,
+					baseline: current.relations
+						? computePollTally(
+								current.relations.getRelations(),
+								current.start,
+								client.getUserId(),
+							).myAnswers
+						: [],
+				};
 				console.error(`Poll vote failed for ${pollId} in ${room.roomId}:`, e);
 				recompute(pollId);
 			}
