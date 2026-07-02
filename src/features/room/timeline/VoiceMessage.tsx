@@ -94,6 +94,8 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 	const [loadState, setLoadState] = createSignal<LoadState>("idle");
 	const [playing, setPlaying] = createSignal(false);
 	const [elapsed, setElapsed] = createSignal(0);
+	/** Web Audio is missing entirely - a failure Retry can never succeed. */
+	const [unsupported, setUnsupported] = createSignal(false);
 	/** Duration of the decoded buffer - a signal, so the total-time memo
 	 *  reacts when the decode completes. */
 	const [decodedDuration, setDecodedDuration] = createSignal<number | null>(
@@ -112,6 +114,15 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 	/** Guards every await in loadBuffer: bumped on source-identity change
 	 *  AND on unmount, so a stale load can never touch fresh state. */
 	let loadGeneration = 0;
+	/** Aborts the in-flight download when the load is cancelled, so a
+	 *  "cancel" during loading stops consuming bandwidth too. */
+	let abortController: AbortController | null = null;
+
+	function invalidateLoad(): void {
+		loadGeneration++;
+		abortController?.abort();
+		abortController = null;
+	}
 
 	/** Encrypted content without a valid descriptor must fail closed
 	 *  before any network I/O (parseEncryptedFile already rejected it). */
@@ -166,7 +177,7 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 	}
 
 	function resetAll(): void {
-		loadGeneration++;
+		invalidateLoad();
 		stopPlayback(false);
 		audioBuffer = null;
 		pausedAt = 0;
@@ -193,10 +204,10 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 	);
 
 	onCleanup(() => {
-		// Invalidate any in-flight load: without this, a pending
-		// fetch/decode would recreate the AudioContext below and start
-		// audible ghost playback with no player on screen.
-		loadGeneration++;
+		// Invalidate (and abort) any in-flight load: without this, a
+		// pending fetch/decode would recreate the AudioContext below and
+		// start audible ghost playback with no player on screen.
+		invalidateLoad();
 		stopPlayback(false);
 		void audioContext?.close().catch(() => {});
 		audioContext = null;
@@ -215,8 +226,9 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 			return;
 		}
 		setLoadState("loading");
+		abortController = new AbortController();
 		try {
-			const response = await fetch(url);
+			const response = await fetch(url, { signal: abortController.signal });
 			if (gen !== loadGeneration) return;
 			if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
 			let bytes = await response.arrayBuffer();
@@ -275,6 +287,7 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 	const togglePlay = (): void => {
 		if (undecryptable()) return;
 		if (typeof AudioContext === "undefined") {
+			setUnsupported(true);
 			setLoadState("failed");
 			return;
 		}
@@ -282,10 +295,11 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 			stopPlayback(true);
 			return;
 		}
-		// A click while loading reads as "cancel": invalidate the in-flight
-		// load so its completion can't auto-start playback.
+		// A click while loading reads as "cancel": invalidate (and abort)
+		// the in-flight load so its completion can't auto-start playback
+		// and the download stops consuming bandwidth.
 		if (loadState() === "loading") {
-			loadGeneration++;
+			invalidateLoad();
 			setLoadState("idle");
 			return;
 		}
@@ -324,7 +338,9 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 									? "Couldn't decrypt voice message"
 									: "Couldn't play voice message"}
 							</span>
-							<Show when={!undecryptable()}>
+							{/* No Retry for non-recoverable failures: a missing
+							    descriptor or missing Web Audio cannot succeed. */}
+							<Show when={!undecryptable() && !unsupported()}>
 								<button
 									type="button"
 									class="shrink-0 rounded px-1 text-xs font-medium text-text-secondary underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"

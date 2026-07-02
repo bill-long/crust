@@ -68,9 +68,9 @@ describe("VoiceMessage", () => {
 		expect(screen.queryByLabelText("Play voice message")).toBeNull();
 	});
 
-	it("fails visibly when Web Audio is unavailable", async () => {
+	it("fails visibly (without a misleading Retry) when Web Audio is unavailable", async () => {
 		// jsdom has no AudioContext; the play press must fail closed
-		// rather than throwing.
+		// rather than throwing, and a retry can never succeed.
 		const fetchSpy = vi.spyOn(globalThis, "fetch");
 		setup();
 		fireEvent.click(screen.getByLabelText("Play voice message"));
@@ -78,6 +78,7 @@ describe("VoiceMessage", () => {
 		await waitFor(() => {
 			expect(screen.getByRole("alert")).toBeTruthy();
 		});
+		expect(screen.queryByText("Retry")).toBeNull();
 	});
 
 	it("loads on play, fails visibly, and can be retried in place", async () => {
@@ -112,21 +113,28 @@ describe("VoiceMessage", () => {
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 
-	it("cancels an in-flight load when play is pressed again", async () => {
+	it("cancels (and aborts) an in-flight load when play is pressed again", async () => {
 		stubAudioContext();
-		// A fetch that never resolves keeps the load in flight.
-		vi.spyOn(globalThis, "fetch").mockReturnValue(
-			new Promise(() => {}) as Promise<Response>,
+		// A fetch that never resolves keeps the load in flight; capture its
+		// abort signal to assert the download is genuinely torn down.
+		let signal: AbortSignal | undefined;
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			(_url, init) =>
+				new Promise(() => {
+					signal = init?.signal ?? undefined;
+				}) as Promise<Response>,
 		);
 		setup();
 		const button = screen.getByLabelText("Play voice message");
 		fireEvent.click(button);
 		expect(screen.getByText("Loading…")).toBeTruthy();
-		// Second click reads as cancel: back to idle, and the (eventual)
-		// completion must not auto-start playback.
+		expect(signal?.aborted).toBe(false);
+		// Second click reads as cancel: back to idle, the (eventual)
+		// completion must not auto-start playback, and the download aborts.
 		fireEvent.click(button);
 		expect(screen.queryByText("Loading…")).toBeNull();
 		expect(screen.getByText("1:23")).toBeTruthy();
+		expect(signal?.aborted).toBe(true);
 	});
 
 	it("falls back to the decoded duration when the wire omits one", async () => {
