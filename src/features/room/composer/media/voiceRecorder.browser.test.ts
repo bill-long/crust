@@ -158,6 +158,20 @@ describe("createVoiceRecorder (browser)", () => {
 		expect(result?.blob.size).toBeGreaterThan(0);
 	});
 
+	it("delivers the full clip when stop() races a spontaneous recorder stop", async () => {
+		const { recorder, stream } = makeRecorderOverTone();
+		await recorder.start();
+		await sleep(300);
+		// Interruption immediately followed by stop() (the composer's
+		// onInterrupted path): with no timeslice the recorder's ONLY
+		// dataavailable is a queued task dispatched after its state flips
+		// to inactive - reading chunks too early yields an empty blob.
+		for (const track of stream.getTracks()) track.stop();
+		const result = await recorder.stop();
+		expect(result).not.toBeNull();
+		expect(result?.blob.size).toBeGreaterThan(0);
+	});
+
 	it("stop() resolves after the recorder already stopped spontaneously", async () => {
 		const { recorder, stream } = makeRecorderOverTone();
 		await recorder.start();

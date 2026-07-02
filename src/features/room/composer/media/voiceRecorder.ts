@@ -289,26 +289,33 @@ export function createVoiceRecorder(
 				session++;
 				const durationMs = Math.round(performance.now() - startedAt);
 				const mimeType = active.mimeType || "audio/webm";
-				// A spontaneously-stopped recorder (interruption) fires no
-				// further onstop; its chunks are already complete.
+				// Wait for the recorder to settle before reading `chunks`: the
+				// final dataavailable is a QUEUED task dispatched after state
+				// flips to "inactive", so reading chunks the moment the state
+				// reads inactive can miss the last (often the only) chunk.
+				const settled = new Promise<void>((resolve) => {
+					// When the recorder is (or goes) active->stopped after this
+					// handler is attached, onstop reliably fires and everything
+					// before it (the final dataavailable) has been delivered.
+					active.onstop = () => resolve();
+					if (active.state === "inactive") {
+						// Already stopped: the stop event may have fired BEFORE
+						// the handler above was attached (it will never fire
+						// again). A macrotask fallback runs after any
+						// still-queued final dataavailable/stop tasks, so the
+						// last chunk lands either way and the await can't hang.
+						setTimeout(resolve, 0);
+					}
+				});
 				if (active.state !== "inactive") {
-					const stopped = new Promise<void>((resolve) => {
-						active.onstop = () => resolve();
-						// The recorder can go inactive (with its stop event
-						// already fired) between the outer state check and the
-						// handler assignment above; a re-check here means we
-						// never await an onstop that will not come. If it is
-						// mid-stop instead (event still queued), the handler
-						// is now attached and fires.
-						if (active.state === "inactive") resolve();
-					});
 					try {
 						active.stop();
 					} catch {
-						// Raced into inactive between the check and the call.
+						// Raced into inactive after the handler was attached;
+						// the already-queued stop event resolves `settled`.
 					}
-					await stopped;
 				}
+				await settled;
 				const blob = new Blob(chunks, { type: mimeType });
 				const waveform = toWireWaveform(amplitudes);
 				if (blob.size === 0) return null;
