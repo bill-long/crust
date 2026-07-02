@@ -6,6 +6,7 @@
  */
 
 import { isPollStartType, pollNotificationBody } from "../../lib/pollCopy";
+import { isVoiceMessageContent } from "../../lib/voiceMessage";
 
 /** Subset of the push payload the notification copy reads. The payload is
  *  operator/homeserver-influenced JSON, typed only by assertion at the parse
@@ -50,7 +51,9 @@ function describeContent(payload: PushPayload): {
 		case "m.file":
 			return { isText: false, text: "sent a file" };
 		case "m.audio":
-			return { isText: false, text: "sent an audio file" };
+			return isVoiceMessageContent(content)
+				? { isText: false, text: "sent a voice message" }
+				: { isText: false, text: "sent an audio file" };
 		case "m.video":
 			return { isText: false, text: "sent a video" };
 		default: {

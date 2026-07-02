@@ -20,6 +20,10 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { pollPreviewText } from "../../../lib/pollCopy";
+import {
+	isVoiceMessageContent,
+	parseVoiceInfo,
+} from "../../../lib/voiceMessage";
 import { extractGifUrl } from "../../gif/gifUrl";
 import {
 	type EncryptedFileInfo,
@@ -158,6 +162,17 @@ export interface TimelineEvent {
 	 * rendering the ciphertext.
 	 */
 	mediaEncryptedFile: EncryptedFileInfo | null;
+	/**
+	 * True for MSC3245 voice messages (an `m.audio` with the voice
+	 * rendering-hint block) - routes to the waveform VoiceMessage renderer
+	 * instead of the generic audio player. Parsing lives in
+	 * src/lib/voiceMessage.ts.
+	 */
+	isVoice: boolean;
+	/** MSC1767 playback duration in ms; null when not readable. */
+	voiceDurationMs: number | null;
+	/** MSC3246 waveform normalized to 0..1 floats; null when absent. */
+	voiceWaveform: number[] | null;
 	isEncrypted: boolean;
 	isDecryptionFailure: boolean;
 	isEdited: boolean;
@@ -330,7 +345,7 @@ function buildReplySnippet(parent: MatrixEvent): string {
 	} else if (msgtype === "m.video") {
 		snippet = "🎬 Video";
 	} else if (msgtype === "m.audio") {
-		snippet = "🔊 Audio";
+		snippet = isVoiceMessageContent(content) ? "🎤 Voice message" : "🔊 Audio";
 	} else if (msgtype === "m.file") {
 		snippet = filename ? `📎 ${filename}` : "📎 File";
 	} else {
@@ -458,6 +473,9 @@ function buildSyntheticCallLeaveEvent(
 		mediaThumbnailMimetype: null,
 		mediaIsEncrypted: false,
 		mediaEncryptedFile: null,
+		isVoice: false,
+		voiceDurationMs: null,
+		voiceWaveform: null,
 		isEncrypted: false,
 		isDecryptionFailure: false,
 		isEdited: false,
@@ -849,6 +867,10 @@ function eventToTimelineEvent(
 		? (pollWatcher?.getSnapshot(event, room) ?? null)
 		: null;
 
+	// MSC3245 voice message: parse-and-validate lives in lib/voiceMessage.
+	const isVoice = isVoiceMessageContent(content);
+	const voiceInfo = isVoice ? parseVoiceInfo(content) : null;
+
 	return {
 		eventId: event.getId() ?? "",
 		senderId: sender,
@@ -879,6 +901,9 @@ function eventToTimelineEvent(
 			hasMediaSource && mediaIsEncrypted
 				? parseEncryptedFile(content.file)
 				: null,
+		isVoice,
+		voiceDurationMs: voiceInfo?.durationMs ?? null,
+		voiceWaveform: voiceInfo?.waveform ?? null,
 		isEncrypted: event.isEncrypted(),
 		isDecryptionFailure: event.isEncrypted() && event.isDecryptionFailure(),
 		isEdited,
