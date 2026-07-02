@@ -66,6 +66,13 @@ describe("VoiceMessage", () => {
 		expect(screen.getByText("-:--")).toBeTruthy();
 	});
 
+	it("formats hour-plus durations as h:mm:ss", () => {
+		// The wire accepts up to 6h; "75:03"-style minute overflow is
+		// ambiguous next to real m:ss readouts.
+		setup({ durationMs: 4_503_000 });
+		expect(screen.getByText("1:15:03")).toBeTruthy();
+	});
+
 	it("shows an unavailable state without a source", () => {
 		setup({ httpUrl: null });
 		expect(screen.getByText("Voice message unavailable")).toBeTruthy();

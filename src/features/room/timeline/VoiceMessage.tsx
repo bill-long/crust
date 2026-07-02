@@ -59,7 +59,14 @@ function resampleWaveform(samples: number[] | null): number[] {
 
 function formatSeconds(totalSeconds: number): string {
 	const s = Math.max(0, Math.round(totalSeconds));
-	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+	const minutes = Math.floor(s / 60) % 60;
+	const seconds = String(s % 60).padStart(2, "0");
+	// Hour-plus clips (the wire accepts up to 6h) read as h:mm:ss rather
+	// than an ever-growing minute count like "75:03".
+	if (s >= 3600) {
+		return `${Math.floor(s / 3600)}:${String(minutes).padStart(2, "0")}:${seconds}`;
+	}
+	return `${minutes}:${seconds}`;
 }
 
 type LoadState = "idle" | "loading" | "ready" | "failed";
@@ -237,7 +244,13 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 		setLoadState("loading");
 		abortController = new AbortController();
 		try {
-			const response = await fetch(url, { signal: abortController.signal });
+			// credentials: "omit" matches every other media fetch in this
+			// feature - Matrix media needs no cookies, and omitting them
+			// avoids cross-origin credential leakage to the media repo.
+			const response = await fetch(url, {
+				signal: abortController.signal,
+				credentials: "omit",
+			});
 			if (gen !== loadGeneration) return;
 			if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
 			let bytes = await response.arrayBuffer();
