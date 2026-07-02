@@ -7,6 +7,7 @@ import {
 	pollResponseEvent,
 	pollStartEvent,
 	textMessage,
+	threadReplyEvent,
 } from "../test/mockClient";
 import {
 	callMembershipExpiresAt,
@@ -1004,6 +1005,23 @@ describe("createSummariesStore poll previews", () => {
 		store.init();
 
 		expect(store.summaries["!r:x"].lastMessage?.body).toBe("latest text");
+		store.cleanup();
+	});
+
+	it("skips thread replies when picking the preview event", () => {
+		// Thread replies belong to their thread, not the sidebar preview;
+		// the latest MAIN-timeline message wins.
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$main", "@alice:x", "main message", 1000),
+				threadReplyEvent("!r:x", "$tr", "@bob:x", "$main", "in thread", 2000),
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("main message");
 		store.cleanup();
 	});
 });

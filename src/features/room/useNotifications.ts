@@ -14,6 +14,7 @@ import {
 	isRenderablePollContent,
 	pollNotificationBody,
 } from "../../lib/pollCopy";
+import { isThreadReply } from "../../lib/threadEvents";
 import { isVoiceMessageContent } from "../../lib/voiceMessage";
 import { userSettings } from "../../stores/settings";
 import {
@@ -86,6 +87,10 @@ export function useNotifications(
 		if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") return false;
+		// Thread replies don't notify yet: deliberate gap until the
+		// thread-aware notification branch lands (issue #303 step 3e),
+		// which replaces this line with "replied in a thread" copy.
+		if (isThreadReply(event)) return false;
 		// A poll start must be renderable (readable question + well-formed
 		// answers) - approximates the timeline's parsePollStart gate so a
 		// malformed poll can't pop a notification for a message the timeline

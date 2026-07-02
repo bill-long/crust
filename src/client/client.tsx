@@ -322,7 +322,14 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		if (result === "reloading" || result === "aborted") return;
 		setCryptoState(result === "ready" ? "ready" : "error");
 		if (disposed || syncState() === "logged-out") return;
-		matrixClient.startClient({ initialSyncLimit: 20 });
+		matrixClient.startClient({
+			initialSyncLimit: 20,
+			// Partitions m.thread relations into per-thread timelines instead
+			// of the room's timeline sets (Room.eventShouldLiveIn). The
+			// timeline / preview / notification / search gates rely on this
+			// and fail closed on thread replies themselves (lib/threadEvents).
+			threadSupport: true,
+		});
 	});
 
 	const cryptoStatus = useCryptoStatus(

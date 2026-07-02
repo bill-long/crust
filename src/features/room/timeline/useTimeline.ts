@@ -2,6 +2,8 @@ import {
 	ClientEvent,
 	Direction,
 	EventStatus,
+	type EventTimeline,
+	type EventTimelineSet,
 	M_POLL_START,
 	type MatrixClient,
 	type MatrixEvent,
@@ -20,6 +22,7 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { pollPreviewText } from "../../../lib/pollCopy";
+import { isThreadReply, isThreadTimelineData } from "../../../lib/threadEvents";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -946,6 +949,10 @@ function isDisplayable(
 	// Filter out message edits (m.replace) — they update existing events
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// Thread replies live in their thread's timeline, not the room's. The
+	// SDK already partitions them out of room timeline sets; this is the
+	// fail-closed backstop (thread ROOTS pass — isThreadReply excludes them).
+	if (isThreadReply(event)) return false;
 	// State notices are displayable only when they produce a non-null
 	// notice (filters out no-op transitions like join->join with no
 	// profile change). This keeps the invariant that every displayable
@@ -1802,9 +1809,14 @@ export function useTimeline(
 		eventRoom: Room | undefined,
 		_toStart: boolean | undefined,
 		removed: boolean | undefined,
-		data: { liveEvent?: boolean },
+		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void {
 		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
+		// Thread timelines re-emit RoomEvent.Timeline through the client;
+		// none of it (replies, or reactions/edits targeting thread events)
+		// may touch main-timeline state. Gate on both the emitting timeline
+		// and the event's own shape (fail-closed).
+		if (isThreadTimelineData(data) || isThreadReply(event)) return;
 
 		// Removed events (e.g. cancelled local echoes the SDK strips from
 		// the timeline before firing LocalEchoUpdated(CANCELLED)) must be
@@ -2036,8 +2048,14 @@ export function useTimeline(
 		);
 	}
 
-	function onTimelineReset(room: Room | undefined): void {
+	function onTimelineReset(
+		room: Room | undefined,
+		timelineSet?: EventTimelineSet,
+	): void {
 		if (!room || !currentRoomId || room.roomId !== currentRoomId) return;
+		// A THREAD timeline resetting (e.g. its initial relations backfill)
+		// must not reload the room's main window.
+		if (timelineSet?.thread) return;
 		backfillReloadAttempted = false;
 		loadRoom(currentRoomId);
 	}

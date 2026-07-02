@@ -52,6 +52,16 @@ export interface MockEvent {
 	 * (leave→join, etc.).
 	 */
 	prevContent?: Record<string, unknown>;
+	/**
+	 * Explicit thread root ID, mirroring the SDK's `event.threadRootId`
+	 * fallbacks (`event.thread.id` / `threadId`) for events whose thread
+	 * membership isn't visible in wire content (e.g. reactions targeting
+	 * thread events after the SDK attaches them). Wire `m.relates_to`
+	 * with `rel_type: "m.thread"` takes precedence, as in the SDK.
+	 */
+	threadRoot?: string;
+	/** Marks the event as a thread root (bundled m.thread aggregation). */
+	threadRoot_isRoot?: boolean;
 }
 
 export function createMatrixEvent(evt: MockEvent) {
@@ -114,6 +124,17 @@ export function createMatrixEvent(evt: MockEvent) {
 		event: { redacts: evt.redacts },
 		getStateKey: () => evt.stateKey,
 		getPrevContent: () => evt.prevContent ?? {},
+		/** Mirrors SDK: wire m.thread relation first, then attached-thread fallback. */
+		get threadRootId(): string | undefined {
+			const relates = wrapped.getContent()?.["m.relates_to"] as
+				| { rel_type?: string; event_id?: string }
+				| undefined;
+			if (relates?.rel_type === "m.thread") return relates.event_id;
+			return evt.threadRoot;
+		},
+		get isThreadRoot(): boolean {
+			return evt.threadRoot_isRoot === true || evt.threadRoot === eventId;
+		},
 		get status() {
 			return status;
 		},
@@ -478,6 +499,34 @@ export function textMessage(
 		sender,
 		type: "m.room.message",
 		content: { msgtype: "m.text", body },
+		ts,
+	};
+}
+
+/** A thread reply in the MSC3440 wire shape (fallback m.in_reply_to). */
+export function threadReplyEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	rootId: string,
+	body: string,
+	ts = Date.now(),
+): MockEvent {
+	return {
+		eventId,
+		roomId,
+		sender,
+		type: "m.room.message",
+		content: {
+			msgtype: "m.text",
+			body,
+			"m.relates_to": {
+				rel_type: "m.thread",
+				event_id: rootId,
+				is_falling_back: true,
+				"m.in_reply_to": { event_id: rootId },
+			},
+		},
 		ts,
 	};
 }

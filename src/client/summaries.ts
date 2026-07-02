@@ -14,6 +14,7 @@ import {
 	isRenderablePollContent,
 	pollPreviewText,
 } from "../lib/pollCopy";
+import { isThreadReply } from "../lib/threadEvents";
 import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
@@ -320,6 +321,12 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	// for MatrixEventEvent.Decrypted to correct the sidebar preview.
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// Thread replies belong to their thread, not the room preview (the
+	// sidebar keeps showing the latest MAIN-timeline message). NOTE: the
+	// timeline listener that calls updateUnreadCounts must stay UNgated for
+	// thread emissions - room badges sum per-thread counts, and the thread
+	// emission is what refreshes them.
+	if (isThreadReply(event)) return false;
 	// A poll start must be renderable (readable question + well-formed
 	// answers) to preview - approximates the timeline's parsePollStart gate
 	// so a redacted/malformed poll never surfaces its raw event type string
