@@ -1255,8 +1255,11 @@ const Composer: Component<{
 				    must not be reachable underneath. */}
 				<div
 					ref={(el) => {
+						// Deferred to the next frame: writing the padding inside
+						// the observer callback perturbs layout in the same frame
+						// and trips the browser's "ResizeObserver loop" error.
 						const observer = new ResizeObserver(() => {
-							setStripWidth(el.offsetWidth);
+							requestAnimationFrame(() => setStripWidth(el.offsetWidth));
 						});
 						observer.observe(el);
 						onCleanup(() => observer.disconnect());
