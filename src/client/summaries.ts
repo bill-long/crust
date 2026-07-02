@@ -1,5 +1,6 @@
 import {
 	ClientEvent,
+	type EventTimeline,
 	EventType,
 	type MatrixClient,
 	type MatrixEvent,
@@ -14,7 +15,7 @@ import {
 	isRenderablePollContent,
 	pollPreviewText,
 } from "../lib/pollCopy";
-import { isThreadReply } from "../lib/threadEvents";
+import { isThreadReply, isThreadTimelineData } from "../lib/threadEvents";
 import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
@@ -581,9 +582,19 @@ export function createSummariesStore(client: MatrixClient): {
 		room: Room | undefined,
 		_toStartOfTimeline: boolean | undefined,
 		_removed: boolean | undefined,
-		data: { liveEvent?: boolean },
+		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void {
 		if (!room || !data.liveEvent) return;
+		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true.
+		// Unread counts must still refresh (room badges sum per-thread
+		// counts, and the thread emission is what delivers the change), but
+		// the PREVIEW branches below must not run: a dual-homed thread ROOT
+		// re-emitted from its thread timeline would clobber a newer preview.
+		if (isThreadTimelineData(data)) {
+			if (!summaries[room.roomId]) upsertRoom(room);
+			updateUnreadCounts(room);
+			return;
+		}
 
 		// Sample server-time offset from every live event before any other
 		// processing so subsequent calls in this handler use the freshest

@@ -1,5 +1,6 @@
 import { useNavigate } from "@solidjs/router";
 import {
+	type EventTimeline,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -14,7 +15,7 @@ import {
 	isRenderablePollContent,
 	pollNotificationBody,
 } from "../../lib/pollCopy";
-import { isThreadReply } from "../../lib/threadEvents";
+import { isThreadReply, isThreadTimelineData } from "../../lib/threadEvents";
 import { isVoiceMessageContent } from "../../lib/voiceMessage";
 import { userSettings } from "../../stores/settings";
 import {
@@ -214,9 +215,13 @@ export function useNotifications(
 		room: Room | undefined,
 		_toStart: boolean | undefined,
 		_removed: boolean | undefined,
-		data: { liveEvent?: boolean },
+		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void => {
 		if (!room || !data.liveEvent) return;
+		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true;
+		// without this gate a dual-homed thread ROOT (present in both the
+		// room and its thread timeline) would notify twice.
+		if (isThreadTimelineData(data)) return;
 
 		// Encrypted event pending decryption — defer and re-evaluate after
 		if (

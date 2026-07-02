@@ -1,4 +1,5 @@
 import type { EventTimeline, MatrixEvent } from "matrix-js-sdk";
+import { THREAD_RELATION_TYPE } from "matrix-js-sdk";
 
 /**
  * Fail-closed gates that keep thread replies out of main-timeline surfaces
@@ -13,39 +14,47 @@ import type { EventTimeline, MatrixEvent } from "matrix-js-sdk";
  *
  * Two complementary gates, applied together where both signals exist:
  *
- * - Gate S (shape): true only for events whose WIRE relation is
- *   `m.thread` - the one shape the SDK partitions thread-only. It must
- *   NOT key on `event.threadRootId`/`getThread()`: the SDK deliberately
- *   DUAL-HOMES some events into both the room and the thread (a plain
- *   `m.in_reply_to` reply to a thread root inherits the root's
- *   both-timelines placement via `eventShouldLiveIn`'s parent recursion)
- *   and attaches `.thread` to them - those are main-timeline citizens
- *   and must keep rendering/notifying. Verified E2E: a threadRootId-based
- *   gate wrongly hid replies-to-roots from the main timeline.
+ * - Gate S (shape): mirrors the SDK's own partition predicate EXACTLY -
+ *   `event.isRelation(THREAD_RELATION_TYPE.name)`, the same call
+ *   `eventShouldLiveIn` keys on. Anything looser or tighter desyncs from
+ *   the partition and hides events the SDK left in the room timeline:
+ *   - NOT `event.threadRootId`/`getThread()`: the SDK deliberately
+ *     DUAL-HOMES some events into both the room and the thread (a plain
+ *     `m.in_reply_to` reply to a thread root inherits the root's
+ *     both-timelines placement via parent recursion) and attaches
+ *     `.thread` to them - verified E2E: a threadRootId-based gate hid
+ *     replies-to-roots from the main timeline.
+ *   - NOT a hardcoded name list: `THREAD_RELATION_TYPE.name` is server-
+ *     latched (stable `m.thread`, pre-stable `io.element.thread`), and
+ *     the SDK partitions on exactly ONE name at a time - an event
+ *     carrying the other name stays in the room timeline and must
+ *     keep rendering.
+ *   `isRelation` also reads WIRE content (thread relations stay cleartext
+ *   on encrypted events) and excludes state events, matching the SDK.
  *
  * - Gate T (timeline identity): classifies the EMISSION by which timeline
  *   set produced it. Catches what shape can't: reactions/edits targeting
  *   thread events carry `m.annotation`/`m.replace` on the wire (not
- *   `m.thread`), but they always arrive via the thread's timeline set.
+ *   `m.thread`), and a dual-homed thread ROOT re-emits from the thread's
+ *   timeline as well - both always arrive via the thread's timeline set.
  */
 
-/** Gate S: true when the event is a thread reply on the wire (MSC3440
- *  `rel_type: m.thread`, or its pre-stable `io.element.thread` name).
- *  False for thread roots, plain replies (including replies to a thread
- *  root, which the SDK dual-homes into the main timeline), and state
- *  events. Reads wire content like the SDK's own `threadRootId` getter,
- *  so it works on encrypted events too (thread relations stay cleartext). */
+/** Gate S: true when the event is a thread reply on the wire - the exact
+ *  shape the SDK partitions thread-only. False for thread roots, plain
+ *  replies (including replies to a thread root, which the SDK dual-homes
+ *  into the main timeline), state events, and everything else. The
+ *  optional call is defensive against partial event fakes (matching the
+ *  `localRedactionEvent` check in isDisplayable); a missing method reads
+ *  as "not a thread reply", the fail-open direction that keeps messages
+ *  visible. */
 export function isThreadReply(event: MatrixEvent): boolean {
-	const content = event.getWireContent?.() ?? event.getContent();
-	const relType = (
-		content?.["m.relates_to"] as { rel_type?: string } | undefined
-	)?.rel_type;
-	return relType === "m.thread" || relType === "io.element.thread";
+	return event.isRelation?.(THREAD_RELATION_TYPE.name) ?? false;
 }
 
 /** Gate T: true when a `RoomEvent.Timeline` emission came from a THREAD
- *  timeline set rather than a room one. `data.timeline` is present on every
- *  timeline emission (IRoomTimelineData). */
+ *  timeline set rather than a room one. Accepts `IRoomTimelineData`
+ *  structurally; `timeline` is optional here (and null-guarded) so mock
+ *  emissions without it fail safe to "not a thread". */
 export function isThreadTimelineData(data: {
 	timeline?: EventTimeline;
 }): boolean {

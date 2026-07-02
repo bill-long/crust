@@ -951,7 +951,7 @@ function isDisplayable(
 	if (relType === "m.replace") return false;
 	// Thread replies live in their thread's timeline, not the room's. The
 	// SDK already partitions them out of room timeline sets; this is the
-	// fail-closed backstop (thread ROOTS pass — isThreadReply excludes them).
+	// fail-closed backstop (thread ROOTS pass - isThreadReply excludes them).
 	if (isThreadReply(event)) return false;
 	// State notices are displayable only when they produce a non-null
 	// notice (filters out no-op transitions like join->join with no

@@ -2,11 +2,15 @@ import { MatrixEvent } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import { isThreadReply, isThreadTimelineData } from "./threadEvents";
 
-/** Real SDK events so the gates exercise the real threadRootId/isThreadRoot
- *  accessors (wire content first, attached-thread fallbacks second). */
+/** Real SDK events so the gates exercise the real isRelation predicate
+ *  (wire content, state-event exclusion, single latched relation name). */
 function realEvent(
 	content: Record<string, unknown>,
-	overrides?: { type?: string; unsigned?: Record<string, unknown> },
+	overrides?: {
+		type?: string;
+		unsigned?: Record<string, unknown>;
+		stateKey?: string;
+	},
 ): MatrixEvent {
 	return new MatrixEvent({
 		type: overrides?.type ?? "m.room.message",
@@ -16,6 +20,9 @@ function realEvent(
 		origin_server_ts: 1,
 		content,
 		unsigned: overrides?.unsigned,
+		...(overrides?.stateKey !== undefined
+			? { state_key: overrides.stateKey }
+			: {}),
 	});
 }
 
@@ -62,19 +69,16 @@ describe("isThreadReply", () => {
 		expect(isThreadReply(ev)).toBe(false);
 	});
 
-	it("is false for an ordinary message and for state events", () => {
-		expect(isThreadReply(realEvent({ msgtype: "m.text", body: "x" }))).toBe(
-			false,
+	it("is false for state events, even with a thread-shaped relation", () => {
+		// The SDK's isRelation explicitly rejects m.thread on state events;
+		// eventShouldLiveIn keeps them in the room timeline.
+		const state = realEvent(
+			{
+				membership: "join",
+				"m.relates_to": { rel_type: "m.thread", event_id: "$root" },
+			},
+			{ type: "m.room.member", stateKey: "@a:hs" },
 		);
-		const state = new MatrixEvent({
-			type: "m.room.member",
-			state_key: "@a:hs",
-			event_id: "$m",
-			room_id: "!r:hs",
-			sender: "@a:hs",
-			origin_server_ts: 1,
-			content: { membership: "join" },
-		});
 		expect(isThreadReply(state)).toBe(false);
 	});
 
@@ -89,7 +93,7 @@ describe("isThreadReply", () => {
 				"m.relates_to": {
 					rel_type: "m.annotation",
 					event_id: "$threadmsg",
-					key: "👍",
+					key: "+1",
 				},
 			},
 			{ type: "m.reaction" },
@@ -106,13 +110,27 @@ describe("isThreadReply", () => {
 		expect(isThreadReply(replyToRoot)).toBe(false);
 	});
 
-	it("recognizes the pre-stable io.element.thread rel_type", () => {
+	it("tracks the SDK's latched relation name, not a hardcoded list", () => {
+		// The SDK partitions on exactly ONE name (THREAD_RELATION_TYPE.name,
+		// stable "m.thread" here). An event carrying the pre-stable
+		// io.element.thread name is NOT partitioned - it stays in the room
+		// timeline - so the gate must not hide it either.
 		const ev = realEvent({
 			msgtype: "m.text",
-			body: "legacy thread reply",
+			body: "legacy-name thread reply",
 			"m.relates_to": { rel_type: "io.element.thread", event_id: "$root" },
 		});
-		expect(isThreadReply(ev)).toBe(true);
+		expect(ev.isRelation("m.thread")).toBe(false);
+		expect(isThreadReply(ev)).toBe(false);
+	});
+
+	it("is false when the relation lacks an event_id (malformed)", () => {
+		const ev = realEvent({
+			msgtype: "m.text",
+			body: "malformed",
+			"m.relates_to": { rel_type: "m.thread" },
+		});
+		expect(isThreadReply(ev)).toBe(false);
 	});
 });
 

@@ -29,10 +29,14 @@ function makeEvent(init: FakeEventInit): MatrixEvent {
 		getSender: () => init.sender ?? "@alice:test",
 		getTs: () => init.ts ?? 1000,
 		getType: () => "m.room.message",
-		// Mirrors the SDK accessors the thread gate reads.
-		threadRootId:
-			relates?.rel_type === "m.thread" ? relates.event_id : undefined,
-		isThreadRoot: false,
+		// Mirrors SDK isRelation (the thread gate's predicate): wire
+		// rel_type + event_id both required.
+		isRelation: (relType?: string) =>
+			!!(
+				relates?.rel_type &&
+				relates.event_id &&
+				(relType ? relates.rel_type === relType : true)
+			),
 	} as unknown as MatrixEvent;
 }
 
