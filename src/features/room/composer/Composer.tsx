@@ -1136,6 +1136,7 @@ const Composer: Component<{
 						}}
 						aria-label="Create poll"
 						aria-haspopup="dialog"
+						aria-expanded={pollDialogOpen()}
 					>
 						<svg
 							class="h-5 w-5"

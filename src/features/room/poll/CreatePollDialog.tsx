@@ -101,11 +101,13 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 		setMaxSelectionsRaw("2");
 	}
 
-	/** Focus an option input by 1-based position, post-render. */
-	function focusOption(position: number): void {
+	/** Focus an option input by 0-based index, post-render. Looked up via a
+	 *  data attribute so focus management can't break when the user-facing
+	 *  label copy changes. */
+	function focusOption(index: number): void {
 		queueMicrotask(() => {
 			overlayRef
-				.querySelector<HTMLInputElement>(`[aria-label="Option ${position}"]`)
+				.querySelector<HTMLInputElement>(`[data-option-index="${index}"]`)
 				?.focus();
 		});
 	}
@@ -223,6 +225,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 											onInput={(e) =>
 												setAnswers(index(), "text", e.currentTarget.value)
 											}
+											data-option-index={index()}
 											aria-label={`Option ${index() + 1}`}
 											class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 											placeholder={`Option ${index() + 1}`}
@@ -241,7 +244,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 													// DOM; keep keyboard focus inside the trap
 													// by moving to the row that took its place
 													// (or the new last row).
-													focusOption(Math.min(removed + 1, answers.length));
+													focusOption(Math.min(removed, answers.length - 1));
 												}}
 											>
 												<svg
@@ -270,7 +273,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 								setAnswers(answers.length, { text: "" });
 								// Focus the new row; also keeps focus in the trap when
 								// this button self-disables at the answer cap.
-								focusOption(answers.length);
+								focusOption(answers.length - 1);
 							}}
 						>
 							+ Add option
