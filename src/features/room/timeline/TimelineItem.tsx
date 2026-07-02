@@ -17,6 +17,7 @@ import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
+import { PollMessage } from "../poll/PollMessage";
 import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
@@ -770,6 +771,9 @@ const TimelineItem: Component<{
 														</p>
 													}
 												>
+													<Match when={ev.poll}>
+														{(poll) => <PollMessage poll={poll()} />}
+													</Match>
 													<Match when={ev.msgtype === "m.video"}>
 														<MediaVideo
 															httpUrl={ev.mediaFullUrl}

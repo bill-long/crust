@@ -9,6 +9,7 @@ import {
 import { onCleanup } from "solid-js";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
+import { isPollStartType, pollPreviewText } from "../../lib/pollCopy";
 import { userSettings } from "../../stores/settings";
 import {
 	type CanNotifyInput,
@@ -72,7 +73,8 @@ export function useNotifications(
 		if (
 			type !== "m.room.message" &&
 			type !== "m.room.encrypted" &&
-			type !== "m.sticker"
+			type !== "m.sticker" &&
+			!isPollStartType(type)
 		) {
 			return false;
 		}
@@ -109,6 +111,12 @@ export function useNotifications(
 
 		if (event.getType() === "m.sticker") {
 			return `${sender} sent a sticker`;
+		}
+
+		// Polls have no msgtype; keyed on event type like stickers. Matches
+		// the room-list preview and background-push copy ("Poll: <question>").
+		if (isPollStartType(event.getType())) {
+			return `${sender}: ${pollPreviewText(content) ?? "Poll"}`;
 		}
 
 		switch (msgtype) {

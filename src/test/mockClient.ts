@@ -4,7 +4,7 @@
  * Extend as needed for other test files.
  */
 
-import type { EventStatus } from "matrix-js-sdk";
+import { type EventStatus, MatrixEvent as SdkMatrixEvent } from "matrix-js-sdk";
 import { vi } from "vitest";
 
 /** Minimal MatrixEvent-like object for testing. */
@@ -60,6 +60,11 @@ export function createMatrixEvent(evt: MockEvent) {
 	// the wrapper.
 	let status: EventStatus | null = evt.status ?? null;
 	let eventId = evt.eventId;
+	// Lazily-computed extensible-event parse (polls). Delegates to a real
+	// SDK MatrixEvent so the mock exercises the same matrix-events-sdk
+	// parser as production instead of a hand-rolled approximation.
+	let cachedExtEv: unknown;
+	let hasCachedExtEv = false;
 	const wrapped = {
 		getId: () => eventId,
 		getRoomId: () => evt.roomId,
@@ -116,6 +121,22 @@ export function createMatrixEvent(evt: MockEvent) {
 		getPrevContent: () => evt.prevContent ?? {},
 		get status() {
 			return status;
+		},
+		/**
+		 * Mirrors SDK `unstableExtensibleEvent`: the matrix-events-sdk parse
+		 * of the event (used by the poll projection). Cached like the real
+		 * getter; content is read through `getContent()` so redactions and
+		 * edits behave consistently with the rest of the mock.
+		 */
+		get unstableExtensibleEvent() {
+			if (!hasCachedExtEv) {
+				hasCachedExtEv = true;
+				cachedExtEv = new SdkMatrixEvent({
+					type: evt.type,
+					content: wrapped.getContent(),
+				}).unstableExtensibleEvent;
+			}
+			return cachedExtEv;
 		},
 
 		/** Test helper: update status (does not emit; caller drives emissions). */
@@ -210,6 +231,7 @@ export function createMockRoom(
 	let canInviteFlag = true;
 	let isSpaceFlag = false;
 	let isEncryptedFlag = false;
+	let maySendRedactionFlag = false;
 	const currentState = {
 		getStateEvents: (type: string, stateKey?: string) => {
 			const typeMap = stateEventStore.get(type);
@@ -220,6 +242,10 @@ export function createMockRoom(
 		},
 		maySendStateEvent: (type: string, _userId: string) =>
 			canSendStateByType.has(type) ? !!canSendStateByType.get(type) : true,
+		// Read by the SDK Poll model's validateEndEvent for non-creator
+		// poll-end events.
+		maySendRedactionForEvent: (_event: unknown, _userId: string) =>
+			maySendRedactionFlag,
 	};
 
 	const roomListeners = new Map<string, Set<(...args: unknown[]) => void>>();
@@ -228,6 +254,9 @@ export function createMockRoom(
 		roomId,
 		name: options?.name ?? roomId,
 		currentState,
+		/** SDK poll models keyed by poll (start event) id; tests insert real
+		 *  `Poll` instances via `__addPoll` and emit `PollEvent.New`. */
+		polls: new Map<string, unknown>(),
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
@@ -272,6 +301,9 @@ export function createMockRoom(
 		},
 		__setEncrypted: (value: boolean) => {
 			isEncryptedFlag = value;
+		},
+		__setMaySendRedaction: (value: boolean) => {
+			maySendRedactionFlag = value;
 		},
 		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);
@@ -380,6 +412,9 @@ export function createMockClient(
 		redactEvent: vi.fn().mockResolvedValue(undefined),
 		resendEvent: vi.fn().mockResolvedValue(undefined),
 		cancelPendingEvent: vi.fn(),
+		// Poll response fetching (SDK Poll.getResponses).
+		relations: vi.fn().mockResolvedValue({ events: [], nextBatch: null }),
+		decryptEventIfNeeded: vi.fn().mockResolvedValue(undefined),
 		paginateEventTimeline: vi.fn().mockResolvedValue(false),
 		getAccountData: (type: string) => accountData.get(type) ?? null,
 		getHomeserverUrl: () => "https://example.com",
@@ -447,6 +482,102 @@ export function textMessage(
 		sender,
 		type: "m.room.message",
 		content: { msgtype: "m.text", body },
+		ts,
+	};
+}
+
+/**
+ * Helper: MSC3381 poll-start wire content (unstable prefixes, matching what
+ * Element and the SDK's `PollStartEvent.serialize()` put on the wire).
+ */
+export function pollStartContent(
+	question: string,
+	answers: { id: string; text: string }[],
+	options?: { kind?: "disclosed" | "undisclosed"; maxSelections?: number },
+): Record<string, unknown> {
+	return {
+		"org.matrix.msc3381.poll.start": {
+			question: { "org.matrix.msc1767.text": question },
+			kind: `org.matrix.msc3381.poll.${options?.kind ?? "disclosed"}`,
+			max_selections: options?.maxSelections ?? 1,
+			answers: answers.map((a) => ({
+				id: a.id,
+				"org.matrix.msc1767.text": a.text,
+			})),
+		},
+		"org.matrix.msc1767.text": [
+			question,
+			...answers.map((a, i) => `${i + 1}. ${a.text}`),
+		].join("\n"),
+	};
+}
+
+/** Helper: create an `m.poll.start` event (unstable type). */
+export function pollStartEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	question: string,
+	answers: { id: string; text: string }[],
+	options?: {
+		kind?: "disclosed" | "undisclosed";
+		maxSelections?: number;
+		ts?: number;
+	},
+): MockEvent {
+	return {
+		eventId,
+		roomId,
+		sender,
+		type: "org.matrix.msc3381.poll.start",
+		content: pollStartContent(question, answers, options),
+		ts: options?.ts ?? Date.now(),
+	};
+}
+
+/** Helper: create an `m.poll.response` (vote) event. Empty `answers`
+ *  produces a spoiled ballot (MSC3381 vote retraction). */
+export function pollResponseEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	pollId: string,
+	answers: string[],
+	ts = Date.now(),
+): MockEvent {
+	return {
+		eventId,
+		roomId,
+		sender,
+		type: "org.matrix.msc3381.poll.response",
+		content: {
+			"m.relates_to": { rel_type: "m.reference", event_id: pollId },
+			"org.matrix.msc3381.poll.response": {
+				answers: answers.length > 0 ? answers : undefined,
+			},
+		},
+		ts,
+	};
+}
+
+/** Helper: create an `m.poll.end` event. */
+export function pollEndEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	pollId: string,
+	ts = Date.now(),
+): MockEvent {
+	return {
+		eventId,
+		roomId,
+		sender,
+		type: "org.matrix.msc3381.poll.end",
+		content: {
+			"m.relates_to": { rel_type: "m.reference", event_id: pollId },
+			"org.matrix.msc3381.poll.end": {},
+			"org.matrix.msc1767.text": "The poll has ended.",
+		},
 		ts,
 	};
 }

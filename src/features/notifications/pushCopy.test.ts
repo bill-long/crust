@@ -63,6 +63,30 @@ describe("buildNotificationCopy", () => {
 		).toEqual({ title: "Carol", body: "🔒 Encrypted message" });
 	});
 
+	it("shows 'Poll: <question>' for a poll start event", () => {
+		expect(
+			buildNotificationCopy({
+				room_name: "General",
+				sender_display_name: "Alice",
+				type: "org.matrix.msc3381.poll.start",
+				content: {
+					"org.matrix.msc3381.poll.start": {
+						question: { "org.matrix.msc1767.text": "Best pizza?" },
+					},
+				},
+			}),
+		).toEqual({ title: "General", body: "Alice: Poll: Best pizza?" });
+	});
+
+	it("falls back to plain 'Poll' when the poll question is unreadable", () => {
+		expect(
+			buildNotificationCopy({
+				sender_display_name: "Alice",
+				type: "m.poll.start",
+			}),
+		).toEqual({ title: "Alice", body: "Poll" });
+	});
+
 	it("falls back to 'New message' for a non-encrypted event with no body", () => {
 		expect(
 			buildNotificationCopy({

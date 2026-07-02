@@ -9,6 +9,7 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
+import { isPollStartType, pollPreviewText } from "../lib/pollCopy";
 import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
@@ -304,7 +305,8 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	if (
 		type !== "m.room.message" &&
 		type !== "m.room.encrypted" &&
-		type !== "m.sticker"
+		type !== "m.sticker" &&
+		!isPollStartType(type)
 	) {
 		return false;
 	}
@@ -320,7 +322,15 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 function buildLastMessage(event: MatrixEvent): RoomSummary["lastMessage"] {
 	const content = event.getContent();
 	return {
-		body: content.body ?? content.msgtype ?? event.getType(),
+		// Polls carry no top-level `body`, so without the explicit preview
+		// they would fall through to the raw event type string. Gated on the
+		// event type so poll-shaped content keys in a regular message can't
+		// fake a poll preview.
+		body:
+			(isPollStartType(event.getType()) ? pollPreviewText(content) : null) ??
+			content.body ??
+			content.msgtype ??
+			event.getType(),
 		sender: event.getSender() ?? "",
 		timestamp: event.getTs(),
 	};

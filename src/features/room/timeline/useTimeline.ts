@@ -2,6 +2,7 @@ import {
 	ClientEvent,
 	Direction,
 	EventStatus,
+	M_POLL_START,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -18,11 +19,14 @@ import {
 	MATERIAL_OFFSET_CHANGE_MS,
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import { pollPreviewText } from "../../../lib/pollCopy";
 import { extractGifUrl } from "../../gif/gifUrl";
 import {
 	type EncryptedFileInfo,
 	parseEncryptedFile,
 } from "../composer/media/attachmentCrypto";
+import { type PollSnapshot, parsePollStart } from "../poll/pollSnapshot";
+import { createPollWatcher, type PollWatcher } from "../poll/pollWatcher";
 import { stripReplyFallback } from "../urlPreviews/replyFallback";
 import type {
 	MembershipTransition,
@@ -236,6 +240,15 @@ export interface TimelineEvent {
 	 * withdrawal/rejection, unban). When set, `stateNotice` is also set.
 	 */
 	membershipTransition: MembershipTransition | null;
+	/**
+	 * Fully-projected poll view model for `m.poll.start` events (stable or
+	 * unstable prefix), null for everything else. Like the reaction fields,
+	 * this is relation-derived data folded into the target row at projection
+	 * time: the poll watcher recomputes the snapshot as vote/end relations
+	 * arrive and re-projects this row. Poll response and end events
+	 * themselves are never displayable.
+	 */
+	poll: PollSnapshot | null;
 }
 
 // Reject any ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F).
@@ -305,7 +318,12 @@ function buildReplySnippet(parent: MatrixEvent): string {
 				? content.body.trim()
 				: null;
 	let snippet: string;
-	if (type === "m.sticker") {
+	const pollPreview = M_POLL_START.matches(type)
+		? pollPreviewText(content)
+		: null;
+	if (pollPreview) {
+		snippet = pollPreview;
+	} else if (type === "m.sticker") {
 		snippet = "Sticker";
 	} else if (msgtype === "m.image") {
 		snippet = "📷 Image";
@@ -461,6 +479,7 @@ function buildSyntheticCallLeaveEvent(
 			subject,
 			avatarUrl,
 		},
+		poll: null,
 	};
 }
 
@@ -469,6 +488,7 @@ function eventToTimelineEvent(
 	room: Room,
 	client: MatrixClient,
 	suppressedCallIds?: ReadonlySet<string>,
+	pollWatcher?: PollWatcher,
 ): TimelineEvent {
 	// `event.getContent()` auto-applies a replacing event's
 	// `m.new_content` regardless of the replacement's status. For
@@ -821,6 +841,14 @@ function eventToTimelineEvent(
 			? buildMembershipTransition(event, room, client)
 			: null;
 
+	// Poll snapshot: relation-derived (votes / end) like reactions, but
+	// resolved through the poll watcher's synchronous cache since the SDK
+	// Poll model only exposes responses asynchronously. The watcher
+	// re-projects this row as responses stream in.
+	const poll = M_POLL_START.matches(event.getType())
+		? (pollWatcher?.getSnapshot(event, room) ?? null)
+		: null;
+
 	return {
 		eventId: event.getId() ?? "",
 		senderId: sender,
@@ -865,6 +893,7 @@ function eventToTimelineEvent(
 		status: event.status ?? null,
 		stateNotice,
 		membershipTransition,
+		poll,
 	};
 }
 
@@ -875,10 +904,16 @@ function isDisplayable(
 ): boolean {
 	const type = event.getType();
 	const isStateNotice = isStateNoticeType(type);
+	// Poll *start* events render as timeline rows. Poll responses and ends
+	// (`m.poll.response` / `m.poll.end`) are reference relations consumed by
+	// the SDK Poll model and stay excluded by this whitelist, mirroring how
+	// reactions and edits fold into their target row.
+	const isPollStart = M_POLL_START.matches(type);
 	if (
 		type !== "m.room.message" &&
 		type !== "m.room.encrypted" &&
 		type !== "m.sticker" &&
+		!isPollStart &&
 		!isStateNotice
 	) {
 		return false;
@@ -916,6 +951,9 @@ function isDisplayable(
 	if (hasLocalRedaction) return true;
 	// Filter out redacted events (content cleared by server)
 	if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
+	// A poll start must yield a parseable definition (question + answers) to
+	// have anything to render; redacted or malformed ones are filtered out.
+	if (isPollStart) return parsePollStart(event) !== null;
 	return true;
 }
 
@@ -1116,6 +1154,50 @@ export function useTimeline(
 	// forward by this count to capture the deferred events.
 	let deferredLiveCount = 0;
 
+	// Poll subscriptions + snapshot cache. Poll votes/ends arrive as
+	// m.reference relations that no timeline handler displays, so without
+	// this seam a poll row would never re-render on a vote. On any poll
+	// state change the watcher recomputes the snapshot and re-projects just
+	// that poll's row, mirroring the reaction recompute path.
+	const pollWatcher = createPollWatcher(client, reprojectPollRow);
+
+	/**
+	 * Single projection entry point for all call sites in this hook, so
+	 * every path (rebuild, live append, redaction/edit/decryption
+	 * recomputes) resolves poll snapshots through the watcher's cache.
+	 */
+	function projectEvent(
+		event: MatrixEvent,
+		room: Room,
+		suppressedCallIds?: ReadonlySet<string>,
+	): TimelineEvent {
+		return eventToTimelineEvent(
+			event,
+			room,
+			client,
+			suppressedCallIds,
+			pollWatcher,
+		);
+	}
+
+	/** Re-project a single poll row after its snapshot changed (vote / end /
+	 *  undecryptable-count update). No-op when the poll isn't in the current
+	 *  window - the next full rebuild picks up the cached snapshot. */
+	function reprojectPollRow(pollId: string): void {
+		if (!currentRoomId) return;
+		const room = client.getRoom(currentRoomId);
+		if (!room) return;
+		const sourceEvent = findWindowEvent(pollId);
+		if (!sourceEvent) return;
+		const updated = projectEvent(sourceEvent, room);
+		setEvents(
+			produce((draft) => {
+				const idx = draft.findIndex((e) => e.eventId === pollId);
+				if (idx >= 0) draft[idx] = updated;
+			}),
+		);
+	}
+
 	// Server-clock tracker so expiry-based call-leave synthesis is robust to
 	// client clock skew (the homeserver populated `created_ts` / `expires`
 	// against its own clock). Seeded from window events on every rebuild and
@@ -1177,7 +1259,7 @@ export function useTimeline(
 			computeCallTimelineNotices(matrixEvents, now);
 		const displayable = matrixEvents
 			.filter((e) => isDisplayable(e, room, suppressed) && e.getId())
-			.map((e) => eventToTimelineEvent(e, room, client, suppressed));
+			.map((e) => projectEvent(e, room, suppressed));
 		// Merge synthetic expiry leaves (sorted ascending by `expiresAt`) into
 		// the chronological displayable list. A synthetic leave is placed after
 		// any real event sharing its timestamp so an explicit event at the same
@@ -1287,6 +1369,11 @@ export function useTimeline(
 			currentTimelineWindow = null;
 			return;
 		}
+
+		// Re-point the poll watcher before the first projection so poll rows
+		// resolve snapshots (and start their response fetches) immediately.
+		// No-op when reloading the same room, keeping fetched tallies warm.
+		pollWatcher.watchRoom(room);
 
 		const timelineSet = room.getUnfilteredTimelineSet();
 		const tw = new TimelineWindow(client, timelineSet, {
@@ -1617,7 +1704,7 @@ export function useTimeline(
 					const sourceEvent = findWindowEvent(redactedId);
 					if (sourceEvent) {
 						if (isDisplayable(sourceEvent, room)) {
-							draft[idx] = eventToTimelineEvent(sourceEvent, room, client);
+							draft[idx] = projectEvent(sourceEvent, room);
 						} else {
 							draft.splice(idx, 1);
 						}
@@ -1641,7 +1728,7 @@ export function useTimeline(
 				for (let i = 0; i < draft.length; i++) {
 					const evt = eventMap.get(draft[i].eventId);
 					if (evt) {
-						draft[i] = eventToTimelineEvent(evt, room, client);
+						draft[i] = projectEvent(evt, room);
 					}
 				}
 			}),
@@ -1655,7 +1742,7 @@ export function useTimeline(
 			if (room.roomId !== currentRoomId) return;
 			const targetEvent = findWindowEvent(targetId);
 			if (!targetEvent) return;
-			const updated = eventToTimelineEvent(targetEvent, room, client);
+			const updated = projectEvent(targetEvent, room);
 			setEvents(
 				produce((draft) => {
 					const idx = draft.findIndex((e) => e.eventId === targetId);
@@ -1679,7 +1766,7 @@ export function useTimeline(
 			produce((draft) => {
 				const idx = draft.findIndex((e) => e.eventId === eid);
 				if (idx >= 0) {
-					draft[idx] = eventToTimelineEvent(originalEvent, room, client);
+					draft[idx] = projectEvent(originalEvent, room);
 				}
 			}),
 		);
@@ -1718,11 +1805,7 @@ export function useTimeline(
 							produce((draft) => {
 								const idx = draft.findIndex((e) => e.eventId === redactedId);
 								if (idx >= 0 && isDisplayable(targetEvent, eventRoom)) {
-									draft[idx] = eventToTimelineEvent(
-										targetEvent,
-										eventRoom,
-										client,
-									);
+									draft[idx] = projectEvent(targetEvent, eventRoom);
 								}
 							}),
 						);
@@ -1830,7 +1913,7 @@ export function useTimeline(
 						if (idx >= 0) {
 							const targetEvent = findWindowEvent(targetId);
 							if (targetEvent) {
-								draft[idx] = eventToTimelineEvent(targetEvent, room, client);
+								draft[idx] = projectEvent(targetEvent, room);
 							}
 						}
 					}),
@@ -1883,9 +1966,7 @@ export function useTimeline(
 			if (!event.getId() || !followingLive) return;
 			setEvents(
 				produce((draft) => {
-					draft.push(
-						eventToTimelineEvent(event, room, client, suppressedCallIds),
-					);
+					draft.push(projectEvent(event, room, suppressedCallIds));
 					capStoreToRealLimit(draft, windowLimit);
 				}),
 			);
@@ -1921,7 +2002,7 @@ export function useTimeline(
 
 		setEvents(
 			produce((draft) => {
-				draft.push(eventToTimelineEvent(event, room, client));
+				draft.push(projectEvent(event, room));
 				// Keep the store bounded to match the TimelineWindow's limit.
 				// The window evicts internally, but the store is updated
 				// independently for live events.
@@ -1972,7 +2053,7 @@ export function useTimeline(
 						if (!r) return;
 						const targetEvent = findWindowEvent(targetId);
 						if (!targetEvent) return;
-						const updated = eventToTimelineEvent(targetEvent, r, client);
+						const updated = projectEvent(targetEvent, r);
 						setEvents(
 							produce((draft) => {
 								const idx = draft.findIndex((e) => e.eventId === targetId);
@@ -2005,7 +2086,7 @@ export function useTimeline(
 			produce((draft) => {
 				const idx = draft.findIndex((e) => e.eventId === eid);
 				if (idx >= 0) {
-					draft[idx] = eventToTimelineEvent(event, room, client);
+					draft[idx] = projectEvent(event, room);
 				}
 			}),
 		);
@@ -2080,7 +2161,7 @@ export function useTimeline(
 						if (idx >= 0) {
 							const targetEvent = findWindowEvent(targetId);
 							if (targetEvent) {
-								draft[idx] = eventToTimelineEvent(targetEvent, room, client);
+								draft[idx] = projectEvent(targetEvent, room);
 							}
 						}
 					}),
@@ -2140,7 +2221,7 @@ export function useTimeline(
 				const lookupId = oldEventId ?? newId;
 				const oldIdx = draft.findIndex((e) => e.eventId === lookupId);
 				if (oldIdx < 0) return;
-				const updated = eventToTimelineEvent(event, room, client);
+				const updated = projectEvent(event, room);
 				draft[oldIdx] = updated;
 				if (oldEventId && oldEventId !== newId) {
 					// If a separate entry already exists under the new ID
@@ -2174,6 +2255,7 @@ export function useTimeline(
 
 	onCleanup(() => {
 		clearCallExpiryTimer();
+		pollWatcher.dispose();
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
 		client.off(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
