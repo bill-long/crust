@@ -21,6 +21,18 @@ import type {
 
 export { PollEndEvent } from "matrix-js-sdk/lib/extensible_events_v1/PollEndEvent";
 export { PollResponseEvent } from "matrix-js-sdk/lib/extensible_events_v1/PollResponseEvent";
+export { PollStartEvent } from "matrix-js-sdk/lib/extensible_events_v1/PollStartEvent";
+
+/**
+ * Poll-kind wire strings for `PollStartEvent.from`'s kind parameter. Plain
+ * strings rather than the SDK's `M_POLL_KIND_*` NamespacedValue constants:
+ * `from` branches on `instanceof NamespacedValue`, and instanceof across
+ * the matrix-js-sdk / matrix-events-sdk package boundary is exactly the
+ * class-identity trap this module exists to avoid - a string is used
+ * verbatim on the wire.
+ */
+export const POLL_KIND_DISCLOSED = "org.matrix.msc3381.poll.disclosed";
+export const POLL_KIND_UNDISCLOSED = "org.matrix.msc3381.poll.undisclosed";
 
 /**
  * Send a serialized extensible poll event. `client.sendEvent`'s typing is

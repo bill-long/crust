@@ -19,6 +19,7 @@ import { buildShortcodeLookup } from "../../emoji/useImagePacks";
 import { GifPicker } from "../../gif/GifPicker";
 import { useGifConfig } from "../../gif/gifConfig";
 import type { GifItem } from "../../gif/types";
+import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
 import {
@@ -117,6 +118,7 @@ const Composer: Component<{
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
+	const [pollDialogOpen, setPollDialogOpen] = createSignal(false);
 	const [previewOpen, setPreviewOpen] = createSignal(false);
 	const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
 	const gifConfig = useGifConfig();
@@ -453,6 +455,7 @@ const Composer: Component<{
 				setMentionQuery(null);
 				setEmojiPickerOpen(false);
 				setGifPickerOpen(false);
+				setPollDialogOpen(false);
 				setPreviewOpen(false);
 				clearAttachments();
 				// A send pinned to the previous room may still be in flight; reset
@@ -1118,9 +1121,38 @@ const Composer: Component<{
 					aria-activedescendant={getActiveDescendant()}
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
-					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-28 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-32 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
 					rows={1}
 				/>
+				{/* Poll button (hidden when editing - polls are new sends). */}
+				<Show when={!props.editingEvent}>
+					<button
+						type="button"
+						class="absolute bottom-2.5 right-23 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+						onClick={() => {
+							setPollDialogOpen(true);
+							setGifPickerOpen(false);
+							setEmojiPickerOpen(false);
+						}}
+						aria-label="Create poll"
+						aria-haspopup="dialog"
+						aria-expanded={pollDialogOpen()}
+					>
+						<svg
+							class="h-5 w-5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							aria-hidden="true"
+						>
+							<path d="M6 20V10" />
+							<path d="M12 20V4" />
+							<path d="M18 20v-6" />
+						</svg>
+					</button>
+				</Show>
 				{/* Attach file button (hidden when editing — edits can't carry
 				    attachments). The hidden input accepts images and arbitrary
 				    files; non-media files are classified as m.file at send. */}
@@ -1204,6 +1236,12 @@ const Composer: Component<{
 						/>
 					</div>
 				</Show>
+				<CreatePollDialog
+					client={client}
+					roomId={props.roomId}
+					open={pollDialogOpen}
+					onClose={() => setPollDialogOpen(false)}
+				/>
 			</div>
 		</div>
 	);
