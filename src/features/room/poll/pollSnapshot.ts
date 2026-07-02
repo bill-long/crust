@@ -123,11 +123,16 @@ export function parsePollStart(event: MatrixEvent): PollStartInfo | null {
 /**
  * Parse and validate one `m.poll.response` event's ballot against the poll
  * definition, mirroring matrix-js-sdk's `PollResponseEvent.validateAgainst`
- * exactly (re-implemented on raw content to avoid constructing
- * cross-package extensible-event instances):
+ * (re-implemented on raw content to avoid constructing cross-package
+ * extensible-event instances):
  * - missing / non-array / empty / non-string answers -> spoiled
  * - any unknown answer id -> the whole ballot is spoiled
  * - otherwise truncated to `maxSelections`
+ *
+ * On top of the SDK's validation, repeated answer ids are deduplicated
+ * before truncation - the SDK does not, and a ballot like ["a", "a"] would
+ * otherwise count one voter twice for the same option, pushing the
+ * per-option percentage past 100%.
  *
  * Returns the valid answer ids, or null for a spoiled ballot (which
  * retracts the sender's vote).
@@ -140,7 +145,7 @@ function parseBallot(
 	const answers = response?.answers;
 	if (!Array.isArray(answers) || answers.length === 0) return null;
 	if (answers.some((a) => typeof a !== "string")) return null;
-	const ids = answers as string[];
+	const ids = [...new Set(answers as string[])];
 	if (ids.some((id) => !start.answers.some((a) => a.id === id))) return null;
 	return ids.slice(0, start.maxSelections);
 }
@@ -216,19 +221,16 @@ export function buildPollSnapshot(args: {
 	undecryptableCount: number;
 	loadingResults: boolean;
 }): PollSnapshot {
-	const zeroCounts = Object.create(null) as Record<string, number>;
-	if (!args.tally) {
-		for (const answer of args.start.answers) zeroCounts[answer.id] = 0;
-	}
+	const tally = args.tally ?? computePollTally([], args.start, null);
 	return {
 		pollId: args.pollId,
 		question: args.start.question,
 		kind: args.start.kind,
 		maxSelections: args.start.maxSelections,
 		answers: args.start.answers,
-		counts: args.tally ? args.tally.counts : zeroCounts,
-		totalVotes: args.tally ? args.tally.totalVotes : 0,
-		myAnswers: args.tally ? args.tally.myAnswers : [],
+		counts: tally.counts,
+		totalVotes: tally.totalVotes,
+		myAnswers: tally.myAnswers,
 		isEnded: args.isEnded,
 		undecryptableCount: args.undecryptableCount,
 		loadingResults: args.loadingResults,

@@ -23,7 +23,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 	const maxCount = createMemo(() => {
 		let max = 0;
 		for (const answer of props.poll.answers) {
-			const count = props.poll.counts[answer.id] ?? 0;
+			const count = props.poll.counts[answer.id];
 			if (count > max) max = count;
 		}
 		return max;
@@ -77,7 +77,9 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 			<ul class="mt-2 flex flex-col gap-2" aria-label="Poll options">
 				<For each={props.poll.answers}>
 					{(answer) => {
-						const count = () => props.poll.counts[answer.id] ?? 0;
+						// counts is zero-filled for every answer id (see
+						// PollSnapshot.counts), so direct indexing is safe.
+						const count = () => props.poll.counts[answer.id];
 						const isMine = () => props.poll.myAnswers.includes(answer.id);
 						const isWinner = () =>
 							props.poll.isEnded && count() > 0 && count() === maxCount();

@@ -1,4 +1,5 @@
 import {
+	EventStatus,
 	type MatrixClient,
 	MatrixEvent,
 	MatrixEventEvent,
@@ -10,7 +11,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createMockClient,
 	createMockRoom,
+	type MockEvent,
+	pollEndEvent,
+	pollResponseEvent,
 	pollStartContent,
+	pollStartEvent,
 } from "../../../test/mockClient";
 import { createPollWatcher, type PollWatcher } from "./pollWatcher";
 
@@ -22,18 +27,33 @@ function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function makeStartEvent(eventId = POLL_ID): MatrixEvent {
+/** Real SDK MatrixEvent from a mock-factory event spec - the SDK Poll model
+ *  and the watcher's event listeners need real emitter instances. */
+function realEventFrom(mock: MockEvent): MatrixEvent {
 	return new MatrixEvent({
-		type: "org.matrix.msc3381.poll.start",
-		event_id: eventId,
-		room_id: ROOM_ID,
-		sender: "@alice:example.com",
-		origin_server_ts: 1000,
-		content: pollStartContent("Best pizza?", [
-			{ id: "a", text: "Margherita" },
-			{ id: "b", text: "Pepperoni" },
-		]),
+		type: mock.type,
+		content: mock.content,
+		event_id: mock.eventId,
+		room_id: mock.roomId,
+		sender: mock.sender,
+		origin_server_ts: mock.ts,
 	});
+}
+
+function makeStartEvent(eventId = POLL_ID): MatrixEvent {
+	return realEventFrom(
+		pollStartEvent(
+			ROOM_ID,
+			eventId,
+			"@alice:example.com",
+			"Best pizza?",
+			[
+				{ id: "a", text: "Margherita" },
+				{ id: "b", text: "Pepperoni" },
+			],
+			{ ts: 1000 },
+		),
+	);
 }
 
 function makeResponse(args: {
@@ -43,37 +63,20 @@ function makeResponse(args: {
 	ts: number;
 	pollId?: string;
 }): MatrixEvent {
-	return new MatrixEvent({
-		type: "org.matrix.msc3381.poll.response",
-		event_id: args.eventId,
-		room_id: ROOM_ID,
-		sender: args.sender,
-		origin_server_ts: args.ts,
-		content: {
-			"m.relates_to": {
-				rel_type: "m.reference",
-				event_id: args.pollId ?? POLL_ID,
-			},
-			"org.matrix.msc3381.poll.response": {
-				answers:
-					args.answers && args.answers.length > 0 ? args.answers : undefined,
-			},
-		},
-	});
+	return realEventFrom(
+		pollResponseEvent(
+			ROOM_ID,
+			args.eventId,
+			args.sender,
+			args.pollId ?? POLL_ID,
+			args.answers ?? [],
+			args.ts,
+		),
+	);
 }
 
 function makeEnd(sender: string, ts: number, eventId = "$end"): MatrixEvent {
-	return new MatrixEvent({
-		type: "org.matrix.msc3381.poll.end",
-		event_id: eventId,
-		room_id: ROOM_ID,
-		sender,
-		origin_server_ts: ts,
-		content: {
-			"m.relates_to": { rel_type: "m.reference", event_id: POLL_ID },
-			"org.matrix.msc3381.poll.end": {},
-		},
-	});
+	return realEventFrom(pollEndEvent(ROOM_ID, eventId, sender, POLL_ID, ts));
 }
 
 describe("createPollWatcher", () => {
@@ -381,6 +384,91 @@ describe("createPollWatcher", () => {
 			makeResponse({ eventId: "$v2", sender: ME, answers: ["a"], ts: 4000 }),
 		);
 		expect(updates).toHaveLength(0);
+	});
+
+	it("re-derives the snapshot when the poll start is edited (m.replace)", async () => {
+		setupPoll([
+			makeResponse({
+				eventId: "$v1",
+				sender: "@bob:example.com",
+				answers: ["a"],
+				ts: 2000,
+			}),
+		]);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		expect(
+			watcher.getSnapshot(rootEvent, room as unknown as Room)?.question,
+		).toBe("Best pizza?");
+		updates.length = 0;
+
+		// An MSC3381 poll edit: a new poll.start with rel_type m.replace.
+		// The SDK applies it to the root event via makeReplaced, which emits
+		// MatrixEventEvent.Replaced and invalidates the extensible parse.
+		const edit = new MatrixEvent({
+			type: "org.matrix.msc3381.poll.start",
+			event_id: "$edit",
+			room_id: ROOM_ID,
+			sender: "@alice:example.com",
+			origin_server_ts: 3000,
+			content: {
+				"m.relates_to": { rel_type: "m.replace", event_id: POLL_ID },
+				"m.new_content": pollStartContent("Best pasta?", [
+					{ id: "x", text: "Carbonara" },
+					{ id: "y", text: "Pesto" },
+				]),
+			},
+		});
+		rootEvent.makeReplaced(edit);
+
+		expect(updates).toContain(POLL_ID);
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.question).toBe("Best pasta?");
+		expect(snapshot?.answers.map((a) => a.id)).toEqual(["x", "y"]);
+		// Bob's old ballot for answer "a" is spoiled against the new answer
+		// ids, matching what a fresh projection would compute.
+		expect(snapshot?.totalVotes).toBe(0);
+		expect(snapshot?.counts).toEqual({ x: 0, y: 0 });
+	});
+
+	it("keeps the watch alive while a local redaction is merely pending", async () => {
+		setupPoll([
+			makeResponse({
+				eventId: "$v1",
+				sender: "@bob:example.com",
+				answers: ["a"],
+				ts: 2000,
+			}),
+		]);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		updates.length = 0;
+
+		// markLocallyRedacted emits BeforeRedaction with the SENDING local
+		// redaction echo - the redaction may still fail or be cancelled, so
+		// the watch (and its tallies) must survive.
+		const pendingRedaction = new MatrixEvent({
+			type: "m.room.redaction",
+			event_id: "~local:redact",
+			room_id: ROOM_ID,
+			sender: "@alice:example.com",
+			origin_server_ts: 7000,
+			content: {},
+		});
+		pendingRedaction.setStatus(EventStatus.SENDING);
+		rootEvent.emit(
+			MatrixEventEvent.BeforeRedaction,
+			rootEvent,
+			pendingRedaction,
+		);
+
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.totalVotes).toBe(1);
+		// Live updates keep flowing after the failed/cancelled redaction.
+		poll.onNewRelation(
+			makeResponse({ eventId: "$v2", sender: ME, answers: ["b"], ts: 8000 }),
+		);
+		expect(updates).toContain(POLL_ID);
 	});
 
 	it("returns a throwaway snapshot for a room other than the watched one", () => {

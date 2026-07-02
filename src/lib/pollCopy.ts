@@ -10,7 +10,8 @@
  */
 
 /** MSC3381 poll-start event types: unstable prefix first (what Element and
- *  our own sends put on the wire today), stable second. */
+ *  the SDK's PollStartEvent serializer put on the wire today), stable
+ *  second. */
 export const POLL_START_EVENT_TYPES = [
 	"org.matrix.msc3381.poll.start",
 	"m.poll.start",
@@ -55,4 +56,13 @@ export function pollQuestionFromContent(content: unknown): string | null {
 export function pollPreviewText(content: unknown): string | null {
 	const question = pollQuestionFromContent(content);
 	return question ? `Poll: ${question}` : null;
+}
+
+/**
+ * Notification-body copy for a poll start: the preview when the question is
+ * readable, a plain "Poll" label otherwise. Shared by the in-app and
+ * background-push notification builders so their fallback can't drift.
+ */
+export function pollNotificationBody(content: unknown): string {
+	return pollPreviewText(content) ?? "Poll";
 }

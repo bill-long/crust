@@ -9,7 +9,11 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
-import { isPollStartType, pollPreviewText } from "../lib/pollCopy";
+import {
+	isPollStartType,
+	pollPreviewText,
+	pollQuestionFromContent,
+} from "../lib/pollCopy";
 import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
@@ -316,6 +320,12 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	// for MatrixEventEvent.Decrypted to correct the sidebar preview.
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// A poll start must carry a readable question to preview - mirrors the
+	// timeline's parse gate so a redacted/malformed poll never surfaces its
+	// raw event type string and the preview falls back to an earlier event.
+	if (isPollStartType(type)) {
+		return pollQuestionFromContent(event.getContent()) !== null;
+	}
 	return true;
 }
 

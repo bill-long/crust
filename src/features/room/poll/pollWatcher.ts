@@ -29,12 +29,13 @@ export interface PollWatcher {
 	 * Synchronously resolve the current {@link PollSnapshot} for an
 	 * `m.poll.start` event, for use inside the timeline projector.
 	 *
-	 * Cache hit returns the latest computed snapshot. On miss this builds a
-	 * provisional zero-count snapshot and - when the SDK `Poll` model exists -
-	 * starts watching it, kicking off the (async, paginated) response fetch;
-	 * each response page then recomputes the snapshot and re-projects the row
-	 * via `onUpdate`. Returns null when the event isn't a parseable poll
-	 * start.
+	 * A watched poll returns its latest computed snapshot from the cache.
+	 * Otherwise this builds a fresh provisional zero-count snapshot from the
+	 * event content (so edits are always reflected) and - when the SDK
+	 * `Poll` model exists - starts watching it, kicking off the (async,
+	 * paginated) response fetch; each response page then recomputes the
+	 * snapshot and re-projects the row via `onUpdate`. Returns null when the
+	 * event isn't a parseable poll start.
 	 */
 	getSnapshot(startEvent: MatrixEvent, room: Room): PollSnapshot | null;
 	/** Remove every SDK listener and drop all cached state. */
@@ -44,7 +45,9 @@ export interface PollWatcher {
 interface WatchedPoll {
 	poll: Poll;
 	start: PollStartInfo;
-	/** Response relations, once the first fetch/emission has delivered them. */
+	/** Response relations, once the first fetch/emission has delivered them.
+	 *  Single source of truth for which Relations object the change
+	 *  listeners are attached to. */
 	relations: Relations | null;
 	/** True when the initial response fetch rejected (tallies stay at the
 	 *  provisional zero state, but the loading indicator must not spin
@@ -74,7 +77,14 @@ export function createPollWatcher(
 ): PollWatcher {
 	let watchedRoom: Room | null = null;
 	const watched = new Map<string, WatchedPoll>();
+	/** Latest computed snapshot per WATCHED poll. Only recompute() writes
+	 *  here: unwatched polls (pending local echo, start event still
+	 *  decrypting) are re-derived from event content on every projection so
+	 *  edits and redactions are always reflected. */
 	const snapshots = new Map<string, PollSnapshot>();
+	/** Poll ids that have been projected into the timeline at least once.
+	 *  Gates onPollNew so only polls with a visible row get watched. */
+	const projectedPolls = new Set<string>();
 
 	function recompute(pollId: string): void {
 		const entry = watched.get(pollId);
@@ -103,54 +113,84 @@ export function createPollWatcher(
 		onUpdate(pollId);
 	}
 
+	function unwatch(pollId: string): void {
+		const entry = watched.get(pollId);
+		if (entry) {
+			entry.detach();
+			watched.delete(pollId);
+		}
+		snapshots.delete(pollId);
+	}
+
 	function startWatching(poll: Poll, start: PollStartInfo): void {
 		const pollId = poll.pollId;
 		if (watched.has(pollId)) return;
 
-		const relationsListeners = {
-			attached: null as Relations | null,
-			onChange: (_event: MatrixEvent) => recompute(pollId),
-		};
-		function attachRelations(relations: Relations): void {
-			if (relationsListeners.attached === relations) return;
-			detachRelations();
-			relationsListeners.attached = relations;
-			relations.on(RelationsEvent.Remove, relationsListeners.onChange);
-			relations.on(RelationsEvent.Redaction, relationsListeners.onChange);
+		const onRelationsChange = (_event: MatrixEvent): void => recompute(pollId);
+		function attachRelations(entry: WatchedPoll, relations: Relations): void {
+			if (entry.relations === relations) return;
+			detachRelations(entry);
+			entry.relations = relations;
+			relations.on(RelationsEvent.Remove, onRelationsChange);
+			relations.on(RelationsEvent.Redaction, onRelationsChange);
 		}
-		function detachRelations(): void {
-			const prev = relationsListeners.attached;
+		function detachRelations(entry: WatchedPoll): void {
+			const prev = entry.relations;
 			if (!prev) return;
-			prev.off(RelationsEvent.Remove, relationsListeners.onChange);
-			prev.off(RelationsEvent.Redaction, relationsListeners.onChange);
-			relationsListeners.attached = null;
+			prev.off(RelationsEvent.Remove, onRelationsChange);
+			prev.off(RelationsEvent.Redaction, onRelationsChange);
+			entry.relations = null;
 		}
 
 		const onResponses = (relations: Relations): void => {
 			const entry = watched.get(pollId);
 			if (!entry) return;
-			entry.relations = relations;
-			attachRelations(relations);
+			attachRelations(entry, relations);
 			recompute(pollId);
 		};
 		const onEnd = (): void => recompute(pollId);
 		const onUndecryptable = (_count: number): void => recompute(pollId);
-		// The SDK removes the poll from `room.polls` when its start event is
-		// redacted (same hook); the timeline row is removed by the redaction
-		// path, so only the watcher-side state needs cleanup here.
-		const onBeforeRedaction = (): void => {
+		// Poll start edited (m.replace): the SDK has already applied the
+		// replacement to getContent() and invalidated the extensible-event
+		// parse cache, so re-derive the static definition and re-tally -
+		// existing ballots are validated against the NEW answer ids, matching
+		// what a fresh projection would compute.
+		const onReplaced = (): void => {
 			const entry = watched.get(pollId);
-			if (entry) {
-				entry.detach();
-				watched.delete(pollId);
+			if (!entry) return;
+			const newStart = parsePollStart(poll.rootEvent);
+			if (newStart) {
+				entry.start = newStart;
+				recompute(pollId);
+			} else {
+				// The edit made the poll unparseable; drop the stale snapshot
+				// and let the row re-project (isDisplayable filters it out).
+				unwatch(pollId);
+				onUpdate(pollId);
 			}
-			snapshots.delete(pollId);
+		};
+		// Fires both for a pending local redaction (markLocallyRedacted, with
+		// the SENDING/QUEUED redaction echo) and for a confirmed one
+		// (makeRedacted, with a server-confirmed status-null redaction).
+		// Only tear down on the confirmed form: dropping the watch for a
+		// pending redaction that later fails would freeze the poll at a
+		// zero-vote provisional snapshot for the rest of the session.
+		const onBeforeRedaction = (
+			_event: MatrixEvent,
+			redactionEvent: MatrixEvent,
+		): void => {
+			if (redactionEvent.status != null) return;
+			// The timeline row is removed by the redaction path; only the
+			// watcher-side state needs cleanup here (the SDK deletes the poll
+			// from room.polls via its own listener on the same emission).
+			unwatch(pollId);
 		};
 
 		poll.on(PollEvent.Responses, onResponses);
 		poll.on(PollEvent.End, onEnd);
 		poll.on(PollEvent.UndecryptableRelations, onUndecryptable);
-		poll.rootEvent.once(MatrixEventEvent.BeforeRedaction, onBeforeRedaction);
+		poll.rootEvent.on(MatrixEventEvent.Replaced, onReplaced);
+		poll.rootEvent.on(MatrixEventEvent.BeforeRedaction, onBeforeRedaction);
 
 		const entry: WatchedPoll = {
 			poll,
@@ -161,8 +201,9 @@ export function createPollWatcher(
 				poll.off(PollEvent.Responses, onResponses);
 				poll.off(PollEvent.End, onEnd);
 				poll.off(PollEvent.UndecryptableRelations, onUndecryptable);
+				poll.rootEvent.off(MatrixEventEvent.Replaced, onReplaced);
 				poll.rootEvent.off(MatrixEventEvent.BeforeRedaction, onBeforeRedaction);
-				detachRelations();
+				detachRelations(entry);
 			},
 		};
 		watched.set(pollId, entry);
@@ -196,9 +237,8 @@ export function createPollWatcher(
 
 	function onPollNew(poll: Poll): void {
 		// Only polls that have actually been projected into the timeline get
-		// watched - `snapshots` holds exactly those. Others start watching
-		// lazily on their first getSnapshot.
-		if (!snapshots.has(poll.pollId) || watched.has(poll.pollId)) return;
+		// watched. Others start watching lazily on their first getSnapshot.
+		if (!projectedPolls.has(poll.pollId) || watched.has(poll.pollId)) return;
 		const start = parsePollStart(poll.rootEvent);
 		if (!start) return;
 		startWatching(poll, start);
@@ -209,6 +249,7 @@ export function createPollWatcher(
 		for (const entry of watched.values()) entry.detach();
 		watched.clear();
 		snapshots.clear();
+		projectedPolls.clear();
 	}
 
 	return {
@@ -228,28 +269,32 @@ export function createPollWatcher(
 			// subscribing would leak state across rooms.
 			const isWatchedRoom = watchedRoom?.roomId === room.roomId;
 			if (isWatchedRoom) {
+				projectedPolls.add(pollId);
 				const cached = snapshots.get(pollId);
 				if (cached) return cached;
 			}
 			const start = parsePollStart(startEvent);
 			if (!start) return null;
 			const poll = room.polls.get(pollId);
-			const snapshot = buildPollSnapshot({
+			if (isWatchedRoom && poll) {
+				// First projection of a poll with an SDK model: subscribe and
+				// kick off the response fetch. recompute() populates the
+				// cache asynchronously; until then fall through to a fresh
+				// provisional snapshot below.
+				startWatching(poll, start);
+			}
+			return buildPollSnapshot({
 				pollId,
 				start,
 				tally: null,
 				isEnded: poll?.isEnded ?? false,
 				undecryptableCount: poll?.undecryptableRelationsCount ?? 0,
-				// When the SDK model exists, watching (below) kicks off the
+				// When the SDK model exists, the watch kicked off the
 				// response fetch, so results are genuinely loading. Without
 				// it (pending local echo, start event still decrypting)
 				// there is nothing to load yet.
 				loadingResults: isWatchedRoom && poll !== undefined,
 			});
-			if (!isWatchedRoom) return snapshot;
-			snapshots.set(pollId, snapshot);
-			if (poll) startWatching(poll, start);
-			return snapshot;
 		},
 
 		dispose(): void {

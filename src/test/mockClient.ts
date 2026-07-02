@@ -60,11 +60,6 @@ export function createMatrixEvent(evt: MockEvent) {
 	// the wrapper.
 	let status: EventStatus | null = evt.status ?? null;
 	let eventId = evt.eventId;
-	// Lazily-computed extensible-event parse (polls). Delegates to a real
-	// SDK MatrixEvent so the mock exercises the same matrix-events-sdk
-	// parser as production instead of a hand-rolled approximation.
-	let cachedExtEv: unknown;
-	let hasCachedExtEv = false;
 	const wrapped = {
 		getId: () => eventId,
 		getRoomId: () => evt.roomId,
@@ -124,19 +119,19 @@ export function createMatrixEvent(evt: MockEvent) {
 		},
 		/**
 		 * Mirrors SDK `unstableExtensibleEvent`: the matrix-events-sdk parse
-		 * of the event (used by the poll projection). Cached like the real
-		 * getter; content is read through `getContent()` so redactions and
-		 * edits behave consistently with the rest of the mock.
+		 * of the event (used by the poll projection). Delegates to a real
+		 * SDK MatrixEvent so the mock exercises the same parser as
+		 * production. Deliberately NOT cached: the real getter caches but
+		 * invalidates on redaction/edit/decryption (invalidateExtensibleEvent),
+		 * and the mock has no mutation hooks to invalidate from - re-parsing
+		 * `getContent()` on every access matches the real post-mutation
+		 * behavior, which is what tests care about.
 		 */
 		get unstableExtensibleEvent() {
-			if (!hasCachedExtEv) {
-				hasCachedExtEv = true;
-				cachedExtEv = new SdkMatrixEvent({
-					type: evt.type,
-					content: wrapped.getContent(),
-				}).unstableExtensibleEvent;
-			}
-			return cachedExtEv;
+			return new SdkMatrixEvent({
+				type: evt.type,
+				content: wrapped.getContent(),
+			}).unstableExtensibleEvent;
 		},
 
 		/** Test helper: update status (does not emit; caller drives emissions). */
@@ -255,7 +250,8 @@ export function createMockRoom(
 		name: options?.name ?? roomId,
 		currentState,
 		/** SDK poll models keyed by poll (start event) id; tests insert real
-		 *  `Poll` instances via `__addPoll` and emit `PollEvent.New`. */
+		 *  `Poll` instances via `room.polls.set(...)` and emit
+		 *  `PollEvent.New`. */
 		polls: new Map<string, unknown>(),
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,

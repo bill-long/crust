@@ -968,6 +968,29 @@ describe("createSummariesStore poll previews", () => {
 		store.cleanup();
 	});
 
+	it("skips an unreadable poll start instead of leaking the raw event type", () => {
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$1", "@alice:x", "older text", 1000),
+				{
+					eventId: "$bad",
+					roomId: "!r:x",
+					sender: "@alice:x",
+					type: "org.matrix.msc3381.poll.start",
+					// Redacted/malformed poll: no readable question.
+					content: {},
+					ts: 2000,
+				},
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("older text");
+		store.cleanup();
+	});
+
 	it("skips poll responses and ends when picking the preview event", () => {
 		const room = stubRoomForStore(
 			createMockRoom("!r:x", [

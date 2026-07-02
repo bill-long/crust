@@ -5,7 +5,7 @@
  * src/features/room/useNotifications.ts.
  */
 
-import { isPollStartType, pollPreviewText } from "../../lib/pollCopy";
+import { isPollStartType, pollNotificationBody } from "../../lib/pollCopy";
 
 /** Subset of the push payload the notification copy reads. The payload is
  *  operator/homeserver-influenced JSON, typed only by assertion at the parse
@@ -42,7 +42,7 @@ function describeContent(payload: PushPayload): {
 	// Polls carry no msgtype, so they're keyed on the event type before the
 	// msgtype switch. Mirrors the in-app copy in useNotifications.ts.
 	if (isPollStartType(payload.type ?? "")) {
-		return { isText: true, text: pollPreviewText(content) ?? "Poll" };
+		return { isText: true, text: pollNotificationBody(content) };
 	}
 	switch (content?.msgtype) {
 		case "m.image":

@@ -283,6 +283,25 @@ describe("computePollTally", () => {
 		expect(tally.counts.a).toBe(0);
 	});
 
+	it("counts repeated answer ids in one ballot only once", () => {
+		const tally = computePollTally(
+			[
+				responseEvent({
+					eventId: "$1",
+					sender: "@alice:example.com",
+					answers: ["a", "a"],
+					ts: 100,
+				}),
+			],
+			multiStart,
+			null,
+		);
+		// Without dedup this would tally a=2 for a single voter, rendering
+		// "2 · 200%" against a total of 1 vote.
+		expect(tally.counts).toEqual({ a: 1, b: 0, c: 0 });
+		expect(tally.totalVotes).toBe(1);
+	});
+
 	it("truncates ballots to maxSelections", () => {
 		const tally = computePollTally(
 			[
