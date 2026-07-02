@@ -90,6 +90,28 @@ describe("createVoiceRecorder (browser)", () => {
 		expect(await recorder.stop()).toBeNull();
 	});
 
+	it("concurrent start() calls share one stream acquisition (single-flight)", async () => {
+		const ctx = new AudioContext();
+		void ctx.resume();
+		let acquisitions = 0;
+		const recorder = createVoiceRecorder({
+			getStream: () => {
+				acquisitions++;
+				const osc = ctx.createOscillator();
+				const destination = ctx.createMediaStreamDestination();
+				osc.connect(destination);
+				osc.start();
+				return Promise.resolve(destination.stream);
+			},
+		});
+		active = { recorder, ctx };
+		// A double-click on the mic button must not spawn a second
+		// getUserMedia request (a second permission prompt).
+		await Promise.all([recorder.start(), recorder.start()]);
+		expect(acquisitions).toBe(1);
+		expect(recorder.recording()).toBe(true);
+	});
+
 	it("concurrent stop() calls share one recording (single-flight)", async () => {
 		const { recorder } = makeRecorderOverTone();
 		await recorder.start();

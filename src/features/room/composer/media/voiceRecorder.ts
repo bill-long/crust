@@ -184,8 +184,21 @@ export function createVoiceRecorder(
 		setElapsedMs(performance.now() - startedAt);
 	}
 
-	async function start(): Promise<void> {
-		if (recording()) return;
+	/** Single-flight start: a double-click on the mic button must not
+	 *  spawn a second getUserMedia request (a second permission prompt);
+	 *  concurrent callers share the first call's outcome. */
+	let startInFlight: Promise<void> | null = null;
+
+	function start(): Promise<void> {
+		if (startInFlight) return startInFlight;
+		if (recording()) return Promise.resolve();
+		startInFlight = doStart().finally(() => {
+			startInFlight = null;
+		});
+		return startInFlight;
+	}
+
+	async function doStart(): Promise<void> {
 		const mySession = ++session;
 		const getStream =
 			options?.getStream ??

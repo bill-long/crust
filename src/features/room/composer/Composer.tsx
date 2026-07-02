@@ -1272,12 +1272,19 @@ const Composer: Component<{
 					ref={(el) => {
 						// Deferred to the next frame: writing the padding inside
 						// the observer callback perturbs layout in the same frame
-						// and trips the browser's "ResizeObserver loop" error.
+						// and trips the browser's "ResizeObserver loop" error. The
+						// pending frame is tracked so cleanup can cancel it (no
+						// setter call after dispose) and rapid fires coalesce.
+						let raf = 0;
 						const observer = new ResizeObserver(() => {
-							requestAnimationFrame(() => setStripWidth(el.offsetWidth));
+							cancelAnimationFrame(raf);
+							raf = requestAnimationFrame(() => setStripWidth(el.offsetWidth));
 						});
 						observer.observe(el);
-						onCleanup(() => observer.disconnect());
+						onCleanup(() => {
+							cancelAnimationFrame(raf);
+							observer.disconnect();
+						});
 					}}
 					inert={voiceRecorder.recording() || undefined}
 					class="absolute bottom-2.5 right-2 flex items-center gap-1"
