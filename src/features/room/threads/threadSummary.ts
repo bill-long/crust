@@ -8,7 +8,13 @@ import type { MatrixEvent, Thread } from "matrix-js-sdk";
 export interface ThreadSummary {
 	/** Thread ID = the root event's ID. */
 	threadId: string;
-	/** Confirmed reply count (m.thread relations only, no pending). */
+	/**
+	 * Reply count. From a live Thread this is `thread.length`, which
+	 * INCLUDES the user's own pending sends (optimistic - a just-sent
+	 * reply counts immediately). A failed send keeps counting until it
+	 * is retried or discarded; the compose-into-threads step (#303 3d)
+	 * owns that retry/discard lifecycle.
+	 */
 	replyCount: number;
 	/** Sender of the latest reply, or null when unknown. */
 	latestSender: string | null;
@@ -68,17 +74,18 @@ export function buildProvisionalThreadSummary(
 }
 
 /**
- * Summary from a live `Thread` object. `replyCount` deliberately excludes
- * pending sends (under Chronological ordering the SDK never counts them
- * anyway); the latest-reply fields tolerate an absent/undecryptable last
- * event. Returns null for a thread with no replies (no chip).
+ * Summary from a live `Thread` object. `thread.length` counts confirmed
+ * replies plus the user's own pending sends (see the replyCount doc);
+ * the latest-reply fields tolerate an absent/undecryptable last event.
+ * Returns null for a thread with no replies (no chip).
  */
 export function buildThreadSummaryFromThread(
 	thread: Thread,
 ): ThreadSummary | null {
 	const replyCount = thread.length;
 	if (!replyCount || replyCount <= 0) return null;
-	const last = thread.replyToEvent ?? thread.lastReply() ?? null;
+	// replyToEvent already ends in `?? lastReply()` internally.
+	const last = thread.replyToEvent ?? null;
 	return {
 		threadId: thread.id,
 		replyCount,

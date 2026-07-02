@@ -52,6 +52,12 @@ export interface MockEvent {
 	 * (leave→join, etc.).
 	 */
 	prevContent?: Record<string, unknown>;
+	/**
+	 * Server-aggregated bundled relations (`unsigned["m.relations"]`),
+	 * keyed by rel_type - e.g. the `m.thread` bundle on a thread root.
+	 * Exposed via `getServerAggregatedRelation()`.
+	 */
+	serverAggregations?: Record<string, unknown>;
 }
 
 export function createMatrixEvent(evt: MockEvent) {
@@ -120,6 +126,9 @@ export function createMatrixEvent(evt: MockEvent) {
 		 * getWireContent), requires both rel_type and event_id, and returns
 		 * false for state events (which cannot be thread/replace relations).
 		 */
+		/** Mirrors SDK: returns unsigned["m.relations"][relType]. */
+		getServerAggregatedRelation: (relType: string): unknown =>
+			evt.serverAggregations?.[relType],
 		isRelation: (relType?: string): boolean => {
 			if (evt.stateKey !== undefined) return false;
 			const relation = evt.content?.["m.relates_to"] as
@@ -261,6 +270,9 @@ export function createMockRoom(
 	};
 
 	const roomListeners = new Map<string, Set<(...args: unknown[]) => void>>();
+	/** Mirrors `Room.threads`: tests register Thread(-shaped) objects via
+	 *  `room.threads.set(...)` and emit `ThreadEvent.*` on the room. */
+	const threadsMap = new Map<string, unknown>();
 
 	return {
 		roomId,
@@ -270,6 +282,8 @@ export function createMockRoom(
 		 *  `Poll` instances via `room.polls.set(...)` and emit
 		 *  `PollEvent.New`. */
 		polls: new Map<string, unknown>(),
+		threads: threadsMap,
+		getThread: (id: string): unknown => threadsMap.get(id) ?? null,
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>

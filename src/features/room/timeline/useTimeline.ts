@@ -1219,7 +1219,7 @@ export function useTimeline(
 	// Same seam for threads: replies are m.thread relations partitioned out
 	// of this timeline entirely, so without the watcher a root's "N replies"
 	// chip would never re-render as replies arrive.
-	const threadWatcher = createThreadWatcher(client, reprojectRow);
+	const threadWatcher = createThreadWatcher(reprojectRow);
 
 	/**
 	 * Single projection entry point for all call sites in this hook, so

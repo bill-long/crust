@@ -1,4 +1,4 @@
-import type { MatrixClient, MatrixEvent, Room, Thread } from "matrix-js-sdk";
+import type { MatrixEvent, Room, Thread } from "matrix-js-sdk";
 import { ThreadEvent } from "matrix-js-sdk";
 import {
 	buildProvisionalThreadSummary,
@@ -35,18 +35,19 @@ export interface ThreadWatcher {
 }
 
 export function createThreadWatcher(
-	_client: MatrixClient,
 	onUpdate: (rootId: string) => void,
 ): ThreadWatcher {
 	let watchedRoom: Room | null = null;
 	/** Latest computed summary per projected root. */
 	const summaries = new Map<string, ThreadSummary>();
-	/** Roots that have been projected at least once - gates the room-level
-	 *  handlers so only threads with a visible row trigger re-projection. */
-	const projectedRoots = new Set<string>();
+	/** Every projected event id (not just roots). Membership means "a
+	 *  ThreadEvent for this id should re-project the row" - so a plain
+	 *  message that only later becomes a thread root gets its chip live,
+	 *  the moment the first reply creates the Thread. */
+	const projectedEvents = new Set<string>();
 
 	function recompute(thread: Thread): void {
-		if (!projectedRoots.has(thread.id)) return;
+		if (!projectedEvents.has(thread.id)) return;
 		const summary = buildThreadSummaryFromThread(thread);
 		if (summary) {
 			summaries.set(thread.id, summary);
@@ -56,24 +57,16 @@ export function createThreadWatcher(
 		onUpdate(thread.id);
 	}
 
-	function onThreadUpdate(thread: Thread): void {
-		recompute(thread);
-	}
-
-	function onThreadNewReply(thread: Thread): void {
-		recompute(thread);
-	}
-
 	function onThreadDelete(thread: Thread): void {
-		if (!projectedRoots.has(thread.id)) return;
+		if (!projectedEvents.has(thread.id)) return;
 		summaries.delete(thread.id);
 		onUpdate(thread.id);
 	}
 
 	function detachRoom(): void {
 		if (!watchedRoom) return;
-		watchedRoom.off(ThreadEvent.Update, onThreadUpdate);
-		watchedRoom.off(ThreadEvent.NewReply, onThreadNewReply);
+		watchedRoom.off(ThreadEvent.Update, recompute);
+		watchedRoom.off(ThreadEvent.NewReply, recompute);
 		watchedRoom.off(ThreadEvent.Delete, onThreadDelete);
 		watchedRoom = null;
 	}
@@ -83,13 +76,13 @@ export function createThreadWatcher(
 			if (watchedRoom?.roomId === room.roomId) return;
 			detachRoom();
 			summaries.clear();
-			projectedRoots.clear();
+			projectedEvents.clear();
 			watchedRoom = room;
 			// ThreadEvent.New (a brand-new thread) is always followed by
 			// Update from updateThreadMetadata, so Update+NewReply+Delete
 			// cover the full lifecycle.
-			room.on(ThreadEvent.Update, onThreadUpdate);
-			room.on(ThreadEvent.NewReply, onThreadNewReply);
+			room.on(ThreadEvent.Update, recompute);
+			room.on(ThreadEvent.NewReply, recompute);
 			room.on(ThreadEvent.Delete, onThreadDelete);
 		},
 
@@ -101,15 +94,23 @@ export function createThreadWatcher(
 			// leak state across rooms.
 			const isWatchedRoom = watchedRoom?.roomId === room.roomId;
 			if (isWatchedRoom) {
-				projectedRoots.add(rootId);
+				projectedEvents.add(rootId);
 				const cached = summaries.get(rootId);
 				if (cached) return cached;
 			}
 			// Optional call: mock rooms without thread support read as "no
 			// Thread object", falling through to the provisional bundle.
 			const thread = room.getThread?.(rootId) ?? null;
+			// A live Thread that hasn't fetched its initial events yet reads
+			// length 0; fall back to the root's bundle so an existing chip
+			// doesn't blink out during the fetch. Once fetched, the Thread
+			// is authoritative (a fetched-and-empty thread means every reply
+			// was redacted - no chip, even if a stale bundle disagrees).
 			const summary = thread
-				? buildThreadSummaryFromThread(thread)
+				? (buildThreadSummaryFromThread(thread) ??
+					(thread.initialEventsFetched
+						? null
+						: buildProvisionalThreadSummary(rootEvent)))
 				: buildProvisionalThreadSummary(rootEvent);
 			if (summary && isWatchedRoom) summaries.set(rootId, summary);
 			return summary;
@@ -118,7 +119,7 @@ export function createThreadWatcher(
 		dispose(): void {
 			detachRoom();
 			summaries.clear();
-			projectedRoots.clear();
+			projectedEvents.clear();
 		},
 	};
 }
