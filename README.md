@@ -62,10 +62,17 @@ unset, empty, or otherwise invalid values are ignored.
 
 ## What Crust is not
 
-- A mobile app (responsive enough to use, not optimized)
-- A bridge management UI
-- An SSO/OIDC client (password-auth only in v1)
-- A replacement for Element's full feature surface
+- A mobile app (responsive enough to use, not optimized — desktop-first is the
+  whole point: a dense, keyboard-first, three-pane layout)
+- A bridge management UI (bridges are a server-side operator concern, configured
+  out-of-band)
+- An SSO/OIDC client (password auth only — our homeserver, Continuwuity, has no
+  OIDC login support yet; this is a "not yet," not a "never," and worth
+  revisiting if that changes)
+- A clone of Element's full feature surface (features are chosen intentionally
+  rather than to reach 100% parity — this rules out labs and niche admin
+  surfaces, *not* mainstream features like threads or polls, which remain fair
+  game)
 
 ## Tech stack
 
