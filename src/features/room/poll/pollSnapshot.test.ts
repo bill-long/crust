@@ -377,6 +377,21 @@ describe("buildPollSnapshot", () => {
 		expect(snapshot.question).toBe("Best pizza?");
 	});
 
+	it("normalizes counts to exactly the poll's answer ids", () => {
+		const snapshot = buildPollSnapshot({
+			pollId: POLL_ID,
+			start,
+			// A tally carrying a stale id (e.g. from before a poll edit) and
+			// missing one of the current answers.
+			tally: { counts: { a: 2, gone: 5 }, totalVotes: 2, myAnswers: [] },
+			isEnded: false,
+			undecryptableCount: 0,
+			loadingResults: false,
+		});
+		expect(snapshot.counts).toEqual({ a: 2, b: 0, c: 0 });
+		expect(Object.getPrototypeOf(snapshot.counts)).toBeNull();
+	});
+
 	it("carries the tally and poll state through", () => {
 		const snapshot = buildPollSnapshot({
 			pollId: POLL_ID,

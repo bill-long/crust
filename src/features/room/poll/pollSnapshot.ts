@@ -221,16 +221,24 @@ export function buildPollSnapshot(args: {
 	undecryptableCount: number;
 	loadingResults: boolean;
 }): PollSnapshot {
-	const tally = args.tally ?? computePollTally([], args.start, null);
+	// Normalize counts at the boundary so the documented PollSnapshot.counts
+	// invariant (null-prototype, a zero-filled key for exactly every answer
+	// id) holds regardless of what the caller's tally object looks like -
+	// this also drops counts for answer ids that no longer exist after a
+	// poll edit.
+	const counts = Object.create(null) as Record<string, number>;
+	for (const answer of args.start.answers) {
+		counts[answer.id] = args.tally?.counts[answer.id] ?? 0;
+	}
 	return {
 		pollId: args.pollId,
 		question: args.start.question,
 		kind: args.start.kind,
 		maxSelections: args.start.maxSelections,
 		answers: args.start.answers,
-		counts: tally.counts,
-		totalVotes: tally.totalVotes,
-		myAnswers: tally.myAnswers,
+		counts,
+		totalVotes: args.tally?.totalVotes ?? 0,
+		myAnswers: args.tally?.myAnswers ?? [],
 		isEnded: args.isEnded,
 		undecryptableCount: args.undecryptableCount,
 		loadingResults: args.loadingResults,

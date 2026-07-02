@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	isPollStartType,
+	isRenderablePollContent,
 	pollPreviewText,
 	pollQuestionFromContent,
 } from "./pollCopy";
@@ -68,6 +69,53 @@ describe("pollQuestionFromContent", () => {
 		],
 	])("returns null for %s", (_label, content) => {
 		expect(pollQuestionFromContent(content)).toBeNull();
+	});
+});
+
+describe("isRenderablePollContent", () => {
+	const answers = [
+		{ id: "a", "org.matrix.msc1767.text": "A" },
+		{ id: "b", "m.text": "B" },
+	];
+
+	it("accepts a poll with a readable question and well-formed answers", () => {
+		expect(
+			isRenderablePollContent({
+				"org.matrix.msc3381.poll.start": {
+					question: { "org.matrix.msc1767.text": "Q?" },
+					answers,
+				},
+			}),
+		).toBe(true);
+	});
+
+	it.each([
+		["no question", { "m.poll.start": { answers } }],
+		["no answers", { "m.poll.start": { question: { "m.text": "Q?" } } }],
+		[
+			"empty answers",
+			{ "m.poll.start": { question: { "m.text": "Q?" }, answers: [] } },
+		],
+		[
+			"answer without id",
+			{
+				"m.poll.start": {
+					question: { "m.text": "Q?" },
+					answers: [{ "m.text": "A" }],
+				},
+			},
+		],
+		[
+			"answer without text",
+			{
+				"m.poll.start": {
+					question: { "m.text": "Q?" },
+					answers: [{ id: "a" }],
+				},
+			},
+		],
+	])("rejects a poll with %s", (_label, content) => {
+		expect(isRenderablePollContent(content)).toBe(false);
 	});
 });
 

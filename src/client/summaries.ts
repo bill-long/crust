@@ -11,8 +11,8 @@ import {
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
 import {
 	isPollStartType,
+	isRenderablePollContent,
 	pollPreviewText,
-	pollQuestionFromContent,
 } from "../lib/pollCopy";
 import {
 	createServerTimeTracker,
@@ -320,11 +320,12 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	// for MatrixEventEvent.Decrypted to correct the sidebar preview.
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
-	// A poll start must carry a readable question to preview - mirrors the
-	// timeline's parse gate so a redacted/malformed poll never surfaces its
-	// raw event type string and the preview falls back to an earlier event.
+	// A poll start must be renderable (readable question + well-formed
+	// answers) to preview - approximates the timeline's parsePollStart gate
+	// so a redacted/malformed poll never surfaces its raw event type string
+	// and the preview falls back to an earlier event.
 	if (isPollStartType(type)) {
-		return pollQuestionFromContent(event.getContent()) !== null;
+		return isRenderablePollContent(event.getContent());
 	}
 	return true;
 }

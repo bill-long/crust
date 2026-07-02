@@ -11,8 +11,8 @@ import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
 import {
 	isPollStartType,
+	isRenderablePollContent,
 	pollNotificationBody,
-	pollQuestionFromContent,
 } from "../../lib/pollCopy";
 import { userSettings } from "../../stores/settings";
 import {
@@ -85,11 +85,12 @@ export function useNotifications(
 		if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") return false;
-		// A poll start must carry a readable question - mirrors the
-		// timeline's parse gate so a malformed poll can't pop a notification
-		// for a message the timeline never renders.
+		// A poll start must be renderable (readable question + well-formed
+		// answers) - approximates the timeline's parsePollStart gate so a
+		// malformed poll can't pop a notification for a message the timeline
+		// never renders.
 		if (isPollStartType(type)) {
-			return pollQuestionFromContent(event.getContent()) !== null;
+			return isRenderablePollContent(event.getContent());
 		}
 		return true;
 	}
