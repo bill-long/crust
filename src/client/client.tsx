@@ -327,7 +327,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			// Partitions m.thread relations into per-thread timelines instead
 			// of the room's timeline sets (Room.eventShouldLiveIn). The
 			// timeline / preview / notification / search gates rely on this
-			// and fail closed on thread replies themselves (lib/threadEvents).
+			// and additionally skip thread replies by shape (lib/threadEvents).
 			threadSupport: true,
 		});
 	});

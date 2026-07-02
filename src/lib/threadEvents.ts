@@ -2,8 +2,11 @@ import type { EventTimeline, MatrixEvent } from "matrix-js-sdk";
 import { THREAD_RELATION_TYPE } from "matrix-js-sdk";
 
 /**
- * Fail-closed gates that keep thread replies out of main-timeline surfaces
- * (timeline rows, room previews, notifications, search).
+ * Gates that keep thread replies out of main-timeline surfaces (timeline
+ * rows, room previews, notifications, search). Safety direction: when a
+ * signal is missing or ambiguous the gates err toward KEEPING an event
+ * visible - hiding a real message is worse than briefly showing a thread
+ * reply, and the SDK's own timeline partition is the primary defense.
  *
  * With `threadSupport: true` the SDK already partitions thread replies out
  * of every ROOM timeline set (`Room.eventShouldLiveIn`), so windows over the

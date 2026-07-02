@@ -950,8 +950,8 @@ function isDisplayable(
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
 	// Thread replies live in their thread's timeline, not the room's. The
-	// SDK already partitions them out of room timeline sets; this is the
-	// fail-closed backstop (thread ROOTS pass - isThreadReply excludes them).
+	// SDK already partitions them out of room timeline sets; this backstop
+	// catches strays (thread ROOTS pass - isThreadReply excludes them).
 	if (isThreadReply(event)) return false;
 	// State notices are displayable only when they produce a non-null
 	// notice (filters out no-op transitions like join->join with no
@@ -1815,7 +1815,7 @@ export function useTimeline(
 		// Thread timelines re-emit RoomEvent.Timeline through the client;
 		// none of it (replies, or reactions/edits targeting thread events)
 		// may touch main-timeline state. Gate on both the emitting timeline
-		// and the event's own shape (fail-closed).
+		// and the event's own shape - either signal suffices to skip.
 		if (isThreadTimelineData(data) || isThreadReply(event)) return;
 
 		// Removed events (e.g. cancelled local echoes the SDK strips from

@@ -33,7 +33,7 @@ function flushPromises(): Promise<void> {
 }
 
 describe("useTimeline thread gating", () => {
-	it("does not render thread replies from the loaded window (fail-closed backstop)", () =>
+	it("does not render thread replies from the loaded window (stray backstop)", () =>
 		withRoot(async () => {
 			// With threadSupport on, the SDK keeps thread replies out of room
 			// timeline sets - but if one slips through (degraded push, SDK
