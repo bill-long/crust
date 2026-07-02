@@ -166,6 +166,22 @@ describe("VoiceMessage", () => {
 		expect(signal?.aborted).toBe(true);
 	});
 
+	it("prefers the decoded duration over the wire-claimed one once loaded", async () => {
+		stubAudioContext();
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(new ArrayBuffer(16), { status: 200 }),
+		);
+		// Wire claims 83s but the real clip decodes to 2s; the decoded value
+		// is ground truth (an understated wire duration would freeze the
+		// progress UI while audio keeps playing).
+		setup({ durationMs: 83_000 });
+		expect(screen.getByText("1:23")).toBeTruthy();
+		fireEvent.click(screen.getByLabelText("Play voice message"));
+		await waitFor(() => {
+			expect(screen.getByText(/\/ 0:02$/)).toBeTruthy();
+		});
+	});
+
 	it("falls back to the decoded duration when the wire omits one", async () => {
 		stubAudioContext();
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(

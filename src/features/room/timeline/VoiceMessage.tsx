@@ -136,8 +136,13 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 
 	const bars = createMemo(() => resampleWaveform(props.waveform));
 	const durationSeconds = createMemo(() => {
-		if (props.durationMs !== null) return props.durationMs / 1000;
-		return decodedDuration();
+		// The decoded buffer is ground truth; the wire duration is untrusted
+		// sender data and only bridges the gap before the first load (a wire
+		// value that understates the clip would otherwise freeze the
+		// progress/readout while audio keeps playing).
+		const decoded = decodedDuration();
+		if (decoded !== null) return decoded;
+		return props.durationMs !== null ? props.durationMs / 1000 : null;
 	});
 	const progress = createMemo(() => {
 		const total = durationSeconds();
