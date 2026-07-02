@@ -29,7 +29,7 @@ Concrete, enforceable rules — not vibes:
    Animation is CSS-only (transitions/keyframes) - there is no JS animation library in the dependency tree, so don't reach for `motion-one` et al. without adding it under "Ask first". No bouncy easings on functional UI. Easings: `cubic-bezier(0.2, 0, 0, 1)` for enter, `cubic-bezier(0.4, 0, 1, 1)` for exit.
 5. **Respect `prefers-reduced-motion`.** Replace transforms/opacity transitions with instant state changes; keep color transitions.
 6. **Keyboard navigation is first-class.**
-   Every clickable thing has a focus ring (use `focus-visible:`). Ctrl/Cmd+K command palette, `↑`/`↓` to navigate rooms, `Esc` to close panels, `Enter` to send, `Shift+Enter` for newline. Match Discord's shortcuts where possible.
+   Every clickable thing has a focus ring (use `focus-visible:`). Implemented today: `Esc` to cancel an edit/reply and close panels, `Enter` to send, `Shift+Enter` for newline, and Ctrl/Cmd+B/I/etc. composer formatting. A Ctrl/Cmd+K command palette and `↑`/`↓` room navigation are desirable Discord-style goals but are **not implemented yet** - don't assume they exist. Match Discord's shortcuts where possible when adding new ones.
 7. **Hover affordances are subtle but present.**
    Message action toolbars (react / reply / edit / more) appear on hover with a 50 ms delay-out, no delay-in. Use `group` + `group-hover:` Tailwind patterns.
 8. **Dark is the only theme today.** There is no light theme yet; design and tune for dark. If a light theme is added it should come through the token layer (see "Theming").
@@ -84,7 +84,7 @@ Token namespace (defined via `@theme` in `src/styles/global.css` as `--color-*` 
 - **Surfaces:** `surface-0` (app bg) through `surface-4` (raised/popover)
 - **Text:** `text-primary`, `text-emphasis`, `text-secondary`, `text-muted`, `text-disabled`, `text-faint`
 - **Borders:** `border-subtle`, `border-default`, `border-strong`, `border-focus`
-- **Semantic:** `accent` (pink), `success`, `warning`, `danger`, `info`, each with `-text`/`-bg`/`-foreground` (and some `-hover`/`-bright`) variants
+- **Semantic:** `accent` (pink), `success`, `warning`, `danger`, `info`. The variant set differs per color - most have a base plus a subset of `-text`/`-bg`/`-foreground`/`-hover`/`-border`/`-bright`, but `info` is `-text`/`-border` only (no base, no `-bg`/`-foreground`). Check `global.css` for the exact token before using one.
 - **Mention/highlight:** `mention-bg`; badge/dot color is `indicator`
 
 ### Spacing & layout
