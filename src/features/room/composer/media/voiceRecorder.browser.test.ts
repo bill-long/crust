@@ -27,7 +27,7 @@ function makeRecorderOverTone(
 	const ctx = new AudioContext();
 	// Headless Chromium starts contexts suspended (no user gesture); a
 	// suspended source context would produce a silent stream.
-	void ctx.resume();
+	void ctx.resume().catch(() => {});
 	const osc = ctx.createOscillator();
 	const destination = ctx.createMediaStreamDestination();
 	osc.frequency.value = 440;
@@ -92,7 +92,7 @@ describe("createVoiceRecorder (browser)", () => {
 
 	it("concurrent start() calls share one stream acquisition (single-flight)", async () => {
 		const ctx = new AudioContext();
-		void ctx.resume();
+		void ctx.resume().catch(() => {});
 		let acquisitions = 0;
 		const recorder = createVoiceRecorder({
 			getStream: () => {
