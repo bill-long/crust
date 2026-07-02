@@ -282,6 +282,13 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 			stopPlayback(true);
 			return;
 		}
+		// A click while loading reads as "cancel": invalidate the in-flight
+		// load so its completion can't auto-start playback.
+		if (loadState() === "loading") {
+			loadGeneration++;
+			setLoadState("idle");
+			return;
+		}
 		// Create the context synchronously inside the user-gesture call
 		// stack (Safari autoplay policy); the async load reuses it.
 		audioContext ??= new AudioContext();
@@ -289,9 +296,7 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 			startFrom(pausedAt);
 			return;
 		}
-		if (loadState() !== "loading") {
-			void loadBuffer();
-		}
+		void loadBuffer();
 	};
 
 	const retry = (): void => {

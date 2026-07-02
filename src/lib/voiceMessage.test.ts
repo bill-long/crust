@@ -40,6 +40,7 @@ describe("isVoiceMessageContent", () => {
 		["null", null],
 		["string content", "hi"],
 		["non-object marker", voiceContent({ "org.matrix.msc3245.voice": "yes" })],
+		["array marker", voiceContent({ "org.matrix.msc3245.voice": [] })],
 	])("rejects %s", (_label, content) => {
 		expect(isVoiceMessageContent(content)).toBe(false);
 	});

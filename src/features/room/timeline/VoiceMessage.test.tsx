@@ -112,6 +112,23 @@ describe("VoiceMessage", () => {
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 
+	it("cancels an in-flight load when play is pressed again", async () => {
+		stubAudioContext();
+		// A fetch that never resolves keeps the load in flight.
+		vi.spyOn(globalThis, "fetch").mockReturnValue(
+			new Promise(() => {}) as Promise<Response>,
+		);
+		setup();
+		const button = screen.getByLabelText("Play voice message");
+		fireEvent.click(button);
+		expect(screen.getByText("Loading…")).toBeTruthy();
+		// Second click reads as cancel: back to idle, and the (eventual)
+		// completion must not auto-start playback.
+		fireEvent.click(button);
+		expect(screen.queryByText("Loading…")).toBeNull();
+		expect(screen.getByText("1:23")).toBeTruthy();
+	});
+
 	it("falls back to the decoded duration when the wire omits one", async () => {
 		stubAudioContext();
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(

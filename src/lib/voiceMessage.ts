@@ -37,7 +37,11 @@ export function isVoiceMessageContent(content: unknown): boolean {
 	const record = content as Record<string, unknown>;
 	if (record.msgtype !== "m.audio") return false;
 	const marker = record[MSC3245_VOICE_KEY];
-	return typeof marker === "object" && marker !== null;
+	// The marker is a plain object ({} on the wire); arrays are objects
+	// too, so reject them explicitly to avoid misclassification.
+	return (
+		typeof marker === "object" && marker !== null && !Array.isArray(marker)
+	);
 }
 
 export interface VoiceInfo {
