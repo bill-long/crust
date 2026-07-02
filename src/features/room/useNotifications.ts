@@ -14,6 +14,7 @@ import {
 	isRenderablePollContent,
 	pollNotificationBody,
 } from "../../lib/pollCopy";
+import { isVoiceMessageContent } from "../../lib/voiceMessage";
 import { userSettings } from "../../stores/settings";
 import {
 	type CanNotifyInput,
@@ -136,7 +137,9 @@ export function useNotifications(
 			case "m.file":
 				return `${sender} sent a file`;
 			case "m.audio":
-				return `${sender} sent an audio file`;
+				return isVoiceMessageContent(content)
+					? `${sender} sent a voice message`
+					: `${sender} sent an audio file`;
 			case "m.video":
 				return `${sender} sent a video`;
 			default: {

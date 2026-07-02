@@ -33,6 +33,7 @@ import { MediaVideo } from "./MediaVideo";
 import { formatReactors } from "./reactionFormatting";
 import { StateNoticeIcon } from "./StateNoticeIcon";
 import type { TimelineEvent } from "./useTimeline";
+import { VoiceMessage } from "./VoiceMessage";
 
 function reactionLabel(
 	key: string,
@@ -800,13 +801,27 @@ const TimelineItem: Component<{
 														/>
 													</Match>
 													<Match when={ev.msgtype === "m.audio"}>
-														<MediaAudio
-															httpUrl={ev.mediaFullUrl}
-															file={ev.mediaEncryptedFile}
-															mimetype={ev.mediaMimetype}
-															label={ev.mediaFilename || "Audio"}
-															isEncrypted={ev.mediaIsEncrypted}
-														/>
+														<Show
+															when={ev.isVoice}
+															fallback={
+																<MediaAudio
+																	httpUrl={ev.mediaFullUrl}
+																	file={ev.mediaEncryptedFile}
+																	mimetype={ev.mediaMimetype}
+																	label={ev.mediaFilename || "Audio"}
+																	isEncrypted={ev.mediaIsEncrypted}
+																/>
+															}
+														>
+															<VoiceMessage
+																httpUrl={ev.mediaFullUrl}
+																file={ev.mediaEncryptedFile}
+																mimetype={ev.mediaMimetype}
+																isEncrypted={ev.mediaIsEncrypted}
+																durationMs={ev.voiceDurationMs}
+																waveform={ev.voiceWaveform}
+															/>
+														</Show>
 													</Match>
 													<Match when={ev.msgtype === "m.file"}>
 														<MediaFile

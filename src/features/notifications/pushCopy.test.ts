@@ -34,6 +34,28 @@ describe("buildNotificationCopy", () => {
 		).toEqual({ title: "Alice", body: "hello there" });
 	});
 
+	it("describes a voice message distinctly from plain audio", () => {
+		expect(
+			buildNotificationCopy({
+				room_name: "General",
+				sender_display_name: "Alice",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.audio",
+					"org.matrix.msc3245.voice": {},
+				},
+			}),
+		).toEqual({ title: "General", body: "Alice sent a voice message" });
+		expect(
+			buildNotificationCopy({
+				room_name: "General",
+				sender_display_name: "Alice",
+				type: "m.room.message",
+				content: { msgtype: "m.audio" },
+			}),
+		).toEqual({ title: "General", body: "Alice sent an audio file" });
+	});
+
 	it("renders media actions with a space join, not a colon", () => {
 		expect(
 			buildNotificationCopy({
