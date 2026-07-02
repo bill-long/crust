@@ -9,6 +9,11 @@ import {
 import { onCleanup } from "solid-js";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
+import {
+	isPollStartType,
+	isRenderablePollContent,
+	pollNotificationBody,
+} from "../../lib/pollCopy";
 import { userSettings } from "../../stores/settings";
 import {
 	type CanNotifyInput,
@@ -72,13 +77,21 @@ export function useNotifications(
 		if (
 			type !== "m.room.message" &&
 			type !== "m.room.encrypted" &&
-			type !== "m.sticker"
+			type !== "m.sticker" &&
+			!isPollStartType(type)
 		) {
 			return false;
 		}
 		if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") return false;
+		// A poll start must be renderable (readable question + well-formed
+		// answers) - approximates the timeline's parsePollStart gate so a
+		// malformed poll can't pop a notification for a message the timeline
+		// never renders.
+		if (isPollStartType(type)) {
+			return isRenderablePollContent(event.getContent());
+		}
 		return true;
 	}
 
@@ -109,6 +122,12 @@ export function useNotifications(
 
 		if (event.getType() === "m.sticker") {
 			return `${sender} sent a sticker`;
+		}
+
+		// Polls have no msgtype; keyed on event type like stickers. Matches
+		// the room-list preview and background-push copy ("Poll: <question>").
+		if (isPollStartType(event.getType())) {
+			return `${sender}: ${pollNotificationBody(content)}`;
 		}
 
 		switch (msgtype) {

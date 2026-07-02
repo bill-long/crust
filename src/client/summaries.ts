@@ -10,6 +10,11 @@ import {
 } from "matrix-js-sdk";
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
 import {
+	isPollStartType,
+	isRenderablePollContent,
+	pollPreviewText,
+} from "../lib/pollCopy";
+import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
 	type ServerTimeTracker,
@@ -304,7 +309,8 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	if (
 		type !== "m.room.message" &&
 		type !== "m.room.encrypted" &&
-		type !== "m.sticker"
+		type !== "m.sticker" &&
+		!isPollStartType(type)
 	) {
 		return false;
 	}
@@ -314,13 +320,28 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	// for MatrixEventEvent.Decrypted to correct the sidebar preview.
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// A poll start must be renderable (readable question + well-formed
+	// answers) to preview - approximates the timeline's parsePollStart gate
+	// so a redacted/malformed poll never surfaces its raw event type string
+	// and the preview falls back to an earlier event.
+	if (isPollStartType(type)) {
+		return isRenderablePollContent(event.getContent());
+	}
 	return true;
 }
 
 function buildLastMessage(event: MatrixEvent): RoomSummary["lastMessage"] {
 	const content = event.getContent();
 	return {
-		body: content.body ?? content.msgtype ?? event.getType(),
+		// Polls carry no top-level `body`, so without the explicit preview
+		// they would fall through to the raw event type string. Gated on the
+		// event type so poll-shaped content keys in a regular message can't
+		// fake a poll preview.
+		body:
+			(isPollStartType(event.getType()) ? pollPreviewText(content) : null) ??
+			content.body ??
+			content.msgtype ??
+			event.getType(),
 		sender: event.getSender() ?? "",
 		timestamp: event.getTs(),
 	};

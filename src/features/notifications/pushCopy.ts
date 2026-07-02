@@ -5,6 +5,8 @@
  * src/features/room/useNotifications.ts.
  */
 
+import { isPollStartType, pollNotificationBody } from "../../lib/pollCopy";
+
 /** Subset of the push payload the notification copy reads. The payload is
  *  operator/homeserver-influenced JSON, typed only by assertion at the parse
  *  site, so consumers must tolerate missing/non-string fields. */
@@ -17,7 +19,9 @@ export interface PushPayload {
 	sender_display_name?: string;
 	type?: string;
 	unread?: number;
-	content?: { body?: string; msgtype?: string };
+	/** Event content. Polls carry their payload under namespaced keys
+	 *  (org.matrix.msc3381.poll.start), hence the open index signature. */
+	content?: { body?: string; msgtype?: string; [key: string]: unknown };
 }
 
 /** Trim a push-payload field, tolerating non-string values: the payload is
@@ -35,6 +39,11 @@ function describeContent(payload: PushPayload): {
 	text: string;
 } {
 	const content = payload.content;
+	// Polls carry no msgtype, so they're keyed on the event type before the
+	// msgtype switch. Mirrors the in-app copy in useNotifications.ts.
+	if (isPollStartType(payload.type ?? "")) {
+		return { isText: true, text: pollNotificationBody(content) };
+	}
 	switch (content?.msgtype) {
 		case "m.image":
 			return { isText: false, text: "sent an image" };

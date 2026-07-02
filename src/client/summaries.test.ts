@@ -1,6 +1,13 @@
 import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createMockClient, createMockRoom } from "../test/mockClient";
+import {
+	createMockClient,
+	createMockRoom,
+	pollEndEvent,
+	pollResponseEvent,
+	pollStartEvent,
+	textMessage,
+} from "../test/mockClient";
 import {
 	callMembershipExpiresAt,
 	createSummariesStore,
@@ -920,6 +927,83 @@ describe("createSummariesStore optimisticallyMarkLeft", () => {
 			"!space:x",
 		);
 
+		store.cleanup();
+	});
+});
+
+describe("createSummariesStore poll previews", () => {
+	function stubRoomForStore(room: ReturnType<typeof createMockRoom>) {
+		const r = room as unknown as Record<string, unknown>;
+		r.isCallRoom = () => false;
+		r.isElementVideoRoom = () => false;
+		r.getAvatarUrl = () => null;
+		r.getUnreadNotificationCount = () => 0;
+		r.getMyMembership = () => "join";
+		r.hasEncryptionStateEvent = () => false;
+		return room;
+	}
+
+	it("previews a poll start as 'Poll: <question>' in lastMessage", () => {
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$1", "@alice:x", "older text", 1000),
+				pollStartEvent(
+					"!r:x",
+					"$poll",
+					"@alice:x",
+					"Best pizza?",
+					[
+						{ id: "a", text: "Margherita" },
+						{ id: "b", text: "Pepperoni" },
+					],
+					{ ts: 2000 },
+				),
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("Poll: Best pizza?");
+		store.cleanup();
+	});
+
+	it("skips an unreadable poll start instead of leaking the raw event type", () => {
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$1", "@alice:x", "older text", 1000),
+				{
+					eventId: "$bad",
+					roomId: "!r:x",
+					sender: "@alice:x",
+					type: "org.matrix.msc3381.poll.start",
+					// Redacted/malformed poll: no readable question.
+					content: {},
+					ts: 2000,
+				},
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("older text");
+		store.cleanup();
+	});
+
+	it("skips poll responses and ends when picking the preview event", () => {
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$1", "@alice:x", "latest text", 1000),
+				pollResponseEvent("!r:x", "$v1", "@bob:x", "$poll", ["a"], 2000),
+				pollEndEvent("!r:x", "$end", "@alice:x", "$poll", 3000),
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("latest text");
 		store.cleanup();
 	});
 });
