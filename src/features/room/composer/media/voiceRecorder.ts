@@ -259,6 +259,11 @@ export function createVoiceRecorder(
 			startedAt = performance.now();
 			sampleTimer = setInterval(sampleAmplitude, SAMPLE_INTERVAL_MS);
 			maxTimer = setTimeout(() => {
+				// stop() clears this timer only after its async settle; a
+				// fire inside that window (or from a caller without the
+				// composer's own stopping guard) must not re-enter a
+				// delivery that is already under way.
+				if (!recording() || stopInFlight) return;
 				options?.onMaxDuration?.();
 			}, MAX_RECORDING_MS);
 			setRecording(true);
