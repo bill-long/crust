@@ -85,6 +85,31 @@ describe("VoiceMessage", () => {
 		expect(screen.queryByText("Retry")).toBeNull();
 	});
 
+	it("fails closed (with Retry) when AudioContext construction throws", async () => {
+		// Restricted environments / the browser's context limit can make
+		// `new AudioContext()` throw; that must surface as the normal error
+		// UI, not an uncaught exception - and it may be transient, so Retry
+		// stays available (unlike Web Audio being absent entirely).
+		vi.stubGlobal(
+			"AudioContext",
+			class {
+				constructor() {
+					throw new Error("context limit");
+				}
+			},
+		);
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+		setup();
+		fireEvent.click(screen.getByLabelText("Play voice message"));
+		expect(fetchSpy).not.toHaveBeenCalled();
+		await waitFor(() => {
+			expect(screen.getByRole("alert").textContent).toContain(
+				"Couldn't play voice message",
+			);
+		});
+		expect(screen.getByText("Retry")).toBeTruthy();
+	});
+
 	it("loads on play, fails visibly, and can be retried in place", async () => {
 		stubAudioContext();
 		const fetchSpy = vi

@@ -312,7 +312,10 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 		// stack (Safari autoplay policy); the async load reuses it.
 		audioContext = getVoicePlaybackContext();
 		if (!audioContext) {
-			setUnsupported(true);
+			// Web Audio missing entirely is terminal (no Retry); a failed
+			// context construction may be transient (context limit,
+			// restricted environment) - keep Retry available.
+			if (typeof AudioContext === "undefined") setUnsupported(true);
 			setLoadState("failed");
 			return;
 		}

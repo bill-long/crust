@@ -14,7 +14,16 @@ let shared: AudioContext | null = null;
  *  where Web Audio is unavailable. */
 export function getVoicePlaybackContext(): AudioContext | null {
 	if (typeof AudioContext === "undefined") return null;
-	shared ??= new AudioContext();
+	if (!shared) {
+		try {
+			shared = new AudioContext();
+		} catch {
+			// Construction can throw in restricted environments or when the
+			// browser's context limit is hit. Fail closed; `shared` stays
+			// null so a later attempt (Retry) constructs again.
+			return null;
+		}
+	}
 	if (shared.state === "suspended") {
 		void shared.resume().catch(() => {});
 	}
