@@ -350,6 +350,81 @@ describe("computePollTally", () => {
 		expect(tally.totalVotes).toBe(1);
 	});
 
+	it("overlays a pending vote over the confirmed ballot", () => {
+		const responses = [
+			responseEvent({
+				eventId: "$1",
+				sender: "@alice:example.com",
+				answers: ["a"],
+				ts: 100,
+			}),
+			responseEvent({
+				eventId: "$2",
+				sender: "@bob:example.com",
+				answers: ["a"],
+				ts: 110,
+			}),
+		];
+		const tally = computePollTally(responses, start, "@alice:example.com", [
+			"b",
+		]);
+		expect(tally.counts).toEqual({ a: 1, b: 1, c: 0 });
+		expect(tally.totalVotes).toBe(2);
+		expect(tally.myAnswers).toEqual(["b"]);
+	});
+
+	it("counts a pending vote from a user with no confirmed ballot", () => {
+		const tally = computePollTally([], start, "@alice:example.com", ["a"]);
+		expect(tally.counts).toEqual({ a: 1, b: 0, c: 0 });
+		expect(tally.totalVotes).toBe(1);
+		expect(tally.myAnswers).toEqual(["a"]);
+	});
+
+	it("treats an empty pending vote as an optimistic retraction", () => {
+		const responses = [
+			responseEvent({
+				eventId: "$1",
+				sender: "@alice:example.com",
+				answers: ["a"],
+				ts: 100,
+			}),
+		];
+		const tally = computePollTally(responses, start, "@alice:example.com", []);
+		expect(tally.counts).toEqual({ a: 0, b: 0, c: 0 });
+		expect(tally.totalVotes).toBe(0);
+		expect(tally.myAnswers).toEqual([]);
+	});
+
+	it("validates a pending vote exactly like a wire ballot", () => {
+		// Deduped then truncated to maxSelections.
+		const truncated = computePollTally([], multiStart, "@alice:example.com", [
+			"a",
+			"a",
+			"b",
+			"c",
+		]);
+		expect(truncated.myAnswers).toEqual(["a", "b"]);
+		expect(truncated.counts).toEqual({ a: 1, b: 1, c: 0 });
+
+		// An unknown id spoils the whole pending ballot, exactly as the
+		// confirmed tally would treat the sent response.
+		const spoiled = computePollTally(
+			[
+				responseEvent({
+					eventId: "$1",
+					sender: "@alice:example.com",
+					answers: ["a"],
+					ts: 100,
+				}),
+			],
+			multiStart,
+			"@alice:example.com",
+			["a", "nope"],
+		);
+		expect(spoiled.myAnswers).toEqual([]);
+		expect(spoiled.totalVotes).toBe(0);
+	});
+
 	it("returns zero counts for every answer with no responses", () => {
 		const tally = computePollTally([], start, null);
 		expect(tally.counts).toEqual({ a: 0, b: 0, c: 0 });

@@ -50,9 +50,26 @@ export interface PollSnapshot {
 	counts: Record<string, number>;
 	/** Number of users with a currently-valid (non-spoiled) ballot. */
 	totalVotes: number;
-	/** The local user's currently-valid answer ids (empty when not voted). */
+	/** The local user's currently-valid answer ids (empty when not voted).
+	 *  Reflects an optimistic pending vote while one is in flight. */
 	myAnswers: string[];
+	/** True while the local user's vote send is in flight (the tally already
+	 *  reflects it optimistically). */
+	hasPendingVote: boolean;
+	/** The answer ids of a vote whose send failed, or null. The renderer
+	 *  shows an inline failure row whose Retry re-submits exactly these. */
+	failedAnswers: string[] | null;
 	isEnded: boolean;
+	/** True while the local user's poll-end send is in flight or awaiting
+	 *  its confirming end event. Undisclosed results stay hidden until the
+	 *  END is CONFIRMED (isEnded), so a failed send can't flash results. */
+	endPending: boolean;
+	/** True when the local user's poll-end send failed. */
+	endFailed: boolean;
+	/** True when the local user may close this poll (they created it).
+	 *  Inbound end events from moderators with redaction power are still
+	 *  honored by the SDK; offering them the button is a follow-up. */
+	canEnd: boolean;
 	/**
 	 * Count of response relations that failed to decrypt. Non-zero means the
 	 * tallies may be incomplete; the renderer surfaces a warning.
@@ -161,11 +178,18 @@ function parseBallot(
  * - failed (NOT_SENT) and cancelled local echoes are ignored, matching the
  *   reaction aggregation policy
  * - spoiled ballots (see {@link parseBallot}) retract the sender's vote
+ *
+ * `pendingVote`, when provided, optimistically replaces the local user's
+ * confirmed ballot (an empty array is a pending retraction). It is applied
+ * after aggregation but validated the same way (unknown ids spoil,
+ * truncated to maxSelections), so the optimistic tally always equals what
+ * the confirmed tally will become once the response event round-trips.
  */
 export function computePollTally(
 	responseEvents: readonly MatrixEvent[],
 	start: PollStartInfo,
 	myUserId: string | null,
+	pendingVote?: string[],
 ): PollTally {
 	const bestBySender = new Map<
 		string,
@@ -190,6 +214,23 @@ export function computePollTally(
 			ts,
 			eventId,
 			answers: parseBallot(event.getContent(), start),
+		});
+	}
+
+	// Optimistic overlay: the pending vote supersedes the local user's
+	// confirmed ballot, validated by the same rules as a wire ballot
+	// (dedupe, any unknown id spoils, truncation; empty/spoiled ->
+	// retraction) so the optimistic tally exactly matches what the
+	// confirmed tally becomes once the response round-trips.
+	if (pendingVote !== undefined && myUserId) {
+		const ids = [...new Set(pendingVote)];
+		const spoiled =
+			ids.length === 0 ||
+			ids.some((id) => !start.answers.some((a) => a.id === id));
+		bestBySender.set(myUserId, {
+			ts: Number.MAX_SAFE_INTEGER,
+			eventId: "",
+			answers: spoiled ? null : ids.slice(0, start.maxSelections),
 		});
 	}
 
@@ -220,6 +261,15 @@ export function buildPollSnapshot(args: {
 	isEnded: boolean;
 	undecryptableCount: number;
 	loadingResults: boolean;
+	/** Interaction state; omitted for provisional snapshots (an unwatched
+	 *  poll has no SDK model to act on yet). */
+	interaction?: {
+		hasPendingVote: boolean;
+		failedAnswers: string[] | null;
+		endPending: boolean;
+		endFailed: boolean;
+		canEnd: boolean;
+	};
 }): PollSnapshot {
 	// Normalize counts at the boundary so the documented PollSnapshot.counts
 	// invariant (null-prototype, a zero-filled key for exactly every answer
@@ -239,7 +289,12 @@ export function buildPollSnapshot(args: {
 		counts,
 		totalVotes: args.tally?.totalVotes ?? 0,
 		myAnswers: args.tally?.myAnswers ?? [],
+		hasPendingVote: args.interaction?.hasPendingVote ?? false,
+		failedAnswers: args.interaction?.failedAnswers ?? null,
 		isEnded: args.isEnded,
+		endPending: args.interaction?.endPending ?? false,
+		endFailed: args.interaction?.endFailed ?? false,
+		canEnd: args.interaction?.canEnd ?? false,
 		undecryptableCount: args.undecryptableCount,
 		loadingResults: args.loadingResults,
 	};

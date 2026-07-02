@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PollMessage } from "./PollMessage";
 import type { PollSnapshot } from "./pollSnapshot";
@@ -27,16 +27,41 @@ function snapshot(overrides?: Partial<PollSnapshot>): PollSnapshot {
 		counts: { a: 2, b: 1 },
 		totalVotes: 3,
 		myAnswers: [],
+		hasPendingVote: false,
+		failedAnswers: null,
 		isEnded: false,
+		endPending: false,
+		endFailed: false,
+		canEnd: false,
 		undecryptableCount: 0,
 		loadingResults: false,
 		...overrides,
 	};
 }
 
-describe("PollMessage", () => {
+function setup(overrides?: Partial<PollSnapshot>) {
+	const onVote = vi.fn();
+	const onEndPoll = vi.fn();
+	const { container } = render(() => (
+		<PollMessage
+			poll={snapshot(overrides)}
+			onVote={onVote}
+			onEndPoll={onEndPoll}
+		/>
+	));
+	return { onVote, onEndPoll, container };
+}
+
+function optionButton(text: string): HTMLButtonElement {
+	const label = screen.getByText(text);
+	const button = label.closest("button");
+	if (!button) throw new Error(`no option button for ${text}`);
+	return button as HTMLButtonElement;
+}
+
+describe("PollMessage rendering", () => {
 	it("renders the question, options, and live tallies for a disclosed poll", () => {
-		render(() => <PollMessage poll={snapshot()} />);
+		setup();
 		expect(screen.getByText("Best pizza?")).toBeTruthy();
 		expect(screen.getByText("Margherita")).toBeTruthy();
 		expect(screen.getByText("Pepperoni")).toBeTruthy();
@@ -47,9 +72,7 @@ describe("PollMessage", () => {
 	});
 
 	it("hides counts for an active undisclosed poll but keeps the bars' geometry", () => {
-		const { container } = render(() => (
-			<PollMessage poll={snapshot({ kind: "undisclosed" })} />
-		));
+		const { container } = setup({ kind: "undisclosed" });
 		expect(screen.getByText("Results hidden until the poll ends")).toBeTruthy();
 		expect(screen.queryByText("2 · 67%")).toBeNull();
 		// The track elements are still rendered (zero-width fill), so results
@@ -63,9 +86,7 @@ describe("PollMessage", () => {
 	});
 
 	it("reveals counts and highlights winners when an undisclosed poll ends", () => {
-		render(() => (
-			<PollMessage poll={snapshot({ kind: "undisclosed", isEnded: true })} />
-		));
+		setup({ kind: "undisclosed", isEnded: true });
 		expect(screen.getByText("Final results")).toBeTruthy();
 		expect(screen.getByText("2 · 67%")).toBeTruthy();
 		const winner = screen.getByText("Margherita");
@@ -75,40 +96,153 @@ describe("PollMessage", () => {
 	});
 
 	it("does not highlight a winner while the poll is still open", () => {
-		render(() => <PollMessage poll={snapshot()} />);
+		setup();
 		expect(screen.getByText("Margherita").className).not.toContain(
 			"text-text-emphasis",
 		);
 	});
 
 	it("marks the local user's vote", () => {
-		render(() => <PollMessage poll={snapshot({ myAnswers: ["b"] })} />);
+		setup({ myAnswers: ["b"] });
 		expect(screen.getByText("(your vote)")).toBeTruthy();
+		expect(optionButton("Pepperoni").getAttribute("aria-pressed")).toBe("true");
+		expect(optionButton("Margherita").getAttribute("aria-pressed")).toBe(
+			"false",
+		);
 	});
 
 	it("pluralizes the vote count", () => {
-		render(() => (
-			<PollMessage poll={snapshot({ counts: { a: 1, b: 0 }, totalVotes: 1 })} />
-		));
+		setup({ counts: { a: 1, b: 0 }, totalVotes: 1 });
 		expect(screen.getByText("1 vote")).toBeTruthy();
 	});
 
 	it("shows a loading state before results have been fetched", () => {
-		render(() => (
-			<PollMessage
-				poll={snapshot({
-					counts: { a: 0, b: 0 },
-					totalVotes: 0,
-					loadingResults: true,
-				})}
-			/>
-		));
+		setup({ counts: { a: 0, b: 0 }, totalVotes: 0, loadingResults: true });
 		expect(screen.getByText("Loading results…")).toBeTruthy();
 	});
 
 	it("warns when some votes could not be decrypted", () => {
-		render(() => <PollMessage poll={snapshot({ undecryptableCount: 2 })} />);
+		setup({ undecryptableCount: 2 });
 		const warning = screen.getByRole("status");
 		expect(warning.textContent).toContain("2 votes couldn't be decrypted");
+	});
+});
+
+describe("PollMessage voting", () => {
+	it("casts a single-select vote on click", () => {
+		const { onVote } = setup();
+		fireEvent.click(optionButton("Margherita"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith(["a"]);
+	});
+
+	it("changes a single-select vote by clicking another option", () => {
+		const { onVote } = setup({ myAnswers: ["a"] });
+		fireEvent.click(optionButton("Pepperoni"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith(["b"]);
+	});
+
+	it("treats re-clicking the selected single-select option as a no-op", () => {
+		const { onVote } = setup({ myAnswers: ["a"] });
+		fireEvent.click(optionButton("Margherita"));
+		expect(onVote).not.toHaveBeenCalled();
+	});
+
+	it("builds multi-select ballots by toggling options", () => {
+		const { onVote } = setup({ maxSelections: 2, myAnswers: ["a"] });
+		fireEvent.click(optionButton("Pepperoni"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith(["a", "b"]);
+	});
+
+	it("retracts by unchecking the last multi-select option", () => {
+		const { onVote } = setup({ maxSelections: 2, myAnswers: ["a"] });
+		fireEvent.click(optionButton("Margherita"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith([]);
+	});
+
+	it("locks unchecked options at the selection cap but keeps checked ones clickable", () => {
+		const { onVote } = setup({
+			maxSelections: 2,
+			myAnswers: ["a", "b"],
+			answers: [
+				{ id: "a", text: "Margherita" },
+				{ id: "b", text: "Pepperoni" },
+				{ id: "c", text: "Hawaiian" },
+			],
+			counts: { a: 1, b: 1, c: 0 },
+		});
+		expect(optionButton("Hawaiian").disabled).toBe(true);
+		fireEvent.click(optionButton("Pepperoni"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith(["a"]);
+	});
+
+	it("shows the multi-select hint", () => {
+		setup({ maxSelections: 2 });
+		expect(screen.getByText("· Choose up to 2")).toBeTruthy();
+	});
+
+	it("disables voting once the poll has ended", () => {
+		const { onVote } = setup({ isEnded: true });
+		expect(optionButton("Margherita").disabled).toBe(true);
+		fireEvent.click(optionButton("Margherita"));
+		expect(onVote).not.toHaveBeenCalled();
+	});
+
+	it("disables voting while the poll is being ended", () => {
+		setup({ canEnd: true, endPending: true });
+		expect(optionButton("Margherita").disabled).toBe(true);
+	});
+
+	it("surfaces a failed vote with a Retry that resubmits the same ballot", () => {
+		const { onVote } = setup({ failedAnswers: ["b"] });
+		const alert = screen.getByRole("alert");
+		expect(alert.textContent).toContain("Couldn't record your vote");
+		fireEvent.click(screen.getByText("Retry"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith(["b"]);
+	});
+});
+
+describe("PollMessage ending", () => {
+	it("hides the End control from non-creators and on ended polls", () => {
+		setup();
+		expect(screen.queryByText("End poll")).toBeNull();
+		cleanup();
+		setup({ canEnd: true, isEnded: true });
+		expect(screen.queryByText("End poll")).toBeNull();
+	});
+
+	it("requires a confirm step and then calls onEndPoll", () => {
+		const { onEndPoll } = setup({ canEnd: true });
+		fireEvent.click(screen.getByText("End poll"));
+		expect(onEndPoll).not.toHaveBeenCalled();
+		expect(screen.getByText("End poll? Voting will stop.")).toBeTruthy();
+		fireEvent.click(screen.getByText("Confirm"));
+		expect(onEndPoll).toHaveBeenCalledOnce();
+	});
+
+	it("cancels the confirm step without ending", () => {
+		const { onEndPoll } = setup({ canEnd: true });
+		fireEvent.click(screen.getByText("End poll"));
+		fireEvent.click(screen.getByText("Cancel"));
+		expect(onEndPoll).not.toHaveBeenCalled();
+		expect(screen.getByText("End poll")).toBeTruthy();
+	});
+
+	it("shows the Ending state while the close is in flight", () => {
+		setup({ canEnd: true, endPending: true });
+		expect(screen.getByText("Ending…")).toBeTruthy();
+		expect(screen.queryByText("End poll")).toBeNull();
+	});
+
+	it("keeps undisclosed results hidden while the end is only pending", () => {
+		setup({ kind: "undisclosed", canEnd: true, endPending: true });
+		expect(screen.queryByText("2 · 67%")).toBeNull();
+	});
+
+	it("surfaces a failed end with a Retry", () => {
+		const { onEndPoll } = setup({ canEnd: true, endFailed: true });
+		const alert = screen.getByRole("alert");
+		expect(alert.textContent).toContain("Couldn't end the poll");
+		fireEvent.click(screen.getByText("Retry"));
+		expect(onEndPoll).toHaveBeenCalledOnce();
 	});
 });

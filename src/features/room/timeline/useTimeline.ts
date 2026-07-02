@@ -2308,5 +2308,16 @@ export function useTimeline(
 		 * most-recent entry and discard the whole list.
 		 */
 		pendingEdits,
+		/**
+		 * Cast or change the local user's vote on a poll (optimistic; the
+		 * row's snapshot updates immediately - see PollWatcher.votePoll).
+		 * An empty array is the MSC3381 vote retraction (spoiled ballot).
+		 * Lives on the watcher so a future thread-scoped timeline hook
+		 * (issue #303, step 3c) inherits voting without poll-specific work.
+		 */
+		votePoll: (pollId: string, answerIds: string[]): Promise<void> =>
+			pollWatcher.votePoll(pollId, answerIds),
+		/** Close a poll the local user created (see PollWatcher.endPoll). */
+		endPoll: (pollId: string): Promise<void> => pollWatcher.endPoll(pollId),
 	};
 }

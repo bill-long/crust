@@ -1,25 +1,41 @@
-import { type Component, createMemo, For, Show } from "solid-js";
+import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import type { PollSnapshot } from "./pollSnapshot";
 
 interface PollMessageProps {
 	poll: PollSnapshot;
+	/** Cast/change the local user's vote. Empty array = MSC3381 retraction
+	 *  (spoiled ballot); only reachable for multi-select polls. */
+	onVote: (answerIds: string[]) => void;
+	/** Close the poll. Only invoked when the snapshot says canEnd. */
+	onEndPoll: () => void;
 }
 
 /**
  * Timeline renderer for an MSC3381 poll, driven entirely by the projected
- * {@link PollSnapshot} (no SDK access). Read-only for now: it shows the
- * question, options, and live tallies for polls sent from other clients;
- * voting and closing land in a follow-up.
+ * {@link PollSnapshot} (no SDK access).
+ *
+ * Voting is optimistic: clicks call onVote and the watcher re-projects the
+ * row with the pending ballot applied, so the UI updates immediately.
+ * Single-select behaves like radios (re-clicking the selected option is a
+ * no-op, no retraction - Element parity); multi-select behaves like
+ * checkboxes capped at maxSelections, and unchecking the last selection
+ * sends the MSC3381 spoiled-ballot retraction.
  *
  * Result visibility follows the poll kind: disclosed polls show counts and
  * bars live, undisclosed polls hide them until the poll ends. The bar track
  * is always rendered (zero-width fill while hidden) so revealing results
- * never shifts layout.
+ * never shifts layout. Undisclosed results reveal only on a CONFIRMED end
+ * (isEnded), never optimistically while endPending.
  */
 export const PollMessage: Component<PollMessageProps> = (props) => {
+	const [confirmingEnd, setConfirmingEnd] = createSignal(false);
 	const showResults = createMemo(
 		() => props.poll.kind === "disclosed" || props.poll.isEnded,
 	);
+	const votingDisabled = createMemo(
+		() => props.poll.isEnded || props.poll.endPending,
+	);
+	const isMultiSelect = () => props.poll.maxSelections > 1;
 	const maxCount = createMemo(() => {
 		let max = 0;
 		for (const answer of props.poll.answers) {
@@ -51,6 +67,24 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 			: `${props.poll.totalVotes} votes`;
 	});
 
+	const toggleAnswer = (answerId: string): void => {
+		if (votingDisabled()) return;
+		const mine = props.poll.myAnswers;
+		const selected = mine.includes(answerId);
+		if (!isMultiSelect()) {
+			// Radio semantics: re-clicking the selected option is a no-op.
+			if (!selected) props.onVote([answerId]);
+			return;
+		}
+		if (selected) {
+			// Unchecking the last selection sends [] - the spoiled-ballot
+			// retraction.
+			props.onVote(mine.filter((id) => id !== answerId));
+		} else if (mine.length < props.poll.maxSelections) {
+			props.onVote([...mine, answerId]);
+		}
+	};
+
 	return (
 		<div class="max-w-md rounded-lg border border-border-subtle bg-surface-2 p-3">
 			<div class="flex items-start gap-2">
@@ -71,7 +105,12 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 					<p class="whitespace-pre-wrap break-words text-sm font-medium text-text-primary">
 						{props.poll.question}
 					</p>
-					<p class="text-xs text-text-muted">{statusLine()}</p>
+					<p class="text-xs text-text-muted">
+						{statusLine()}
+						<Show when={isMultiSelect() && !props.poll.isEnded}>
+							<span> · Choose up to {props.poll.maxSelections}</span>
+						</Show>
+					</p>
 				</div>
 			</div>
 			<ul class="mt-2 flex flex-col gap-2" aria-label="Poll options">
@@ -83,53 +122,137 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 						const isMine = () => props.poll.myAnswers.includes(answer.id);
 						const isWinner = () =>
 							props.poll.isEnded && count() > 0 && count() === maxCount();
+						// Multi-select cap: unchecked options lock once the cap
+						// is reached (checked ones stay clickable to uncheck).
+						const capLocked = () =>
+							isMultiSelect() &&
+							!isMine() &&
+							props.poll.myAnswers.length >= props.poll.maxSelections;
 						return (
 							<li>
-								<div class="flex items-baseline justify-between gap-2 text-sm">
-									<span
-										class={`min-w-0 break-words ${
-											isWinner()
-												? "font-medium text-text-emphasis"
-												: "text-text-secondary"
-										}`}
-									>
-										{answer.text}
-										<Show when={isMine()}>
-											<svg
-												class="ml-1 inline h-3.5 w-3.5 text-accent-text"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="3"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												aria-hidden="true"
-											>
-												<path d="M20 6 9 17l-5-5" />
-											</svg>
-											<span class="sr-only">(your vote)</span>
+								<button
+									type="button"
+									class="w-full rounded p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover enabled:hover:bg-surface-3/60 disabled:cursor-default any-pointer-coarse:min-h-11"
+									disabled={votingDisabled() || capLocked()}
+									aria-pressed={isMine()}
+									onClick={() => toggleAnswer(answer.id)}
+								>
+									<span class="flex items-baseline justify-between gap-2 text-sm">
+										<span
+											class={`min-w-0 break-words ${
+												isWinner()
+													? "font-medium text-text-emphasis"
+													: "text-text-secondary"
+											}`}
+										>
+											{answer.text}
+											<Show when={isMine()}>
+												<svg
+													class="ml-1 inline h-3.5 w-3.5 text-accent-text"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="3"
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													aria-hidden="true"
+												>
+													<path d="M20 6 9 17l-5-5" />
+												</svg>
+												<span class="sr-only">(your vote)</span>
+											</Show>
+										</span>
+										<Show when={showResults()}>
+											<span class="shrink-0 text-xs tabular-nums text-text-muted">
+												{count()} · {percent(count())}%
+											</span>
 										</Show>
 									</span>
-									<Show when={showResults()}>
-										<span class="shrink-0 text-xs tabular-nums text-text-muted">
-											{count()} · {percent(count())}%
-										</span>
-									</Show>
-								</div>
-								<div class="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-3">
-									<div
-										class="h-full rounded-full bg-accent transition-[width] duration-200 motion-reduce:transition-none"
-										style={{
-											width: showResults() ? `${percent(count())}%` : "0%",
-										}}
-									/>
-								</div>
+									<span class="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-3">
+										<span
+											class="block h-full rounded-full bg-accent transition-[width] duration-200 motion-reduce:transition-none"
+											style={{
+												width: showResults() ? `${percent(count())}%` : "0%",
+											}}
+										/>
+									</span>
+								</button>
 							</li>
 						);
 					}}
 				</For>
 			</ul>
-			<p class="mt-2 text-xs text-text-muted">{votesLine()}</p>
+			<Show when={props.poll.failedAnswers}>
+				{(failed) => (
+					<p class="mt-2 text-xs text-danger-text" role="alert">
+						Couldn't record your vote.{" "}
+						<button
+							type="button"
+							class="font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							onClick={() => props.onVote(failed())}
+						>
+							Retry
+						</button>
+					</p>
+				)}
+			</Show>
+			<div class="mt-2 flex items-baseline justify-between gap-2">
+				<p class="text-xs text-text-muted">{votesLine()}</p>
+				<Show when={props.poll.canEnd && !props.poll.isEnded}>
+					<Show
+						when={!props.poll.endPending}
+						fallback={<p class="text-xs text-text-disabled">Ending…</p>}
+					>
+						<Show
+							when={confirmingEnd()}
+							fallback={
+								<button
+									type="button"
+									class="rounded px-1 text-xs text-text-muted transition-colors hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={() => setConfirmingEnd(true)}
+								>
+									End poll
+								</button>
+							}
+						>
+							<span class="flex items-baseline gap-2 text-xs">
+								<span class="text-text-secondary">
+									End poll? Voting will stop.
+								</span>
+								<button
+									type="button"
+									class="rounded px-1 font-medium text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={() => {
+										setConfirmingEnd(false);
+										props.onEndPoll();
+									}}
+								>
+									Confirm
+								</button>
+								<button
+									type="button"
+									class="rounded px-1 text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={() => setConfirmingEnd(false)}
+								>
+									Cancel
+								</button>
+							</span>
+						</Show>
+					</Show>
+				</Show>
+			</div>
+			<Show when={props.poll.endFailed}>
+				<p class="mt-1 text-xs text-danger-text" role="alert">
+					Couldn't end the poll.{" "}
+					<button
+						type="button"
+						class="font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						onClick={() => props.onEndPoll()}
+					>
+						Retry
+					</button>
+				</p>
+			</Show>
 			<Show when={props.poll.undecryptableCount > 0}>
 				<p class="mt-1 text-xs text-warning-text" role="status">
 					{props.poll.undecryptableCount === 1

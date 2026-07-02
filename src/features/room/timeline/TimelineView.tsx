@@ -122,6 +122,8 @@ const TimelineView: Component<{
 		pendingRedactions,
 		pendingReactions,
 		pendingEdits,
+		votePoll,
+		endPoll,
 	} = useTimeline(client, () => props.roomId);
 
 	// Custom emoji packs for this room. When the parent passes a shared
@@ -1418,6 +1420,10 @@ const TimelineView: Component<{
 													isPinned={props.isPinned?.(event.eventId) ?? false}
 													onTogglePin={() => props.onTogglePin?.(event.eventId)}
 													onReact={(key) => onReact(event.eventId, key)}
+													onVote={(answerIds) =>
+														void votePoll(event.eventId, answerIds)
+													}
+													onEndPoll={() => void endPoll(event.eventId)}
 													onReply={() => setReplyTo(event)}
 													onJumpToReply={(id) => {
 														setWantsBottom(false);

@@ -9,6 +9,11 @@ import {
 	type Room,
 } from "matrix-js-sdk";
 import {
+	PollEndEvent,
+	PollResponseEvent,
+	sendSerializedPollEvent,
+} from "./pollSdk";
+import {
 	buildPollSnapshot,
 	computePollTally,
 	type PollSnapshot,
@@ -38,6 +43,22 @@ export interface PollWatcher {
 	 * event isn't a parseable poll start.
 	 */
 	getSnapshot(startEvent: MatrixEvent, room: Room): PollSnapshot | null;
+	/**
+	 * Cast (or change) the local user's vote. Optimistic: the snapshot
+	 * reflects the new ballot immediately; the pending overlay clears when
+	 * the sent response event arrives back through the poll's relations. On
+	 * send failure the tally reverts and the snapshot carries
+	 * `failedAnswers` for a Retry affordance. An empty `answerIds` array
+	 * sends a spoiled ballot - the MSC3381 vote retraction.
+	 */
+	votePoll(pollId: string, answerIds: string[]): Promise<void>;
+	/**
+	 * Close the poll (creator only - see PollSnapshot.canEnd). Optimistic
+	 * only to the "Ending..." state: undisclosed results are not revealed
+	 * until the confirmed end event flips `isEnded`, so a failed send never
+	 * flashes results that must stay hidden.
+	 */
+	endPoll(pollId: string): Promise<void>;
 	/** Remove every SDK listener and drop all cached state. */
 	dispose(): void;
 }
@@ -53,6 +74,19 @@ interface WatchedPoll {
 	 *  provisional zero state, but the loading indicator must not spin
 	 *  forever). */
 	fetchFailed: boolean;
+	/**
+	 * In-flight optimistic vote. `sentEventId` is filled once the send
+	 * resolves; the overlay clears when that exact event id shows up in the
+	 * poll's relations (the remote echo round-tripped) - id-matched, not
+	 * timestamp-heuristic, so clock skew can't mis-clear it. Object
+	 * identity guards against rapid re-votes: each votePoll installs a new
+	 * object and only mutates/clears its own.
+	 */
+	pendingVote: { answers: string[]; sentEventId: string | null } | null;
+	/** Ballot of the last failed vote send, for the Retry affordance. */
+	failedVoteAnswers: string[] | null;
+	endPending: boolean;
+	endFailed: boolean;
 	detach(): void;
 }
 
@@ -89,13 +123,30 @@ export function createPollWatcher(
 	function recompute(pollId: string): void {
 		const entry = watched.get(pollId);
 		if (!entry) return;
-		const tally = entry.relations
-			? computePollTally(
-					entry.relations.getRelations(),
-					entry.start,
-					client.getUserId(),
-				)
-			: null;
+		const relationEvents = entry.relations?.getRelations() ?? null;
+		// The optimistic vote overlay retires once its own response event is
+		// visible in the relations - from then on the confirmed tally
+		// already contains the ballot.
+		if (
+			entry.pendingVote?.sentEventId &&
+			relationEvents?.some((e) => e.getId() === entry.pendingVote?.sentEventId)
+		) {
+			entry.pendingVote = null;
+		}
+		// A confirmed end retires the optimistic "Ending..." state.
+		if (entry.poll.isEnded) entry.endPending = false;
+		// With a pending vote but no fetched relations yet, tally over an
+		// empty response set so the optimistic ballot still shows; the real
+		// counts merge in when the fetch lands.
+		const tally =
+			relationEvents || entry.pendingVote
+				? computePollTally(
+						relationEvents ?? [],
+						entry.start,
+						client.getUserId(),
+						entry.pendingVote?.answers,
+					)
+				: null;
 		const loadingResults = entry.relations
 			? entry.poll.isFetchingResponses
 			: !entry.fetchFailed;
@@ -108,6 +159,15 @@ export function createPollWatcher(
 				isEnded: entry.poll.isEnded,
 				undecryptableCount: entry.poll.undecryptableRelationsCount,
 				loadingResults,
+				interaction: {
+					hasPendingVote: entry.pendingVote !== null,
+					failedAnswers: entry.failedVoteAnswers,
+					endPending: entry.endPending,
+					endFailed: entry.endFailed,
+					canEnd:
+						!entry.poll.isEnded &&
+						client.getUserId() === entry.poll.rootEvent.getSender(),
+				},
 			}),
 		);
 		onUpdate(pollId);
@@ -197,6 +257,10 @@ export function createPollWatcher(
 			start,
 			relations: null,
 			fetchFailed: false,
+			pendingVote: null,
+			failedVoteAnswers: null,
+			endPending: false,
+			endFailed: false,
 			detach() {
 				poll.off(PollEvent.Responses, onResponses);
 				poll.off(PollEvent.End, onEnd);
@@ -298,6 +362,69 @@ export function createPollWatcher(
 				// there is nothing to load yet.
 				loadingResults: isWatchedRoom && poll !== undefined,
 			});
+		},
+
+		async votePoll(pollId: string, answerIds: string[]): Promise<void> {
+			const entry = watched.get(pollId);
+			const room = watchedRoom;
+			// Voting needs a watched poll (an SDK model behind it); pending
+			// local-echo polls can't be voted on until they confirm.
+			if (!entry || !room) return;
+			entry.failedVoteAnswers = null;
+			const pending = {
+				answers: answerIds,
+				sentEventId: null as string | null,
+			};
+			entry.pendingVote = pending;
+			recompute(pollId);
+			try {
+				const res = await sendSerializedPollEvent(
+					client,
+					room.roomId,
+					PollResponseEvent.from(answerIds, pollId),
+				);
+				const current = watched.get(pollId);
+				// Stale if unwatched meanwhile, or superseded by a newer vote.
+				if (!current || current.pendingVote !== pending) return;
+				pending.sentEventId = res.event_id;
+				// The remote echo may already have arrived; recompute applies
+				// the id-matched clear either way.
+				recompute(pollId);
+			} catch (e) {
+				const current = watched.get(pollId);
+				if (!current || current.pendingVote !== pending) return;
+				current.pendingVote = null;
+				current.failedVoteAnswers = answerIds;
+				console.error(`Poll vote failed for ${pollId} in ${room.roomId}:`, e);
+				recompute(pollId);
+			}
+		},
+
+		async endPoll(pollId: string): Promise<void> {
+			const entry = watched.get(pollId);
+			const room = watchedRoom;
+			if (!entry || !room || entry.poll.isEnded || entry.endPending) return;
+			entry.endFailed = false;
+			entry.endPending = true;
+			recompute(pollId);
+			try {
+				await sendSerializedPollEvent(
+					client,
+					room.roomId,
+					PollEndEvent.from(pollId, "The poll has ended."),
+				);
+				// endPending intentionally stays set: it clears when the
+				// confirmed end event round-trips (PollEvent.End ->
+				// recompute sees poll.isEnded), so undisclosed results only
+				// reveal on a server-confirmed close.
+			} catch (e) {
+				const current = watched.get(pollId);
+				if (!current) return;
+				current.endPending = false;
+				current.endFailed = true;
+				console.error(`Poll end failed for ${pollId} in ${room.roomId}:`, e);
+				recompute(pollId);
+			}
 		},
 
 		dispose(): void {
