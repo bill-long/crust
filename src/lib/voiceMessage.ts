@@ -13,6 +13,8 @@ export const MSC3245_VOICE_KEY = "org.matrix.msc3245.voice";
 /** MSC1767 audio block carrying `duration` (ms) and the MSC3246
  *  `waveform` (integer amplitudes in 0..1024). */
 export const MSC1767_AUDIO_KEY = "org.matrix.msc1767.audio";
+/** MSC1767 plain-text fallback body. */
+export const MSC1767_TEXT_KEY = "org.matrix.msc1767.text";
 
 /** Defensive cap on accepted waveform samples: Element sends ~100; a
  *  hostile event could carry millions. Longer arrays are resampled by the

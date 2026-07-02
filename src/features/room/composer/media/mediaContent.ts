@@ -1,4 +1,9 @@
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
+import {
+	MSC1767_AUDIO_KEY,
+	MSC1767_TEXT_KEY,
+	MSC3245_VOICE_KEY,
+} from "../../../../lib/voiceMessage";
 import type { AttachmentKind, BuildMediaContentArgs, MediaInfo } from "./types";
 
 /**
@@ -107,6 +112,23 @@ export function buildMediaContent(
 		content.file = file;
 	} else {
 		content.url = contentUri;
+	}
+
+	// MSC3245 voice note: the rendering-hint marker plus the MSC1767 audio
+	// block (duration + MSC3246 waveform), matching Element's wire shape.
+	// Voice markers on a non-audio msgtype would be nonsensical wire
+	// content; fail closed on the caller bug (assertExactlyOneSource style).
+	if (args.voice && kind !== "audio") {
+		throw new Error("buildMediaContent: voice metadata requires kind=audio");
+	}
+	if (args.voice) {
+		info.duration = args.voice.durationMs;
+		content[MSC1767_AUDIO_KEY] = {
+			duration: args.voice.durationMs,
+			waveform: args.voice.waveform,
+		};
+		content[MSC3245_VOICE_KEY] = {};
+		content[MSC1767_TEXT_KEY] = content.body;
 	}
 
 	if (replyTo) {
