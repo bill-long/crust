@@ -325,7 +325,7 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 	};
 
 	return (
-		<div class="flex h-12 w-72 items-center gap-2 rounded-lg border border-border-subtle bg-surface-2 px-3">
+		<div class="flex h-12 w-full max-w-72 items-center gap-2 rounded-lg border border-border-subtle bg-surface-2 px-3">
 			<Show
 				when={props.httpUrl}
 				fallback={
