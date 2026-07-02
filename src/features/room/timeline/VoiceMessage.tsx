@@ -261,6 +261,12 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 		if (audioContext.state === "suspended") {
 			void audioContext.resume().catch(() => {});
 		}
+		// A pause landing at the clip's very end can leave pausedAt at (or
+		// past) the buffer duration, which start(0, offset) may reject.
+		const offset = Math.min(
+			Math.max(offsetSeconds, 0),
+			Math.max(0, audioBuffer.duration - 0.01),
+		);
 		const source = audioContext.createBufferSource();
 		source.buffer = audioBuffer;
 		source.connect(audioContext.destination);
@@ -272,9 +278,9 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 			setElapsed(0);
 			setPlaying(false);
 		};
-		source.start(0, offsetSeconds);
+		source.start(0, offset);
 		sourceNode = source;
-		startedAt = audioContext.currentTime - offsetSeconds;
+		startedAt = audioContext.currentTime - offset;
 		setPlaying(true);
 		stopTicker();
 		ticker = setInterval(() => {
