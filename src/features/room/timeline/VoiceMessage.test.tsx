@@ -7,6 +7,7 @@ import {
 } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { VoiceMessage } from "./VoiceMessage";
+import { resetVoicePlaybackContextForTests } from "./voicePlaybackContext";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -21,6 +22,9 @@ afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
+	// The playback context is a module-level singleton; drop it so one
+	// test's AudioContext stub can't leak into the next.
+	resetVoicePlaybackContextForTests();
 });
 
 function setup(overrides?: Partial<Parameters<typeof VoiceMessage>[0]>) {

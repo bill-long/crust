@@ -12,6 +12,7 @@ import {
 	decryptAttachment,
 	type EncryptedFileInfo,
 } from "../composer/media/attachmentCrypto";
+import { getVoicePlaybackContext } from "./voicePlaybackContext";
 
 interface VoiceMessageProps {
 	/** Audio source. For encrypted rooms this is CIPHERTEXT (decrypted via
@@ -102,6 +103,8 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 		null,
 	);
 
+	/** SHARED playback context (see voicePlaybackContext) - held per
+	 *  component only as a reference; never closed here. */
 	let audioContext: AudioContext | null = null;
 	let audioBuffer: AudioBuffer | null = null;
 	let sourceNode: AudioBufferSourceNode | null = null;
@@ -209,7 +212,8 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 		// start audible ghost playback with no player on screen.
 		invalidateLoad();
 		stopPlayback(false);
-		void audioContext?.close().catch(() => {});
+		// The context is shared across voice messages; drop only our
+		// reference (never close it).
 		audioContext = null;
 	});
 
@@ -292,11 +296,6 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 
 	const togglePlay = (): void => {
 		if (undecryptable()) return;
-		if (typeof AudioContext === "undefined") {
-			setUnsupported(true);
-			setLoadState("failed");
-			return;
-		}
 		if (playing()) {
 			stopPlayback(true);
 			return;
@@ -309,9 +308,14 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 			setLoadState("idle");
 			return;
 		}
-		// Create the context synchronously inside the user-gesture call
+		// Acquire the SHARED playback context inside the user-gesture call
 		// stack (Safari autoplay policy); the async load reuses it.
-		audioContext ??= new AudioContext();
+		audioContext = getVoicePlaybackContext();
+		if (!audioContext) {
+			setUnsupported(true);
+			setLoadState("failed");
+			return;
+		}
 		if (loadState() === "ready" && audioBuffer) {
 			startFrom(pausedAt);
 			return;
