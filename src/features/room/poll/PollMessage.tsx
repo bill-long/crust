@@ -110,8 +110,11 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 	};
 
 	/** Arrow-key focus movement within the single-select radiogroup.
-	 *  Deliberately moves focus WITHOUT selecting - selection here is a
-	 *  network send, so it stays on explicit Enter/Space/click. */
+	 *  Deliberately moves focus WITHOUT selecting: the WAI-ARIA APG's
+	 *  "selection follows focus" guidance explicitly exempts widgets where
+	 *  selection triggers significant side effects, and here selecting
+	 *  sends a vote over the network. Selection stays on explicit
+	 *  Enter/Space/click. */
 	const onGroupKeyDown = (event: KeyboardEvent): void => {
 		if (isMultiSelect()) return;
 		const delta =

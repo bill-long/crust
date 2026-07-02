@@ -96,8 +96,11 @@ interface WatchedPoll {
 	detach(): void;
 }
 
+/** Ballots are sets: different devices/serializers can emit the same
+ *  selections in a different order, so compare order-insensitively (ids are
+ *  already deduped by the ballot validation). */
 function sameBallot(a: readonly string[], b: readonly string[]): boolean {
-	return a.length === b.length && a.every((id, i) => id === b[i]);
+	return a.length === b.length && a.every((id) => b.includes(id));
 }
 
 /**
@@ -450,6 +453,11 @@ export function createPollWatcher(
 			const entry = watched.get(pollId);
 			const room = watchedRoom;
 			if (!entry || !room || entry.poll.isEnded || entry.endPending) return;
+			// Fail-closed mirror of PollSnapshot.canEnd: only the creator may
+			// close, even if a UI bug or future caller invokes this directly
+			// (the homeserver would accept the event; other clients would
+			// rightly ignore it and disagree with ours).
+			if (client.getUserId() !== entry.poll.rootEvent.getSender()) return;
 			entry.endFailed = false;
 			entry.endPending = true;
 			recompute(pollId);
