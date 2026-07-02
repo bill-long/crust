@@ -34,6 +34,11 @@ import {
 } from "../composer/media/attachmentCrypto";
 import { type PollSnapshot, parsePollStart } from "../poll/pollSnapshot";
 import { createPollWatcher, type PollWatcher } from "../poll/pollWatcher";
+import type { ThreadSummary } from "../threads/threadSummary";
+import {
+	createThreadWatcher,
+	type ThreadWatcher,
+} from "../threads/threadWatcher";
 import { stripReplyFallback } from "../urlPreviews/replyFallback";
 import type {
 	MembershipTransition,
@@ -267,6 +272,15 @@ export interface TimelineEvent {
 	 * themselves are never displayable.
 	 */
 	poll: PollSnapshot | null;
+	/**
+	 * Thread summary when this event heads a thread ("N replies" chip),
+	 * null otherwise. Like `poll`, relation-derived data folded into the
+	 * root's row at projection time: the thread watcher recomputes the
+	 * summary as replies arrive and re-projects this row. The replies
+	 * themselves are never displayable here (they live in the thread's
+	 * own timeline).
+	 */
+	thread: ThreadSummary | null;
 }
 
 // Reject any ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F).
@@ -501,6 +515,7 @@ function buildSyntheticCallLeaveEvent(
 			avatarUrl,
 		},
 		poll: null,
+		thread: null,
 	};
 }
 
@@ -510,6 +525,7 @@ function eventToTimelineEvent(
 	client: MatrixClient,
 	suppressedCallIds?: ReadonlySet<string>,
 	pollWatcher?: PollWatcher,
+	threadWatcher?: ThreadWatcher,
 ): TimelineEvent {
 	// `event.getContent()` auto-applies a replacing event's
 	// `m.new_content` regardless of the replacement's status. For
@@ -874,6 +890,13 @@ function eventToTimelineEvent(
 	const isVoice = isVoiceMessageContent(content);
 	const voiceInfo = isVoice ? parseVoiceInfo(content) : null;
 
+	// Thread summary for roots: resolved through the thread watcher's
+	// synchronous cache (live Thread object, or the root's bundled
+	// aggregation for paginated-in roots). Null for everything that heads
+	// no thread. A plain message that later becomes a root re-projects
+	// live via the watcher's ThreadEvent subscription.
+	const thread = threadWatcher?.getSummary(event, room) ?? null;
+
 	return {
 		eventId: event.getId() ?? "",
 		senderId: sender,
@@ -922,6 +945,7 @@ function eventToTimelineEvent(
 		stateNotice,
 		membershipTransition,
 		poll,
+		thread,
 	};
 }
 
@@ -1191,12 +1215,17 @@ export function useTimeline(
 	// this seam a poll row would never re-render on a vote. On any poll
 	// state change the watcher recomputes the snapshot and re-projects just
 	// that poll's row, mirroring the reaction recompute path.
-	const pollWatcher = createPollWatcher(client, reprojectPollRow);
+	const pollWatcher = createPollWatcher(client, reprojectRow);
+	// Same seam for threads: replies are m.thread relations partitioned out
+	// of this timeline entirely, so without the watcher a root's "N replies"
+	// chip would never re-render as replies arrive.
+	const threadWatcher = createThreadWatcher(client, reprojectRow);
 
 	/**
 	 * Single projection entry point for all call sites in this hook, so
 	 * every path (rebuild, live append, redaction/edit/decryption
-	 * recomputes) resolves poll snapshots through the watcher's cache.
+	 * recomputes) resolves poll snapshots and thread summaries through the
+	 * watchers' caches.
 	 */
 	function projectEvent(
 		event: MatrixEvent,
@@ -1209,22 +1238,24 @@ export function useTimeline(
 			client,
 			suppressedCallIds,
 			pollWatcher,
+			threadWatcher,
 		);
 	}
 
-	/** Re-project a single poll row after its snapshot changed (vote / end /
-	 *  undecryptable-count update). No-op when the poll isn't in the current
-	 *  window - the next full rebuild picks up the cached snapshot. */
-	function reprojectPollRow(pollId: string): void {
+	/** Re-project a single row after its relation-derived data changed (a
+	 *  poll vote/end, a thread reply updating the root's summary chip).
+	 *  No-op when the event isn't in the current window - the next full
+	 *  rebuild picks up the cached snapshot. */
+	function reprojectRow(eventId: string): void {
 		if (!currentRoomId) return;
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
-		const sourceEvent = findWindowEvent(pollId);
+		const sourceEvent = findWindowEvent(eventId);
 		if (!sourceEvent) return;
 		const updated = projectEvent(sourceEvent, room);
 		setEvents(
 			produce((draft) => {
-				const idx = draft.findIndex((e) => e.eventId === pollId);
+				const idx = draft.findIndex((e) => e.eventId === eventId);
 				if (idx >= 0) draft[idx] = updated;
 			}),
 		);
@@ -1402,10 +1433,12 @@ export function useTimeline(
 			return;
 		}
 
-		// Re-point the poll watcher before the first projection so poll rows
-		// resolve snapshots (and start their response fetches) immediately.
-		// No-op when reloading the same room, keeping fetched tallies warm.
+		// Re-point the watchers before the first projection so poll rows
+		// resolve snapshots (and start their response fetches) and thread
+		// roots resolve summaries immediately. No-ops when reloading the
+		// same room, keeping fetched state warm.
 		pollWatcher.watchRoom(room);
+		threadWatcher.watchRoom(room);
 
 		const timelineSet = room.getUnfilteredTimelineSet();
 		const tw = new TimelineWindow(client, timelineSet, {
@@ -2299,6 +2332,7 @@ export function useTimeline(
 	onCleanup(() => {
 		clearCallExpiryTimer();
 		pollWatcher.dispose();
+		threadWatcher.dispose();
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
 		client.off(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);

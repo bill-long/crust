@@ -78,6 +78,7 @@ function mkEvent(eventId: string, body: string, ts: number): TimelineEvent {
 		stateNotice: null,
 		membershipTransition: null,
 		poll: null,
+		thread: null,
 	};
 }
 

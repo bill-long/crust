@@ -18,6 +18,7 @@ import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import { PollMessage } from "../poll/PollMessage";
+import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
 import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
@@ -970,6 +971,9 @@ const TimelineItem: Component<{
 				    so the message reads as "deleting" rather than fully
 				    interactive. */}
 					<Show when={!isRedactionPending() && !isRedactionFailed()}>
+						<Show when={ev.thread}>
+							{(thread) => <ThreadSummaryChip thread={thread()} />}
+						</Show>
 						<ReactionPills
 							reactions={ev.reactions}
 							myReactions={ev.myReactions}
