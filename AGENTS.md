@@ -22,17 +22,17 @@ Concrete, enforceable rules — not vibes:
 1. **Interaction latency budget: < 16 ms for any UI response to user input.**
    No spinner unless the network round-trip exceeds 200 ms. Use optimistic UI for sends, reactions, edits, redactions, read markers, typing indicators.
 2. **Scrolling stays at 60 fps even in 10k-message rooms.**
-   Long lists must be virtualized (`@tanstack/solid-virtual` or hand-rolled). Never render an entire timeline.
+   Long lists must be virtualized with `virtua/solid`'s `Virtualizer` (already used for the timeline, member list, and pinned-messages panel). Never render an entire timeline.
 3. **No layout shift after content loads.**
    Reserve space for avatars, images (use intrinsic size from `info.w/info.h` in Matrix `m.image` events), and message reactions. Skeleton states must match final dimensions.
-4. **Animations are spring-based and short (120–220 ms).**
-   Use CSS transitions for hover/focus, `motion-one` or `@motionone/solid` for entry/exit. No bouncy easings on functional UI. Easings: `cubic-bezier(0.2, 0, 0, 1)` for enter, `cubic-bezier(0.4, 0, 1, 1)` for exit.
+4. **Animations are short (120-220 ms).**
+   Animation is CSS-only (transitions/keyframes) - there is no JS animation library in the dependency tree, so don't reach for `motion-one` et al. without adding it under "Ask first". No bouncy easings on functional UI. Easings: `cubic-bezier(0.2, 0, 0, 1)` for enter, `cubic-bezier(0.4, 0, 1, 1)` for exit.
 5. **Respect `prefers-reduced-motion`.** Replace transforms/opacity transitions with instant state changes; keep color transitions.
 6. **Keyboard navigation is first-class.**
    Every clickable thing has a focus ring (use `focus-visible:`). Ctrl/Cmd+K command palette, `↑`/`↓` to navigate rooms, `Esc` to close panels, `Enter` to send, `Shift+Enter` for newline. Match Discord's shortcuts where possible.
 7. **Hover affordances are subtle but present.**
    Message action toolbars (react / reply / edit / more) appear on hover with a 50 ms delay-out, no delay-in. Use `group` + `group-hover:` Tailwind patterns.
-8. **Dark mode is the default and primary theme.** Light theme must work but dark is what we tune for.
+8. **Dark is the only theme today.** There is no light theme yet; design and tune for dark. If a light theme is added it should come through the token layer (see "Theming").
 
 ---
 
@@ -55,7 +55,7 @@ SolidJS reactivity is unforgiving. These are the rules that prevent 90% of bugs:
 - Function components only, named exports, PascalCase files matching component name.
 - Props interfaces declared inline or just above the component. Suffix with `Props`: `interface MessageProps { ... }`.
 - Co-locate small subcomponents in the same file when only used by the parent. Promote to their own file when reused or > ~80 lines.
-- Refs: `let el!: HTMLDivElement;` then `<div ref={el}>`. The `!` is required.
+- Refs: declare a local and assign via `<div ref={el}>`. Both forms are used in this repo - `let el!: HTMLDivElement` (definite assignment, when the ref is always attached before use) and `let el: HTMLDivElement | undefined` (when it may be read before mount, then guard with a null check). Pick per usage; neither is mandated.
 
 ### Performance
 
@@ -69,7 +69,7 @@ SolidJS reactivity is unforgiving. These are the rules that prevent 90% of bugs:
 
 ### Design tokens (no raw colors in components)
 
-All colors come from CSS variables defined in `src/index.css` and exposed as Tailwind tokens in `tailwind.config.ts`. **Never use raw Tailwind palette colors** (`bg-slate-800`, `text-zinc-400`) in components.
+This repo uses **Tailwind CSS 4** with the CSS-native config (`@import "tailwindcss"` via the `@tailwindcss/vite` plugin) - there is **no `tailwind.config.ts`**. All design tokens are defined as CSS variables in an `@theme` block in `src/styles/global.css`, which is what generates the `*-surface-1`, `*-accent`, etc. utility classes. **Never use raw Tailwind palette colors** (`bg-slate-800`, `text-zinc-400`) in components.
 
 ```tsx
 // CORRECT
@@ -80,12 +80,12 @@ All colors come from CSS variables defined in `src/index.css` and exposed as Tai
 <div class="bg-zinc-900 text-gray-200 border-zinc-700">
 ```
 
-Token namespace (define these in the config):
-- **Surfaces:** `surface-0` (app bg), `surface-1` (panel), `surface-2` (raised), `surface-3` (popover/menu)
-- **Text:** `text-primary`, `text-secondary`, `text-muted`, `text-disabled`
-- **Borders:** `border-subtle`, `border-strong`, `border-focus`
-- **Semantic:** `accent`, `success`, `warning`, `danger`, plus `-foreground` variants
-- **Mention/highlight:** `mention`, `mention-bg`
+Token namespace (defined via `@theme` in `src/styles/global.css` as `--color-*` variables; the actual file is the source of truth):
+- **Surfaces:** `surface-0` (app bg) through `surface-4` (raised/popover)
+- **Text:** `text-primary`, `text-emphasis`, `text-secondary`, `text-muted`, `text-disabled`, `text-faint`
+- **Borders:** `border-subtle`, `border-default`, `border-strong`, `border-focus`
+- **Semantic:** `accent` (pink), `success`, `warning`, `danger`, `info`, each with `-text`/`-bg`/`-foreground` (and some `-hover`/`-bright`) variants
+- **Mention/highlight:** `mention-bg`; badge/dot color is `indicator`
 
 ### Spacing & layout
 
@@ -96,14 +96,14 @@ Token namespace (define these in the config):
 
 ### Class organization
 
-- One Tailwind string per element. If it exceeds ~120 chars, break into `clsx`/`cva` (`class-variance-authority`) variants.
-- Order classes loosely as: layout → box → typography → color → state. Don't fight Prettier's tailwind plugin if it's installed.
-- Use `cva` for any component with > 2 visual variants (buttons, badges, message bubbles).
+- One Tailwind string per element. For conditional/variant classes, use template strings or a small local helper - the repo does **not** depend on `clsx` or `class-variance-authority`, so don't import them without adding under "Ask first".
+- Order classes loosely as: layout, box, typography, color, state.
+- Formatting/linting is **Biome** (`pnpm lint`), not Prettier/ESLint - let it own class formatting.
 
-### Dark mode
+### Theming
 
-- Use `class` strategy (`darkMode: 'class'`). Toggle on `<html>`.
-- All tokens have a dark variant defined in CSS — components don't write `dark:` prefixes; they just use the token. The token *is* the abstraction.
+- The app is currently **dark-only**: `@theme` defines a single set of token values and there is no light theme, no `darkMode: 'class'` toggle, and no `prefers-color-scheme` handling yet.
+- Components never write `dark:` prefixes or raw colors - they just use the token. The token *is* the abstraction, so if a light theme is added later it's a token-layer change, not a component change.
 
 ---
 
@@ -114,7 +114,7 @@ Token namespace (define these in the config):
 - One client instance, owned by a root context (`ClientProvider`). Children consume via `useClient()`.
 - **The SDK emits a 404 on `/_matrix/client/v3/voip/turnServer` for Conduwuity.** Suppress this in your error logging — it's expected, not a bug. Voice/video uses LiveKit via `org.matrix.msc4143.rtc_foci` from `.well-known/matrix/client`.
 - Subscribe to room events via SDK event emitters; bridge into Solid stores with `onMount`/`onCleanup`. Don't poll.
-- Treat `Room.timeline` as append-mostly. For pagination, use `client.scrollback()`.
+- Treat `Room.timeline` as append-mostly. Pagination goes through a `TimelineWindow` (`tw.paginate(Direction.Backward, ...)`), as in `features/room/timeline/useTimeline.ts` - not raw `client.scrollback()`.
 - E2EE rooms require the rust-crypto stack (`matrix-js-sdk` + `@matrix-org/matrix-sdk-crypto-wasm`). Initialize with `initRustCrypto()`.
 
 ### Optimistic UI
@@ -135,35 +135,32 @@ Token namespace (define these in the config):
 
 ```
 src/
-  app/                      # App shell, providers, routing
-    Providers.tsx           # ClientProvider, ThemeProvider, etc.
-    Shell.tsx               # Three-pane layout
-  features/                 # Feature-scoped: components + hooks + stores together
-    rooms/
-      RoomList.tsx
-      RoomListItem.tsx
-      useRoomList.ts
-    timeline/
-      Timeline.tsx
-      Message.tsx
-      MessageActions.tsx
-      useTimeline.ts
-    composer/
-    members/
-    spaces/
-    call/                   # LiveKit / MSC4143
-  ui/                       # Pure presentational primitives (Button, Tooltip, Popover, ...)
-  matrix/                   # SDK wrappers, type helpers, event predicates
-  lib/                      # Cross-cutting helpers (formatters, hotkeys, virtualization)
+  index.tsx                 # Entry point (mounts #root)
+  sw.ts                     # Service worker
+  app/                      # App shell, routing, config
+    App.tsx                 # Root component
+    Layout.tsx              # Three-pane layout
+    ConfigProvider.tsx      # Runtime config
+  client/                   # matrix-js-sdk wrapper layer
+    client.tsx              # ClientProvider + useClient()
+  components/               # Shared presentational primitives (Avatar, Tooltip, UserBar, ResizableLayout)
+  features/                 # Feature-scoped: components + hooks together
+    auth/  crypto/  emoji/  gif/  notifications/  settings/  space/  voice/
+    room/                   # Largest feature: RoomList, MemberList, dialogs, plus subfolders:
+      timeline/  composer/  call/  search/  pinned/  settings/  urlPreviews/
+  stores/                   # Cross-cutting Solid stores (activeCall, layout, lastRoom, ...)
+  lib/                      # Small cross-cutting helpers (formatBytes, htmlEscape)
+  types/                    # Shared type helpers
+  test/                     # Test setup/utilities
   styles/
-    index.css               # Tokens + base layer
-  main.tsx
+    global.css              # Tailwind import + @theme tokens + base layer
 ```
 
 Rules:
-- A component in `ui/` knows nothing about Matrix.
-- A component in `features/` may use `matrix/` and `ui/` but not other features' internals — cross-feature comms via stores or events.
-- Hooks colocated with the feature that owns them. Promote to `lib/` only when used by 3+ features.
+- A component in `components/` knows nothing about Matrix.
+- Matrix SDK access is centralized in `client/`; features consume it via `useClient()`.
+- A component in `features/` may use `client/`, `components/`, `stores/`, and `lib/`, but not another feature's internals - cross-feature comms via stores or events.
+- Hooks are colocated with the feature that owns them (e.g. `useTimeline.ts`, `useMemberList.ts`). Promote to `lib/` only when broadly reused.
 
 ---
 
@@ -171,7 +168,7 @@ Rules:
 
 - All interactive elements are real `<button>` / `<a>` / form controls, or have `role` + keyboard handlers.
 - Modals and popovers trap focus and restore it on close. Use a headless library (`@kobalte/core` recommended for Solid) — don't reinvent.
-- Color contrast ≥ 4.5:1 for body text, ≥ 3:1 for large/UI. Verify in dark *and* light themes.
+- Color contrast ≥ 4.5:1 for body text, ≥ 3:1 for large/UI. Verify against the dark token values.
 - All icons that aren't purely decorative get an `aria-label`. Decorative icons get `aria-hidden="true"`.
 - Live regions: typing indicators and new-message announcements use `aria-live="polite"`.
 
@@ -179,16 +176,19 @@ Rules:
 
 ## Commands
 
+This repo uses **pnpm** (see `packageManager` in `package.json`).
+
 ```bash
-npm run dev          # Vite dev server
-npm run build        # Type-check + production build
-npm run preview      # Preview prod build
-npm run lint         # ESLint (solid + tailwindcss plugins)
-npm run typecheck    # tsc --noEmit
-npm run test         # Vitest
+pnpm dev             # Vite dev server
+pnpm build           # Production build (Vite) - does NOT type-check
+pnpm preview         # Preview prod build
+pnpm lint            # Biome check (lint + format)
+pnpm lint:fix        # Biome check --write
+pnpm typecheck       # tsc --noEmit (app + service-worker tsconfig)
+pnpm test            # Vitest (run once); pnpm test:watch to watch
 ```
 
-Run `npm run lint && npm run typecheck` before declaring any task complete.
+CI runs `pnpm lint && pnpm typecheck && pnpm build`. Run the same three before declaring any task complete (add `pnpm test` when you've touched logic with test coverage).
 
 ---
 
@@ -204,7 +204,7 @@ Run `npm run lint && npm run typecheck` before declaring any task complete.
 
 - Optimistic updates for any user action that has a network round-trip.
 - Virtualize any list that can exceed ~50 items (rooms, members, timeline, search results).
-- Honor `prefers-reduced-motion` and `prefers-color-scheme`.
+- Honor `prefers-reduced-motion`.
 - Use design tokens for color, spacing, radii, shadows.
 - Provide a `focus-visible` ring on every focusable element.
 - Use `<Show when={}>` rather than `&&` in JSX (better reactivity, no falsy-render footguns).
@@ -219,7 +219,7 @@ Run `npm run lint && npm run typecheck` before declaring any task complete.
 - Use `<h1>`-`<h6>` arbitrarily for visual size — they carry semantics. Use `text-*` utilities for size, semantic tags for structure.
 - Introduce a state-management library (Redux, Zustand, etc.). Solid stores + context cover everything we need.
 - Add emojis to source code, comments, or non-user-facing UI.
-- Suppress lint or TypeScript errors with `// @ts-ignore` / `eslint-disable` without an inline justification comment.
+- Suppress lint or TypeScript errors with `// @ts-ignore` / `// biome-ignore` without an inline justification comment (Biome's `biome-ignore` already requires a reason string - use it).
 
 ## Ask first
 
