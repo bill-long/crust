@@ -11,6 +11,7 @@ import {
 	Show,
 } from "solid-js";
 import { createStore } from "solid-js/store";
+import { trapTabKey } from "../../../lib/focusTrap";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 import {
@@ -19,9 +20,6 @@ import {
 	PollStartEvent,
 	sendSerializedPollEvent,
 } from "./pollSdk";
-
-const FOCUSABLE =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** MSC3381 caps a poll at 20 answers (the SDK serializer truncates beyond). */
 const MAX_ANSWERS = 20;
@@ -35,8 +33,6 @@ interface CreatePollDialogProps {
 }
 
 interface AnswerRow {
-	/** Stable per-row key so <For> keeps input identity across edits. */
-	key: number;
 	text: string;
 }
 
@@ -57,7 +53,6 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 	let overlayRef!: HTMLDivElement;
 	let questionRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;
-	let nextRowKey = 0;
 
 	const titleId = createUniqueId();
 	const maxSelectionsId = createUniqueId();
@@ -66,7 +61,16 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 	const [answers, setAnswers] = createStore<AnswerRow[]>([]);
 	const [showLive, setShowLive] = createSignal(true);
 	const [multiSelect, setMultiSelect] = createSignal(false);
-	const [maxSelectionsRaw, setMaxSelectionsRaw] = createSignal(2);
+	/** Raw field text, not eagerly clamped: binding the input to a clamped
+	 *  memo would rewrite intermediate keystrokes (typing "10" becomes "2"
+	 *  after the "1"), silently submitting a different cap than typed.
+	 *  Native min/max constraints validate; the clamp applies at submit. */
+	const [maxSelectionsRaw, setMaxSelectionsRaw] = createSignal("2");
+	/** roomId captured at dialog-open time: the composer is one reused
+	 *  instance across room switches, so props.roomId at submit time could
+	 *  point at a different room than the one the user composed the poll
+	 *  for (same race CreateRoomDialog snapshots spaceId against). */
+	const [snapshotRoomId, setSnapshotRoomId] = createSignal("");
 
 	const validAnswers = createMemo(() =>
 		answers.map((a) => a.text.trim()).filter((text) => text.length > 0),
@@ -74,25 +78,36 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 	const canSubmit = createMemo(
 		() => question().trim().length > 0 && validAnswers().length >= MIN_ANSWERS,
 	);
-	/** Effective cap: at least 2, at most the number of usable answers. */
+	/** Upper bound for the multi-select cap: the usable answer count. */
+	const answerCap = createMemo(() =>
+		Math.max(validAnswers().length, MIN_ANSWERS),
+	);
+	/** Effective cap at submit: the raw field clamped into 2..answerCap. */
 	const maxSelections = createMemo(() =>
 		Math.min(
-			Math.max(MIN_ANSWERS, Math.floor(maxSelectionsRaw()) || MIN_ANSWERS),
-			Math.max(validAnswers().length, MIN_ANSWERS),
+			Math.max(
+				MIN_ANSWERS,
+				Math.floor(Number(maxSelectionsRaw())) || MIN_ANSWERS,
+			),
+			answerCap(),
 		),
 	);
 
-	function freshRow(): AnswerRow {
-		nextRowKey += 1;
-		return { key: nextRowKey, text: "" };
-	}
-
 	function resetForm(): void {
 		setQuestion("");
-		setAnswers([freshRow(), freshRow()]);
+		setAnswers([{ text: "" }, { text: "" }]);
 		setShowLive(true);
 		setMultiSelect(false);
-		setMaxSelectionsRaw(2);
+		setMaxSelectionsRaw("2");
+	}
+
+	/** Focus an option input by 1-based position, post-render. */
+	function focusOption(position: number): void {
+		queueMicrotask(() => {
+			overlayRef
+				.querySelector<HTMLInputElement>(`[aria-label="Option ${position}"]`)
+				?.focus();
+		});
 	}
 
 	createEffect(
@@ -100,6 +115,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 			if (isOpen && !wasOpen) {
 				previousFocus = document.activeElement as HTMLElement | null;
 				resetForm();
+				setSnapshotRoomId(props.roomId);
 				queueMicrotask(() => questionRef?.focus());
 			} else if (!isOpen && wasOpen) {
 				if (previousFocus && document.body.contains(previousFocus)) {
@@ -124,19 +140,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 			return;
 		}
 		if (e.key === "Tab") {
-			const focusable = Array.from(
-				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			).filter((el) => el.offsetParent !== null);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
+			trapTabKey(overlayRef, e);
 		}
 	};
 
@@ -152,10 +156,11 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 		// Fire-and-forget, like a message send: the local echo renders the
 		// poll immediately and a failure surfaces via the timeline's
 		// NOT_SENT retry affordances. The console.error mirrors the
-		// reaction-send precedent.
-		sendSerializedPollEvent(props.client, props.roomId, poll).catch(
+		// reaction-send precedent. Sends to the open-time room snapshot.
+		const roomId = snapshotRoomId();
+		sendSerializedPollEvent(props.client, roomId, poll).catch(
 			(err: unknown) => {
-				console.error(`Poll create failed in ${props.roomId}:`, err);
+				console.error(`Poll create failed in ${roomId}:`, err);
 			},
 		);
 		props.onClose();
@@ -227,11 +232,17 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 												type="button"
 												class="rounded p-1 text-text-muted transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 												aria-label={`Remove option ${index() + 1}`}
-												onClick={() =>
+												onClick={() => {
+													const removed = index();
 													setAnswers((rows) =>
-														rows.filter((_, i) => i !== index()),
-													)
-												}
+														rows.filter((_, i) => i !== removed),
+													);
+													// The focused Remove button just left the
+													// DOM; keep keyboard focus inside the trap
+													// by moving to the row that took its place
+													// (or the new last row).
+													focusOption(Math.min(removed + 1, answers.length));
+												}}
 											>
 												<svg
 													class="h-4 w-4"
@@ -255,7 +266,12 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 							type="button"
 							class="mt-2 rounded px-1 text-sm text-accent-text transition-colors hover:text-accent-text-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							disabled={answers.length >= MAX_ANSWERS}
-							onClick={() => setAnswers(answers.length, freshRow())}
+							onClick={() => {
+								setAnswers(answers.length, { text: "" });
+								// Focus the new row; also keeps focus in the trap when
+								// this button self-disables at the answer cap.
+								focusOption(answers.length);
+							}}
 						>
 							+ Add option
 						</button>
@@ -289,12 +305,11 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 							<input
 								id={maxSelectionsId}
 								type="number"
+								required
 								min={MIN_ANSWERS}
-								max={Math.max(validAnswers().length, MIN_ANSWERS)}
-								value={maxSelections()}
-								onInput={(e) =>
-									setMaxSelectionsRaw(Number(e.currentTarget.value))
-								}
+								max={answerCap()}
+								value={maxSelectionsRaw()}
+								onInput={(e) => setMaxSelectionsRaw(e.currentTarget.value)}
 								class="w-16 rounded border border-border-subtle bg-surface-2 px-2 py-1 text-text-primary focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 							answers

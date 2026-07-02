@@ -197,12 +197,69 @@ describe("CreatePollDialog", () => {
 		]);
 	});
 
+	it("does not rewrite in-progress keystrokes in the cap field", () => {
+		setup();
+		fillValidPoll();
+		fireEvent.click(screen.getByLabelText("Allow choosing multiple answers"));
+		const maxInput = screen.getByLabelText(/Up to/) as HTMLInputElement;
+		// An intermediate below-min value must stay as typed (an eagerly
+		// clamped binding would rewrite "1" to "2" mid-keystroke, turning an
+		// intended "10" into "20").
+		fireEvent.input(maxInput, { target: { value: "1" } });
+		expect(maxInput.value).toBe("1");
+	});
+
+	it("keeps focus inside the dialog when removing the focused row", () => {
+		setup();
+		fireEvent.click(screen.getByText("+ Add option"));
+		const remove = screen.getByLabelText("Remove option 3");
+		remove.focus();
+		fireEvent.click(remove);
+		return Promise.resolve().then(() => {
+			// The focused Remove button unmounted; focus must stay in the
+			// dialog rather than escaping the trap to <body>.
+			expect(
+				screen
+					.getByRole("dialog")
+					.contains(document.activeElement as HTMLElement),
+			).toBe(true);
+		});
+	});
+
+	it("moves focus to the new row when adding an option", async () => {
+		setup();
+		fireEvent.click(screen.getByText("+ Add option"));
+		await Promise.resolve();
+		expect(document.activeElement).toBe(optionInput(3));
+	});
+
 	it("closes on Escape without sending", () => {
 		const { client, onClose } = setup();
 		fillValidPoll();
 		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
 		expect(onClose).toHaveBeenCalledOnce();
 		expect(client.sendEvent).not.toHaveBeenCalled();
+	});
+
+	it("sends to the room the dialog was opened in, not the current one", () => {
+		// The composer is one reused instance: a room switch while the
+		// dialog is open must not redirect the poll.
+		const client = createMockClient();
+		const [open, setOpen] = createSignal(false);
+		const [roomId, setRoomId] = createSignal("!original:example.com");
+		render(() => (
+			<CreatePollDialog
+				client={client as unknown as MatrixClient}
+				roomId={roomId()}
+				open={open}
+				onClose={vi.fn(() => setOpen(false))}
+			/>
+		));
+		setOpen(true);
+		fillValidPoll();
+		setRoomId("!switched:example.com");
+		fireEvent.click(submitButton());
+		expect(sentEvent(client).roomId).toBe("!original:example.com");
 	});
 
 	it("resets the form when reopened", () => {

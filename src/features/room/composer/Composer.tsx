@@ -455,6 +455,7 @@ const Composer: Component<{
 				setMentionQuery(null);
 				setEmojiPickerOpen(false);
 				setGifPickerOpen(false);
+				setPollDialogOpen(false);
 				setPreviewOpen(false);
 				clearAttachments();
 				// A send pinned to the previous room may still be in flight; reset
@@ -1123,7 +1124,7 @@ const Composer: Component<{
 					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 pr-32 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
 					rows={1}
 				/>
-				{/* Poll button (hidden when editing — polls are new sends). */}
+				{/* Poll button (hidden when editing - polls are new sends). */}
 				<Show when={!props.editingEvent}>
 					<button
 						type="button"
