@@ -1285,7 +1285,7 @@ const Composer: Component<{
 					<Show when={voiceSupported && !props.editingEvent}>
 						<button
 							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							onClick={() => void startRecording()}
 							aria-label="Record voice message"
 						>
@@ -1309,7 +1309,7 @@ const Composer: Component<{
 					<Show when={!props.editingEvent}>
 						<button
 							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							onClick={() => {
 								setPollDialogOpen(true);
 								setGifPickerOpen(false);
@@ -1350,7 +1350,7 @@ const Composer: Component<{
 						/>
 						<button
 							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							onClick={() => fileInputRef?.click()}
 							aria-label="Attach file"
 						>
@@ -1364,7 +1364,7 @@ const Composer: Component<{
 								gifButtonRef = el;
 							}}
 							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							onClick={() => {
 								setGifPickerOpen((v) => !v);
 								setEmojiPickerOpen(false);
@@ -1381,7 +1381,7 @@ const Composer: Component<{
 							emojiButtonRef = el;
 						}}
 						type="button"
-						class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
+						class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 						onClick={() => {
 							setEmojiPickerOpen((v) => !v);
 							setGifPickerOpen(false);

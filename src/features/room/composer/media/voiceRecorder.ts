@@ -147,7 +147,13 @@ export function createVoiceRecorder(
 			clearTimeout(maxTimer);
 			maxTimer = null;
 		}
-		for (const track of stream?.getTracks() ?? []) track.stop();
+		for (const track of stream?.getTracks() ?? []) {
+			// Spec-wise a local stop() fires no "ended" event, but detach the
+			// interruption listener first anyway so teardown can never be
+			// mistaken for an external interruption.
+			track.removeEventListener("ended", onExternalInterruption);
+			track.stop();
+		}
 		stream = null;
 		analyser = null;
 		void audioContext?.close().catch(() => {});
