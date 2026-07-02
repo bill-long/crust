@@ -159,6 +159,13 @@ export function createVoiceRecorder(
 		void audioContext?.close().catch(() => {});
 		audioContext = null;
 		recorder = null;
+		// Release the capture buffers: after a long note they can hold
+		// megabytes that would otherwise stay referenced by this closure
+		// until the next start(). stop() builds its Blob before this runs
+		// (the Blob owns its own copy of the data).
+		chunks = [];
+		amplitudes = [];
+		setLiveAmplitudes([]);
 		setRecording(false);
 	}
 
@@ -360,10 +367,8 @@ export function createVoiceRecorder(
 				}
 			}
 		}
-		chunks = [];
-		amplitudes = [];
-		setLiveAmplitudes([]);
 		setElapsedMs(0);
+		// releaseResources also clears the capture buffers.
 		releaseResources();
 	}
 
