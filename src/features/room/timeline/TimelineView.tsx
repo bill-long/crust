@@ -832,15 +832,19 @@ const TimelineView: Component<{
 	// scroll settling. Suppressed when behind live (`canLoadNewer`) so
 	// forward pagination via "Load newer messages" doesn't jump past the
 	// loaded page. A single deferred scroll (not a settle loop) - late row
-	// growth is re-pinned by the re-anchor ResizeObserver above, so one
-	// scrollTo per arrival is enough and avoids continuously refreshing the
-	// programmatic-scroll grace window.
+	// growth is re-pinned by the re-anchor ResizeObserver above (which also
+	// covers a hidden-tab pin that scrolled short before virtua remeasured the
+	// row: the row grows on foreground and the observer re-pins), so one
+	// scrollTo per arrival is enough and avoids refreshing the grace window.
 	//
-	// Coalescing (not cancel-and-reschedule): while a pin is already pending
-	// we leave it, so a burst of arrivals faster than one frame still fires it
+	// Coalescing (not cancel-and-reschedule): while a pin is already pending we
+	// leave it, so a burst of arrivals faster than one frame still fires it
 	// promptly (it re-reads scrollHeight when it runs) instead of being pushed
-	// out one frame per arrival and starving. The pin re-checks its gates at
-	// fire time because `canLoadNewer` can flip during the deferral.
+	// out one frame per arrival and starving. `scheduleFrame` runs it via
+	// setTimeout while the tab is hidden (rAF is paused there - the #324 bug);
+	// a pin scheduled as rAF just before the tab hides simply resumes on
+	// foreground. The pin re-checks its gates at fire time because
+	// `canLoadNewer` can flip during the deferral.
 	let cancelPin: (() => void) | null = null;
 	const schedulePin = (): void => {
 		if (cancelPin) return;
@@ -860,39 +864,7 @@ const TimelineView: Component<{
 			},
 		),
 	);
-
-	if (typeof document !== "undefined") {
-		const onVisibilityChange = (): void => {
-			// A pending pin was scheduled under whichever primitive matched the
-			// visibility state at the time - a rAF is paused the instant the tab
-			// hides (never firing, re-stranding the append); a throttled timeout
-			// lags once the tab is shown. On a flip, cancel and re-schedule under
-			// the now-correct primitive so it neither stalls nor lags.
-			if (cancelPin) {
-				cancelPin();
-				cancelPin = null;
-				schedulePin();
-				return;
-			}
-			// Nothing pending: a pin that fired while hidden may have scrolled
-			// against a layout virtua had not finished measuring and stopped
-			// short. On returning to the foreground, re-pin only when we should
-			// be at the live end but actually aren't - so a stranded append is
-			// corrected against real layout without yanking an already-settled
-			// view.
-			if (document.hidden || !wantsBottom() || canLoadNewer() || !scrollRef) {
-				return;
-			}
-			const dist =
-				scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
-			if (dist > 1) schedulePin();
-		};
-		document.addEventListener("visibilitychange", onVisibilityChange);
-		onCleanup(() => {
-			document.removeEventListener("visibilitychange", onVisibilityChange);
-			cancelPin?.();
-		});
-	}
+	onCleanup(() => cancelPin?.());
 
 	// Sync the timeline hook's followingLive state with scroll position.
 	// When the user scrolls up, stop extending the window with live events.
