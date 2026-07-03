@@ -8,12 +8,12 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import { updateSetting, userSettings } from "../../stores/settings";
+import { pushLocalUrlPreviewSetting } from "../../client/urlPreviewSync";
 import {
 	SCREEN_SHARE_QUALITY_ORDER,
 	SCREEN_SHARE_QUALITY_SPECS,
-} from "../room/call/rtc/screenShareQuality";
-import { pushLocalUrlPreviewSetting } from "../room/urlPreviews/accountDataSync";
+} from "../../lib/screenShareQuality";
+import { updateSetting, userSettings } from "../../stores/settings";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 function MicDeviceSelect(): ReturnType<Component> {
