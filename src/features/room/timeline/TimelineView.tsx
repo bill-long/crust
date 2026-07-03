@@ -589,47 +589,39 @@ const TimelineView: Component<{
 	// Frame scheduler that survives a hidden/backgrounded tab. The browser
 	// pauses `requestAnimationFrame` entirely while the document is hidden,
 	// which would strand every scroll-to-bottom path (room-entry pin, live
-	// append) until the tab is next foregrounded — the tab may never be (an
+	// append) until the tab is next foregrounded - the tab may never be (an
 	// E2E harness or a long-lived background session), leaving live messages
 	// appended to the store but never scrolled into the virtualizer's
 	// rendered range. `setTimeout` still fires when hidden (throttled to ~1s,
-	// which is fine — nobody is watching), so fall back to it. See #324.
-	const scheduleFrame = (cb: () => void): void => {
+	// which is fine - nobody is watching), so fall back to it. Returns a
+	// handle so a pending callback can be cancelled and re-scheduled under the
+	// other primitive when visibility flips (see the live-append pin). The
+	// rAF-vs-timeout choice is made at schedule time, so a caller that must
+	// survive a mid-flight visibility change re-schedules on `visibilitychange`
+	// rather than relying on this alone. See #324.
+	type FrameHandle = { cancel: () => void };
+	const scheduleFrame = (cb: () => void): FrameHandle => {
 		if (typeof document !== "undefined" && document.hidden) {
-			setTimeout(cb, 16);
-		} else {
-			requestAnimationFrame(cb);
+			const id = setTimeout(cb, 16);
+			return { cancel: () => clearTimeout(id) };
 		}
+		const id = requestAnimationFrame(cb);
+		return { cancel: () => cancelAnimationFrame(id) };
 	};
-	// Guards against stacking overlapping settle loops when live messages
-	// arrive in a burst. Unlike a bare "raf pending" flag it can never latch
-	// permanently off: every exit path of the loop clears it, and the loop is
-	// bounded by MAX_SETTLE_FRAMES and scheduled via `scheduleFrame` (which
-	// always fires, even hidden), so it is guaranteed to run and reset.
-	let settleActive = false;
 	const settleAtBottom = (): void => {
-		if (settleActive) return;
-		settleActive = true;
 		let stableFrames = 0;
 		let mountFrames = 0;
 		let settleFrames = 0;
-		const finish = (): void => {
-			settleActive = false;
-		};
 		const tick = (): void => {
-			if (!wantsBottom()) {
-				finish();
-				return;
-			}
+			if (!wantsBottom()) return;
 			const el = scrollEl();
 			if (!el?.isConnected) {
 				// Scroller not mounted yet (parent <Show> still rendering its
-				// loading fallback) — or briefly detached during a room
+				// loading fallback) - or briefly detached during a room
 				// switch that unmounts and remounts the scroller. Retry up
 				// to MAX_MOUNT_FRAMES so the room-entry pin survives a slow
 				// initial sync.
 				if (++mountFrames < MAX_MOUNT_FRAMES) scheduleFrame(tick);
-				else finish();
 				return;
 			}
 			const before = el.scrollTop;
@@ -639,15 +631,11 @@ const TimelineView: Component<{
 			const dist = el.scrollHeight - after - el.clientHeight;
 			if (dist < 1 && Math.abs(after - before) < 1) {
 				stableFrames++;
-				if (stableFrames >= STABLE_FRAMES_REQUIRED) {
-					finish();
-					return;
-				}
+				if (stableFrames >= STABLE_FRAMES_REQUIRED) return;
 			} else {
 				stableFrames = 0;
 			}
 			if (++settleFrames < MAX_SETTLE_FRAMES) scheduleFrame(tick);
-			else finish();
 		};
 		scheduleFrame(tick);
 	};
@@ -848,35 +836,60 @@ const TimelineView: Component<{
 	// because the latter is transiently flipped false during programmatic
 	// scroll settling. Suppressed when behind live (`canLoadNewer`) so
 	// forward pagination via "Load newer messages" doesn't jump past the
-	// loaded page. Delegates to the shared `settleAtBottom` loop so the pin
-	// re-reads scrollHeight each frame (late image/emoji growth), coalesces a
-	// burst of arrivals into one loop, and — crucially — schedules via
-	// `scheduleFrame`, which keeps working when the tab is hidden (a bare
-	// `requestAnimationFrame` never fires while backgrounded, which used to
-	// strand every live append below the fold until reload; see #324).
+	// loaded page. A single deferred scroll (not a settle loop) - late row
+	// growth is re-pinned by the re-anchor ResizeObserver above, so one
+	// scrollTo per arrival is enough and avoids continuously refreshing the
+	// programmatic-scroll grace window.
+	//
+	// The pending scroll is held in `pinHandle` so a `visibilitychange` can
+	// re-target it: `scheduleFrame` picks rAF-vs-timeout at schedule time, so
+	// a rAF scheduled while visible is paused the instant the tab hides and
+	// would never fire (re-stranding the append, the #324 symptom); a timeout
+	// scheduled while hidden is slow once the tab is shown again. Cancelling
+	// and re-scheduling under the now-correct primitive keeps it from latching
+	// and flushes immediately on foreground. Re-checks its gates at fire time
+	// because `canLoadNewer` can flip during the deferral.
+	let pinHandle: FrameHandle | null = null;
+	const pinToBottom = (): void => {
+		if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
+		markProgrammaticScroll();
+		scrollRef.scrollTo({ top: scrollRef.scrollHeight });
+	};
+	const schedulePin = (): void => {
+		pinHandle?.cancel();
+		pinHandle = scheduleFrame(() => {
+			pinHandle = null;
+			pinToBottom();
+		});
+	};
 	createEffect(
 		on(
 			() => events.length,
 			(len) => {
 				if (!wantsBottom() || canLoadNewer() || len === 0) return;
-				settleAtBottom();
+				schedulePin();
 			},
 		),
 	);
 
-	// Flush the bottom pin when the tab returns to the foreground. While
-	// hidden, scroll scheduling is throttled hard; on becoming visible again
-	// re-settle so any messages that landed in the background are scrolled
-	// into view immediately rather than waiting for the next arrival.
 	if (typeof document !== "undefined") {
-		const onVisible = (): void => {
-			if (document.hidden) return;
-			if (wantsBottom() && !canLoadNewer()) settleAtBottom();
+		const onVisibilityChange = (): void => {
+			// Re-target a pending pin under the primitive matching the new
+			// visibility state (a hidden-paused rAF becomes a timeout so it
+			// still fires; a slow hidden timeout becomes a rAF so it fires at
+			// once on foreground). With nothing pending, flush a fresh pin when
+			// returning to the foreground so messages that landed in the
+			// background are revealed immediately rather than on next arrival.
+			if (pinHandle) schedulePin();
+			else if (!document.hidden && wantsBottom() && !canLoadNewer()) {
+				schedulePin();
+			}
 		};
-		document.addEventListener("visibilitychange", onVisible);
-		onCleanup(() =>
-			document.removeEventListener("visibilitychange", onVisible),
-		);
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		onCleanup(() => {
+			document.removeEventListener("visibilitychange", onVisibilityChange);
+			pinHandle?.cancel();
+		});
 	}
 
 	// Sync the timeline hook's followingLive state with scroll position.
