@@ -145,4 +145,34 @@ describe("useTimeline thread gating", () => {
 			await flushPromises();
 			expect(events.map((e) => e.eventId)).toEqual(["$root"]);
 		}));
+
+	it("projects a thread summary onto roots (provisional from the bundle)", () =>
+		withRoot(async () => {
+			const room = createMockRoom(ROOM_ID, [
+				{
+					...textMessage(ROOM_ID, "$root", "@a:hs", "root with thread", 1000),
+					serverAggregations: {
+						"m.thread": {
+							count: 2,
+							current_user_participated: false,
+							latest_event: { sender: "@b:hs", origin_server_ts: 5000 },
+						},
+					},
+				},
+				textMessage(ROOM_ID, "$plain", "@a:hs", "no thread here", 2000),
+			]);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+			);
+			await flushPromises();
+			expect(events[0].thread).toMatchObject({
+				threadId: "$root",
+				replyCount: 2,
+				latestSender: "@b:hs",
+				provisional: true,
+			});
+			expect(events[1].thread).toBeNull();
+		}));
 });

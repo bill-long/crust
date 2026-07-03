@@ -1,5 +1,6 @@
 import { type Component, Show } from "solid-js";
 import { Tooltip } from "../../components/Tooltip";
+import { formatRelativeTime } from "../../lib/relativeTime";
 
 export interface DeviceInfo {
 	deviceId: string;
@@ -16,18 +17,9 @@ interface DeviceItemProps {
 
 function formatLastSeen(ts: number | undefined): string {
 	if (!ts) return "Unknown";
-	const date = new Date(ts);
-	const now = Date.now();
-	const diffMs = now - ts;
-	const diffMins = Math.floor(diffMs / 60_000);
-	const diffHours = Math.floor(diffMs / 3_600_000);
-	const diffDays = Math.floor(diffMs / 86_400_000);
-
-	if (diffMins < 1) return "Just now";
-	if (diffMins < 60) return `${diffMins}m ago`;
-	if (diffHours < 24) return `${diffHours}h ago`;
-	if (diffDays < 7) return `${diffDays}d ago`;
-	return date.toLocaleDateString();
+	const label = formatRelativeTime(ts, Date.now());
+	// Sentence position: "Just now" rather than "just now".
+	return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 const DeviceItem: Component<DeviceItemProps> = (props) => {
