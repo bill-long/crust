@@ -533,7 +533,14 @@ const RoomPane: Component<{
 						const el = membersToggleEl;
 						if (el)
 							queueMicrotask(() => {
-								if (document.body.contains(el)) el.focus();
+								if (!document.body.contains(el)) return;
+								// Only restore when focus dropped to the body
+								// (Kobalte's default on close) or was cleared —
+								// never override a control the user focused during
+								// the close transition. Mirrors ThreadPanel /
+								// Composer focus-restore guards.
+								const active = document.activeElement;
+								if (!active || active === document.body) el.focus();
 							});
 					}
 				}}
