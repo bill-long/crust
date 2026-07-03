@@ -1,5 +1,6 @@
 import {
 	ClientEvent,
+	type EventTimeline,
 	EventType,
 	type MatrixClient,
 	type MatrixEvent,
@@ -14,6 +15,7 @@ import {
 	isRenderablePollContent,
 	pollPreviewText,
 } from "../lib/pollCopy";
+import { isThreadReply, isThreadTimelineData } from "../lib/threadEvents";
 import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
@@ -320,6 +322,12 @@ function isDisplayableMessage(event: MatrixEvent): boolean {
 	// for MatrixEventEvent.Decrypted to correct the sidebar preview.
 	const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 	if (relType === "m.replace") return false;
+	// Thread replies belong to their thread, not the room preview (the
+	// sidebar keeps showing the latest MAIN-timeline message). NOTE: the
+	// timeline listener that calls updateUnreadCounts must stay UNgated for
+	// thread emissions - room badges sum per-thread counts, and the thread
+	// emission is what refreshes them.
+	if (isThreadReply(event)) return false;
 	// A poll start must be renderable (readable question + well-formed
 	// answers) to preview - approximates the timeline's parsePollStart gate
 	// so a redacted/malformed poll never surfaces its raw event type string
@@ -574,14 +582,15 @@ export function createSummariesStore(client: MatrixClient): {
 		room: Room | undefined,
 		_toStartOfTimeline: boolean | undefined,
 		_removed: boolean | undefined,
-		data: { liveEvent?: boolean },
+		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void {
 		if (!room || !data.liveEvent) return;
 
-		// Sample server-time offset from every live event before any other
-		// processing so subsequent calls in this handler use the freshest
-		// possible offset. If the offset shifted materially, re-evaluate
-		// every room's `callActive` and re-arm timers.
+		// Sample server-time offset from every live event - INCLUDING
+		// thread-timeline emissions - before any other processing so
+		// subsequent calls in this handler use the freshest possible
+		// offset. If the offset shifted materially, re-evaluate every
+		// room's `callActive` and re-arm timers.
 		const prevOffset = serverTime.getOffsetMs();
 		if (
 			serverTime.sampleFromEvent(event) &&
@@ -589,6 +598,17 @@ export function createSummariesStore(client: MatrixClient): {
 				MATERIAL_OFFSET_CHANGE_MS
 		) {
 			refreshAllCallActive();
+		}
+
+		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true.
+		// Unread counts must still refresh (room badges sum per-thread
+		// counts, and the thread emission is what delivers the change), but
+		// the PREVIEW branches below must not run: a dual-homed thread ROOT
+		// re-emitted from its thread timeline would clobber a newer preview.
+		if (isThreadTimelineData(data)) {
+			if (!summaries[room.roomId]) upsertRoom(room);
+			updateUnreadCounts(room);
+			return;
 		}
 
 		// Ensure room exists in store before field-level updates

@@ -467,7 +467,13 @@ const TimelineView: Component<{
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
 		client
-			.sendReadReceipt(matrixEvent, ReceiptType.Read)
+			// UNTHREADED (3rd arg): with threadSupport on, a plain receipt
+			// gets thread_id "main" and clears only main-timeline counts -
+			// the per-thread counts the room badge sums would then be
+			// un-clearable from Crust (no per-thread receipt path until the
+			// thread panel lands). Unthreaded preserves the pre-thread
+			// invariant: reading a room to the bottom clears its whole badge.
+			.sendReadReceipt(matrixEvent, ReceiptType.Read, true)
 			.then(() => {
 				lastSentReceiptEventId = eventId;
 			})

@@ -114,6 +114,23 @@ export function createMatrixEvent(evt: MockEvent) {
 		event: { redacts: evt.redacts },
 		getStateKey: () => evt.stateKey,
 		getPrevContent: () => evt.prevContent ?? {},
+		/**
+		 * Mirrors SDK `isRelation(relType?)`: reads WIRE content (the mock's
+		 * raw `evt.content` - unaffected by edits/redactions, like the real
+		 * getWireContent), requires both rel_type and event_id, and returns
+		 * false for state events (which cannot be thread/replace relations).
+		 */
+		isRelation: (relType?: string): boolean => {
+			if (evt.stateKey !== undefined) return false;
+			const relation = evt.content?.["m.relates_to"] as
+				| { rel_type?: string; event_id?: string }
+				| undefined;
+			return !!(
+				relation?.rel_type &&
+				relation.event_id &&
+				(relType ? relation.rel_type === relType : true)
+			);
+		},
 		get status() {
 			return status;
 		},
@@ -478,6 +495,34 @@ export function textMessage(
 		sender,
 		type: "m.room.message",
 		content: { msgtype: "m.text", body },
+		ts,
+	};
+}
+
+/** A thread reply in the MSC3440 wire shape (fallback m.in_reply_to). */
+export function threadReplyEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	rootId: string,
+	body: string,
+	ts = Date.now(),
+): MockEvent {
+	return {
+		eventId,
+		roomId,
+		sender,
+		type: "m.room.message",
+		content: {
+			msgtype: "m.text",
+			body,
+			"m.relates_to": {
+				rel_type: "m.thread",
+				event_id: rootId,
+				is_falling_back: true,
+				"m.in_reply_to": { event_id: rootId },
+			},
+		},
 		ts,
 	};
 }

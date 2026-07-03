@@ -1,12 +1,14 @@
 import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	createMatrixEvent,
 	createMockClient,
 	createMockRoom,
 	pollEndEvent,
 	pollResponseEvent,
 	pollStartEvent,
 	textMessage,
+	threadReplyEvent,
 } from "../test/mockClient";
 import {
 	callMembershipExpiresAt,
@@ -665,6 +667,7 @@ describe("createSummariesStore call expiry timer", () => {
 			getContent: () => ({}),
 			getType: () => "m.room.message",
 			getSender: () => "@a:x",
+			isRelation: () => false,
 		} as unknown as MatrixEvent;
 		client.__emit("Room.timeline", liveEvent, room, undefined, false, {
 			liveEvent: true,
@@ -1004,6 +1007,56 @@ describe("createSummariesStore poll previews", () => {
 		store.init();
 
 		expect(store.summaries["!r:x"].lastMessage?.body).toBe("latest text");
+		store.cleanup();
+	});
+
+	it("skips thread replies when picking the preview event", () => {
+		// Thread replies belong to their thread, not the sidebar preview;
+		// the latest MAIN-timeline message wins.
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$main", "@alice:x", "main message", 1000),
+				threadReplyEvent("!r:x", "$tr", "@bob:x", "$main", "in thread", 2000),
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("main message");
+		store.cleanup();
+	});
+
+	it("thread-timeline emissions refresh unread counts but never the preview", () => {
+		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true.
+		// A dual-homed thread ROOT re-emitted from its thread timeline must
+		// not clobber a newer preview - but the badge still refreshes
+		// (room badges sum per-thread counts).
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$root", "@alice:x", "old root", 1000),
+				textMessage("!r:x", "$newer", "@alice:x", "newer main", 2000),
+			]),
+		);
+		let unread = 0;
+		(room as unknown as Record<string, unknown>).getUnreadNotificationCount =
+			() => unread;
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("newer main");
+
+		unread = 3;
+		const rootEvent = createMatrixEvent(
+			textMessage("!r:x", "$root", "@alice:x", "old root", 1000),
+		);
+		client.__emit("Room.timeline", rootEvent, room, undefined, false, {
+			liveEvent: true,
+			timeline: { getTimelineSet: () => ({ thread: { id: "$root" } }) },
+		});
+
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("newer main");
+		expect(store.summaries["!r:x"].unreadCount).toBe(3);
 		store.cleanup();
 	});
 });

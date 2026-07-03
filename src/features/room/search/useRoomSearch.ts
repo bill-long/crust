@@ -14,6 +14,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { isThreadReply } from "../../../lib/threadEvents";
 
 /**
  * Server search returns results across all the user's rooms by default;
@@ -85,6 +86,10 @@ export function projectEvent(
 	const content = (ev.getContent?.() ?? {}) as Record<string, unknown>;
 	const relates = content["m.relates_to"] as { rel_type?: string } | undefined;
 	if (relates?.rel_type === "m.replace") return null;
+	// Thread replies aren't part of the main timeline; searching them is
+	// thread-panel territory (issue #303). Belt-and-suspenders: the search
+	// scan iterates the unfiltered set, which no longer contains them.
+	if (isThreadReply(ev)) return null;
 	const body = typeof content.body === "string" ? content.body : "";
 	if (!body) return null;
 	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
