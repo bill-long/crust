@@ -1471,9 +1471,18 @@ export function useTimeline(
 				merge: false,
 			}),
 		);
+		pruneThreadProjections();
 
 		clearCallExpiryTimer();
 		if (nextExpiry !== null) scheduleCallExpiryRefresh(room, nextExpiry);
+	}
+
+	/** Keep the thread watcher's projected-id tracking bounded to the rows
+	 *  actually in the store: it records EVERY projected id (any message
+	 *  can become a thread root later), so without pruning it grows
+	 *  monotonically as the user paginates through a room. */
+	function pruneThreadProjections(): void {
+		threadWatcher.pruneProjected(new Set(events.map((e) => e.eventId)));
 	}
 
 	/**
@@ -1538,6 +1547,7 @@ export function useTimeline(
 				}
 			}),
 		);
+		pruneThreadProjections();
 	}
 
 	function loadRoom(rid: string): void {

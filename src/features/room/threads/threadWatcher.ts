@@ -30,6 +30,13 @@ export interface ThreadWatcher {
 	 * Returns null when the event heads no thread (no chip).
 	 */
 	getSummary(rootEvent: MatrixEvent, room: Room): ThreadSummary | null;
+	/**
+	 * Drop tracking for every projected id NOT in `visible` (the store's
+	 * current event ids). Without this the projected set - which records
+	 * EVERY projected row, since any message can become a root later -
+	 * grows monotonically as the user paginates through a room.
+	 */
+	pruneProjected(visible: ReadonlySet<string>): void;
 	/** Remove every SDK listener and drop all cached state. */
 	dispose(): void;
 }
@@ -132,6 +139,15 @@ export function createThreadWatcher(
 				: buildProvisionalThreadSummary(rootEvent);
 			if (summary && isWatchedRoom) summaries.set(rootId, summary);
 			return summary;
+		},
+
+		pruneProjected(visible: ReadonlySet<string>): void {
+			for (const id of projectedEvents) {
+				if (!visible.has(id)) projectedEvents.delete(id);
+			}
+			for (const id of summaries.keys()) {
+				if (!visible.has(id)) summaries.delete(id);
+			}
 		},
 
 		dispose(): void {

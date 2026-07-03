@@ -127,6 +127,24 @@ describe("createThreadWatcher", () => {
 		expect(watcher.getSummary(rootEvent, room as unknown as Room)).toBeNull();
 	});
 
+	it("prunes tracking for ids that left the visible store", () => {
+		const { room, watcher, onUpdate, rootEvent } = setup();
+		const thread = threadStub("$root", 1, { sender: "@b:test", ts: 5000 });
+		room.threads.set("$root", thread);
+		watcher.getSummary(rootEvent, room as unknown as Room);
+		onUpdate.mockClear();
+
+		// The root scrolled out of the loaded window; its emissions must no
+		// longer re-project (and the cached summary is re-derived on the
+		// next projection rather than served stale).
+		watcher.pruneProjected(new Set(["$other"]));
+		room.__emit(
+			ThreadEvent.Update,
+			threadStub("$root", 2, { sender: "@c:test", ts: 6000 }),
+		);
+		expect(onUpdate).not.toHaveBeenCalled();
+	});
+
 	it("drops cache and listeners on room switch", () => {
 		const { room, watcher, onUpdate, rootEvent } = setup();
 		room.threads.set("$root", threadStub("$root", 2));
