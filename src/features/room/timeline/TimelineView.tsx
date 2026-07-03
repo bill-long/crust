@@ -597,8 +597,8 @@ const TimelineView: Component<{
 	// scroll-settling churn) and resumes on foreground.
 	const scheduleFrame = (cb: () => void): (() => void) => {
 		if (typeof document !== "undefined" && document.hidden) {
-			const id = setTimeout(cb, 16);
-			return () => clearTimeout(id);
+			const id = window.setTimeout(cb, 16);
+			return () => window.clearTimeout(id);
 		}
 		const id = requestAnimationFrame(cb);
 		return () => cancelAnimationFrame(id);
@@ -861,18 +861,31 @@ const TimelineView: Component<{
 		),
 	);
 
-	// A pending pin was scheduled under whichever primitive matched the
-	// visibility state at the time - a rAF is paused the instant the tab hides
-	// (never firing, re-stranding the append), a throttled timeout lags once
-	// the tab is shown. On a flip, cancel and re-schedule the pending pin under
-	// the now-correct primitive so it neither stalls nor lags. Nothing pending
-	// means we're already settled, so there's nothing to flush.
 	if (typeof document !== "undefined") {
 		const onVisibilityChange = (): void => {
-			if (!cancelPin) return;
-			cancelPin();
-			cancelPin = null;
-			schedulePin();
+			// A pending pin was scheduled under whichever primitive matched the
+			// visibility state at the time - a rAF is paused the instant the tab
+			// hides (never firing, re-stranding the append); a throttled timeout
+			// lags once the tab is shown. On a flip, cancel and re-schedule under
+			// the now-correct primitive so it neither stalls nor lags.
+			if (cancelPin) {
+				cancelPin();
+				cancelPin = null;
+				schedulePin();
+				return;
+			}
+			// Nothing pending: a pin that fired while hidden may have scrolled
+			// against a layout virtua had not finished measuring and stopped
+			// short. On returning to the foreground, re-pin only when we should
+			// be at the live end but actually aren't - so a stranded append is
+			// corrected against real layout without yanking an already-settled
+			// view.
+			if (document.hidden || !wantsBottom() || canLoadNewer() || !scrollRef) {
+				return;
+			}
+			const dist =
+				scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight;
+			if (dist > 1) schedulePin();
 		};
 		document.addEventListener("visibilitychange", onVisibilityChange);
 		onCleanup(() => {
