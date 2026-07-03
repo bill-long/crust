@@ -113,7 +113,7 @@ describe("uploadAndSend", () => {
 		const info = content.info as Record<string, unknown>;
 		expect(info).toMatchObject({ w: 1600, h: 1200, size: 50 });
 		expect(info.thumbnail_url).toBe("mxc://srv/thumb");
-		expect(client.sendMessage).toHaveBeenCalledWith(ROOM, content);
+		expect(client.sendMessage).toHaveBeenCalledWith(ROOM, null, content);
 		expect(progress.at(-1)).toBe(1);
 	});
 

@@ -1,4 +1,4 @@
-import type { MatrixClient } from "matrix-js-sdk";
+import { EventStatus, type MatrixClient } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
 import {
@@ -273,5 +273,66 @@ describe("useTimeline thread gating", () => {
 			});
 			await flushPromises();
 			expect(events.map((e) => e.eventId)).toEqual(["$root", "$r1"]);
+		}));
+
+	it("injects, rekeys, and cancels thread-send local echoes", () =>
+		withRoot(async () => {
+			// Under Chronological ordering a thread send's pending echo lives
+			// in NO timeline, so the store must inject it from
+			// LocalEchoUpdated and reconcile the rekey/cancel itself.
+			const room = createMockRoom(ROOM_ID, []);
+			const { thread } = createMockThread("$root", [
+				textMessage(ROOM_ID, "$root", "@a:hs", "the root", 1000),
+			]);
+			room.threads.set("$root", thread);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				{ source: () => threadTimelineSource("$root") },
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				...threadReplyEvent(
+					ROOM_ID,
+					"~txn1",
+					"@me:hs",
+					"$root",
+					"sending…",
+					2000,
+				),
+				status: EventStatus.SENDING,
+			});
+			client.__emit("Room.localEchoUpdated", echo, room);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "~txn1"]);
+			expect(events[1].status).toBe(EventStatus.SENDING);
+
+			// Remote confirmation: the SDK rekeys the same event object and
+			// re-emits with the old id.
+			echo.__setId("$confirmed");
+			echo.__setStatus(null);
+			client.__emit("Room.localEchoUpdated", echo, room, "~txn1");
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "$confirmed"]);
+			expect(events[1].status).toBeNull();
+
+			// A second, discarded echo: CANCELLED drops the injected row.
+			const echo2 = createMatrixEvent({
+				...threadReplyEvent(ROOM_ID, "~txn2", "@me:hs", "$root", "oops", 3000),
+				status: EventStatus.SENDING,
+			});
+			client.__emit("Room.localEchoUpdated", echo2, room);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$confirmed",
+				"~txn2",
+			]);
+			echo2.__setStatus(EventStatus.CANCELLED);
+			client.__emit("Room.localEchoUpdated", echo2, room);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "$confirmed"]);
 		}));
 });
