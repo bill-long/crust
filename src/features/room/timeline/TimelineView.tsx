@@ -586,74 +586,23 @@ const TimelineView: Component<{
 	// takes longer than that to mount, layout has bigger problems.
 	const MAX_MOUNT_FRAMES = 30;
 	const STABLE_FRAMES_REQUIRED = 4;
-	// Frame scheduler that survives a hidden/backgrounded tab. The browser
-	// pauses `requestAnimationFrame` entirely while the document is hidden,
-	// which would strand every scroll-to-bottom path (room-entry pin, live
-	// append) until the tab is next foregrounded - the tab may never be (an
-	// E2E harness or a long-lived background session), leaving live messages
-	// appended to the store but never scrolled into the virtualizer's
-	// rendered range. `setTimeout` still fires when hidden (throttled to ~1s,
-	// which is fine - nobody is watching), so fall back to it. See #324.
-	//
-	// The rAF-vs-timeout choice is made when armed, so a `visibilitychange`
-	// re-arms every in-flight frame under the now-correct primitive: a rAF
-	// scheduled while visible is paused the instant the tab hides and would
-	// never fire; a throttled timeout scheduled while hidden lags once the tab
-	// is shown. This protects BOTH the live-append pin and the room-entry
-	// settle loop against a mid-flight flip without per-caller handling.
-	type FrameHandle = { cancel: () => void };
-	interface FrameEntry {
-		cb: () => void;
-		cancelTimer: () => void;
-	}
-	// Every in-flight frame, so `visibilitychange` can re-arm it and
-	// `onCleanup` can cancel work still scheduled at unmount (a throttled
-	// `setTimeout` tick that would otherwise fire against a detached scroller).
-	// Entries remove themselves once they run.
-	const pendingFrames = new Set<FrameEntry>();
-	const armFrame = (entry: FrameEntry): void => {
-		const run = (): void => {
-			pendingFrames.delete(entry);
-			entry.cb();
-		};
+	// Frame scheduler for the live-append pin that survives a hidden tab. The
+	// browser pauses `requestAnimationFrame` entirely while the document is
+	// hidden, which used to strand a live append below the fold until reload
+	// (see #324). `setTimeout` still fires while hidden (throttled to ~1s,
+	// which is fine - nobody is watching), so fall back to it. Returns a
+	// cancel fn so the pin can re-target its pending frame when visibility
+	// flips. Only the live pin needs this; the room-entry settle loop below
+	// stays on raw rAF, which correctly idles while hidden (no invisible
+	// scroll-settling churn) and resumes on foreground.
+	const scheduleFrame = (cb: () => void): (() => void) => {
 		if (typeof document !== "undefined" && document.hidden) {
-			const id = setTimeout(run, 16);
-			entry.cancelTimer = () => clearTimeout(id);
-		} else {
-			const id = requestAnimationFrame(run);
-			entry.cancelTimer = () => cancelAnimationFrame(id);
+			const id = setTimeout(cb, 16);
+			return () => clearTimeout(id);
 		}
+		const id = requestAnimationFrame(cb);
+		return () => cancelAnimationFrame(id);
 	};
-	const scheduleFrame = (cb: () => void): FrameHandle => {
-		const entry: FrameEntry = { cb, cancelTimer: () => {} };
-		armFrame(entry);
-		pendingFrames.add(entry);
-		return {
-			cancel: () => {
-				entry.cancelTimer();
-				pendingFrames.delete(entry);
-			},
-		};
-	};
-	if (typeof document !== "undefined") {
-		const onVisibilityChange = (): void => {
-			// Re-arm each pending frame under the primitive matching the new
-			// visibility state (snapshot first: re-arming only swaps timers, but
-			// guard against concurrent mutation defensively).
-			for (const entry of [...pendingFrames]) {
-				entry.cancelTimer();
-				armFrame(entry);
-			}
-		};
-		document.addEventListener("visibilitychange", onVisibilityChange);
-		onCleanup(() =>
-			document.removeEventListener("visibilitychange", onVisibilityChange),
-		);
-	}
-	onCleanup(() => {
-		for (const entry of [...pendingFrames]) entry.cancelTimer();
-		pendingFrames.clear();
-	});
 	const settleAtBottom = (): void => {
 		let stableFrames = 0;
 		let mountFrames = 0;
@@ -663,11 +612,11 @@ const TimelineView: Component<{
 			const el = scrollEl();
 			if (!el?.isConnected) {
 				// Scroller not mounted yet (parent <Show> still rendering its
-				// loading fallback) - or briefly detached during a room
+				// loading fallback) — or briefly detached during a room
 				// switch that unmounts and remounts the scroller. Retry up
 				// to MAX_MOUNT_FRAMES so the room-entry pin survives a slow
 				// initial sync.
-				if (++mountFrames < MAX_MOUNT_FRAMES) scheduleFrame(tick);
+				if (++mountFrames < MAX_MOUNT_FRAMES) requestAnimationFrame(tick);
 				return;
 			}
 			const before = el.scrollTop;
@@ -681,9 +630,9 @@ const TimelineView: Component<{
 			} else {
 				stableFrames = 0;
 			}
-			if (++settleFrames < MAX_SETTLE_FRAMES) scheduleFrame(tick);
+			if (++settleFrames < MAX_SETTLE_FRAMES) requestAnimationFrame(tick);
 		};
-		scheduleFrame(tick);
+		requestAnimationFrame(tick);
 	};
 
 	// Re-anchor to the bottom when content above grows while the user
@@ -890,14 +839,13 @@ const TimelineView: Component<{
 	// Coalescing (not cancel-and-reschedule): while a pin is already pending
 	// we leave it, so a burst of arrivals faster than one frame still fires it
 	// promptly (it re-reads scrollHeight when it runs) instead of being pushed
-	// out one frame per arrival and starving. `scheduleFrame` handles hidden
-	// tabs and mid-flight visibility flips (see above). The pin re-checks its
-	// gates at fire time because `canLoadNewer` can flip during the deferral.
-	let pinHandle: FrameHandle | null = null;
+	// out one frame per arrival and starving. The pin re-checks its gates at
+	// fire time because `canLoadNewer` can flip during the deferral.
+	let cancelPin: (() => void) | null = null;
 	const schedulePin = (): void => {
-		if (pinHandle) return;
-		pinHandle = scheduleFrame(() => {
-			pinHandle = null;
+		if (cancelPin) return;
+		cancelPin = scheduleFrame(() => {
+			cancelPin = null;
 			if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
 			markProgrammaticScroll();
 			scrollRef.scrollTo({ top: scrollRef.scrollHeight });
@@ -912,6 +860,26 @@ const TimelineView: Component<{
 			},
 		),
 	);
+
+	// A pending pin was scheduled under whichever primitive matched the
+	// visibility state at the time - a rAF is paused the instant the tab hides
+	// (never firing, re-stranding the append), a throttled timeout lags once
+	// the tab is shown. On a flip, cancel and re-schedule the pending pin under
+	// the now-correct primitive so it neither stalls nor lags. Nothing pending
+	// means we're already settled, so there's nothing to flush.
+	if (typeof document !== "undefined") {
+		const onVisibilityChange = (): void => {
+			if (!cancelPin) return;
+			cancelPin();
+			cancelPin = null;
+			schedulePin();
+		};
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		onCleanup(() => {
+			document.removeEventListener("visibilitychange", onVisibilityChange);
+			cancelPin?.();
+		});
+	}
 
 	// Sync the timeline hook's followingLive state with scroll position.
 	// When the user scrolls up, stop extending the window with live events.
