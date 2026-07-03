@@ -105,6 +105,9 @@ function formatRecordingTime(elapsedMs: number): string {
 
 const Composer: Component<{
 	roomId: string;
+	/** Thread scope: sends target this thread (SDK 3-arg overload builds
+	 *  the MSC3440 relation). Absent for the main room composer. */
+	threadRootId?: string;
 	replyTo?: TimelineEvent | null;
 	editingEvent?: TimelineEvent | null;
 	onCancelReply?: () => void;
@@ -214,6 +217,7 @@ const Composer: Component<{
 		try {
 			await uploadAndSend(client, roomId, attachment, {
 				replyTo: replyTo ?? undefined,
+				threadId: props.threadRootId ?? null,
 			});
 			// Don't fire onSent while an edit is active: TimelineView
 			// reads it as "edit complete" and would clear the edit the
@@ -520,8 +524,12 @@ const Composer: Component<{
 		setError(null);
 		stopTyping();
 		try {
+			// 3-arg overload: a threadId routes the send into the thread and
+			// the SDK builds the MSC3440 relation (preserving an explicit
+			// m.in_reply_to as a real reply, is_falling_back false).
 			await client.sendMessage(
 				props.roomId,
+				props.threadRootId ?? null,
 				content as unknown as RoomMessageEventContent,
 			);
 			props.onSent?.();
@@ -867,6 +875,7 @@ const Composer: Component<{
 				try {
 					await uploadAndSend(client, roomId, att, {
 						replyTo: replyConsumed ? null : replyTo,
+						threadId: props.threadRootId ?? null,
 						onProgress: (p) => updateAttachment(att.id, { progress: p }),
 					});
 					// Clear the reply at the source once an event has carried it,
@@ -944,8 +953,10 @@ const Composer: Component<{
 		stopTyping();
 
 		try {
+			// 3-arg overload: see the GIF path - threads route via threadId.
 			await client.sendMessage(
 				roomId,
+				props.threadRootId ?? null,
 				content as unknown as RoomMessageEventContent,
 			);
 			if (onThisRoom()) props.onSent?.();
@@ -1224,7 +1235,7 @@ const Composer: Component<{
 				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}
 				<textarea
 					ref={textareaRef}
-					data-composer-textarea
+					data-composer-textarea={props.threadRootId ?? "main"}
 					value={text()}
 					onInput={(e) => {
 						const val = e.currentTarget.value;
@@ -1312,8 +1323,9 @@ const Composer: Component<{
 							</svg>
 						</button>
 					</Show>
-					{/* Poll button (hidden when editing - polls are new sends). */}
-					<Show when={!props.editingEvent}>
+					{/* Poll button (hidden when editing - polls are new sends -
+					    and in threads: polls-in-threads are deferred, #303). */}
+					<Show when={!props.editingEvent && !props.threadRootId}>
 						<button
 							type="button"
 							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"

@@ -57,6 +57,9 @@ export async function validateSize(
 
 export interface UploadAndSendOptions {
 	replyTo?: TimelineEvent | null;
+	/** Thread scope: routes the send into this thread (SDK 3-arg
+	 *  overload builds the MSC3440 relation). Null/absent = main. */
+	threadId?: string | null;
 	/** Receives upload progress in the range 0..1. */
 	onProgress?: (progress: number) => void;
 }
@@ -199,7 +202,7 @@ export async function uploadAndSend(
 		voice: attachment.voice,
 	});
 
-	await client.sendMessage(roomId, content);
+	await client.sendMessage(roomId, opts.threadId ?? null, content);
 	return content;
 }
 

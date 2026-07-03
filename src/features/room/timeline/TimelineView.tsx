@@ -282,10 +282,8 @@ const TimelineView: Component<{
 
 	// `dataTransfer.types` is a frozen string array; checked on every dragover,
 	// so avoid allocating a copy per event.
-	// Thread panels have no composer (until #303 3d) and therefore no upload
-	// path - advertising a drop zone there would silently discard files.
 	const dragHasFiles = (e: DragEvent): boolean =>
-		!props.thread && !!e.dataTransfer && e.dataTransfer.types.includes("Files");
+		!!e.dataTransfer && e.dataTransfer.types.includes("Files");
 
 	const onDragEnter = (e: DragEvent): void => {
 		if (!dragHasFiles(e)) return;
@@ -1002,7 +1000,7 @@ const TimelineView: Component<{
 		requestAnimationFrame(() => {
 			if (props.roomId !== expectedRoomId) return;
 			const textarea = document.querySelector<HTMLTextAreaElement>(
-				"textarea[data-composer-textarea]",
+				`textarea[data-composer-textarea="${props.thread?.threadId ?? "main"}"]`,
 			);
 			textarea?.focus();
 		});
@@ -1629,26 +1627,24 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Composer. Threads are read-only until compose-into-threads
-			    lands (issue #303 step 3d) - the room composer would send to
-			    the MAIN timeline, so it must not render inside a panel. */}
-			<Show when={!props.thread}>
-				<Composer
-					roomId={props.roomId}
-					replyTo={replyTo()}
-					editingEvent={editingEvent()}
-					onCancelReply={() => setReplyTo(null)}
-					onCancelEdit={() => setEditingEvent(null)}
-					onSent={() => {
-						setReplyTo(null);
-						setEditingEvent(null);
-					}}
-					onEnqueueReady={(fn) => {
-						enqueueFiles = fn;
-					}}
-					packs={packs()}
-				/>
-			</Show>
+			{/* Composer. In a thread panel it targets the thread (the SDK's
+			    3-arg send overload builds the MSC3440 relation). */}
+			<Composer
+				roomId={props.roomId}
+				threadRootId={props.thread?.threadId}
+				replyTo={replyTo()}
+				editingEvent={editingEvent()}
+				onCancelReply={() => setReplyTo(null)}
+				onCancelEdit={() => setEditingEvent(null)}
+				onSent={() => {
+					setReplyTo(null);
+					setEditingEvent(null);
+				}}
+				onEnqueueReady={(fn) => {
+					enqueueFiles = fn;
+				}}
+				packs={packs()}
+			/>
 
 			<ImageLightbox
 				open={lightboxOpen}

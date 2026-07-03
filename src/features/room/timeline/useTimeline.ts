@@ -2370,7 +2370,34 @@ export function useTimeline(
 				// change). Splice out a duplicate if both somehow exist.
 				const lookupId = oldEventId ?? newId;
 				const oldIdx = draft.findIndex((e) => e.eventId === lookupId);
-				if (oldIdx < 0) return;
+				if (oldIdx < 0) {
+					// Thread sends: under Chronological ordering the pending
+					// echo lives in NO timeline (Room.addPendingEvent only
+					// feeds room sets, whose canContain rejects thread
+					// events), so no Timeline emission ever inserts the row.
+					// Inject it here. On confirmation the SDK ADDS the event
+					// to the thread timeline (EventTimelineSet.handleRemoteEcho
+					// miss path) and fires the rekey - the dedupe below and
+					// the live-append path reconcile in either order.
+					if (
+						source().inThread &&
+						!oldEventId &&
+						event.status !== null &&
+						event.status !== EventStatus.CANCELLED &&
+						isRowDisplayable(event, room)
+					) {
+						draft.push(projectEvent(event, room));
+					}
+					return;
+				}
+				if (event.status === EventStatus.CANCELLED) {
+					// A discarded thread echo was never in a timeline, so no
+					// removed-path cleanup fires - drop the row here. (Main
+					// sends normally clean up via the removed path first; a
+					// second splice attempt no-ops on oldIdx < 0 above.)
+					draft.splice(oldIdx, 1);
+					return;
+				}
 				const updated = projectEvent(event, room);
 				draft[oldIdx] = updated;
 				if (oldEventId && oldEventId !== newId) {
