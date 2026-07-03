@@ -10,13 +10,8 @@ import {
 import { onCleanup } from "solid-js";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
-import {
-	isPollStartType,
-	isRenderablePollContent,
-	pollNotificationBody,
-} from "../../lib/pollCopy";
+import { isPollStartType, isRenderablePollContent } from "../../lib/pollCopy";
 import { isThreadReply, isThreadTimelineData } from "../../lib/threadEvents";
-import { isVoiceMessageContent } from "../../lib/voiceMessage";
 import { userSettings } from "../../stores/settings";
 import {
 	type CanNotifyInput,
@@ -25,6 +20,7 @@ import {
 	NOTIFY_CHANNEL_NAME,
 	type NotifyPing,
 } from "../notifications/notifyChannel";
+import { buildNotificationBody } from "./notificationCopy";
 import { playNotificationSound, primeAudioContext } from "./notificationSound";
 
 /**
@@ -88,10 +84,10 @@ export function useNotifications(
 		if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") return false;
-		// Thread replies don't notify yet: deliberate gap until the
-		// thread-aware notification branch lands (issue #303 step 3e),
-		// which replaces this line with "replied in a thread" copy.
-		if (isThreadReply(event)) return false;
+		// Thread replies DO notify (issue #303 step 3e) - they reach here via
+		// the thread-timeline emission (see the onTimeline gate below) and get
+		// "replied in a thread" copy in buildBody. Push rules still decide
+		// whether any given reply actually alerts.
 		// A poll start must be renderable (readable question + well-formed
 		// answers) - approximates the timeline's parsePollStart gate so a
 		// malformed poll can't pop a notification for a message the timeline
@@ -117,43 +113,7 @@ export function useNotifications(
 			? room.getMember(senderId)?.name?.trim()
 			: undefined;
 		const sender = memberName || senderId || "Someone";
-
-		if (event.isDecryptionFailure()) {
-			// Lock indicator matches the background-push copy in pushCopy.ts for
-			// a consistent "can't show encrypted content" message across paths.
-			return `${sender}: 🔒 Encrypted message`;
-		}
-
-		const content = event.getContent();
-		const msgtype = content.msgtype as string | undefined;
-
-		if (event.getType() === "m.sticker") {
-			return `${sender} sent a sticker`;
-		}
-
-		// Polls have no msgtype; keyed on event type like stickers. Matches
-		// the room-list preview and background-push copy ("Poll: <question>").
-		if (isPollStartType(event.getType())) {
-			return `${sender}: ${pollNotificationBody(content)}`;
-		}
-
-		switch (msgtype) {
-			case "m.image":
-				return `${sender} sent an image`;
-			case "m.file":
-				return `${sender} sent a file`;
-			case "m.audio":
-				return isVoiceMessageContent(content)
-					? `${sender} sent a voice message`
-					: `${sender} sent an audio file`;
-			case "m.video":
-				return `${sender} sent a video`;
-			default: {
-				const body =
-					typeof content.body === "string" ? content.body.slice(0, 200) : null;
-				return `${sender}: ${body || "New message"}`;
-			}
-		}
+		return buildNotificationBody(event, sender);
 	}
 
 	function showNotification(event: MatrixEvent, room: Room): boolean {
@@ -170,7 +130,13 @@ export function useNotifications(
 				window.focus();
 				const isDm = summaries[room.roomId]?.isDirect;
 				const encoded = encodeURIComponent(room.roomId);
-				navigate(isDm ? `/dm/${encoded}` : `/home/${encoded}`);
+				const base = isDm ? `/dm/${encoded}` : `/home/${encoded}`;
+				// A thread reply deep-links to its thread: the room opens with
+				// the panel for the reply's root (RoomPane reads ?thread).
+				const rootId = isThreadReply(event) ? event.threadRootId : undefined;
+				navigate(
+					rootId ? `${base}?thread=${encodeURIComponent(rootId)}` : base,
+				);
 				notif.close();
 			};
 			return true;
@@ -218,10 +184,13 @@ export function useNotifications(
 		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void => {
 		if (!room || !data.liveEvent) return;
-		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true;
-		// without this gate a dual-homed thread ROOT (present in both the
-		// room and its thread timeline) would notify twice.
-		if (isThreadTimelineData(data)) return;
+		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true.
+		// Let genuine thread REPLIES through (they emit only from the thread
+		// timeline, and #303 3e notifies them), but drop everything else a
+		// thread timeline re-emits: a dual-homed thread ROOT (or a plain
+		// reply-to-root the SDK dual-homes) already notified via the room
+		// timeline, so without this it would notify twice.
+		if (isThreadTimelineData(data) && !isThreadReply(event)) return;
 
 		// Encrypted event pending decryption — defer and re-evaluate after
 		if (

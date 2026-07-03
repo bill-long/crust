@@ -1,5 +1,5 @@
 import type { MatrixEvent, Room, Thread } from "matrix-js-sdk";
-import { ThreadEvent } from "matrix-js-sdk";
+import { NotificationCountType, RoomEvent, ThreadEvent } from "matrix-js-sdk";
 import {
 	buildProvisionalThreadSummary,
 	buildThreadSummaryFromThread,
@@ -60,13 +60,30 @@ export function createThreadWatcher(
 			a.latestSender === b.latestSender &&
 			a.latestTs === b.latestTs &&
 			a.currentUserParticipated === b.currentUserParticipated &&
+			a.unreadCount === b.unreadCount &&
 			a.provisional === b.provisional
+		);
+	}
+
+	/** Per-thread unread count from the room's counter, folded into the
+	 *  summary so the chip can show an unread dot. Optional call: mock rooms
+	 *  and servers without MSC3771/3773 support read 0. */
+	function unreadFor(room: Room, threadId: string): number {
+		return (
+			room.getThreadUnreadNotificationCount?.(
+				threadId,
+				NotificationCountType.Total,
+			) ?? 0
 		);
 	}
 
 	function recompute(thread: Thread): void {
 		if (!projectedEvents.has(thread.id)) return;
-		const summary = buildThreadSummaryFromThread(thread);
+		const room = watchedRoom;
+		const summary = buildThreadSummaryFromThread(
+			thread,
+			room ? unreadFor(room, thread.id) : 0,
+		);
 		const cached = summaries.get(thread.id);
 		if (summary) {
 			// The SDK fires BOTH NewReply and Update for each incoming reply;
@@ -88,11 +105,30 @@ export function createThreadWatcher(
 		onUpdate(thread.id);
 	}
 
+	/**
+	 * Re-project a thread's chip when its unread count changes (reading it
+	 * clears the dot; a new reply while away sets it). Fires with a
+	 * threadId only for thread-scoped changes - room-level unread
+	 * (threadId undefined) is the summaries store's job, not the chip's.
+	 * Mutates only the unread field of the cached summary so it works for
+	 * both live-Thread and provisional-bundle summaries.
+	 */
+	function onUnread(_counts: unknown, threadId?: string): void {
+		if (!threadId || !projectedEvents.has(threadId)) return;
+		const cached = summaries.get(threadId);
+		if (!cached) return;
+		const unread = watchedRoom ? unreadFor(watchedRoom, threadId) : 0;
+		if (unread === cached.unreadCount) return;
+		summaries.set(threadId, { ...cached, unreadCount: unread });
+		onUpdate(threadId);
+	}
+
 	function detachRoom(): void {
 		if (!watchedRoom) return;
 		watchedRoom.off(ThreadEvent.Update, recompute);
 		watchedRoom.off(ThreadEvent.NewReply, recompute);
 		watchedRoom.off(ThreadEvent.Delete, onThreadDelete);
+		watchedRoom.off(RoomEvent.UnreadNotifications, onUnread);
 		watchedRoom = null;
 	}
 
@@ -109,6 +145,7 @@ export function createThreadWatcher(
 			room.on(ThreadEvent.Update, recompute);
 			room.on(ThreadEvent.NewReply, recompute);
 			room.on(ThreadEvent.Delete, onThreadDelete);
+			room.on(RoomEvent.UnreadNotifications, onUnread);
 		},
 
 		getSummary(rootEvent: MatrixEvent, room: Room): ThreadSummary | null {
@@ -126,17 +163,18 @@ export function createThreadWatcher(
 			// Optional call: mock rooms without thread support read as "no
 			// Thread object", falling through to the provisional bundle.
 			const thread = room.getThread?.(rootId) ?? null;
+			const unread = unreadFor(room, rootId);
 			// A live Thread that hasn't fetched its initial events yet reads
 			// length 0; fall back to the root's bundle so an existing chip
 			// doesn't blink out during the fetch. Once fetched, the Thread
 			// is authoritative (a fetched-and-empty thread means every reply
 			// was redacted - no chip, even if a stale bundle disagrees).
 			const summary = thread
-				? (buildThreadSummaryFromThread(thread) ??
+				? (buildThreadSummaryFromThread(thread, unread) ??
 					(thread.initialEventsFetched
 						? null
-						: buildProvisionalThreadSummary(rootEvent)))
-				: buildProvisionalThreadSummary(rootEvent);
+						: buildProvisionalThreadSummary(rootEvent, unread)))
+				: buildProvisionalThreadSummary(rootEvent, unread);
 			if (summary && isWatchedRoom) summaries.set(rootId, summary);
 			return summary;
 		},

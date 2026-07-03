@@ -35,9 +35,13 @@ export const ThreadSummaryChip: Component<{
 				)
 			: null;
 
+	const hasUnread = () => props.thread.unreadCount > 0;
+
 	const ariaLabel = () => {
 		const act = activity();
-		return `Open thread: ${replyLabel()}${act ? `, last activity ${act}` : ""}`;
+		return `Open thread: ${replyLabel()}${act ? `, last activity ${act}` : ""}${
+			hasUnread() ? ", unread" : ""
+		}`;
 	};
 
 	return (
@@ -71,6 +75,13 @@ export const ThreadSummaryChip: Component<{
 			<span class="font-medium text-accent-text">{replyLabel()}</span>
 			<Show when={activity()}>
 				{(label) => <span class="text-text-muted">{label()}</span>}
+			</Show>
+			<Show when={hasUnread()}>
+				{/* Unread dot; the count is conveyed to AT via aria-label. */}
+				<span
+					class="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+					aria-hidden="true"
+				/>
 			</Show>
 		</Dynamic>
 	);

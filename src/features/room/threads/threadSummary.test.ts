@@ -37,8 +37,17 @@ describe("buildProvisionalThreadSummary", () => {
 			latestSender: "@b:hs",
 			latestTs: 5000,
 			currentUserParticipated: true,
+			unreadCount: 0,
 			provisional: true,
 		});
+	});
+
+	it("folds in the passed unread count", () => {
+		const summary = buildProvisionalThreadSummary(
+			rootWithBundle({ count: 2, current_user_participated: false }),
+			3,
+		);
+		expect(summary?.unreadCount).toBe(3);
 	});
 
 	it("returns null without a bundle (no chip for plain messages)", () => {
@@ -75,6 +84,7 @@ describe("buildProvisionalThreadSummary", () => {
 			latestSender: null,
 			latestTs: null,
 			currentUserParticipated: false,
+			unreadCount: 0,
 			provisional: true,
 		});
 	});
@@ -116,8 +126,14 @@ describe("buildThreadSummaryFromThread", () => {
 			latestSender: "@c:hs",
 			latestTs: 9000,
 			currentUserParticipated: true,
+			unreadCount: 0,
 			provisional: false,
 		});
+	});
+
+	it("folds in the passed unread count", () => {
+		const summary = buildThreadSummaryFromThread(threadStub({ length: 2 }), 5);
+		expect(summary?.unreadCount).toBe(5);
 	});
 
 	it("returns null for a thread with no replies (no chip)", () => {

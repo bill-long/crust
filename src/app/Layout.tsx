@@ -1,6 +1,6 @@
 import { Dialog } from "@kobalte/core/dialog";
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { useLocation, useNavigate } from "@solidjs/router";
+import { useLocation, useNavigate, useSearchParams } from "@solidjs/router";
 import type { MatrixClient } from "matrix-js-sdk";
 import { RoomStateEvent, UserEvent } from "matrix-js-sdk";
 import {
@@ -270,6 +270,20 @@ const RoomPane: Component<{
 			{ defer: true },
 		),
 	);
+
+	// Deep-link: a notification click navigates to `?thread=<rootId>` to open
+	// that thread's panel. Consume the param (open the panel, then strip it so
+	// a later manual close, room switch, or reload doesn't reopen it). Reading
+	// happens in an effect so it also fires when a notification arrives while
+	// the room is already open.
+	const [searchParams, setSearchParams] = useSearchParams();
+	createEffect(() => {
+		const requested = searchParams.thread;
+		if (typeof requested === "string" && requested) {
+			setOpenThreadId(requested);
+			setSearchParams({ thread: undefined }, { replace: true });
+		}
+	});
 
 	// Ref to the members toggle so the mobile members dialog can return focus
 	// to it on close (Kobalte can't auto-restore for an externally-controlled
