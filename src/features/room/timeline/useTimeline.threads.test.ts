@@ -275,6 +275,71 @@ describe("useTimeline thread gating", () => {
 			expect(events.map((e) => e.eventId)).toEqual(["$root", "$r1"]);
 		}));
 
+	it("keeps a failed echo's chronological slot across window rebuilds", () =>
+		withRoot(async () => {
+			const room = createMockRoom(ROOM_ID, []);
+			const { thread, timeline, timelineSet } = createMockThread("$root", [
+				textMessage(ROOM_ID, "$root", "@a:hs", "the root", 1000),
+				threadReplyEvent(ROOM_ID, "$r1", "@b:hs", "$root", "first", 2000),
+			]);
+			// Pretend older history exists so loadOlderMessages runs its
+			// (mocked no-op) pagination and rebuilds the store from the window.
+			timeline.getPaginationToken = () => "tok";
+			room.threads.set("$root", thread);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+			const { events, loadOlderMessages } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				{ source: () => threadTimelineSource("$root") },
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				...threadReplyEvent(
+					ROOM_ID,
+					"~txn1",
+					"@me:hs",
+					"$root",
+					"will fail",
+					3000,
+				),
+				status: EventStatus.SENDING,
+			});
+			client.__emit("Room.localEchoUpdated", echo, room);
+			await flushPromises();
+			echo.__setStatus(EventStatus.NOT_SENT);
+			client.__emit("Room.localEchoUpdated", echo, room);
+			await flushPromises();
+
+			// A newer remote reply lands after the failure.
+			const newer = createMatrixEvent(
+				threadReplyEvent(ROOM_ID, "$r2", "@b:hs", "$root", "newer", 4000),
+			);
+			timeline.__append(newer);
+			client.__emit("Room.timeline", newer, room, false, false, {
+				liveEvent: true,
+				timeline: { getTimelineSet: () => timelineSet },
+			});
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$r1",
+				"~txn1",
+				"$r2",
+			]);
+
+			// Any window rebuild (pagination here) must merge the re-injected
+			// failed row by timestamp, not re-append it at the bottom.
+			await loadOlderMessages();
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$r1",
+				"~txn1",
+				"$r2",
+			]);
+			expect(events[2].status).toBe(EventStatus.NOT_SENT);
+		}));
+
 	it("injects, rekeys, and cancels thread-send local echoes", () =>
 		withRoot(async () => {
 			// Under Chronological ordering a thread send's pending echo lives

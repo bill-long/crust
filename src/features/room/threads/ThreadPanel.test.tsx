@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { createSignal, Show } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadPanel } from "./ThreadPanel";
 
@@ -51,6 +52,58 @@ describe("ThreadPanel", () => {
 			<ThreadPanel roomId="!r:hs" threadId="$root" onClose={() => {}} />
 		));
 		expect(await screen.findByText("Couldn't load this thread")).toBeTruthy();
+	});
+
+	it("restores focus to the opener when closed with focus inside", async () => {
+		getRoom.mockReturnValue(
+			roomWithThread({ id: "$root", initialEventsFetched: true }),
+		);
+		const [open, setOpen] = createSignal(false);
+		render(() => (
+			<>
+				<button type="button" data-testid="opener">
+					open
+				</button>
+				<Show when={open()}>
+					<ThreadPanel roomId="!r:hs" threadId="$root" onClose={() => {}} />
+				</Show>
+			</>
+		));
+		screen.getByTestId("opener").focus();
+		setOpen(true);
+		await screen.findByTestId("thread-timeline");
+		// Mount moved focus into the panel; closing hands it back.
+		expect(screen.getByLabelText("Thread")).toBe(document.activeElement);
+		setOpen(false);
+		expect(document.activeElement).toBe(screen.getByTestId("opener"));
+	});
+
+	it("does not steal focus when closed while focus is elsewhere", async () => {
+		getRoom.mockReturnValue(
+			roomWithThread({ id: "$root", initialEventsFetched: true }),
+		);
+		const [open, setOpen] = createSignal(false);
+		render(() => (
+			<>
+				<button type="button" data-testid="opener">
+					open
+				</button>
+				<button type="button" data-testid="elsewhere">
+					elsewhere
+				</button>
+				<Show when={open()}>
+					<ThreadPanel roomId="!r:hs" threadId="$root" onClose={() => {}} />
+				</Show>
+			</>
+		));
+		screen.getByTestId("opener").focus();
+		setOpen(true);
+		await screen.findByTestId("thread-timeline");
+		// The user moved on (e.g. to the main composer); a programmatic
+		// close (room switch) must not yank focus back to the opener.
+		screen.getByTestId("elsewhere").focus();
+		setOpen(false);
+		expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
 	});
 
 	it("closes via the button and via Escape", async () => {

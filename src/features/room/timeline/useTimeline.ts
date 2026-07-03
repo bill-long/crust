@@ -1388,17 +1388,26 @@ export function useTimeline(
 		const merged = mergeSyntheticLeaves(displayable, syntheticLeaves, room);
 		// Re-append pending thread echoes: they exist in no timeline, so a
 		// window rebuild would otherwise silently drop an in-flight or
-		// FAILED send (failed rows must stay for Retry/Discard).
+		// FAILED send (failed rows must stay for Retry/Discard). Merged by
+		// timestamp - not pushed at the end - so an older FAILED row keeps
+		// its chronological slot instead of jumping below newer replies.
+		const echoRows: TimelineEvent[] = [];
 		for (const [id, echo] of pendingThreadEchoes) {
 			if (echo.status === null || echo.status === EventStatus.CANCELLED) {
 				pendingThreadEchoes.delete(id);
 				continue;
 			}
 			if (!merged.some((e) => e.eventId === id)) {
-				merged.push(projectEvent(echo, room));
+				echoRows.push(projectEvent(echo, room));
 			}
 		}
-		setEvents(reconcile(merged, { key: "eventId", merge: false }));
+		echoRows.sort((a, b) => a.timestamp - b.timestamp);
+		setEvents(
+			reconcile(mergeRowsByTimestamp(merged, echoRows), {
+				key: "eventId",
+				merge: false,
+			}),
+		);
 
 		clearCallExpiryTimer();
 		if (nextExpiry !== null) scheduleCallExpiryRefresh(room, nextExpiry);

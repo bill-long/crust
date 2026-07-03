@@ -531,7 +531,8 @@ export function createMockThread(threadId: string, events: MockEvent[] = []) {
 	let baseIndex = 0;
 	const timeline = {
 		getEvents: () => matrixEvents,
-		getPaginationToken: () => null,
+		// Widened so tests can patch in a token to unlock pagination paths.
+		getPaginationToken: (): string | null => null,
 		getBaseIndex: () => baseIndex,
 		getNeighbouringTimeline: () => null,
 		setNeighbouringTimeline: () => {},

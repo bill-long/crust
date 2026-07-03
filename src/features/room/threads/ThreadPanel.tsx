@@ -44,7 +44,18 @@ export const ThreadPanel: Component<{
 			: null;
 	onMount(() => sectionRef?.focus());
 	onCleanup(() => {
-		if (previouslyFocused?.isConnected) previouslyFocused.focus();
+		// Restore only when focus is still inside the panel (or already
+		// dropped to the body by the panel's removal): a programmatic close
+		// (e.g. a room switch) must not steal focus from wherever the user
+		// has since moved it.
+		const active = document.activeElement;
+		const focusStillInPanel =
+			!active ||
+			active === document.body ||
+			(sectionRef?.contains(active) ?? false);
+		if (focusStillInPanel && previouslyFocused?.isConnected) {
+			previouslyFocused.focus();
+		}
 	});
 
 	return (
