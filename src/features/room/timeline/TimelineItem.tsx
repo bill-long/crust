@@ -447,6 +447,9 @@ const TimelineItem: Component<{
 	onReact: (key: string) => void;
 	/** Cast/change the local user's poll vote (empty array = retraction). */
 	onVote: (answerIds: string[]) => void;
+	/** Open the thread panel for this event's thread (chip click). Absent
+	 *  inside the panel itself, where the chip is a plain summary. */
+	onOpenThread?: (threadId: string) => void;
 	/** Close the poll (only offered when the snapshot says canEnd). */
 	onEndPoll: () => void;
 	onReply: () => void;
@@ -972,7 +975,16 @@ const TimelineItem: Component<{
 				    interactive. */}
 					<Show when={!isRedactionPending() && !isRedactionFailed()}>
 						<Show when={ev.thread}>
-							{(thread) => <ThreadSummaryChip thread={thread()} />}
+							{(thread) => (
+								<ThreadSummaryChip
+									thread={thread()}
+									onOpen={
+										props.onOpenThread
+											? () => props.onOpenThread?.(thread().threadId)
+											: undefined
+									}
+								/>
+							)}
 						</Show>
 						<ReactionPills
 							reactions={ev.reactions}

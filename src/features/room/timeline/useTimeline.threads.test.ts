@@ -5,9 +5,11 @@ import {
 	createMatrixEvent,
 	createMockClient,
 	createMockRoom,
+	createMockThread,
 	textMessage,
 	threadReplyEvent,
 } from "../../../test/mockClient";
+import { threadTimelineSource } from "../threads/timelineSource";
 import { useTimeline } from "./useTimeline";
 
 const ROOM_ID = "!room:test";
@@ -174,5 +176,102 @@ describe("useTimeline thread gating", () => {
 				provisional: true,
 			});
 			expect(events[1].thread).toBeNull();
+		}));
+
+	it("windows a thread's timeline with a thread source", () =>
+		withRoot(async () => {
+			const room = createMockRoom(ROOM_ID, [
+				textMessage(ROOM_ID, "$other", "@a:hs", "main-only message", 500),
+			]);
+			const { thread } = createMockThread("$root", [
+				textMessage(ROOM_ID, "$root", "@a:hs", "the root", 1000),
+				threadReplyEvent(ROOM_ID, "$r1", "@b:hs", "$root", "first reply", 2000),
+				threadReplyEvent(
+					ROOM_ID,
+					"$r2",
+					"@c:hs",
+					"$root",
+					"second reply",
+					3000,
+				),
+				{
+					eventId: "$real",
+					roomId: ROOM_ID,
+					sender: "@d:hs",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "quoting r1",
+						"m.relates_to": {
+							rel_type: "m.thread",
+							event_id: "$root",
+							is_falling_back: false,
+							"m.in_reply_to": { event_id: "$r1" },
+						},
+					},
+					ts: 3500,
+				},
+			]);
+			room.threads.set("$root", thread);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				{ source: () => threadTimelineSource("$root") },
+			);
+			await flushPromises();
+			// Thread replies ARE displayable inside the thread window, and
+			// the fallback m.in_reply_to renders no quote block.
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$r1",
+				"$r2",
+				"$real",
+			]);
+			expect(events[1].replyToId).toBeNull();
+			// A REAL in-thread reply (is_falling_back: false) keeps its quote.
+			expect(events[3].replyToId).toBe("$r1");
+			// Main-room events don't leak in via live emissions.
+			const mainEvent = createMatrixEvent(
+				textMessage(ROOM_ID, "$live", "@a:hs", "main live", 4000),
+			);
+			client.__emit("Room.timeline", mainEvent, room, false, false, {
+				liveEvent: true,
+			});
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$r1",
+				"$r2",
+				"$real",
+			]);
+		}));
+
+	it("appends live replies arriving via the thread's timeline", () =>
+		withRoot(async () => {
+			const room = createMockRoom(ROOM_ID, []);
+			const { thread, timeline, timelineSet } = createMockThread("$root", [
+				textMessage(ROOM_ID, "$root", "@a:hs", "the root", 1000),
+			]);
+			room.threads.set("$root", thread);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				{ source: () => threadTimelineSource("$root") },
+			);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root"]);
+
+			const reply = createMatrixEvent(
+				threadReplyEvent(ROOM_ID, "$r1", "@b:hs", "$root", "live reply", 2000),
+			);
+			timeline.__append(reply);
+			client.__emit("Room.timeline", reply, room, false, false, {
+				liveEvent: true,
+				timeline: { getTimelineSet: () => timelineSet },
+			});
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "$r1"]);
 		}));
 });

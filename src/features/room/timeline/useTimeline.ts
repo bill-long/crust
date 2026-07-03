@@ -22,7 +22,7 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { pollPreviewText } from "../../../lib/pollCopy";
-import { isThreadReply, isThreadTimelineData } from "../../../lib/threadEvents";
+import { isThreadReply } from "../../../lib/threadEvents";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -39,6 +39,10 @@ import {
 	createThreadWatcher,
 	type ThreadWatcher,
 } from "../threads/threadWatcher";
+import {
+	mainTimelineSource,
+	type TimelineSource,
+} from "../threads/timelineSource";
 import { stripReplyFallback } from "../urlPreviews/replyFallback";
 import type {
 	MembershipTransition,
@@ -526,6 +530,9 @@ function eventToTimelineEvent(
 	suppressedCallIds?: ReadonlySet<string>,
 	pollWatcher?: PollWatcher,
 	threadWatcher?: ThreadWatcher,
+	// Reactions on thread events live on the THREAD's relations set, so a
+	// thread-scoped projection passes the thread's timeline set here.
+	relationsTimelineSet?: EventTimelineSet,
 ): TimelineEvent {
 	// `event.getContent()` auto-applies a replacing event's
 	// `m.new_content` regardless of the replacement's status. For
@@ -679,7 +686,18 @@ function eventToTimelineEvent(
 	// carry only this relation, no legacy `> ` body prefix). When the parent
 	// isn't in any loaded timeline, keep the id but leave sender/body null so
 	// the renderer shows a generic affordance.
-	const inReplyToRaw = content["m.relates_to"]?.["m.in_reply_to"]?.event_id;
+	//
+	// MSC3440: a thread reply carries an m.in_reply_to FALLBACK pointer at
+	// the previous thread message (for thread-unaware clients), flagged
+	// is_falling_back: true. That must not render as a quote; a REAL
+	// in-thread reply omits the flag or sets it false and keeps its quote
+	// (Element suppresses only on a truthy flag).
+	const relatesTo = content["m.relates_to"];
+	const isThreadFallbackReply =
+		relatesTo?.rel_type === "m.thread" && relatesTo.is_falling_back === true;
+	const inReplyToRaw = isThreadFallbackReply
+		? undefined
+		: relatesTo?.["m.in_reply_to"]?.event_id;
 	const replyToId =
 		typeof inReplyToRaw === "string" && inReplyToRaw.length > 0
 			? inReplyToRaw
@@ -772,13 +790,13 @@ function eventToTimelineEvent(
 	try {
 		const eventId = event.getId();
 		if (eventId) {
-			const relationsGroup = room
-				.getUnfilteredTimelineSet()
-				.relations?.getChildEventsForEvent(
-					eventId,
-					"m.annotation",
-					"m.reaction",
-				);
+			const relationsGroup = (
+				relationsTimelineSet ?? room.getUnfilteredTimelineSet()
+			).relations?.getChildEventsForEvent(
+				eventId,
+				"m.annotation",
+				"m.reaction",
+			);
 			if (relationsGroup) {
 				const sortedEntries = relationsGroup.getSortedAnnotationsByKey();
 				if (sortedEntries) {
@@ -953,6 +971,9 @@ function isDisplayable(
 	event: MatrixEvent,
 	room: Room,
 	suppressedCallIds?: ReadonlySet<string>,
+	// A thread-scoped window (the thread panel) DOES display thread
+	// replies - they are its content.
+	displayThreadReplies = false,
 ): boolean {
 	const type = event.getType();
 	const isStateNotice = isStateNoticeType(type);
@@ -976,7 +997,7 @@ function isDisplayable(
 	// Thread replies live in their thread's timeline, not the room's. The
 	// SDK already partitions them out of room timeline sets; this backstop
 	// catches strays (thread ROOTS pass - isThreadReply excludes them).
-	if (isThreadReply(event)) return false;
+	if (!displayThreadReplies && isThreadReply(event)) return false;
 	// State notices are displayable only when they produce a non-null
 	// notice (filters out no-op transitions like join->join with no
 	// profile change). This keeps the invariant that every displayable
@@ -1019,7 +1040,16 @@ const INITIAL_WINDOW_SIZE = 500;
 export interface UseTimelineOptions {
 	windowLimit?: number;
 	initialWindowSize?: number;
+	/**
+	 * Which timeline to window over: the room's main timeline (default)
+	 * or one thread's timeline (the thread panel). Reactive - a key
+	 * change reloads the window. See {@link TimelineSource}.
+	 */
+	source?: () => TimelineSource;
 }
+
+/** Module-level default so the source identity is stable across renders. */
+const MAIN_SOURCE = mainTimelineSource();
 
 export function useTimeline(
 	client: MatrixClient,
@@ -1036,6 +1066,17 @@ export function useTimeline(
 		rawInitSize != null && Number.isFinite(rawInitSize) && rawInitSize >= 1
 			? Math.min(Math.floor(rawInitSize), windowLimit)
 			: Math.min(INITIAL_WINDOW_SIZE, windowLimit);
+	const source = (): TimelineSource => opts?.source?.() ?? MAIN_SOURCE;
+
+	/** isDisplayable bound to this hook's source: a thread window displays
+	 *  thread replies, the main window excludes them. */
+	function isRowDisplayable(
+		event: MatrixEvent,
+		room: Room,
+		suppressedCallIds?: ReadonlySet<string>,
+	): boolean {
+		return isDisplayable(event, room, suppressedCallIds, source().inThread);
+	}
 	const [events, setEvents] = createStore<TimelineEvent[]>([]);
 	const [loading, setLoading] = createSignal(true);
 	const [loadingOlder, setLoadingOlder] = createSignal(false);
@@ -1195,6 +1236,7 @@ export function useTimeline(
 	}
 
 	let currentRoomId: string | null = null;
+	let currentSourceKey: string | null = null;
 	let backfillReloadAttempted = false;
 	// Generation counter — increments on every room load. Async operations
 	// capture the current generation and bail if it changed (A→B→A safety).
@@ -1239,6 +1281,7 @@ export function useTimeline(
 			suppressedCallIds,
 			pollWatcher,
 			threadWatcher,
+			source().getTimelineSet(room) ?? undefined,
 		);
 	}
 
@@ -1321,7 +1364,7 @@ export function useTimeline(
 		const { suppressed, syntheticLeaves, nextExpiry } =
 			computeCallTimelineNotices(matrixEvents, now);
 		const displayable = matrixEvents
-			.filter((e) => isDisplayable(e, room, suppressed) && e.getId())
+			.filter((e) => isRowDisplayable(e, room, suppressed) && e.getId())
 			.map((e) => projectEvent(e, room, suppressed));
 		// Merge synthetic expiry leaves (sorted ascending by `expiresAt`) into
 		// the chronological displayable list. A synthetic leave is placed after
@@ -1399,14 +1442,15 @@ export function useTimeline(
 	}
 
 	function loadRoom(rid: string): void {
-		if (rid !== currentRoomId) {
+		if (rid !== currentRoomId || source().key !== currentSourceKey) {
 			backfillReloadAttempted = false;
-			// Clear stale events immediately on room switch so the view
-			// shows the loading spinner (events.length === 0) instead of
-			// the previous room's messages under the new room header.
+			// Clear stale events immediately on room/source switch so the
+			// view shows the loading spinner (events.length === 0) instead
+			// of the previous timeline's messages under the new header.
 			setEvents(reconcile([], { key: "eventId", merge: false }));
 		}
 		currentRoomId = rid;
+		currentSourceKey = source().key;
 		roomGeneration++;
 		const gen = roomGeneration;
 		currentTimelineWindow = null;
@@ -1440,7 +1484,16 @@ export function useTimeline(
 		pollWatcher.watchRoom(room);
 		threadWatcher.watchRoom(room);
 
-		const timelineSet = room.getUnfilteredTimelineSet();
+		const timelineSet = source().getTimelineSet(room);
+		if (!timelineSet) {
+			// A thread source whose Thread object doesn't exist (the panel
+			// awaits ensureThread before mounting, so this is a stale-open
+			// edge): render empty rather than the wrong timeline.
+			setEvents(reconcile([], { key: "eventId", merge: false }));
+			setLoading(false);
+			currentTimelineWindow = null;
+			return;
+		}
 		const tw = new TimelineWindow(client, timelineSet, {
 			windowLimit: windowLimit,
 		});
@@ -1714,9 +1767,13 @@ export function useTimeline(
 			}
 		}
 
+		// Resolve the source's set BEFORE bumping the generation: returning
+		// after the bump would strand in-flight paginations (their finally
+		// blocks see a generation mismatch and never clear loading flags).
+		const timelineSet = source().getTimelineSet(room);
+		if (!timelineSet) return;
 		roomGeneration++;
 		const gen = roomGeneration;
-		const timelineSet = room.getUnfilteredTimelineSet();
 		const tw = new TimelineWindow(client, timelineSet, {
 			windowLimit: windowLimit,
 		});
@@ -1768,7 +1825,7 @@ export function useTimeline(
 				if (idx >= 0) {
 					const sourceEvent = findWindowEvent(redactedId);
 					if (sourceEvent) {
-						if (isDisplayable(sourceEvent, room)) {
+						if (isRowDisplayable(sourceEvent, room)) {
 							draft[idx] = projectEvent(sourceEvent, room);
 						} else {
 							draft.splice(idx, 1);
@@ -1845,11 +1902,23 @@ export function useTimeline(
 		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void {
 		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
-		// Thread timelines re-emit RoomEvent.Timeline through the client;
-		// none of it (replies, or reactions/edits targeting thread events)
-		// may touch main-timeline state. Gate on both the emitting timeline
-		// and the event's own shape - either signal suffices to skip.
-		if (isThreadTimelineData(data) || isThreadReply(event)) return;
+		// Only emissions belonging to this hook's timeline source may touch
+		// its store. Main source: thread timelines re-emit RoomEvent.Timeline
+		// through the client, and none of it (replies, or reactions/edits
+		// targeting thread events) belongs here. Thread source: only its own
+		// thread's emissions do. Gate on both the emitting timeline and the
+		// event's own shape - either mismatch skips.
+		//
+		// Redactions bypass the gate: a redaction of a thread ROOT lives in
+		// the MAIN timeline only (eventShouldLiveIn) yet the open panel must
+		// tombstone its root row too. handleRedaction keys on the target and
+		// no-ops when it isn't in this window, so cross-source redaction
+		// traffic is harmless in both directions.
+		if (
+			event.getType() !== "m.room.redaction" &&
+			(!source().acceptsTimeline(data) || !source().acceptsEvent(event))
+		)
+			return;
 
 		// Removed events (e.g. cancelled local echoes the SDK strips from
 		// the timeline before firing LocalEchoUpdated(CANCELLED)) must be
@@ -1874,7 +1943,7 @@ export function useTimeline(
 						setEvents(
 							produce((draft) => {
 								const idx = draft.findIndex((e) => e.eventId === redactedId);
-								if (idx >= 0 && isDisplayable(targetEvent, eventRoom)) {
+								if (idx >= 0 && isRowDisplayable(targetEvent, eventRoom)) {
 									draft[idx] = projectEvent(targetEvent, eventRoom);
 								}
 							}),
@@ -2032,7 +2101,7 @@ export function useTimeline(
 					serverTime.now(),
 				).suppressed;
 			}
-			if (!isDisplayable(event, room, suppressedCallIds)) return;
+			if (!isRowDisplayable(event, room, suppressedCallIds)) return;
 			if (!event.getId() || !followingLive) return;
 			setEvents(
 				produce((draft) => {
@@ -2043,7 +2112,7 @@ export function useTimeline(
 			return;
 		}
 
-		if (!isDisplayable(event, room)) {
+		if (!isRowDisplayable(event, room)) {
 			if (event.getType() === "m.room.redaction") {
 				const redactedId = event.event.redacts;
 				if (typeof redactedId === "string") {
@@ -2086,9 +2155,11 @@ export function useTimeline(
 		timelineSet?: EventTimelineSet,
 	): void {
 		if (!room || !currentRoomId || room.roomId !== currentRoomId) return;
-		// A THREAD timeline resetting (e.g. its initial relations backfill)
-		// must not reload the room's main window.
-		if (timelineSet?.thread) return;
+		// Only a reset of THIS source's timeline set reloads the window
+		// (main: a thread's relations-backfill reset must not reload the
+		// room; thread: another thread's or the room's reset must not
+		// reload the panel).
+		if (!source().acceptsTimelineSet(timelineSet)) return;
 		backfillReloadAttempted = false;
 		loadRoom(currentRoomId);
 	}
@@ -2106,7 +2177,7 @@ export function useTimeline(
 		// redactions, and edits were initially appended as m.room.encrypted
 		// placeholders and must now be reclassified.
 		// Decryption failures always update in place (SDK sets synthetic content).
-		if (!event.isDecryptionFailure() && !isDisplayable(event, room)) {
+		if (!event.isDecryptionFailure() && !isRowDisplayable(event, room)) {
 			const decryptedType = event.getType();
 
 			setEvents(
@@ -2209,6 +2280,9 @@ export function useTimeline(
 		_oldStatus?: EventStatus | null,
 	): void {
 		if (!eventRoom || eventRoom.roomId !== currentRoomId) return;
+		// Echoes belong to exactly one source: thread sends to the thread
+		// window (3d), everything else to the main window.
+		if (!source().acceptsEvent(event)) return;
 		const room = client.getRoom(currentRoomId);
 		if (!room) return;
 		const newId = event.getId();
@@ -2316,8 +2390,11 @@ export function useTimeline(
 		return findWindowEvent(eventId);
 	}
 
-	// Initial load + reactive reload on room change
+	// Initial load + reactive reload on room or source change. The source
+	// KEY is read here explicitly: loadRoom also reads it internally, but
+	// the effect's dependency must not hinge on that implementation detail.
 	createEffect(() => {
+		source().key;
 		loadRoom(roomId());
 	});
 

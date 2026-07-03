@@ -26,6 +26,10 @@ import {
 } from "../../emoji/useImagePacks";
 import { Composer } from "../composer/Composer";
 import {
+	mainTimelineSource,
+	threadTimelineSource,
+} from "../threads/timelineSource";
+import {
 	formatDateSeparatorLabel,
 	isDifferentDay,
 	isSameDay,
@@ -100,8 +104,22 @@ const TimelineView: Component<{
 	 *  (ClientEvent.AccountData + RoomStateEvent.Events) when sibling
 	 *  components (e.g. PinnedMessagesPanel) also need the packs. */
 	packs?: () => ImagePack[];
+	/** Thread scope: when set, this instance windows the thread's timeline
+	 *  (the thread panel) instead of the room's. Typing indicators are
+	 *  room-level and therefore suppressed in a thread. */
+	thread?: { threadId: string };
+	/** Open the thread panel for a root event ("Open thread" affordances
+	 *  on chips and the hover toolbar). Absent inside the panel itself. */
+	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
+	// Memoized: useTimeline reads source() in hot per-event paths, so the
+	// source object must be stable per thread change, not per call.
+	const timelineSource = createMemo(() =>
+		props.thread
+			? threadTimelineSource(props.thread.threadId)
+			: mainTimelineSource(),
+	);
 	const {
 		events,
 		loading,
@@ -124,7 +142,9 @@ const TimelineView: Component<{
 		pendingEdits,
 		votePoll,
 		endPoll,
-	} = useTimeline(client, () => props.roomId);
+	} = useTimeline(client, () => props.roomId, {
+		source: timelineSource,
+	});
 
 	// Custom emoji packs for this room. When the parent passes a shared
 	// `packs` accessor (Layout does — same accessor also feeds the
@@ -262,8 +282,10 @@ const TimelineView: Component<{
 
 	// `dataTransfer.types` is a frozen string array; checked on every dragover,
 	// so avoid allocating a copy per event.
+	// Thread panels have no composer (until #303 3d) and therefore no upload
+	// path - advertising a drop zone there would silently discard files.
 	const dragHasFiles = (e: DragEvent): boolean =>
-		!!e.dataTransfer && e.dataTransfer.types.includes("Files");
+		!props.thread && !!e.dataTransfer && e.dataTransfer.types.includes("Files");
 
 	const onDragEnter = (e: DragEvent): void => {
 		if (!dragHasFiles(e)) return;
@@ -467,13 +489,15 @@ const TimelineView: Component<{
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
 		client
-			// UNTHREADED (3rd arg): with threadSupport on, a plain receipt
-			// gets thread_id "main" and clears only main-timeline counts -
-			// the per-thread counts the room badge sums would then be
-			// un-clearable from Crust (no per-thread receipt path until the
-			// thread panel lands). Unthreaded preserves the pre-thread
-			// invariant: reading a room to the bottom clears its whole badge.
-			.sendReadReceipt(matrixEvent, ReceiptType.Read, true)
+			// Main timeline: UNTHREADED (3rd arg true) - a plain receipt would
+			// get thread_id "main" and clear only main-timeline counts, leaving
+			// the per-thread counts the room badge sums un-clearable outside
+			// the panel. Unthreaded preserves the pre-thread invariant that
+			// reading a room clears its whole badge.
+			// Thread panel: THREADED (3rd arg false) - the SDK derives
+			// thread_id from the event, so reading a thread clears exactly that
+			// thread's counts and never the whole room's read state.
+			.sendReadReceipt(matrixEvent, ReceiptType.Read, !props.thread)
 			.then(() => {
 				lastSentReceiptEventId = eventId;
 			})
@@ -1430,6 +1454,7 @@ const TimelineView: Component<{
 														void votePoll(event.eventId, answerIds)
 													}
 													onEndPoll={() => void endPoll(event.eventId)}
+													onOpenThread={props.onOpenThread}
 													onReply={() => setReplyTo(event)}
 													onJumpToReply={(id) => {
 														setWantsBottom(false);
@@ -1594,8 +1619,8 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Typing indicator */}
-			<Show when={typingText()}>
+			{/* Typing indicator (room-level; meaningless inside a thread) */}
+			<Show when={!props.thread && typingText()}>
 				<div
 					class="shrink-0 px-4 py-1 text-xs text-text-disabled"
 					aria-live="polite"
@@ -1604,22 +1629,26 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Composer */}
-			<Composer
-				roomId={props.roomId}
-				replyTo={replyTo()}
-				editingEvent={editingEvent()}
-				onCancelReply={() => setReplyTo(null)}
-				onCancelEdit={() => setEditingEvent(null)}
-				onSent={() => {
-					setReplyTo(null);
-					setEditingEvent(null);
-				}}
-				onEnqueueReady={(fn) => {
-					enqueueFiles = fn;
-				}}
-				packs={packs()}
-			/>
+			{/* Composer. Threads are read-only until compose-into-threads
+			    lands (issue #303 step 3d) - the room composer would send to
+			    the MAIN timeline, so it must not render inside a panel. */}
+			<Show when={!props.thread}>
+				<Composer
+					roomId={props.roomId}
+					replyTo={replyTo()}
+					editingEvent={editingEvent()}
+					onCancelReply={() => setReplyTo(null)}
+					onCancelEdit={() => setEditingEvent(null)}
+					onSent={() => {
+						setReplyTo(null);
+						setEditingEvent(null);
+					}}
+					onEnqueueReady={(fn) => {
+						enqueueFiles = fn;
+					}}
+					packs={packs()}
+				/>
+			</Show>
 
 			<ImageLightbox
 				open={lightboxOpen}
