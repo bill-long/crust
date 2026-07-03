@@ -21,8 +21,8 @@ const VIRTUALIZE_THRESHOLD = 50;
  * Focus the active room composer textarea, if one exists. Lets a keyboard
  * user who jumps to a search result land back on the input they were typing
  * in without an extra Tab. We target the MAIN room composer via its scoped
- * `data-composer-textarea="main"` marker (thread panels carry their own)
- * marker rendered by Composer; if no composer is mounted this is a no-op.
+ * `data-composer-textarea="main"` marker (thread panels carry their own);
+ * if no composer is mounted this is a no-op.
  */
 function focusComposer(): void {
 	const textarea = document.querySelector<HTMLTextAreaElement>(

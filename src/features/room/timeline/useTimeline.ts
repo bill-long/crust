@@ -1344,9 +1344,24 @@ export function useTimeline(
 	}
 
 	/** Find a raw MatrixEvent in the current window by ID */
+	/**
+	 * Pending THREAD echoes live in no SDK timeline under Chronological
+	 * ordering (Room.addPendingEvent feeds only room sets, whose canContain
+	 * rejects thread events), so the window can never resolve them. This
+	 * registry keeps the SDK event objects reachable for Retry/Discard
+	 * (getSourceEvent), rebuild survival, and edit lookups. Entries clear
+	 * on confirmation (status null) or cancellation.
+	 */
+	const pendingThreadEchoes = new Map<string, MatrixEvent>();
+
 	function findWindowEvent(eventId: string): MatrixEvent | undefined {
-		if (!currentTimelineWindow) return undefined;
-		return currentTimelineWindow.getEvents().find((e) => e.getId() === eventId);
+		if (!currentTimelineWindow) {
+			return pendingThreadEchoes.get(eventId);
+		}
+		return (
+			currentTimelineWindow.getEvents().find((e) => e.getId() === eventId) ??
+			pendingThreadEchoes.get(eventId)
+		);
 	}
 
 	/** Rebuild the displayable events store from the current window */
@@ -1371,6 +1386,18 @@ export function useTimeline(
 		// any real event sharing its timestamp so an explicit event at the same
 		// instant renders first.
 		const merged = mergeSyntheticLeaves(displayable, syntheticLeaves, room);
+		// Re-append pending thread echoes: they exist in no timeline, so a
+		// window rebuild would otherwise silently drop an in-flight or
+		// FAILED send (failed rows must stay for Retry/Discard).
+		for (const [id, echo] of pendingThreadEchoes) {
+			if (echo.status === null || echo.status === EventStatus.CANCELLED) {
+				pendingThreadEchoes.delete(id);
+				continue;
+			}
+			if (!merged.some((e) => e.eventId === id)) {
+				merged.push(projectEvent(echo, room));
+			}
+		}
 		setEvents(reconcile(merged, { key: "eventId", merge: false }));
 
 		clearCallExpiryTimer();
@@ -1466,6 +1493,7 @@ export function useTimeline(
 		setCanLoadNewer(false);
 		setTypingUsers([]);
 		setPendingRedactions(reconcile({}, { merge: false }));
+		pendingThreadEchoes.clear();
 		setPendingReactions(reconcile(Object.create(null), { merge: false }));
 		setPendingEdits(reconcile(Object.create(null), { merge: false }));
 
@@ -2141,6 +2169,15 @@ export function useTimeline(
 
 		setEvents(
 			produce((draft) => {
+				// Replace-in-place when the id already exists: a thread send
+				// confirmed via the /send response (rekey) arrives in the
+				// store BEFORE the /sync remote echo re-adds it through the
+				// thread timeline - pushing again would duplicate the row.
+				const existingIdx = draft.findIndex((e) => e.eventId === event.getId());
+				if (existingIdx >= 0) {
+					draft[existingIdx] = projectEvent(event, room);
+					return;
+				}
 				draft.push(projectEvent(event, room));
 				// Keep the store bounded to match the TimelineWindow's limit.
 				// The window evicts internally, but the store is updated
@@ -2357,6 +2394,17 @@ export function useTimeline(
 			} else {
 				removePendingEdit(event);
 			}
+			// Thread-scoped edit echoes also live in no timeline (their
+			// target's threadRootId routes them out of room sets); keep the
+			// SDK event reachable for the failed-edit Retry path.
+			if (source().inThread) {
+				if (event.status === null || event.status === EventStatus.CANCELLED) {
+					pendingThreadEchoes.delete(newId);
+					if (oldEventId) pendingThreadEchoes.delete(oldEventId);
+				} else {
+					pendingThreadEchoes.set(newId, event);
+				}
+			}
 			if (typeof targetId === "string") {
 				handleEdit(room, targetId);
 			}
@@ -2375,10 +2423,12 @@ export function useTimeline(
 					// echo lives in NO timeline (Room.addPendingEvent only
 					// feeds room sets, whose canContain rejects thread
 					// events), so no Timeline emission ever inserts the row.
-					// Inject it here. On confirmation the SDK ADDS the event
-					// to the thread timeline (EventTimelineSet.handleRemoteEcho
-					// miss path) and fires the rekey - the dedupe below and
-					// the live-append path reconcile in either order.
+					// Inject it here and register the SDK event so
+					// Retry/Discard and window rebuilds can still reach it.
+					// On confirmation the SDK ADDS the event to the thread
+					// timeline (EventTimelineSet.handleRemoteEcho miss path)
+					// and fires the rekey - the dedupe below and the
+					// live-append path reconcile in either order.
 					if (
 						source().inThread &&
 						!oldEventId &&
@@ -2386,15 +2436,27 @@ export function useTimeline(
 						event.status !== EventStatus.CANCELLED &&
 						isRowDisplayable(event, room)
 					) {
+						pendingThreadEchoes.set(newId, event);
 						draft.push(projectEvent(event, room));
 					}
 					return;
+				}
+				// Registry lifecycle: rekeys move the entry; confirmation and
+				// cancellation clear it.
+				if (oldEventId && oldEventId !== newId) {
+					pendingThreadEchoes.delete(oldEventId);
+				}
+				if (event.status === null) {
+					pendingThreadEchoes.delete(newId);
+				} else if (pendingThreadEchoes.has(oldEventId ?? newId)) {
+					pendingThreadEchoes.set(newId, event);
 				}
 				if (event.status === EventStatus.CANCELLED) {
 					// A discarded thread echo was never in a timeline, so no
 					// removed-path cleanup fires - drop the row here. (Main
 					// sends normally clean up via the removed path first; a
 					// second splice attempt no-ops on oldIdx < 0 above.)
+					pendingThreadEchoes.delete(newId);
 					draft.splice(oldIdx, 1);
 					return;
 				}

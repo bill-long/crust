@@ -182,6 +182,9 @@ const Composer: Component<{
 		if (voiceStopping()) return;
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
+		// Pinned: the recorder stop awaits, and the panel's thread (or the
+		// panel itself) can change under the send.
+		const threadRootId = props.threadRootId ?? null;
 		const onThisRoom = (): boolean => props.roomId === roomId;
 		let attachment: PendingAttachment | null = null;
 		setVoiceStopping(true);
@@ -217,7 +220,7 @@ const Composer: Component<{
 		try {
 			await uploadAndSend(client, roomId, attachment, {
 				replyTo: replyTo ?? undefined,
-				threadId: props.threadRootId ?? null,
+				threadId: threadRootId,
 			});
 			// Don't fire onSent while an edit is active: TimelineView
 			// reads it as "edit complete" and would clear the edit the
@@ -488,6 +491,10 @@ const Composer: Component<{
 	}
 
 	async function onGifSelect(gif: GifItem): Promise<void> {
+		// Pinned before any await: the panel's thread (or the room) can
+		// change while the send is in flight.
+		const gifRoomId = props.roomId;
+		const gifThreadRootId = props.threadRootId ?? null;
 		setGifPickerOpen(false);
 
 		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting).
@@ -526,10 +533,11 @@ const Composer: Component<{
 		try {
 			// 3-arg overload: a threadId routes the send into the thread and
 			// the SDK builds the MSC3440 relation (preserving an explicit
-			// m.in_reply_to as a real reply, is_falling_back false).
+			// m.in_reply_to as a real reply, is_falling_back false). roomId
+			// and threadRootId were pinned before the awaits above.
 			await client.sendMessage(
-				props.roomId,
-				props.threadRootId ?? null,
+				gifRoomId,
+				gifThreadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
 			props.onSent?.();
@@ -752,6 +760,10 @@ const Composer: Component<{
 		// clobber the newly selected room's composer.
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
+		// Pinned like roomId: the panel can switch threads (or close) while
+		// uploads run, and every await-separated send below must target the
+		// thread this send STARTED in.
+		const threadRootId = props.threadRootId ?? null;
 		const onThisRoom = (): boolean => props.roomId === roomId;
 
 		// Edit mode: send m.replace event
@@ -875,7 +887,7 @@ const Composer: Component<{
 				try {
 					await uploadAndSend(client, roomId, att, {
 						replyTo: replyConsumed ? null : replyTo,
-						threadId: props.threadRootId ?? null,
+						threadId: threadRootId,
 						onProgress: (p) => updateAttachment(att.id, { progress: p }),
 					});
 					// Clear the reply at the source once an event has carried it,
@@ -956,7 +968,7 @@ const Composer: Component<{
 			// 3-arg overload: see the GIF path - threads route via threadId.
 			await client.sendMessage(
 				roomId,
-				props.threadRootId ?? null,
+				threadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
 			if (onThisRoom()) props.onSent?.();

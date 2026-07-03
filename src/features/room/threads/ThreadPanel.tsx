@@ -12,8 +12,8 @@ import { ensureThread } from "./ensureThread";
 
 /**
  * Right-hand thread panel: the full timeline machinery (TimelineView with
- * a thread source) over one thread's timeline. Read-only until
- * compose-into-threads lands (issue #303 step 3d).
+ * a thread source) over one thread's timeline, including a thread-scoped
+ * composer (sends route through the SDK's 3-arg overload).
  *
  * Mounting waits for {@link ensureThread} so the TimelineWindow never
  * races the SDK's initial relations backfill (which resets the thread's
