@@ -19,6 +19,9 @@ interface FakeEventInit {
 function makeEvent(init: FakeEventInit): MatrixEvent {
 	const content = init.content ?? {};
 	const id = "id" in init ? init.id : "$evt:test";
+	const relates = content["m.relates_to"] as
+		| { rel_type?: string; event_id?: string }
+		| undefined;
 	return {
 		getId: () => id ?? undefined,
 		isRedacted: () => init.redacted ?? false,
@@ -26,6 +29,14 @@ function makeEvent(init: FakeEventInit): MatrixEvent {
 		getSender: () => init.sender ?? "@alice:test",
 		getTs: () => init.ts ?? 1000,
 		getType: () => "m.room.message",
+		// Mirrors SDK isRelation (the thread gate's predicate): wire
+		// rel_type + event_id both required.
+		isRelation: (relType?: string) =>
+			!!(
+				relates?.rel_type &&
+				relates.event_id &&
+				(relType ? relates.rel_type === relType : true)
+			),
 	} as unknown as MatrixEvent;
 }
 
@@ -110,6 +121,23 @@ describe("projectEvent", () => {
 			},
 		});
 		expect(projectEvent(room, ev)).not.toBeNull();
+	});
+
+	it("rejects thread replies (m.thread relations live in the thread)", () => {
+		const room = makeRoom({});
+		const ev = makeEvent({
+			content: {
+				msgtype: "m.text",
+				body: "in a thread",
+				"m.relates_to": {
+					rel_type: "m.thread",
+					event_id: "$root:test",
+					is_falling_back: true,
+					"m.in_reply_to": { event_id: "$root:test" },
+				},
+			},
+		});
+		expect(projectEvent(room, ev)).toBeNull();
 	});
 
 	it("rejects events without an id", () => {

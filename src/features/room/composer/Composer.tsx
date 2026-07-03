@@ -23,6 +23,7 @@ import type { GifItem } from "../../gif/types";
 import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
+import { composerTextareaScope } from "./composerTextarea";
 import {
 	type CustomEmoji,
 	escapeHtml,
@@ -105,6 +106,9 @@ function formatRecordingTime(elapsedMs: number): string {
 
 const Composer: Component<{
 	roomId: string;
+	/** Thread scope: sends target this thread (SDK 3-arg overload builds
+	 *  the MSC3440 relation). Absent for the main room composer. */
+	threadRootId?: string;
 	replyTo?: TimelineEvent | null;
 	editingEvent?: TimelineEvent | null;
 	onCancelReply?: () => void;
@@ -179,6 +183,9 @@ const Composer: Component<{
 		if (voiceStopping()) return;
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
+		// Pinned: the recorder stop awaits, and the panel's thread (or the
+		// panel itself) can change under the send.
+		const threadRootId = props.threadRootId ?? null;
 		const onThisRoom = (): boolean => props.roomId === roomId;
 		let attachment: PendingAttachment | null = null;
 		setVoiceStopping(true);
@@ -214,6 +221,7 @@ const Composer: Component<{
 		try {
 			await uploadAndSend(client, roomId, attachment, {
 				replyTo: replyTo ?? undefined,
+				threadId: threadRootId,
 			});
 			// Don't fire onSent while an edit is active: TimelineView
 			// reads it as "edit complete" and would clear the edit the
@@ -484,6 +492,13 @@ const Composer: Component<{
 	}
 
 	async function onGifSelect(gif: GifItem): Promise<void> {
+		// Pinned at entry and used exclusively below: the panel's thread (or
+		// the room, or the reply target) can change while the send is in
+		// flight, and every read of a reactive prop after an await would see
+		// the NEW value.
+		const gifRoomId = props.roomId;
+		const gifThreadRootId = props.threadRootId ?? null;
+		const gifReplyTo = props.replyTo;
 		setGifPickerOpen(false);
 
 		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting).
@@ -503,16 +518,16 @@ const Composer: Component<{
 		};
 
 		// Attach reply fallback + metadata if replying (same format as normal sends)
-		if (props.replyTo) {
+		if (gifReplyTo) {
 			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
-				props.replyTo,
-				props.roomId,
+				gifReplyTo,
+				gifRoomId,
 			);
 			content.body = bodyPrefix + gif.url;
 			content.format = "org.matrix.custom.html";
 			content.formatted_body = htmlPrefix + escapeHtml(gif.url);
 			content["m.relates_to"] = {
-				"m.in_reply_to": { event_id: props.replyTo.eventId },
+				"m.in_reply_to": { event_id: gifReplyTo.eventId },
 			};
 		}
 
@@ -520,8 +535,12 @@ const Composer: Component<{
 		setError(null);
 		stopTyping();
 		try {
+			// 3-arg overload: a threadId routes the send into the thread and
+			// the SDK builds the MSC3440 relation (preserving an explicit
+			// m.in_reply_to as a real reply, is_falling_back false).
 			await client.sendMessage(
-				props.roomId,
+				gifRoomId,
+				gifThreadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
 			props.onSent?.();
@@ -744,6 +763,10 @@ const Composer: Component<{
 		// clobber the newly selected room's composer.
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
+		// Pinned like roomId: the panel can switch threads (or close) while
+		// uploads run, and every await-separated send below must target the
+		// thread this send STARTED in.
+		const threadRootId = props.threadRootId ?? null;
 		const onThisRoom = (): boolean => props.roomId === roomId;
 
 		// Edit mode: send m.replace event
@@ -795,8 +818,13 @@ const Composer: Component<{
 			requestAnimationFrame(autoResize);
 
 			try {
+				// 3-arg overload: without the threadId the edit's local echo gets
+				// no thread association (the SDK only calls setThread when one is
+				// passed), so a thread panel's acceptsEvent gate would reject it -
+				// no optimistic update and no failed-edit Retry surface there.
 				await client.sendMessage(
 					roomId,
+					threadRootId,
 					content as unknown as RoomMessageEventContent,
 				);
 				if (onThisRoom()) props.onSent?.();
@@ -867,6 +895,7 @@ const Composer: Component<{
 				try {
 					await uploadAndSend(client, roomId, att, {
 						replyTo: replyConsumed ? null : replyTo,
+						threadId: threadRootId,
 						onProgress: (p) => updateAttachment(att.id, { progress: p }),
 					});
 					// Clear the reply at the source once an event has carried it,
@@ -944,8 +973,10 @@ const Composer: Component<{
 		stopTyping();
 
 		try {
+			// 3-arg overload: see the GIF path - threads route via threadId.
 			await client.sendMessage(
 				roomId,
+				threadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
 			if (onThisRoom()) props.onSent?.();
@@ -1224,7 +1255,7 @@ const Composer: Component<{
 				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}
 				<textarea
 					ref={textareaRef}
-					data-composer-textarea
+					data-composer-textarea={composerTextareaScope(props.threadRootId)}
 					value={text()}
 					onInput={(e) => {
 						const val = e.currentTarget.value;
@@ -1312,8 +1343,9 @@ const Composer: Component<{
 							</svg>
 						</button>
 					</Show>
-					{/* Poll button (hidden when editing - polls are new sends). */}
-					<Show when={!props.editingEvent}>
+					{/* Poll button (hidden when editing - polls are new sends -
+					    and in threads: polls-in-threads are deferred, #303). */}
+					<Show when={!props.editingEvent && !props.threadRootId}>
 						<button
 							type="button"
 							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"

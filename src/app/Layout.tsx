@@ -8,6 +8,7 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
+	on,
 	onCleanup,
 	onMount,
 	Show,
@@ -53,6 +54,7 @@ import {
 	RoomSettingsOverlay,
 	type RoomSettingsTab,
 } from "../features/room/settings/RoomSettingsOverlay";
+import { ThreadPanel } from "../features/room/threads/ThreadPanel";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { createCopyLink } from "../features/room/useCopyLink";
 import { useNotifications } from "../features/room/useNotifications";
@@ -257,6 +259,17 @@ const RoomPane: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
+
+	// Open thread (root event id) shown in the right-hand panel; closed on
+	// room switch so a thread never renders under another room's header.
+	const [openThreadId, setOpenThreadId] = createSignal<string | null>(null);
+	createEffect(
+		on(
+			() => props.rid,
+			() => setOpenThreadId(null),
+			{ defer: true },
+		),
+	);
 
 	// Ref to the members toggle so the mobile members dialog can return focus
 	// to it on close (Kobalte can't auto-restore for an externally-controlled
@@ -512,8 +525,24 @@ const RoomPane: Component<{
 						jumpRequest={jumpRequest}
 						onJumpHandled={() => setJumpRequest(null)}
 						packs={packs}
+						onOpenThread={(threadId) => setOpenThreadId(threadId)}
 					/>
 				</div>
+				{/* Desktop: inline thread panel column. Keyed so switching to
+					another thread remounts the panel: mount-time focus capture,
+					focus-into-panel (live Escape), and restore target all track
+					the thread the user actually opened. */}
+				<Show when={!isMobile() && openThreadId()} keyed>
+					{(threadId) => (
+						<div class="w-96 min-w-60 max-w-[45%] shrink overflow-hidden border-l border-border-subtle">
+							<ThreadPanel
+								roomId={props.rid}
+								threadId={threadId}
+								onClose={() => setOpenThreadId(null)}
+							/>
+						</div>
+					)}
+				</Show>
 				{/* Desktop: inline resizable members column */}
 				<Show when={!isMobile() && props.membersVisible()}>
 					<ResizeDivider
@@ -536,6 +565,32 @@ const RoomPane: Component<{
 					</div>
 				</Show>
 			</div>
+			{/* Mobile: thread panel as a focus-trapped slide-over dialog
+				(Escape-to-close, focus return, aria-modal for free). */}
+			<Dialog
+				open={isMobile() && openThreadId() !== null}
+				onOpenChange={(open) => {
+					if (!open) setOpenThreadId(null);
+				}}
+			>
+				<Dialog.Portal>
+					<Dialog.Overlay class="fixed inset-0 z-30 bg-black/60" />
+					<Dialog.Content class="fixed inset-y-0 right-0 z-30 flex w-96 max-w-[92%] flex-col overflow-hidden border-l border-border-subtle bg-surface-1 shadow-xl">
+						<Dialog.Title class="sr-only">Thread</Dialog.Title>
+						{/* Keyed for the same per-thread remount as the desktop
+							column (fresh focus capture per thread switch). */}
+						<Show when={openThreadId()} keyed>
+							{(threadId) => (
+								<ThreadPanel
+									roomId={props.rid}
+									threadId={threadId}
+									onClose={() => setOpenThreadId(null)}
+								/>
+							)}
+						</Show>
+					</Dialog.Content>
+				</Dialog.Portal>
+			</Dialog>
 			{/* Mobile: members list as a focus-trapped slide-over dialog so it
 				gets Escape-to-close, focus return, and aria-modal for free. */}
 			<Dialog

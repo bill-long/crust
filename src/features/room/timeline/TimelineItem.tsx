@@ -18,6 +18,7 @@ import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import { PollMessage } from "../poll/PollMessage";
+import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
 import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
@@ -300,6 +301,8 @@ const HoverToolbar: Component<{
 	packs: ImagePack[];
 	onReactPick: (key: string) => void;
 	onReply: () => void;
+	/** Open (or start) this message's thread. Absent inside the panel. */
+	onReplyInThread?: () => void;
 	onEdit: () => void;
 	onDelete: () => void;
 	onTogglePin: () => void;
@@ -371,6 +374,27 @@ const HoverToolbar: Component<{
 					<path d="M20 18v-2a4 4 0 0 0-4-4H4" />
 				</svg>
 			</button>
+			<Show when={props.onReplyInThread}>
+				<button
+					type="button"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					onClick={() => props.onReplyInThread?.()}
+					aria-label="Reply in thread"
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+					</svg>
+				</button>
+			</Show>
 			<Show when={props.isOwnMessage && props.msgtype === "m.text"}>
 				<button
 					type="button"
@@ -446,6 +470,9 @@ const TimelineItem: Component<{
 	onReact: (key: string) => void;
 	/** Cast/change the local user's poll vote (empty array = retraction). */
 	onVote: (answerIds: string[]) => void;
+	/** Open the thread panel for this event's thread (chip click). Absent
+	 *  inside the panel itself, where the chip is a plain summary. */
+	onOpenThread?: (threadId: string) => void;
 	/** Close the poll (only offered when the snapshot says canEnd). */
 	onEndPoll: () => void;
 	onReply: () => void;
@@ -665,6 +692,11 @@ const TimelineItem: Component<{
 						packs={props.packs}
 						onReactPick={(key) => props.onReact(key)}
 						onReply={props.onReply}
+						onReplyInThread={
+							props.onOpenThread
+								? () => props.onOpenThread?.(props.event.eventId)
+								: undefined
+						}
 						onEdit={props.onEdit}
 						onDelete={props.onDelete}
 						onTogglePin={() => props.onTogglePin?.()}
@@ -970,6 +1002,18 @@ const TimelineItem: Component<{
 				    so the message reads as "deleting" rather than fully
 				    interactive. */}
 					<Show when={!isRedactionPending() && !isRedactionFailed()}>
+						<Show when={ev.thread}>
+							{(thread) => (
+								<ThreadSummaryChip
+									thread={thread()}
+									onOpen={
+										props.onOpenThread
+											? () => props.onOpenThread?.(thread().threadId)
+											: undefined
+									}
+								/>
+							)}
+						</Show>
 						<ReactionPills
 							reactions={ev.reactions}
 							myReactions={ev.myReactions}

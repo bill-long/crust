@@ -12,6 +12,7 @@ import {
 	Show,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
+import { composerTextareaSelector } from "../composer/composerTextarea";
 import { SearchResultRow } from "./SearchResultRow";
 import { MAX_QUERY_LEN, useRoomSearch } from "./useRoomSearch";
 
@@ -20,12 +21,13 @@ const VIRTUALIZE_THRESHOLD = 50;
 /**
  * Focus the active room composer textarea, if one exists. Lets a keyboard
  * user who jumps to a search result land back on the input they were typing
- * in without an extra Tab. We rely on the singleton `data-composer-textarea`
- * marker rendered by Composer; if no composer is mounted this is a no-op.
+ * in without an extra Tab. We target the MAIN room composer via its scoped
+ * `data-composer-textarea="main"` marker (thread panels carry their own);
+ * if no composer is mounted this is a no-op.
  */
 function focusComposer(): void {
 	const textarea = document.querySelector<HTMLTextAreaElement>(
-		"textarea[data-composer-textarea]",
+		composerTextareaSelector(),
 	);
 	textarea?.focus();
 }

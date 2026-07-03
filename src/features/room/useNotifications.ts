@@ -1,5 +1,6 @@
 import { useNavigate } from "@solidjs/router";
 import {
+	type EventTimeline,
 	type MatrixClient,
 	type MatrixEvent,
 	MatrixEventEvent,
@@ -14,6 +15,7 @@ import {
 	isRenderablePollContent,
 	pollNotificationBody,
 } from "../../lib/pollCopy";
+import { isThreadReply, isThreadTimelineData } from "../../lib/threadEvents";
 import { isVoiceMessageContent } from "../../lib/voiceMessage";
 import { userSettings } from "../../stores/settings";
 import {
@@ -86,6 +88,10 @@ export function useNotifications(
 		if (type === "m.room.message" && !event.getContent()?.msgtype) return false;
 		const relType = event.getContent()?.["m.relates_to"]?.rel_type;
 		if (relType === "m.replace") return false;
+		// Thread replies don't notify yet: deliberate gap until the
+		// thread-aware notification branch lands (issue #303 step 3e),
+		// which replaces this line with "replied in a thread" copy.
+		if (isThreadReply(event)) return false;
 		// A poll start must be renderable (readable question + well-formed
 		// answers) - approximates the timeline's parsePollStart gate so a
 		// malformed poll can't pop a notification for a message the timeline
@@ -209,9 +215,13 @@ export function useNotifications(
 		room: Room | undefined,
 		_toStart: boolean | undefined,
 		_removed: boolean | undefined,
-		data: { liveEvent?: boolean },
+		data: { liveEvent?: boolean; timeline?: EventTimeline },
 	): void => {
 		if (!room || !data.liveEvent) return;
+		// Thread timelines re-emit RoomEvent.Timeline with liveEvent: true;
+		// without this gate a dual-homed thread ROOT (present in both the
+		// room and its thread timeline) would notify twice.
+		if (isThreadTimelineData(data)) return;
 
 		// Encrypted event pending decryption — defer and re-evaluate after
 		if (

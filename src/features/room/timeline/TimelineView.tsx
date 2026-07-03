@@ -25,6 +25,11 @@ import {
 	useImagePacks,
 } from "../../emoji/useImagePacks";
 import { Composer } from "../composer/Composer";
+import { composerTextareaSelector } from "../composer/composerTextarea";
+import {
+	mainTimelineSource,
+	threadTimelineSource,
+} from "../threads/timelineSource";
 import {
 	formatDateSeparatorLabel,
 	isDifferentDay,
@@ -100,8 +105,22 @@ const TimelineView: Component<{
 	 *  (ClientEvent.AccountData + RoomStateEvent.Events) when sibling
 	 *  components (e.g. PinnedMessagesPanel) also need the packs. */
 	packs?: () => ImagePack[];
+	/** Thread scope: when set, this instance windows the thread's timeline
+	 *  (the thread panel) instead of the room's. Typing indicators are
+	 *  room-level and therefore suppressed in a thread. */
+	thread?: { threadId: string };
+	/** Open the thread panel for a root event ("Open thread" affordances
+	 *  on chips and the hover toolbar). Absent inside the panel itself. */
+	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
+	// Memoized: useTimeline reads source() in hot per-event paths, so the
+	// source object must be stable per thread change, not per call.
+	const timelineSource = createMemo(() =>
+		props.thread
+			? threadTimelineSource(props.thread.threadId)
+			: mainTimelineSource(),
+	);
 	const {
 		events,
 		loading,
@@ -124,7 +143,9 @@ const TimelineView: Component<{
 		pendingEdits,
 		votePoll,
 		endPoll,
-	} = useTimeline(client, () => props.roomId);
+	} = useTimeline(client, () => props.roomId, {
+		source: timelineSource,
+	});
 
 	// Custom emoji packs for this room. When the parent passes a shared
 	// `packs` accessor (Layout does — same accessor also feeds the
@@ -467,7 +488,15 @@ const TimelineView: Component<{
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
 		client
-			.sendReadReceipt(matrixEvent, ReceiptType.Read)
+			// Main timeline: UNTHREADED (3rd arg true) - a plain receipt would
+			// get thread_id "main" and clear only main-timeline counts, leaving
+			// the per-thread counts the room badge sums un-clearable outside
+			// the panel. Unthreaded preserves the pre-thread invariant that
+			// reading a room clears its whole badge.
+			// Thread panel: THREADED (3rd arg false) - the SDK derives
+			// thread_id from the event, so reading a thread clears exactly that
+			// thread's counts and never the whole room's read state.
+			.sendReadReceipt(matrixEvent, ReceiptType.Read, !props.thread)
 			.then(() => {
 				lastSentReceiptEventId = eventId;
 			})
@@ -925,6 +954,13 @@ const TimelineView: Component<{
 		}
 	};
 
+	// threadId for the SDK's 3-arg overloads: in a thread panel the local
+	// echo only gets its thread association (setThread) when a threadId is
+	// passed - without it the echo lives in no timeline set and this
+	// hook's acceptsEvent gate rejects it, so reactions/redactions would
+	// show no optimistic update inside the panel.
+	const sendThreadId = (): string | null => props.thread?.threadId ?? null;
+
 	const onReact = async (eventId: string, key: string): Promise<void> => {
 		const ev = events.find((e) => e.eventId === eventId);
 		if (!ev) return;
@@ -934,15 +970,20 @@ const TimelineView: Component<{
 			: undefined;
 		try {
 			if (existingId) {
-				await client.redactEvent(props.roomId, existingId);
+				await client.redactEvent(props.roomId, sendThreadId(), existingId);
 			} else {
-				await client.sendEvent(props.roomId, EventType.Reaction, {
-					"m.relates_to": {
-						rel_type: RelationType.Annotation,
-						event_id: eventId,
-						key,
+				await client.sendEvent(
+					props.roomId,
+					sendThreadId(),
+					EventType.Reaction,
+					{
+						"m.relates_to": {
+							rel_type: RelationType.Annotation,
+							event_id: eventId,
+							key,
+						},
 					},
-				});
+				);
 			}
 		} catch (e) {
 			console.error("Reaction failed:", e);
@@ -951,7 +992,7 @@ const TimelineView: Component<{
 
 	const onDelete = async (eventId: string): Promise<void> => {
 		try {
-			await client.redactEvent(props.roomId, eventId);
+			await client.redactEvent(props.roomId, sendThreadId(), eventId);
 		} catch (e) {
 			console.error("Delete failed:", e);
 		}
@@ -972,7 +1013,7 @@ const TimelineView: Component<{
 		requestAnimationFrame(() => {
 			if (props.roomId !== expectedRoomId) return;
 			const textarea = document.querySelector<HTMLTextAreaElement>(
-				"textarea[data-composer-textarea]",
+				composerTextareaSelector(props.thread?.threadId),
 			);
 			textarea?.focus();
 		});
@@ -1424,6 +1465,7 @@ const TimelineView: Component<{
 														void votePoll(event.eventId, answerIds)
 													}
 													onEndPoll={() => void endPoll(event.eventId)}
+													onOpenThread={props.onOpenThread}
 													onReply={() => setReplyTo(event)}
 													onJumpToReply={(id) => {
 														setWantsBottom(false);
@@ -1588,8 +1630,8 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Typing indicator */}
-			<Show when={typingText()}>
+			{/* Typing indicator (room-level; meaningless inside a thread) */}
+			<Show when={!props.thread && typingText()}>
 				<div
 					class="shrink-0 px-4 py-1 text-xs text-text-disabled"
 					aria-live="polite"
@@ -1598,9 +1640,11 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Composer */}
+			{/* Composer. In a thread panel it targets the thread (the SDK's
+			    3-arg send overload builds the MSC3440 relation). */}
 			<Composer
 				roomId={props.roomId}
+				threadRootId={props.thread?.threadId}
 				replyTo={replyTo()}
 				editingEvent={editingEvent()}
 				onCancelReply={() => setReplyTo(null)}

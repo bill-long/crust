@@ -52,6 +52,12 @@ export interface MockEvent {
 	 * (leave→join, etc.).
 	 */
 	prevContent?: Record<string, unknown>;
+	/**
+	 * Server-aggregated bundled relations (`unsigned["m.relations"]`),
+	 * keyed by rel_type - e.g. the `m.thread` bundle on a thread root.
+	 * Exposed via `getServerAggregatedRelation()`.
+	 */
+	serverAggregations?: Record<string, unknown>;
 }
 
 export function createMatrixEvent(evt: MockEvent) {
@@ -114,6 +120,34 @@ export function createMatrixEvent(evt: MockEvent) {
 		event: { redacts: evt.redacts },
 		getStateKey: () => evt.stateKey,
 		getPrevContent: () => evt.prevContent ?? {},
+		/** Mirrors SDK: returns unsigned["m.relations"][relType]. */
+		getServerAggregatedRelation: (relType: string): unknown =>
+			evt.serverAggregations?.[relType],
+		/** Mirrors SDK threadRootId's wire-content branch (the mock never
+		 *  attaches Thread objects, so the .thread fallbacks don't apply). */
+		get threadRootId(): string | undefined {
+			const relation = evt.content?.["m.relates_to"] as
+				| { rel_type?: string; event_id?: string }
+				| undefined;
+			return relation?.rel_type === "m.thread" ? relation.event_id : undefined;
+		},
+		/**
+		 * Mirrors SDK `isRelation(relType?)`: reads WIRE content (the mock's
+		 * raw `evt.content` - unaffected by edits/redactions, like the real
+		 * getWireContent), requires both rel_type and event_id, and returns
+		 * false for state events (which cannot be thread/replace relations).
+		 */
+		isRelation: (relType?: string): boolean => {
+			if (evt.stateKey !== undefined) return false;
+			const relation = evt.content?.["m.relates_to"] as
+				| { rel_type?: string; event_id?: string }
+				| undefined;
+			return !!(
+				relation?.rel_type &&
+				relation.event_id &&
+				(relType ? relation.rel_type === relType : true)
+			);
+		},
 		get status() {
 			return status;
 		},
@@ -244,6 +278,9 @@ export function createMockRoom(
 	};
 
 	const roomListeners = new Map<string, Set<(...args: unknown[]) => void>>();
+	/** Mirrors `Room.threads`: tests register Thread(-shaped) objects via
+	 *  `room.threads.set(...)` and emit `ThreadEvent.*` on the room. */
+	const threadsMap = new Map<string, unknown>();
 
 	return {
 		roomId,
@@ -253,6 +290,8 @@ export function createMockRoom(
 		 *  `Poll` instances via `room.polls.set(...)` and emit
 		 *  `PollEvent.New`. */
 		polls: new Map<string, unknown>(),
+		threads: threadsMap,
+		getThread: (id: string): unknown => threadsMap.get(id) ?? null,
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
@@ -478,6 +517,85 @@ export function textMessage(
 		sender,
 		type: "m.room.message",
 		content: { msgtype: "m.text", body },
+		ts,
+	};
+}
+
+/**
+ * Thread(-shaped) mock with a windowable timeline set, for thread-scoped
+ * useTimeline tests and `room.threads.set(...)` registration. The
+ * timeline mirrors the room mock's shape (TimelineWindow-compatible).
+ */
+export function createMockThread(threadId: string, events: MockEvent[] = []) {
+	const matrixEvents = events.map(createMatrixEvent);
+	let baseIndex = 0;
+	const timeline = {
+		getEvents: () => matrixEvents,
+		// Widened so tests can patch in a token to unlock pagination paths.
+		getPaginationToken: (): string | null => null,
+		getBaseIndex: () => baseIndex,
+		getNeighbouringTimeline: () => null,
+		setNeighbouringTimeline: () => {},
+		setPaginationToken: () => {},
+		__prepend: (event: ReturnType<typeof createMatrixEvent>) => {
+			matrixEvents.unshift(event);
+			baseIndex++;
+		},
+		__append: (event: ReturnType<typeof createMatrixEvent>) => {
+			matrixEvents.push(event);
+		},
+	};
+	const thread = {
+		id: threadId,
+		initialEventsFetched: true,
+		get length() {
+			// Replies only: the root itself lives in the thread timeline too.
+			return matrixEvents.filter((e) => e.getId() !== threadId).length;
+		},
+		get replyToEvent() {
+			const replies = matrixEvents.filter((e) => e.getId() !== threadId);
+			return replies[replies.length - 1] ?? null;
+		},
+		hasCurrentUserParticipated: false,
+		timelineSet: undefined as unknown,
+	};
+	const timelineSet = {
+		room: null as unknown,
+		thread,
+		getLiveTimeline: () => timeline,
+		getTimelineForEvent: () => null,
+		relations: {
+			getChildEventsForEvent: () => null,
+		},
+	};
+	thread.timelineSet = timelineSet;
+	return { thread, timeline, timelineSet };
+}
+
+/** A thread reply in the MSC3440 wire shape (fallback m.in_reply_to). */
+export function threadReplyEvent(
+	roomId: string,
+	eventId: string,
+	sender: string,
+	rootId: string,
+	body: string,
+	ts = Date.now(),
+): MockEvent {
+	return {
+		eventId,
+		roomId,
+		sender,
+		type: "m.room.message",
+		content: {
+			msgtype: "m.text",
+			body,
+			"m.relates_to": {
+				rel_type: "m.thread",
+				event_id: rootId,
+				is_falling_back: true,
+				"m.in_reply_to": { event_id: rootId },
+			},
+		},
 		ts,
 	};
 }
