@@ -26,6 +26,10 @@ import {
 } from "../../emoji/useImagePacks";
 import { Composer } from "../composer/Composer";
 import {
+	mainTimelineSource,
+	threadTimelineSource,
+} from "../threads/timelineSource";
+import {
 	formatDateSeparatorLabel,
 	isDifferentDay,
 	isSameDay,
@@ -100,6 +104,13 @@ const TimelineView: Component<{
 	 *  (ClientEvent.AccountData + RoomStateEvent.Events) when sibling
 	 *  components (e.g. PinnedMessagesPanel) also need the packs. */
 	packs?: () => ImagePack[];
+	/** Thread scope: when set, this instance windows the thread's timeline
+	 *  (the thread panel) instead of the room's. Typing indicators are
+	 *  room-level and therefore suppressed in a thread. */
+	thread?: { threadId: string };
+	/** Open the thread panel for a root event ("Open thread" affordances
+	 *  on chips and the hover toolbar). Absent inside the panel itself. */
+	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
 	const {
@@ -124,7 +135,12 @@ const TimelineView: Component<{
 		pendingEdits,
 		votePoll,
 		endPoll,
-	} = useTimeline(client, () => props.roomId);
+	} = useTimeline(client, () => props.roomId, {
+		source: () =>
+			props.thread
+				? threadTimelineSource(props.thread.threadId)
+				: mainTimelineSource(),
+	});
 
 	// Custom emoji packs for this room. When the parent passes a shared
 	// `packs` accessor (Layout does — same accessor also feeds the
@@ -1430,6 +1446,11 @@ const TimelineView: Component<{
 														void votePoll(event.eventId, answerIds)
 													}
 													onEndPoll={() => void endPoll(event.eventId)}
+													onOpenThread={
+														props.onOpenThread
+															? (threadId) => props.onOpenThread?.(threadId)
+															: undefined
+													}
 													onReply={() => setReplyTo(event)}
 													onJumpToReply={(id) => {
 														setWantsBottom(false);
@@ -1594,8 +1615,8 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Typing indicator */}
-			<Show when={typingText()}>
+			{/* Typing indicator (room-level; meaningless inside a thread) */}
+			<Show when={!props.thread && typingText()}>
 				<div
 					class="shrink-0 px-4 py-1 text-xs text-text-disabled"
 					aria-live="polite"
@@ -1604,22 +1625,26 @@ const TimelineView: Component<{
 				</div>
 			</Show>
 
-			{/* Composer */}
-			<Composer
-				roomId={props.roomId}
-				replyTo={replyTo()}
-				editingEvent={editingEvent()}
-				onCancelReply={() => setReplyTo(null)}
-				onCancelEdit={() => setEditingEvent(null)}
-				onSent={() => {
-					setReplyTo(null);
-					setEditingEvent(null);
-				}}
-				onEnqueueReady={(fn) => {
-					enqueueFiles = fn;
-				}}
-				packs={packs()}
-			/>
+			{/* Composer. Threads are read-only until compose-into-threads
+			    lands (issue #303 step 3d) - the room composer would send to
+			    the MAIN timeline, so it must not render inside a panel. */}
+			<Show when={!props.thread}>
+				<Composer
+					roomId={props.roomId}
+					replyTo={replyTo()}
+					editingEvent={editingEvent()}
+					onCancelReply={() => setReplyTo(null)}
+					onCancelEdit={() => setEditingEvent(null)}
+					onSent={() => {
+						setReplyTo(null);
+						setEditingEvent(null);
+					}}
+					onEnqueueReady={(fn) => {
+						enqueueFiles = fn;
+					}}
+					packs={packs()}
+				/>
+			</Show>
 
 			<ImageLightbox
 				open={lightboxOpen}

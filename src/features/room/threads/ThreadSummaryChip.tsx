@@ -1,15 +1,18 @@
 import { type Component, Show } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import { formatRelativeTime, useMinuteTick } from "../../../lib/relativeTime";
 import type { ThreadSummary } from "./threadSummary";
 
 /**
  * Compact "N replies" summary rendered under a thread root's message body
- * (beside the reaction pills). Non-interactive for now: it becomes the
- * open-thread button when the thread panel lands (issue #303 step 3c).
+ * (beside the reaction pills). A button that opens the thread panel when
+ * `onOpen` is provided; a plain summary otherwise (inside the panel).
  */
 
 export const ThreadSummaryChip: Component<{
 	thread: ThreadSummary;
+	/** Opens the thread panel; when absent the chip is non-interactive. */
+	onOpen?: () => void;
 	/** Injectable clock for tests; when set, the ticker isn't subscribed. */
 	now?: number;
 }> = (props) => {
@@ -32,8 +35,27 @@ export const ThreadSummaryChip: Component<{
 				)
 			: null;
 
+	const ariaLabel = () => {
+		const act = activity();
+		return `Open thread: ${replyLabel()}${act ? `, last activity ${act}` : ""}`;
+	};
+
 	return (
-		<div class="mt-1 inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
+		<Dynamic
+			component={props.onOpen ? "button" : "div"}
+			{...(props.onOpen
+				? {
+						type: "button",
+						onClick: props.onOpen,
+						"aria-label": ariaLabel(),
+					}
+				: {})}
+			class={`mt-1 inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface-2 px-2 py-0.5 text-xs text-text-secondary ${
+				props.onOpen
+					? "transition-colors hover:border-border-default hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					: ""
+			}`}
+		>
 			<svg
 				class="h-3.5 w-3.5 shrink-0 text-text-muted"
 				viewBox="0 0 24 24"
@@ -50,6 +72,6 @@ export const ThreadSummaryChip: Component<{
 			<Show when={activity()}>
 				{(label) => <span class="text-text-muted">{label()}</span>}
 			</Show>
-		</div>
+		</Dynamic>
 	);
 };
