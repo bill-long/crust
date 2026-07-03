@@ -191,7 +191,7 @@ function MediaDeviceSelect(
 	);
 }
 
-const GeneralTab: Component = () => {
+const AppGeneralTab: Component = () => {
 	const { client } = useClient();
 	// Local preview signal prevents a feedback loop: applying zoom resizes the
 	// slider, which shifts the thumb to a higher value, which zooms further.
@@ -317,4 +317,4 @@ const GeneralTab: Component = () => {
 	);
 };
 
-export { GeneralTab };
+export { AppGeneralTab };

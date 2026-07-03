@@ -14,9 +14,9 @@ import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { trackAppModalMounted } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 import { AdvancedTab } from "./AdvancedTab";
-import { GeneralTab } from "./GeneralTab";
 import { MembersTab } from "./MembersTab";
 import { PermissionsTab } from "./PermissionsTab";
+import { RoomGeneralTab } from "./RoomGeneralTab";
 import { RoomsTab } from "./RoomsTab";
 import { VisibilityTab } from "./VisibilityTab";
 
@@ -218,7 +218,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 						<div class="max-w-2xl">
 							<Switch>
 								<Match when={props.activeTab === "general"}>
-									<GeneralTab client={props.client} roomId={props.roomId} />
+									<RoomGeneralTab client={props.client} roomId={props.roomId} />
 								</Match>
 								<Match when={props.activeTab === "rooms" && isSpace()}>
 									<RoomsTab client={props.client} roomId={props.roomId} />
