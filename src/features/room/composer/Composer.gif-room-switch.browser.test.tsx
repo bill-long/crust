@@ -20,7 +20,7 @@ import { TestClientProvider } from "../../../test/TimelineHarness";
 vi.mock("../../../app/ConfigProvider", () => ({
 	useConfig: () => ({
 		gif: {
-			provider: "tenor",
+			provider: "giphy",
 			apiKey: "key",
 			trendingOnOpen: true,
 			maxRating: "g",
@@ -33,10 +33,10 @@ vi.mock("../../../app/ConfigProvider", () => ({
 vi.mock("../../gif/gifConfig", () => ({
 	useGifConfig: () => ({
 		available: () => true,
-		provider: () => "tenor",
+		provider: () => "giphy",
 		apiKey: () => "key",
 		trendingOnOpen: () => true,
-		maxRating: () => "off",
+		maxRating: () => "g",
 		autoDownload: () => false,
 	}),
 }));
@@ -57,10 +57,10 @@ vi.mock("../../gif/provider", () => ({
 		trending: async () => ({ items: [GIF], hasMore: false, nextOffset: 0 }),
 		search: async () => ({ items: [GIF], hasMore: false, nextOffset: 0 }),
 		attribution: {
-			name: "Tenor",
+			name: "Giphy",
 			logoUrl: "",
 			url: "",
-			searchPlaceholder: "Search Tenor",
+			searchPlaceholder: "Search Giphy",
 		},
 	}),
 }));
@@ -108,7 +108,15 @@ describe("Composer GIF send room-switch guard (#310)", () => {
 		// send (pinned to ROOM_A) is now in flight.
 		(await findByLabelText("Open GIF picker")).click();
 		(await findByLabelText("party parrot")).click();
+		// The GIF must be sent to the room it was picked in (ROOM_A), with no
+		// thread. This pins the core contract so a future change that routed
+		// the send to the switched-to room would fail here, not just on onSent.
 		expect(client.sendMessage).toHaveBeenCalledTimes(1);
+		expect(client.sendMessage).toHaveBeenCalledWith(
+			ROOM_A,
+			null,
+			expect.objectContaining({ msgtype: "m.text", body: GIF.url }),
+		);
 
 		// User switches to ROOM_B while the ROOM_A send is still pending.
 		setRoomId(ROOM_B);
