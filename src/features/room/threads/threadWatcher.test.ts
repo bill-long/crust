@@ -85,6 +85,29 @@ describe("createThreadWatcher", () => {
 		expect(summary?.latestSender).toBe("@c:test");
 	});
 
+	it("skips onUpdate when a recompute lands on an identical summary", () => {
+		const { room, watcher, onUpdate, rootEvent } = setup();
+		room.threads.set(
+			"$root",
+			threadStub("$root", 2, { sender: "@b:test", ts: 5000 }),
+		);
+		watcher.getSummary(rootEvent, room as unknown as Room);
+		onUpdate.mockClear();
+
+		// The SDK fires BOTH NewReply and Update per incoming reply: the
+		// first recompute sees the new state and re-projects; the second
+		// lands on an identical summary and must not re-project again.
+		const grown = threadStub("$root", 3, { sender: "@c:test", ts: 6000 });
+		room.threads.set("$root", grown);
+		room.__emit(
+			ThreadEvent.NewReply,
+			grown,
+			createMatrixEvent(textMessage(ROOM_ID, "$r3", "@c:test", "re", 6000)),
+		);
+		room.__emit(ThreadEvent.Update, grown);
+		expect(onUpdate).toHaveBeenCalledTimes(1);
+	});
+
 	it("ignores emissions for roots that were never projected", () => {
 		const { room, onUpdate } = setup();
 		room.__emit(ThreadEvent.Update, threadStub("$unseen", 3));

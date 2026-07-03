@@ -23,6 +23,7 @@ import type { GifItem } from "../../gif/types";
 import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
+import { composerTextareaScope } from "./composerTextarea";
 import {
 	type CustomEmoji,
 	escapeHtml,
@@ -491,10 +492,13 @@ const Composer: Component<{
 	}
 
 	async function onGifSelect(gif: GifItem): Promise<void> {
-		// Pinned before any await: the panel's thread (or the room) can
-		// change while the send is in flight.
+		// Pinned at entry and used exclusively below: the panel's thread (or
+		// the room, or the reply target) can change while the send is in
+		// flight, and every read of a reactive prop after an await would see
+		// the NEW value.
 		const gifRoomId = props.roomId;
 		const gifThreadRootId = props.threadRootId ?? null;
+		const gifReplyTo = props.replyTo;
 		setGifPickerOpen(false);
 
 		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting).
@@ -514,16 +518,16 @@ const Composer: Component<{
 		};
 
 		// Attach reply fallback + metadata if replying (same format as normal sends)
-		if (props.replyTo) {
+		if (gifReplyTo) {
 			const { bodyPrefix, htmlPrefix } = buildReplyFallback(
-				props.replyTo,
-				props.roomId,
+				gifReplyTo,
+				gifRoomId,
 			);
 			content.body = bodyPrefix + gif.url;
 			content.format = "org.matrix.custom.html";
 			content.formatted_body = htmlPrefix + escapeHtml(gif.url);
 			content["m.relates_to"] = {
-				"m.in_reply_to": { event_id: props.replyTo.eventId },
+				"m.in_reply_to": { event_id: gifReplyTo.eventId },
 			};
 		}
 
@@ -533,8 +537,7 @@ const Composer: Component<{
 		try {
 			// 3-arg overload: a threadId routes the send into the thread and
 			// the SDK builds the MSC3440 relation (preserving an explicit
-			// m.in_reply_to as a real reply, is_falling_back false). roomId
-			// and threadRootId were pinned before the awaits above.
+			// m.in_reply_to as a real reply, is_falling_back false).
 			await client.sendMessage(
 				gifRoomId,
 				gifThreadRootId,
@@ -815,8 +818,13 @@ const Composer: Component<{
 			requestAnimationFrame(autoResize);
 
 			try {
+				// 3-arg overload: without the threadId the edit's local echo gets
+				// no thread association (the SDK only calls setThread when one is
+				// passed), so a thread panel's acceptsEvent gate would reject it -
+				// no optimistic update and no failed-edit Retry surface there.
 				await client.sendMessage(
 					roomId,
+					threadRootId,
 					content as unknown as RoomMessageEventContent,
 				);
 				if (onThisRoom()) props.onSent?.();
@@ -1247,7 +1255,7 @@ const Composer: Component<{
 				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}
 				<textarea
 					ref={textareaRef}
-					data-composer-textarea={props.threadRootId ?? "main"}
+					data-composer-textarea={composerTextareaScope(props.threadRootId)}
 					value={text()}
 					onInput={(e) => {
 						const val = e.currentTarget.value;

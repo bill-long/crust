@@ -12,6 +12,7 @@ import {
 	Show,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
+import { composerTextareaSelector } from "../composer/composerTextarea";
 import { SearchResultRow } from "./SearchResultRow";
 import { MAX_QUERY_LEN, useRoomSearch } from "./useRoomSearch";
 
@@ -26,7 +27,7 @@ const VIRTUALIZE_THRESHOLD = 50;
  */
 function focusComposer(): void {
 	const textarea = document.querySelector<HTMLTextAreaElement>(
-		'textarea[data-composer-textarea="main"]',
+		composerTextareaSelector(),
 	);
 	textarea?.focus();
 }

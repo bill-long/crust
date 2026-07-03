@@ -340,6 +340,59 @@ describe("useTimeline thread gating", () => {
 			expect(events[2].status).toBe(EventStatus.NOT_SENT);
 		}));
 
+	it("keeps a SENT-but-unsynced echo across rebuilds (two-step confirm)", () =>
+		withRoot(async () => {
+			// Real SDK flow is two-step: the /send response fires a SENT
+			// rekey (status non-null), and only the later /sync remote echo
+			// nulls the status. In that gap the event lives in NO timeline,
+			// so the registry must carry it through rebuilds.
+			const room = createMockRoom(ROOM_ID, []);
+			const { thread, timeline, timelineSet } = createMockThread("$root", [
+				textMessage(ROOM_ID, "$root", "@a:hs", "the root", 1000),
+			]);
+			timeline.getPaginationToken = () => "tok";
+			room.threads.set("$root", thread);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+			const { events, loadOlderMessages } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				{ source: () => threadTimelineSource("$root") },
+			);
+			await flushPromises();
+
+			const echo = createMatrixEvent({
+				...threadReplyEvent(ROOM_ID, "~txn1", "@me:hs", "$root", "hi", 2000),
+				status: EventStatus.SENDING,
+			});
+			client.__emit("Room.localEchoUpdated", echo, room);
+			await flushPromises();
+
+			// /send response: rekey to the real id, status SENT (not null).
+			echo.__setId("$real");
+			echo.__setStatus(EventStatus.SENT);
+			client.__emit("Room.localEchoUpdated", echo, room, "~txn1");
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "$real"]);
+
+			// A rebuild in the SENT-to-sync gap must not drop the row.
+			await loadOlderMessages();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "$real"]);
+
+			// /sync remote echo: the SDK adds the event to the thread
+			// timeline (emitting Timeline, which extends the window) and
+			// nulls the status; no duplicate, registry pruned.
+			timeline.__append(echo);
+			echo.__setStatus(null);
+			client.__emit("Room.timeline", echo, room, false, false, {
+				liveEvent: true,
+				timeline: { getTimelineSet: () => timelineSet },
+			});
+			client.__emit("Room.localEchoUpdated", echo, room, "$real");
+			await flushPromises();
+			await loadOlderMessages();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "$real"]);
+		}));
+
 	it("keeps a failed thread echo retryable across panel close/reopen", () =>
 		withRoot(async () => {
 			const room = createMockRoom(ROOM_ID, []);

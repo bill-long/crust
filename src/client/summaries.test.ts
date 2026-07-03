@@ -1059,4 +1059,31 @@ describe("createSummariesStore poll previews", () => {
 		expect(store.summaries["!r:x"].unreadCount).toBe(3);
 		store.cleanup();
 	});
+
+	it("thread replies bump sidebar recency but not the preview text", () => {
+		// An actively-threading room must rise in the recency-sorted
+		// sidebar (as in Element) even though its preview keeps showing
+		// the latest MAIN-timeline message.
+		const room = stubRoomForStore(
+			createMockRoom("!r:x", [
+				textMessage("!r:x", "$main", "@alice:x", "main message", 1000),
+			]),
+		);
+		const client = createMockClient(new Map([[room.roomId, room]]));
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+		expect(store.summaries["!r:x"].lastMessage?.timestamp).toBe(1000);
+
+		const reply = createMatrixEvent(
+			threadReplyEvent("!r:x", "$tr", "@bob:x", "$main", "in thread", 5000),
+		);
+		client.__emit("Room.timeline", reply, room, undefined, false, {
+			liveEvent: true,
+			timeline: { getTimelineSet: () => ({ thread: { id: "$main" } }) },
+		});
+
+		expect(store.summaries["!r:x"].lastMessage?.timestamp).toBe(5000);
+		expect(store.summaries["!r:x"].lastMessage?.body).toBe("main message");
+		store.cleanup();
+	});
 });

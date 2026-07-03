@@ -65,7 +65,11 @@ export const ThreadPanel: Component<{
 			class="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none"
 			aria-label="Thread"
 			onKeyDown={(e) => {
-				if (e.key === "Escape") {
+				// defaultPrevented: the composer's own Escape handling (cancel
+				// reply/edit) marks the event handled; the first Escape must
+				// cancel just that, the next one closes the panel - matching
+				// the main room, where Escape never dismisses the whole view.
+				if (e.key === "Escape" && !e.defaultPrevented) {
 					e.stopPropagation();
 					props.onClose();
 				}
@@ -94,7 +98,9 @@ export const ThreadPanel: Component<{
 				</button>
 			</div>
 			<Switch>
-				<Match when={thread.error}>
+				{/* error short-circuits before thread() (reading an errored
+					resource throws); !loading guards the read during fetch. */}
+				<Match when={thread.error || (!thread.loading && thread() === null)}>
 					<div class="flex flex-1 items-center justify-center px-4 text-center text-sm text-text-muted">
 						Couldn't load this thread
 					</div>
@@ -102,11 +108,6 @@ export const ThreadPanel: Component<{
 				<Match when={thread.loading}>
 					<div class="flex flex-1 items-center justify-center text-sm text-text-muted">
 						Loading thread…
-					</div>
-				</Match>
-				<Match when={thread() === null && !thread.loading}>
-					<div class="flex flex-1 items-center justify-center px-4 text-center text-sm text-text-muted">
-						Couldn't load this thread
 					</div>
 				</Match>
 				<Match when={thread()}>

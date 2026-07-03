@@ -608,6 +608,15 @@ export function createSummariesStore(client: MatrixClient): {
 		if (isThreadTimelineData(data)) {
 			if (!summaries[room.roomId]) upsertRoom(room);
 			updateUnreadCounts(room);
+			// Thread replies ARE room activity: bump the recency sort key so
+			// an actively-threading room rises in the sidebar (as in Element)
+			// while the preview TEXT stays on the latest main-timeline
+			// message. Only forward, and only for actual replies - a
+			// dual-homed root's main emission already handled it.
+			const last = summaries[room.roomId]?.lastMessage;
+			if (last && isThreadReply(event) && event.getTs() > last.timestamp) {
+				setSummaries(room.roomId, "lastMessage", "timestamp", event.getTs());
+			}
 			return;
 		}
 

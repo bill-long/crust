@@ -46,12 +46,30 @@ export function createThreadWatcher(
 	 *  the moment the first reply creates the Thread. */
 	const projectedEvents = new Set<string>();
 
+	function summariesEqual(a: ThreadSummary, b: ThreadSummary): boolean {
+		return (
+			a.threadId === b.threadId &&
+			a.replyCount === b.replyCount &&
+			a.latestSender === b.latestSender &&
+			a.latestTs === b.latestTs &&
+			a.currentUserParticipated === b.currentUserParticipated &&
+			a.provisional === b.provisional
+		);
+	}
+
 	function recompute(thread: Thread): void {
 		if (!projectedEvents.has(thread.id)) return;
 		const summary = buildThreadSummaryFromThread(thread);
+		const cached = summaries.get(thread.id);
 		if (summary) {
+			// The SDK fires BOTH NewReply and Update for each incoming reply;
+			// skipping the identical second pass halves the root-row
+			// re-projections (reaction scan, reply resolution, poll parse) on
+			// the live-message hot path.
+			if (cached && summariesEqual(cached, summary)) return;
 			summaries.set(thread.id, summary);
 		} else {
+			if (!cached) return;
 			summaries.delete(thread.id);
 		}
 		onUpdate(thread.id);

@@ -119,6 +119,42 @@ describe("Composer thread sends", () => {
 		expect(relates?.["m.in_reply_to"]).toEqual({ event_id: "$r1" });
 	});
 
+	it("routes a thread edit through the 3-arg overload", async () => {
+		const client = makeClient();
+		const editingEvent = {
+			eventId: "$mine",
+			senderId: "@test:example.com",
+			senderName: "Test",
+			body: "original",
+			msgtype: "m.text",
+			type: "m.room.message",
+			timestamp: 1000,
+		} as never;
+		const { container } = render(() => (
+			<TestClientProvider client={client}>
+				<Composer
+					roomId={ROOM}
+					threadRootId="$root"
+					editingEvent={editingEvent}
+					packs={[]}
+				/>
+			</TestClientProvider>
+		));
+		typeAndSend(container, "edited text");
+		await tick();
+		expect(client.sendMessage).toHaveBeenCalledTimes(1);
+		const [roomId, threadId, content] = client.sendMessage.mock.calls[0];
+		expect(roomId).toBe(ROOM);
+		// Without the threadId the edit's local echo would get no thread
+		// association and the panel's acceptsEvent gate would reject it.
+		expect(threadId).toBe("$root");
+		const relates = (content as Record<string, unknown>)["m.relates_to"] as
+			| Record<string, unknown>
+			| undefined;
+		expect(relates?.rel_type).toBe("m.replace");
+		expect(relates?.event_id).toBe("$mine");
+	});
+
 	it("hides the poll button inside threads (polls-in-threads deferred)", () => {
 		const client = makeClient();
 		const { container } = render(() => (

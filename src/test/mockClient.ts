@@ -120,12 +120,6 @@ export function createMatrixEvent(evt: MockEvent) {
 		event: { redacts: evt.redacts },
 		getStateKey: () => evt.stateKey,
 		getPrevContent: () => evt.prevContent ?? {},
-		/**
-		 * Mirrors SDK `isRelation(relType?)`: reads WIRE content (the mock's
-		 * raw `evt.content` - unaffected by edits/redactions, like the real
-		 * getWireContent), requires both rel_type and event_id, and returns
-		 * false for state events (which cannot be thread/replace relations).
-		 */
 		/** Mirrors SDK: returns unsigned["m.relations"][relType]. */
 		getServerAggregatedRelation: (relType: string): unknown =>
 			evt.serverAggregations?.[relType],
@@ -137,6 +131,12 @@ export function createMatrixEvent(evt: MockEvent) {
 				| undefined;
 			return relation?.rel_type === "m.thread" ? relation.event_id : undefined;
 		},
+		/**
+		 * Mirrors SDK `isRelation(relType?)`: reads WIRE content (the mock's
+		 * raw `evt.content` - unaffected by edits/redactions, like the real
+		 * getWireContent), requires both rel_type and event_id, and returns
+		 * false for state events (which cannot be thread/replace relations).
+		 */
 		isRelation: (relType?: string): boolean => {
 			if (evt.stateKey !== undefined) return false;
 			const relation = evt.content?.["m.relates_to"] as

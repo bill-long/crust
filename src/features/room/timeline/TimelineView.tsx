@@ -25,6 +25,7 @@ import {
 	useImagePacks,
 } from "../../emoji/useImagePacks";
 import { Composer } from "../composer/Composer";
+import { composerTextareaSelector } from "../composer/composerTextarea";
 import {
 	mainTimelineSource,
 	threadTimelineSource,
@@ -953,6 +954,13 @@ const TimelineView: Component<{
 		}
 	};
 
+	// threadId for the SDK's 3-arg overloads: in a thread panel the local
+	// echo only gets its thread association (setThread) when a threadId is
+	// passed - without it the echo lives in no timeline set and this
+	// hook's acceptsEvent gate rejects it, so reactions/redactions would
+	// show no optimistic update inside the panel.
+	const sendThreadId = (): string | null => props.thread?.threadId ?? null;
+
 	const onReact = async (eventId: string, key: string): Promise<void> => {
 		const ev = events.find((e) => e.eventId === eventId);
 		if (!ev) return;
@@ -962,15 +970,20 @@ const TimelineView: Component<{
 			: undefined;
 		try {
 			if (existingId) {
-				await client.redactEvent(props.roomId, existingId);
+				await client.redactEvent(props.roomId, sendThreadId(), existingId);
 			} else {
-				await client.sendEvent(props.roomId, EventType.Reaction, {
-					"m.relates_to": {
-						rel_type: RelationType.Annotation,
-						event_id: eventId,
-						key,
+				await client.sendEvent(
+					props.roomId,
+					sendThreadId(),
+					EventType.Reaction,
+					{
+						"m.relates_to": {
+							rel_type: RelationType.Annotation,
+							event_id: eventId,
+							key,
+						},
 					},
-				});
+				);
 			}
 		} catch (e) {
 			console.error("Reaction failed:", e);
@@ -979,7 +992,7 @@ const TimelineView: Component<{
 
 	const onDelete = async (eventId: string): Promise<void> => {
 		try {
-			await client.redactEvent(props.roomId, eventId);
+			await client.redactEvent(props.roomId, sendThreadId(), eventId);
 		} catch (e) {
 			console.error("Delete failed:", e);
 		}
@@ -1000,7 +1013,7 @@ const TimelineView: Component<{
 		requestAnimationFrame(() => {
 			if (props.roomId !== expectedRoomId) return;
 			const textarea = document.querySelector<HTMLTextAreaElement>(
-				`textarea[data-composer-textarea="${props.thread?.threadId ?? "main"}"]`,
+				composerTextareaSelector(props.thread?.threadId),
 			);
 			textarea?.focus();
 		});

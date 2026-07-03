@@ -153,4 +153,23 @@ describe("ThreadPanel", () => {
 		fireEvent.keyDown(screen.getByLabelText("Thread"), { key: "Escape" });
 		expect(onClose).toHaveBeenCalledTimes(2);
 	});
+
+	it("does not close on an Escape the composer already handled", async () => {
+		getRoom.mockReturnValue(
+			roomWithThread({ id: "$root", initialEventsFetched: true }),
+		);
+		const onClose = vi.fn();
+		render(() => (
+			<ThreadPanel roomId="!r:hs" threadId="$root" onClose={onClose} />
+		));
+		const inner = await screen.findByTestId("thread-timeline");
+		// Mimic the composer's cancel-reply/cancel-edit Escape handling
+		// (preventDefault, no stopPropagation): the first Escape cancels
+		// just that; only an unhandled Escape closes the panel.
+		inner.addEventListener("keydown", (e) => {
+			if (e.key === "Escape") e.preventDefault();
+		});
+		fireEvent.keyDown(inner, { key: "Escape" });
+		expect(onClose).not.toHaveBeenCalled();
+	});
 });

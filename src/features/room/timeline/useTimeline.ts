@@ -12,6 +12,7 @@ import {
 	RoomEvent,
 	type RoomMember,
 	RoomMemberEvent,
+	THREAD_RELATION_TYPE,
 	TimelineWindow,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
@@ -484,6 +485,26 @@ function getThreadEchoRegistry(
 }
 
 /**
+ * Drop a scope's registry once it holds nothing, so the client-lifetime
+ * module registry stays proportional to threads with actually-pending
+ * sends instead of accreting one empty Map per thread ever composed in.
+ * Called only when the scope is being swapped out or the hook disposes -
+ * never while the scope is active, so the live reference can't be
+ * orphaned from the module map.
+ */
+function releaseThreadEchoRegistryIfEmpty(
+	client: MatrixClient,
+	roomId: string | null,
+	sourceKey: string | null,
+): void {
+	if (!roomId || !sourceKey) return;
+	const byScope = threadEchoRegistries.get(client);
+	if (!byScope) return;
+	const scope = `${roomId}|${sourceKey}`;
+	if (byScope.get(scope)?.size === 0) byScope.delete(scope);
+}
+
+/**
  * Build a displayable `TimelineEvent` for a synthesized expiry-based
  * "left the call" notice. Resolves the subject name and avatar from current
  * room state (call-member events carry no profile data), mirroring
@@ -725,8 +746,11 @@ function eventToTimelineEvent(
 	// in-thread reply omits the flag or sets it false and keeps its quote
 	// (Element suppresses only on a truthy flag).
 	const relatesTo = content["m.relates_to"];
+	// Server-latched relation name, not a literal: mirrors Gate S
+	// (threadEvents.ts) so pre-stable servers stay in sync.
 	const isThreadFallbackReply =
-		relatesTo?.rel_type === "m.thread" && relatesTo.is_falling_back === true;
+		relatesTo?.rel_type === THREAD_RELATION_TYPE.name &&
+		relatesTo.is_falling_back === true;
 	const inReplyToRaw = isThreadFallbackReply
 		? undefined
 		: relatesTo?.["m.in_reply_to"]?.event_id;
@@ -1375,7 +1399,6 @@ export function useTimeline(
 		}, delay);
 	}
 
-	/** Find a raw MatrixEvent in the current window by ID */
 	/**
 	 * Pending THREAD echoes live in no SDK timeline under Chronological
 	 * ordering (Room.addPendingEvent feeds only room sets, whose canContain
@@ -1392,6 +1415,8 @@ export function useTimeline(
 	 */
 	let pendingThreadEchoes = new Map<string, MatrixEvent>();
 
+	/** Find a raw MatrixEvent by ID in the current window, falling back to
+	 *  the pending-thread-echo registry (echoes live in no window). */
 	function findWindowEvent(eventId: string): MatrixEvent | undefined {
 		if (!currentTimelineWindow) {
 			return pendingThreadEchoes.get(eventId);
@@ -1516,6 +1541,8 @@ export function useTimeline(
 	}
 
 	function loadRoom(rid: string): void {
+		const prevRoomId = currentRoomId;
+		const prevSourceKey = currentSourceKey;
 		if (rid !== currentRoomId || source().key !== currentSourceKey) {
 			backfillReloadAttempted = false;
 			// Clear stale events immediately on room/source switch so the
@@ -1543,7 +1570,9 @@ export function useTimeline(
 		// Swap to this room+source's persistent echo registry: unresolved
 		// entries (FAILED sends) rehydrate through the first window rebuild;
 		// resolved ones get pruned there. Main sources hold no echoes, so a
-		// throwaway map keeps the module registry from accreting empty maps.
+		// throwaway map keeps the module registry from accreting empty maps;
+		// the outgoing scope is likewise released once it holds nothing.
+		releaseThreadEchoRegistryIfEmpty(client, prevRoomId, prevSourceKey);
 		pendingThreadEchoes = source().inThread
 			? getThreadEchoRegistry(client, rid, source().key)
 			: new Map();
@@ -1995,11 +2024,13 @@ export function useTimeline(
 		// tombstone its root row too. handleRedaction keys on the target and
 		// no-ops when it isn't in this window, so cross-source redaction
 		// traffic is harmless in both directions.
-		if (
-			event.getType() !== "m.room.redaction" &&
-			(!source().acceptsTimeline(data) || !source().acceptsEvent(event))
-		)
-			return;
+		// Cross-source redactions still flow past this gate (see above), but
+		// `sourceAccepts` keeps them out of the live-window bookkeeping below
+		// (extend / new-messages pill) - a main-room redaction is not thread
+		// activity, and vice versa.
+		const sourceAccepts =
+			source().acceptsTimeline(data) && source().acceptsEvent(event);
+		if (!sourceAccepts && event.getType() !== "m.room.redaction") return;
 
 		// Removed events (e.g. cancelled local echoes the SDK strips from
 		// the timeline before firing LocalEchoUpdated(CANCELLED)) must be
@@ -2096,11 +2127,14 @@ export function useTimeline(
 		// scrolled up, withhold new events to keep the window stable and
 		// prevent eviction of events the user is viewing.
 		if (followingLive && currentTimelineWindow) {
-			currentTimelineWindow.extend(Direction.Forward, 1);
-			syncStoreEviction();
-		} else if (!followingLive) {
-			// Track that the window is behind live for ANY skipped event
-			// (displayable, reaction, edit, state), not just displayable ones.
+			if (sourceAccepts) {
+				currentTimelineWindow.extend(Direction.Forward, 1);
+				syncStoreEviction();
+			}
+		} else if (!followingLive && sourceAccepts) {
+			// Track that the window is behind live for ANY skipped event of
+			// this source (displayable, reaction, edit, state), not just
+			// displayable ones.
 			setCanLoadNewer(true);
 		}
 
@@ -2495,13 +2529,20 @@ export function useTimeline(
 					return;
 				}
 				// Registry lifecycle: rekeys move the entry; confirmation and
-				// cancellation clear it.
+				// cancellation clear it. Membership is sampled BEFORE the
+				// rekey delete: the /send response fires a SENT rekey while
+				// status is still non-null (the /sync remote echo nulls it
+				// later), and delete-then-check would drop the entry in that
+				// gap - a rebuild would silently lose the just-sent row.
+				const wasTracked =
+					pendingThreadEchoes.has(oldEventId ?? newId) ||
+					pendingThreadEchoes.has(newId);
 				if (oldEventId && oldEventId !== newId) {
 					pendingThreadEchoes.delete(oldEventId);
 				}
 				if (event.status === null) {
 					pendingThreadEchoes.delete(newId);
-				} else if (pendingThreadEchoes.has(oldEventId ?? newId)) {
+				} else if (wasTracked) {
 					pendingThreadEchoes.set(newId, event);
 				}
 				if (event.status === EventStatus.CANCELLED) {
@@ -2552,6 +2593,7 @@ export function useTimeline(
 		clearCallExpiryTimer();
 		pollWatcher.dispose();
 		threadWatcher.dispose();
+		releaseThreadEchoRegistryIfEmpty(client, currentRoomId, currentSourceKey);
 		client.off(RoomEvent.Timeline, onTimelineEvent);
 		client.off(RoomEvent.TimelineReset, onTimelineReset);
 		client.off(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
