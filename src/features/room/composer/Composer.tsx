@@ -499,6 +499,12 @@ const Composer: Component<{
 		const gifRoomId = props.roomId;
 		const gifThreadRootId = props.threadRootId ?? null;
 		const gifReplyTo = props.replyTo;
+		// Like send(): the send can finish after the user switched rooms, so
+		// gate every completion-time write on still being on the room it
+		// started in - otherwise it clobbers the newly selected room's
+		// composer (clears its reply state, steals focus). See the room-switch
+		// effect, which resets `sending` for the new room on our behalf.
+		const onThisRoom = (): boolean => props.roomId === gifRoomId;
 		setGifPickerOpen(false);
 
 		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting).
@@ -543,17 +549,21 @@ const Composer: Component<{
 				gifThreadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
-			props.onSent?.();
+			if (onThisRoom()) props.onSent?.();
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "Failed to send GIF");
+			if (onThisRoom()) {
+				setError(e instanceof Error ? e.message : "Failed to send GIF");
+			}
 		} finally {
-			setSending(false);
-			if (
-				!document.activeElement ||
-				document.activeElement === document.body ||
-				document.activeElement === textareaRef
-			) {
-				textareaRef?.focus();
+			if (onThisRoom()) {
+				setSending(false);
+				if (
+					!document.activeElement ||
+					document.activeElement === document.body ||
+					document.activeElement === textareaRef
+				) {
+					textareaRef?.focus();
+				}
 			}
 		}
 	}
