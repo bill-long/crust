@@ -586,6 +586,23 @@ const TimelineView: Component<{
 	// takes longer than that to mount, layout has bigger problems.
 	const MAX_MOUNT_FRAMES = 30;
 	const STABLE_FRAMES_REQUIRED = 4;
+	// Frame scheduler for the live-append pin that survives a hidden tab. The
+	// browser pauses `requestAnimationFrame` entirely while the document is
+	// hidden, which used to strand a live append below the fold until reload
+	// (see #324). `setTimeout` still fires while hidden (throttled to ~1s,
+	// which is fine - nobody is watching), so fall back to it. Returns a
+	// cancel fn the pin uses to drop a still-pending frame on unmount. Only
+	// the live pin needs the hidden-tab fallback; the room-entry settle loop
+	// below stays on raw rAF, which correctly idles while hidden (no invisible
+	// scroll-settling churn) and resumes on foreground.
+	const scheduleFrame = (cb: () => void): (() => void) => {
+		if (typeof document !== "undefined" && document.hidden) {
+			const id = window.setTimeout(cb, 16);
+			return () => window.clearTimeout(id);
+		}
+		const id = requestAnimationFrame(cb);
+		return () => cancelAnimationFrame(id);
+	};
 	const settleAtBottom = (): void => {
 		let stableFrames = 0;
 		let mountFrames = 0;
@@ -814,24 +831,40 @@ const TimelineView: Component<{
 	// because the latter is transiently flipped false during programmatic
 	// scroll settling. Suppressed when behind live (`canLoadNewer`) so
 	// forward pagination via "Load newer messages" doesn't jump past the
-	// loaded page.
-	let bottomScrollRafPending = false;
+	// loaded page. A single deferred scroll (not a settle loop) - late row
+	// growth is re-pinned by the re-anchor ResizeObserver above (which also
+	// covers a hidden-tab pin that scrolled short before virtua remeasured the
+	// row: the row grows on foreground and the observer re-pins), so one
+	// scrollTo per arrival is enough and avoids refreshing the grace window.
+	//
+	// Coalescing (not cancel-and-reschedule): while a pin is already pending we
+	// leave it, so a burst of arrivals faster than one frame still fires it
+	// promptly (it re-reads scrollHeight when it runs) instead of being pushed
+	// out one frame per arrival and starving. `scheduleFrame` runs it via
+	// setTimeout while the tab is hidden (rAF is paused there - the #324 bug);
+	// a pin scheduled as rAF just before the tab hides simply resumes on
+	// foreground. The pin re-checks its gates at fire time because
+	// `canLoadNewer` can flip during the deferral.
+	let cancelPin: (() => void) | null = null;
+	const schedulePin = (): void => {
+		if (cancelPin) return;
+		cancelPin = scheduleFrame(() => {
+			cancelPin = null;
+			if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
+			markProgrammaticScroll();
+			scrollRef.scrollTo({ top: scrollRef.scrollHeight });
+		});
+	};
 	createEffect(
 		on(
 			() => events.length,
 			(len) => {
 				if (!wantsBottom() || canLoadNewer() || len === 0) return;
-				if (bottomScrollRafPending) return;
-				bottomScrollRafPending = true;
-				requestAnimationFrame(() => {
-					bottomScrollRafPending = false;
-					if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
-					markProgrammaticScroll();
-					scrollRef.scrollTo({ top: scrollRef.scrollHeight });
-				});
+				schedulePin();
 			},
 		),
 	);
+	onCleanup(() => cancelPin?.());
 
 	// Sync the timeline hook's followingLive state with scroll position.
 	// When the user scrolls up, stop extending the window with live events.
