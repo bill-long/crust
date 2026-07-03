@@ -586,12 +586,41 @@ const TimelineView: Component<{
 	// takes longer than that to mount, layout has bigger problems.
 	const MAX_MOUNT_FRAMES = 30;
 	const STABLE_FRAMES_REQUIRED = 4;
+	// Frame scheduler that survives a hidden/backgrounded tab. The browser
+	// pauses `requestAnimationFrame` entirely while the document is hidden,
+	// which would strand every scroll-to-bottom path (room-entry pin, live
+	// append) until the tab is next foregrounded — the tab may never be (an
+	// E2E harness or a long-lived background session), leaving live messages
+	// appended to the store but never scrolled into the virtualizer's
+	// rendered range. `setTimeout` still fires when hidden (throttled to ~1s,
+	// which is fine — nobody is watching), so fall back to it. See #324.
+	const scheduleFrame = (cb: () => void): void => {
+		if (typeof document !== "undefined" && document.hidden) {
+			setTimeout(cb, 16);
+		} else {
+			requestAnimationFrame(cb);
+		}
+	};
+	// Guards against stacking overlapping settle loops when live messages
+	// arrive in a burst. Unlike a bare "raf pending" flag it can never latch
+	// permanently off: every exit path of the loop clears it, and the loop is
+	// bounded by MAX_SETTLE_FRAMES and scheduled via `scheduleFrame` (which
+	// always fires, even hidden), so it is guaranteed to run and reset.
+	let settleActive = false;
 	const settleAtBottom = (): void => {
+		if (settleActive) return;
+		settleActive = true;
 		let stableFrames = 0;
 		let mountFrames = 0;
 		let settleFrames = 0;
+		const finish = (): void => {
+			settleActive = false;
+		};
 		const tick = (): void => {
-			if (!wantsBottom()) return;
+			if (!wantsBottom()) {
+				finish();
+				return;
+			}
 			const el = scrollEl();
 			if (!el?.isConnected) {
 				// Scroller not mounted yet (parent <Show> still rendering its
@@ -599,7 +628,8 @@ const TimelineView: Component<{
 				// switch that unmounts and remounts the scroller. Retry up
 				// to MAX_MOUNT_FRAMES so the room-entry pin survives a slow
 				// initial sync.
-				if (++mountFrames < MAX_MOUNT_FRAMES) requestAnimationFrame(tick);
+				if (++mountFrames < MAX_MOUNT_FRAMES) scheduleFrame(tick);
+				else finish();
 				return;
 			}
 			const before = el.scrollTop;
@@ -609,13 +639,17 @@ const TimelineView: Component<{
 			const dist = el.scrollHeight - after - el.clientHeight;
 			if (dist < 1 && Math.abs(after - before) < 1) {
 				stableFrames++;
-				if (stableFrames >= STABLE_FRAMES_REQUIRED) return;
+				if (stableFrames >= STABLE_FRAMES_REQUIRED) {
+					finish();
+					return;
+				}
 			} else {
 				stableFrames = 0;
 			}
-			if (++settleFrames < MAX_SETTLE_FRAMES) requestAnimationFrame(tick);
+			if (++settleFrames < MAX_SETTLE_FRAMES) scheduleFrame(tick);
+			else finish();
 		};
-		requestAnimationFrame(tick);
+		scheduleFrame(tick);
 	};
 
 	// Re-anchor to the bottom when content above grows while the user
@@ -814,24 +848,36 @@ const TimelineView: Component<{
 	// because the latter is transiently flipped false during programmatic
 	// scroll settling. Suppressed when behind live (`canLoadNewer`) so
 	// forward pagination via "Load newer messages" doesn't jump past the
-	// loaded page.
-	let bottomScrollRafPending = false;
+	// loaded page. Delegates to the shared `settleAtBottom` loop so the pin
+	// re-reads scrollHeight each frame (late image/emoji growth), coalesces a
+	// burst of arrivals into one loop, and — crucially — schedules via
+	// `scheduleFrame`, which keeps working when the tab is hidden (a bare
+	// `requestAnimationFrame` never fires while backgrounded, which used to
+	// strand every live append below the fold until reload; see #324).
 	createEffect(
 		on(
 			() => events.length,
 			(len) => {
 				if (!wantsBottom() || canLoadNewer() || len === 0) return;
-				if (bottomScrollRafPending) return;
-				bottomScrollRafPending = true;
-				requestAnimationFrame(() => {
-					bottomScrollRafPending = false;
-					if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
-					markProgrammaticScroll();
-					scrollRef.scrollTo({ top: scrollRef.scrollHeight });
-				});
+				settleAtBottom();
 			},
 		),
 	);
+
+	// Flush the bottom pin when the tab returns to the foreground. While
+	// hidden, scroll scheduling is throttled hard; on becoming visible again
+	// re-settle so any messages that landed in the background are scrolled
+	// into view immediately rather than waiting for the next arrival.
+	if (typeof document !== "undefined") {
+		const onVisible = (): void => {
+			if (document.hidden) return;
+			if (wantsBottom() && !canLoadNewer()) settleAtBottom();
+		};
+		document.addEventListener("visibilitychange", onVisible);
+		onCleanup(() =>
+			document.removeEventListener("visibilitychange", onVisible),
+		);
+	}
 
 	// Sync the timeline hook's followingLive state with scroll position.
 	// When the user scrolls up, stop extending the window with live events.
