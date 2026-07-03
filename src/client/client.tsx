@@ -19,7 +19,6 @@ import {
 	type CryptoStatus,
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
-import { attachUrlPreviewAccountDataSync } from "../features/room/urlPreviews/accountDataSync";
 import { loadSession, type Session } from "../stores/session";
 import { updateAppBadge } from "./appBadge";
 import {
@@ -38,6 +37,7 @@ import {
 	type SummariesStore,
 } from "./summaries";
 import { getTotalUnread } from "./summaries-selectors";
+import { attachUrlPreviewAccountDataSync } from "./urlPreviewSync";
 
 export type AppSyncState =
 	| "initial"

@@ -18,9 +18,9 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { screenShareQualitySpec } from "../../../../lib/screenShareQuality";
 import type { ScreenShareQuality } from "../../../../stores/settings";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
-import { screenShareQualitySpec } from "./screenShareQuality";
 
 export type LivekitConnectionStatus =
 	| "idle"

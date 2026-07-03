@@ -1,4 +1,4 @@
-import type { ScreenShareQuality } from "../../../../stores/settings";
+import type { ScreenShareQuality } from "../stores/settings";
 
 /**
  * A selectable screen-share quality, mapped to the LiveKit capture

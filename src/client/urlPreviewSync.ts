@@ -3,7 +3,7 @@ import {
 	type MatrixClient,
 	type MatrixEvent,
 } from "matrix-js-sdk";
-import { updateSetting, userSettings } from "../../../stores/settings";
+import { updateSetting, userSettings } from "../stores/settings";
 
 /**
  * Matrix account-data event type for the user's URL preview preference.

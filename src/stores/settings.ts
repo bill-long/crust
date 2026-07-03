@@ -48,7 +48,7 @@ export interface UserSettings {
 	/**
 	 * Outgoing screen-share quality. Maps to a getDisplayMedia capture
 	 * constraint + encoder ceiling (see
-	 * `features/room/call/rtc/screenShareQuality.ts`). LiveKit's stock
+	 * `lib/screenShareQuality.ts`). LiveKit's stock
 	 * default encodes screen shares at 1080p15 (~2.5 Mbps), which looks
 	 * choppy for motion-heavy shares; this lets the sharing user pick a
 	 * higher frame rate / bitrate, at the cost of more upload + CPU.
