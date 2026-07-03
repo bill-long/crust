@@ -528,13 +528,16 @@ const RoomPane: Component<{
 						onOpenThread={(threadId) => setOpenThreadId(threadId)}
 					/>
 				</div>
-				{/* Desktop: inline thread panel column */}
-				<Show when={!isMobile() && openThreadId()}>
+				{/* Desktop: inline thread panel column. Keyed so switching to
+					another thread remounts the panel: mount-time focus capture,
+					focus-into-panel (live Escape), and restore target all track
+					the thread the user actually opened. */}
+				<Show when={!isMobile() && openThreadId()} keyed>
 					{(threadId) => (
 						<div class="w-96 min-w-60 max-w-[45%] shrink overflow-hidden border-l border-border-subtle">
 							<ThreadPanel
 								roomId={props.rid}
-								threadId={threadId()}
+								threadId={threadId}
 								onClose={() => setOpenThreadId(null)}
 							/>
 						</div>
@@ -574,11 +577,13 @@ const RoomPane: Component<{
 					<Dialog.Overlay class="fixed inset-0 z-30 bg-black/60" />
 					<Dialog.Content class="fixed inset-y-0 right-0 z-30 flex w-96 max-w-[92%] flex-col overflow-hidden border-l border-border-subtle bg-surface-1 shadow-xl">
 						<Dialog.Title class="sr-only">Thread</Dialog.Title>
-						<Show when={openThreadId()}>
+						{/* Keyed for the same per-thread remount as the desktop
+							column (fresh focus capture per thread switch). */}
+						<Show when={openThreadId()} keyed>
 							{(threadId) => (
 								<ThreadPanel
 									roomId={props.rid}
-									threadId={threadId()}
+									threadId={threadId}
 									onClose={() => setOpenThreadId(null)}
 								/>
 							)}

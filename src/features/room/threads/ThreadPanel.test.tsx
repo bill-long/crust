@@ -106,6 +106,39 @@ describe("ThreadPanel", () => {
 		expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
 	});
 
+	it("re-captures focus per thread under a keyed Show (Layout wiring)", async () => {
+		getRoom.mockReturnValue(
+			roomWithThread({ id: "$root", initialEventsFetched: true }),
+		);
+		const [tid, setTid] = createSignal<string | null>("$a");
+		render(() => (
+			<>
+				<button type="button" data-testid="chip-b">
+					other chip
+				</button>
+				<Show when={tid()} keyed>
+					{(threadId) => (
+						<ThreadPanel
+							roomId="!r:hs"
+							threadId={threadId}
+							onClose={() => {}}
+						/>
+					)}
+				</Show>
+			</>
+		));
+		await screen.findByTestId("thread-timeline");
+		expect(screen.getByTestId("thread-timeline").textContent).toBe("$a");
+		// Switching threads from another root's chip must remount the panel:
+		// focus moves into the NEW panel (keeping Escape live) rather than
+		// staying on the chip with the old panel updated in place.
+		screen.getByTestId("chip-b").focus();
+		setTid("$b");
+		await screen.findByTestId("thread-timeline");
+		expect(screen.getByTestId("thread-timeline").textContent).toBe("$b");
+		expect(document.activeElement).toBe(screen.getByLabelText("Thread"));
+	});
+
 	it("closes via the button and via Escape", async () => {
 		getRoom.mockReturnValue(
 			roomWithThread({ id: "$root", initialEventsFetched: true }),
