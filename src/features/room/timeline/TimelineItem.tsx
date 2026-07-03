@@ -10,6 +10,10 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
+import {
+	extractUrlsFromHtml,
+	extractUrlsFromText,
+} from "../../../lib/extractUrls";
 import { userSettings } from "../../../stores/settings";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -19,10 +23,6 @@ import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import { PollMessage } from "../poll/PollMessage";
 import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
-import {
-	extractUrlsFromHtml,
-	extractUrlsFromText,
-} from "../urlPreviews/extractUrls";
 import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";

@@ -23,6 +23,7 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { pollPreviewText } from "../../../lib/pollCopy";
+import { stripReplyFallback } from "../../../lib/replyFallback";
 import { isThreadReply } from "../../../lib/threadEvents";
 import {
 	isVoiceMessageContent,
@@ -44,7 +45,6 @@ import {
 	mainTimelineSource,
 	type TimelineSource,
 } from "../threads/timelineSource";
-import { stripReplyFallback } from "../urlPreviews/replyFallback";
 import type {
 	MembershipTransition,
 	StateNotice,
