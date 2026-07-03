@@ -194,6 +194,23 @@ describe("useTimeline thread gating", () => {
 					"second reply",
 					3000,
 				),
+				{
+					eventId: "$real",
+					roomId: ROOM_ID,
+					sender: "@d:hs",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.text",
+						body: "quoting r1",
+						"m.relates_to": {
+							rel_type: "m.thread",
+							event_id: "$root",
+							is_falling_back: false,
+							"m.in_reply_to": { event_id: "$r1" },
+						},
+					},
+					ts: 3500,
+				},
 			]);
 			room.threads.set("$root", thread);
 			const client = createMockClient(new Map([[ROOM_ID, room]]));
@@ -205,8 +222,15 @@ describe("useTimeline thread gating", () => {
 			await flushPromises();
 			// Thread replies ARE displayable inside the thread window, and
 			// the fallback m.in_reply_to renders no quote block.
-			expect(events.map((e) => e.eventId)).toEqual(["$root", "$r1", "$r2"]);
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$r1",
+				"$r2",
+				"$real",
+			]);
 			expect(events[1].replyToId).toBeNull();
+			// A REAL in-thread reply (is_falling_back: false) keeps its quote.
+			expect(events[3].replyToId).toBe("$r1");
 			// Main-room events don't leak in via live emissions.
 			const mainEvent = createMatrixEvent(
 				textMessage(ROOM_ID, "$live", "@a:hs", "main live", 4000),
@@ -215,7 +239,12 @@ describe("useTimeline thread gating", () => {
 				liveEvent: true,
 			});
 			await flushPromises();
-			expect(events.map((e) => e.eventId)).toEqual(["$root", "$r1", "$r2"]);
+			expect(events.map((e) => e.eventId)).toEqual([
+				"$root",
+				"$r1",
+				"$r2",
+				"$real",
+			]);
 		}));
 
 	it("appends live replies arriving via the thread's timeline", () =>

@@ -1,4 +1,11 @@
-import { type Component, createResource, Match, Switch } from "solid-js";
+import {
+	type Component,
+	createResource,
+	Match,
+	onCleanup,
+	onMount,
+	Switch,
+} from "solid-js";
 import { useClient } from "../../../client/client";
 import { TimelineView } from "../timeline/TimelineView";
 import { ensureThread } from "./ensureThread";
@@ -27,9 +34,24 @@ export const ThreadPanel: Component<{
 		},
 	);
 
+	// Focus lands inside the panel on open so the Escape handler is live
+	// on desktop (the mobile Dialog manages its own focus); the previously
+	// focused element (usually the chip) gets focus back on close.
+	let sectionRef: HTMLElement | undefined;
+	const previouslyFocused =
+		document.activeElement instanceof HTMLElement
+			? document.activeElement
+			: null;
+	onMount(() => sectionRef?.focus());
+	onCleanup(() => {
+		if (previouslyFocused?.isConnected) previouslyFocused.focus();
+	});
+
 	return (
 		<section
-			class="flex h-full min-w-0 flex-col overflow-hidden"
+			ref={sectionRef}
+			tabindex="-1"
+			class="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none"
 			aria-label="Thread"
 			onKeyDown={(e) => {
 				if (e.key === "Escape") {
@@ -61,6 +83,11 @@ export const ThreadPanel: Component<{
 				</button>
 			</div>
 			<Switch>
+				<Match when={thread.error}>
+					<div class="flex flex-1 items-center justify-center px-4 text-center text-sm text-text-muted">
+						Couldn't load this thread
+					</div>
+				</Match>
 				<Match when={thread.loading}>
 					<div class="flex flex-1 items-center justify-center text-sm text-text-muted">
 						Loading thread…

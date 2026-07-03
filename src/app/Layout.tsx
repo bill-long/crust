@@ -531,7 +531,7 @@ const RoomPane: Component<{
 				{/* Desktop: inline thread panel column */}
 				<Show when={!isMobile() && openThreadId()}>
 					{(threadId) => (
-						<div class="w-96 max-w-[45%] shrink-0 overflow-hidden border-l border-border-subtle">
+						<div class="w-96 min-w-60 max-w-[45%] shrink overflow-hidden border-l border-border-subtle">
 							<ThreadPanel
 								roomId={props.rid}
 								threadId={threadId()}

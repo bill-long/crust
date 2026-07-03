@@ -113,6 +113,13 @@ const TimelineView: Component<{
 	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
+	// Memoized: useTimeline reads source() in hot per-event paths, so the
+	// source object must be stable per thread change, not per call.
+	const timelineSource = createMemo(() =>
+		props.thread
+			? threadTimelineSource(props.thread.threadId)
+			: mainTimelineSource(),
+	);
 	const {
 		events,
 		loading,
@@ -136,10 +143,7 @@ const TimelineView: Component<{
 		votePoll,
 		endPoll,
 	} = useTimeline(client, () => props.roomId, {
-		source: () =>
-			props.thread
-				? threadTimelineSource(props.thread.threadId)
-				: mainTimelineSource(),
+		source: timelineSource,
 	});
 
 	// Custom emoji packs for this room. When the parent passes a shared
@@ -278,8 +282,10 @@ const TimelineView: Component<{
 
 	// `dataTransfer.types` is a frozen string array; checked on every dragover,
 	// so avoid allocating a copy per event.
+	// Thread panels have no composer (until #303 3d) and therefore no upload
+	// path - advertising a drop zone there would silently discard files.
 	const dragHasFiles = (e: DragEvent): boolean =>
-		!!e.dataTransfer && e.dataTransfer.types.includes("Files");
+		!props.thread && !!e.dataTransfer && e.dataTransfer.types.includes("Files");
 
 	const onDragEnter = (e: DragEvent): void => {
 		if (!dragHasFiles(e)) return;
@@ -483,13 +489,15 @@ const TimelineView: Component<{
 		const matrixEvent = getSourceEvent(eventId);
 		if (!matrixEvent) return;
 		client
-			// UNTHREADED (3rd arg): with threadSupport on, a plain receipt
-			// gets thread_id "main" and clears only main-timeline counts -
-			// the per-thread counts the room badge sums would then be
-			// un-clearable from Crust (no per-thread receipt path until the
-			// thread panel lands). Unthreaded preserves the pre-thread
-			// invariant: reading a room to the bottom clears its whole badge.
-			.sendReadReceipt(matrixEvent, ReceiptType.Read, true)
+			// Main timeline: UNTHREADED (3rd arg true) - a plain receipt would
+			// get thread_id "main" and clear only main-timeline counts, leaving
+			// the per-thread counts the room badge sums un-clearable outside
+			// the panel. Unthreaded preserves the pre-thread invariant that
+			// reading a room clears its whole badge.
+			// Thread panel: THREADED (3rd arg false) - the SDK derives
+			// thread_id from the event, so reading a thread clears exactly that
+			// thread's counts and never the whole room's read state.
+			.sendReadReceipt(matrixEvent, ReceiptType.Read, !props.thread)
 			.then(() => {
 				lastSentReceiptEventId = eventId;
 			})

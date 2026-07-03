@@ -38,17 +38,21 @@ function waitForInitialFetch(thread: Thread, timeoutMs: number): Promise<void> {
 	if (thread.initialEventsFetched) return Promise.resolve();
 	return new Promise((resolve) => {
 		let timer: ReturnType<typeof setTimeout> | null = null;
-		const check = (): void => {
-			if (!thread.initialEventsFetched) return;
+		const settle = (): void => {
 			thread.off(ThreadEvent.Update, check);
+			thread.off(ThreadEvent.Delete, settle);
 			if (timer !== null) clearTimeout(timer);
 			resolve();
 		};
+		const check = (): void => {
+			if (!thread.initialEventsFetched) return;
+			settle();
+		};
 		thread.on(ThreadEvent.Update, check);
-		timer = setTimeout(() => {
-			thread.off(ThreadEvent.Update, check);
-			resolve();
-		}, timeoutMs);
+		// A thread deleted mid-wait (root redacted) never fetches; settle
+		// immediately so the caller can render its failure/empty state.
+		thread.on(ThreadEvent.Delete, settle);
+		timer = setTimeout(settle, timeoutMs);
 		// The fetch may have completed between the guard and the subscribe.
 		check();
 	});

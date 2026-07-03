@@ -688,13 +688,13 @@ function eventToTimelineEvent(
 	// the renderer shows a generic affordance.
 	//
 	// MSC3440: a thread reply carries an m.in_reply_to FALLBACK pointer at
-	// the previous thread message (for thread-unaware clients). In a thread
-	// window that must not render as a quote - only a REAL in-thread reply
-	// (is_falling_back: false) does. Absent is_falling_back on an m.thread
-	// relation reads as a fallback, matching Element.
+	// the previous thread message (for thread-unaware clients), flagged
+	// is_falling_back: true. That must not render as a quote; a REAL
+	// in-thread reply omits the flag or sets it false and keeps its quote
+	// (Element suppresses only on a truthy flag).
 	const relatesTo = content["m.relates_to"];
 	const isThreadFallbackReply =
-		relatesTo?.rel_type === "m.thread" && relatesTo.is_falling_back !== false;
+		relatesTo?.rel_type === "m.thread" && relatesTo.is_falling_back === true;
 	const inReplyToRaw = isThreadFallbackReply
 		? undefined
 		: relatesTo?.["m.in_reply_to"]?.event_id;
@@ -1767,10 +1767,13 @@ export function useTimeline(
 			}
 		}
 
-		roomGeneration++;
-		const gen = roomGeneration;
+		// Resolve the source's set BEFORE bumping the generation: returning
+		// after the bump would strand in-flight paginations (their finally
+		// blocks see a generation mismatch and never clear loading flags).
 		const timelineSet = source().getTimelineSet(room);
 		if (!timelineSet) return;
+		roomGeneration++;
+		const gen = roomGeneration;
 		const tw = new TimelineWindow(client, timelineSet, {
 			windowLimit: windowLimit,
 		});
@@ -1905,7 +1908,16 @@ export function useTimeline(
 		// targeting thread events) belongs here. Thread source: only its own
 		// thread's emissions do. Gate on both the emitting timeline and the
 		// event's own shape - either mismatch skips.
-		if (!source().acceptsTimeline(data) || !source().acceptsEvent(event))
+		//
+		// Redactions bypass the gate: a redaction of a thread ROOT lives in
+		// the MAIN timeline only (eventShouldLiveIn) yet the open panel must
+		// tombstone its root row too. handleRedaction keys on the target and
+		// no-ops when it isn't in this window, so cross-source redaction
+		// traffic is harmless in both directions.
+		if (
+			event.getType() !== "m.room.redaction" &&
+			(!source().acceptsTimeline(data) || !source().acceptsEvent(event))
+		)
 			return;
 
 		// Removed events (e.g. cancelled local echoes the SDK strips from
