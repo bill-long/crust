@@ -13,7 +13,7 @@ import {
 } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
-import { GeneralTab } from "./GeneralTab";
+import { RoomGeneralTab } from "./RoomGeneralTab";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -46,7 +46,7 @@ function setup() {
 	});
 	const client = createMockClient(new Map([["!room:example.com", room]]));
 	render(() => (
-		<GeneralTab
+		<RoomGeneralTab
 			client={client as unknown as MatrixClient}
 			roomId="!room:example.com"
 		/>
@@ -60,7 +60,7 @@ function nameInput(): HTMLInputElement {
 
 afterEach(cleanup);
 
-describe("GeneralTab", () => {
+describe("RoomGeneralTab", () => {
 	it("renders current name and topic, with no save action when not dirty", () => {
 		setup();
 		expect(nameInput().value).toBe("Alpha");
@@ -168,7 +168,7 @@ describe("GeneralTab", () => {
 		const client = createMockClient(new Map([["!room:example.com", room]]));
 
 		render(() => (
-			<GeneralTab
+			<RoomGeneralTab
 				client={client as unknown as MatrixClient}
 				roomId="!room:example.com"
 			/>

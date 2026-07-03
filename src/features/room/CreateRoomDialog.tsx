@@ -27,7 +27,7 @@ const FOCUSABLE =
 /** Local-part of a Matrix room alias. Server adds ":server" + leading "#". */
 const ALIAS_LOCAL_PART_RE = /^[A-Za-z0-9._=/+-]+$/;
 
-const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB (matches AccountTab/GeneralTab)
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB (matches AccountTab/RoomGeneralTab)
 
 interface CreateRoomDialogProps {
 	client: MatrixClient;

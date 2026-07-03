@@ -12,8 +12,8 @@ import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalMounted } from "../../stores/modalStack";
 import { userSettings } from "../../stores/settings";
 import { AccountTab } from "./AccountTab";
+import { AppGeneralTab } from "./AppGeneralTab";
 import { DevicesTab } from "./DevicesTab";
-import { GeneralTab } from "./GeneralTab";
 import { NotificationsTab } from "./NotificationsTab";
 
 export const tabMeta = [
@@ -210,7 +210,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 						<div class="max-w-2xl">
 							<Switch>
 								<Match when={props.activeTab === "general"}>
-									<GeneralTab />
+									<AppGeneralTab />
 								</Match>
 								<Match when={props.activeTab === "account"}>
 									<AccountTab />

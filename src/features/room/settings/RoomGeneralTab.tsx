@@ -13,14 +13,14 @@ import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
 import { useRoomStateContent } from "./useRoomStateContent";
 
-interface GeneralTabProps {
+interface RoomGeneralTabProps {
 	client: MatrixClient;
 	roomId: string;
 }
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
 
-const GeneralTab: Component<GeneralTabProps> = (props) => {
+const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 	const roomId = () => props.roomId;
 	const perms = useRoomPermissions(props.client, roomId);
 
@@ -466,4 +466,4 @@ const GeneralTab: Component<GeneralTabProps> = (props) => {
 	);
 };
 
-export { GeneralTab };
+export { RoomGeneralTab };
