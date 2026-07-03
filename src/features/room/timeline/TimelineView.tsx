@@ -593,47 +593,66 @@ const TimelineView: Component<{
 	// E2E harness or a long-lived background session), leaving live messages
 	// appended to the store but never scrolled into the virtualizer's
 	// rendered range. `setTimeout` still fires when hidden (throttled to ~1s,
-	// which is fine - nobody is watching), so fall back to it. Returns a
-	// handle so a pending callback can be cancelled and re-scheduled under the
-	// other primitive when visibility flips (see the live-append pin). The
-	// rAF-vs-timeout choice is made at schedule time, so a caller that must
-	// survive a mid-flight visibility change re-schedules on `visibilitychange`
-	// rather than relying on this alone. See #324.
+	// which is fine - nobody is watching), so fall back to it. See #324.
+	//
+	// The rAF-vs-timeout choice is made when armed, so a `visibilitychange`
+	// re-arms every in-flight frame under the now-correct primitive: a rAF
+	// scheduled while visible is paused the instant the tab hides and would
+	// never fire; a throttled timeout scheduled while hidden lags once the tab
+	// is shown. This protects BOTH the live-append pin and the room-entry
+	// settle loop against a mid-flight flip without per-caller handling.
 	type FrameHandle = { cancel: () => void };
-	// Every in-flight frame handle, so `onCleanup` can cancel work scheduled
-	// before an unmount (room switch / navigation). Without this, a throttled
-	// `setTimeout` tick could fire against a disposed component and detached
-	// scroller. Handles remove themselves once they run.
-	const pendingFrames = new Set<FrameHandle>();
-	const scheduleFrame = (cb: () => void): FrameHandle => {
-		const handle: FrameHandle = { cancel: () => {} };
-		const done = (): void => {
-			pendingFrames.delete(handle);
+	interface FrameEntry {
+		cb: () => void;
+		cancelTimer: () => void;
+	}
+	// Every in-flight frame, so `visibilitychange` can re-arm it and
+	// `onCleanup` can cancel work still scheduled at unmount (a throttled
+	// `setTimeout` tick that would otherwise fire against a detached scroller).
+	// Entries remove themselves once they run.
+	const pendingFrames = new Set<FrameEntry>();
+	const armFrame = (entry: FrameEntry): void => {
+		const run = (): void => {
+			pendingFrames.delete(entry);
+			entry.cb();
 		};
 		if (typeof document !== "undefined" && document.hidden) {
-			const id = setTimeout(() => {
-				done();
-				cb();
-			}, 16);
-			handle.cancel = () => {
-				clearTimeout(id);
-				done();
-			};
+			const id = setTimeout(run, 16);
+			entry.cancelTimer = () => clearTimeout(id);
 		} else {
-			const id = requestAnimationFrame(() => {
-				done();
-				cb();
-			});
-			handle.cancel = () => {
-				cancelAnimationFrame(id);
-				done();
-			};
+			const id = requestAnimationFrame(run);
+			entry.cancelTimer = () => cancelAnimationFrame(id);
 		}
-		pendingFrames.add(handle);
-		return handle;
 	};
+	const scheduleFrame = (cb: () => void): FrameHandle => {
+		const entry: FrameEntry = { cb, cancelTimer: () => {} };
+		armFrame(entry);
+		pendingFrames.add(entry);
+		return {
+			cancel: () => {
+				entry.cancelTimer();
+				pendingFrames.delete(entry);
+			},
+		};
+	};
+	if (typeof document !== "undefined") {
+		const onVisibilityChange = (): void => {
+			// Re-arm each pending frame under the primitive matching the new
+			// visibility state (snapshot first: re-arming only swaps timers, but
+			// guard against concurrent mutation defensively).
+			for (const entry of [...pendingFrames]) {
+				entry.cancelTimer();
+				armFrame(entry);
+			}
+		};
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		onCleanup(() =>
+			document.removeEventListener("visibilitychange", onVisibilityChange),
+		);
+	}
 	onCleanup(() => {
-		for (const handle of [...pendingFrames]) handle.cancel();
+		for (const entry of [...pendingFrames]) entry.cancelTimer();
+		pendingFrames.clear();
 	});
 	const settleAtBottom = (): void => {
 		let stableFrames = 0;
@@ -868,25 +887,20 @@ const TimelineView: Component<{
 	// scrollTo per arrival is enough and avoids continuously refreshing the
 	// programmatic-scroll grace window.
 	//
-	// The pending scroll is held in `pinHandle` so a `visibilitychange` can
-	// re-target it: `scheduleFrame` picks rAF-vs-timeout at schedule time, so
-	// a rAF scheduled while visible is paused the instant the tab hides and
-	// would never fire (re-stranding the append, the #324 symptom); a timeout
-	// scheduled while hidden is slow once the tab is shown again. Cancelling
-	// and re-scheduling under the now-correct primitive keeps it from latching
-	// and flushes immediately on foreground. Re-checks its gates at fire time
-	// because `canLoadNewer` can flip during the deferral.
+	// Coalescing (not cancel-and-reschedule): while a pin is already pending
+	// we leave it, so a burst of arrivals faster than one frame still fires it
+	// promptly (it re-reads scrollHeight when it runs) instead of being pushed
+	// out one frame per arrival and starving. `scheduleFrame` handles hidden
+	// tabs and mid-flight visibility flips (see above). The pin re-checks its
+	// gates at fire time because `canLoadNewer` can flip during the deferral.
 	let pinHandle: FrameHandle | null = null;
-	const pinToBottom = (): void => {
-		if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
-		markProgrammaticScroll();
-		scrollRef.scrollTo({ top: scrollRef.scrollHeight });
-	};
 	const schedulePin = (): void => {
-		pinHandle?.cancel();
+		if (pinHandle) return;
 		pinHandle = scheduleFrame(() => {
 			pinHandle = null;
-			pinToBottom();
+			if (!wantsBottom() || canLoadNewer() || !scrollRef) return;
+			markProgrammaticScroll();
+			scrollRef.scrollTo({ top: scrollRef.scrollHeight });
 		});
 	};
 	createEffect(
@@ -898,25 +912,6 @@ const TimelineView: Component<{
 			},
 		),
 	);
-
-	if (typeof document !== "undefined") {
-		const onVisibilityChange = (): void => {
-			// Re-target a pending pin under the primitive matching the new
-			// visibility state (a hidden-paused rAF becomes a timeout so it
-			// still fires; a slow hidden timeout becomes a rAF so it fires at
-			// once on foreground). With nothing pending, flush a fresh pin when
-			// returning to the foreground so messages that landed in the
-			// background are revealed immediately rather than on next arrival.
-			if (pinHandle) schedulePin();
-			else if (!document.hidden && wantsBottom() && !canLoadNewer()) {
-				schedulePin();
-			}
-		};
-		document.addEventListener("visibilitychange", onVisibilityChange);
-		onCleanup(() =>
-			document.removeEventListener("visibilitychange", onVisibilityChange),
-		);
-	}
 
 	// Sync the timeline hook's followingLive state with scroll position.
 	// When the user scrolls up, stop extending the window with live events.
