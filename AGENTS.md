@@ -159,8 +159,8 @@ src/
 Rules:
 - A component in `components/` knows nothing about Matrix.
 - Matrix SDK access is centralized in `client/`; features consume it via `useClient()`.
-- A component in `features/` may use `client/`, `components/`, `stores/`, and `lib/`, but not another feature's internals - cross-feature comms via stores or events.
-- Hooks are colocated with the feature that owns them (e.g. `useTimeline.ts`, `useMemberList.ts`). Promote to `lib/` only when broadly reused.
+- A component in `features/` may use `client/`, `components/`, `stores/`, and `lib/`. It may also compose another feature's **public component** (e.g. `RoomList` renders `space/SpaceDiscoverList`) - that is normal cross-feature composition. What it must NOT do is reach into another feature's *internals*: its hooks, or non-component modules. Share that kind of logic via `stores`/events, or promote it to `lib/`/`client/`.
+- Hooks are colocated with the feature that owns them (e.g. `useTimeline.ts`, `useMemberList.ts`) and stay private to it. Promote to `lib/` only when broadly reused. If another feature needs a hook's behaviour, wrap it in a component that feature owns and compose that instead.
 
 ---
 
