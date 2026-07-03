@@ -600,14 +600,41 @@ const TimelineView: Component<{
 	// survive a mid-flight visibility change re-schedules on `visibilitychange`
 	// rather than relying on this alone. See #324.
 	type FrameHandle = { cancel: () => void };
+	// Every in-flight frame handle, so `onCleanup` can cancel work scheduled
+	// before an unmount (room switch / navigation). Without this, a throttled
+	// `setTimeout` tick could fire against a disposed component and detached
+	// scroller. Handles remove themselves once they run.
+	const pendingFrames = new Set<FrameHandle>();
 	const scheduleFrame = (cb: () => void): FrameHandle => {
+		const handle: FrameHandle = { cancel: () => {} };
+		const done = (): void => {
+			pendingFrames.delete(handle);
+		};
 		if (typeof document !== "undefined" && document.hidden) {
-			const id = setTimeout(cb, 16);
-			return { cancel: () => clearTimeout(id) };
+			const id = setTimeout(() => {
+				done();
+				cb();
+			}, 16);
+			handle.cancel = () => {
+				clearTimeout(id);
+				done();
+			};
+		} else {
+			const id = requestAnimationFrame(() => {
+				done();
+				cb();
+			});
+			handle.cancel = () => {
+				cancelAnimationFrame(id);
+				done();
+			};
 		}
-		const id = requestAnimationFrame(cb);
-		return { cancel: () => cancelAnimationFrame(id) };
+		pendingFrames.add(handle);
+		return handle;
 	};
+	onCleanup(() => {
+		for (const handle of [...pendingFrames]) handle.cancel();
+	});
 	const settleAtBottom = (): void => {
 		let stableFrames = 0;
 		let mountFrames = 0;
@@ -886,10 +913,9 @@ const TimelineView: Component<{
 			}
 		};
 		document.addEventListener("visibilitychange", onVisibilityChange);
-		onCleanup(() => {
-			document.removeEventListener("visibilitychange", onVisibilityChange);
-			pinHandle?.cancel();
-		});
+		onCleanup(() =>
+			document.removeEventListener("visibilitychange", onVisibilityChange),
+		);
 	}
 
 	// Sync the timeline hook's followingLive state with scroll position.
