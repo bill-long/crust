@@ -1,4 +1,8 @@
-import type { MatrixEvent, Thread } from "matrix-js-sdk";
+import {
+	type MatrixEvent,
+	THREAD_RELATION_TYPE,
+	type Thread,
+} from "matrix-js-sdk";
 
 /**
  * Plain-data summary of a thread for the root event's timeline row.
@@ -50,8 +54,11 @@ export function buildProvisionalThreadSummary(
 	if (!rootId) return null;
 	// Optional call: defensive against partial event fakes (the
 	// isRelation precedent) - a missing accessor reads as "no bundle".
-	const bundle =
-		rootEvent.getServerAggregatedRelation?.<ThreadBundle>("m.thread");
+	// Server-latched relation name, not a literal, so the bundle key
+	// stays in sync with the SDK partition on pre-stable servers.
+	const bundle = rootEvent.getServerAggregatedRelation?.<ThreadBundle>(
+		THREAD_RELATION_TYPE.name,
+	);
 	if (!bundle) return null;
 	const count =
 		typeof bundle.count === "number" && Number.isFinite(bundle.count)

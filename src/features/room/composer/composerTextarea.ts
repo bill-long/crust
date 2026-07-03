@@ -10,5 +10,7 @@ export function composerTextareaScope(threadRootId?: string | null): string {
 }
 
 export function composerTextareaSelector(threadRootId?: string | null): string {
-	return `textarea[data-composer-textarea="${composerTextareaScope(threadRootId)}"]`;
+	// CSS.escape: the scope is an event id (opaque server-chosen string);
+	// an unescaped special character would make querySelector throw.
+	return `textarea[data-composer-textarea="${CSS.escape(composerTextareaScope(threadRootId))}"]`;
 }
