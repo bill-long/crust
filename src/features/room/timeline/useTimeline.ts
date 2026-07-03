@@ -2390,8 +2390,11 @@ export function useTimeline(
 		return findWindowEvent(eventId);
 	}
 
-	// Initial load + reactive reload on room change
+	// Initial load + reactive reload on room or source change. The source
+	// KEY is read here explicitly: loadRoom also reads it internally, but
+	// the effect's dependency must not hinge on that implementation detail.
 	createEffect(() => {
+		source().key;
 		loadRoom(roomId());
 	});
 

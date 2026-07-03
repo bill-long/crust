@@ -1454,11 +1454,7 @@ const TimelineView: Component<{
 														void votePoll(event.eventId, answerIds)
 													}
 													onEndPoll={() => void endPoll(event.eventId)}
-													onOpenThread={
-														props.onOpenThread
-															? (threadId) => props.onOpenThread?.(threadId)
-															: undefined
-													}
+													onOpenThread={props.onOpenThread}
 													onReply={() => setReplyTo(event)}
 													onJumpToReply={(id) => {
 														setWantsBottom(false);
