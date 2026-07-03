@@ -82,7 +82,7 @@ describe("ensureThread", () => {
 			getThread: () => null,
 			findEventById: () => null,
 			createThread,
-			client: { fetchRoomEvent },
+			client: { fetchRoomEvent, decryptEventIfNeeded: vi.fn(async () => {}) },
 		} as unknown as Room;
 		expect(await ensureThread(room, "$root")).toBe(thread);
 		expect(fetchRoomEvent).toHaveBeenCalledWith("!r:hs", "$root");

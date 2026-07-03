@@ -6,8 +6,10 @@ import { isVoiceMessageContent } from "../../lib/voiceMessage";
 /**
  * Pure in-app notification body copy, split out from `useNotifications`
  * so the thread/media/poll wording is unit-testable without the browser
- * Notification harness. Mirrors `describeContent` in pushCopy.ts so the
- * in-app and background-push copy stay in agreement.
+ * Notification harness. Shares its content-descriptor shape and thread
+ * framing with `describeContent` / `buildNotificationCopy` in pushCopy.ts
+ * so the in-app and background-push wording agree (stickers are the one
+ * in-app extra the limited push payload can't always distinguish).
  *
  * `isText` distinguishes a literal message body (joined to the sender
  * with ": ") from an action phrase like "sent an image" (joined with a

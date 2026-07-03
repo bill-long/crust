@@ -67,6 +67,15 @@ export function useNotifications(
 	// limit.
 	const surfacedEvents = createSurfacedEventTracker();
 
+	// Event ids processEvent has already alerted for, so a single event can't
+	// chime twice. An encrypted thread reply is delivered once via the room
+	// timeline (deferred through pendingDecryption -> onDecrypted) and then
+	// AGAIN when the SDK re-partitions it into the thread timeline on
+	// decryption and re-emits RoomEvent.Timeline (now decrypted, so it passes
+	// the relaxed thread-reply gate). The desktop popup is deduped by
+	// tag=roomId, but the sound is not - this tracker guards it. Bounded.
+	const alertedEvents = createSurfacedEventTracker();
+
 	function isAppFocused(): boolean {
 		return !document.hidden && document.hasFocus();
 	}
@@ -157,6 +166,14 @@ export function useNotifications(
 		const actions = client.getPushActionsForEvent(event, true);
 		if (!actions?.notify) return;
 
+		// Alert at most once per event (guards the double-emission of an
+		// encrypted thread reply described where `alertedEvents` is declared).
+		const eventId = event.getId();
+		if (eventId) {
+			if (alertedEvents.has(eventId)) return;
+			alertedEvents.record(eventId);
+		}
+
 		// "Loud" events have sound or highlight tweaks.
 		// Bare notify (no tweaks) = badge only, no popup or chime.
 		const hasSound = !!actions.tweaks?.sound;
@@ -166,7 +183,6 @@ export function useNotifications(
 			// Record the event as surfaced only when the notification was
 			// actually created, so the SW's per-event dedupe doesn't suppress a
 			// background notification for an event we failed to pop.
-			const eventId = event.getId();
 			if (showNotification(event, room) && eventId) {
 				surfacedEvents.record(eventId);
 			}
@@ -301,6 +317,7 @@ export function useNotifications(
 		}
 		pendingDecryption.clear();
 		surfacedEvents.clear();
+		alertedEvents.clear();
 		for (const notif of activeNotifications) {
 			notif.close();
 		}

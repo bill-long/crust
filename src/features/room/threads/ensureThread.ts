@@ -44,9 +44,10 @@ export async function ensureThread(
  * Fetch a thread root from the server for a deep-link into an unloaded
  * thread. Returns null on any failure (network, redacted, gone) so the
  * caller renders the panel's "couldn't load" state instead of throwing.
- * The fetched root is wrapped in a MatrixEvent for `createThread`; in an
- * encrypted room it stays ciphertext until the SDK decrypts it, same as
- * any freshly-fetched event.
+ * The fetched root is wrapped in a MatrixEvent and, in an encrypted room,
+ * decrypted before it heads the Thread - otherwise a freshly-constructed
+ * event nobody schedules for decryption would render the root row as a
+ * permanent "Encrypted message" even with the keys present.
  */
 async function fetchRootEvent(
 	room: Room,
@@ -55,7 +56,10 @@ async function fetchRootEvent(
 	try {
 		const raw = await room.client.fetchRoomEvent(room.roomId, threadId);
 		if (!raw?.event_id) return null;
-		return new MatrixEvent(raw);
+		const event = new MatrixEvent(raw);
+		// No-op for unencrypted events; decrypts (using cached keys) otherwise.
+		await room.client.decryptEventIfNeeded(event);
+		return event;
 	} catch {
 		return null;
 	}

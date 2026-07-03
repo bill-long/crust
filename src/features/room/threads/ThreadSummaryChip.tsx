@@ -77,11 +77,17 @@ export const ThreadSummaryChip: Component<{
 				{(label) => <span class="text-text-muted">{label()}</span>}
 			</Show>
 			<Show when={hasUnread()}>
-				{/* Unread dot; the count is conveyed to AT via aria-label. */}
+				{/* Unread indicator. The dot is decorative; the unread STATE
+					(not a count) reaches AT via the button's aria-label suffix,
+					and via this sr-only text on the non-interactive variant
+					(a div has no aria-label to carry the suffix). */}
 				<span
-					class="h-1.5 w-1.5 shrink-0 rounded-full bg-accent"
+					class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator"
 					aria-hidden="true"
 				/>
+				<Show when={!props.onOpen}>
+					<span class="sr-only">unread</span>
+				</Show>
 			</Show>
 		</Dynamic>
 	);

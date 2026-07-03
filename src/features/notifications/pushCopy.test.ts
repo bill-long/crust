@@ -34,6 +34,52 @@ describe("buildNotificationCopy", () => {
 		).toEqual({ title: "Alice", body: "hello there" });
 	});
 
+	it("frames a thread reply consistently with the in-app copy (named room)", () => {
+		expect(
+			buildNotificationCopy({
+				room_name: "General",
+				sender_display_name: "Alice",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "in thread",
+					"m.relates_to": { rel_type: "m.thread", event_id: "$root" },
+				},
+			}),
+		).toEqual({
+			title: "General",
+			body: "Alice replied in a thread: in thread",
+		});
+	});
+
+	it("frames a thread media reply without the sent-an-X specifics (DM)", () => {
+		expect(
+			buildNotificationCopy({
+				sender_display_name: "Alice",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					"m.relates_to": { rel_type: "m.thread", event_id: "$root" },
+				},
+			}),
+		).toEqual({ title: "Alice", body: "replied in a thread" });
+	});
+
+	it("does not thread-frame a plain in_reply_to reply", () => {
+		expect(
+			buildNotificationCopy({
+				room_name: "General",
+				sender_display_name: "Alice",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.text",
+					body: "hi",
+					"m.relates_to": { "m.in_reply_to": { event_id: "$p" } },
+				},
+			}),
+		).toEqual({ title: "General", body: "Alice: hi" });
+	});
+
 	it("describes a voice message distinctly from plain audio", () => {
 		expect(
 			buildNotificationCopy({
