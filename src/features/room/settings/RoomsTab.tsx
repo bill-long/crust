@@ -13,7 +13,7 @@ import { useClient } from "../../../client/client";
 import {
 	linkRoomToSpace,
 	unlinkRoomFromSpace,
-} from "../../space/spaceChildLink";
+} from "../../../lib/spaceChildLink";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
 

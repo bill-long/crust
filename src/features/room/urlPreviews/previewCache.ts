@@ -1,5 +1,5 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { canonicalizeUrl } from "./extractUrls";
+import { canonicalizeUrl } from "../../../lib/extractUrls";
 
 /**
  * Normalized OpenGraph data we render. Only fields we display are

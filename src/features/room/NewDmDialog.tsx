@@ -10,9 +10,9 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { validateMatrixUserId } from "../../lib/inviteValidation";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
-import { validateMatrixUserId } from "./inviteValidation";
 import { startDm } from "./startDm";
 
 const FOCUSABLE =

@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { stripReplyFallback } from "../urlPreviews/replyFallback";
+import { stripReplyFallback } from "../../../lib/replyFallback";
 
 /** Half-window (in characters) on each side of the first match. */
 const WINDOW_BEFORE = 60;

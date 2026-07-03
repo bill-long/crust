@@ -17,9 +17,9 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { parseInvites } from "../../lib/inviteParsing";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
-import { parseInvites } from "../room/inviteParsing";
 
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

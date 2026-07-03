@@ -7,7 +7,7 @@ import {
 	on,
 	Show,
 } from "solid-js";
-import { validateMatrixUserId } from "../inviteValidation";
+import { validateMatrixUserId } from "../../../lib/inviteValidation";
 
 export function describeInviteError(
 	err: unknown,

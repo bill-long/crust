@@ -1,14 +1,10 @@
 import DOMPurify from "dompurify";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, Show } from "solid-js";
+import { canonicalizeUrl, trimUrlTail, urlRegex } from "../../lib/extractUrls";
 import { escapeAttr, escapeHtml } from "../../lib/htmlEscape";
-import {
-	canonicalizeUrl,
-	trimUrlTail,
-	urlRegex,
-} from "../room/urlPreviews/extractUrls";
-import { linkifyTextNodes } from "../room/urlPreviews/linkify";
-import { stripReplyFallback } from "../room/urlPreviews/replyFallback";
+import { linkifyTextNodes } from "../../lib/linkify";
+import { stripReplyFallback } from "../../lib/replyFallback";
 import type { ResolvedEmote } from "./types";
 
 // Configure DOMPurify once with Matrix-safe allowlist
