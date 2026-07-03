@@ -452,6 +452,38 @@ export function mergeRowsByTimestamp(
 }
 
 /**
+ * Session-lived registries of pending thread echoes, keyed per client
+ * (WeakMap, so a logout's discarded client releases its events) and then
+ * per `${roomId}|${source.key}` scope. Module-level on purpose: the hook
+ * instance unmounts with the thread panel, and a FAILED thread send held
+ * only in hook state would silently become unretryable (thread echoes
+ * exist in no SDK timeline, unlike main-timeline pending events).
+ */
+const threadEchoRegistries = new WeakMap<
+	MatrixClient,
+	Map<string, Map<string, MatrixEvent>>
+>();
+
+function getThreadEchoRegistry(
+	client: MatrixClient,
+	roomId: string,
+	sourceKey: string,
+): Map<string, MatrixEvent> {
+	let byScope = threadEchoRegistries.get(client);
+	if (!byScope) {
+		byScope = new Map();
+		threadEchoRegistries.set(client, byScope);
+	}
+	const scope = `${roomId}|${sourceKey}`;
+	let registry = byScope.get(scope);
+	if (!registry) {
+		registry = new Map();
+		byScope.set(scope, registry);
+	}
+	return registry;
+}
+
+/**
  * Build a displayable `TimelineEvent` for a synthesized expiry-based
  * "left the call" notice. Resolves the subject name and avatar from current
  * room state (call-member events carry no profile data), mirroring
@@ -1351,8 +1383,14 @@ export function useTimeline(
 	 * registry keeps the SDK event objects reachable for Retry/Discard
 	 * (getSourceEvent), rebuild survival, and edit lookups. Entries clear
 	 * on confirmation (status null) or cancellation.
+	 *
+	 * Thread sources swap in a persistent per-thread registry on load (see
+	 * {@link getThreadEchoRegistry}) so a FAILED send stays retryable after
+	 * the panel closes and reopens; per-hook state would drop it forever on
+	 * unmount (unlike main-timeline failed sends, which the SDK timeline
+	 * itself preserves).
 	 */
-	const pendingThreadEchoes = new Map<string, MatrixEvent>();
+	let pendingThreadEchoes = new Map<string, MatrixEvent>();
 
 	function findWindowEvent(eventId: string): MatrixEvent | undefined {
 		if (!currentTimelineWindow) {
@@ -1502,7 +1540,13 @@ export function useTimeline(
 		setCanLoadNewer(false);
 		setTypingUsers([]);
 		setPendingRedactions(reconcile({}, { merge: false }));
-		pendingThreadEchoes.clear();
+		// Swap to this room+source's persistent echo registry: unresolved
+		// entries (FAILED sends) rehydrate through the first window rebuild;
+		// resolved ones get pruned there. Main sources hold no echoes, so a
+		// throwaway map keeps the module registry from accreting empty maps.
+		pendingThreadEchoes = source().inThread
+			? getThreadEchoRegistry(client, rid, source().key)
+			: new Map();
 		setPendingReactions(reconcile(Object.create(null), { merge: false }));
 		setPendingEdits(reconcile(Object.create(null), { merge: false }));
 

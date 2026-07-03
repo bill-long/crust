@@ -340,6 +340,89 @@ describe("useTimeline thread gating", () => {
 			expect(events[2].status).toBe(EventStatus.NOT_SENT);
 		}));
 
+	it("keeps a failed thread echo retryable across panel close/reopen", () =>
+		withRoot(async () => {
+			const room = createMockRoom(ROOM_ID, []);
+			const { thread } = createMockThread("$root", [
+				textMessage(ROOM_ID, "$root", "@a:hs", "the root", 1000),
+			]);
+			room.threads.set("$root", thread);
+			const client = createMockClient(new Map([[ROOM_ID, room]]));
+
+			// First mount (panel open): a send fails, then the panel closes
+			// (hook disposal) with the FAILED row unresolved.
+			const echo = createMatrixEvent({
+				...threadReplyEvent(
+					ROOM_ID,
+					"~txn1",
+					"@me:hs",
+					"$root",
+					"will fail",
+					2000,
+				),
+				status: EventStatus.SENDING,
+			});
+			await new Promise<void>((resolve, reject) => {
+				createRoot(async (dispose) => {
+					try {
+						const { events } = useTimeline(
+							client as unknown as MatrixClient,
+							() => ROOM_ID,
+							{ source: () => threadTimelineSource("$root") },
+						);
+						await flushPromises();
+						client.__emit("Room.localEchoUpdated", echo, room);
+						await flushPromises();
+						echo.__setStatus(EventStatus.NOT_SENT);
+						client.__emit("Room.localEchoUpdated", echo, room);
+						await flushPromises();
+						expect(events.map((e) => e.eventId)).toEqual(["$root", "~txn1"]);
+						dispose();
+						resolve();
+					} catch (e) {
+						dispose();
+						reject(e);
+					}
+				});
+			});
+
+			// Reopen: a fresh hook over the same thread rehydrates the FAILED
+			// row from the persistent registry (thread echoes live in no SDK
+			// timeline, so nothing else could restore it).
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				{ source: () => threadTimelineSource("$root") },
+			);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root", "~txn1"]);
+			expect(events[1].status).toBe(EventStatus.NOT_SENT);
+
+			// Once resolved (discarded here), a later reopen shows no stale row.
+			echo.__setStatus(EventStatus.CANCELLED);
+			client.__emit("Room.localEchoUpdated", echo, room);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$root"]);
+			await new Promise<void>((resolve, reject) => {
+				createRoot(async (dispose) => {
+					try {
+						const { events: reopened } = useTimeline(
+							client as unknown as MatrixClient,
+							() => ROOM_ID,
+							{ source: () => threadTimelineSource("$root") },
+						);
+						await flushPromises();
+						expect(reopened.map((e) => e.eventId)).toEqual(["$root"]);
+						dispose();
+						resolve();
+					} catch (e) {
+						dispose();
+						reject(e);
+					}
+				});
+			});
+		}));
+
 	it("injects, rekeys, and cancels thread-send local echoes", () =>
 		withRoot(async () => {
 			// Under Chronological ordering a thread send's pending echo lives
