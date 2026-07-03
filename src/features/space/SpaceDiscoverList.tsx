@@ -54,7 +54,7 @@ const DiscoverEntry: Component<{
 									? `Retry joining ${props.room.name}`
 									: `Join ${props.room.name}`
 					}
-					class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors ${
+					class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
 						isJoined()
 							? "bg-success-bg/50 text-success-text"
 							: isError()
@@ -97,8 +97,11 @@ export const SpaceDiscoverList: Component<{
 }> = (props) => {
 	const hierarchy = useSpaceHierarchy(props.spaceId);
 
+	// Render nothing without a space: `useSpaceHierarchy` yields an empty,
+	// non-loading state for an undefined id, which would otherwise surface the
+	// "No rooms in this space" empty state even though no space was provided.
 	return (
-		<>
+		<Show when={props.spaceId()}>
 			<Show
 				when={
 					!props.hasJoinedRooms() &&
@@ -148,7 +151,7 @@ export const SpaceDiscoverList: Component<{
 						type="button"
 						onClick={() => hierarchy.loadMore()}
 						disabled={hierarchy.loadingMore}
-						class="rounded px-3 py-1 text-[10px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis disabled:cursor-wait disabled:opacity-50"
+						class="rounded px-3 py-1 text-[10px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-50"
 					>
 						{hierarchy.loadingMore ? "Loading…" : "Load more rooms"}
 					</button>
@@ -160,6 +163,6 @@ export const SpaceDiscoverList: Component<{
 					Could not load discoverable rooms
 				</p>
 			</Show>
-		</>
+		</Show>
 	);
 };
