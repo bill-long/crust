@@ -1,5 +1,9 @@
-import type { Room, Thread } from "matrix-js-sdk";
-import { ThreadEvent } from "matrix-js-sdk";
+import {
+	MatrixEvent,
+	type Room,
+	type Thread,
+	ThreadEvent,
+} from "matrix-js-sdk";
 
 /**
  * Resolve (or create) the `Thread` object for a root event and wait for
@@ -8,10 +12,11 @@ import { ThreadEvent } from "matrix-js-sdk";
  * live-timeline reset (`updateThreadMetadata` resets the timeline when it
  * back-paginates the thread's history).
  *
- * The panel only opens from a rendered root row, so the root event is
- * always available via `room.findEventById`; a fetch-root-from-server
- * branch is deliberately deferred until something needs it (e.g. a
- * notification deep-link to an unloaded thread, issue #303 step 3e).
+ * The root is normally already loaded (the panel opens from a rendered
+ * root row), so `room.findEventById` resolves it. A notification
+ * deep-link (issue #303 step 3e) can target a thread whose root has
+ * scrolled out of / never entered the loaded window, so as a fallback we
+ * fetch the root from the server before creating the Thread.
  */
 export async function ensureThread(
 	room: Room,
@@ -19,7 +24,8 @@ export async function ensureThread(
 ): Promise<Thread | null> {
 	let thread = room.getThread(threadId);
 	if (!thread) {
-		const rootEvent = room.findEventById(threadId);
+		const rootEvent =
+			room.findEventById(threadId) ?? (await fetchRootEvent(room, threadId));
 		if (!rootEvent) return null;
 		thread = room.createThread(threadId, rootEvent, [], false);
 	}
@@ -32,6 +38,31 @@ export async function ensureThread(
 		await waitForInitialFetch(thread, 10_000);
 	}
 	return thread;
+}
+
+/**
+ * Fetch a thread root from the server for a deep-link into an unloaded
+ * thread. Returns null on any failure (network, redacted, gone) so the
+ * caller renders the panel's "couldn't load" state instead of throwing.
+ * The fetched root is wrapped in a MatrixEvent and, in an encrypted room,
+ * decrypted before it heads the Thread - otherwise a freshly-constructed
+ * event nobody schedules for decryption would render the root row as a
+ * permanent "Encrypted message" even with the keys present.
+ */
+async function fetchRootEvent(
+	room: Room,
+	threadId: string,
+): Promise<MatrixEvent | null> {
+	try {
+		const raw = await room.client.fetchRoomEvent(room.roomId, threadId);
+		if (!raw?.event_id) return null;
+		const event = new MatrixEvent(raw);
+		// No-op for unencrypted events; decrypts (using cached keys) otherwise.
+		await room.client.decryptEventIfNeeded(event);
+		return event;
+	} catch {
+		return null;
+	}
 }
 
 function waitForInitialFetch(thread: Thread, timeoutMs: number): Promise<void> {

@@ -27,6 +27,13 @@ export interface ThreadSummary {
 	/** Whether the current user has participated in the thread. */
 	currentUserParticipated: boolean;
 	/**
+	 * Unread notification count for this thread (Total). Drives the chip's
+	 * unread dot; 0 means read. Sourced from the room's per-thread counter
+	 * (populated by `unread_thread_notifications` in /sync, MSC3771/3773),
+	 * so it silently reads 0 on servers that don't advertise that support.
+	 */
+	unreadCount: number;
+	/**
 	 * True when built from the root's server-aggregated bundle only (no
 	 * live Thread object yet) - counts are correct as of the last sync
 	 * that bundled them, and upgrade automatically once a Thread exists.
@@ -49,6 +56,7 @@ interface ThreadBundle {
  */
 export function buildProvisionalThreadSummary(
 	rootEvent: MatrixEvent,
+	unreadCount = 0,
 ): ThreadSummary | null {
 	const rootId = rootEvent.getId();
 	if (!rootId) return null;
@@ -76,6 +84,7 @@ export function buildProvisionalThreadSummary(
 				? latest.origin_server_ts
 				: null,
 		currentUserParticipated: bundle.current_user_participated === true,
+		unreadCount: Math.max(0, unreadCount),
 		provisional: true,
 	};
 }
@@ -88,6 +97,7 @@ export function buildProvisionalThreadSummary(
  */
 export function buildThreadSummaryFromThread(
 	thread: Thread,
+	unreadCount = 0,
 ): ThreadSummary | null {
 	const replyCount = thread.length;
 	if (!replyCount || replyCount <= 0) return null;
@@ -99,6 +109,7 @@ export function buildThreadSummaryFromThread(
 		latestSender: last?.getSender() ?? null,
 		latestTs: last?.getTs() ?? null,
 		currentUserParticipated: thread.hasCurrentUserParticipated,
+		unreadCount: Math.max(0, unreadCount),
 		provisional: false,
 	};
 }

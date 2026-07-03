@@ -281,6 +281,9 @@ export function createMockRoom(
 	/** Mirrors `Room.threads`: tests register Thread(-shaped) objects via
 	 *  `room.threads.set(...)` and emit `ThreadEvent.*` on the room. */
 	const threadsMap = new Map<string, unknown>();
+	/** Per-thread unread counts for `getThreadUnreadNotificationCount`; tests
+	 *  set them via `__setThreadUnread` and emit `RoomEvent.UnreadNotifications`. */
+	const threadUnread = new Map<string, number>();
 
 	return {
 		roomId,
@@ -292,6 +295,11 @@ export function createMockRoom(
 		polls: new Map<string, unknown>(),
 		threads: threadsMap,
 		getThread: (id: string): unknown => threadsMap.get(id) ?? null,
+		getThreadUnreadNotificationCount: (threadId: string, _type?: unknown) =>
+			threadUnread.get(threadId) ?? 0,
+		__setThreadUnread: (threadId: string, count: number) => {
+			threadUnread.set(threadId, count);
+		},
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>

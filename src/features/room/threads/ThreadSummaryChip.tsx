@@ -35,9 +35,13 @@ export const ThreadSummaryChip: Component<{
 				)
 			: null;
 
+	const hasUnread = () => props.thread.unreadCount > 0;
+
 	const ariaLabel = () => {
 		const act = activity();
-		return `Open thread: ${replyLabel()}${act ? `, last activity ${act}` : ""}`;
+		return `Open thread: ${replyLabel()}${act ? `, last activity ${act}` : ""}${
+			hasUnread() ? ", unread" : ""
+		}`;
 	};
 
 	return (
@@ -71,6 +75,19 @@ export const ThreadSummaryChip: Component<{
 			<span class="font-medium text-accent-text">{replyLabel()}</span>
 			<Show when={activity()}>
 				{(label) => <span class="text-text-muted">{label()}</span>}
+			</Show>
+			<Show when={hasUnread()}>
+				{/* Unread indicator. The dot is decorative; the unread STATE
+					(not a count) reaches AT via the button's aria-label suffix,
+					and via this sr-only text on the non-interactive variant
+					(a div has no aria-label to carry the suffix). */}
+				<span
+					class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator"
+					aria-hidden="true"
+				/>
+				<Show when={!props.onOpen}>
+					<span class="sr-only">unread</span>
+				</Show>
 			</Show>
 		</Dynamic>
 	);

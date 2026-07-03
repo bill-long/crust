@@ -23,6 +23,7 @@ function summary(overrides?: Partial<ThreadSummary>): ThreadSummary {
 		latestSender: "@b:hs",
 		latestTs: NOW - 5 * 60_000,
 		currentUserParticipated: false,
+		unreadCount: 0,
 		provisional: false,
 		...overrides,
 	};
@@ -48,5 +49,38 @@ describe("ThreadSummaryChip", () => {
 		));
 		expect(screen.getByText("3 replies")).toBeTruthy();
 		expect(screen.queryByText(/ago|just now/)).toBeNull();
+	});
+
+	it("shows an unread dot (indicator token) and aria suffix when unread", () => {
+		const { container } = render(() => (
+			<ThreadSummaryChip
+				thread={summary({ unreadCount: 2 })}
+				onOpen={() => {}}
+				now={NOW}
+			/>
+		));
+		expect(screen.getByLabelText(/unread$/)).toBeTruthy();
+		// Uses the repo's shared unread-indicator token, not a one-off color.
+		expect(container.querySelector(".bg-indicator")).toBeTruthy();
+	});
+
+	it("conveys unread on the non-interactive variant via sr-only text", () => {
+		render(() => (
+			<ThreadSummaryChip thread={summary({ unreadCount: 1 })} now={NOW} />
+		));
+		// No aria-label on the div variant, so an sr-only "unread" carries it.
+		expect(screen.getByText("unread")).toBeTruthy();
+	});
+
+	it("no unread dot or suffix when read", () => {
+		const { container } = render(() => (
+			<ThreadSummaryChip
+				thread={summary({ unreadCount: 0 })}
+				onOpen={() => {}}
+				now={NOW}
+			/>
+		));
+		expect(screen.queryByLabelText(/unread$/)).toBeNull();
+		expect(container.querySelector(".bg-indicator")).toBeNull();
 	});
 });

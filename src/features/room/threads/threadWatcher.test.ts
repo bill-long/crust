@@ -1,5 +1,5 @@
 import type { MatrixEvent, Room, Thread } from "matrix-js-sdk";
-import { ThreadEvent } from "matrix-js-sdk";
+import { RoomEvent, ThreadEvent } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
 import {
 	createMatrixEvent,
@@ -60,6 +60,41 @@ describe("createThreadWatcher", () => {
 	it("returns null for a plain message (no thread, no bundle)", () => {
 		const { room, watcher, rootEvent } = setup();
 		expect(watcher.getSummary(rootEvent, room as unknown as Room)).toBeNull();
+	});
+
+	it("folds the per-thread unread count into the summary", () => {
+		const { room, watcher, rootEvent } = setup();
+		room.threads.set("$root", threadStub("$root", 2, { sender: "@b", ts: 1 }));
+		room.__setThreadUnread("$root", 4);
+		const summary = watcher.getSummary(rootEvent, room as unknown as Room);
+		expect(summary?.unreadCount).toBe(4);
+	});
+
+	it("re-projects on a thread-scoped UnreadNotifications change", () => {
+		const { room, watcher, onUpdate, rootEvent } = setup();
+		room.threads.set("$root", threadStub("$root", 2, { sender: "@b", ts: 1 }));
+		room.__setThreadUnread("$root", 3);
+		// Project the root so the watcher tracks it and caches the summary.
+		watcher.getSummary(rootEvent, room as unknown as Room);
+		onUpdate.mockClear();
+
+		// Reading the thread clears its unread count -> chip re-projects.
+		room.__setThreadUnread("$root", 0);
+		room.__emit(RoomEvent.UnreadNotifications, { total: 0 }, "$root");
+		expect(onUpdate).toHaveBeenCalledWith("$root");
+		expect(
+			watcher.getSummary(rootEvent, room as unknown as Room)?.unreadCount,
+		).toBe(0);
+	});
+
+	it("ignores room-level UnreadNotifications (no threadId)", () => {
+		const { room, watcher, onUpdate, rootEvent } = setup();
+		room.threads.set("$root", threadStub("$root", 2, { sender: "@b", ts: 1 }));
+		watcher.getSummary(rootEvent, room as unknown as Room);
+		onUpdate.mockClear();
+		// Room-level unread is the summaries store's job, not the chip's.
+		room.__emit(RoomEvent.UnreadNotifications, { total: 5 }, undefined);
+		expect(onUpdate).not.toHaveBeenCalled();
 	});
 
 	it("recomputes and re-projects on room-level ThreadEvent emissions", () => {

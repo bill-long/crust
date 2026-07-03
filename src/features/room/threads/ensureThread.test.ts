@@ -69,10 +69,38 @@ describe("ensureThread", () => {
 		expect(createThread).toHaveBeenCalledWith("$root", rootEvent, [], false);
 	});
 
-	it("returns null when the root event isn't loaded", async () => {
+	it("fetches the root from the server when not loaded (deep-link)", async () => {
+		const thread = emitterThread();
+		const createThread = vi.fn((..._args: unknown[]) => thread);
+		const fetchRoomEvent = vi.fn(async () => ({
+			event_id: "$root",
+			type: "m.room.message",
+			content: { msgtype: "m.text", body: "root" },
+		}));
 		const room = {
+			roomId: "!r:hs",
 			getThread: () => null,
 			findEventById: () => null,
+			createThread,
+			client: { fetchRoomEvent, decryptEventIfNeeded: vi.fn(async () => {}) },
+		} as unknown as Room;
+		expect(await ensureThread(room, "$root")).toBe(thread);
+		expect(fetchRoomEvent).toHaveBeenCalledWith("!r:hs", "$root");
+		// createThread got a MatrixEvent wrapping the fetched root.
+		expect(createThread).toHaveBeenCalledTimes(1);
+		expect(createThread.mock.calls[0][0]).toBe("$root");
+	});
+
+	it("returns null when the server fetch fails (unloaded + unreachable)", async () => {
+		const room = {
+			roomId: "!r:hs",
+			getThread: () => null,
+			findEventById: () => null,
+			client: {
+				fetchRoomEvent: vi.fn(async () => {
+					throw new Error("404");
+				}),
+			},
 		} as unknown as Room;
 		expect(await ensureThread(room, "$root")).toBeNull();
 	});

@@ -90,10 +90,36 @@ export function buildNotificationCopy(payload: PushPayload): {
 	const room =
 		trimmedField(payload.room_name) || trimmedField(payload.room_alias);
 	const { isText, text } = describeContent(payload);
-	const senderLine = isText ? `${sender}: ${text}` : `${sender} ${text}`;
 	const inRoom = room !== "" && room !== sender;
+	// Thread framing matches the in-app copy (notificationCopy.ts) so the two
+	// notification paths agree. Best-effort on the push payload: the relation
+	// is read from cleartext content, so an encrypted reply whose relation is
+	// hidden falls back to plain copy (as it must).
+	if (isThreadReplyPayload(payload)) {
+		const threaded = isText
+			? `replied in a thread: ${text}`
+			: "replied in a thread";
+		return {
+			title: inRoom ? room : sender,
+			body: inRoom ? `${sender} ${threaded}` : threaded,
+		};
+	}
+	const senderLine = isText ? `${sender}: ${text}` : `${sender} ${text}`;
 	return {
 		title: inRoom ? room : sender,
 		body: inRoom ? senderLine : text,
 	};
+}
+
+/** Whether the push payload describes a thread reply. Reads the cleartext
+ *  `m.relates_to` (the stable "m.thread" name continuwuity advertises);
+ *  worker-safe, so it uses the literal rather than importing the SDK's
+ *  latched constant. */
+function isThreadReplyPayload(payload: PushPayload): boolean {
+	const relatesTo = payload.content?.["m.relates_to"] as
+		| { rel_type?: string; event_id?: string }
+		| undefined;
+	return (
+		relatesTo?.rel_type === "m.thread" && typeof relatesTo.event_id === "string"
+	);
 }
