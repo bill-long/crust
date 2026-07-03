@@ -591,9 +591,9 @@ const TimelineView: Component<{
 	// hidden, which used to strand a live append below the fold until reload
 	// (see #324). `setTimeout` still fires while hidden (throttled to ~1s,
 	// which is fine - nobody is watching), so fall back to it. Returns a
-	// cancel fn so the pin can re-target its pending frame when visibility
-	// flips. Only the live pin needs this; the room-entry settle loop below
-	// stays on raw rAF, which correctly idles while hidden (no invisible
+	// cancel fn the pin uses to drop a still-pending frame on unmount. Only
+	// the live pin needs the hidden-tab fallback; the room-entry settle loop
+	// below stays on raw rAF, which correctly idles while hidden (no invisible
 	// scroll-settling churn) and resumes on foreground.
 	const scheduleFrame = (cb: () => void): (() => void) => {
 		if (typeof document !== "undefined" && document.hidden) {
