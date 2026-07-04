@@ -28,6 +28,7 @@ import type { GifItem } from "../../gif/types";
 import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
+import { ComposerActionStrip } from "./ComposerActionStrip";
 import { ComposerContextBanner } from "./ComposerContextBanner";
 import { composerTextareaScope } from "./composerTextarea";
 import { FormattingToolbar } from "./FormattingToolbar";
@@ -259,8 +260,6 @@ const Composer: Component<{
 	// Expose the enqueue seam to the parent so the room view's drag-and-drop
 	// overlay can feed dropped files into this same queue.
 	onMount(() => props.onEnqueueReady?.(enqueueFiles));
-
-	let fileInputRef: HTMLInputElement | undefined;
 
 	/** Queue files chosen via the attach button's hidden file input. */
 	const onFileInputChange = (
@@ -1177,144 +1176,40 @@ const Composer: Component<{
 					}}
 					rows={1}
 				/>
-				{/* Composer action strip: one flex row instead of per-button
-				    absolute offsets, so adding/hiding buttons never requires
-				    recomputing right-N positions or the textarea padding (the
-				    textarea reserves this strip's measured width). Inert while
-				    recording: the recording bar overlays it, and its buttons
-				    must not be reachable underneath. */}
-				<div
-					ref={(el) => {
-						// Deferred to the next frame: writing the padding inside
-						// the observer callback perturbs layout in the same frame
-						// and trips the browser's "ResizeObserver loop" error. The
-						// pending frame is tracked so cleanup can cancel it (no
-						// setter call after dispose) and rapid fires coalesce.
-						let raf = 0;
-						const observer = new ResizeObserver(() => {
-							cancelAnimationFrame(raf);
-							raf = requestAnimationFrame(() => setStripWidth(el.offsetWidth));
-						});
-						observer.observe(el);
-						onCleanup(() => {
-							cancelAnimationFrame(raf);
-							observer.disconnect();
-						});
+				{/* Inert while recording: the recording bar overlays it, and its
+				    buttons must not be reachable underneath. */}
+				<ComposerActionStrip
+					voiceSupported={voiceSupported}
+					editing={!!props.editingEvent}
+					inThread={!!props.threadRootId}
+					gifAvailable={gifConfig.available()}
+					pollOpen={pollDialogOpen()}
+					gifOpen={gifPickerOpen()}
+					emojiOpen={emojiPickerOpen()}
+					inert={voiceRecorder.recording()}
+					onStartRecording={() => void startRecording()}
+					onOpenPoll={() => {
+						setPollDialogOpen(true);
+						setGifPickerOpen(false);
+						setEmojiPickerOpen(false);
 					}}
-					inert={voiceRecorder.recording() || undefined}
-					class="absolute bottom-2.5 right-2 flex items-center gap-1"
-				>
-					<Show when={voiceSupported && !props.editingEvent}>
-						<button
-							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => void startRecording()}
-							aria-label="Record voice message"
-						>
-							<svg
-								class="h-5 w-5"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								aria-hidden="true"
-							>
-								<rect x="9" y="2" width="6" height="12" rx="3" />
-								<path d="M5 10v1a7 7 0 0 0 14 0v-1" />
-								<path d="M12 18v4" />
-							</svg>
-						</button>
-					</Show>
-					{/* Poll button (hidden when editing - polls are new sends -
-					    and in threads: polls-in-threads are deferred, #303). */}
-					<Show when={!props.editingEvent && !props.threadRootId}>
-						<button
-							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => {
-								setPollDialogOpen(true);
-								setGifPickerOpen(false);
-								setEmojiPickerOpen(false);
-							}}
-							aria-label="Create poll"
-							aria-haspopup="dialog"
-							aria-expanded={pollDialogOpen()}
-						>
-							<svg
-								class="h-5 w-5"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								aria-hidden="true"
-							>
-								<path d="M6 20V10" />
-								<path d="M12 20V4" />
-								<path d="M18 20v-6" />
-							</svg>
-						</button>
-					</Show>
-					{/* Attach file button (hidden when editing - edits can't carry
-					    attachments). The hidden input accepts images and arbitrary
-					    files; non-media files are classified as m.file at send. */}
-					<Show when={!props.editingEvent}>
-						<input
-							ref={(el) => {
-								fileInputRef = el;
-							}}
-							type="file"
-							multiple
-							data-composer-file-input
-							class="hidden"
-							onChange={onFileInputChange}
-						/>
-						<button
-							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => fileInputRef?.click()}
-							aria-label="Attach file"
-						>
-							📎
-						</button>
-					</Show>
-					{/* GIF picker button (only when GIF search is available and not editing) */}
-					<Show when={gifConfig.available() && !props.editingEvent}>
-						<button
-							ref={(el) => {
-								gifButtonRef = el;
-							}}
-							type="button"
-							class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => {
-								setGifPickerOpen((v) => !v);
-								setEmojiPickerOpen(false);
-							}}
-							aria-label="Open GIF picker"
-							aria-expanded={gifPickerOpen()}
-						>
-							GIF
-						</button>
-					</Show>
-					{/* Emoji picker button */}
-					<button
-						ref={(el) => {
-							emojiButtonRef = el;
-						}}
-						type="button"
-						class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-						onClick={() => {
-							setEmojiPickerOpen((v) => !v);
-							setGifPickerOpen(false);
-						}}
-						aria-label="Open emoji picker"
-						aria-expanded={emojiPickerOpen()}
-					>
-						😀
-					</button>
-				</div>
+					onFileSelected={onFileInputChange}
+					onToggleGif={() => {
+						setGifPickerOpen((v) => !v);
+						setEmojiPickerOpen(false);
+					}}
+					onToggleEmoji={() => {
+						setEmojiPickerOpen((v) => !v);
+						setGifPickerOpen(false);
+					}}
+					onMeasure={setStripWidth}
+					gifButtonRef={(el) => {
+						gifButtonRef = el;
+					}}
+					emojiButtonRef={(el) => {
+						emojiButtonRef = el;
+					}}
+				/>
 				{/* Always mounted: live regions announce content CHANGES, so the
 				    text flips with the recording state (a region inserted with
 				    its text already present is typically never announced). */}
