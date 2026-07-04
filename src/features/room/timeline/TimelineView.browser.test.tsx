@@ -351,29 +351,35 @@ describe("TimelineView (browser)", () => {
 			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
 			.toBeLessThan(2);
 
-		const hiddenDesc = Object.getOwnPropertyDescriptor(
-			Document.prototype,
-			"hidden",
-		);
-		const visDesc = Object.getOwnPropertyDescriptor(
-			Document.prototype,
+		// Stub visibility so the pin takes its hidden (setTimeout) path. `document`
+		// has no own `hidden`/`visibilityState` (they live on Document.prototype),
+		// so stubbing adds own properties. Capture any pre-existing OWN descriptor
+		// up front; restore re-defines it if there was one, else deletes the own
+		// property so the built-in prototype accessor takes over again. Installing
+		// the stubs inside the try keeps restore() authoritative even if a
+		// defineProperty throws, so the stub can never leak into later tests.
+		let fakeHidden = false;
+		const origHidden = Object.getOwnPropertyDescriptor(document, "hidden");
+		const origVis = Object.getOwnPropertyDescriptor(
+			document,
 			"visibilityState",
 		);
-		let fakeHidden = false;
-		Object.defineProperty(document, "hidden", {
-			configurable: true,
-			get: () => fakeHidden,
-		});
-		Object.defineProperty(document, "visibilityState", {
-			configurable: true,
-			get: () => (fakeHidden ? "hidden" : "visible"),
-		});
 		const restore = (): void => {
-			if (hiddenDesc) Object.defineProperty(document, "hidden", hiddenDesc);
-			if (visDesc) Object.defineProperty(document, "visibilityState", visDesc);
+			if (origHidden) Object.defineProperty(document, "hidden", origHidden);
+			else Reflect.deleteProperty(document, "hidden");
+			if (origVis) Object.defineProperty(document, "visibilityState", origVis);
+			else Reflect.deleteProperty(document, "visibilityState");
 		};
 
 		try {
+			Object.defineProperty(document, "hidden", {
+				configurable: true,
+				get: () => fakeHidden,
+			});
+			Object.defineProperty(document, "visibilityState", {
+				configurable: true,
+				get: () => (fakeHidden ? "hidden" : "visible"),
+			});
 			// Go hidden, then append -> the live-append pin runs via setTimeout
 			// and scrolls to the bottom while "hidden", arming the reconcile
 			// flag. Poll confirms the pin reached the live end.
