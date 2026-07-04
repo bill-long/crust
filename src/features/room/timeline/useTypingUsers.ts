@@ -24,7 +24,7 @@ export interface TypingUser {
  */
 export function useTypingUsers(
 	client: MatrixClient,
-	activeRoomId: () => string | null,
+	activeRoomId: Accessor<string | null>,
 ): { typingUsers: Accessor<TypingUser[]>; resetTyping: () => void } {
 	const [typingUsers, setTypingUsers] = createSignal<TypingUser[]>([]);
 
