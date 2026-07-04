@@ -166,7 +166,7 @@ export function useMessageActions(
 	/**
 	 * Abort a pending redaction echo (whether in-flight QUEUED /
 	 * ENCRYPTING or failed NOT_SENT). Both Cancel (in-flight overlay)
-	 * and Discard (failed banner) call this — `cancelPendingEvent`
+	 * and Discard (failed banner) call this - `cancelPendingEvent`
 	 * triggers the SDK's `unmarkLocallyRedacted`, which restores the
 	 * target's content, and the `_removed` Timeline handler in the
 	 * timeline hook clears the pending overlay and re-renders the row.
@@ -223,7 +223,7 @@ export function useMessageActions(
 		const arr = deps.pendingReactions[targetId]?.[key];
 		if (!arr || arr.length === 0) return;
 		const originalRoomId = roomId();
-		// Snapshot before iterating — the store mutates underneath us as
+		// Snapshot before iterating - the store mutates underneath us as
 		// each cancel fires its synchronous lifecycle events.
 		const snapshot = [...arr];
 		for (const ev of snapshot) {
