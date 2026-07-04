@@ -14,8 +14,9 @@ import {
 	encryptedMessage,
 	textMessage,
 } from "../../../test/mockClient";
+import { mergeRowsByTimestamp } from "./timelineHelpers";
 import type { TimelineEvent } from "./useTimeline";
-import { mergeRowsByTimestamp, useTimeline } from "./useTimeline";
+import { useTimeline } from "./useTimeline";
 
 const row = (eventId: string, timestamp: number): TimelineEvent =>
 	({ eventId, timestamp }) as unknown as TimelineEvent;
