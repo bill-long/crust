@@ -275,6 +275,149 @@ describe("TimelineView (browser)", () => {
 		m.unmount();
 	});
 
+	// Test 2b (issue #337 case 2): a live-append pin scheduled at room A's
+	// bottom must not disrupt room B when the SAME TimelineView instance is
+	// reused across the switch (this harness's RoomSwitcher is not keyed, so
+	// the instance is reused - the exact condition case 2 guards). The
+	// room-switch reset effect now cancels the pending pin (`cancelPin?.()`).
+	//
+	// This is a path/regression guard, not a fix-isolating test: after a
+	// switch the room-entry settle re-pins B to its own bottom anyway, so a
+	// stale bottom-pin is redundant rather than visibly wrong (hence #337
+	// calls case 2 "usually redundant rather than wrong"). What this locks in
+	// is that scheduling a pin in A and immediately switching leaves B
+	// correctly rendered and pinned - so a future change that let the stale
+	// pin corrupt the switch (e.g. firing scrollTo against the wrong element)
+	// would regress here.
+	it("a pending A pin does not disrupt B on a reused-instance switch (#337)", async () => {
+		const roomA = "!a337:example.com";
+		const roomB = "!b337:example.com";
+		harness.setRoomState(roomA, { events: manyEvents(40, "$aaa") });
+		harness.setRoomState(roomB, { events: manyEvents(40, "$bbb") });
+		const m = mount(roomA);
+		// Re-fetch the scroller at each assertion via m.getScroller() rather
+		// than caching it: the room switch can unmount/remount the scroller, and
+		// distFromBottom() on a detached element reads 0 (< 2) and would pass
+		// spuriously. (Matches the A->B->A test above.)
+		await expect
+			.poll(() => distFromBottom(m.getScroller()), {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toBeLessThan(2);
+		// Append to A to schedule a live-append pin, then IMMEDIATELY switch to
+		// B in the same tick so the pin is still pending when the room-switch
+		// reset effect runs and cancels it.
+		harness.appendEvents(roomA, [
+			mkEvent("$a-late", "late alpha message", 1700000500000),
+		]);
+		m.setRoomId(roomB);
+		// B renders its own content, not A's.
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toMatch(/bbb/);
+		expect(m.container.textContent).not.toMatch(/aaa/);
+		// B is pinned at its own live end.
+		await expect
+			.poll(() => distFromBottom(m.getScroller()), {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toBeLessThan(2);
+		m.unmount();
+	});
+
+	// Test 2c (issue #337 case 1): a scroll event delivered after the tab is
+	// foregrounded - the browser replaying a programmatic scroll it executed
+	// but did not dispatch while the tab was hidden - must not be misread as a
+	// user scroll-away that drops follow-live. The visibilitychange
+	// grace-refresh guards this. Without it, the deferred event arrives past
+	// the 250ms programmatic-scroll grace and onScroll clears `wantsBottom`.
+	//
+	// `document.hidden`/`visibilityState` are stubbed so the live-append pin
+	// takes its hidden (setTimeout) path and arms the reconcile flag, exactly
+	// as a backgrounded tab would. (Vitest browser mode runs in a visible tab,
+	// so the visibility must be faked; the deferral itself is modelled by
+	// scrolling up + dispatching the scroll event after the grace expires.)
+	it("keeps follow-live when a hidden pin's scroll event is deferred to foreground (#337)", async () => {
+		const roomId = "!hidden337:example.com";
+		harness.setRoomState(roomId, { events: manyEvents(60, "$hid") });
+		const m = mount(roomId);
+		const scroller = m.getScroller();
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeLessThan(2);
+
+		// Stub visibility so the pin takes its hidden (setTimeout) path. `document`
+		// has no own `hidden`/`visibilityState` (they live on Document.prototype),
+		// so stubbing adds own properties. Capture any pre-existing OWN descriptor
+		// up front; restore re-defines it if there was one, else deletes the own
+		// property so the built-in prototype accessor takes over again. Installing
+		// the stubs inside the try keeps restore() authoritative even if a
+		// defineProperty throws, so the stub can never leak into later tests.
+		let fakeHidden = false;
+		const origHidden = Object.getOwnPropertyDescriptor(document, "hidden");
+		const origVis = Object.getOwnPropertyDescriptor(
+			document,
+			"visibilityState",
+		);
+		const restore = (): void => {
+			if (origHidden) Object.defineProperty(document, "hidden", origHidden);
+			else Reflect.deleteProperty(document, "hidden");
+			if (origVis) Object.defineProperty(document, "visibilityState", origVis);
+			else Reflect.deleteProperty(document, "visibilityState");
+		};
+
+		try {
+			Object.defineProperty(document, "hidden", {
+				configurable: true,
+				get: () => fakeHidden,
+			});
+			Object.defineProperty(document, "visibilityState", {
+				configurable: true,
+				get: () => (fakeHidden ? "hidden" : "visible"),
+			});
+			// Go hidden, then append -> the live-append pin runs via setTimeout
+			// and scrolls to the bottom while "hidden", arming the reconcile
+			// flag. Poll confirms the pin reached the live end.
+			fakeHidden = true;
+			harness.appendEvents(roomId, [
+				mkEvent("$hid-live", "hidden live append", 1700000600000),
+			]);
+			await expect
+				.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+				.toBeLessThan(2);
+			// Let the original grace fully expire, as it would over a long hidden
+			// period, so a later scroll event arrives outside it.
+			await wait(300);
+			// Foreground: the fix refreshes the grace on this transition.
+			fakeHidden = false;
+			document.dispatchEvent(new Event("visibilitychange"));
+			// Now model the deferred replay: the pin underscrolled (a row grew),
+			// so the browser delivers a scroll event whose viewport is well above
+			// the live end. Scroll up and dispatch the event synchronously,
+			// before the re-anchor RO can re-pin, so onScroll sees the large
+			// distFromBottom - the exact shape of the deferred hidden-pin event.
+			scroller.scrollTop = 0;
+			scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+			// wantsBottom must be preserved: a fresh append still snaps to the
+			// live end. Without the grace-refresh the deferred scroll above would
+			// have cleared wantsBottom and this append would leave us scrolled up.
+			harness.appendEvents(roomId, [
+				mkEvent("$hid-after", "after foreground", 1700000600500),
+			]);
+			await expect
+				.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+				.toBeLessThan(2);
+		} finally {
+			restore();
+		}
+		m.unmount();
+	});
+
 	// Test 3: auto-pagination routes through paginateOlder (which
 	// toggles Virtua's `shift` prop). Auto-pagination is the
 	// "viewport unfilled" path, so this verifies the wiring is

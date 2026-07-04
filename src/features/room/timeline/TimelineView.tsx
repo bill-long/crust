@@ -553,11 +553,57 @@ const TimelineView: Component<{
 	// high enough to span the smooth animation duration.
 	const PROGRAMMATIC_SCROLL_GRACE_MS = 250;
 	let lastProgrammaticScrollAt = 0;
+	// Set when we scroll the container while the tab is hidden (the live-append
+	// pin's setTimeout path). A programmatic scroll performed while hidden takes
+	// effect but fires NO scroll event until the tab is foregrounded - Chromium
+	// ties scroll-event dispatch to frame production, which is paused while
+	// hidden (verified empirically; the same reason rAF is paused). The deferred
+	// scroll event then arrives long after the 250ms grace has expired, so
+	// onScroll would misread our own hidden pin as a user scroll-away and clear
+	// `wantsBottom`, silently dropping follow-live (issue #337 case 1).
+	let hiddenProgrammaticScrollPending = false;
 	const markProgrammaticScroll = (): void => {
 		lastProgrammaticScrollAt = performance.now();
+		if (typeof document !== "undefined" && document.hidden) {
+			hiddenProgrammaticScrollPending = true;
+		}
 	};
 	const inProgrammaticScrollGrace = (): boolean =>
 		performance.now() - lastProgrammaticScrollAt < PROGRAMMATIC_SCROLL_GRACE_MS;
+
+	// On foreground, if we scrolled the container while hidden, refresh the
+	// grace window so the now-deferred scroll event from that hidden pin lands
+	// inside it and isn't treated as a user gesture. This does NOT re-scroll -
+	// the re-anchor ResizeObserver below still performs the actual re-pin when
+	// grown rows remeasure on foreground - so it can't yank the view (the
+	// failure mode an earlier foreground-re-pin attempt hit).
+	//
+	// Two accepted bounds, both narrow:
+	//  - Ordering: this relies on visibilitychange firing before the browser
+	//    replays the hidden pin's scroll event. That holds in Chromium (the
+	//    only engine this hidden-tab path was verified against). If an engine
+	//    delivered the scroll first, the grace would still be expired and
+	//    follow-live would drop - i.e. it degrades to the pre-fix behaviour, no
+	//    worse, never a new regression.
+	//  - The refresh reuses the shared 250ms grace, so for up to 250ms after
+	//    foreground a genuine touch / scrollbar-drag scroll-away is read as
+	//    programmatic and won't clear `wantsBottom`. This is the same trade-off
+	//    the grace already makes after every programmatic scroll; it self-
+	//    corrects on the next scroll event, only bites when a hidden pin armed
+	//    the flag, and wheel/keyboard gestures are unaffected (they clear
+	//    `wantsBottom` via their own handlers, not onScroll).
+	if (typeof document !== "undefined") {
+		const onVisibleReconcilePin = (): void => {
+			if (document.visibilityState !== "visible") return;
+			if (!hiddenProgrammaticScrollPending) return;
+			hiddenProgrammaticScrollPending = false;
+			markProgrammaticScroll();
+		};
+		document.addEventListener("visibilitychange", onVisibleReconcilePin);
+		onCleanup(() =>
+			document.removeEventListener("visibilitychange", onVisibleReconcilePin),
+		);
+	}
 
 	// Pin the scroller to the live end via a settle loop that re-applies
 	// scrollTop = scrollHeight each frame until layout stabilises (or
@@ -683,6 +729,15 @@ const TimelineView: Component<{
 		on(
 			() => props.roomId,
 			() => {
+				// Cancel any live-append pin scheduled at the previous room's
+				// bottom. Today `RoomPane` keys `TimelineView` on roomId, so a
+				// room switch remounts this component and `onCleanup` already
+				// drops the pin - this call is a no-op (cancelPin === null) in
+				// that path. It exists so the pin can't fire a stale scrollTo
+				// against the new room's scroller if the instance is ever
+				// reused across a switch (issue #337 case 2).
+				cancelPin?.();
+				cancelPin = null;
 				setAtBottom(true);
 				setWantsBottom(true);
 				setReplyTo(null);
