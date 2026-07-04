@@ -30,6 +30,8 @@ import {
 	mainTimelineSource,
 	threadTimelineSource,
 } from "../threads/timelineSource";
+import { DateSeparator } from "./DateSeparator";
+import { DragOverlay } from "./DragOverlay";
 import {
 	formatDateSeparatorLabel,
 	isDifferentDay,
@@ -42,6 +44,7 @@ import {
 	computeMembershipGroups,
 	type MembershipGroup,
 } from "./membershipGrouping";
+import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
@@ -1376,19 +1379,9 @@ const TimelineView: Component<{
 			on:dragleave={onDragLeave}
 			on:drop={onDrop}
 		>
-			{/* Drag-over overlay. `pointer-events-none` is essential: it keeps the
-			    overlay from becoming the drag target, so crossing onto it doesn't
-			    fire a dragleave on the content below and flicker the overlay. The
-			    drop still bubbles up to <main> from the child under the cursor. */}
+			{/* Drag-over overlay while files are dragged over the timeline. */}
 			<Show when={isDraggingFiles()}>
-				<div
-					class="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-surface-1/80"
-					aria-hidden="true"
-				>
-					<div class="rounded-xl border-2 border-dashed border-accent-hover bg-surface-2/90 px-8 py-6 text-sm font-medium text-text-emphasis shadow-lg">
-						Drop files to upload
-					</div>
-				</div>
+				<DragOverlay />
 			</Show>
 			{/* Timeline */}
 			<Show
@@ -1502,19 +1495,12 @@ const TimelineView: Component<{
 								return (
 									<div>
 										<Show when={shouldShowDateSeparator(events, indexAcc())}>
-											<div class="flex items-center gap-3 px-4 pt-4 pb-2 text-[11px] font-semibold tracking-wider text-text-muted uppercase select-none">
-												<div
-													class="h-px flex-1 bg-border-default"
-													aria-hidden="true"
-												/>
-												<span>
-													{formatDateSeparatorLabel(event.timestamp, dayTick())}
-												</span>
-												<div
-													class="h-px flex-1 bg-border-default"
-													aria-hidden="true"
-												/>
-											</div>
+											<DateSeparator
+												label={formatDateSeparatorLabel(
+													event.timestamp,
+													dayTick(),
+												)}
+											/>
 										</Show>
 										<Switch>
 											<Match when={mode() === "summary"}>
@@ -1679,9 +1665,8 @@ const TimelineView: Component<{
 					     Show when scrolled up OR when behind live (even at
 					     bottom of current slice, so jump-to-live is reachable). */}
 					<Show when={!atBottom() || canLoadNewer()}>
-						<button
-							type="button"
-							class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4"
+						<ScrollToBottomButton
+							behindLive={canLoadNewer()}
 							onClick={() => {
 								// User-initiated jump back to the live end re-arms
 								// `wantsBottom` so the settle loop + new-message
@@ -1705,15 +1690,7 @@ const TimelineView: Component<{
 									}
 								}
 							}}
-							aria-label={
-								canLoadNewer() ? "Jump to latest messages" : "Scroll to bottom"
-							}
-						>
-							<Show when={canLoadNewer()}>
-								<span class="text-xs">New messages</span>
-							</Show>
-							<span>↓</span>
-						</button>
+						/>
 					</Show>
 				</div>
 			</Show>
