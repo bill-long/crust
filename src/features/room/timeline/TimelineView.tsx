@@ -326,6 +326,7 @@ const TimelineView: Component<{
 			getSourceEvent,
 			atBottom,
 			canLoadNewer,
+			myUserId,
 		},
 	);
 

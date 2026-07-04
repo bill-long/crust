@@ -21,6 +21,9 @@ interface ReadReceiptDeps {
 	getSourceEvent: (eventId: string) => MatrixEvent | undefined;
 	atBottom: Accessor<boolean>;
 	canLoadNewer: Accessor<boolean>;
+	/** The local user's ID, supplied by the caller so receipt self-exclusion
+	 *  uses the same value as the rest of the timeline's own-message logic. */
+	myUserId: string;
 }
 
 /**
@@ -41,8 +44,6 @@ export function useReadReceipts(
 	thread: Accessor<{ threadId: string } | undefined>,
 	deps: ReadReceiptDeps,
 ): { receipts: Accessor<Record<string, ReadReceiptEntry[]>> } {
-	const myUserId = client.getUserId() ?? "";
-
 	// Re-trigger read receipt computation on receipt events for the current room.
 	const [receiptTick, setReceiptTick] = createSignal(0);
 	function onReceiptEvent(_event: unknown, room: { roomId: string }): void {
@@ -82,7 +83,7 @@ export function useReadReceipts(
 
 		const members = room.getMembers();
 		for (const member of members) {
-			if (member.userId === myUserId) continue;
+			if (member.userId === deps.myUserId) continue;
 			let readUpToId = room.getEventReadUpTo(member.userId);
 			if (!readUpToId) continue;
 
