@@ -28,6 +28,7 @@ import type { GifItem } from "../../gif/types";
 import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
+import { ComposerContextBanner } from "./ComposerContextBanner";
 import { composerTextareaScope } from "./composerTextarea";
 import { FormattingToolbar } from "./FormattingToolbar";
 import type { PendingAttachment } from "./media/types";
@@ -998,6 +999,17 @@ const Composer: Component<{
 		}
 	};
 
+	/** Exit edit mode, discarding the in-progress draft. Shared by the context
+	 *  banner's cancel button and the Escape shortcut. */
+	const cancelEdit = (): void => {
+		stopTyping();
+		setText("");
+		setMentions([]);
+		setMentionQuery(null);
+		requestAnimationFrame(autoResize);
+		props.onCancelEdit?.();
+	};
+
 	const onKeyDown = (e: KeyboardEvent): void => {
 		// Picker gets first dibs on keyboard events
 		if (handlePickerKey(e)) return;
@@ -1020,12 +1032,7 @@ const Composer: Component<{
 
 		if (e.key === "Escape" && props.editingEvent) {
 			e.preventDefault();
-			stopTyping();
-			setText("");
-			setMentions([]);
-			setMentionQuery(null);
-			requestAnimationFrame(autoResize);
-			props.onCancelEdit?.();
+			cancelEdit();
 			return;
 		}
 		if (e.key === "Escape" && props.replyTo) {
@@ -1041,57 +1048,12 @@ const Composer: Component<{
 
 	return (
 		<div class="border-t border-border-subtle px-4 py-3">
-			<Show when={props.editingEvent}>
-				{(editing) => (
-					<div class="mb-2 flex items-center gap-2 rounded bg-surface-2/50 px-3 py-1.5">
-						<div class="min-w-0 flex-1 border-l-2 border-info-border pl-2">
-							<p class="truncate text-xs font-medium text-info-text">
-								Editing message
-							</p>
-							<p class="truncate text-xs text-text-disabled">
-								{editing().body.trim() || "Message"}
-							</p>
-						</div>
-						<button
-							type="button"
-							class="shrink-0 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-							onClick={() => {
-								stopTyping();
-								setText("");
-								setMentions([]);
-								setMentionQuery(null);
-								requestAnimationFrame(autoResize);
-								props.onCancelEdit?.();
-							}}
-							aria-label="Cancel edit"
-						>
-							✕
-						</button>
-					</div>
-				)}
-			</Show>
-			<Show when={!props.editingEvent && props.replyTo}>
-				{(reply) => (
-					<div class="mb-2 flex items-center gap-2 rounded bg-surface-2/50 px-3 py-1.5">
-						<div class="min-w-0 flex-1 border-l-2 border-accent-hover pl-2">
-							<p class="truncate text-xs font-medium text-text-muted">
-								{reply().senderName.trim() || "Unknown"}
-							</p>
-							<p class="truncate text-xs text-text-disabled">
-								{reply().body.trim() || "Message"}
-							</p>
-						</div>
-						<button
-							type="button"
-							class="shrink-0 rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary"
-							onClick={() => props.onCancelReply?.()}
-							aria-label="Cancel reply"
-						>
-							✕
-						</button>
-					</div>
-				)}
-			</Show>
+			<ComposerContextBanner
+				editingEvent={props.editingEvent}
+				replyTo={props.replyTo}
+				onCancelEdit={cancelEdit}
+				onCancelReply={() => props.onCancelReply?.()}
+			/>
 			<Show when={error()}>
 				<div
 					class="mb-2 rounded bg-danger-bg/30 px-3 py-1.5 text-xs text-danger-text"
