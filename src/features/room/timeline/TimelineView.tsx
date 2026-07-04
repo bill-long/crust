@@ -576,8 +576,22 @@ const TimelineView: Component<{
 	// inside it and isn't treated as a user gesture. This does NOT re-scroll -
 	// the re-anchor ResizeObserver below still performs the actual re-pin when
 	// grown rows remeasure on foreground - so it can't yank the view (the
-	// failure mode an earlier foreground-re-pin attempt hit). visibilitychange
-	// fires before frame production resumes and dispatches the pending scroll.
+	// failure mode an earlier foreground-re-pin attempt hit).
+	//
+	// Two accepted bounds, both narrow:
+	//  - Ordering: this relies on visibilitychange firing before the browser
+	//    replays the hidden pin's scroll event. That holds in Chromium (the
+	//    only engine this hidden-tab path was verified against). If an engine
+	//    delivered the scroll first, the grace would still be expired and
+	//    follow-live would drop - i.e. it degrades to the pre-fix behaviour, no
+	//    worse, never a new regression.
+	//  - The refresh reuses the shared 250ms grace, so for up to 250ms after
+	//    foreground a genuine touch / scrollbar-drag scroll-away is read as
+	//    programmatic and won't clear `wantsBottom`. This is the same trade-off
+	//    the grace already makes after every programmatic scroll; it self-
+	//    corrects on the next scroll event, only bites when a hidden pin armed
+	//    the flag, and wheel/keyboard gestures are unaffected (they clear
+	//    `wantsBottom` via their own handlers, not onScroll).
 	if (typeof document !== "undefined") {
 		const onVisibleReconcilePin = (): void => {
 			if (document.visibilityState !== "visible") return;
