@@ -295,9 +295,15 @@ describe("TimelineView (browser)", () => {
 		harness.setRoomState(roomA, { events: manyEvents(40, "$aaa") });
 		harness.setRoomState(roomB, { events: manyEvents(40, "$bbb") });
 		const m = mount(roomA);
-		const scroller = m.getScroller();
+		// Re-fetch the scroller at each assertion via m.getScroller() rather
+		// than caching it: the room switch can unmount/remount the scroller, and
+		// distFromBottom() on a detached element reads 0 (< 2) and would pass
+		// spuriously. (Matches the A->B->A test above.)
 		await expect
-			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.poll(() => distFromBottom(m.getScroller()), {
+				timeout: 2000,
+				interval: 50,
+			})
 			.toBeLessThan(2);
 		// Append to A to schedule a live-append pin, then IMMEDIATELY switch to
 		// B in the same tick so the pin is still pending when the room-switch
@@ -316,7 +322,10 @@ describe("TimelineView (browser)", () => {
 		expect(m.container.textContent).not.toMatch(/aaa/);
 		// B is pinned at its own live end.
 		await expect
-			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.poll(() => distFromBottom(m.getScroller()), {
+				timeout: 2000,
+				interval: 50,
+			})
 			.toBeLessThan(2);
 		m.unmount();
 	});
