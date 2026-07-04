@@ -1,4 +1,3 @@
-import { ReceiptType, RoomEvent } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -41,6 +40,7 @@ import { TimelineItem } from "./TimelineItem";
 import { useImageLightbox } from "./useImageLightbox";
 import { useMembershipExpansion } from "./useMembershipExpansion";
 import { useMessageActions } from "./useMessageActions";
+import { useReadReceipts } from "./useReadReceipts";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
 const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
@@ -83,11 +83,6 @@ function shouldShowDateSeparator(
 	const curr = events[index];
 	if (!prev || !curr) return false;
 	return isDifferentDay(prev.timestamp, curr.timestamp);
-}
-
-interface ReadReceiptEntry {
-	userId: string;
-	displayName: string;
 }
 
 const TimelineView: Component<{
@@ -319,155 +314,20 @@ const TimelineView: Component<{
 		});
 	};
 
-	// --- Read receipts ---
-	// Build a map: eventId → list of users who have read up to that event
-	// Re-trigger read receipt computation on receipt events for current room
-	const [receiptTick, setReceiptTick] = createSignal(0);
-	function onReceiptEvent(_event: unknown, room: { roomId: string }): void {
-		if (room.roomId === props.roomId) {
-			setReceiptTick((n) => n + 1);
-		}
-	}
-	client.on(RoomEvent.Receipt, onReceiptEvent);
-	onCleanup(() => client.off(RoomEvent.Receipt, onReceiptEvent));
-
-	// Build a map: eventId → list of users who have read up to that event
-	const receipts = createMemo(() => {
-		receiptTick(); // track receipt updates for reactivity
-		const map = Object.create(null) as Record<string, ReadReceiptEntry[]>;
-		const room = client.getRoom(props.roomId);
-		if (!room) return map;
-
-		// Build a set of displayable event IDs for quick lookup.
-		// State-notice events (joins/leaves/name changes) are excluded so
-		// receipts targeting them fall through to the nearest prior
-		// message via the walk-backwards path below — otherwise the
-		// "read by …" avatars would intermittently disappear whenever
-		// membership churns.
-		const displayableIds = new Set<string>();
-		for (const ev of events) {
-			if (ev.stateNotice) continue;
-			displayableIds.add(ev.eventId);
-		}
-
-		const timelineEvents = getWindowEvents();
-		// Precompute eventId→index map for O(1) lookup
-		const idxById = Object.create(null) as Record<string, number>;
-		for (let i = 0; i < timelineEvents.length; i++) {
-			const id = timelineEvents[i].getId();
-			if (id) idxById[id] = i;
-		}
-
-		const members = room.getMembers();
-		for (const member of members) {
-			if (member.userId === myUserId) continue;
-			let readUpToId = room.getEventReadUpTo(member.userId);
-			if (!readUpToId) continue;
-
-			// If the receipt points at a non-displayable event (e.g. an edit),
-			// walk backwards through the SDK timeline to find the nearest
-			// displayable event
-			if (!displayableIds.has(readUpToId)) {
-				const idx = idxById[readUpToId];
-				if (idx === undefined) continue;
-				let resolved: string | null = null;
-				for (let i = idx; i >= 0; i--) {
-					const id = timelineEvents[i].getId();
-					if (id && displayableIds.has(id)) {
-						resolved = id;
-						break;
-					}
-				}
-				if (!resolved) continue;
-				readUpToId = resolved;
-			}
-
-			if (!map[readUpToId]) map[readUpToId] = [];
-			map[readUpToId].push({
-				userId: member.userId,
-				displayName: member.name?.trim() || member.userId,
-			});
-		}
-		// Sort each per-event receipt list by userId for stable ordering.
-		// Per-event lists are typically <10 entries, so this is far cheaper
-		// than sorting the full room member list (which can be 1000s) on
-		// every receipt tick.
-		for (const id in map) {
-			map[id].sort((a, b) => a.userId.localeCompare(b.userId));
-		}
-		return map;
-	});
-
-	// Send read receipt for the latest event when at bottom
-	let lastSentReceiptEventId: string | null = null;
-
-	function sendReadReceipt(): void {
-		if (!atBottom()) return;
-		// Don't send receipts for events the user hasn't scrolled to.
-		// When behind live, forward pagination appends events but
-		// auto-scroll is suppressed, so atBottom can be stale-true.
-		if (canLoadNewer()) return;
-		const lastEvent = events[events.length - 1];
-		if (!lastEvent || lastEvent.eventId === lastSentReceiptEventId) return;
-		const eventId = lastEvent.eventId;
-		// Skip local echo events — their temporary ~-prefixed IDs
-		// are rejected by the server with 400.
-		if (!eventId.startsWith("$")) return;
-		const matrixEvent = getSourceEvent(eventId);
-		if (!matrixEvent) return;
-		client
-			// Main timeline: UNTHREADED (3rd arg true) - a plain receipt would
-			// get thread_id "main" and clear only main-timeline counts, leaving
-			// the per-thread counts the room badge sums un-clearable outside
-			// the panel. Unthreaded preserves the pre-thread invariant that
-			// reading a room clears its whole badge.
-			// Thread panel: THREADED (3rd arg false) - the SDK derives
-			// thread_id from the event, so reading a thread clears exactly that
-			// thread's counts and never the whole room's read state.
-			.sendReadReceipt(matrixEvent, ReceiptType.Read, !props.thread)
-			.then(() => {
-				lastSentReceiptEventId = eventId;
-			})
-			.catch(() => {
-				// Best-effort; receipt will retry on next scroll/event
-			});
-	}
-
-	// Send receipt when new events arrive or last event ID changes
-	// (local echo replacement triggers the ID change without a length change)
-	createEffect(
-		on(
-			() => events[events.length - 1]?.eventId,
-			() => sendReadReceipt(),
-		),
-	);
-
-	// Send receipt when user scrolls to bottom
-	createEffect(
-		on(atBottom, (isAtBottom) => {
-			if (isAtBottom) sendReadReceipt();
-		}),
-	);
-
-	// Send receipt when forward pagination catches up to live.
-	// The events.length effect misses the final page because
-	// canLoadNewer is still true when events rebuild.
-	createEffect(
-		on(canLoadNewer, (hasNewer) => {
-			if (!hasNewer) sendReadReceipt();
-		}),
-	);
-
-	// Send receipt when room first opens
-	createEffect(
-		on(
-			() => props.roomId,
-			() => {
-				lastSentReceiptEventId = null;
-				// Defer so events are loaded first
-				requestAnimationFrame(() => sendReadReceipt());
-			},
-		),
+	// Read receipts: who has read up to each event, plus sending our own
+	// receipt for the latest event when at the live bottom. See useReadReceipts.
+	const { receipts } = useReadReceipts(
+		client,
+		() => props.roomId,
+		() => props.thread,
+		{
+			events,
+			getWindowEvents,
+			getSourceEvent,
+			atBottom,
+			canLoadNewer,
+			myUserId,
+		},
 	);
 
 	// Programmatic-scroll grace window. The settle loop, new-message
