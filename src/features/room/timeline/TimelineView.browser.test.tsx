@@ -321,6 +321,88 @@ describe("TimelineView (browser)", () => {
 		m.unmount();
 	});
 
+	// Test 2c (issue #337 case 1): a scroll event delivered after the tab is
+	// foregrounded - the browser replaying a programmatic scroll it executed
+	// but did not dispatch while the tab was hidden - must not be misread as a
+	// user scroll-away that drops follow-live. The visibilitychange
+	// grace-refresh guards this. Without it, the deferred event arrives past
+	// the 250ms programmatic-scroll grace and onScroll clears `wantsBottom`.
+	//
+	// `document.hidden`/`visibilityState` are stubbed so the live-append pin
+	// takes its hidden (setTimeout) path and arms the reconcile flag, exactly
+	// as a backgrounded tab would. (Vitest browser mode runs in a visible tab,
+	// so the visibility must be faked; the deferral itself is modelled by
+	// scrolling up + dispatching the scroll event after the grace expires.)
+	it("keeps follow-live when a hidden pin's scroll event is deferred to foreground (#337)", async () => {
+		const roomId = "!hidden337:example.com";
+		harness.setRoomState(roomId, { events: manyEvents(60, "$hid") });
+		const m = mount(roomId);
+		const scroller = m.getScroller();
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeLessThan(2);
+
+		const hiddenDesc = Object.getOwnPropertyDescriptor(
+			Document.prototype,
+			"hidden",
+		);
+		const visDesc = Object.getOwnPropertyDescriptor(
+			Document.prototype,
+			"visibilityState",
+		);
+		let fakeHidden = false;
+		Object.defineProperty(document, "hidden", {
+			configurable: true,
+			get: () => fakeHidden,
+		});
+		Object.defineProperty(document, "visibilityState", {
+			configurable: true,
+			get: () => (fakeHidden ? "hidden" : "visible"),
+		});
+		const restore = (): void => {
+			if (hiddenDesc) Object.defineProperty(document, "hidden", hiddenDesc);
+			if (visDesc) Object.defineProperty(document, "visibilityState", visDesc);
+		};
+
+		try {
+			// Go hidden, then append -> the live-append pin runs via setTimeout
+			// and scrolls to the bottom while "hidden", arming the reconcile
+			// flag. Poll confirms the pin reached the live end.
+			fakeHidden = true;
+			harness.appendEvents(roomId, [
+				mkEvent("$hid-live", "hidden live append", 1700000600000),
+			]);
+			await expect
+				.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+				.toBeLessThan(2);
+			// Let the original grace fully expire, as it would over a long hidden
+			// period, so a later scroll event arrives outside it.
+			await wait(300);
+			// Foreground: the fix refreshes the grace on this transition.
+			fakeHidden = false;
+			document.dispatchEvent(new Event("visibilitychange"));
+			// Now model the deferred replay: the pin underscrolled (a row grew),
+			// so the browser delivers a scroll event whose viewport is well above
+			// the live end. Scroll up and dispatch the event synchronously,
+			// before the re-anchor RO can re-pin, so onScroll sees the large
+			// distFromBottom - the exact shape of the deferred hidden-pin event.
+			scroller.scrollTop = 0;
+			scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+			// wantsBottom must be preserved: a fresh append still snaps to the
+			// live end. Without the grace-refresh the deferred scroll above would
+			// have cleared wantsBottom and this append would leave us scrolled up.
+			harness.appendEvents(roomId, [
+				mkEvent("$hid-after", "after foreground", 1700000600500),
+			]);
+			await expect
+				.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+				.toBeLessThan(2);
+		} finally {
+			restore();
+		}
+		m.unmount();
+	});
+
 	// Test 3: auto-pagination routes through paginateOlder (which
 	// toggles Virtua's `shift` prop). Auto-pagination is the
 	// "viewport unfilled" path, so this verifies the wiring is
