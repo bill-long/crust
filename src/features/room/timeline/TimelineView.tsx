@@ -44,6 +44,8 @@ import {
 	computeMembershipGroups,
 	type MembershipGroup,
 } from "./membershipGrouping";
+import { NewerMessagesLoader } from "./NewerMessagesLoader";
+import { OlderMessagesLoader } from "./OlderMessagesLoader";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
@@ -1430,35 +1432,16 @@ const TimelineView: Component<{
 								onCleanup(() => setTopAreaEl(undefined));
 							}}
 						>
-							{/* Loading older messages indicator */}
-							<Show when={loadingOlder()}>
-								<div class="flex justify-center py-3">
-									<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
-								</div>
-							</Show>
-							{/* Manual load button when auto-pagination exhausted */}
-							<Show
-								when={
+							<OlderMessagesLoader
+								loadingOlder={loadingOlder()}
+								showLoadOlderButton={
 									!loadingOlder() &&
 									canLoadOlder() &&
 									autoPageCount() >= MAX_AUTO_PAGES
 								}
-							>
-								<div class="flex justify-center py-3">
-									<button
-										type="button"
-										class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
-										onClick={() => paginateOlder()}
-									>
-										Load older messages
-									</button>
-								</div>
-							</Show>
-							<Show when={!loading() && !canLoadOlder() && events.length > 0}>
-								<div class="py-3 text-center text-xs text-text-disabled">
-									Beginning of conversation
-								</div>
-							</Show>
+								atBeginning={!loading() && !canLoadOlder() && events.length > 0}
+								onLoadOlder={() => paginateOlder()}
+							/>
 						</div>
 						<Virtualizer
 							ref={(h) => {
@@ -1619,40 +1602,19 @@ const TimelineView: Component<{
 								);
 							}}
 						</Virtualizer>
-						{/* Loading newer messages indicator */}
-						<Show when={loadingNewer()}>
-							<div
-								class="flex justify-center py-3"
-								role="status"
-								aria-live="polite"
-							>
-								<span class="sr-only">Loading newer messages</span>
-								<div
-									class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover"
-									aria-hidden="true"
-								/>
-							</div>
-						</Show>
-						{/* Manual load button for newer messages */}
-						<Show when={!loadingNewer() && canLoadNewer()}>
-							<div class="flex justify-center py-3">
-								<button
-									type="button"
-									class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
-									onClick={() => {
-										// Content will be appended below the user's current
-										// position, so they won't be at bottom after the load.
-										// Clear stale atBottom to prevent the followingLive and
-										// read-receipt effects from firing prematurely when
-										// canLoadNewer flips to false on the final page.
-										setAtBottom(false);
-										loadNewerMessages();
-									}}
-								>
-									Load newer messages
-								</button>
-							</div>
-						</Show>
+						<NewerMessagesLoader
+							loadingNewer={loadingNewer()}
+							showLoadNewerButton={!loadingNewer() && canLoadNewer()}
+							onLoadNewer={() => {
+								// Content will be appended below the user's current
+								// position, so they won't be at bottom after the load.
+								// Clear stale atBottom to prevent the followingLive and
+								// read-receipt effects from firing prematurely when
+								// canLoadNewer flips to false on the final page.
+								setAtBottom(false);
+								loadNewerMessages();
+							}}
+						/>
 						{/* Bottom sentinel spacer so the last message's descenders
 						    and media don't touch the composer's top divider.
 						    Lives inside the scroller so scrollHeight-based
