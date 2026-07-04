@@ -1,6 +1,6 @@
 /**
  * Shared HTML-escaping helpers used by both the send path
- * (`composer/markdown.ts`) and the receive/render path (`emoji/MessageBody.tsx`).
+ * (`lib/markdown.ts`) and the receive/render path (`emoji/MessageBody.tsx`).
  * Keeping a single audited implementation avoids the two paths drifting and
  * constructing HTML with inconsistent escaping rules.
  */
