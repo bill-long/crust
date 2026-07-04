@@ -202,6 +202,8 @@ npm run review:stamp   # records the reviewed HEAD; unlocks push for this commit
 - A push is allowed only when every pushed commit equals the stamped SHA. Any new/amended commit changes the tip and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). `npm run review:check` reports the current state.
 - Fail-closed: if the gate can't determine review state it blocks. The only bypass is git's own `git push --no-verify`, a deliberate override - don't use it to skip review.
 
+Caveats: the stamp records one commit, so push a single reviewed branch at a time (an annotated tag on the reviewed tip is fine - OIDs are dereferenced to their commit). The hook needs `node` on `PATH` (it's a Node project) and `core.hooksPath=.githooks` set - `pnpm install` does this via `prepare`, skipping CI and any pre-existing hooksPath. The hook gates the review only; `lint`/`typecheck`/`test` are covered by CI and by the review flow before you stamp.
+
 Only stamp after an actual clean local review - the stamp is an attestation, not a formality.
 
 ---

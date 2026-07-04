@@ -6,8 +6,16 @@
 import { writeFileSync } from "node:fs";
 import { git, markerPath } from "./review-gate-lib.mjs";
 
-const head = git("rev-parse HEAD");
-writeFileSync(markerPath(), `${head}\n`);
-console.log(
-	`Recorded local-review pass for ${head.slice(0, 8)}. Push is unlocked for this commit.`,
-);
+try {
+	const head = git("rev-parse HEAD");
+	writeFileSync(markerPath(), `${head}\n`);
+	console.log(
+		`Recorded local-review pass for ${head.slice(0, 8)}. Push is unlocked for this commit.`,
+	);
+} catch (err) {
+	process.stderr.write(
+		`Could not record review stamp: ${err?.message ?? err}\n` +
+			"  (Are you in a git repo with at least one commit?)\n",
+	);
+	process.exit(1);
+}

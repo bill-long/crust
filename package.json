@@ -17,7 +17,7 @@
 		"review:stamp": "node scripts/stamp-review.mjs",
 		"review:check": "node scripts/check-review-marker.mjs",
 		"hooks:enable": "git config core.hooksPath .githooks",
-		"prepare": "git config core.hooksPath .githooks || true"
+		"prepare": "node scripts/enable-hooks.mjs"
 	},
 	"dependencies": {
 		"@kobalte/core": "^0.13.11",

@@ -10,13 +10,17 @@
 //
 // The marker lives inside the git dir so it is never committed and is per-clone.
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Run a git command and return trimmed stdout. Throws on non-zero exit. */
+/** Run git with the given args and return trimmed stdout. Throws on non-zero
+ *  exit. Uses execFileSync (no shell) so args like `sha^{commit}` aren't mangled
+ *  by cmd.exe's `^` escaping on Windows and nothing needs shell-quoting. Accepts
+ *  a string (split on whitespace - our args never contain spaces) or an array. */
 export function git(args) {
-	return execSync(`git ${args}`, { encoding: "utf8" }).trim();
+	const argv = Array.isArray(args) ? args : args.split(/\s+/).filter(Boolean);
+	return execFileSync("git", argv, { encoding: "utf8" }).trim();
 }
 
 /** Absolute path to the review-stamp marker file. */
