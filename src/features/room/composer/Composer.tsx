@@ -5,7 +5,6 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
-	Index,
 	on,
 	onCleanup,
 	onMount,
@@ -30,12 +29,14 @@ import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
 import { composerTextareaScope } from "./composerTextarea";
+import { FormattingToolbar } from "./FormattingToolbar";
 import type { PendingAttachment } from "./media/types";
 import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
 import {
 	createVoiceRecorder,
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
+import { VoiceRecordingBar } from "./VoiceRecordingBar";
 
 function buildReplyFallback(
 	replyTo: TimelineEvent,
@@ -97,12 +98,6 @@ function findCustomEmoji(
 
 const TYPING_TIMEOUT_MS = 30_000;
 const TYPING_RESEND_MS = 25_000;
-
-/** mm:ss readout for the recording bar timer. */
-function formatRecordingTime(elapsedMs: number): string {
-	const s = Math.max(0, Math.floor(elapsedMs / 1000));
-	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
 
 const Composer: Component<{
 	roomId: string;
@@ -1112,99 +1107,16 @@ const Composer: Component<{
 					onCaptionChange={(id, caption) => updateAttachment(id, { caption })}
 				/>
 			</Show>
-			{/* preventDefault on mousedown keeps focus (and thus the selection)
-			    on the textarea when a button is pressed, so the wrap helpers read
-			    a live selection and the textarea's blur side effects don't fire.
-			    Inert while recording: the recording bar hides the draft, and a
+			{/* Inert while recording: the recording bar hides the draft, and a
 			    toolbar action would silently edit text the user can't see. */}
-			<div
-				role="toolbar"
-				aria-label="Text formatting"
-				class="mb-1.5 flex items-center gap-0.5 text-text-disabled"
-				inert={voiceRecorder.recording() || undefined}
-				onMouseDown={(e) => e.preventDefault()}
-			>
-				<button
-					type="button"
-					class="h-7 w-7 rounded font-bold transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Bold (Ctrl/Cmd+B)"
-					title="Bold (Ctrl/Cmd+B)"
-					onClick={() => wrapInline("**")}
-				>
-					B
-				</button>
-				<button
-					type="button"
-					class="h-7 w-7 rounded italic transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Italic (Ctrl/Cmd+I)"
-					title="Italic (Ctrl/Cmd+I)"
-					onClick={() => wrapInline("*")}
-				>
-					I
-				</button>
-				<button
-					type="button"
-					class="h-7 w-7 rounded line-through transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Strikethrough (Ctrl/Cmd+Shift+X)"
-					title="Strikethrough (Ctrl/Cmd+Shift+X)"
-					onClick={() => wrapInline("~~")}
-				>
-					S
-				</button>
-				<button
-					type="button"
-					class="h-7 w-7 rounded font-mono text-xs transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Inline code (Ctrl/Cmd+E)"
-					title="Inline code (Ctrl/Cmd+E)"
-					onClick={() => wrapInline("`")}
-				>
-					{"<>"}
-				</button>
-				<button
-					type="button"
-					class="h-7 w-7 rounded transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Link"
-					title="Link"
-					onClick={insertLink}
-				>
-					🔗
-				</button>
-				<button
-					type="button"
-					class="h-7 w-7 rounded transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Bulleted list"
-					title="Bulleted list"
-					onClick={() => prefixLines("- ")}
-				>
-					☰
-				</button>
-				<button
-					type="button"
-					class="h-7 w-7 rounded transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					aria-label="Quote"
-					title="Quote"
-					onClick={() => prefixLines("> ")}
-				>
-					❝
-				</button>
-				{/* Toggle a live render of the draft through the receive-side
-				    pipeline. Stable accessible name + aria-pressed (not a changing
-				    label) so screen readers announce the on/off state once. */}
-				<button
-					type="button"
-					class="ml-auto h-7 rounded px-2 text-xs transition-colors hover:bg-surface-3 hover:text-text-secondary"
-					classList={{
-						"bg-surface-3": previewOpen(),
-						"text-text-secondary": previewOpen(),
-					}}
-					aria-label="Preview"
-					aria-pressed={previewOpen()}
-					title="Preview formatted message"
-					onClick={() => setPreviewOpen((v) => !v)}
-				>
-					Preview
-				</button>
-			</div>
+			<FormattingToolbar
+				onWrap={wrapInline}
+				onLink={insertLink}
+				onPrefix={prefixLines}
+				previewOpen={previewOpen()}
+				onTogglePreview={() => setPreviewOpen((v) => !v)}
+				inert={voiceRecorder.recording()}
+			/>
 			<Show when={previewOpen()}>
 				<section
 					class="mb-1.5 max-h-40 overflow-y-auto rounded-lg border border-border-subtle bg-surface-2 px-4 py-2.5"
@@ -1449,85 +1361,18 @@ const Composer: Component<{
 				</span>
 				{/* Recording bar: overlays the input area while capturing. */}
 				<Show when={voiceRecorder.recording()}>
-					<fieldset
-						aria-label="Voice recording"
-						class="absolute inset-0 z-10 flex min-w-0 items-center gap-2 rounded-lg bg-surface-2 px-3"
-						onKeyDown={(e) => {
-							// The composer textarea (which owns the usual Escape
-							// handling) is inert under the bar; Esc cancels here.
-							if (e.key === "Escape") {
-								e.stopPropagation();
-								voiceRecorder.cancel();
-								restoreFocus();
-							}
+					<VoiceRecordingBar
+						elapsedMs={voiceRecorder.elapsedMs()}
+						amplitudes={voiceRecorder.liveAmplitudes()}
+						onCancel={() => {
+							voiceRecorder.cancel();
+							restoreFocus();
 						}}
-					>
-						<span
-							class="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger motion-reduce:animate-none"
-							aria-hidden="true"
-						/>
-						<span
-							role="timer"
-							class="shrink-0 text-sm tabular-nums text-text-secondary"
-						>
-							{formatRecordingTime(voiceRecorder.elapsedMs())}
-						</span>
-						<div
-							class="flex h-6 min-w-0 flex-1 items-center justify-end gap-px"
-							aria-hidden="true"
-						>
-							<Index each={voiceRecorder.liveAmplitudes()}>
-								{(amp) => (
-									<span
-										class="w-1 shrink-0 rounded-full bg-accent"
-										style={{
-											height: `${Math.round(Math.max(amp(), 0.12) * 100)}%`,
-										}}
-									/>
-								)}
-							</Index>
-						</div>
-						<button
-							type="button"
-							class="shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => {
-								voiceRecorder.cancel();
-								restoreFocus();
-							}}
-							aria-label="Cancel recording"
-						>
-							<svg
-								class="h-5 w-5"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								aria-hidden="true"
-							>
-								<path d="M18 6 6 18" />
-								<path d="m6 6 12 12" />
-							</svg>
-						</button>
-						<button
-							ref={(el) => {
-								voiceSendButtonRef = el;
-							}}
-							type="button"
-							class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-							onClick={() => void stopAndSendVoice()}
-							aria-label="Send voice message"
-						>
-							<svg
-								class="h-4 w-4"
-								viewBox="0 0 24 24"
-								fill="currentColor"
-								aria-hidden="true"
-							>
-								<path d="m3 11 18-8-8 18-2-8-8-2z" />
-							</svg>
-						</button>
-					</fieldset>
+						onSend={() => void stopAndSendVoice()}
+						sendButtonRef={(el) => {
+							voiceSendButtonRef = el;
+						}}
+					/>
 				</Show>
 				{/* GIF picker popover */}
 				<Show when={gifPickerOpen()}>
