@@ -275,6 +275,52 @@ describe("TimelineView (browser)", () => {
 		m.unmount();
 	});
 
+	// Test 2b (issue #337 case 2): a live-append pin scheduled at room A's
+	// bottom must not disrupt room B when the SAME TimelineView instance is
+	// reused across the switch (this harness's RoomSwitcher is not keyed, so
+	// the instance is reused - the exact condition case 2 guards). The
+	// room-switch reset effect now cancels the pending pin (`cancelPin?.()`).
+	//
+	// This is a path/regression guard, not a fix-isolating test: after a
+	// switch the room-entry settle re-pins B to its own bottom anyway, so a
+	// stale bottom-pin is redundant rather than visibly wrong (hence #337
+	// calls case 2 "usually redundant rather than wrong"). What this locks in
+	// is that scheduling a pin in A and immediately switching leaves B
+	// correctly rendered and pinned - so a future change that let the stale
+	// pin corrupt the switch (e.g. firing scrollTo against the wrong element)
+	// would regress here.
+	it("a pending A pin does not disrupt B on a reused-instance switch (#337)", async () => {
+		const roomA = "!a337:example.com";
+		const roomB = "!b337:example.com";
+		harness.setRoomState(roomA, { events: manyEvents(40, "$aaa") });
+		harness.setRoomState(roomB, { events: manyEvents(40, "$bbb") });
+		const m = mount(roomA);
+		const scroller = m.getScroller();
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeLessThan(2);
+		// Append to A to schedule a live-append pin, then IMMEDIATELY switch to
+		// B in the same tick so the pin is still pending when the room-switch
+		// reset effect runs and cancels it.
+		harness.appendEvents(roomA, [
+			mkEvent("$a-late", "late alpha message", 1700000500000),
+		]);
+		m.setRoomId(roomB);
+		// B renders its own content, not A's.
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toMatch(/bbb/);
+		expect(m.container.textContent).not.toMatch(/aaa/);
+		// B is pinned at its own live end.
+		await expect
+			.poll(() => distFromBottom(scroller), { timeout: 2000, interval: 50 })
+			.toBeLessThan(2);
+		m.unmount();
+	});
+
 	// Test 3: auto-pagination routes through paginateOlder (which
 	// toggles Virtua's `shift` prop). Auto-pagination is the
 	// "viewport unfilled" path, so this verifies the wiring is

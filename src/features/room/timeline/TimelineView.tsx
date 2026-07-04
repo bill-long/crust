@@ -683,6 +683,15 @@ const TimelineView: Component<{
 		on(
 			() => props.roomId,
 			() => {
+				// Cancel any live-append pin scheduled at the previous room's
+				// bottom. Today `RoomPane` keys `TimelineView` on roomId, so a
+				// room switch remounts this component and `onCleanup` already
+				// drops the pin - this call is a no-op (cancelPin === null) in
+				// that path. It exists so the pin can't fire a stale scrollTo
+				// against the new room's scroller if the instance is ever
+				// reused across a switch (issue #337 case 2).
+				cancelPin?.();
+				cancelPin = null;
 				setAtBottom(true);
 				setWantsBottom(true);
 				setReplyTo(null);
