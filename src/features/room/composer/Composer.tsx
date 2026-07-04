@@ -39,6 +39,7 @@ import {
 	createVoiceRecorder,
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
+import { useAttachments } from "./useAttachments";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
 
 function buildReplyFallback(
@@ -133,7 +134,16 @@ const Composer: Component<{
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
 	const [pollDialogOpen, setPollDialogOpen] = createSignal(false);
 	const [previewOpen, setPreviewOpen] = createSignal(false);
-	const [attachments, setAttachments] = createSignal<PendingAttachment[]>([]);
+	const {
+		attachments,
+		setAttachments,
+		enqueueFiles,
+		onFileInputChange,
+		updateAttachment,
+		removeAttachment,
+		clearAttachments,
+		onPaste,
+	} = useAttachments(() => props.editingEvent);
 	const gifConfig = useGifConfig();
 	/** Measured width of the action strip; the textarea reserves exactly
 	 *  this so text never runs under the buttons regardless of which are
@@ -248,75 +258,9 @@ const Composer: Component<{
 		}
 	};
 
-	/** Queue raw files for upload. The shared seam for paste / attach / drop. */
-	const enqueueFiles = (files: Iterable<File>): void => {
-		if (props.editingEvent) return;
-		const list = Array.from(files);
-		if (list.length === 0) return;
-		// Encrypted and unencrypted rooms both accept attachments; the send path
-		// (uploadAndSend) encrypts when the room is encrypted.
-		setAttachments((prev) => [...prev, ...list.map(createPendingAttachment)]);
-	};
-
 	// Expose the enqueue seam to the parent so the room view's drag-and-drop
 	// overlay can feed dropped files into this same queue.
 	onMount(() => props.onEnqueueReady?.(enqueueFiles));
-
-	/** Queue files chosen via the attach button's hidden file input. */
-	const onFileInputChange = (
-		e: Event & { currentTarget: HTMLInputElement },
-	): void => {
-		const input = e.currentTarget;
-		if (input.files) enqueueFiles(input.files);
-		// Reset so picking the same file again still fires `change`.
-		input.value = "";
-	};
-
-	const updateAttachment = (
-		id: string,
-		patch: Partial<PendingAttachment>,
-	): void => {
-		setAttachments((prev) =>
-			prev.map((a) => (a.id === id ? { ...a, ...patch } : a)),
-		);
-	};
-
-	const removeAttachment = (id: string): void => {
-		setAttachments((prev) => {
-			const found = prev.find((a) => a.id === id);
-			if (found?.previewUrl) URL.revokeObjectURL(found.previewUrl);
-			return prev.filter((a) => a.id !== id);
-		});
-	};
-
-	const clearAttachments = (): void => {
-		setAttachments((prev) => {
-			for (const a of prev) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-			return [];
-		});
-	};
-
-	/** Pull any image blobs out of a paste and queue them. */
-	const onPaste = (e: ClipboardEvent): void => {
-		const items = e.clipboardData?.items;
-		if (!items) return;
-		const files: File[] = [];
-		let hasText = false;
-		// DataTransferItemList is index-accessed, not reliably iterable.
-		for (let i = 0; i < items.length; i++) {
-			const item = items[i];
-			if (item.kind === "string") hasText = true;
-			if (item.kind === "file" && item.type.startsWith("image/")) {
-				const file = item.getAsFile();
-				if (file) files.push(file);
-			}
-		}
-		if (files.length === 0) return;
-		// Only suppress the textarea's default when the clipboard is image-only;
-		// if text was pasted alongside the image, let the native paste insert it.
-		if (!hasText) e.preventDefault();
-		enqueueFiles(files);
-	};
 
 	// Memoize shortcode lookup to avoid rebuilding on every send
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
