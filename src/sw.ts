@@ -7,14 +7,11 @@ import {
 } from "workbox-precaching";
 import { NavigationRoute, registerRoute } from "workbox-routing";
 import {
-	NOTIFY_CHANNEL_NAME,
-	type NotifyPong,
-} from "./features/notifications/notifyChannel";
-import {
 	buildNotificationCopy,
 	type PushPayload,
 	trimmedField,
 } from "./features/notifications/pushCopy";
+import { NOTIFY_CHANNEL_NAME, type NotifyPong } from "./lib/notifyChannel";
 
 // `self` is typed as a generic WorkerGlobalScope by the WebWorker lib; narrow
 // it to the service-worker scope so registration/clients are typed.

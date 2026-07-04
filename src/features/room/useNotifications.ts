@@ -10,16 +10,16 @@ import {
 import { onCleanup } from "solid-js";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
-import { isPollStartType, isRenderablePollContent } from "../../lib/pollCopy";
-import { isThreadReply, isThreadTimelineData } from "../../lib/threadEvents";
-import { userSettings } from "../../stores/settings";
 import {
 	type CanNotifyInput,
 	computeCanNotify,
 	createSurfacedEventTracker,
 	NOTIFY_CHANNEL_NAME,
 	type NotifyPing,
-} from "../notifications/notifyChannel";
+} from "../../lib/notifyChannel";
+import { isPollStartType, isRenderablePollContent } from "../../lib/pollCopy";
+import { isThreadReply, isThreadTimelineData } from "../../lib/threadEvents";
+import { userSettings } from "../../stores/settings";
 import { buildNotificationBody } from "./notificationCopy";
 import { playNotificationSound, primeAudioContext } from "./notificationSound";
 
