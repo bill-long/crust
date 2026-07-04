@@ -10,8 +10,6 @@ import {
 	MatrixEventEvent,
 	type Room,
 	RoomEvent,
-	type RoomMember,
-	RoomMemberEvent,
 	TimelineWindow,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
@@ -47,6 +45,7 @@ import type {
 	TimelineEvent,
 	UseTimelineOptions,
 } from "./timelineTypes";
+import { useTypingUsers } from "./useTypingUsers";
 
 // Re-export the timeline's public types so existing consumers can keep
 // importing them from `useTimeline`; the definitions live in ./timelineTypes.
@@ -281,10 +280,6 @@ export function useTimeline(
 	const [loadingNewer, setLoadingNewer] = createSignal(false);
 	const [canLoadOlder, setCanLoadOlder] = createSignal(true);
 	const [canLoadNewer, setCanLoadNewer] = createSignal(false);
-	const [typingUsers, setTypingUsers] = createSignal<
-		{ userId: string; displayName: string }[]
-	>([]);
-
 	/**
 	 * Pending-redaction status keyed by *target* event ID. Surfaces a
 	 * "Deleting…" overlay on the target while the redaction round-trips,
@@ -436,6 +431,13 @@ export function useTimeline(
 	let currentRoomId: string | null = null;
 	let currentSourceKey: string | null = null;
 	let backfillReloadAttempted = false;
+
+	// Typing indicator: reads currentRoomId live on each Typing event, and is
+	// cleared synchronously at the room-switch reset below via resetTyping().
+	const { typingUsers, resetTyping } = useTypingUsers(
+		client,
+		() => currentRoomId,
+	);
 	// Generation counter — increments on every room load. Async operations
 	// capture the current generation and bail if it changed (A→B→A safety).
 	let roomGeneration = 0;
@@ -717,7 +719,7 @@ export function useTimeline(
 		setLoadingNewer(false);
 		setCanLoadOlder(false);
 		setCanLoadNewer(false);
-		setTypingUsers([]);
+		resetTyping();
 		setPendingRedactions(reconcile({}, { merge: false }));
 		// Swap to this room+source's persistent echo registry: unresolved
 		// entries (FAILED sends) rehydrate through the first window rebuild;
@@ -1521,23 +1523,6 @@ export function useTimeline(
 		}
 	}
 
-	function onTyping(_event: MatrixEvent, member: RoomMember): void {
-		if (member.roomId !== currentRoomId) return;
-		const room = client.getRoom(currentRoomId);
-		if (!room) return;
-		const myUserId = client.getUserId();
-		const typing: { userId: string; displayName: string }[] = [];
-		for (const m of room.getMembers()) {
-			if (m.typing && m.userId !== myUserId) {
-				typing.push({
-					userId: m.userId,
-					displayName: m.name?.trim() || m.userId,
-				});
-			}
-		}
-		setTypingUsers(typing);
-	}
-
 	/**
 	 * Handle SDK local-echo lifecycle transitions. Fires when an event's
 	 * status changes (SENDING -> SENT / NOT_SENT / CANCELLED) and when
@@ -1739,7 +1724,6 @@ export function useTimeline(
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
 	client.on(MatrixEventEvent.Replaced, onReplaced);
 	client.on(ClientEvent.Room, onRoomAppeared);
-	client.on(RoomMemberEvent.Typing, onTyping);
 
 	onCleanup(() => {
 		clearCallExpiryTimer();
@@ -1752,7 +1736,6 @@ export function useTimeline(
 		client.off(MatrixEventEvent.Decrypted, onDecrypted);
 		client.off(MatrixEventEvent.Replaced, onReplaced);
 		client.off(ClientEvent.Room, onRoomAppeared);
-		client.off(RoomMemberEvent.Typing, onTyping);
 	});
 
 	return {
