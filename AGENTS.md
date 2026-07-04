@@ -195,14 +195,14 @@ CI runs `pnpm lint && pnpm typecheck && pnpm build`. Run the same three before d
 Pushing is gated on a local code review. Run the review, then stamp it and push:
 
 ```bash
-npm run review:stamp   # records the reviewed HEAD; unlocks push for this commit
+pnpm review:stamp   # records the reviewed HEAD; unlocks push for this commit
 ```
 
-- The gate is a git **`pre-push` hook** (`.githooks/pre-push` → `scripts/pre-push-gate.mjs`), enabled automatically by the `prepare` script (`core.hooksPath=.githooks`) on `pnpm install`; re-enable manually with `npm run hooks:enable`. git runs it for **every** push - agent or human, however `git push` is invoked - and it checks the actual refs being pushed (read from stdin), not the command string.
-- A push is allowed only when every pushed commit equals the stamped SHA. Any new/amended commit changes the tip and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). `npm run review:check` reports the current state.
+- The gate is a git **`pre-push` hook** (`.githooks/pre-push` → `scripts/pre-push-gate.mjs`), enabled automatically by the `prepare` script (`core.hooksPath=.githooks`) on `pnpm install`; re-enable manually with `pnpm hooks:enable`. git runs it for **every** push - agent or human, however `git push` is invoked - and it checks the actual refs being pushed (read from stdin), not the command string.
+- A push is allowed only when every pushed commit equals the stamped SHA. Any new/amended commit changes the tip and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). `pnpm review:check` reports the current state.
 - Fail-closed: if the gate can't determine review state it blocks. The only bypass is git's own `git push --no-verify`, a deliberate override - don't use it to skip review.
 
-Caveats: the stamp records one commit, so push a single reviewed branch at a time (an annotated tag on the reviewed tip is fine - OIDs are dereferenced to their commit). Activation is per-clone: `pnpm install` runs `prepare` -> `enable-hooks.mjs`, which sets `core.hooksPath=.githooks` (skipping CI and any pre-existing hooksPath, warning loudly if it can't). That setting then persists across pulls, but a brand-new clone isn't gated until it installs once (or runs `npm run hooks:enable`). The hook needs `node` on `PATH` and, on Windows, real `git.exe` (a `.cmd`/`.bat` git shim makes the hook fail-closed and block every push). The hook gates the review only; `lint`/`typecheck`/`test` are covered by CI and by the review flow before you stamp.
+Caveats: the stamp records one commit, so push a single reviewed branch at a time (an annotated tag on the reviewed tip is fine - OIDs are dereferenced to their commit). Activation is per-clone: `pnpm install` runs `prepare` -> `enable-hooks.mjs`, which sets `core.hooksPath=.githooks` (skipping CI and any pre-existing hooksPath, warning loudly if it can't). That setting then persists across pulls, but a brand-new clone isn't gated until it installs once (or runs `pnpm hooks:enable`). The hook needs `node` on `PATH` and, on Windows, real `git.exe` (a `.cmd`/`.bat` git shim makes the hook fail-closed and block every push). The hook gates the review only; `lint`/`typecheck`/`test` are covered by CI and by the review flow before you stamp.
 
 Only stamp after an actual clean local review - the stamp is an attestation, not a formality.
 

@@ -78,7 +78,7 @@ async function main() {
 				? `  Stamped (reviewed): ${short(stamped)}\n`
 				: "  No local review has been recorded for this repo yet.\n") +
 			`  Pushing commit(s):  ${pushedCommits.map(short).join(", ")}\n` +
-			"  Check out that commit, run the local code review, then:  npm run review:stamp\n" +
+			"  Check out that commit, run the local code review, then:  pnpm review:stamp\n" +
 			"  (Deliberate override, discouraged: git push --no-verify.)\n\n",
 	);
 	process.exit(1);

@@ -5,8 +5,8 @@
 # gate for BOTH the Claude agent and humans - git runs it for every push
 # regardless of how `git push` was invoked.
 #
-# Enabled automatically by the `prepare` npm script (core.hooksPath=.githooks);
-# re-enable manually with `npm run hooks:enable`.
+# Enabled automatically by the `prepare` script (core.hooksPath=.githooks);
+# re-enable manually with `pnpm hooks:enable`.
 #
 # `exec` hands our stdin (the refspec list) straight to node.
 exec node scripts/pre-push-gate.mjs

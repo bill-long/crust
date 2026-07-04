@@ -2,7 +2,7 @@
 //
 // A local code review is an agent action (the `code-review` workflow), not a
 // scriptable CI step, so the gate can't run the review itself. Instead it
-// checks an attestation: `npm run review:stamp` records the reviewed commit
+// checks an attestation: `pnpm review:stamp` records the reviewed commit
 // SHA into `<git-dir>/local-review-passed`, and the git pre-push hook refuses
 // to push any commit whose SHA isn't the stamped one. Any new or amended
 // commit changes the tip and thus invalidates the stamp, so "review before
@@ -53,6 +53,6 @@ export function unreviewedMessage({ head, marker }) {
 		(marker
 			? `  Last reviewed commit: ${short(marker)} (stale - commits changed since).\n`
 			: `  No local review has been recorded for this repo yet.\n`) +
-		"  Run the local code review, then stamp it:  npm run review:stamp\n"
+		"  Run the local code review, then stamp it:  pnpm review:stamp\n"
 	);
 }

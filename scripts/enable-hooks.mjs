@@ -2,7 +2,7 @@
 // Point git at .githooks so the local-review pre-push gate runs. Invoked two ways:
 //   - `prepare` (automatic, on install): guarded - skips CI and refuses to
 //     clobber a pre-existing different core.hooksPath (husky, shared hooks dir).
-//   - `npm run hooks:enable` (explicit, passes --force): the user is asking for
+//   - `pnpm hooks:enable` (explicit, passes --force): the user is asking for
 //     it, so bypass those guards and set it, noting any value being overridden.
 //
 // A silently-unset gate is worse than a visible failure. The automatic path
@@ -60,7 +60,7 @@ if (current && current !== ".githooks") {
 	if (!force) {
 		warn([
 			`core.hooksPath is already '${current}'; leaving it untouched.`,
-			"To enable the review gate anyway: npm run hooks:enable",
+			"To enable the review gate anyway: pnpm hooks:enable",
 		]);
 		process.exit(0);
 	}
@@ -75,6 +75,6 @@ try {
 	warn([
 		"WARNING: could not set core.hooksPath - the local-review push gate is NOT active.",
 		`  ${err?.message ?? err}`,
-		"  Enable it manually with: npm run hooks:enable",
+		"  Enable it manually with: pnpm hooks:enable",
 	]);
 }

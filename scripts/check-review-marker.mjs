@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Exits 0 if the current HEAD has passed local code review, else exits 1 with
-// an explanatory message on stderr. A convenience for humans (`npm run
-// review:check`) - the authoritative push gate is scripts/pre-push-gate.mjs.
+// an explanatory message on stderr. A convenience for humans
+// (`pnpm review:check`) - the authoritative push gate is scripts/pre-push-gate.mjs.
 // Fail-closed: if git errors (unborn HEAD, git not on PATH, ...), exit 1.
 
 import { reviewStatus, unreviewedMessage } from "./review-gate-lib.mjs";
