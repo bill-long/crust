@@ -25,6 +25,11 @@ import type { GifItem } from "../../gif/types";
 import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
+import {
+	buildEditContent,
+	buildReplyFallback,
+	buildTextMessageContent,
+} from "./buildMessageContent";
 import { ComposerActionStrip } from "./ComposerActionStrip";
 import { ComposerContextBanner } from "./ComposerContextBanner";
 import { createComposerFormatting } from "./composerFormatting";
@@ -39,37 +44,6 @@ import {
 import { useAttachments } from "./useAttachments";
 import { useMentions } from "./useMentions";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
-
-function buildReplyFallback(
-	replyTo: TimelineEvent,
-	roomId: string,
-): {
-	bodyPrefix: string;
-	htmlPrefix: string;
-} {
-	const quotedLines = replyTo.body
-		.split("\n")
-		.map((l) => `> ${l}`)
-		.join("\n");
-	const bodyPrefix = `> <${replyTo.senderId}> ${replyTo.body.split("\n")[0]}\n${
-		replyTo.body.includes("\n")
-			? `${quotedLines.split("\n").slice(1).join("\n")}\n`
-			: ""
-	}\n`;
-
-	const escapedSender = escapeHtml(replyTo.senderId);
-	const escapedBody = escapeHtml(replyTo.body).replace(/\n/g, "<br>");
-	const eventPermalink = `https://matrix.to/#/${encodeURIComponent(roomId)}/${encodeURIComponent(replyTo.eventId)}`;
-	const senderPermalink = `https://matrix.to/#/${encodeURIComponent(replyTo.senderId)}`;
-	const htmlPrefix =
-		`<mx-reply><blockquote>` +
-		`<a href="${eventPermalink}">In reply to</a> ` +
-		`<a href="${senderPermalink}">${escapedSender}</a><br>` +
-		`${escapedBody}` +
-		`</blockquote></mx-reply>`;
-
-	return { bodyPrefix, htmlPrefix };
-}
 
 const SHORTCODE_RE = /(?:^|[^:\w]):([a-zA-Z0-9_-]{2,50}):(?![\w:])/g;
 
@@ -551,33 +525,12 @@ const Composer: Component<{
 				currentMentions,
 				emoji,
 			);
-			const newContent: Record<string, unknown> = {
-				msgtype: "m.text",
-				body: newBody,
-			};
-			if (formatted_body) {
-				newContent.format = "org.matrix.custom.html";
-				newContent.formatted_body = formatted_body;
-			}
-			if (currentMentions.length > 0) {
-				newContent["m.mentions"] = {
-					user_ids: currentMentions.map((m) => m.userId),
-				};
-			}
-
-			const content: Record<string, unknown> = {
-				msgtype: "m.text",
-				body: `* ${newBody}`,
-				"m.new_content": newContent,
-				"m.relates_to": {
-					rel_type: "m.replace",
-					event_id: props.editingEvent.eventId,
-				},
-			};
-			if (formatted_body) {
-				content.format = "org.matrix.custom.html";
-				content.formatted_body = `* ${formatted_body}`;
-			}
+			const content = buildEditContent(
+				newBody,
+				formatted_body,
+				currentMentions,
+				props.editingEvent.eventId,
+			);
 
 			const draft = text();
 			const draftMentions = mentions();
@@ -714,33 +667,13 @@ const Composer: Component<{
 			currentMentions,
 			emoji,
 		);
-		const content: Record<string, unknown> = {
-			msgtype: "m.text",
+		const content = buildTextMessageContent(
 			body,
-		};
-		if (formatted_body) {
-			content.format = "org.matrix.custom.html";
-			content.formatted_body = formatted_body;
-		}
-		if (currentMentions.length > 0) {
-			content["m.mentions"] = {
-				user_ids: currentMentions.map((m) => m.userId),
-			};
-		}
-
-		// Add reply metadata if replying (unless an attachment already carried it)
-		if (replyTo && !replyConsumed) {
-			const { bodyPrefix, htmlPrefix } = buildReplyFallback(replyTo, roomId);
-			const replyHtmlBody =
-				(content.formatted_body as string | undefined) ??
-				escapeHtml(content.body as string).replace(/\n/g, "<br>");
-			content.body = bodyPrefix + (content.body as string);
-			content.format = "org.matrix.custom.html";
-			content.formatted_body = htmlPrefix + replyHtmlBody;
-			content["m.relates_to"] = {
-				"m.in_reply_to": { event_id: replyTo.eventId },
-			};
-		}
+			formatted_body,
+			currentMentions,
+			replyTo && !replyConsumed ? replyTo : null,
+			roomId,
+		);
 
 		setSending(true);
 		stopTyping();
