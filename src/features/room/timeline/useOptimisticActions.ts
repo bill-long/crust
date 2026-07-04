@@ -176,3 +176,7 @@ export function useOptimisticActions() {
 		resetOptimistic,
 	};
 }
+
+/** The optimistic-echo stores and mutators, for consumers (e.g. the timeline's
+ *  message-action handlers) that receive a subset threaded in as deps. */
+export type OptimisticActions = ReturnType<typeof useOptimisticActions>;

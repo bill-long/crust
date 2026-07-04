@@ -3,17 +3,15 @@ import { EventStatus, EventType, RelationType } from "matrix-js-sdk";
 import type { Accessor } from "solid-js";
 import { composerTextareaSelector } from "../composer/composerTextarea";
 import type { TimelineEvent } from "./timelineTypes";
-import type { useOptimisticActions } from "./useOptimisticActions";
-
-type OptimisticStores = ReturnType<typeof useOptimisticActions>;
+import type { OptimisticActions } from "./useOptimisticActions";
 
 interface MessageActionDeps {
 	/** The reactive events store; read imperatively at click time. */
 	events: TimelineEvent[];
 	getSourceEvent: (eventId: string) => MatrixEvent | undefined;
-	pendingRedactions: OptimisticStores["pendingRedactions"];
-	pendingReactions: OptimisticStores["pendingReactions"];
-	pendingEdits: OptimisticStores["pendingEdits"];
+	pendingRedactions: OptimisticActions["pendingRedactions"];
+	pendingReactions: OptimisticActions["pendingReactions"];
+	pendingEdits: OptimisticActions["pendingEdits"];
 	/** Composer-context setters owned by the caller (TimelineView). */
 	setReplyTo: (ev: TimelineEvent | null) => void;
 	setEditingEvent: (ev: TimelineEvent | null) => void;
