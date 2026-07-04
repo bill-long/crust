@@ -5,62 +5,76 @@
 //   - `npm run hooks:enable` (explicit, passes --force): the user is asking for
 //     it, so bypass those guards and set it, noting any value being overridden.
 //
-// A silently-unset gate is worse than a visible failure, so a genuine
-// `git config` failure WARNS loudly rather than being swallowed.
+// A silently-unset gate is worse than a visible failure. The automatic path
+// stays quiet in contexts where enabling legitimately doesn't apply (not a git
+// work tree); the explicit --force path warns on any failure, because the user
+// asked and expects it to take effect.
 
 import { execFileSync } from "node:child_process";
 
 const force = process.argv.includes("--force");
 
-if (!force && process.env.CI) {
+// A CI value of "false"/"0"/"" does NOT mean CI (some shells export CI=false).
+const ci = (process.env.CI ?? "").toLowerCase();
+const inCI = ci !== "" && ci !== "false" && ci !== "0";
+if (!force && inCI) {
 	process.exit(0);
 }
 
-function gitConfig(args) {
-	return execFileSync("git", ["config", ...args], {
+/** Run git; returns trimmed stdout, throws on failure. stderr is suppressed
+ *  (an unset config key exits non-zero, which is normal). */
+function git(args) {
+	return execFileSync("git", args, {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
 	}).trim();
 }
 
-// Nothing to enable outside a git work tree (this runs on every install,
-// including contexts without a .git) - stay quiet.
+function warn(lines) {
+	console.warn(lines.map((l) => `[review-gate] ${l}`).join("\n"));
+}
+
+// Must be able to invoke git in a work tree. Failure is quiet on the automatic
+// path (prepare runs in many contexts, including ones without a .git) but loud
+// on --force (the user explicitly asked to enable it).
 try {
-	execFileSync("git", ["rev-parse", "--git-dir"], { stdio: "ignore" });
-} catch {
+	git(["rev-parse", "--git-dir"]);
+} catch (err) {
+	if (force) {
+		warn([
+			"WARNING: cannot run git to enable the gate - it is NOT active.",
+			`  ${err?.message ?? err}`,
+		]);
+	}
 	process.exit(0);
 }
 
+// Don't clobber a pre-existing different hooksPath on the automatic path.
 let current = "";
 try {
-	current = gitConfig(["--get", "core.hooksPath"]);
+	current = git(["config", "--get", "core.hooksPath"]);
 } catch {
 	// non-zero exit == key unset; leave `current` empty.
 }
-
 if (current && current !== ".githooks") {
 	if (!force) {
-		// Automatic path: don't silently disable the user's other hooks.
-		console.warn(
-			`[review-gate] core.hooksPath is already '${current}'; leaving it untouched.\n` +
-				`[review-gate] To enable the review gate anyway (overrides '${current}'): npm run hooks:enable`,
-		);
+		warn([
+			`core.hooksPath is already '${current}'; leaving it untouched.`,
+			"To enable the review gate anyway: npm run hooks:enable",
+		]);
 		process.exit(0);
 	}
-	// Explicit path: the user asked; override, but say what we replaced.
-	console.warn(
-		`[review-gate] Overriding existing core.hooksPath '${current}'.`,
-	);
+	warn([`Overriding existing core.hooksPath '${current}'.`]);
 }
 
 // Enable. A failure here means the gate would be silently off, so surface it -
 // but don't fail the install.
 try {
-	gitConfig(["core.hooksPath", ".githooks"]);
+	git(["config", "core.hooksPath", ".githooks"]);
 } catch (err) {
-	console.warn(
-		"[review-gate] WARNING: could not set core.hooksPath - the local-review push gate is NOT active.\n" +
-			`[review-gate]   ${err?.message ?? err}\n` +
-			"[review-gate]   Enable it manually with: npm run hooks:enable",
-	);
+	warn([
+		"WARNING: could not set core.hooksPath - the local-review push gate is NOT active.",
+		`  ${err?.message ?? err}`,
+		"  Enable it manually with: npm run hooks:enable",
+	]);
 }
