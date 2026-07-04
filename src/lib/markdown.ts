@@ -17,7 +17,7 @@
  * Crust's own renderer round-trips them; Element parses the same set.
  */
 
-import { escapeAttr, escapeHtml } from "../../../lib/htmlEscape";
+import { escapeAttr, escapeHtml } from "./htmlEscape";
 
 export { escapeHtml };
 

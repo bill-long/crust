@@ -13,6 +13,12 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { createPicker } from "../../../components/picker/Picker";
+import {
+	type CustomEmoji,
+	escapeHtml,
+	formatMarkdown,
+	type Mention,
+} from "../../../lib/markdown";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
@@ -24,12 +30,6 @@ import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
 import { composerTextareaScope } from "./composerTextarea";
-import {
-	type CustomEmoji,
-	escapeHtml,
-	formatMarkdown,
-	type Mention,
-} from "./markdown";
 import type { PendingAttachment } from "./media/types";
 import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
 import {

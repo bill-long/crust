@@ -11,8 +11,8 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
+import { formatMarkdown } from "../../lib/markdown";
 import { createMockClient } from "../../test/mockClient";
-import { formatMarkdown } from "../room/composer/markdown";
 import { MessageBody } from "./MessageBody";
 
 afterEach(cleanup);
