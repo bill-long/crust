@@ -32,7 +32,7 @@ import {
 	useDayTick,
 } from "./dateFormatting";
 import { GroupedMembershipNotice } from "./GroupedMembershipNotice";
-import { ImageLightbox, type LightboxImage } from "./ImageLightbox";
+import { ImageLightbox } from "./ImageLightbox";
 import {
 	computeMembershipGroups,
 	type MembershipGroup,
@@ -41,6 +41,7 @@ import { NewerMessagesLoader } from "./NewerMessagesLoader";
 import { OlderMessagesLoader } from "./OlderMessagesLoader";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
+import { useImageLightbox } from "./useImageLightbox";
 import { useMessageActions } from "./useMessageActions";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 
@@ -1078,67 +1079,17 @@ const TimelineView: Component<{
 		return "Several people are typing…";
 	});
 
-	// ─── Image lightbox ─────────────────────────────────────────────
-	// Gallery is built from confirmed (status === null) m.image events
-	// only. Pending / failed local echoes are excluded because their
-	// event id can re-key on confirmation, which would orphan the open
-	// lightbox descriptor.
-	const [lightboxEventId, setLightboxEventId] = createSignal<string | null>(
-		null,
-	);
-	const imageGallery = createMemo<TimelineEvent[]>(() =>
-		events.filter(
-			(e) => e.msgtype === "m.image" && e.status === null && !!e.mediaFullUrl,
-		),
-	);
-	const lightboxIndex = createMemo<number>(() => {
-		const id = lightboxEventId();
-		if (!id) return -1;
-		return imageGallery().findIndex((e) => e.eventId === id);
-	});
-	const lightboxOpen = (): boolean => lightboxEventId() !== null;
-	// Auto-close if the currently open image disappears from the list
-	// (redacted, paged out, room switched, status flipped, etc.).
-	createEffect(() => {
-		if (lightboxEventId() !== null && lightboxIndex() === -1) {
-			setLightboxEventId(null);
-		}
-	});
-	const currentLightboxImage = createMemo<LightboxImage | null>(() => {
-		const idx = lightboxIndex();
-		if (idx < 0) return null;
-		const e = imageGallery()[idx];
-		if (!e?.mediaFullUrl) return null;
-		return {
-			eventId: e.eventId,
-			fullUrl: e.mediaFullUrl,
-			mimetype: e.mediaMimetype,
-			size: e.mediaSize,
-			filename: e.mediaFilename,
-			width: e.mediaWidth,
-			height: e.mediaHeight,
-			senderName: e.senderName,
-			timestamp: e.timestamp,
-			isEncrypted: e.mediaIsEncrypted,
-			encryptedFile: e.mediaEncryptedFile,
-		};
-	});
-	const hasPrev = (): boolean => lightboxIndex() > 0;
-	const hasNext = (): boolean => {
-		const idx = lightboxIndex();
-		return idx >= 0 && idx < imageGallery().length - 1;
-	};
-	const goPrev = (): void => {
-		const idx = lightboxIndex();
-		if (idx > 0) setLightboxEventId(imageGallery()[idx - 1].eventId);
-	};
-	const goNext = (): void => {
-		const idx = lightboxIndex();
-		const g = imageGallery();
-		if (idx >= 0 && idx < g.length - 1) {
-			setLightboxEventId(g[idx + 1].eventId);
-		}
-	};
+	// Image lightbox: gallery + open/close + prev/next navigation.
+	const {
+		openImage,
+		closeLightbox,
+		isOpen,
+		currentImage,
+		hasPrev,
+		hasNext,
+		goPrev,
+		goNext,
+	} = useImageLightbox(events);
 
 	return (
 		<main
@@ -1345,7 +1296,7 @@ const TimelineView: Component<{
 													shortcodeLookup={shortcodeLookup()}
 													emoteLookup={emoteLookup()}
 													packs={packs()}
-													onOpenImage={setLightboxEventId}
+													onOpenImage={openImage}
 												/>
 												<Show when={showCollapseControl()}>
 													<div class="flex items-center gap-3 px-4 py-0.5">
@@ -1454,9 +1405,9 @@ const TimelineView: Component<{
 			/>
 
 			<ImageLightbox
-				open={lightboxOpen}
-				onClose={() => setLightboxEventId(null)}
-				image={currentLightboxImage}
+				open={isOpen}
+				onClose={closeLightbox}
+				image={currentImage}
 				onPrev={goPrev}
 				onNext={goNext}
 				hasPrev={hasPrev}
