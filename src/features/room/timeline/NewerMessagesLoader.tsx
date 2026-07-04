@@ -34,7 +34,7 @@ const NewerMessagesLoader: Component<NewerMessagesLoaderProps> = (props) => (
 				<button
 					type="button"
 					class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
-					onClick={() => props.onLoadNewer()}
+					onClick={props.onLoadNewer}
 				>
 					Load newer messages
 				</button>

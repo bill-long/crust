@@ -33,7 +33,7 @@ const OlderMessagesLoader: Component<OlderMessagesLoaderProps> = (props) => (
 				<button
 					type="button"
 					class="rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis"
-					onClick={() => props.onLoadOlder()}
+					onClick={props.onLoadOlder}
 				>
 					Load older messages
 				</button>
