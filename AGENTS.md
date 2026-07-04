@@ -190,6 +190,20 @@ pnpm test            # Vitest (run once); pnpm test:watch to watch
 
 CI runs `pnpm lint && pnpm typecheck && pnpm build`. Run the same three before declaring any task complete (add `pnpm test` when you've touched logic with test coverage).
 
+### Local code review is required before every push
+
+Pushing is gated on a local code review. Run the review, then stamp it and push:
+
+```bash
+npm run review:stamp   # records the reviewed HEAD; unlocks push for this commit
+```
+
+- The Claude Code agent is gated by a `PreToolUse` hook (`.claude/settings.json` → `scripts/claude-push-gate.mjs`): `git push` is denied unless HEAD has been stamped.
+- Humans can opt into the same gate (plus `lint`/`typecheck`/`test`) with `npm run hooks:enable` (a git `pre-push` hook via `core.hooksPath`).
+- Any new or amended commit changes HEAD and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). See `scripts/review-gate-lib.mjs`.
+
+Only stamp after an actual clean local review - the stamp is an attestation, not a formality.
+
 ---
 
 ## Known server quirks (Conduwuity)

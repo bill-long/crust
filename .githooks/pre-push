@@ -1,0 +1,17 @@
+#!/bin/sh
+# Local-review + quality gate for `git push` (covers manual/human pushes; the
+# Claude agent is gated separately by .claude/settings.json).
+#
+# Opt-in: enable once per clone with `npm run hooks:enable`
+# (sets git config core.hooksPath .githooks).
+
+set -e
+
+# 1. Require a local code-review stamp for the current HEAD.
+node scripts/check-review-marker.mjs
+
+# 2. Scriptable quality gates. Comment out `test` if you want faster pushes and
+#    rely on the review flow having run it.
+npm run lint
+npm run typecheck
+npm run test
