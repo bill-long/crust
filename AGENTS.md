@@ -198,9 +198,9 @@ Pushing is gated on a local code review. Run the review, then stamp it and push:
 npm run review:stamp   # records the reviewed HEAD; unlocks push for this commit
 ```
 
-- The Claude Code agent is gated by a `PreToolUse` hook (`.claude/settings.json` → `scripts/claude-push-gate.mjs`): `git push` is denied unless HEAD has been stamped.
-- Humans can opt into the same gate (plus `lint`/`typecheck`/`test`) with `npm run hooks:enable` (a git `pre-push` hook via `core.hooksPath`).
-- Any new or amended commit changes HEAD and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). See `scripts/review-gate-lib.mjs`.
+- The gate is a git **`pre-push` hook** (`.githooks/pre-push` → `scripts/pre-push-gate.mjs`), enabled automatically by the `prepare` script (`core.hooksPath=.githooks`) on `pnpm install`; re-enable manually with `npm run hooks:enable`. git runs it for **every** push - agent or human, however `git push` is invoked - and it checks the actual refs being pushed (read from stdin), not the command string.
+- A push is allowed only when every pushed commit equals the stamped SHA. Any new/amended commit changes the tip and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). `npm run review:check` reports the current state.
+- Fail-closed: if the gate can't determine review state it blocks. The only bypass is git's own `git push --no-verify`, a deliberate override - don't use it to skip review.
 
 Only stamp after an actual clean local review - the stamp is an attestation, not a formality.
 

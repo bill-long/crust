@@ -1,17 +1,12 @@
 #!/bin/sh
-# Local-review + quality gate for `git push` (covers manual/human pushes; the
-# Claude agent is gated separately by .claude/settings.json).
+# Local-review gate: refuse to push commits that haven't passed local review.
+# git pipes the refs being pushed on stdin; the node script checks each against
+# the review stamp (see scripts/pre-push-gate.mjs). This is the authoritative
+# gate for BOTH the Claude agent and humans - git runs it for every push
+# regardless of how `git push` was invoked.
 #
-# Opt-in: enable once per clone with `npm run hooks:enable`
-# (sets git config core.hooksPath .githooks).
-
-set -e
-
-# 1. Require a local code-review stamp for the current HEAD.
-node scripts/check-review-marker.mjs
-
-# 2. Scriptable quality gates. Comment out `test` if you want faster pushes and
-#    rely on the review flow having run it.
-npm run lint
-npm run typecheck
-npm run test
+# Enabled automatically by the `prepare` npm script (core.hooksPath=.githooks);
+# re-enable manually with `npm run hooks:enable`.
+#
+# `exec` hands our stdin (the refspec list) straight to node.
+exec node scripts/pre-push-gate.mjs
