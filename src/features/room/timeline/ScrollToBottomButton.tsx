@@ -18,7 +18,7 @@ const ScrollToBottomButton: Component<ScrollToBottomButtonProps> = (props) => (
 	<button
 		type="button"
 		class="absolute bottom-4 right-4 z-10 flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4"
-		onClick={() => props.onClick()}
+		onClick={props.onClick}
 		aria-label={
 			props.behindLive ? "Jump to latest messages" : "Scroll to bottom"
 		}
