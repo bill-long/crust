@@ -13,7 +13,11 @@
 		"typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.sw.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"test:browser": "vitest run --project browser"
+		"test:browser": "vitest run --project browser",
+		"review:stamp": "node scripts/stamp-review.mjs",
+		"review:check": "node scripts/check-review-marker.mjs",
+		"hooks:enable": "node scripts/enable-hooks.mjs --force",
+		"prepare": "node scripts/enable-hooks.mjs"
 	},
 	"dependencies": {
 		"@kobalte/core": "^0.13.11",

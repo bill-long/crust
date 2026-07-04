@@ -1,0 +1,12 @@
+#!/bin/sh
+# Local-review gate: refuse to push commits that haven't passed local review.
+# git pipes the refs being pushed on stdin; the node script checks each against
+# the review stamp (see scripts/pre-push-gate.mjs). This is the authoritative
+# gate for BOTH the Claude agent and humans - git runs it for every push
+# regardless of how `git push` was invoked.
+#
+# Enabled automatically by the `prepare` script (core.hooksPath=.githooks);
+# re-enable manually with `pnpm hooks:enable`.
+#
+# `exec` hands our stdin (the refspec list) straight to node.
+exec node scripts/pre-push-gate.mjs
