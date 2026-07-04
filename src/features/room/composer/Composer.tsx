@@ -1,4 +1,3 @@
-import type { RoomMember } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
 import {
 	type Component,
@@ -11,12 +10,10 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
-import { createPicker } from "../../../components/picker/Picker";
 import {
 	type CustomEmoji,
 	escapeHtml,
 	formatMarkdown,
-	type Mention,
 } from "../../../lib/markdown";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -40,6 +37,7 @@ import {
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
 import { useAttachments } from "./useAttachments";
+import { useMentions } from "./useMentions";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
 
 function buildReplyFallback(
@@ -128,8 +126,28 @@ const Composer: Component<{
 	const [text, setText] = createSignal("");
 	const [sending, setSending] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
-	const [mentions, setMentions] = createSignal<Mention[]>([]);
-	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
+	const {
+		mentions,
+		setMentions,
+		mentionQuery,
+		setMentionQuery,
+		MentionPicker,
+		handlePickerKey,
+		getActiveDescendant,
+		listboxId,
+		filteredMembers,
+		pickerRendered,
+		detectMention,
+		reconcileMentions,
+		onMentionSelect,
+	} = useMentions({
+		client,
+		roomId: () => props.roomId,
+		getTextarea: () => textareaRef,
+		text,
+		setText,
+		autoResize: () => autoResize(),
+	});
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
 	const [pollDialogOpen, setPollDialogOpen] = createSignal(false);
@@ -287,118 +305,6 @@ const Composer: Component<{
 	let voiceSendButtonRef: HTMLButtonElement | undefined;
 	let lastTypingSentAt = 0;
 	let typingRoomId: string | null = null;
-
-	// Mention picker
-	const {
-		Picker: MentionPicker,
-		handlePickerKey,
-		getActiveDescendant,
-		listboxId,
-	} = createPicker<RoomMember>();
-
-	const roomMembers = createMemo(() => {
-		const room = client.getRoom(props.roomId);
-		return room ? room.getJoinedMembers() : [];
-	});
-
-	const MAX_PICKER_RESULTS = 50;
-
-	// Shared filtered member list — used by both picker and ARIA state
-	const filteredMembers = createMemo(() => {
-		const q = mentionQuery();
-		if (q === null) return [];
-		const lowerQ = q.toLowerCase();
-		const results: RoomMember[] = [];
-		for (const m of roomMembers()) {
-			const name = (m.name ?? "").toLowerCase();
-			const uid = m.userId.toLowerCase();
-			if (name.includes(lowerQ) || uid.includes(lowerQ)) {
-				results.push(m);
-				if (results.length >= MAX_PICKER_RESULTS) break;
-			}
-		}
-		return results;
-	});
-
-	const pickerRendered = () => filteredMembers().length > 0;
-
-	function detectMention(currentText?: string): void {
-		const el = textareaRef;
-		if (!el) return;
-		const pos = el.selectionStart;
-		const before = (currentText ?? el.value).slice(0, pos);
-		// Look for @ at start or after non-word char, capture query after it
-		const match = before.match(/(^|[^\w])@(\S*)$/);
-		if (match) {
-			setMentionQuery(match[2]);
-		} else {
-			setMentionQuery(null);
-		}
-	}
-
-	/** Prune mentions whose @DisplayName is no longer in non-code text */
-	function reconcileMentions(msg: string): Mention[] {
-		// Strip code blocks and inline code so mentions inside code don't count
-		const stripped = msg
-			.replace(/```(?:[^\n]*\n[\s\S]*?```|[\s\S]*?```)/g, "")
-			.replace(/`[^`]+`/g, "");
-		return mentions().filter((m) => {
-			const token = `@${m.displayName}`;
-			// Scan all occurrences in stripped text — keep if any has valid word boundaries
-			let searchFrom = 0;
-			while (searchFrom < stripped.length) {
-				const idx = stripped.indexOf(token, searchFrom);
-				if (idx < 0) return false;
-				const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
-				const afterIdx = idx + token.length;
-				const afterOk =
-					afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
-				if (beforeOk && afterOk) return true;
-				searchFrom = idx + 1;
-			}
-			return false;
-		});
-	}
-
-	function onMentionSelect(member: RoomMember): void {
-		const el = textareaRef;
-		if (!el) return;
-		const pos = el.selectionStart;
-		const currentText = text();
-		const before = currentText.slice(0, pos);
-		// Use same regex as detectMention to find the triggering @
-		const triggerMatch = before.match(/(^|[^\w])@(\S*)$/);
-		if (!triggerMatch) return;
-		const atIdx = before.length - triggerMatch[2].length - 1;
-
-		const rawName = member.name?.trim() || member.userId;
-		// Strip leading @ from userId fallback to avoid @@user:server
-		const displayName = rawName.startsWith("@") ? rawName.slice(1) : rawName;
-		const insertion = `@${displayName} `;
-		// Replace the entire @partial token (from @ through any non-whitespace after caret)
-		const afterCaret = currentText.slice(pos);
-		const trailingQuery = afterCaret.match(/^\S*/)?.[0] ?? "";
-		const after = currentText.slice(pos + trailingQuery.length);
-		const newText = currentText.slice(0, atIdx) + insertion + after;
-
-		setText(newText);
-		setMentionQuery(null);
-
-		// Add to mentions list (deduplicate by userId)
-		setMentions((prev) => {
-			if (prev.some((m) => m.userId === member.userId)) return prev;
-			return [...prev, { userId: member.userId, displayName }];
-		});
-
-		// Move caret after inserted mention
-		requestAnimationFrame(() => {
-			if (!textareaRef) return;
-			const newPos = atIdx + insertion.length;
-			textareaRef.setSelectionRange(newPos, newPos);
-			textareaRef.focus();
-			autoResize();
-		});
-	}
 
 	function onEmojiSelect(item: PickerEmoji): void {
 		const el = textareaRef;
