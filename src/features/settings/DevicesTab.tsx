@@ -2,7 +2,6 @@ import { type Component, createMemo, Show } from "solid-js";
 import { useClient } from "../../client/client";
 import { triggerCryptoAction } from "../../stores/cryptoActions";
 import { BackupStatus } from "../crypto/backup/BackupStatus";
-import { useKeyBackup } from "../crypto/backup/useKeyBackup";
 import {
 	cryptoActionLabel,
 	deriveCryptoAction,
@@ -25,7 +24,6 @@ const StatusBadge: Component<{ ok: boolean; label: string }> = (props) => (
 
 const DevicesTab: Component = () => {
 	const { client, cryptoStatus } = useClient();
-	const backup = useKeyBackup(client);
 
 	const cryptoAction = createMemo(() =>
 		deriveCryptoAction(
@@ -185,7 +183,7 @@ const DevicesTab: Component = () => {
 										</>
 									}
 								>
-									<BackupStatus backup={backup} />
+									<BackupStatus client={client} />
 								</Show>
 							</div>
 						</Show>
