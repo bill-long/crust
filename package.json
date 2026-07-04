@@ -16,7 +16,7 @@
 		"test:browser": "vitest run --project browser",
 		"review:stamp": "node scripts/stamp-review.mjs",
 		"review:check": "node scripts/check-review-marker.mjs",
-		"hooks:enable": "git config core.hooksPath .githooks",
+		"hooks:enable": "node scripts/enable-hooks.mjs",
 		"prepare": "node scripts/enable-hooks.mjs"
 	},
 	"dependencies": {

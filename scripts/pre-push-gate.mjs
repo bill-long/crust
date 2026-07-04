@@ -30,10 +30,21 @@ async function readStdin() {
 	return input;
 }
 
-/** Resolve an OID to the commit it names (identity for commits, deref for
- *  annotated tags). Throws if it doesn't name a commit. */
-function toCommit(sha) {
-	return git(["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]);
+/** Resolve OIDs to the commits they name (identity for commits, deref for
+ *  annotated tags) in a single git process. Throws (-> fail-closed) if any OID
+ *  doesn't name a commit or the result count doesn't line up. */
+function toCommits(oids) {
+	const out = git(["rev-parse", ...oids.map((o) => `${o}^{commit}`)]);
+	const commits = out
+		.split("\n")
+		.map((l) => l.trim())
+		.filter(Boolean);
+	if (commits.length !== oids.length) {
+		throw new Error(
+			`resolved ${commits.length} commits for ${oids.length} pushed OIDs`,
+		);
+	}
+	return commits;
 }
 
 async function main() {
@@ -56,7 +67,7 @@ async function main() {
 	// Nothing to push (e.g. only deletions) -> allow.
 	if (pushedOids.length === 0) process.exit(0);
 
-	const pushedCommits = pushedOids.map(toCommit);
+	const pushedCommits = toCommits(pushedOids);
 	const unreviewed = pushedCommits.filter((sha) => sha !== stamped);
 	if (stamped && unreviewed.length === 0) process.exit(0);
 
