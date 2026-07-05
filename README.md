@@ -154,9 +154,10 @@ that skips it.
 CI (`.github/workflows/ci.yml`) runs `pnpm test:unit` in the main job and the
 `browser` project in a separate job that installs Chromium first, so both
 projects run on every pull request and push to `main` (a failing test fails
-the CI check). Note that image publishing (`publish.yml`) triggers on push to
-`main` independently of CI, so a red CI run does not by itself block the GHCR
-`:latest` deploy.
+the CI check). Image publishing is gated on CI: the `publish` job in
+`.github/workflows/ci.yml` `needs` the test jobs and only runs for a push to
+`main` (or a `v*` tag / manual dispatch), so a red CI run never ships the GHCR
+`:latest` image, and pull requests (including forks) can't publish.
 
 ## License
 

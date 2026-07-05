@@ -12,8 +12,8 @@ name: Desktop release
 # the write-capable token away from dependency/build scripts.
 #
 # Tag scheme: desktop releases use `desktop-v*` tags, kept separate from the
-# `v*` tags publish.yml uses for the web container, so the two never
-# cross-trigger. The installers produced here are UNSIGNED (code signing and
+# `v*` tags the CI workflow (ci.yml) uses to publish the web container, so the
+# two never cross-trigger. The installers produced here are UNSIGNED (code signing and
 # auto-update are added in later Phase 3 steps).
 
 on:
