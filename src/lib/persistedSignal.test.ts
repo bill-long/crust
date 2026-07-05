@@ -7,7 +7,9 @@ import {
 	savePersisted,
 } from "./persistedSignal";
 
-// Accept any object with a numeric `n`, else fall back to the initial.
+// Accept any object with a numeric `n`, else fall back to `{ n: 0 }` - this is
+// parse's OWN fallback for parseable-but-invalid input, independent of the
+// `initial` passed to loadPersisted/createPersistedSignal.
 const parseCounter = (raw: unknown): { n: number } =>
 	typeof raw === "object" &&
 	raw !== null &&
@@ -67,12 +69,15 @@ describe("loadPersisted / savePersisted", () => {
 		expect(localStorage.getItem("crust:c")).toBeNull();
 	});
 
-	it("returns initial for absent, non-JSON, and structurally invalid values", () => {
+	it("returns initial for absent/unparseable input, and parse's fallback for structurally-invalid input", () => {
+		// Absent and non-JSON both yield the provided `initial`.
 		expect(loadPersisted("crust:absent", parseCounter, { n: 1 })).toEqual({
 			n: 1,
 		});
 		localStorage.setItem("crust:c", "not json {");
 		expect(loadPersisted("crust:c", parseCounter, { n: 1 })).toEqual({ n: 1 });
+		// Structurally-invalid (parseable) input is parse's responsibility: it
+		// returns its own fallback ({ n: 0 }), NOT the `initial` ({ n: 2 }).
 		localStorage.setItem("crust:c", JSON.stringify({ n: "x" }));
 		expect(loadPersisted("crust:c", parseCounter, { n: 2 })).toEqual({ n: 0 });
 	});
