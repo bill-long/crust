@@ -11,12 +11,14 @@ import {
 import { ClientProvider, useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
 import { LoginPage } from "../features/auth/LoginPage";
+import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { OverlayRoute } from "../features/room/call/rtc/OverlayRoute";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
+import { basePrefix } from "./basePath";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
 import { UpdatePrompt } from "./UpdatePrompt";
@@ -26,10 +28,19 @@ import { useDecodedParams } from "./useDecodedParams";
 const AuthGuard: Component<RouteSectionProps> = (props) => {
 	const session = loadSession();
 	const navigate = useNavigate();
+	const location = useLocation();
 
 	onMount(() => {
 		if (!session) {
-			navigate("/login", { replace: true });
+			// Preserve the deep-linked target so login can return the user to it
+			// instead of dropping them on home (#338). Carried via router state
+			// (not a query param), which a crafted link can't set. Base-relative
+			// (toReturnToPath strips the Vite base) so navigate() re-adds it
+			// without doubling it under sub-path hosting.
+			navigate("/login", {
+				replace: true,
+				state: { returnTo: toReturnToPath(location, basePrefix) },
+			});
 		}
 	});
 
@@ -174,11 +185,10 @@ const App: Component = () => {
 	// `BASE_URL` is set by Vite from the `base` config option (default `/`,
 	// overridable via `VITE_BASE_PATH` at build time). The router wants the
 	// base without a trailing slash; "/" becomes "" which the router treats
-	// as root-hosted.
-	const routerBase = import.meta.env.BASE_URL.replace(/\/$/, "");
+	// as root-hosted (see basePrefix in basePath.ts - the shared source of truth).
 	return (
 		<ConfigProvider>
-			<Router base={routerBase}>
+			<Router base={basePrefix}>
 				<Route path="/login" component={LoginPage} />
 				{/* Standalone overlay window contents (the desktop two-window
 				    overlay). Top-level + session-free: it mirrors call state from

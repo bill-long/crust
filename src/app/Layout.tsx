@@ -62,7 +62,7 @@ import { clearSession } from "../stores/session";
 import { updateSetting, userSettings } from "../stores/settings";
 import { isMobile } from "../stores/viewport";
 import type { CryptoAction } from "../types/crypto";
-import { stripBasePath } from "./basePath";
+import { basePrefix, stripBasePath } from "./basePath";
 import { useConfig } from "./ConfigProvider";
 import { dmCanonicalTarget } from "./dmRoute";
 import { RoomPane } from "./RoomPane";
@@ -177,7 +177,6 @@ const Layout: Component = () => {
 	// `location.pathname` is the full URL pathname including any Vite base
 	// (e.g. `/crust/settings/account`). Strip the base before comparing
 	// against route patterns the app defines.
-	const basePrefix = import.meta.env.BASE_URL.replace(/\/$/, "");
 	const relativePath = (): string =>
 		stripBasePath(location.pathname, basePrefix);
 
