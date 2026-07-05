@@ -13,11 +13,13 @@ export const safeLocalStorage = {
 			return null;
 		}
 	},
-	set(key: string, value: string): void {
+	/** Returns true if the write succeeded, false if storage rejected it. */
+	set(key: string, value: string): boolean {
 		try {
 			localStorage.setItem(key, value);
+			return true;
 		} catch {
-			// best-effort
+			return false;
 		}
 	},
 	remove(key: string): void {
@@ -108,15 +110,26 @@ export function createPersistedSignal<T>(
 	const legacyKey = options?.legacyKey;
 
 	const load = (): T => {
-		if (legacyKey && safeLocalStorage.get(key) === null) {
-			// One-time migration: adopt the legacy value under the new key.
+		let raw = safeLocalStorage.get(key);
+		if (raw === null && legacyKey) {
+			// One-time migration: adopt the legacy value under the new key. Use it
+			// for this session regardless, and only DROP the legacy key once the
+			// new write has actually succeeded - so a failed write (quota /
+			// disabled storage) can't lose the value; it just retries next load.
 			const legacy = safeLocalStorage.get(legacyKey);
 			if (legacy !== null) {
-				safeLocalStorage.set(key, legacy);
-				safeLocalStorage.remove(legacyKey);
+				raw = legacy;
+				if (safeLocalStorage.set(key, legacy)) {
+					safeLocalStorage.remove(legacyKey);
+				}
 			}
 		}
-		return loadPersisted(key, parse, initial);
+		if (raw === null) return initial;
+		try {
+			return parse(JSON.parse(raw));
+		} catch {
+			return initial;
+		}
 	};
 
 	const [get, setSignal] = createSignal<T>(load());

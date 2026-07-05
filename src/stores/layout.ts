@@ -13,7 +13,10 @@ const defaults: LayoutState = {
 function parse(raw: unknown): LayoutState {
 	if (typeof raw !== "object" || raw === null) return { ...defaults };
 	const obj = raw as Record<string, unknown>;
+	// Start from defaults and override validated fields, so a future added
+	// LayoutState field keeps its default rather than being dropped on load.
 	return {
+		...defaults,
 		membersPaneVisible:
 			typeof obj.membersPaneVisible === "boolean"
 				? obj.membersPaneVisible

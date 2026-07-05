@@ -30,6 +30,14 @@ describe("safeLocalStorage", () => {
 		expect(safeLocalStorage.get("crust:k")).toBeNull();
 	});
 
+	it("set returns true on success and false when storage rejects the write", () => {
+		expect(safeLocalStorage.set("crust:k", "v")).toBe(true);
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("QuotaExceeded");
+		});
+		expect(safeLocalStorage.set("crust:k", "v2")).toBe(false);
+	});
+
 	it("swallows errors from a throwing storage (returns null / no-op)", () => {
 		vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
 			throw new Error("SecurityError");
@@ -180,6 +188,26 @@ describe("createPersistedSignal", () => {
 			expect(s.get()).toEqual({ n: 5 });
 			expect(localStorage.getItem("crust:c")).toBe(JSON.stringify({ n: 5 }));
 			expect(localStorage.getItem("crust_c")).toBeNull();
+		});
+
+		it("does NOT remove the legacy key if writing the new key fails (no state loss)", () => {
+			localStorage.setItem("crust_c", JSON.stringify({ n: 5 }));
+			// Storage rejects the migration write (quota / disabled).
+			vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+				throw new Error("QuotaExceeded");
+			});
+			const s = createPersistedSignal(
+				"crust:c",
+				parseCounter,
+				{ n: 0 },
+				{
+					legacyKey: "crust_c",
+				},
+			);
+			// In-memory value still loads from the legacy key...
+			expect(s.get()).toEqual({ n: 5 });
+			// ...and crucially the legacy key is preserved, so the value survives.
+			expect(localStorage.getItem("crust_c")).toBe(JSON.stringify({ n: 5 }));
 		});
 
 		it("prefers the new key and leaves the legacy key untouched", () => {
