@@ -871,8 +871,19 @@ describe("useLivekitRoom", () => {
 			fakeRoom.localParticipant.setScreenShareEnabled,
 		).toHaveBeenCalledWith(
 			true,
-			{ audio: true, resolution: { width: 1920, height: 1080, frameRate: 30 } },
-			{ screenShareEncoding: { maxBitrate: 5_000_000, maxFramerate: 30 } },
+			{
+				audio: true,
+				resolution: { width: 1920, height: 1080, frameRate: 30 },
+				contentHint: "motion",
+			},
+			{
+				// 1080p30 ceiling raised 5M -> 8M so motion isn't starved.
+				screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 30 },
+				videoCodec: "vp9",
+				scalabilityMode: "L1T3",
+				simulcast: false,
+				degradationPreference: "maintain-framerate",
+			},
 		);
 		expect(result.localScreenShareEnabled()).toBe(true);
 		// LiveKit publishes the local screen-share track; reconcile puts it in
@@ -915,8 +926,18 @@ describe("useLivekitRoom", () => {
 			// frameRate: 60 in the capture constraint is essential — LiveKit's
 			// default screen-capture caps at 30fps, so the encoding alone wouldn't
 			// reach 60.
-			{ audio: true, resolution: { width: 1920, height: 1080, frameRate: 60 } },
-			{ screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 60 } },
+			{
+				audio: true,
+				resolution: { width: 1920, height: 1080, frameRate: 60 },
+				contentHint: "motion",
+			},
+			{
+				screenShareEncoding: { maxBitrate: 8_000_000, maxFramerate: 60 },
+				videoCodec: "vp9",
+				scalabilityMode: "L1T3",
+				simulcast: false,
+				degradationPreference: "maintain-framerate",
+			},
 		);
 	});
 
