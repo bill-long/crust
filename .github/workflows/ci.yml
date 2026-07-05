@@ -48,17 +48,24 @@ jobs:
   # jobs so a red run never ships. Kept in the CI workflow (rather than a
   # separate publish workflow gated via `workflow_run`) so publishing runs in
   # the push context, which avoids fork-PR exposure (PRs never satisfy the `if`)
-  # and sha-tag drift. Every CI-passed push builds its own per-commit `sha-*`
-  # image; `:latest` tracks the default branch.
+  # and sha-tag drift. A CI-passed push builds its own per-commit `sha-*` image
+  # (unless it is superseded first - see the concurrency note below); `:latest`
+  # tracks the default branch.
   #
-  # Accepted limitation: gating on variable-duration CI means two near-
-  # simultaneous main merges whose CI finishes out of commit order can briefly
-  # leave `:latest` on the earlier commit until the next push. Eliminating this
-  # needs a "is this still main's head?" guard, which in turn can suppress a
-  # good commit's image when a newer one fails CI - a worse failure mode - so we
-  # accept the rare, self-healing staleness instead.
   publish:
     needs: [ci, browser-tests]
+    # Serialize per ref and let a newer branch publish cancel an older one, so
+    # in the common case :latest ends at the newest commit; tag publishes are
+    # never cancelled (we want every release image). Accepted limitation: since
+    # publishing is gated on variable-duration CI, if two near-simultaneous main
+    # merges have their CI finish in inverted order this can't fully guarantee
+    # ordering (the later-finishing older commit's publish would win) - a rare,
+    # self-healing staleness. A stricter "is this still main's head?" guard was
+    # considered and rejected: it can suppress a good commit's image entirely
+    # when a newer one fails CI, a worse failure mode.
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: ${{ github.ref_type == 'branch' }}
     # Only trusted refs: a push to main (post-merge), a v* tag, or a manual
     # dispatch from main / a v* tag. pull_request events (incl. forks) never
     # match (a PR ref is never main/tag), so unreviewed code can't publish.
