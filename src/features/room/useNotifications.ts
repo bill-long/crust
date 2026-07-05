@@ -233,8 +233,14 @@ export function useNotifications(
 		//    immediate path consistent with the deferred-then-failed path above.
 		//    (#312)
 		//
-		//  - Already decrypted (clear content, msgtype set): fall through and
-		//    process normally.
+		//  - Already decrypted: falls through and processes normally. The
+		//    load-bearing discriminator is getType(), which returns the CLEAR
+		//    type once decrypted (a decrypted message reports "m.room.message", a
+		//    sticker "m.sticker", ...), so a decrypted event never matches
+		//    "m.room.encrypted" here regardless of msgtype. The extra
+		//    !getContent().msgtype check is a defensive redundancy for the odd
+		//    event still reporting the encrypted wire type yet already carrying
+		//    clear message content.
 		if (
 			event.getType() === "m.room.encrypted" &&
 			!event.isDecryptionFailure() &&
