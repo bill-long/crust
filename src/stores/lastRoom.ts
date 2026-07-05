@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createPersistedSignal } from "../lib/persistedSignal";
 
 const STORAGE_KEY = "crust:last-room";
 
@@ -13,39 +13,23 @@ export interface LastRoom {
 	spaceId?: string;
 }
 
-function load(): LastRoom | null {
-	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return null;
-		const parsed: unknown = JSON.parse(raw);
-		if (
-			typeof parsed !== "object" ||
-			parsed === null ||
-			typeof (parsed as LastRoom).roomId !== "string"
-		) {
-			return null;
-		}
-		const { roomId, spaceId } = parsed as LastRoom;
-		return typeof spaceId === "string" ? { roomId, spaceId } : { roomId };
-	} catch {
+function parse(raw: unknown): LastRoom | null {
+	if (
+		typeof raw !== "object" ||
+		raw === null ||
+		typeof (raw as LastRoom).roomId !== "string"
+	) {
 		return null;
 	}
+	const { roomId, spaceId } = raw as LastRoom;
+	return typeof spaceId === "string" ? { roomId, spaceId } : { roomId };
 }
 
-function save(value: LastRoom): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-	} catch {
-		// localStorage full or unavailable — best-effort
-	}
-}
-
-// Module-level singleton — one signal, shared by all consumers.
-const [state, setState] = createSignal<LastRoom | null>(load());
+const store = createPersistedSignal<LastRoom | null>(STORAGE_KEY, parse, null);
 
 /** The room the user last had open, or null if none recorded. */
 export function getLastRoom(): LastRoom | null {
-	return state();
+	return store.get();
 }
 
 /**
@@ -54,22 +38,14 @@ export function getLastRoom(): LastRoom | null {
  */
 export function setLastRoom(roomId: string, spaceId?: string): void {
 	// Functional update so callers in a tracked scope (e.g. the recording
-	// effect in Layout) don't subscribe to this signal by reading state().
-	let next: LastRoom | undefined;
-	setState((prev) => {
+	// effect in Layout) don't subscribe to this signal by reading the value.
+	store.set((prev) => {
 		if (prev && prev.roomId === roomId && prev.spaceId === spaceId) return prev;
-		next = spaceId ? { roomId, spaceId } : { roomId };
-		return next;
+		return spaceId ? { roomId, spaceId } : { roomId };
 	});
-	if (next) save(next);
 }
 
 /** Test-only: reset in-memory state and clear persistence. */
 export function _resetLastRoomForTests(): void {
-	setState(null);
-	try {
-		localStorage.removeItem(STORAGE_KEY);
-	} catch {
-		// best-effort
-	}
+	store.reset();
 }

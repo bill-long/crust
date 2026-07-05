@@ -1,3 +1,5 @@
+import { loadPersisted, savePersisted } from "../../lib/persistedSignal";
+
 const STORAGE_KEY = "crust:recent-emoji";
 const MAX_RECENT = 32;
 
@@ -9,29 +11,24 @@ interface RecentEntry {
 }
 
 function loadEntries(): RecentEntry[] {
-	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return [];
-		const parsed = JSON.parse(raw);
-		if (!Array.isArray(parsed)) return [];
-		return parsed.filter(
-			(e: unknown) =>
-				typeof e === "object" &&
-				e !== null &&
-				typeof (e as RecentEntry).key === "string" &&
-				typeof (e as RecentEntry).ts === "number",
-		);
-	} catch {
-		return [];
-	}
+	return loadPersisted(
+		STORAGE_KEY,
+		(raw): RecentEntry[] =>
+			Array.isArray(raw)
+				? raw.filter(
+						(e: unknown): e is RecentEntry =>
+							typeof e === "object" &&
+							e !== null &&
+							typeof (e as RecentEntry).key === "string" &&
+							typeof (e as RecentEntry).ts === "number",
+					)
+				: [],
+		[],
+	);
 }
 
 function saveEntries(entries: RecentEntry[]): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-	} catch {
-		// localStorage full or unavailable — best-effort
-	}
+	savePersisted(STORAGE_KEY, entries);
 }
 
 /** Get recently used emoji keys (most recent first). */

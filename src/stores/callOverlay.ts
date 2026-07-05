@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 
 /**
  * Global state for the floating voice-overlay panel (a Document
@@ -46,31 +47,26 @@ function isValidDimension(value: unknown): value is number {
 
 /** Read the persisted preferred size, falling back to the default. */
 export function loadOverlaySize(): OverlaySize {
-	try {
-		const raw = localStorage.getItem(SIZE_KEY);
-		if (!raw) return { ...DEFAULT_OVERLAY_SIZE };
-		const parsed: unknown = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) {
+	return loadPersisted(
+		SIZE_KEY,
+		(raw): OverlaySize => {
+			if (typeof raw !== "object" || raw === null) {
+				return { ...DEFAULT_OVERLAY_SIZE };
+			}
+			const obj = raw as Record<string, unknown>;
+			if (isValidDimension(obj.width) && isValidDimension(obj.height)) {
+				return { width: obj.width, height: obj.height };
+			}
 			return { ...DEFAULT_OVERLAY_SIZE };
-		}
-		const obj = parsed as Record<string, unknown>;
-		if (isValidDimension(obj.width) && isValidDimension(obj.height)) {
-			return { width: obj.width, height: obj.height };
-		}
-		return { ...DEFAULT_OVERLAY_SIZE };
-	} catch {
-		return { ...DEFAULT_OVERLAY_SIZE };
-	}
+		},
+		{ ...DEFAULT_OVERLAY_SIZE },
+	);
 }
 
 /** Persist the user's preferred overlay size (best-effort; ignores invalid). */
 export function saveOverlaySize(size: OverlaySize): void {
 	if (!isValidDimension(size.width) || !isValidDimension(size.height)) return;
-	try {
-		localStorage.setItem(SIZE_KEY, JSON.stringify(size));
-	} catch {
-		// localStorage full or unavailable — best-effort.
-	}
+	savePersisted(SIZE_KEY, size);
 }
 
 const [overlayOpenSignal, setOverlayOpenSignal] = createSignal(false);
