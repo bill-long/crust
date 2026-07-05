@@ -85,6 +85,13 @@ const Composer: Component<{
 	editingEvent?: TimelineEvent | null;
 	onCancelReply?: () => void;
 	onCancelEdit?: () => void;
+	/**
+	 * Up-arrow in an empty composer requests the "edit last" shortcut. The parent
+	 * owns the timeline, so it resolves the target (the user's most recent
+	 * message, edited only if it is editable - see findLastEditableEvent) and
+	 * enters edit mode; the composer only detects the gesture.
+	 */
+	onEditLast?: () => void;
 	onSent?: () => void;
 	packs: ImagePack[];
 	/**
@@ -763,6 +770,30 @@ const Composer: Component<{
 		if (e.key === "Escape" && props.replyTo) {
 			e.preventDefault();
 			props.onCancelReply?.();
+			return;
+		}
+		// Up-arrow in an empty composer edits the last own message (Element /
+		// Discord / Slack convention). Only a plain Up on a genuinely empty, idle
+		// composer: no modifiers (Shift/Cmd/Option+Up are caret/selection nav), no
+		// draft text (so it never hijacks multi-line cursor movement), no queued
+		// attachment, and not already editing/replying/composing - so it can't
+		// silently clobber a pending reply or orphan an attachment. The picker
+		// already consumed the key above if one was open (handlePickerKey).
+		if (
+			e.key === "ArrowUp" &&
+			!e.isComposing &&
+			!e.shiftKey &&
+			!e.ctrlKey &&
+			!e.altKey &&
+			!e.metaKey &&
+			!props.editingEvent &&
+			!props.replyTo &&
+			text() === "" &&
+			attachments().length === 0 &&
+			props.onEditLast
+		) {
+			e.preventDefault();
+			props.onEditLast();
 			return;
 		}
 		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {

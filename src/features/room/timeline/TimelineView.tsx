@@ -30,6 +30,7 @@ import {
 	isSameDay,
 	useDayTick,
 } from "./dateFormatting";
+import { findLastEditableEvent } from "./editableEvents";
 import { GroupedMembershipNotice } from "./GroupedMembershipNotice";
 import { ImageLightbox } from "./ImageLightbox";
 import type { MembershipGroup } from "./membershipGrouping";
@@ -857,6 +858,22 @@ const TimelineView: Component<{
 		},
 	);
 
+	// Up-arrow in an empty composer edits the user's most recent message, but
+	// only if it's editable (findLastEditableEvent no-ops otherwise rather than
+	// hunting back). The composer detects the gesture; we own the timeline, so
+	// we resolve the target here.
+	const onEditLast = (): void => {
+		// Bail when the live end isn't loaded (user scrolled up, live-following
+		// off): the windowed `events` tail is then an older message, not the
+		// user's actual latest, so editing it would edit the wrong message.
+		if (canLoadNewer()) return;
+		const ev = findLastEditableEvent(events, myUserId);
+		// onEdit prefills the composer with the message body and shows the
+		// "Editing message" banner, so the user sees which message they're
+		// editing without needing the timeline scrolled to it.
+		if (ev) onEdit(ev);
+	};
+
 	// Typing indicator text
 	const typingText = createMemo(() => {
 		const users = typingUsers();
@@ -1182,6 +1199,7 @@ const TimelineView: Component<{
 				editingEvent={editingEvent()}
 				onCancelReply={() => setReplyTo(null)}
 				onCancelEdit={() => setEditingEvent(null)}
+				onEditLast={onEditLast}
 				onSent={() => {
 					setReplyTo(null);
 					setEditingEvent(null);

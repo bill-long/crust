@@ -339,3 +339,154 @@ describe("Composer preview toggle", () => {
 		expect(region?.textContent).toContain("Nothing to preview");
 	});
 });
+
+describe("Composer edit-last shortcut (Up arrow)", () => {
+	function getTextarea(container: HTMLElement): HTMLTextAreaElement {
+		const ta = container.querySelector<HTMLTextAreaElement>(
+			"[data-composer-textarea]",
+		);
+		if (!ta) throw new Error("no textarea");
+		return ta;
+	}
+
+	function typeValue(ta: HTMLTextAreaElement, value: string): void {
+		ta.value = value;
+		ta.dispatchEvent(new Event("input", { bubbles: true }));
+	}
+
+	/** Dispatch an ArrowUp keydown and report whether preventDefault fired. */
+	function pressArrowUp(
+		ta: HTMLTextAreaElement,
+		modifiers: KeyboardEventInit = {},
+	): boolean {
+		const e = new KeyboardEvent("keydown", {
+			key: "ArrowUp",
+			bubbles: true,
+			cancelable: true,
+			...modifiers,
+		});
+		ta.dispatchEvent(e);
+		return e.defaultPrevented;
+	}
+
+	const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+	it("requests edit-last when Up is pressed in an empty composer", () => {
+		const onEditLast = vi.fn();
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} onEditLast={onEditLast} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		ta.focus();
+		const prevented = pressArrowUp(ta);
+		expect(onEditLast).toHaveBeenCalledTimes(1);
+		expect(prevented).toBe(true);
+	});
+
+	it("does not hijack Up when the composer has a draft", () => {
+		const onEditLast = vi.fn();
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} onEditLast={onEditLast} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		typeValue(ta, "a multi\nline draft");
+		ta.focus();
+		const prevented = pressArrowUp(ta);
+		expect(onEditLast).not.toHaveBeenCalled();
+		expect(prevented).toBe(false);
+	});
+
+	it("does not request edit-last while already editing", () => {
+		const onEditLast = vi.fn();
+		const editing = {
+			eventId: "$e:example.com",
+			body: "old text",
+		} as unknown as TimelineEvent;
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer
+					roomId={ROOM}
+					packs={[]}
+					editingEvent={editing}
+					onEditLast={onEditLast}
+				/>
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		// Edit mode prefills the textarea, so clear it to isolate the guard.
+		typeValue(ta, "");
+		ta.focus();
+		pressArrowUp(ta);
+		expect(onEditLast).not.toHaveBeenCalled();
+	});
+
+	it("does not request edit-last for a modified Up (Shift/Ctrl/Alt/Meta)", () => {
+		const onEditLast = vi.fn();
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} onEditLast={onEditLast} />
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		ta.focus();
+		for (const mod of [
+			{ shiftKey: true },
+			{ ctrlKey: true },
+			{ altKey: true },
+			{ metaKey: true },
+		]) {
+			const prevented = pressArrowUp(ta, mod);
+			expect(prevented).toBe(false);
+		}
+		expect(onEditLast).not.toHaveBeenCalled();
+	});
+
+	it("does not clobber a pending reply with Up", () => {
+		const onEditLast = vi.fn();
+		const replyTo = {
+			eventId: "$parent:example.com",
+			senderId: "@bob:example.com",
+			senderName: "Bob",
+			body: "parent",
+		} as unknown as TimelineEvent;
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer
+					roomId={ROOM}
+					packs={[]}
+					replyTo={replyTo}
+					onEditLast={onEditLast}
+				/>
+			</TestClientProvider>
+		));
+		const ta = getTextarea(container);
+		ta.focus();
+		const prevented = pressArrowUp(ta);
+		expect(onEditLast).not.toHaveBeenCalled();
+		expect(prevented).toBe(false);
+	});
+
+	it("does not hijack Up while an attachment is queued", async () => {
+		const onEditLast = vi.fn();
+		const { container } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} onEditLast={onEditLast} />
+			</TestClientProvider>
+		));
+		const input = container.querySelector<HTMLInputElement>(
+			"input[data-composer-file-input]",
+		);
+		if (!input) throw new Error("no file input");
+		pickFiles(input, [new File(["a"], "pic.png", { type: "image/png" })]);
+		await tick();
+		const ta = getTextarea(container);
+		ta.focus();
+		const prevented = pressArrowUp(ta);
+		expect(onEditLast).not.toHaveBeenCalled();
+		expect(prevented).toBe(false);
+	});
+});
