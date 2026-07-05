@@ -50,6 +50,23 @@ describe("loadPersisted / savePersisted", () => {
 		expect(loadPersisted("crust:c", parseCounter, { n: 0 })).toEqual({ n: 8 });
 	});
 
+	it("savePersisted never throws on an unserializable value (cyclic / BigInt)", () => {
+		const cyclic: Record<string, unknown> = {};
+		cyclic.self = cyclic;
+		expect(() => savePersisted("crust:c", cyclic)).not.toThrow();
+		// Nothing was written (JSON.stringify threw and was swallowed).
+		expect(localStorage.getItem("crust:c")).toBeNull();
+		expect(() => savePersisted("crust:c", { big: 1n })).not.toThrow();
+		expect(localStorage.getItem("crust:c")).toBeNull();
+	});
+
+	it("does not persist the literal string 'undefined' for an undefined value", () => {
+		// JSON.stringify(undefined) === undefined, which would coerce to the
+		// string "undefined" and then fail to re-parse on load.
+		savePersisted("crust:c", undefined);
+		expect(localStorage.getItem("crust:c")).toBeNull();
+	});
+
 	it("returns initial for absent, non-JSON, and structurally invalid values", () => {
 		expect(loadPersisted("crust:absent", parseCounter, { n: 1 })).toEqual({
 			n: 1,

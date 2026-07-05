@@ -30,8 +30,10 @@ export const safeLocalStorage = {
 };
 
 /**
- * Read and validate a JSON value from a `crust:` storage key, falling back to
- * `initial` when absent, unparseable, or structurally invalid. The non-reactive
+ * Read a JSON value from a `crust:` storage key, returning `initial` when the
+ * key is absent, the contents aren't valid JSON, or `parse` throws. Structural
+ * validation is `parse`'s job: it receives the parsed value and returns its own
+ * fallback (often `initial`) for parseable-but-invalid input. The non-reactive
  * counterpart to `createPersistedSignal` for load-on-demand stores.
  */
 export function loadPersisted<T>(
@@ -48,18 +50,33 @@ export function loadPersisted<T>(
 	}
 }
 
-/** Best-effort JSON persist to a `crust:` storage key. */
+/**
+ * Best-effort JSON persist to a `crust:` storage key. Never throws: an
+ * unserializable value (cyclic reference, BigInt, ...) is dropped rather than
+ * propagating out of `JSON.stringify`.
+ */
 export function savePersisted(key: string, value: unknown): void {
-	safeLocalStorage.set(key, JSON.stringify(value));
+	let json: string | undefined;
+	try {
+		json = JSON.stringify(value);
+	} catch {
+		return;
+	}
+	// JSON.stringify returns undefined (not a throw) for undefined / functions /
+	// symbols; writing that would store the literal string "undefined", which
+	// then fails to re-parse on load. Drop it.
+	if (json === undefined) return;
+	safeLocalStorage.set(key, json);
 }
 
 export interface PersistedSignal<T> {
 	/** Reactive accessor for the current value. */
 	get: Accessor<T>;
 	/**
-	 * Set a new value (or apply a functional updater) and persist it
-	 * immediately. Returning the previous value from an updater is a no-op for
-	 * subscribers (referential equality) but still rewrites storage.
+	 * Set a new value (or apply a functional updater) and persist it. A set that
+	 * yields a value referentially equal to the current one - via an updater
+	 * returning prev, or a direct same-reference value - is a full no-op: no
+	 * subscriber notification and no storage write.
 	 */
 	set: (next: T | ((prev: T) => T)) => void;
 	/** Reset to the initial value and clear persistence (logout / test helper). */
