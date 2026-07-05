@@ -18,7 +18,11 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
-import { screenShareQualitySpec } from "../../../../lib/screenShareQuality";
+import {
+	SCREEN_SHARE_CONTENT_HINT,
+	SCREEN_SHARE_PUBLISH_OPTIONS,
+	screenShareQualitySpec,
+} from "../../../../lib/screenShareQuality";
 import type { ScreenShareQuality } from "../../../../stores/settings";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
 
@@ -1361,8 +1365,15 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					const spec = screenShareQualitySpec(opts.screenShareQuality?.());
 					await r2.localParticipant.setScreenShareEnabled(
 						desired,
-						{ audio: true, resolution: spec.resolution },
-						{ screenShareEncoding: spec.encoding },
+						{
+							audio: true,
+							resolution: spec.resolution,
+							contentHint: SCREEN_SHARE_CONTENT_HINT,
+						},
+						{
+							screenShareEncoding: spec.encoding,
+							...SCREEN_SHARE_PUBLISH_OPTIONS,
+						},
 					);
 				} catch (e) {
 					if (disposed || myAttempt !== attempt || room !== r2) return;
