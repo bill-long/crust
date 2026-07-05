@@ -15,6 +15,14 @@
  *                   `""` for root-hosted apps.
  * @returns Pathname relative to base (always starts with `/`).
  */
+/**
+ * The app's configured base path without a trailing slash, from Vite's
+ * `BASE_URL` (overridable via `VITE_BASE_PATH`). `""` for a root-hosted app.
+ * This is the single source of truth for the base - pass it to `<Router base>`
+ * and `stripBasePath` so the two never diverge.
+ */
+export const basePrefix = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 export function stripBasePath(pathname: string, basePrefix: string): string {
 	if (!basePrefix) return pathname;
 	if (pathname === basePrefix) return "/";

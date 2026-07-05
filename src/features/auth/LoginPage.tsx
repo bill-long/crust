@@ -1,4 +1,4 @@
-import { useNavigate } from "@solidjs/router";
+import { useLocation, useNavigate } from "@solidjs/router";
 import {
 	createClient,
 	type ILoginFlowsResponse,
@@ -8,10 +8,12 @@ import { type Component, createSignal, Match, Show, Switch } from "solid-js";
 import { useConfig } from "../../app/ConfigProvider";
 import { saveSession } from "../../stores/session";
 import { discoverHomeserver } from "./discovery";
+import { sanitizeReturnTo } from "./returnTo";
 
 const LoginPage: Component = () => {
 	const config = useConfig();
 	const navigate = useNavigate();
+	const location = useLocation();
 
 	const [homeserver, setHomeserver] = createSignal(config.defaultHomeserver);
 	const [username, setUsername] = createSignal("");
@@ -98,7 +100,11 @@ const LoginPage: Component = () => {
 				homeserverUrl: resolvedUrl,
 			});
 
-			navigate("/", { replace: true });
+			// Return to the deep-linked target the user was sent here from
+			// (#338), sanitized to an in-app path; falls back to home.
+			const returnTo = (location.state as { returnTo?: unknown } | null)
+				?.returnTo;
+			navigate(sanitizeReturnTo(returnTo), { replace: true });
 		} catch (err: unknown) {
 			setError(err instanceof Error ? err.message : "Login failed");
 		} finally {
