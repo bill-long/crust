@@ -90,9 +90,10 @@ const Composer: Component<{
 	 * Hands the parent the composer's file-queue seam so out-of-composer
 	 * entry points (e.g. TimelineView's drag-and-drop overlay) can enqueue
 	 * files into the same queue the attach button and paste use. Registered
-	 * once on mount; the closure reads `props` reactively, so the single
-	 * registration stays correct across room switches (the composer is one
-	 * reused instance).
+	 * on mount; TimelineView renders this Composer and both share a lifetime
+	 * (RoomPane, and thus both, are remounted together per room by the keyed
+	 * <Show> in Layout), so the registration is naturally scoped to the
+	 * current room.
 	 */
 	onEnqueueReady?: (enqueue: (files: Iterable<File>) => void) => void;
 }> = (props) => {
@@ -183,9 +184,12 @@ const Composer: Component<{
 		if (voiceStopping()) return;
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
-		// Pinned: the recorder stop awaits, and the panel's thread (or the
-		// panel itself) can change under the send.
+		// Pinned at entry so post-await reads use the send's target rather than a
+		// newer value; see send() for which of these actually change in place
+		// (replyTo) versus which are remount-frozen (roomId/threadRootId).
 		const threadRootId = props.threadRootId ?? null;
+		// Completion-time guard, same contract as send() - defensive given the
+		// keyed-<Show> remount (see send() for the full rationale).
 		const onThisRoom = (): boolean => props.roomId === roomId;
 		let attachment: PendingAttachment | null = null;
 		setVoiceStopping(true);
@@ -312,18 +316,16 @@ const Composer: Component<{
 	}
 
 	async function onGifSelect(gif: GifItem): Promise<void> {
-		// Pinned at entry and used exclusively below: the panel's thread (or
-		// the room, or the reply target) can change while the send is in
-		// flight, and every read of a reactive prop after an await would see
-		// the NEW value.
+		// Pinned at entry and used exclusively below: a reactive prop read after
+		// an await would otherwise see a newer value. (replyTo genuinely changes
+		// in place; roomId/threadRootId are remount-frozen - see send().)
 		const gifRoomId = props.roomId;
 		const gifThreadRootId = props.threadRootId ?? null;
 		const gifReplyTo = props.replyTo;
-		// Like send(): the send can finish after the user switched rooms, so
-		// gate every completion-time write on still being on the room it
-		// started in - otherwise it clobbers the newly selected room's
-		// composer (clears its reply state, steals focus). See the room-switch
-		// effect, which resets `sending` for the new room on our behalf.
+		// Completion-time guard, same contract as send(): defensive given the
+		// keyed-<Show> remount that isolates rooms (props.roomId can't change
+		// within this instance), so effectively always true. See send() for the
+		// full rationale.
 		const onThisRoom = (): boolean => props.roomId === gifRoomId;
 		setGifPickerOpen(false);
 
@@ -417,7 +419,12 @@ const Composer: Component<{
 		),
 	);
 
-	// Clear state when switching rooms
+	// Clear state when props.roomId changes IN PLACE. In the current app this
+	// is belt-and-suspenders: RoomPane sits under a keyed <Show> (Layout) that
+	// remounts this Composer per room, so props.roomId never actually changes
+	// within an instance - a real room switch yields a fresh Composer instead,
+	// and this effect only runs its initial (mount-time) pass. It would do work
+	// only if the composer became a reused instance across rooms.
 	createEffect(
 		on(
 			() => props.roomId,
@@ -435,10 +442,9 @@ const Composer: Component<{
 				setPreviewOpen(false);
 				voiceRecorder.cancel();
 				clearAttachments();
-				// A send pinned to the previous room may still be in flight; reset
-				// the busy flag so the newly selected room's composer is usable.
-				// That send's own completion writes are gated on still being on
-				// its room, so they won't clobber this fresh state.
+				// Reset the busy flag. (Inert under the current remount model - a
+				// real room switch gives a fresh Composer with sending() already
+				// false; see the effect header above.)
 				setSending(false);
 				requestAnimationFrame(autoResize);
 			},
@@ -502,18 +508,28 @@ const Composer: Component<{
 		const msg = text().trim();
 		if ((!msg && attachments().length === 0) || sending()) return;
 
-		// Pin the target room (and reply target) for the whole send: uploads
-		// await, and the user could switch rooms mid-send. The composer is a
-		// single reused instance with shared signals, so we (a) deliver to the
-		// pinned room and (b) gate every completion-time write on still being on
-		// that room, so a send that finishes after the user navigated away can't
-		// clobber the newly selected room's composer.
+		// Pin the room, reply target, and thread for the whole send: uploads
+		// await, and a reactive prop read after an await would see a newer
+		// value. Cross-room (and cross-thread) isolation, though, comes from the
+		// mount structure, not from these reads: RoomPane (and this Composer) sit
+		// under a keyed <Show> in Layout, so switching rooms REMOUNTS the whole
+		// subtree - the newly selected room gets a fresh Composer with its own
+		// signals, and an in-flight send from the disposed instance can only
+		// touch that disposed instance's own props/state. The thread panel is
+		// likewise keyed on threadId (RoomPane), so props.roomId and
+		// props.threadRootId both never change within a single Composer instance
+		// (pinning them is symmetry - they're already frozen). Only replyTo
+		// genuinely changes in place: it's a live signal in TimelineView, so the
+		// user can reply to a different message mid-send without any remount -
+		// pinning it is the read that actually matters here.
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
-		// Pinned like roomId: the panel can switch threads (or close) while
-		// uploads run, and every await-separated send below must target the
-		// thread this send STARTED in.
 		const threadRootId = props.threadRootId ?? null;
+		// Completion-time guard. Because a room switch remounts (see above),
+		// props.roomId === roomId is effectively always true here - this is
+		// defensive belt-and-suspenders that would only do work if the composer
+		// ever became a genuinely reused instance across rooms. Kept uniform
+		// across the three send paths.
 		const onThisRoom = (): boolean => props.roomId === roomId;
 
 		// Edit mode: send m.replace event
