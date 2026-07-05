@@ -153,7 +153,10 @@ path.
 
 CI (`.github/workflows/ci.yml`) runs `pnpm test:unit` in the main job and the
 `browser` project in a separate job that installs Chromium first, so both
-projects gate every PR and push to `main`.
+projects run on every pull request and push to `main` (a failing test fails
+the CI check). Note that image publishing (`publish.yml`) triggers on push to
+`main` independently of CI, so a red CI run does not by itself block the GHCR
+`:latest` deploy.
 
 ## License
 
