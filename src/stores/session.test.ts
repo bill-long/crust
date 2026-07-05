@@ -135,8 +135,16 @@ describe("saveSession validation", () => {
 		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
 	});
 
-	it("throws for a missing field", () => {
+	it("throws for an empty required field", () => {
 		const bad = { ...VALID, accessToken: "" };
+		expect(() => saveSession(bad as Session)).toThrow(
+			"Refusing to persist invalid session data",
+		);
+	});
+
+	it("throws for a missing required field", () => {
+		const bad = { ...VALID };
+		delete (bad as Record<string, unknown>).userId;
 		expect(() => saveSession(bad as Session)).toThrow(
 			"Refusing to persist invalid session data",
 		);
