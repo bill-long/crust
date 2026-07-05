@@ -188,7 +188,7 @@ pnpm typecheck       # tsc --noEmit (app + service-worker tsconfig)
 pnpm test            # Vitest (run once); pnpm test:watch to watch
 ```
 
-CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, and `pnpm build` (with the `*.browser.test.tsx` suite in a separate `browser-tests` job). Run at least `pnpm lint`, `pnpm typecheck`, and `pnpm test:unit` before declaring any task complete (add `pnpm test:browser` when you've touched layout/browser-dependent code).
+CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, and `pnpm build` (with the `*.browser.test.tsx` suite in a separate `browser-tests` job). Run all four before declaring any task complete (add `pnpm test:browser` when you've touched layout/browser-dependent code).
 
 ### Local code review is required before every push
 

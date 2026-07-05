@@ -138,7 +138,7 @@ require a Web Push gateway (also separate). All optional.
 
 ```bash
 pnpm test              # full suite (jsdom + browser projects)
-pnpm test:unit         # jsdom project only (fast, no Playwright needed)
+pnpm test:unit         # jsdom project only (fast, no Chromium download)
 pnpm test:watch        # vitest in watch mode
 pnpm test:browser      # browser-mode only (headless Chromium via Playwright)
 ```
@@ -148,8 +148,8 @@ Most tests run in jsdom (the `unit` project). Layout-dependent tests live in
 headless Chromium so `ResizeObserver`, RAF cadence, and scroll math behave
 like a real browser. The browser project requires Playwright's Chromium
 download (`pnpm exec playwright install chromium`) on first run, so `pnpm
-test` fails without it - use `pnpm test:unit` for the fast, Playwright-free
-path.
+test` fails without that download - use `pnpm test:unit` for the fast path
+that skips it.
 
 CI (`.github/workflows/ci.yml`) runs `pnpm test:unit` in the main job and the
 `browser` project in a separate job that installs Chromium first, so both
