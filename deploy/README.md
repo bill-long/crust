@@ -1,8 +1,9 @@
 # Deploying Crust
 
 Crust ships as a static SPA inside an `nginx:alpine` container. The image is
-published to GitHub Container Registry (GHCR) by the `Publish image` workflow
-on every push to `main` and on `v*` tags.
+published to GitHub Container Registry (GHCR) by the `publish` job in the CI
+workflow (`.github/workflows/ci.yml`) - after the tests pass - on every push
+to `main` and on `v*` tags.
 
 Image: `ghcr.io/bill-long/crust`
 
@@ -21,8 +22,8 @@ Tags:
 GHCR packages created by Actions default to **private**. To allow the server to
 `docker pull` anonymously:
 
-1. After the first successful `publish.yml` run, open the package settings
-   linked from the repository's "Packages" tab.
+1. After the first successful CI run that publishes the image, open the package
+   settings linked from the repository's "Packages" tab.
 2. Under "Danger Zone", change visibility to **Public**.
 
 Alternatively, keep it private and log in on the server (use stdin to avoid
@@ -171,4 +172,5 @@ different path, rebuild locally:
 docker build --build-arg VITE_BASE_PATH=/some-other-path/ -t crust:custom .
 ```
 
-Or change the `build-args` value in `.github/workflows/publish.yml`.
+Or change the `build-args` value in the `publish` job of
+`.github/workflows/ci.yml`.
