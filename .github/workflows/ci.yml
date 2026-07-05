@@ -19,4 +19,25 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm test:unit
       - run: pnpm build
+
+  browser-tests:
+    # Gate on the cheap checks (lint/typecheck/unit/build) so an already-failing
+    # run doesn't spend minutes provisioning Chromium + system deps. Tradeoff:
+    # when `ci` fails, browser-tests is skipped, so a browser regression only
+    # surfaces once `ci` is green - acceptable given how expensive this job is.
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The `browser` vitest project drives a real headless Chromium via
+      # Playwright, so its browser (and system deps) must be installed first.
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
