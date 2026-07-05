@@ -1,4 +1,5 @@
 import { escapeHtml, type Mention } from "../../../lib/markdown";
+import { stripReplyFallback } from "../../../lib/replyFallback";
 import type { TimelineEvent } from "../timeline/timelineTypes";
 
 /**
@@ -6,6 +7,11 @@ import type { TimelineEvent } from "../timeline/timelineTypes";
  * prefix is the mandated `> <sender> quoted-text` block; the HTML prefix is the
  * `<mx-reply><blockquote>` permalink header. Shared by the text-send and GIF
  * paths.
+ *
+ * `replyTo.body` is the raw `content.body`, which for a reply still carries the
+ * parent's own reply fallback. We strip that here (per the Matrix rich-reply
+ * convention, matching Element) so nested fallbacks don't accumulate and bloat
+ * the body/blockquote on every hop of a reply chain.
  */
 export function buildReplyFallback(
 	replyTo: TimelineEvent,
@@ -14,18 +20,25 @@ export function buildReplyFallback(
 	bodyPrefix: string;
 	htmlPrefix: string;
 } {
-	const quotedLines = replyTo.body
+	const stripped = stripReplyFallback(replyTo.body);
+	// When the parent's body is nothing but its own reply fallback (a reply
+	// whose actual text is empty), stripping yields "". Fall back to the raw
+	// body so we quote something rather than emitting a blank `> <sender> `
+	// line; there is no parent-authored text to duplicate here, so no nested
+	// fallback accumulates.
+	const quotedBody = stripped === "" ? replyTo.body : stripped;
+	const quotedLines = quotedBody
 		.split("\n")
 		.map((l) => `> ${l}`)
 		.join("\n");
-	const bodyPrefix = `> <${replyTo.senderId}> ${replyTo.body.split("\n")[0]}\n${
-		replyTo.body.includes("\n")
+	const bodyPrefix = `> <${replyTo.senderId}> ${quotedBody.split("\n")[0]}\n${
+		quotedBody.includes("\n")
 			? `${quotedLines.split("\n").slice(1).join("\n")}\n`
 			: ""
 	}\n`;
 
 	const escapedSender = escapeHtml(replyTo.senderId);
-	const escapedBody = escapeHtml(replyTo.body).replace(/\n/g, "<br>");
+	const escapedBody = escapeHtml(quotedBody).replace(/\n/g, "<br>");
 	const eventPermalink = `https://matrix.to/#/${encodeURIComponent(roomId)}/${encodeURIComponent(replyTo.eventId)}`;
 	const senderPermalink = `https://matrix.to/#/${encodeURIComponent(replyTo.senderId)}`;
 	const htmlPrefix =
