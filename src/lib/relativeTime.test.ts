@@ -49,7 +49,14 @@ describe("formatRelativeTime", () => {
 
 describe("useMinuteTick", () => {
 	beforeEach(() => vi.useFakeTimers());
-	afterEach(() => vi.useRealTimers());
+	afterEach(() => {
+		// Order matters: restore the setInterval/clearInterval spies FIRST (their
+		// captured "original" is the fake-timer function), THEN swap fake timers
+		// back for real ones - so globalThis ends up with the real timers, not an
+		// orphaned fake. (The unit project has no global restoreMocks.)
+		vi.restoreAllMocks();
+		vi.useRealTimers();
+	});
 
 	it("shares one interval across subscribers and clears it after the last unsubscribes", () => {
 		const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
