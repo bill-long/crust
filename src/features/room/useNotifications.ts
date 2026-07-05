@@ -208,7 +208,39 @@ export function useNotifications(
 		// timeline, so without this it would notify twice.
 		if (isThreadTimelineData(data) && !isThreadReply(event)) return;
 
-		// Encrypted event pending decryption — defer and re-evaluate after
+		// Encrypted events are handled by decryption state:
+		//
+		//  - Still pending (not yet a failure, no clear content): DEFER into
+		//    pendingDecryption and let onDecrypted re-evaluate once the SDK
+		//    resolves it, so a successful decryption computes the TRUE
+		//    per-message push action rather than a room-default guess on
+		//    ciphertext. The SDK emits MatrixEventEvent.Decrypted on failure too
+		//    (once retries are exhausted; it calls setPushDetails() first), so a
+		//    deferred event that ultimately fails still reaches processEvent via
+		//    onDecrypted and notifies with the encrypted-message fallback.
+		//
+		//  - Already a decryption failure at arrival (isDecryptionFailure()):
+		//    decryption has already run and failed with no retry pending, so
+		//    there is nothing to wait for - fall through to processEvent now. It
+		//    notifies from the ciphertext via the room's default push rules (the
+		//    "Encrypted message" fallback), deliberately matching Element: better
+		//    a vague notification than a silently missed mention. Deferring such
+		//    an event instead would gamble on a late room key: the SDK can
+		//    re-decrypt a failed event and re-emit Decrypted if the key later
+		//    arrives, but for an event already failed at arrival the key usually
+		//    never comes, so deferring risks notifying not at all. Notifying now
+		//    trades notification precision for not missing it, and keeps the
+		//    immediate path consistent with the deferred-then-failed path above.
+		//    (#312)
+		//
+		//  - Already decrypted: falls through and processes normally. The
+		//    load-bearing discriminator is getType(), which returns the CLEAR
+		//    type once decrypted (a decrypted message reports "m.room.message", a
+		//    sticker "m.sticker", ...), so a decrypted event never matches
+		//    "m.room.encrypted" here regardless of msgtype. The extra
+		//    !getContent().msgtype check is a defensive redundancy for the odd
+		//    event still reporting the encrypted wire type yet already carrying
+		//    clear message content.
 		if (
 			event.getType() === "m.room.encrypted" &&
 			!event.isDecryptionFailure() &&
