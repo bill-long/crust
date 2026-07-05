@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createPersistedSignal } from "../lib/persistedSignal";
 
 const STORAGE_KEY = "crust:layout";
 
@@ -10,53 +10,38 @@ const defaults: LayoutState = {
 	membersPaneVisible: false,
 };
 
-function load(): LayoutState {
-	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return { ...defaults };
-		const parsed: unknown = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) return { ...defaults };
-		const obj = parsed as Record<string, unknown>;
-		return {
-			membersPaneVisible:
-				typeof obj.membersPaneVisible === "boolean"
-					? obj.membersPaneVisible
-					: defaults.membersPaneVisible,
-		};
-	} catch {
-		return { ...defaults };
-	}
+function parse(raw: unknown): LayoutState {
+	if (typeof raw !== "object" || raw === null) return { ...defaults };
+	const obj = raw as Record<string, unknown>;
+	// Start from defaults and override validated fields, so a future added
+	// LayoutState field keeps its default rather than being dropped on load.
+	return {
+		...defaults,
+		membersPaneVisible:
+			typeof obj.membersPaneVisible === "boolean"
+				? obj.membersPaneVisible
+				: defaults.membersPaneVisible,
+	};
 }
 
-function save(state: LayoutState): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-	} catch {
-		// localStorage full or unavailable — best-effort
-	}
-}
-
-// Module-level singleton — one signal, shared by all consumers.
-const [layoutState, setLayoutState] = createSignal<LayoutState>(load());
+const store = createPersistedSignal<LayoutState>(STORAGE_KEY, parse, {
+	...defaults,
+});
 
 /** Whether the members pane is currently visible (reactive). */
 export function membersPaneVisible(): boolean {
-	return layoutState().membersPaneVisible;
+	return store.get().membersPaneVisible;
 }
 
 /** Toggle the members pane visibility. Persists to localStorage immediately. */
 export function toggleMembersPane(): void {
-	const next = {
-		...layoutState(),
-		membersPaneVisible: !layoutState().membersPaneVisible,
-	};
-	setLayoutState(next);
-	save(next);
+	store.set((prev) => ({
+		...prev,
+		membersPaneVisible: !prev.membersPaneVisible,
+	}));
 }
 
-/** Explicitly set the members pane visibility. */
+/** Explicitly set the members pane visibility. Persists immediately. */
 export function setMembersPaneVisible(visible: boolean): void {
-	const next = { ...layoutState(), membersPaneVisible: visible };
-	setLayoutState(next);
-	save(next);
+	store.set((prev) => ({ ...prev, membersPaneVisible: visible }));
 }
