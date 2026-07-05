@@ -235,11 +235,14 @@ const Composer: Component<{
 				props.onSent?.();
 			}
 		} catch (e) {
-			// Deliberately NOT gated on room or edit mode: the alternative
-			// to parking the failed recording is silently losing it. The
-			// tray belongs to the (shared) composer instance, so after a
-			// room switch the recording stays visible and removable, and a
-			// retry sends it to the currently selected room.
+			// Deliberately NOT gated on room or edit mode: parking a failed
+			// upload in the tray beats silently losing the recording. Within the
+			// room the send started in, the entry stays visible and retryable.
+			// (Room-switch caveat: a switch remounts this Composer - see send() -
+			// so a failure that resolves after the user has already left the room
+			// lands in the disposed instance's tray, i.e. it is effectively lost.
+			// That is a pre-existing limitation of the per-room mount, not
+			// something this guard changes.)
 			const failed = attachment;
 			setAttachments((prev) => [
 				...prev,
