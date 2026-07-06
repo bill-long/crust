@@ -11,7 +11,9 @@ import {
 	type PushPayload,
 	trimmedField,
 } from "./features/notifications/pushCopy";
+import { iconCacheUrls, isIconRequest } from "./lib/iconRuntimeCache";
 import { NOTIFY_CHANNEL_NAME, type NotifyPong } from "./lib/notifyChannel";
+import { staleWhileRevalidate } from "./lib/swrCache";
 
 // `self` is typed as a generic WorkerGlobalScope by the WebWorker lib; narrow
 // it to the service-worker scope so registration/clients are typed.
@@ -41,6 +43,76 @@ registerRoute(
 		allowlist: [new RegExp(`^${escapedBase}`)],
 		denylist: [/\/config\.json$/, /^\/_matrix\//],
 	}),
+);
+
+// ─── Runtime cache for the stable-named PWA icons ───
+// The app icons/favicon (pwa-*.png, apple-touch-icon.png, favicon.svg) are
+// excluded from the precache (injectManifest.globIgnores in vite.config.ts) and
+// served here instead. Because this SW never auto-skipWaiting()s (above), a
+// *precached* icon would stay stale until the new worker fully took over. See
+// issue #252.
+const ICON_CACHE = "crust-icons";
+
+// Warm the icon cache at install so the icons are available offline - roughly
+// the availability the precache used to give (best-effort, see below).
+// `{ cache: "reload" }` bypasses the HTTP cache so we store the freshly-deployed
+// bytes. Warming also overwrites the shared ICON_CACHE eagerly, so once this
+// feature is live a later icon-only deploy is picked up by the *currently active*
+// worker's SWR route on the next load. (On the very first deploy that introduces
+// this route the previous worker is the old precache-only SW with no icon route,
+// so for that one transition a changed icon still waits for this worker to take
+// over.) Best-effort: allSettled + try/catch means a transient offline install
+// never fails the SW install (which would also block app-shell updates); the
+// route below repopulates on the next successful fetch.
+async function warmIconCache(): Promise<void> {
+	try {
+		const cache = await caches.open(ICON_CACHE);
+		await Promise.allSettled(
+			iconCacheUrls(base).map(async (url) => {
+				const res = await fetch(url, { cache: "reload" });
+				if (res.ok) await cache.put(url, res.clone());
+			}),
+		);
+	} catch {
+		// best-effort; nothing actionable if opening the cache throws
+	}
+}
+sw.addEventListener("install", (event) => {
+	event.waitUntil(warmIconCache());
+});
+
+// Serve the icons stale-while-revalidate: return the cached copy instantly (like
+// the precache did) and refresh it in the background so a changed icon lands on
+// the next load. `event.waitUntil` keeps the worker alive until the background
+// refresh's cache write finishes (else an idle-worker termination would drop it
+// and the icon would stay stale). Keyed by pathname (query dropped) so variant
+// query strings can't grow the cache past one entry per icon.
+//
+// The revalidation fetch uses `{ cache: "reload" }` (like the install warm): the
+// icons ship with a year-long max-age, so a default fetch would revalidate
+// against the browser's HTTP cache and keep seeing the OLD bytes - never picking
+// up a redeployed icon. reload bypasses the HTTP cache to hit the network.
+//
+// If CacheStorage itself is unavailable (restricted storage contexts), fall back
+// to serving the icon directly rather than failing the request - still with
+// `{ cache: "reload" }` so a redeployed icon stays visible in that degraded path
+// (a default fetch would return the browser's year-old HTTP-cached bytes).
+registerRoute(
+	({ url }) => isIconRequest(url, base, sw.location.origin),
+	async ({ request, event }) => {
+		let cache: Cache;
+		try {
+			cache = await caches.open(ICON_CACHE);
+		} catch {
+			return fetch(request, { cache: "reload" });
+		}
+		return staleWhileRevalidate(
+			cache,
+			new URL(request.url).pathname,
+			() => fetch(request, { cache: "reload" }),
+			(background) => event.waitUntil(background),
+		);
+	},
 );
 
 // Deliberately do NOT skipWaiting()/clientsClaim() automatically: a new worker
