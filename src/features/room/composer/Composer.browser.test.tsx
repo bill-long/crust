@@ -1,6 +1,6 @@
 /**
  * Browser-mode tests for the composer's Phase 2 attach-file entry point
- * (issue #276): the hidden file input behind the 📎 button, and the
+ * (issue #276): the hidden file input behind the attach button, and the
  * `onEnqueueReady` seam the room view's drag-and-drop overlay feeds.
  *
  * Runs in headless Chromium because real `File`/`DataTransfer`/object-URL
