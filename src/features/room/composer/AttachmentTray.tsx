@@ -30,7 +30,14 @@ const AttachmentTray: Component<{
 		<div class="mb-2 flex flex-col gap-2">
 			<For each={props.attachments}>
 				{(att) => {
+					// att is a store row: reading its fields (att.caption, att.progress,
+					// …) subscribes to just that field, and updateAttachment mutates in
+					// place so the object reference is stable. That keeps <For> from
+					// remounting the row on a caption keystroke or a progress tick, which
+					// is what preserves the caption input's focus while typing.
 					const uploading = (): boolean => att.status === "uploading";
+					// The store never patches a row's `file`, so the display name is
+					// fixed for this row's lifetime - compute it once.
 					const name = sanitizeFilename(att.file.name);
 					return (
 						<div class="flex items-start gap-3 rounded bg-surface-2/50 p-2">

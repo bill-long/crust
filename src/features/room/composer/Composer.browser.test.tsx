@@ -164,6 +164,86 @@ describe("Composer attach-file button", () => {
 	});
 });
 
+describe("Composer caption input", () => {
+	// Regression: the tray iterated attachments with a reference-keyed <For>, but
+	// updateAttachment used to replace the attachment object wholesale, so every
+	// caption keystroke minted a new reference and <For> remounted the row,
+	// dropping the input's focus (the user had to re-click the box per character).
+	// The queue is now a store mutated in place, so the row's reference - and its
+	// DOM node - is stable across edits.
+	it("keeps focus while typing a caption, character by character", async () => {
+		const { container, findByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+
+		const fileInput = container.querySelector<HTMLInputElement>(
+			"input[data-composer-file-input]",
+		);
+		if (!fileInput) throw new Error("file input missing");
+		pickFiles(fileInput, [
+			new File(["fake-png-bytes"], "photo.png", { type: "image/png" }),
+		]);
+
+		const caption = (await findByLabelText(
+			"Caption for photo.png",
+		)) as HTMLInputElement;
+		caption.focus();
+		expect(document.activeElement).toBe(caption);
+
+		// Type three characters the way a browser does: mutate value, fire input.
+		for (const ch of "cat") {
+			caption.value += ch;
+			caption.dispatchEvent(new Event("input", { bubbles: true }));
+			await tick();
+			// The same node must survive each keystroke, still connected and focused.
+			expect(caption.isConnected).toBe(true);
+			expect(document.activeElement).toBe(caption);
+		}
+		expect(caption.value).toBe("cat");
+	});
+
+	// Reference-keying (the reason we kept <For> over <Index>): removing an
+	// earlier attachment must move the surviving rows' nodes, not rebind fresh
+	// nodes by position - otherwise a caption being typed in a later row loses its
+	// focus/caret. The send loop removes attachments one-by-one as they upload, so
+	// this path is real.
+	it("keeps focus in a later caption when an earlier attachment is removed", async () => {
+		const { container, findByLabelText } = render(() => (
+			<TestClientProvider client={makeClient()}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+
+		const fileInput = container.querySelector<HTMLInputElement>(
+			"input[data-composer-file-input]",
+		);
+		if (!fileInput) throw new Error("file input missing");
+		pickFiles(fileInput, [
+			new File(["a"], "first.png", { type: "image/png" }),
+			new File(["b"], "second.png", { type: "image/png" }),
+		]);
+
+		const secondCaption = (await findByLabelText(
+			"Caption for second.png",
+		)) as HTMLInputElement;
+		secondCaption.value = "hi";
+		secondCaption.dispatchEvent(new Event("input", { bubbles: true }));
+		secondCaption.focus();
+		expect(document.activeElement).toBe(secondCaption);
+
+		// Remove the first (upper) attachment via its tray control.
+		((await findByLabelText("Remove first.png")) as HTMLButtonElement).click();
+		await tick();
+
+		// The second row's input node survives the removal with its focus + value.
+		expect(secondCaption.isConnected).toBe(true);
+		expect(document.activeElement).toBe(secondCaption);
+		expect(secondCaption.value).toBe("hi");
+	});
+});
+
 describe("Composer formatting toolbar", () => {
 	/** Get the composer textarea. */
 	function getTextarea(container: HTMLElement): HTMLTextAreaElement {
