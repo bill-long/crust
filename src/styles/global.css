@@ -285,3 +285,25 @@ body {
 .flash-pin {
 	animation: flash-pin 1.6s ease-out 1;
 }
+
+/* Notice/toast entrance. The resting (post-animation) state is fully visible,
+ * so a toast is shown even where the animation never runs - a backgrounded tab
+ * pauses rAF/paint (see #324) and reduced motion disables the animation. */
+@keyframes notice-in {
+	from {
+		opacity: 0;
+		transform: translateY(-0.5rem);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+.notice-in {
+	animation: notice-in 200ms ease-out 1;
+}
+@media (prefers-reduced-motion: reduce) {
+	.notice-in {
+		animation: none;
+	}
+}

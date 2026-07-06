@@ -18,6 +18,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { createSignal, Show } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../../styles/global.css";
+import { clearNotices, notices } from "../../../stores/notices";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
 
@@ -86,7 +87,10 @@ function makeClient() {
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-afterEach(() => cleanup());
+afterEach(() => {
+	cleanup();
+	clearNotices();
+});
 
 describe("Composer GIF send under the keyed-<Show> remount (#310, #382)", () => {
 	it("sends a picked GIF to the room it was picked in, with GIF content", async () => {
@@ -179,5 +183,68 @@ describe("Composer GIF send under the keyed-<Show> remount (#310, #382)", () => 
 		// cannot reach ROOM_B's fresh composer.
 		expect(onSentA).toHaveBeenCalledTimes(1);
 		expect(onSentB).not.toHaveBeenCalled();
+	});
+
+	it("surfaces an app-level notice when a GIF send FAILS after a room switch", async () => {
+		const client = makeClient();
+
+		// Hold the send, then reject it after the room switch.
+		let rejectSend: (reason: Error) => void = () => {};
+		client.sendMessage = vi.fn(
+			() =>
+				new Promise<{ event_id: string }>((_res, rej) => {
+					rejectSend = rej;
+				}),
+		) as unknown as typeof client.sendMessage;
+
+		const [roomId, setRoomId] = createSignal(ROOM_A);
+		const { findByLabelText } = render(() => (
+			<TestClientProvider client={client}>
+				<Show when={roomId()} keyed>
+					{(rid) => <Composer roomId={rid} packs={[]} />}
+				</Show>
+			</TestClientProvider>
+		));
+
+		(await findByLabelText("Open GIF picker")).click();
+		(await findByLabelText("party parrot")).click();
+
+		// Leave ROOM_A: its composer is disposed while the send is still pending.
+		setRoomId(ROOM_B);
+		await tick();
+
+		// The ROOM_A send now fails. The inline error would land on the disposed
+		// composer, so a notice must surface instead - not a silent loss (#381).
+		rejectSend(new Error("network"));
+		await tick();
+
+		expect(notices()).toHaveLength(1);
+		expect(notices()[0].message).toContain("GIF");
+		expect(notices()[0].tone).toBe("error");
+	});
+
+	it("does NOT push a notice when a GIF send fails while still on the room", async () => {
+		const client = makeClient();
+		client.sendMessage = vi.fn(() =>
+			Promise.reject(new Error("network")),
+		) as unknown as typeof client.sendMessage;
+
+		const [roomId] = createSignal(ROOM_A);
+		const { findByLabelText } = render(() => (
+			<TestClientProvider client={client}>
+				<Show when={roomId()} keyed>
+					{(rid) => <Composer roomId={rid} packs={[]} />}
+				</Show>
+			</TestClientProvider>
+		));
+
+		(await findByLabelText("Open GIF picker")).click();
+		(await findByLabelText("party parrot")).click();
+		await tick();
+
+		// Still on ROOM_A, so the inline composer error is visible - no app-level
+		// toast (that would be a redundant double surface). Guards the
+		// `if (disposed)` escalation gate.
+		expect(notices()).toHaveLength(0);
 	});
 });

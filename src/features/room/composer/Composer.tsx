@@ -15,6 +15,7 @@ import {
 	escapeHtml,
 	formatMarkdown,
 } from "../../../lib/markdown";
+import { pushNotice } from "../../../stores/notices";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
@@ -294,6 +295,10 @@ const Composer: Component<{
 	let voiceSendButtonRef: HTMLButtonElement | undefined;
 	let lastTypingSentAt = 0;
 	let typingRoomId: string | null = null;
+	// Set on unmount (a room/thread switch remounts this Composer via Layout's
+	// keyed <Show>). Lets a send that fails after the switch tell that its inline
+	// error would be invisible and escalate to an app-level notice instead (#381).
+	let disposed = false;
 
 	function onEmojiSelect(item: PickerEmoji): void {
 		const el = textareaRef;
@@ -333,6 +338,11 @@ const Composer: Component<{
 		const gifRoomId = props.roomId;
 		const gifThreadRootId = props.threadRootId ?? null;
 		const gifReplyTo = props.replyTo;
+		// Pinned for the failure notice (#381): if the user switches rooms before
+		// the send fails, this Composer is disposed and we surface an app-level
+		// notice naming the room it was meant for. Trimmed so a whitespace-only
+		// room name falls back to the generic message rather than a dangling "to ".
+		const gifRoomName = client.getRoom(gifRoomId)?.name?.trim();
 		// Completion writes below are unconditional: a room switch remounts this
 		// Composer (see send()), so an in-flight send only ever touches its own
 		// disposed instance.
@@ -387,6 +397,18 @@ const Composer: Component<{
 			props.onSent?.();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to send GIF");
+			// The GIF path has no draft/tray to fall back on. If the user has since
+			// switched rooms this Composer is disposed, so the inline error above is
+			// invisible - escalate to an app-level notice so the failure isn't
+			// silently lost (#381). On-room failures keep the inline error only.
+			if (disposed) {
+				pushNotice(
+					gifRoomName
+						? `Couldn't send GIF to ${gifRoomName}`
+						: "Couldn't send GIF",
+					"error",
+				);
+			}
 		} finally {
 			setSending(false);
 			restoreFocus();
@@ -436,6 +458,7 @@ const Composer: Component<{
 
 	// Stop typing and release preview object URLs on unmount
 	onCleanup(() => {
+		disposed = true;
 		stopTyping();
 		clearAttachments();
 	});
