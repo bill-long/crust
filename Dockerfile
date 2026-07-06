@@ -11,7 +11,13 @@ WORKDIR /app
 ARG VITE_BASE_PATH=/
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# --ignore-scripts: the only install lifecycle script is the root `prepare`
+# (scripts/enable-hooks.mjs), a dev-only git-hooks setup that (a) isn't in the
+# build context - it fails with "Cannot find module" and breaks the publish -
+# and (b) has nothing to do here anyway (no .git in the image). pnpm 10 already
+# blocks dependency build scripts by default (no onlyBuiltDependencies is
+# configured), so this skips nothing the Vite build needs.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY . .
 RUN pnpm build
 
