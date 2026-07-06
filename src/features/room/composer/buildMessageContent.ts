@@ -93,9 +93,54 @@ export function buildEditContent(
 }
 
 /**
+ * Merge the reply target's author into the typed mention ids so a reply counts
+ * as an intentional mention of the parent's author (Element does this, so the
+ * replied-to user is highlighted/notified even without an explicit `@`-mention).
+ * Deduped, and self-replies are excluded so you never mention yourself.
+ */
+export function mentionUserIds(
+	mentions: Mention[],
+	replyTo: TimelineEvent | null,
+	myUserId: string,
+): string[] {
+	const userIds: string[] = [];
+	for (const m of mentions) {
+		if (!userIds.includes(m.userId)) userIds.push(m.userId);
+	}
+	if (
+		replyTo &&
+		replyTo.senderId !== myUserId &&
+		!userIds.includes(replyTo.senderId)
+	) {
+		userIds.push(replyTo.senderId);
+	}
+	return userIds;
+}
+
+/**
+ * Set `content["m.mentions"]` from the typed mentions plus the reply target's
+ * author (see {@link mentionUserIds}), or remove the field when there are none.
+ * Shared by every send path so the `m.mentions` shape and the reply-mention
+ * rule live in exactly one place.
+ */
+export function applyMentions(
+	content: Record<string, unknown>,
+	mentions: Mention[],
+	replyTo: TimelineEvent | null,
+	myUserId: string,
+): void {
+	const userIds = mentionUserIds(mentions, replyTo, myUserId);
+	if (userIds.length > 0) {
+		content["m.mentions"] = { user_ids: userIds };
+	} else {
+		delete content["m.mentions"];
+	}
+}
+
+/**
  * Build the content for a plain `m.text` message. When `replyTo` is non-null,
- * merges the reply fallback (body + formatted_body prefixes) and the
- * `m.in_reply_to` relation.
+ * merges the reply fallback (body + formatted_body prefixes), the
+ * `m.in_reply_to` relation, and the parent's author into `m.mentions`.
  */
 export function buildTextMessageContent(
 	body: string,
@@ -103,6 +148,7 @@ export function buildTextMessageContent(
 	mentions: Mention[],
 	replyTo: TimelineEvent | null,
 	roomId: string,
+	myUserId: string,
 ): Record<string, unknown> {
 	const content: Record<string, unknown> = {
 		msgtype: "m.text",
@@ -112,11 +158,7 @@ export function buildTextMessageContent(
 		content.format = "org.matrix.custom.html";
 		content.formatted_body = formattedBody;
 	}
-	if (mentions.length > 0) {
-		content["m.mentions"] = {
-			user_ids: mentions.map((m) => m.userId),
-		};
-	}
+	applyMentions(content, mentions, replyTo, myUserId);
 
 	// Add reply metadata + fallback if replying.
 	if (replyTo) {

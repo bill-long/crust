@@ -26,6 +26,7 @@ import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
 import {
+	applyMentions,
 	buildEditContent,
 	buildReplyFallback,
 	buildTextMessageContent,
@@ -360,6 +361,10 @@ const Composer: Component<{
 			content["m.relates_to"] = {
 				"m.in_reply_to": { event_id: gifReplyTo.eventId },
 			};
+			// Flag the reply as an intentional mention of the parent's author, so
+			// they're notified even though a GIF carries no typed mentions (shares
+			// applyMentions with the text-send path). Skip self-replies.
+			applyMentions(content, [], gifReplyTo, client.getUserId() ?? "");
 		}
 
 		setSending(true);
@@ -692,6 +697,7 @@ const Composer: Component<{
 			currentMentions,
 			replyTo && !replyConsumed ? replyTo : null,
 			roomId,
+			client.getUserId() ?? "",
 		);
 
 		setSending(true);

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "../timeline/timelineTypes";
 import {
+	applyMentions,
 	buildReplyFallback,
 	buildTextMessageContent,
+	mentionUserIds,
 } from "./buildMessageContent";
 
 function makeEvent(body: string): TimelineEvent {
@@ -75,6 +77,68 @@ describe("buildReplyFallback", () => {
 	});
 });
 
+const ME = "@me:example.com";
+
+describe("mentionUserIds", () => {
+	it("is empty with no mentions and no reply", () => {
+		expect(mentionUserIds([], null, ME)).toEqual([]);
+	});
+
+	it("adds the reply target's author", () => {
+		// makeEvent's sender is @alice.
+		expect(mentionUserIds([], makeEvent("hi"), ME)).toEqual([
+			"@alice:example.com",
+		]);
+	});
+
+	it("dedupes when the parent's author is already a typed mention", () => {
+		const mentions = [{ userId: "@alice:example.com", displayName: "Alice" }];
+		expect(mentionUserIds(mentions, makeEvent("hi"), ME)).toEqual([
+			"@alice:example.com",
+		]);
+	});
+
+	it("dedupes repeated typed mentions, preserving first-seen order", () => {
+		const mentions = [
+			{ userId: "@a:example.com", displayName: "A" },
+			{ userId: "@b:example.com", displayName: "B" },
+			{ userId: "@a:example.com", displayName: "A" },
+		];
+		expect(mentionUserIds(mentions, null, ME)).toEqual([
+			"@a:example.com",
+			"@b:example.com",
+		]);
+	});
+
+	it("does not mention yourself when replying to your own message", () => {
+		expect(mentionUserIds([], makeEvent("hi"), "@alice:example.com")).toEqual(
+			[],
+		);
+	});
+});
+
+describe("applyMentions", () => {
+	it("sets m.mentions when there are user ids", () => {
+		const content: Record<string, unknown> = {};
+		applyMentions(content, [], makeEvent("hi"), ME);
+		expect(content["m.mentions"]).toEqual({ user_ids: ["@alice:example.com"] });
+	});
+
+	it("omits m.mentions entirely when there are none", () => {
+		const content: Record<string, unknown> = {};
+		applyMentions(content, [], null, ME);
+		expect(content).not.toHaveProperty("m.mentions");
+	});
+
+	it("clears a pre-existing m.mentions when there are none", () => {
+		const content: Record<string, unknown> = {
+			"m.mentions": { user_ids: ["@stale:example.com"] },
+		};
+		applyMentions(content, [], null, ME);
+		expect(content).not.toHaveProperty("m.mentions");
+	});
+});
+
 describe("buildTextMessageContent with a reply", () => {
 	it("prepends a single stripped fallback to body and formatted_body", () => {
 		const parent = makeEvent("> <@bob:example.com> original\n\nparent reply");
@@ -84,6 +148,7 @@ describe("buildTextMessageContent with a reply", () => {
 			[],
 			parent,
 			ROOM,
+			ME,
 		);
 		expect(content.body).toBe(
 			"> <@alice:example.com> parent reply\n\nnew message",
@@ -94,5 +159,24 @@ describe("buildTextMessageContent with a reply", () => {
 		expect(content["m.relates_to"]).toEqual({
 			"m.in_reply_to": { event_id: "$evt:example.com" },
 		});
+	});
+
+	it("adds the parent's author to m.mentions", () => {
+		const content = buildTextMessageContent(
+			"new message",
+			null,
+			[],
+			makeEvent("parent"),
+			ROOM,
+			ME,
+		);
+		expect(content["m.mentions"]).toEqual({
+			user_ids: ["@alice:example.com"],
+		});
+	});
+
+	it("omits m.mentions entirely for a non-reply with no typed mentions", () => {
+		const content = buildTextMessageContent("hi", null, [], null, ROOM, ME);
+		expect(content["m.mentions"]).toBeUndefined();
 	});
 });
