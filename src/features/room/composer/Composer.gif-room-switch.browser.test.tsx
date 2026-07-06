@@ -1,15 +1,21 @@
 /**
- * Regression test for #310: `onGifSelect`'s completion-time writes must be
- * gated on still being on the room the send STARTED in - the same contract
- * `send()` and the voice path enforce. A GIF send that resolves after the
- * user switched rooms must not clear the newly-selected room's reply state
- * (`onSent`) or otherwise mutate its composer.
+ * Covers the GIF send path (onGifSelect) AND the composer's cross-room isolation
+ * under Layout's keyed <Show> remount (issues #310, #382).
+ *
+ * The original #310 test simulated an *in-place* roomId change to exercise a
+ * per-path room guard. #382 removed those guards because Layout renders the room
+ * subtree under a keyed <Show>, so a room switch REMOUNTS the composer and an
+ * in-place roomId change never happens. This test therefore renders Composer
+ * under that SAME keyed <Show> and asserts the two things that matter now:
+ *   1. a picked GIF is sent to the room it was picked in, with the right content;
+ *   2. an in-flight GIF send that resolves AFTER a room switch (i.e. after the
+ *      composer remounted for the new room) cannot fire the new room's onSent.
  *
  * Runs in browser mode because it drives the real GIF picker UI.
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../../styles/global.css";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
@@ -82,51 +88,96 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 afterEach(() => cleanup());
 
-describe("Composer GIF send room-switch guard (#310)", () => {
-	it("does not clear the new room's reply state when a GIF send resolves after a room switch", async () => {
+describe("Composer GIF send under the keyed-<Show> remount (#310, #382)", () => {
+	it("sends a picked GIF to the room it was picked in, with GIF content", async () => {
+		const client = makeClient();
+		client.sendMessage = vi.fn(async () => ({
+			event_id: "$sent",
+		})) as unknown as typeof client.sendMessage;
+
+		const [roomId] = createSignal(ROOM_A);
+		const { findByLabelText } = render(() => (
+			<TestClientProvider client={client}>
+				<Show when={roomId()} keyed>
+					{(rid) => <Composer roomId={rid} packs={[]} />}
+				</Show>
+			</TestClientProvider>
+		));
+
+		(await findByLabelText("Open GIF picker")).click();
+		(await findByLabelText("party parrot")).click();
+
+		// m.text with the GIF url + intrinsic dimensions (the info block receivers
+		// use to reserve layout), sent to the room it was picked in, no thread.
+		expect(client.sendMessage).toHaveBeenCalledTimes(1);
+		expect(client.sendMessage).toHaveBeenCalledWith(
+			ROOM_A,
+			null,
+			expect.objectContaining({
+				msgtype: "m.text",
+				body: GIF.url,
+				info: expect.objectContaining({
+					w: GIF.width,
+					h: GIF.height,
+					mimetype: "image/gif",
+				}),
+			}),
+		);
+	});
+
+	it("does not fire the new room's onSent when a GIF send resolves after a room switch", async () => {
 		const client = makeClient();
 
-		// Hold the send in flight so it can resolve AFTER the room switch.
+		// Hold the send in flight so it resolves AFTER the room switch remounts.
 		let resolveSend: (v: { event_id: string }) => void = () => {};
 		client.sendMessage = vi.fn(
 			() =>
 				new Promise<{ event_id: string }>((res) => {
 					resolveSend = res;
 				}),
-		) as typeof client.sendMessage;
+		) as unknown as typeof client.sendMessage;
 
-		const onSent = vi.fn();
+		// Distinct onSent per room, resolved through the keyed render prop, so we
+		// can tell whose send-completion fired.
+		const onSentA = vi.fn();
+		const onSentB = vi.fn();
 		const [roomId, setRoomId] = createSignal(ROOM_A);
 
 		const { findByLabelText } = render(() => (
 			<TestClientProvider client={client}>
-				<Composer roomId={roomId()} packs={[]} onSent={onSent} />
+				<Show when={roomId()} keyed>
+					{(rid) => (
+						<Composer
+							roomId={rid}
+							packs={[]}
+							onSent={rid === ROOM_A ? onSentA : onSentB}
+						/>
+					)}
+				</Show>
 			</TestClientProvider>
 		));
 
-		// Open the picker and pick the trending GIF → onGifSelect fires and the
-		// send (pinned to ROOM_A) is now in flight.
+		// Pick the GIF in ROOM_A → its send is in flight, pinned to ROOM_A.
 		(await findByLabelText("Open GIF picker")).click();
 		(await findByLabelText("party parrot")).click();
-		// The GIF must be sent to the room it was picked in (ROOM_A), with no
-		// thread. This pins the core contract so a future change that routed
-		// the send to the switched-to room would fail here, not just on onSent.
-		expect(client.sendMessage).toHaveBeenCalledTimes(1);
 		expect(client.sendMessage).toHaveBeenCalledWith(
 			ROOM_A,
 			null,
-			expect.objectContaining({ msgtype: "m.text", body: GIF.url }),
+			expect.anything(),
 		);
 
-		// User switches to ROOM_B while the ROOM_A send is still pending.
+		// Switch to ROOM_B: the keyed <Show> REMOUNTS the composer, so ROOM_B gets
+		// a fresh instance while the ROOM_A send is still pending.
 		setRoomId(ROOM_B);
 		await tick();
 
-		// The ROOM_A send now resolves - its completion writes must NOT touch
-		// ROOM_B's composer.
+		// The ROOM_A send now resolves.
 		resolveSend({ event_id: "$sent" });
 		await tick();
 
-		expect(onSent).not.toHaveBeenCalled();
+		// Its completion fires ROOM_A's own onSent (on the disposed instance) and
+		// cannot reach ROOM_B's fresh composer.
+		expect(onSentA).toHaveBeenCalledTimes(1);
+		expect(onSentB).not.toHaveBeenCalled();
 	});
 });
