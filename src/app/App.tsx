@@ -10,6 +10,7 @@ import {
 } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
+import { NoticeToasts } from "../components/NoticeToasts";
 import { LoginPage } from "../features/auth/LoginPage";
 import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
@@ -175,6 +176,9 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				/space/X/Y -> /home/Y) AND transient sync-state transitions.
 				Renders nothing until activeCallRoomId() becomes non-null. */}
 			<PersistentCallSurface />
+			{/* App-root transient notices (toasts). A sibling of <Switch> so a
+				notice survives room/route changes and a disposed emitter. */}
+			<NoticeToasts />
 		</>
 	);
 };
