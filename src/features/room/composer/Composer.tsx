@@ -196,9 +196,10 @@ const Composer: Component<{
 		// newer value; see send() for which of these actually change in place
 		// (replyTo) versus which are remount-frozen (roomId/threadRootId).
 		const threadRootId = props.threadRootId ?? null;
-		// Completion-time guard, same contract as send() - defensive given the
-		// keyed-<Show> remount (see send() for the full rationale).
-		const onThisRoom = (): boolean => props.roomId === roomId;
+		// Completion writes below run unconditionally: a room switch remounts this
+		// Composer (see send() for the full rationale), so an in-flight send can
+		// only ever touch its own now-disposed instance, never the newly selected
+		// room's fresh Composer.
 		let attachment: PendingAttachment | null = null;
 		setVoiceStopping(true);
 		try {
@@ -225,7 +226,7 @@ const Composer: Component<{
 			restoreFocus();
 		}
 		if (!attachment) {
-			if (onThisRoom()) setError("Nothing was recorded");
+			setError("Nothing was recorded");
 			return;
 		}
 		setError(null);
@@ -238,7 +239,7 @@ const Composer: Component<{
 			// Don't fire onSent while an edit is active: TimelineView
 			// reads it as "edit complete" and would clear the edit the
 			// user is composing.
-			if (onThisRoom() && !props.editingEvent) {
+			if (!props.editingEvent) {
 				props.onCancelReply?.();
 				props.onSent?.();
 			}
@@ -249,8 +250,7 @@ const Composer: Component<{
 			// (Room-switch caveat: a switch remounts this Composer - see send() -
 			// so a failure that resolves after the user has already left the room
 			// lands in the disposed instance's tray, i.e. it is effectively lost.
-			// That is a pre-existing limitation of the per-room mount, not
-			// something this guard changes.)
+			// That is a pre-existing limitation of the per-room mount.)
 			const failed = attachment;
 			setAttachments((prev) => [
 				...prev,
@@ -333,11 +333,9 @@ const Composer: Component<{
 		const gifRoomId = props.roomId;
 		const gifThreadRootId = props.threadRootId ?? null;
 		const gifReplyTo = props.replyTo;
-		// Completion-time guard, same contract as send(): defensive given the
-		// keyed-<Show> remount that isolates rooms (props.roomId can't change
-		// within this instance), so effectively always true. See send() for the
-		// full rationale.
-		const onThisRoom = (): boolean => props.roomId === gifRoomId;
+		// Completion writes below are unconditional: a room switch remounts this
+		// Composer (see send()), so an in-flight send only ever touches its own
+		// disposed instance.
 		setGifPickerOpen(false);
 
 		// Send the GIF URL as a plain text message (TOS-compliant: no re-hosting).
@@ -386,22 +384,12 @@ const Composer: Component<{
 				gifThreadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
-			if (onThisRoom()) props.onSent?.();
+			props.onSent?.();
 		} catch (e) {
-			if (onThisRoom()) {
-				setError(e instanceof Error ? e.message : "Failed to send GIF");
-			}
+			setError(e instanceof Error ? e.message : "Failed to send GIF");
 		} finally {
-			if (onThisRoom()) {
-				setSending(false);
-				if (
-					!document.activeElement ||
-					document.activeElement === document.body ||
-					document.activeElement === textareaRef
-				) {
-					textareaRef?.focus();
-				}
-			}
+			setSending(false);
+			restoreFocus();
 		}
 	}
 
@@ -434,37 +422,17 @@ const Composer: Component<{
 		),
 	);
 
-	// Clear state when props.roomId changes IN PLACE. In the current app this
-	// is belt-and-suspenders: RoomPane sits under a keyed <Show> (Layout) that
-	// remounts this Composer per room, so props.roomId never actually changes
-	// within an instance - a real room switch yields a fresh Composer instead,
-	// and this effect only runs its initial (mount-time) pass. It would do work
-	// only if the composer became a reused instance across rooms.
-	createEffect(
-		on(
-			() => props.roomId,
-			() => {
-				stopTyping();
-				lastTypingSentAt = 0;
-				typingRoomId = null;
-				setText("");
-				setError(null);
-				setMentions([]);
-				setMentionQuery(null);
-				setEmojiPickerOpen(false);
-				setGifPickerOpen(false);
-				setPollDialogOpen(false);
-				setPreviewOpen(false);
-				voiceRecorder.cancel();
-				clearAttachments();
-				// Reset the busy flag. (Inert under the current remount model - a
-				// real room switch gives a fresh Composer with sending() already
-				// false; see the effect header above.)
-				setSending(false);
-				requestAnimationFrame(autoResize);
-			},
-		),
-	);
+	// There is deliberately no "clear state when props.roomId changes" effect:
+	// RoomPane (and this Composer) sit under a keyed <Show> in Layout, so a room
+	// switch REMOUNTS the whole subtree - the new room always gets a fresh
+	// Composer with clean signals, so there is no stale in-place state to reset.
+	// That keyed remount is load-bearing (it's also why the send paths above need
+	// no room guard); a test in Composer.roomIsolation.test.ts fails if Layout
+	// ever drops `keyed`. See issue #382.
+
+	// Size the textarea to its initial content on mount (the only work the former
+	// reset effect did that isn't already the signal's initial value).
+	onMount(() => requestAnimationFrame(autoResize));
 
 	// Stop typing and release preview object URLs on unmount
 	onCleanup(() => {
@@ -540,12 +508,9 @@ const Composer: Component<{
 		const roomId = props.roomId;
 		const replyTo = props.replyTo;
 		const threadRootId = props.threadRootId ?? null;
-		// Completion-time guard. Because a room switch remounts (see above),
-		// props.roomId === roomId is effectively always true here - this is
-		// defensive belt-and-suspenders that would only do work if the composer
-		// ever became a genuinely reused instance across rooms. Kept uniform
-		// across the three send paths.
-		const onThisRoom = (): boolean => props.roomId === roomId;
+		// Completion writes below run unconditionally: the keyed-<Show> remount
+		// (see above) means an in-flight send can only touch its own disposed
+		// instance, never the newly selected room's fresh Composer.
 
 		// Edit mode: send m.replace event
 		if (props.editingEvent) {
@@ -584,21 +549,17 @@ const Composer: Component<{
 					threadRootId,
 					content as unknown as RoomMessageEventContent,
 				);
-				if (onThisRoom()) props.onSent?.();
+				props.onSent?.();
 			} catch (e) {
-				if (onThisRoom()) {
-					if (!text()) {
-						setText(draft);
-						setMentions(draftMentions);
-					}
-					setError(e instanceof Error ? e.message : "Failed to edit message");
-					requestAnimationFrame(autoResize);
+				if (!text()) {
+					setText(draft);
+					setMentions(draftMentions);
 				}
+				setError(e instanceof Error ? e.message : "Failed to edit message");
+				requestAnimationFrame(autoResize);
 			} finally {
-				if (onThisRoom()) {
-					setSending(false);
-					restoreFocus();
-				}
+				setSending(false);
+				restoreFocus();
 			}
 			return;
 		}
@@ -622,10 +583,10 @@ const Composer: Component<{
 		setGifPickerOpen(false);
 		requestAnimationFrame(autoResize);
 
-		// Restore the trailing text on failure, but only if we're still on the
-		// send's room and the user hasn't already started a new message.
+		// Restore the trailing text on failure, but only if the user hasn't
+		// already started a new message.
 		const restoreDraft = (): void => {
-			if (onThisRoom() && !text()) {
+			if (!text()) {
 				setText(draft);
 				setMentions(draftMentions);
 				requestAnimationFrame(autoResize);
@@ -657,11 +618,10 @@ const Composer: Component<{
 					});
 					// Clear the reply at the source once an event has carried it,
 					// so a retry after a partial failure doesn't re-attach it and
-					// emit a second reply. Only touch the parent's reply state if
-					// we're still on this room (else we'd clear another room's reply).
+					// emit a second reply.
 					if (replyTo && !replyConsumed) {
 						replyConsumed = true;
-						if (onThisRoom()) props.onCancelReply?.();
+						props.onCancelReply?.();
 					}
 					removeAttachment(att.id);
 				} catch (e) {
@@ -676,18 +636,14 @@ const Composer: Component<{
 			// so the user can retry without losing it.
 			if (!allOk) {
 				restoreDraft();
-				if (onThisRoom()) {
-					setSending(false);
-					restoreFocus();
-				}
+				setSending(false);
+				restoreFocus();
 				return;
 			}
 			if (!hasText) {
-				if (onThisRoom()) {
-					setSending(false);
-					props.onSent?.();
-					restoreFocus();
-				}
+				setSending(false);
+				props.onSent?.();
+				restoreFocus();
 				return;
 			}
 			// Otherwise fall through to send the trailing text message.
@@ -717,17 +673,13 @@ const Composer: Component<{
 				threadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
-			if (onThisRoom()) props.onSent?.();
+			props.onSent?.();
 		} catch (e) {
 			restoreDraft();
-			if (onThisRoom()) {
-				setError(e instanceof Error ? e.message : "Failed to send message");
-			}
+			setError(e instanceof Error ? e.message : "Failed to send message");
 		} finally {
-			if (onThisRoom()) {
-				setSending(false);
-				restoreFocus();
-			}
+			setSending(false);
+			restoreFocus();
 		}
 	};
 

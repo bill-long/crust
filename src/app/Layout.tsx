@@ -687,6 +687,15 @@ const Layout: Component = () => {
 				}
 				main={
 					<div class="relative flex h-full min-h-0 flex-col">
+						{/*
+						 * `keyed` is load-bearing, not a perf tweak: it REMOUNTS the
+						 * room subtree (RoomPane -> Composer/TimelineView) on every room
+						 * switch, so each room gets fresh component state. Composer
+						 * relies on this for room isolation - it has no in-place
+						 * room-switch guards (#382). Do NOT drop `keyed` without
+						 * restoring those guards; Composer.roomIsolation.test.ts fails
+						 * loudly if you do.
+						 */}
 						<Show
 							when={roomId()}
 							keyed
