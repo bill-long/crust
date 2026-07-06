@@ -9,6 +9,7 @@ import {
 	onMount,
 	Show,
 } from "solid-js";
+import { unwrap } from "solid-js/store";
 import { useClient } from "../../../client/client";
 import {
 	type CustomEmoji,
@@ -512,7 +513,7 @@ const Composer: Component<{
 
 	const send = async (): Promise<void> => {
 		const msg = text().trim();
-		if ((!msg && attachments().length === 0) || sending()) return;
+		if ((!msg && attachments.length === 0) || sending()) return;
 
 		// Pin the room, reply target, and thread for the whole send: uploads
 		// await, and a reactive prop read after an await would see a newer
@@ -620,21 +621,24 @@ const Composer: Component<{
 		// the first event only (whether that's an attachment or the trailing
 		// text) so we don't emit one reply per file.
 		let replyConsumed = false;
-		if (attachments().length > 0) {
+		if (attachments.length > 0) {
 			setSending(true);
 			stopTyping();
 			let allOk = true;
-			for (const att of [...attachments()]) {
+			for (const att of [...attachments]) {
 				// The user can remove a still-queued attachment from the tray while
 				// an earlier one uploads; skip anything no longer in the queue.
-				if (!attachments().some((a) => a.id === att.id)) continue;
+				if (!attachments.some((a) => a.id === att.id)) continue;
 				updateAttachment(att.id, {
 					status: "uploading",
 					progress: 0,
 					error: undefined,
 				});
 				try {
-					await uploadAndSend(client, roomId, att, {
+					// Hand the send path plain data, not the live store proxy: unwrap
+					// so nested fields (e.g. a voice note's waveform number[]) serialize
+					// onto the wire as plain values rather than Solid proxies.
+					await uploadAndSend(client, roomId, unwrap(att), {
 						replyTo: replyConsumed ? null : replyTo,
 						threadId: threadRootId,
 						onProgress: (p) => updateAttachment(att.id, { progress: p }),
@@ -764,7 +768,7 @@ const Composer: Component<{
 			!props.editingEvent &&
 			!props.replyTo &&
 			text() === "" &&
-			attachments().length === 0 &&
+			attachments.length === 0 &&
 			props.onEditLast
 		) {
 			e.preventDefault();
@@ -793,9 +797,9 @@ const Composer: Component<{
 					{error()}
 				</div>
 			</Show>
-			<Show when={attachments().length > 0}>
+			<Show when={attachments.length > 0}>
 				<AttachmentTray
-					attachments={attachments()}
+					attachments={attachments}
 					onRemove={removeAttachment}
 					onCaptionChange={(id, caption) => updateAttachment(id, { caption })}
 				/>
