@@ -9,6 +9,7 @@ import {
 	on,
 	Show,
 } from "solid-js";
+import { VirtualList } from "../../components/VirtualList";
 import { addRecentEmoji, getRecentEmoji } from "./recentEmoji";
 import type {
 	ImagePack,
@@ -20,6 +21,8 @@ import { EMOJI_GROUP_LABELS, PICKER_GROUPS } from "./types";
 import { getEmojiByGroup, searchUnicodeEmoji } from "./unicode";
 
 const GRID_COLS = 8;
+/** Row pitch: the 36px (h-9) button plus the 2px (gap-0.5) inter-row gap. */
+const ROW_HEIGHT = 38;
 
 const EmojiPicker: Component<{
 	packs: ImagePack[];
@@ -180,6 +183,18 @@ const EmojiPicker: Component<{
 		return [];
 	});
 
+	// Bucket the flat item list into fixed-width rows for VirtualList (which
+	// windows whole rows). A full-Unicode search or a large category tab is
+	// 100s-1000s of buttons; only the on-screen rows are mounted.
+	const rows = createMemo((): PickerEmoji[][] => {
+		const items = displayItems();
+		const out: PickerEmoji[][] = [];
+		for (let i = 0; i < items.length; i += GRID_COLS) {
+			out.push(items.slice(i, i + GRID_COLS));
+		}
+		return out;
+	});
+
 	// Focus search on mount
 	createEffect(() => {
 		requestAnimationFrame(() => searchRef?.focus());
@@ -282,25 +297,32 @@ const EmojiPicker: Component<{
 				</nav>
 			</Show>
 
-			{/* Emoji list */}
-			<section
+			{/* Emoji list (windowed rows) */}
+			<VirtualList
+				each={rows()}
+				rowHeight={ROW_HEIGHT}
+				resetKey={`${query().trim()} ${activeTab()}`}
 				class="min-h-0 flex-1 overflow-y-auto p-1"
+				// Preserve the region landmark the prior <section aria-label> gave;
+				// aria-label on a role-less div is not a landmark.
+				role="region"
 				aria-label="Emoji"
 				id={`emoji-grid-${pickerId}`}
+				fallback={
+					<div class="flex h-full items-center justify-center text-sm text-text-disabled">
+						{query() ? "No emoji found" : "No recently used emoji"}
+					</div>
+				}
 			>
-				<Show
-					when={displayItems().length > 0}
-					fallback={
-						<div class="flex h-full items-center justify-center text-sm text-text-disabled">
-							{query() ? "No emoji found" : "No recently used emoji"}
-						</div>
-					}
-				>
+				{(row) => (
 					<div
 						class="grid gap-0.5"
-						style={{ "grid-template-columns": `repeat(${GRID_COLS}, 1fr)` }}
+						style={{
+							height: `${ROW_HEIGHT}px`,
+							"grid-template-columns": `repeat(${GRID_COLS}, 1fr)`,
+						}}
 					>
-						<For each={displayItems()}>
+						<For each={row}>
 							{(item) => {
 								const label =
 									item.kind === "unicode"
@@ -335,8 +357,8 @@ const EmojiPicker: Component<{
 							}}
 						</For>
 					</div>
-				</Show>
-			</section>
+				)}
+			</VirtualList>
 		</div>
 	);
 };
