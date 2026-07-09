@@ -9,6 +9,7 @@ import {
 	createMemo,
 	createSignal,
 	For,
+	type JSX,
 	onCleanup,
 	Show,
 } from "solid-js";
@@ -20,9 +21,30 @@ import {
 	getOrphanRooms,
 	getSpaceRooms,
 } from "../../client/summaries-selectors";
+import { VirtualList } from "../../components/VirtualList";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
 import { NewDmDialog } from "./NewDmDialog";
+
+/**
+ * Home row pitch in px. RoomEntry rows (py-2 + text-sm line) and section headers
+ * (h-9) are both exactly 2.25rem tall, so derive the pitch from the root font
+ * size - a hard-coded px would drift if the browser's default font size (an
+ * accessibility setting, distinct from the app's zoom) isn't 16px.
+ */
+function homeRowHeight(): number {
+	const rem =
+		Number.parseFloat(getComputedStyle(document.documentElement).fontSize) ||
+		16;
+	return rem * 2.25;
+}
+/** Only window the Home list once it's long enough to matter (cf. PinnedMessagesPanel). */
+const VIRTUALIZE_THRESHOLD = 50;
+
+/** A flattened Home-list entry: a section header or a room row. */
+type HomeItem =
+	| { readonly type: "header"; readonly label: string }
+	| { readonly type: "room"; readonly room: RoomSummary };
 
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
@@ -298,6 +320,69 @@ const RoomList: Component<RoomListProps> = (props) => {
 		}
 	};
 
+	// Stable header refs + a per-room wrapper cache, so building homeItems() on a
+	// summary change (e.g. an unread bump) doesn't hand VirtualList's
+	// reference-keyed <For> brand-new items and remount every visible row.
+	const DM_HEADER: HomeItem = { type: "header", label: "Direct Messages" };
+	const ROOMS_HEADER: HomeItem = { type: "header", label: "Rooms" };
+	const roomItems = new Map<string, { room: RoomSummary; item: HomeItem }>();
+	const roomItem = (room: RoomSummary): HomeItem => {
+		const cached = roomItems.get(room.roomId);
+		if (cached && cached.room === room) return cached.item;
+		const item: HomeItem = { type: "room", room };
+		roomItems.set(room.roomId, { room, item });
+		return item;
+	};
+
+	// Flattened Home list: [DM header?, ...dms, Rooms header?, ...orphans].
+	const homeItems = createMemo<HomeItem[]>(() => {
+		const out: HomeItem[] = [];
+		const dms = dmRooms();
+		const orphans = orphanRooms();
+		if (dms.length > 0) {
+			out.push(DM_HEADER);
+			for (const room of dms) out.push(roomItem(room));
+		}
+		if (orphans.length > 0) {
+			out.push(ROOMS_HEADER);
+			for (const room of orphans) out.push(roomItem(room));
+		}
+		// Drop cached wrappers for rooms that are no longer present so the map
+		// doesn't retain every room ever seen this session.
+		if (roomItems.size > dms.length + orphans.length) {
+			const live = new Set<string>();
+			for (const room of dms) live.add(room.roomId);
+			for (const room of orphans) live.add(room.roomId);
+			for (const id of roomItems.keys()) {
+				if (!live.has(id)) roomItems.delete(id);
+			}
+		}
+		return out;
+	});
+
+	const renderRoom = (room: RoomSummary): JSX.Element => (
+		<RoomEntry
+			room={room}
+			isSelected={selectedRoomId() === room.roomId}
+			isMuted={isMuted(room.roomId)}
+			onClick={() => navigateToRoom(room.roomId)}
+		/>
+	);
+
+	const renderHomeItem = (item: HomeItem): JSX.Element =>
+		item.type === "header" ? (
+			// h-9 pins the header to 2.25rem so it matches the room pitch exactly
+			// regardless of inherited line-height (its natural height already is
+			// 2.25rem: 0.75rem padding + a 1.5rem line box), a visual no-op.
+			<div class="h-9 px-3 pb-1 pt-2">
+				<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
+					{item.label}
+				</span>
+			</div>
+		) : (
+			renderRoom(item.room)
+		);
+
 	return (
 		<aside class="flex h-full flex-col border-r border-border-subtle bg-surface-1/50">
 			<div class="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
@@ -376,70 +461,43 @@ const RoomList: Component<RoomListProps> = (props) => {
 				</button>
 			</div>
 
-			<div class="flex-1 overflow-y-auto p-1">
-				<Show when={!isHome()}>
-					<For each={spaceRooms()}>
-						{(room) => (
-							<RoomEntry
-								room={room}
-								isSelected={selectedRoomId() === room.roomId}
-								isMuted={isMuted(room.roomId)}
-								onClick={() => navigateToRoom(room.roomId)}
+			{/* Home mode above the threshold windows the flattened list. Space
+				mode stays plain: it's bounded by one space's rooms and its
+				SpaceDiscoverList tail can't share VirtualList's scroll container.
+				Crossing the threshold swaps scroll containers, so scroll position
+				resets - an accepted edge (it only happens at exactly the boundary
+				count, and VirtualList must own its scroller). */}
+			<Show
+				when={isHome() && homeItems().length > VIRTUALIZE_THRESHOLD}
+				fallback={
+					<div class="flex-1 overflow-y-auto p-1">
+						<Show when={!isHome()}>
+							<For each={spaceRooms()}>{(room) => renderRoom(room)}</For>
+							<SpaceDiscoverList
+								spaceId={() => params.spaceId}
+								hasJoinedRooms={() => spaceRooms().length > 0}
 							/>
-						)}
-					</For>
-					<SpaceDiscoverList
-						spaceId={() => params.spaceId}
-						hasJoinedRooms={() => spaceRooms().length > 0}
-					/>
-				</Show>
+						</Show>
 
-				<Show when={isHome()}>
-					{/* DMs section */}
-					<Show when={dmRooms().length > 0}>
-						<div class="px-3 pb-1 pt-2">
-							<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
-								Direct Messages
-							</span>
-						</div>
-						<For each={dmRooms()}>
-							{(room) => (
-								<RoomEntry
-									room={room}
-									isSelected={selectedRoomId() === room.roomId}
-									isMuted={isMuted(room.roomId)}
-									onClick={() => navigateToRoom(room.roomId)}
-								/>
-							)}
-						</For>
-					</Show>
-
-					{/* Orphan rooms section */}
-					<Show when={orphanRooms().length > 0}>
-						<div class="px-3 pb-1 pt-2">
-							<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
-								Rooms
-							</span>
-						</div>
-						<For each={orphanRooms()}>
-							{(room) => (
-								<RoomEntry
-									room={room}
-									isSelected={selectedRoomId() === room.roomId}
-									isMuted={isMuted(room.roomId)}
-									onClick={() => navigateToRoom(room.roomId)}
-								/>
-							)}
-						</For>
-					</Show>
-
-					<Show when={dmRooms().length === 0 && orphanRooms().length === 0}>
-						<p class="px-3 py-4 text-center text-xs text-text-faint">
-							No rooms yet
-						</p>
-					</Show>
-				</Show>
-			</div>
+						<Show when={isHome()}>
+							<For each={homeItems()}>{(item) => renderHomeItem(item)}</For>
+							<Show when={homeItems().length === 0}>
+								<p class="px-3 py-4 text-center text-xs text-text-faint">
+									No rooms yet
+								</p>
+							</Show>
+						</Show>
+					</div>
+				}
+			>
+				<VirtualList
+					each={homeItems()}
+					rowHeight={homeRowHeight()}
+					class="flex-1 overflow-y-auto p-1"
+				>
+					{(item) => renderHomeItem(item)}
+				</VirtualList>
+			</Show>
 
 			<CreateRoomDialog
 				client={client}
