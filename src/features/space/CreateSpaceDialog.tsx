@@ -17,12 +17,10 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { trapTabKey } from "../../lib/focusTrap";
 import { parseInvites } from "../../lib/inviteParsing";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
-
-const FOCUSABLE =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Local-part of a Matrix room alias. Server adds ":server" + leading "#". */
 const ALIAS_LOCAL_PART_RE = /^[A-Za-z0-9._=/+-]+$/;
@@ -156,19 +154,7 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 			return;
 		}
 		if (e.key === "Tab") {
-			const focusable = Array.from(
-				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			).filter((el) => el.offsetParent !== null);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
+			trapTabKey(overlayRef, e);
 		}
 	};
 

@@ -4,6 +4,11 @@ interface AvatarProps {
 	url: string | null;
 	initial: string;
 	alt?: string;
+	/**
+	 * Image loading strategy. Omitted by default (eager), matching the browser
+	 * default for above-the-fold avatars like UserBar. Lists pass "lazy".
+	 */
+	loading?: "lazy" | "eager";
 }
 
 /** Compact 32px avatar with automatic image-error fallback. */
@@ -30,6 +35,7 @@ const Avatar: Component<AvatarProps> = (props) => {
 					src={url()}
 					alt={props.alt ?? ""}
 					class="h-8 w-8 shrink-0 rounded-full object-cover"
+					loading={props.loading}
 					onError={() => setImgFailed(true)}
 				/>
 			)}

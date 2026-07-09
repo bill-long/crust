@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
+import { Avatar } from "../../components/Avatar";
 import { startDm } from "./startDm";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
@@ -18,36 +19,20 @@ type FlatItem =
 	| { type: "header"; role: string; count: number }
 	| { type: "member"; member: MemberEntry };
 
-/** Placeholder avatar for members without a profile image. */
-const AvatarFallback: Component<{ name: string }> = (props) => {
-	const initial = (): string => {
-		const ch = props.name.replace(/^@/, "").charAt(0).toUpperCase();
-		return ch || "?";
-	};
-	return (
-		<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-			{initial()}
-		</div>
-	);
-};
+/** First letter of a member's name for the avatar fallback. */
+function avatarInitial(name: string): string {
+	return name.replace(/^@/, "").charAt(0).toUpperCase() || "?";
+}
 
 /** Shared visual content for a member row (avatar + name + typing state). */
 const MemberRowContent: Component<{ member: MemberEntry }> = (props) => {
 	return (
 		<>
-			<Show
-				when={props.member.avatarUrl}
-				fallback={<AvatarFallback name={props.member.displayName} />}
-			>
-				{(url) => (
-					<img
-						src={url()}
-						alt=""
-						class="h-8 w-8 shrink-0 rounded-full object-cover"
-						loading="lazy"
-					/>
-				)}
-			</Show>
+			<Avatar
+				url={props.member.avatarUrl ?? null}
+				initial={avatarInitial(props.member.displayName)}
+				loading="lazy"
+			/>
 			<div class="min-w-0 flex-1 text-left">
 				<div class="truncate text-sm">{props.member.displayName}</div>
 				<Show when={props.member.isTyping}>
