@@ -10,13 +10,11 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { trapTabKey } from "../../lib/focusTrap";
 import { validateMatrixUserId } from "../../lib/inviteValidation";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
 import { startDm } from "./startDm";
-
-const FOCUSABLE =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface NewDmDialogProps {
 	client: MatrixClient;
@@ -92,19 +90,7 @@ const NewDmDialog: Component<NewDmDialogProps> = (props) => {
 			return;
 		}
 		if (e.key === "Tab") {
-			const focusable = Array.from(
-				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			).filter((el) => el.offsetParent !== null);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
+			trapTabKey(overlayRef, e);
 		}
 	};
 
