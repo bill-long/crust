@@ -16,6 +16,9 @@ const MAX_ROOM_LIST = 480;
 export const MIN_MEMBERS = 200;
 export const MAX_MEMBERS = 400;
 export const DEFAULT_MEMBERS = 240;
+export const MIN_THREAD = 240;
+export const MAX_THREAD = 640;
+export const DEFAULT_THREAD = 384;
 
 interface PaneWidths {
 	spaces: number;

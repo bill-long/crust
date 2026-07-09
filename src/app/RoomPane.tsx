@@ -13,7 +13,9 @@ import {
 import {
 	clamp,
 	MAX_MEMBERS,
+	MAX_THREAD,
 	MIN_MEMBERS,
+	MIN_THREAD,
 	ResizeDivider,
 } from "../components/ResizableLayout";
 import {
@@ -167,6 +169,9 @@ const RoomPane: Component<{
 	membersWidth: () => number;
 	onMembersWidthChange: (next: number) => void;
 	onMembersWidthCommit: () => void;
+	threadWidth: () => number;
+	onThreadWidthChange: (next: number) => void;
+	onThreadWidthCommit: () => void;
 }> = (props) => {
 	const pins = usePinnedEvents(props.client, () => props.rid);
 	const packs = useImagePacks(props.client, () => props.rid);
@@ -462,13 +467,35 @@ const RoomPane: Component<{
 					the thread the user actually opened. */}
 				<Show when={!isMobile() && openThreadId()} keyed>
 					{(threadId) => (
-						<div class="w-96 min-w-60 max-w-[45%] shrink overflow-hidden border-l border-border-subtle">
-							<ThreadPanel
-								roomId={props.rid}
-								threadId={threadId}
-								onClose={() => setOpenThreadId(null)}
+						<>
+							{/* Divider on the panel's LEFT edge; the panel sits to its
+								right (same as the members column), so dragging the
+								divider right shrinks the panel - hence `width - d`. */}
+							<ResizeDivider
+								onDrag={(d) =>
+									props.onThreadWidthChange(
+										clamp(props.threadWidth() - d, MIN_THREAD, MAX_THREAD),
+									)
+								}
+								onDragEnd={() => props.onThreadWidthCommit()}
+								value={props.threadWidth()}
+								min={MIN_THREAD}
+								max={MAX_THREAD}
+								label="Resize thread panel"
 							/>
-						</div>
+							{/* max-w cap so a wide persisted thread + members width can't
+								squeeze the timeline to zero on a narrow desktop window. */}
+							<div
+								style={{ width: `${props.threadWidth()}px` }}
+								class="max-w-[45%] shrink-0 overflow-hidden border-l border-border-subtle"
+							>
+								<ThreadPanel
+									roomId={props.rid}
+									threadId={threadId}
+									onClose={() => setOpenThreadId(null)}
+								/>
+							</div>
+						</>
 					)}
 				</Show>
 				{/* Desktop: inline resizable members column */}
