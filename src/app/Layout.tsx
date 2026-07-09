@@ -16,8 +16,11 @@ import { getSpaceRooms } from "../client/summaries-selectors";
 import {
 	clamp,
 	DEFAULT_MEMBERS,
+	DEFAULT_THREAD,
 	MAX_MEMBERS,
+	MAX_THREAD,
 	MIN_MEMBERS,
+	MIN_THREAD,
 	ResizableLayout,
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
@@ -101,6 +104,29 @@ function saveMembersWidth(w: number): void {
 	}
 }
 
+const THREAD_WIDTH_KEY = "crust_thread_width";
+
+function loadThreadWidth(): number {
+	try {
+		const raw = localStorage.getItem(THREAD_WIDTH_KEY);
+		if (raw) {
+			const n = Number(raw);
+			if (Number.isFinite(n)) return clamp(n, MIN_THREAD, MAX_THREAD);
+		}
+	} catch {
+		// ignore
+	}
+	return DEFAULT_THREAD;
+}
+
+function saveThreadWidth(w: number): void {
+	try {
+		localStorage.setItem(THREAD_WIDTH_KEY, String(w));
+	} catch {
+		// ignore
+	}
+}
+
 const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
 		useClient();
@@ -115,6 +141,7 @@ const Layout: Component = () => {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [membersWidth, setMembersWidth] = createSignal(loadMembersWidth());
+	const [threadWidth, setThreadWidth] = createSignal(loadThreadWidth());
 	const [leavingIds, setLeavingIds] = createSignal<ReadonlySet<string>>(
 		new Set(),
 	);
@@ -730,6 +757,9 @@ const Layout: Component = () => {
 									membersWidth={membersWidth}
 									onMembersWidthChange={(next) => setMembersWidth(next)}
 									onMembersWidthCommit={() => saveMembersWidth(membersWidth())}
+									threadWidth={threadWidth}
+									onThreadWidthChange={(next) => setThreadWidth(next)}
+									onThreadWidthCommit={() => saveThreadWidth(threadWidth())}
 								/>
 							)}
 						</Show>
