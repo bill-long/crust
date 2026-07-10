@@ -1,6 +1,7 @@
 import { createPersistedSignal } from "../lib/persistedSignal";
+import { STORAGE_KEYS } from "../lib/storageKeys";
 
-const STORAGE_KEY = "crust:last-channel";
+const STORAGE_KEY = STORAGE_KEYS.lastChannel;
 
 // Map of space room ID -> the room ID the user last viewed within that space.
 // Room IDs are external data, so use null-prototype maps to keep lookups and

@@ -89,6 +89,54 @@ describe("loadPersisted / savePersisted", () => {
 		localStorage.setItem("crust:c", JSON.stringify({ n: "x" }));
 		expect(loadPersisted("crust:c", parseCounter, { n: 2 })).toEqual({ n: 0 });
 	});
+
+	describe("legacy key migration", () => {
+		it("adopts the legacy value under the new key and removes the legacy key", () => {
+			localStorage.setItem("crust_c", JSON.stringify({ n: 5 }));
+			expect(
+				loadPersisted(
+					"crust:c",
+					parseCounter,
+					{ n: 0 },
+					{ legacyKey: "crust_c" },
+				),
+			).toEqual({ n: 5 });
+			expect(localStorage.getItem("crust:c")).toBe(JSON.stringify({ n: 5 }));
+			expect(localStorage.getItem("crust_c")).toBeNull();
+		});
+
+		it("keeps the legacy key when writing the new key fails (no state loss)", () => {
+			localStorage.setItem("crust_c", JSON.stringify({ n: 5 }));
+			vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+				throw new Error("QuotaExceeded");
+			});
+			// The value still loads from the legacy key this session...
+			expect(
+				loadPersisted(
+					"crust:c",
+					parseCounter,
+					{ n: 0 },
+					{ legacyKey: "crust_c" },
+				),
+			).toEqual({ n: 5 });
+			// ...and the legacy key is preserved so it survives to the next load.
+			expect(localStorage.getItem("crust_c")).toBe(JSON.stringify({ n: 5 }));
+		});
+
+		it("prefers the new key and leaves the legacy key untouched", () => {
+			localStorage.setItem("crust:c", JSON.stringify({ n: 2 }));
+			localStorage.setItem("crust_c", JSON.stringify({ n: 5 }));
+			expect(
+				loadPersisted(
+					"crust:c",
+					parseCounter,
+					{ n: 0 },
+					{ legacyKey: "crust_c" },
+				),
+			).toEqual({ n: 2 });
+			expect(localStorage.getItem("crust_c")).toBe(JSON.stringify({ n: 5 }));
+		});
+	});
 });
 
 describe("createPersistedSignal", () => {

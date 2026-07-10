@@ -1,6 +1,8 @@
 import { createStore } from "solid-js/store";
+import { loadPersisted, savePersisted } from "../lib/persistedSignal";
+import { STORAGE_KEYS } from "../lib/storageKeys";
 
-const SETTINGS_KEY = "crust:settings";
+const SETTINGS_KEY = STORAGE_KEYS.settings;
 
 export interface UserSettings {
 	/** Whether to auto-fetch GIF URLs from CDN for inline display. */
@@ -109,75 +111,72 @@ function loadBool(
 	return typeof obj[key] === "boolean" ? (obj[key] as boolean) : fallback;
 }
 
-function load(): UserSettings {
-	try {
-		const raw = localStorage.getItem(SETTINGS_KEY);
-		if (!raw) return { ...defaults };
-		const parsed: unknown = JSON.parse(raw);
-		if (typeof parsed !== "object" || parsed === null) return { ...defaults };
-		const obj = parsed as Record<string, unknown>;
-		return {
-			autoDownloadGifs: loadBool(
-				obj,
-				"autoDownloadGifs",
-				defaults.autoDownloadGifs,
-			),
-			zoomLevel:
-				typeof obj.zoomLevel === "number" &&
-				obj.zoomLevel >= 50 &&
-				obj.zoomLevel <= 200
-					? obj.zoomLevel
-					: defaults.zoomLevel,
-			timeFormat:
-				obj.timeFormat === "12h" || obj.timeFormat === "24h"
-					? obj.timeFormat
-					: defaults.timeFormat,
-			desktopNotifications: loadBool(
-				obj,
-				"desktopNotifications",
-				defaults.desktopNotifications,
-			),
-			backgroundNotifications: loadBool(
-				obj,
-				"backgroundNotifications",
-				defaults.backgroundNotifications,
-			),
-			notificationSound: loadBool(
-				obj,
-				"notificationSound",
-				defaults.notificationSound,
-			),
-			urlPreviews: loadBool(obj, "urlPreviews", defaults.urlPreviews),
-			inlineMediaPlayers: loadBool(
-				obj,
-				"inlineMediaPlayers",
-				defaults.inlineMediaPlayers,
-			),
-			rtcMicDeviceId:
-				typeof obj.rtcMicDeviceId === "string"
-					? obj.rtcMicDeviceId
-					: defaults.rtcMicDeviceId,
-			rtcCamDeviceId:
-				typeof obj.rtcCamDeviceId === "string"
-					? obj.rtcCamDeviceId
-					: defaults.rtcCamDeviceId,
-			rtcScreenShareQuality:
-				obj.rtcScreenShareQuality === "720p30" ||
-				obj.rtcScreenShareQuality === "1080p30" ||
-				obj.rtcScreenShareQuality === "1080p60"
-					? obj.rtcScreenShareQuality
-					: defaults.rtcScreenShareQuality,
-			micMode:
-				obj.micMode === "voice-activity" ||
-				obj.micMode === "push-to-talk" ||
-				obj.micMode === "push-to-mute"
-					? obj.micMode
-					: defaults.micMode,
-			micHotkey: parseMicHotkey(obj.micHotkey),
-		};
-	} catch {
-		return { ...defaults };
-	}
+// Validates a JSON-parsed settings object field-by-field, falling back to the
+// default for each absent/malformed field. Structural validation is this
+// callback's job (loadPersisted handles the JSON-syntax try/catch); a
+// non-object payload yields the full defaults.
+function parseSettings(parsed: unknown): UserSettings {
+	if (typeof parsed !== "object" || parsed === null) return { ...defaults };
+	const obj = parsed as Record<string, unknown>;
+	return {
+		autoDownloadGifs: loadBool(
+			obj,
+			"autoDownloadGifs",
+			defaults.autoDownloadGifs,
+		),
+		zoomLevel:
+			typeof obj.zoomLevel === "number" &&
+			obj.zoomLevel >= 50 &&
+			obj.zoomLevel <= 200
+				? obj.zoomLevel
+				: defaults.zoomLevel,
+		timeFormat:
+			obj.timeFormat === "12h" || obj.timeFormat === "24h"
+				? obj.timeFormat
+				: defaults.timeFormat,
+		desktopNotifications: loadBool(
+			obj,
+			"desktopNotifications",
+			defaults.desktopNotifications,
+		),
+		backgroundNotifications: loadBool(
+			obj,
+			"backgroundNotifications",
+			defaults.backgroundNotifications,
+		),
+		notificationSound: loadBool(
+			obj,
+			"notificationSound",
+			defaults.notificationSound,
+		),
+		urlPreviews: loadBool(obj, "urlPreviews", defaults.urlPreviews),
+		inlineMediaPlayers: loadBool(
+			obj,
+			"inlineMediaPlayers",
+			defaults.inlineMediaPlayers,
+		),
+		rtcMicDeviceId:
+			typeof obj.rtcMicDeviceId === "string"
+				? obj.rtcMicDeviceId
+				: defaults.rtcMicDeviceId,
+		rtcCamDeviceId:
+			typeof obj.rtcCamDeviceId === "string"
+				? obj.rtcCamDeviceId
+				: defaults.rtcCamDeviceId,
+		rtcScreenShareQuality:
+			obj.rtcScreenShareQuality === "720p30" ||
+			obj.rtcScreenShareQuality === "1080p30" ||
+			obj.rtcScreenShareQuality === "1080p60"
+				? obj.rtcScreenShareQuality
+				: defaults.rtcScreenShareQuality,
+		micMode:
+			obj.micMode === "voice-activity" ||
+			obj.micMode === "push-to-talk" ||
+			obj.micMode === "push-to-mute"
+				? obj.micMode
+				: defaults.micMode,
+		micHotkey: parseMicHotkey(obj.micHotkey),
+	};
 }
 
 /**
@@ -230,14 +229,12 @@ function applyZoom(level: number): void {
 
 // Module-level singleton store — property-level reactivity so consumers
 // reading e.g. settings.timeFormat don't re-render on zoomLevel changes.
-const [settings, setSettings] = createStore<UserSettings>(load());
+const [settings, setSettings] = createStore<UserSettings>(
+	loadPersisted(SETTINGS_KEY, parseSettings, { ...defaults }),
+);
 
 function save(): void {
-	try {
-		localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-	} catch {
-		// localStorage full or unavailable — best-effort
-	}
+	savePersisted(SETTINGS_KEY, settings);
 }
 
 /** Apply persisted zoom level. Call once during app bootstrap. */
