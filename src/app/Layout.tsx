@@ -56,11 +56,7 @@ import {
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
-import {
-	loadPersisted,
-	safeLocalStorage,
-	savePersisted,
-} from "../lib/persistedSignal";
+import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
@@ -89,27 +85,28 @@ function loadMembersWidth(): number {
 	);
 	if (stored !== null) return stored;
 	// Even older layouts stored the members width inside the combined pane-widths
-	// object, before it was split into its own key. Recover it from wherever the
-	// pane-widths value now lives - the migrated `crust:pane-widths` (whose raw
-	// value still carries the stale `members` field) or the not-yet-migrated
-	// `crust_pane_widths` - and promote it to the dedicated key.
-	const combined =
-		safeLocalStorage.get(STORAGE_KEYS.paneWidths) ??
-		safeLocalStorage.get(LEGACY_STORAGE_KEYS.paneWidths);
-	if (combined) {
-		try {
-			const parsed = JSON.parse(combined);
-			if (
-				typeof parsed.members === "number" &&
-				Number.isFinite(parsed.members)
-			) {
-				const w = clamp(parsed.members, MIN_MEMBERS, MAX_MEMBERS);
-				saveMembersWidth(w);
-				return w;
-			}
-		} catch {
-			// ignore a malformed combined value
-		}
+	// object, before it was split into its own key. Recover it through the same
+	// helper (so JSON parsing/migration stays centralized) by reading `members`
+	// from wherever the pane-widths value now lives - the migrated
+	// `crust:pane-widths` (whose raw value still carries the stale `members`
+	// field) or the not-yet-migrated `crust_pane_widths` - then promote it.
+	const fromCombined = loadPersisted<number | null>(
+		STORAGE_KEYS.paneWidths,
+		(raw) => {
+			const members =
+				typeof raw === "object" && raw !== null
+					? (raw as { members?: unknown }).members
+					: undefined;
+			return typeof members === "number" && Number.isFinite(members)
+				? clamp(members, MIN_MEMBERS, MAX_MEMBERS)
+				: null;
+		},
+		null,
+		{ legacyKey: LEGACY_STORAGE_KEYS.paneWidths },
+	);
+	if (fromCombined !== null) {
+		saveMembersWidth(fromCombined);
+		return fromCombined;
 	}
 	return DEFAULT_MEMBERS;
 }

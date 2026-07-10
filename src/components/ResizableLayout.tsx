@@ -42,10 +42,14 @@ function loadWidths(): PaneWidths {
 				typeof (raw as PaneWidths).roomList === "number"
 			) {
 				const { spaces, roomList } = raw as PaneWidths;
-				return {
-					spaces: clamp(spaces, MIN_SPACES, MAX_SPACES),
-					roomList: clamp(roomList, MIN_ROOM_LIST, MAX_ROOM_LIST),
-				};
+				// clamp(NaN, ...) is NaN, so reject non-finite values (NaN /
+				// Infinity slip past the typeof-number check) before clamping.
+				if (Number.isFinite(spaces) && Number.isFinite(roomList)) {
+					return {
+						spaces: clamp(spaces, MIN_SPACES, MAX_SPACES),
+						roomList: clamp(roomList, MIN_ROOM_LIST, MAX_ROOM_LIST),
+					};
+				}
 			}
 			return DEFAULT_WIDTHS;
 		},
