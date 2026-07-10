@@ -56,6 +56,8 @@ import {
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
+import { loadPersisted, savePersisted } from "../lib/persistedSignal";
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { setLastChannel } from "../stores/lastChannel";
@@ -71,60 +73,62 @@ import { dmCanonicalTarget } from "./dmRoute";
 import { RoomPane } from "./RoomPane";
 import { useDecodedParams } from "./useDecodedParams";
 
-const MEMBERS_WIDTH_KEY = "crust_members_width";
-
 function loadMembersWidth(): number {
-	try {
-		const raw = localStorage.getItem(MEMBERS_WIDTH_KEY);
-		if (raw) {
-			const n = Number(raw);
-			if (Number.isFinite(n)) return clamp(n, MIN_MEMBERS, MAX_MEMBERS);
-		}
-		// Migrate from old combined storage key
-		const legacy = localStorage.getItem("crust_pane_widths");
-		if (legacy) {
-			const parsed = JSON.parse(legacy);
-			if (typeof parsed.members === "number") {
-				const w = clamp(parsed.members, MIN_MEMBERS, MAX_MEMBERS);
-				saveMembersWidth(w);
-				return w;
-			}
-		}
-	} catch {
-		// ignore
+	const stored = loadPersisted<number | null>(
+		STORAGE_KEYS.membersWidth,
+		(raw) =>
+			typeof raw === "number" && Number.isFinite(raw)
+				? clamp(raw, MIN_MEMBERS, MAX_MEMBERS)
+				: null,
+		null,
+		{ legacyKey: LEGACY_STORAGE_KEYS.membersWidth },
+	);
+	if (stored !== null) return stored;
+	// Even older layouts stored the members width inside the combined pane-widths
+	// object, before it was split into its own key. Recover it through the same
+	// helper (so JSON parsing/migration stays centralized) by reading `members`
+	// from wherever the pane-widths value now lives - the migrated
+	// `crust:pane-widths` (whose raw value still carries the stale `members`
+	// field) or the not-yet-migrated `crust_pane_widths` - then promote it.
+	const fromCombined = loadPersisted<number | null>(
+		STORAGE_KEYS.paneWidths,
+		(raw) => {
+			const members =
+				typeof raw === "object" && raw !== null
+					? (raw as { members?: unknown }).members
+					: undefined;
+			return typeof members === "number" && Number.isFinite(members)
+				? clamp(members, MIN_MEMBERS, MAX_MEMBERS)
+				: null;
+		},
+		null,
+		{ legacyKey: LEGACY_STORAGE_KEYS.paneWidths },
+	);
+	if (fromCombined !== null) {
+		saveMembersWidth(fromCombined);
+		return fromCombined;
 	}
 	return DEFAULT_MEMBERS;
 }
 
 function saveMembersWidth(w: number): void {
-	try {
-		localStorage.setItem(MEMBERS_WIDTH_KEY, String(w));
-	} catch {
-		// ignore
-	}
+	savePersisted(STORAGE_KEYS.membersWidth, w);
 }
 
-const THREAD_WIDTH_KEY = "crust_thread_width";
-
 function loadThreadWidth(): number {
-	try {
-		const raw = localStorage.getItem(THREAD_WIDTH_KEY);
-		if (raw) {
-			const n = Number(raw);
-			if (Number.isFinite(n)) return clamp(n, MIN_THREAD, MAX_THREAD);
-		}
-	} catch {
-		// ignore
-	}
-	return DEFAULT_THREAD;
+	return loadPersisted<number>(
+		STORAGE_KEYS.threadWidth,
+		(raw) =>
+			typeof raw === "number" && Number.isFinite(raw)
+				? clamp(raw, MIN_THREAD, MAX_THREAD)
+				: DEFAULT_THREAD,
+		DEFAULT_THREAD,
+		{ legacyKey: LEGACY_STORAGE_KEYS.threadWidth },
+	);
 }
 
 function saveThreadWidth(w: number): void {
-	try {
-		localStorage.setItem(THREAD_WIDTH_KEY, String(w));
-	} catch {
-		// ignore
-	}
+	savePersisted(STORAGE_KEYS.threadWidth, w);
 }
 
 const Layout: Component = () => {

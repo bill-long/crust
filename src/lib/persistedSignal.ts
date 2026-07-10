@@ -32,18 +32,38 @@ export const safeLocalStorage = {
 };
 
 /**
+ * Resolve the raw stored string for `key`, performing a one-time migration from
+ * `legacyKey` when supplied: if `key` is absent but `legacyKey` holds a value,
+ * adopt that value under `key` and drop the legacy key. The legacy key is only
+ * removed once the new write has actually succeeded, so a failed write (quota /
+ * disabled storage) can't lose the value - it just retries on the next load.
+ */
+function readRawWithMigration(key: string, legacyKey?: string): string | null {
+	const raw = safeLocalStorage.get(key);
+	if (raw !== null || !legacyKey) return raw;
+	const legacy = safeLocalStorage.get(legacyKey);
+	if (legacy === null) return null;
+	if (safeLocalStorage.set(key, legacy)) safeLocalStorage.remove(legacyKey);
+	return legacy;
+}
+
+/**
  * Read a JSON value from a `crust:` storage key, returning `initial` when the
  * key is absent, the contents aren't valid JSON, or `parse` throws. Structural
  * validation is `parse`'s job: it receives the parsed value and returns its own
  * fallback (often `initial`) for parseable-but-invalid input. The non-reactive
  * counterpart to `createPersistedSignal` for load-on-demand stores.
+ *
+ * @param options.legacyKey  A previous key to migrate from, with the same
+ *                one-time, state-loss-safe semantics as `createPersistedSignal`.
  */
 export function loadPersisted<T>(
 	key: string,
 	parse: (raw: unknown) => T,
 	initial: T,
+	options?: { legacyKey?: string },
 ): T {
-	const raw = safeLocalStorage.get(key);
+	const raw = readRawWithMigration(key, options?.legacyKey);
 	if (raw === null) return initial;
 	try {
 		return parse(JSON.parse(raw));
@@ -110,20 +130,7 @@ export function createPersistedSignal<T>(
 	const legacyKey = options?.legacyKey;
 
 	const load = (): T => {
-		let raw = safeLocalStorage.get(key);
-		if (raw === null && legacyKey) {
-			// One-time migration: adopt the legacy value under the new key. Use it
-			// for this session regardless, and only DROP the legacy key once the
-			// new write has actually succeeded - so a failed write (quota /
-			// disabled storage) can't lose the value; it just retries next load.
-			const legacy = safeLocalStorage.get(legacyKey);
-			if (legacy !== null) {
-				raw = legacy;
-				if (safeLocalStorage.set(key, legacy)) {
-					safeLocalStorage.remove(legacyKey);
-				}
-			}
-		}
+		const raw = readRawWithMigration(key, legacyKey);
 		if (raw === null) return initial;
 		try {
 			return parse(JSON.parse(raw));

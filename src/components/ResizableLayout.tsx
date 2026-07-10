@@ -5,9 +5,9 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { loadPersisted, savePersisted } from "../lib/persistedSignal";
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { isMobile } from "../stores/viewport";
-
-const STORAGE_KEY = "crust_pane_widths";
 
 const MIN_SPACES = 48;
 const MAX_SPACES = 96;
@@ -25,37 +25,41 @@ interface PaneWidths {
 	roomList: number;
 }
 
+const DEFAULT_WIDTHS: PaneWidths = { spaces: 64, roomList: 256 };
+
 export function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value));
 }
 
 function loadWidths(): PaneWidths {
-	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (raw) {
-			const parsed = JSON.parse(raw);
+	return loadPersisted<PaneWidths>(
+		STORAGE_KEYS.paneWidths,
+		(raw) => {
 			if (
-				typeof parsed.spaces === "number" &&
-				typeof parsed.roomList === "number"
+				typeof raw === "object" &&
+				raw !== null &&
+				typeof (raw as PaneWidths).spaces === "number" &&
+				typeof (raw as PaneWidths).roomList === "number"
 			) {
-				return {
-					spaces: clamp(parsed.spaces, MIN_SPACES, MAX_SPACES),
-					roomList: clamp(parsed.roomList, MIN_ROOM_LIST, MAX_ROOM_LIST),
-				};
+				const { spaces, roomList } = raw as PaneWidths;
+				// clamp(NaN, ...) is NaN, so reject non-finite values (NaN /
+				// Infinity slip past the typeof-number check) before clamping.
+				if (Number.isFinite(spaces) && Number.isFinite(roomList)) {
+					return {
+						spaces: clamp(spaces, MIN_SPACES, MAX_SPACES),
+						roomList: clamp(roomList, MIN_ROOM_LIST, MAX_ROOM_LIST),
+					};
+				}
 			}
-		}
-	} catch {
-		// ignore
-	}
-	return { spaces: 64, roomList: 256 };
+			return DEFAULT_WIDTHS;
+		},
+		DEFAULT_WIDTHS,
+		{ legacyKey: LEGACY_STORAGE_KEYS.paneWidths },
+	);
 }
 
 function saveWidths(widths: PaneWidths): void {
-	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(widths));
-	} catch {
-		// Storage may be unavailable (private mode, quota exceeded)
-	}
+	savePersisted(STORAGE_KEYS.paneWidths, widths);
 }
 
 const STEP = 10;

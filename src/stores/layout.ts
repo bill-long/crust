@@ -1,6 +1,7 @@
 import { createPersistedSignal } from "../lib/persistedSignal";
+import { STORAGE_KEYS } from "../lib/storageKeys";
 
-const STORAGE_KEY = "crust:layout";
+const STORAGE_KEY = STORAGE_KEYS.layout;
 
 interface LayoutState {
 	membersPaneVisible: boolean;

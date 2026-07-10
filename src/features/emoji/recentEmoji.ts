@@ -1,6 +1,7 @@
 import { loadPersisted, savePersisted } from "../../lib/persistedSignal";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 
-const STORAGE_KEY = "crust:recent-emoji";
+const STORAGE_KEY = STORAGE_KEYS.recentEmoji;
 const MAX_RECENT = 32;
 
 interface RecentEntry {

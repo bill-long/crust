@@ -1,6 +1,7 @@
 import { createPersistedSignal } from "../lib/persistedSignal";
+import { STORAGE_KEYS } from "../lib/storageKeys";
 
-const STORAGE_KEY = "crust:last-room";
+const STORAGE_KEY = STORAGE_KEYS.lastRoom;
 
 // The room the user last had open, across all sections (home / space / DM).
 // Stored structurally rather than as a raw route so the route can be rebuilt

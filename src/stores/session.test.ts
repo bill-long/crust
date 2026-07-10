@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	clearSession,
 	loadSession,
@@ -8,7 +8,8 @@ import {
 
 // The persisted key is module-private; the tests that poke localStorage
 // directly reference it by its literal value.
-const SESSION_KEY = "crust_session";
+const SESSION_KEY = "crust:session";
+const LEGACY_SESSION_KEY = "crust_session";
 
 const VALID: Session = {
 	accessToken: "syt_accesstoken",
@@ -18,7 +19,10 @@ const VALID: Session = {
 };
 
 beforeEach(() => localStorage.clear());
-afterEach(() => localStorage.clear());
+afterEach(() => {
+	localStorage.clear();
+	vi.restoreAllMocks();
+});
 
 describe("saveSession / loadSession round-trip", () => {
 	it("persists a valid session and loads it back", () => {
@@ -163,5 +167,58 @@ describe("clearSession", () => {
 	it("is a no-op when nothing is stored", () => {
 		expect(() => clearSession()).not.toThrow();
 		expect(loadSession()).toBeNull();
+	});
+
+	it("also clears an un-migrated legacy session (no stale token left behind)", () => {
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		clearSession();
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
+		expect(loadSession()).toBeNull();
+	});
+});
+
+describe("legacy key migration", () => {
+	it("migrates a legacy crust_session value to crust:session on load", () => {
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		expect(loadSession()).toEqual(VALID);
+		// The value now lives under the new key and the legacy key is dropped.
+		expect(localStorage.getItem(SESSION_KEY)).toBe(JSON.stringify(VALID));
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
+	});
+
+	it("prefers the new key and drops a stale coexisting legacy token", () => {
+		const legacy = { ...VALID, deviceId: "OLD_DEVICE" };
+		localStorage.setItem(SESSION_KEY, JSON.stringify(VALID));
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(legacy));
+		expect(loadSession()).toEqual(VALID);
+		// A still-valid legacy token must not linger once the new key is set.
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
+		expect(localStorage.getItem(SESSION_KEY)).toBe(JSON.stringify(VALID));
+	});
+
+	it("recovers from a valid legacy token when the new key is unusable, then heals", () => {
+		// The new key exists but is corrupt/invalid; a valid legacy token must be
+		// recovered rather than deleted, so the user isn't stranded logged out.
+		localStorage.setItem(SESSION_KEY, "not json {");
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		expect(loadSession()).toEqual(VALID);
+		// The recovered value is promoted to the new key (overwriting the corrupt
+		// one) and the legacy token is dropped, leaving a single clean copy.
+		expect(localStorage.getItem(SESSION_KEY)).toBe(JSON.stringify(VALID));
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
+	});
+
+	it("keeps the legacy value when the migration write failed (no state loss)", () => {
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		// Storage rejects the migration write, so `crust:session` stays absent.
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("QuotaExceeded");
+		});
+		// The session still loads from the legacy key this session...
+		expect(loadSession()).toEqual(VALID);
+		// ...and the legacy value is preserved rather than dropped.
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBe(
+			JSON.stringify(VALID),
+		);
 	});
 });

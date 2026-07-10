@@ -1,5 +1,6 @@
 import { createSignal } from "solid-js";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
+import { STORAGE_KEYS } from "../lib/storageKeys";
 
 /**
  * Global state for the floating voice-overlay panel (a Document
@@ -22,7 +23,7 @@ import { loadPersisted, savePersisted } from "../lib/persistedSignal";
  * Only one PiP window can exist per browser, matching this single-signal model.
  */
 
-const SIZE_KEY = "crust:call-overlay-size";
+const SIZE_KEY = STORAGE_KEYS.callOverlaySize;
 
 export interface OverlaySize {
 	width: number;
