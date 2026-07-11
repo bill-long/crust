@@ -6,15 +6,16 @@ Built for the [strange.pizza](https://strange.pizza) community; open-sourced
 under Apache-2.0. Public deploy at
 [strange.pizza/crust](https://strange.pizza/crust).
 
-> **Status: Post-Phase 6 — polish and notifications.** Phases 0–6 shipped.
+> **Status: Post-Phase 6 - polish and notifications.** Phases 0-6 shipped.
 > Cutover from Cinny is planned but not yet scheduled.
 
 ## Why Crust exists
 
-We wanted to send GIFs on Matrix. No client could do it — every GIF provider
-prohibits re-hosting, and no Matrix client renders third-party URLs inline. So we
-built one that does. Everything else (spaces-first nav, real mentions, E2EE,
-calls) is table stakes for a chat client we'd actually use daily.
+We wanted to send GIFs on Matrix. No client does this, due to the privacy
+tradeoff it requires - GIF providers prohibit re-hosting, and no Matrix client
+renders third-party URLs inline. So we built one that does. Everything else
+(spaces-first nav, real mentions, E2EE, calls) is table stakes for a chat client
+we'd actually use daily.
 
 ## What Crust is
 
@@ -24,20 +25,27 @@ calls) is table stakes for a chat client we'd actually use daily.
   `/v3/notifications` dependency)
 - E2EE by default for DMs, with SAS verification and key backup
 - Custom emoji and image packs (MSC2545)
-- GIF search (Giphy / Klipy) — opt-in, TOS-compliant
+- GIF search (Giphy / Klipy) - opt-in, TOS-compliant
 - Desktop notifications with per-room levels (default / all / mentions-only / mute)
 - Native MatrixRTC voice/video calls (LiveKit-backed, end-to-end encrypted);
   optional fallback to embedded Element Call iframe
 - Strict Content Security Policy from day one
 
-## GIF search — how and why
+## GIF search - how and why
 
 Every GIF provider (Giphy, Tenor, Klipy) prohibits downloading and re-hosting
-their content — GIFs must be served from the provider's CDN. But no Matrix
-client renders third-party URLs inline; only images uploaded to the homeserver
-(`m.image` with an MXC URI) display as inline media. These two requirements are
-mutually exclusive, which is why **no Matrix client has shipped a native GIF
-picker.**
+their content - GIFs must be served from the provider's CDN. Because the user's
+client fetches directly from that CDN, this exposes the end user's IP to the CDN.
+On top of that, no Matrix client renders third-party URLs inline; only images
+uploaded to the homeserver (`m.image` with an MXC URI) display as inline media.
+Between the privacy tradeoff and the lack of inline third-party rendering, **no
+other Matrix client has shipped a native GIF picker.** Cinny's maintainer lays
+out this same reasoning - both the IP exposure and the re-hosting problem - in
+[cinnyapp/cinny#1557](https://github.com/cinnyapp/cinny/issues/1557).
+
+Crust is built for people coming from Discord, where GIFs are a core part of the
+chat experience. That makes native GIF support worth the privacy tradeoff, so we
+make it intentionally in Crust.
 
 Crust resolves this honestly:
 
@@ -56,21 +64,21 @@ providing a provider API key. Content rating defaults to `g`.
 
 For local development, copy `.env.example` to `.env.local` and set
 `VITE_GIF_API_KEY` (and `VITE_GIF_ENABLED=true`) there instead of editing
-`config.json` — `.env.local` is gitignored so your key won't be committed.
+`config.json` - `.env.local` is gitignored so your key won't be committed.
 Any valid `VITE_GIF_*` value overrides the matching field in `config.json`;
 unset, empty, or otherwise invalid values are ignored.
 
 ## What Crust is not
 
-- A mobile app (responsive enough to use, not optimized — desktop-first is the
+- A mobile app (responsive enough to use, not optimized - desktop-first is the
   whole point: a dense, keyboard-first, three-pane layout)
 - A bridge management UI (bridges are a server-side operator concern, configured
   out-of-band)
-- An SSO/OIDC client (password auth only — our homeserver, Continuwuity, has no
+- An SSO/OIDC client (password auth only - our homeserver, Continuwuity, has no
   OIDC login support yet; this is a "not yet," not a "never," and worth
   revisiting if that changes)
 - A clone of Element's full feature surface (features are chosen intentionally
-  rather than to reach 100% parity — this rules out labs and niche admin
+  rather than to reach 100% parity - this rules out labs and niche admin
   surfaces, *not* mainstream features like threads or polls, which remain fair
   game)
 
@@ -109,7 +117,7 @@ docker build --build-arg VITE_BASE_PATH=/crust/ -t crust .
 
 This bakes `/crust/` into the asset URLs and the in-app router. The container
 still serves at its own root (`/`), so put a reverse proxy in front that
-strips the `/crust` prefix before forwarding to the container — for example
+strips the `/crust` prefix before forwarding to the container - for example
 with nginx:
 
 ```nginx
