@@ -1,68 +1,97 @@
 /**
- * Pure helpers for reading live received-video quality off a WebRTC stats
- * report (#408). Kept free of runtime `livekit-client` imports so the stats
- * overlay doesn't pull the LiveKit chunk into the bundle eagerly - the SDK
- * is only fetched when a call is joined (see `useLivekitRoom`).
+ * Pure helpers for reading live video quality off a WebRTC stats report -
+ * the receive side (inbound-rtp, #408) and the send side (outbound-rtp,
+ * #409) share one shape and one reader. Kept free of runtime
+ * `livekit-client` imports so the stats overlay doesn't pull the LiveKit
+ * chunk into the bundle eagerly - the SDK is only fetched when a call is
+ * joined (see `useLivekitRoom`).
  */
 
-/** Snapshot of the received-video quality fields the stats overlay renders. */
-export interface InboundVideoStats {
+/** Which side of the pipe a readout describes. */
+export type StatsDirection = "receive" | "send";
+
+/** Snapshot of the video-quality fields the stats overlay renders. */
+export interface VideoTrackStats {
 	/**
-	 * The report id of the video inbound-rtp entry, or null when the
-	 * report has none. Not rendered - the overlay's poll loop uses it to
-	 * (a) hold the last-good readout when the entry VANISHES transiently
-	 * from a live report (renegotiation, layer switch) instead of
-	 * flickering, and (b) reset per-stream state when the id CHANGES
-	 * (SSRC restart / replaced publication), so a stale fps flag or
-	 * counter baseline never misreads a fresh stream.
+	 * The report id of the selected RTP entry, or null when the report
+	 * has none. Not rendered - the overlay's poll loop uses it to (a)
+	 * hold the last-good readout when the entry VANISHES transiently
+	 * from a live report instead of flickering, and (b) detect
+	 * selected-entry changes; see useTrackStats for the direction-aware
+	 * semantics (receive: any id change resets the stream baselines;
+	 * send: fps history clears while the limitation spell carries by
+	 * contract).
 	 */
 	entryId: string | null;
 	/**
-	 * Cumulative received payload bytes and the entry's timestamp (ms).
-	 * Not rendered - the poll loop derives bitrate from tick-to-tick
-	 * deltas of these, because livekit's `currentBitrate` monitor needs
-	 * several seconds to warm up and would falsify the "0 kbps = nothing
-	 * arriving" diagnosis on healthy new streams.
+	 * Cumulative payload bytes (received, or sent SUMMED across simulcast
+	 * layers - total upload) and the selected entry's timestamp (ms). Not
+	 * rendered - the poll loop derives bitrate from tick-to-tick deltas
+	 * of these, because livekit's `currentBitrate` monitor needs several
+	 * seconds to warm up and would falsify the "0 kbps = nothing
+	 * arriving/leaving" diagnosis on healthy new streams.
 	 */
-	bytesReceived: number | null;
+	bytes: number | null;
 	timestamp: number | null;
 	/**
-	 * Decoded frame width in px. Null until the first frame decodes -
-	 * including when the inbound-rtp entry is missing entirely - so a
-	 * null here means "nothing decoded", which the overlay surfaces
+	 * Sorted ids of every entry contributing to `bytes`, joined - the
+	 * byte baseline's identity. Not rendered: the poll loop must drop its
+	 * delta baseline whenever this changes (a NON-top simulcast layer
+	 * churning moves the sum without the top entryId changing, which
+	 * would otherwise spike then blank the derived bitrate).
+	 */
+	byteEntryIds: string | null;
+	/**
+	 * Decoded (receive) or encoded (send) frame width in px. Null until
+	 * the first frame - including when the RTP entry is missing entirely
+	 * - so a null here means "no frames", which the overlay surfaces
 	 * explicitly rather than papering over.
 	 */
 	frameWidth: number | null;
-	/** Decoded frame height in px, or null when not yet reported. */
+	/** Frame height in px, or null when not yet reported. */
 	frameHeight: number | null;
-	/** Decoded frames per second, or null when not yet reported. */
+	/** Decoded/encoded frames per second, or null when not yet reported. */
 	framesPerSecond: number | null;
 	/** Codec short name from the codec entry's mimeType, e.g. "VP9". */
 	codec: string | null;
 	/**
-	 * Whether decode is hardware-accelerated, derived from Chrome's
-	 * `powerEfficientDecoder` stats extension. Null on browsers that
-	 * don't expose it.
+	 * Whether decode (receive) / encode (send) is hardware-accelerated,
+	 * from Chrome's `powerEfficientDecoder`/`powerEfficientEncoder`
+	 * stats extensions. Null on browsers that don't expose them.
 	 */
-	decoder: "hw" | "sw" | null;
-	/** Cumulative receiver-side dropped frames. */
+	accel: "hw" | "sw" | null;
+	/** Cumulative receiver-side dropped frames (always 0 on send). */
 	framesDropped: number;
-	/** Cumulative playback freezes (Chrome-only stats extension). */
+	/** Cumulative playback freezes (Chrome extension; always 0 on send). */
 	freezeCount: number;
+	/**
+	 * The encoder's current quality limitation ("none" | "cpu" |
+	 * "bandwidth" | "other"), send side only (null on receive). Unlike
+	 * the cumulative counters this is a LIVE value - render it directly.
+	 */
+	qualityLimitationReason: string | null;
+	/**
+	 * Cumulative seconds spent under the CURRENT limitation reason, from
+	 * `qualityLimitationDurations`. Null when unlimited or not exposed.
+	 */
+	qualityLimitationSeconds: number | null;
 }
 
-function emptyInboundVideoStats(): InboundVideoStats {
+function emptyVideoTrackStats(): VideoTrackStats {
 	return {
 		entryId: null,
-		bytesReceived: null,
+		bytes: null,
 		timestamp: null,
+		byteEntryIds: null,
 		frameWidth: null,
 		frameHeight: null,
 		framesPerSecond: null,
 		codec: null,
-		decoder: null,
+		accel: null,
 		framesDropped: 0,
 		freezeCount: 0,
+		qualityLimitationReason: null,
+		qualityLimitationSeconds: null,
 	};
 }
 
@@ -75,53 +104,109 @@ function numField(entry: Record<string, unknown>, key: string): number | null {
 	return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
-// Around an SSRC restart a report can transiently carry BOTH the ended and
-// the new inbound-rtp entry; pick deterministically so the choice can't
-// latch onto the dead one or flip-flop between ticks: freshest timestamp
-// wins, then an actively-decoding entry (framesPerSecond present). On a
-// full tie (restart overlap before the new stream decodes its first
-// frame) prefer the later-iterated candidate: stats maplikes commonly
-// iterate in insertion order (not spec-guaranteed), putting the
-// replacement entry after the dying one. There is no reliable
-// discriminator at a full tie, and a mis-pick self-heals within a tick
-// or two - the dead entry disappears and the id-change reset kicks in.
-function preferInbound(
+// Whether a send-side simulcast layer is currently encoding. The spec's
+// `active` boolean on outbound-rtp is the direct discriminator; where a
+// browser omits it, fall back to a nonzero framesPerSecond (a deactivated
+// layer can report a PRESENT fps of 0, which must not count as active).
+function sendLayerActive(entry: Record<string, unknown>): boolean {
+	if (typeof entry.active === "boolean") return entry.active;
+	return (numField(entry, "framesPerSecond") ?? 0) > 0;
+}
+
+// Pick the entry the readout describes when a report carries several.
+// Entries in one report usually share a single collection timestamp, so
+// content signals decide first and timestamp only breaks remaining ties
+// (it discriminates cross-staleness on report shapes with per-entry
+// stamps without letting stamp jitter flip-flop the choice). Send side:
+// the ACTIVE layer beats size (a bandwidth-deactivated top layer keeps
+// its last-encoded frameWidth and must not render as a false stall over
+// a streaming lower layer), then an actually-flowing one (both entries
+// can claim active:true while only one reports framesPerSecond), then
+// the largest frame (the top layer of a simulcast set). Receive side:
+// an actively-decoding entry wins. On a full tie prefer the
+// later-iterated candidate: stats maplikes commonly iterate in insertion
+// order (not spec-guaranteed), putting a replacement entry after the
+// dying one; there is no reliable discriminator at a full tie, and a
+// mis-pick self-heals within a tick or two once the dead entry is
+// pruned.
+function preferEntry(
 	candidate: Record<string, unknown>,
 	current: Record<string, unknown>,
+	direction: StatsDirection,
 ): boolean {
+	const candidateFps = numField(candidate, "framesPerSecond") !== null;
+	const currentFps = numField(current, "framesPerSecond") !== null;
+	if (direction === "send") {
+		const candidateActive = sendLayerActive(candidate);
+		const currentActive = sendLayerActive(current);
+		if (candidateActive !== currentActive) return candidateActive;
+		if (candidateFps !== currentFps) return candidateFps;
+		const candidateW = numField(candidate, "frameWidth") ?? -1;
+		const currentW = numField(current, "frameWidth") ?? -1;
+		if (candidateW !== currentW) return candidateW > currentW;
+	} else if (candidateFps !== currentFps) {
+		return candidateFps;
+	}
 	const candidateTs = numField(candidate, "timestamp") ?? -1;
 	const currentTs = numField(current, "timestamp") ?? -1;
 	if (candidateTs !== currentTs) return candidateTs > currentTs;
-	const candidateFps = numField(candidate, "framesPerSecond") !== null;
-	const currentFps = numField(current, "framesPerSecond") !== null;
-	if (candidateFps !== currentFps) return candidateFps;
 	return true;
 }
 
 /**
- * Extract the received-video quality snapshot from a track's
- * `getRTCStatsReport()` result: the video `inbound-rtp` entry plus the
- * codec entry it references. Absent entries/fields degrade to nulls (and
- * zero counters) rather than throwing, since browsers differ in which
- * stats extensions they expose.
+ * Extract the video-quality snapshot for one direction from a track's
+ * `getRTCStatsReport()` result: the selected RTP entry plus the codec
+ * entry it references. Absent entries/fields degrade to nulls (and zero
+ * counters) rather than throwing, since browsers differ in which stats
+ * extensions they expose.
  */
-export function readInboundVideoStats(
+export function readVideoTrackStats(
 	report: RTCStatsReport,
-): InboundVideoStats {
-	let inbound: Record<string, unknown> | undefined;
+	direction: StatsDirection,
+): VideoTrackStats {
+	const entryType = direction === "receive" ? "inbound-rtp" : "outbound-rtp";
+	const bytesField = direction === "receive" ? "bytesReceived" : "bytesSent";
+	const accelField =
+		direction === "receive" ? "powerEfficientDecoder" : "powerEfficientEncoder";
+
+	const entries: Record<string, unknown>[] = [];
 	report.forEach((entry) => {
 		const e = entry as Record<string, unknown>;
-		if (e.type !== "inbound-rtp" || e.kind !== "video") return;
+		if (e.type !== entryType || e.kind !== "video") return;
 		// Spec guarantees every stats entry a string id, and the poll loop
 		// keys per-stream state on it - an id-less object is not usable.
 		if (typeof e.id !== "string") return;
-		if (inbound === undefined || preferInbound(e, inbound)) inbound = e;
+		entries.push(e);
 	});
-	if (!inbound) return emptyInboundVideoStats();
+	if (entries.length === 0) return emptyVideoTrackStats();
+
+	let top = entries[0];
+	for (const e of entries) {
+		if (e !== top && preferEntry(e, top, direction)) top = e;
+	}
+
+	// Send bitrate is the TOTAL upload: sum bytesSent across simulcast
+	// layers. Receive has a single selected entry.
+	let bytes: number | null = null;
+	let byteEntryIds: string | null = null;
+	if (direction === "send") {
+		const contributing: string[] = [];
+		for (const e of entries) {
+			const b = numField(e, bytesField);
+			if (b !== null) {
+				bytes = (bytes ?? 0) + b;
+				contributing.push(e.id as string);
+			}
+		}
+		if (contributing.length > 0) byteEntryIds = contributing.sort().join(",");
+	} else {
+		bytes = numField(top, bytesField);
+		if (bytes !== null) byteEntryIds = top.id as string;
+	}
 
 	let codec: string | null = null;
-	if (typeof inbound.codecId === "string") {
-		const codecEntry = report.get(inbound.codecId) as
+	if (typeof top.codecId === "string") {
+		const codecEntry = report.get(top.codecId) as
 			| Record<string, unknown>
 			| undefined;
 		if (typeof codecEntry?.mimeType === "string") {
@@ -131,23 +216,45 @@ export function readInboundVideoStats(
 		}
 	}
 
-	const powerEfficient = inbound.powerEfficientDecoder;
+	let qualityLimitationReason: string | null = null;
+	let qualityLimitationSeconds: number | null = null;
+	if (direction === "send") {
+		const reason = top.qualityLimitationReason;
+		qualityLimitationReason = typeof reason === "string" ? reason : null;
+		const durations = top.qualityLimitationDurations;
+		if (
+			qualityLimitationReason !== null &&
+			qualityLimitationReason !== "none" &&
+			typeof durations === "object" &&
+			durations !== null
+		) {
+			qualityLimitationSeconds = numField(
+				durations as Record<string, unknown>,
+				qualityLimitationReason,
+			);
+		}
+	}
+
+	const powerEfficient = top[accelField];
 	return {
-		entryId: inbound.id as string,
-		bytesReceived: numField(inbound, "bytesReceived"),
-		timestamp: numField(inbound, "timestamp"),
-		frameWidth: numField(inbound, "frameWidth"),
-		frameHeight: numField(inbound, "frameHeight"),
-		framesPerSecond: numField(inbound, "framesPerSecond"),
+		entryId: top.id as string,
+		bytes,
+		timestamp: numField(top, "timestamp"),
+		byteEntryIds,
+		frameWidth: numField(top, "frameWidth"),
+		frameHeight: numField(top, "frameHeight"),
+		framesPerSecond: numField(top, "framesPerSecond"),
 		codec,
-		decoder:
+		accel:
 			typeof powerEfficient === "boolean"
 				? powerEfficient
 					? "hw"
 					: "sw"
 				: null,
-		framesDropped: numField(inbound, "framesDropped") ?? 0,
-		freezeCount: numField(inbound, "freezeCount") ?? 0,
+		framesDropped: numField(top, "framesDropped") ?? 0,
+		freezeCount: numField(top, "freezeCount") ?? 0,
+		qualityLimitationReason,
+		qualityLimitationSeconds,
 	};
 }
 
@@ -167,21 +274,33 @@ export function formatBitrate(bitsPerSecond: number): string {
 }
 
 /**
- * "2560x1440 · 60fps". No frame size means nothing has ever decoded; say
- * so explicitly (the rate line then distinguishes "nothing arriving" from
- * "arriving but not decoding"). A null framesPerSecond omits the fps
- * segment - the caller passes null while the rate is genuinely unmeasured
- * (a stream's first second) and 0 for a stall, so "0fps" always means a
- * stream that decoded before and stopped.
+ * "2560x1440 · 60fps". No frame size means no frames have flowed; say so
+ * explicitly per direction ("no frames decoded" / "no frames sent" - the
+ * rate line then distinguishes "nothing arriving" from "arriving but not
+ * decoding"). A null framesPerSecond omits the fps segment - the caller
+ * passes null while the rate is genuinely unmeasured (a stream's first
+ * second) and 0 for a stall, so "0fps" always means a stream that flowed
+ * before and stopped.
  */
 export function formatFrameLine(
 	frameWidth: number | null,
 	frameHeight: number | null,
 	framesPerSecond: number | null,
+	direction: StatsDirection,
 ): string {
-	if (frameWidth === null || frameHeight === null) return "no frames decoded";
-	const fps =
-		framesPerSecond !== null ? ` · ${Math.round(framesPerSecond)}fps` : "";
+	if (frameWidth === null || frameHeight === null) {
+		return direction === "send" ? "no frames sent" : "no frames decoded";
+	}
+	// A trickling sub-1fps stream renders "<1fps", never a rounded "0fps"
+	// that would falsely claim a stall while frames still arrive.
+	let fps = "";
+	if (framesPerSecond !== null) {
+		const rendered =
+			framesPerSecond > 0 && framesPerSecond < 1
+				? "<1"
+				: `${Math.round(framesPerSecond)}`;
+		fps = ` · ${rendered}fps`;
+	}
 	return `${frameWidth}x${frameHeight}${fps}`;
 }
 
@@ -190,16 +309,16 @@ export function formatFrameLine(
  * unmeasured bitrate (a stream's first tick has no delta baseline yet)
  * renders no number at all rather than a false "0 kbps", and the line can
  * be empty (caller hides it). A MEASURED zero still renders "0 kbps" -
- * that's the honest "nothing arriving" diagnosis.
+ * that's the honest "nothing arriving/leaving" diagnosis.
  */
 export function formatRateLine(
 	bitrate: number | null,
 	codec: string | null,
-	decoder: "hw" | "sw" | null,
+	accel: "hw" | "sw" | null,
 ): string {
 	const parts: string[] = [];
 	if (bitrate !== null) parts.push(formatBitrate(bitrate));
-	if (codec) parts.push(decoder ? `${codec} ${decoder}` : codec);
+	if (codec) parts.push(accel ? `${codec} ${accel}` : codec);
 	return parts.join(" · ");
 }
 
@@ -219,4 +338,21 @@ export function formatAnomalyLine(
 		parts.push(`${freezeCount} ${freezeCount === 1 ? "freeze" : "freezes"}`);
 	}
 	return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/**
+ * "cpu limited · 34s", or null when unlimited/unknown. The reason is the
+ * encoder's LIVE self-report (send side); the seconds are the CURRENT
+ * spell's duration (the poll loop derives it from the cumulative stats)
+ * and the segment is omitted while under a second - a spell that just
+ * started reads as "cpu limited", not "cpu limited · 0s".
+ */
+export function formatLimitationLine(
+	reason: string | null,
+	seconds: number | null,
+): string | null {
+	if (reason === null || reason === "none") return null;
+	const duration =
+		seconds !== null && seconds >= 1 ? ` · ${Math.round(seconds)}s` : "";
+	return `${reason} limited${duration}`;
 }
