@@ -57,6 +57,13 @@ export interface UserSettings {
 	 */
 	rtcScreenShareQuality: ScreenShareQuality;
 	/**
+	 * Whether call video tiles render a diagnostic overlay with the live
+	 * received resolution, frame rate, bitrate, and codec (#408). Off by
+	 * default; useful for verifying screen-share quality end-to-end
+	 * without server-side wire inspection.
+	 */
+	rtcShowCallStats: boolean;
+	/**
 	 * Mic transmission mode (Phase 6 of #122 — issue #108).
 	 * - `"voice-activity"`: always transmit when not manually muted.
 	 * - `"push-to-talk"`: transmit only while `micHotkey` is held.
@@ -99,6 +106,7 @@ const defaults: UserSettings = {
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
 	rtcScreenShareQuality: "1080p30",
+	rtcShowCallStats: false,
 	micMode: "voice-activity",
 	micHotkey: null,
 };
@@ -169,6 +177,11 @@ function parseSettings(parsed: unknown): UserSettings {
 			obj.rtcScreenShareQuality === "1080p60"
 				? obj.rtcScreenShareQuality
 				: defaults.rtcScreenShareQuality,
+		rtcShowCallStats: loadBool(
+			obj,
+			"rtcShowCallStats",
+			defaults.rtcShowCallStats,
+		),
 		micMode:
 			obj.micMode === "voice-activity" ||
 			obj.micMode === "push-to-talk" ||

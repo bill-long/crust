@@ -286,6 +286,12 @@ const AppGeneralTab: Component = () => {
 				<MicDeviceSelect />
 				<CamDeviceSelect />
 				<ScreenShareQualitySelect />
+				<ToggleRow
+					label="Call stats overlay"
+					description="Show live resolution, frame rate, bitrate, and codec on other participants' call tiles"
+					checked={userSettings().rtcShowCallStats}
+					onChange={(v) => updateSetting("rtcShowCallStats", v)}
+				/>
 			</section>
 
 			{/* Privacy */}
