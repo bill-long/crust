@@ -17,6 +17,7 @@ import {
 	micEnabled as voiceMicEnabled,
 } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
+import { TrackStatsOverlay } from "./TrackStatsOverlay";
 import type {
 	LivekitRoomApi,
 	RtcParticipant,
@@ -619,6 +620,14 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 					)}
 				</Show>
 			</Show>
+			<Show when={entry()}>
+				{(e) => (
+					<TrackStatsOverlay
+						track={e().track}
+						isLocal={props.participant.isLocal}
+					/>
+				)}
+			</Show>
 			<div class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-black/40 px-2 py-1 text-xs text-white">
 				<span class="min-w-0 truncate">
 					{props.participant.displayName}
@@ -672,13 +681,15 @@ interface ScreenShareTileProps {
 const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 	let videoEl: HTMLVideoElement | undefined;
 
-	// Label resolves reactively from the participant list so a display-name /
-	// active-speaker update refreshes it without remounting the tile. The
-	// local participant's own outgoing share reads as "Your screen".
-	const label = createMemo(() => {
-		const p = props.livekit
+	const sharer = createMemo(() =>
+		props.livekit
 			.participants()
-			.find((part) => part.identity === props.identity);
+			.find((part) => part.identity === props.identity),
+	);
+
+	// The local participant's own outgoing share reads as "Your screen".
+	const label = createMemo(() => {
+		const p = sharer();
 		if (p?.isLocal) return "Your screen";
 		return `${p?.displayName ?? props.identity}’s screen`;
 	});
@@ -707,6 +718,10 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 				autoplay
 				playsinline
 				muted
+			/>
+			<TrackStatsOverlay
+				track={props.entry.track}
+				isLocal={sharer()?.isLocal}
 			/>
 			<div class="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-black/40 px-2 py-1 text-xs text-white">
 				<svg

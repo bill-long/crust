@@ -5,6 +5,7 @@ import {
 	_resetAppModalStackForTests,
 	pushAppModal,
 } from "../../../../stores/modalStack";
+import { updateSetting } from "../../../../stores/settings";
 import {
 	_resetVoiceForTests,
 	setUserWantsMic,
@@ -15,7 +16,12 @@ import {
 	publishCallSession,
 } from "./callSessionStore";
 import { FullCallOverlay } from "./FullCallOverlay";
-import { makeFakeCallSession } from "./fakeCallSession.test-utils";
+import { makeFakeCallSession, participant } from "./fakeCallSession.test-utils";
+import {
+	inboundVideo,
+	makeFakeStatsTrack,
+	vp9Codec,
+} from "./trackStats.test-utils";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -27,6 +33,11 @@ vi.mock("solid-refresh", () => ({
 }));
 
 const flush = (): Promise<void> => new Promise((r) => queueMicrotask(r));
+
+// The stats badge's first poll is phase-scheduled via setTimeout(0), so
+// letting it land needs a macrotask turn, not just microtasks.
+const flushStatsTick = (): Promise<void> =>
+	new Promise((r) => setTimeout(r, 0));
 
 describe("FullCallOverlay", () => {
 	const fakes: Array<{ dispose: () => void }> = [];
@@ -42,6 +53,7 @@ describe("FullCallOverlay", () => {
 		_resetAppModalStackForTests();
 		_resetVoiceForTests();
 		setCryptoDialogOpen(false);
+		updateSetting("rtcShowCallStats", false);
 	});
 
 	it("renders nothing when no session is published", () => {
@@ -319,24 +331,14 @@ describe("FullCallOverlay", () => {
 	it("renders a participant avatar image when avatarUrl is set and the initial otherwise", () => {
 		const fake = track(makeFakeCallSession());
 		fake.setLivekitParticipants([
-			{
+			participant({
 				identity: "a",
 				displayName: "Amon",
 				avatarUrl: "https://media.example.com/amon",
 				avatarUrlLarge: "https://media.example.com/amon",
-				isSpeaking: false,
-				isMuted: false,
 				isLocal: true,
-			},
-			{
-				identity: "b",
-				displayName: "Bea",
-				avatarUrl: null,
-				avatarUrlLarge: null,
-				isSpeaking: false,
-				isMuted: false,
-				isLocal: false,
-			},
+			}),
+			participant({ identity: "b", displayName: "Bea" }),
 		]);
 		publishCallSession(fake.api);
 		render(() => <FullCallOverlay />);
@@ -354,15 +356,7 @@ describe("FullCallOverlay", () => {
 		const detach = vi.fn();
 		const fake = track(makeFakeCallSession());
 		fake.setLivekitParticipants([
-			{
-				identity: "a",
-				displayName: "Amon",
-				avatarUrl: null,
-				avatarUrlLarge: null,
-				isSpeaking: false,
-				isMuted: false,
-				isLocal: false,
-			},
+			participant({ identity: "a", displayName: "Amon" }),
 		]);
 		fake.setLivekitScreenShareTracks(
 			new Map([["a", { track: { attach, detach } as never, sid: "ss-1" }]]),
@@ -384,19 +378,106 @@ describe("FullCallOverlay", () => {
 	it("does not render a screen-share tile when no screen share is active", () => {
 		const fake = track(makeFakeCallSession());
 		fake.setLivekitParticipants([
-			{
-				identity: "a",
-				displayName: "Amon",
-				avatarUrl: null,
-				avatarUrlLarge: null,
-				isSpeaking: false,
-				isMuted: false,
-				isLocal: false,
-			},
+			participant({ identity: "a", displayName: "Amon" }),
 		]);
 		publishCallSession(fake.api);
 		render(() => <FullCallOverlay />);
 		expect(screen.queryByLabelText("Screen share")).toBeNull();
+	});
+
+	// A stats-capable fake video track (shared builder so the track surface
+	// TrackStatsOverlay reads is defined once). `as never` matches the
+	// file's existing minimal-track idiom.
+	const makeStatsTrack = (width: number, height: number) =>
+		makeFakeStatsTrack({
+			statsEntries: [
+				inboundVideo({ frameWidth: width, frameHeight: height }),
+				vp9Codec,
+			],
+		}).track as never;
+
+	const remoteAmon = participant({ identity: "a", displayName: "Amon" });
+	const localSelf = participant({
+		identity: "me",
+		displayName: "Me",
+		isLocal: true,
+	});
+
+	it("shows a stats overlay on remote tiles (not local) when rtcShowCallStats is on", async () => {
+		updateSetting("rtcShowCallStats", true);
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([localSelf, remoteAmon]);
+		fake.setLivekitVideoTracks(
+			new Map([
+				["a", { track: makeStatsTrack(1280, 720), sid: "v-a" }],
+				["me", { track: makeStatsTrack(640, 480), sid: "v-me" }],
+			]),
+		);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		// Let the overlay's phase-scheduled first stats tick land.
+		await flushStatsTick();
+		const badges = screen.getAllByTestId("track-stats");
+		expect(badges.length).toBe(1);
+		// The resolution discriminates WHICH tile's badge rendered (remote,
+		// not local); exact formatting is locked by the trackStats unit tests.
+		expect(badges[0].textContent).toContain("1280x720");
+	});
+
+	it("shows stats on a remote screen-share tile but not on the local user's own share", async () => {
+		updateSetting("rtcShowCallStats", true);
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([localSelf, remoteAmon]);
+		fake.setLivekitScreenShareTracks(
+			new Map([
+				["a", { track: makeStatsTrack(2560, 1440), sid: "ss-a" }],
+				["me", { track: makeStatsTrack(1920, 1080), sid: "ss-me" }],
+			]),
+		);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		await flushStatsTick();
+		const badges = screen.getAllByTestId("track-stats");
+		expect(badges.length).toBe(1);
+		expect(badges[0].textContent).toContain("2560x1440");
+	});
+
+	it("keeps the stats readout when the participant snapshot object is replaced (tile remount)", async () => {
+		updateSetting("rtcShowCallStats", true);
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([remoteAmon]);
+		fake.setLivekitVideoTracks(
+			new Map([["a", { track: makeStatsTrack(1280, 720), sid: "v-a" }]]),
+		);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		await flushStatsTick();
+		expect(screen.getByTestId("track-stats").textContent).toContain("1280x720");
+
+		// A speaking flip produces a NEW participant object; the
+		// reference-keyed <For> rebuilds the tile. The badge must re-render
+		// its persisted readout immediately (same track object), not blank
+		// until the next poll.
+		fake.setLivekitParticipants([
+			participant({ identity: "a", displayName: "Amon", isSpeaking: true }),
+		]);
+		await flush();
+		expect(screen.getByTestId("track-stats").textContent).toContain("1280x720");
+	});
+
+	it("fails closed: no stats overlay on a share whose participant record is missing", async () => {
+		updateSetting("rtcShowCallStats", true);
+		const fake = track(makeFakeCallSession());
+		// Teardown ordering can empty the participant snapshot before the share
+		// map clears; an unresolved sharer must not be treated as remote.
+		fake.setLivekitParticipants([]);
+		fake.setLivekitScreenShareTracks(
+			new Map([["me", { track: makeStatsTrack(1920, 1080), sid: "ss-me" }]]),
+		);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		await flushStatsTick();
+		expect(screen.queryByTestId("track-stats")).toBeNull();
 	});
 
 	it("restores focus to the previous focus owner on cleanup", async () => {

@@ -67,6 +67,24 @@ interface MakeFakeOptions {
 	instanceId?: number;
 }
 
+/**
+ * RtcParticipant fixture with sensible defaults, so suites don't hand-roll
+ * the full literal (and every literal site doesn't break when the
+ * interface gains a field).
+ */
+export function participant(over: Partial<RtcParticipant>): RtcParticipant {
+	return {
+		identity: "id",
+		displayName: "Someone",
+		avatarUrl: null,
+		avatarUrlLarge: null,
+		isSpeaking: false,
+		isMuted: false,
+		isLocal: false,
+		...over,
+	};
+}
+
 export function makeFakeCallSession(
 	opts: MakeFakeOptions = {},
 ): FakeCallSession {

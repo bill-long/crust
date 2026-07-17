@@ -11,7 +11,7 @@ import {
 	_resetCallSessionForTests,
 	publishCallSession,
 } from "./callSessionStore";
-import { makeFakeCallSession } from "./fakeCallSession.test-utils";
+import { makeFakeCallSession, participant } from "./fakeCallSession.test-utils";
 import type { RtcParticipant } from "./useLivekitRoom";
 
 vi.mock("solid-refresh", () => ({
@@ -22,19 +22,6 @@ vi.mock("solid-refresh", () => ({
 	$$decline: () => undefined,
 	$$refresh: () => undefined,
 }));
-
-function participant(over: Partial<RtcParticipant>): RtcParticipant {
-	return {
-		identity: "id",
-		displayName: "Someone",
-		avatarUrl: null,
-		avatarUrlLarge: null,
-		isSpeaking: false,
-		isMuted: false,
-		isLocal: false,
-		...over,
-	};
-}
 
 function rowFor(name: string): HTMLElement {
 	const label = screen.getByText(name);
