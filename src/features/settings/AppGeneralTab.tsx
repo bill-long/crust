@@ -10,7 +10,8 @@ import {
 import { useClient } from "../../client/client";
 import { pushLocalUrlPreviewSetting } from "../../client/urlPreviewSync";
 import {
-	SCREEN_SHARE_QUALITY_ORDER,
+	isScreenShareQuality,
+	SCREEN_SHARE_QUALITIES,
 	SCREEN_SHARE_QUALITY_SPECS,
 } from "../../lib/screenShareQuality";
 import { updateSetting, userSettings } from "../../stores/settings";
@@ -54,24 +55,26 @@ function ScreenShareQualitySelect(): ReturnType<Component> {
 					Screen share quality
 				</div>
 				<div class="text-xs text-text-muted">
-					Quality of your outgoing screen share. Higher frame rates look
-					smoother for games and motion, but use more upload bandwidth and CPU.
-					Applies to your next share.
+					Quality of your outgoing screen share. Higher resolutions look sharper
+					and higher frame rates smoother, at the cost of more upload bandwidth
+					and CPU. Applies to your next share.
 				</div>
 			</div>
 			<select
 				value={userSettings().rtcScreenShareQuality}
-				onChange={(e) =>
-					updateSetting(
-						"rtcScreenShareQuality",
-						e.currentTarget
-							.value as (typeof SCREEN_SHARE_QUALITY_ORDER)[number],
-					)
-				}
+				onChange={(e) => {
+					// The options render from SCREEN_SHARE_QUALITIES, but the DOM
+					// value is still a string - run it through the one membership
+					// guard instead of asserting.
+					const value = e.currentTarget.value;
+					if (isScreenShareQuality(value)) {
+						updateSetting("rtcScreenShareQuality", value);
+					}
+				}}
 				class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 				aria-label="Screen share quality"
 			>
-				<For each={SCREEN_SHARE_QUALITY_ORDER}>
+				<For each={SCREEN_SHARE_QUALITIES}>
 					{(quality) => (
 						<option value={quality}>
 							{SCREEN_SHARE_QUALITY_SPECS[quality].label}
@@ -121,7 +124,7 @@ function MediaDeviceSelect(
 			const stream = await navigator.mediaDevices.getUserMedia(
 				props.permissionConstraints,
 			);
-			// We only needed the permission grant — release the tracks immediately.
+			// We only needed the permission grant - release the tracks immediately.
 			for (const track of stream.getTracks()) track.stop();
 			await refresh();
 		} catch (e) {
