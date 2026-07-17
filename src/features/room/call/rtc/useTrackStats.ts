@@ -6,7 +6,11 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
-import { type InboundVideoStats, readInboundVideoStats } from "./trackStats";
+import {
+	readVideoTrackStats,
+	type StatsDirection,
+	type VideoTrackStats,
+} from "./trackStats";
 
 /** How often the readout refreshes while a consumer is mounted. */
 const POLL_INTERVAL_MS = 1_000;
@@ -26,43 +30,113 @@ const MAX_MISSING_REPORTS = 3;
 const RECOVERY_POLL_INTERVAL_MS = 10_000;
 
 /**
- * Persisted per-track state is discarded on mount once older than this
- * many missed ticks of ITS OWN cadence (fast or recovery). The
- * persistence exists for near-instant remounts (a tile rebuild on a
- * speaking flip); after a real gap (the setting was off, the tile was
- * gone) the baselines would render gap-era drops and gap-averaged
- * bitrates as current, and the snapshot itself is stale news. Measuring
- * against the state's own cadence keeps the recovery backoff alive
- * across remounts - a slow-polling dead surface ticks only every
- * RECOVERY_POLL_INTERVAL_MS, and resetting it on each tile rebuild
- * would re-probe the dead end at full speed all call long.
+ * A tick gap beyond this many ticks of the state's OWN cadence (fast or
+ * recovery) marks measurement baselines stale: deltas spanning the gap
+ * would render gap-era drops and gap-averaged bitrates as current, so
+ * they re-baseline (one unmeasured tick) and the warning claims decay -
+ * but the readout itself holds, because ~1-2s of main-thread jank (a
+ * share starting, a heavy render) is routine mid-call and must not wipe
+ * history.
  */
 const STALE_TICKS = 2;
 
 /**
- * The fields the stats badge renders: the parsed stats minus the
- * poll-loop-only fields (`entryId` and the raw byte/timestamp counters
+ * A gap beyond this discards the persisted state WHOLESALE: the badge
+ * was unmounted (setting off, tile gone) or the tab throttled long
+ * enough that even the snapshot is stale news. Chosen below hidden-tab
+ * intensive-throttling clamps (>=60s) and far above any jank.
+ */
+const WHOLESALE_STALE_MS = 30_000;
+
+/**
+ * The fields the stats badge renders - the parsed stats minus the
+ * poll-loop-only fields (the entry ids and raw byte/timestamp counters
  * must not leak into render state), plus the two values the loop derives.
+ * One shape for both directions; direction-specific fields are null/zero
+ * on the other side.
  */
 export interface StatsSnapshot
-	extends Omit<InboundVideoStats, "entryId" | "bytesReceived" | "timestamp"> {
+	extends Omit<
+		VideoTrackStats,
+		"entryId" | "bytes" | "timestamp" | "byteEntryIds"
+	> {
 	/**
-	 * Receive bitrate in bits/sec, derived from tick-to-tick
-	 * bytesReceived deltas. Null until a delta baseline exists (a
-	 * stream's first tick), which renders as no number rather than a
-	 * false "0 kbps".
+	 * Bitrate in bits/sec, derived from tick-to-tick byte deltas
+	 * (received, or sent summed across simulcast layers). Null until a
+	 * delta baseline exists (a stream's first tick), which renders as no
+	 * number rather than a false "0 kbps".
 	 */
 	bitrate: number | null;
 	/**
 	 * True when the drop/freeze counters increased during the last poll
 	 * interval. The counters themselves are cumulative since subscription,
 	 * so this is what makes the warning line mean "happening NOW" rather
-	 * than "happened at some point in this call".
+	 * than "happened at some point in this call". Always false on send -
+	 * the send-side warning is the live qualityLimitationReason.
 	 */
 	anomaliesActive: boolean;
 }
 
 type StatsTrack = LocalVideoTrack | RemoteVideoTrack;
+
+/**
+ * Measurement baselines scoped to ONE stream (RTP publication). Nested
+ * in a single sub-object so the stream reset is structurally complete:
+ * `state.stream = freshStreamState()` cannot forget a field the way a
+ * hand-maintained reset function can, and a leaked baseline is exactly
+ * the stale-state-misreads-a-fresh-stream bug class this module's
+ * invariants exist to prevent.
+ */
+interface StreamMeasureState {
+	/**
+	 * Whether framesPerSecond has ever been reported for this stream.
+	 * Distinguishes "not measured yet" (first second - omit the fps
+	 * segment) from "measured before, absent now" (a stall - 0fps).
+	 */
+	sawFps: boolean;
+	/**
+	 * Previous tick's cumulative counters, so the warning line only shows
+	 * while they're actively increasing.
+	 */
+	lastCounters: { dropped: number; freezes: number } | null;
+	/** Previous tick's byte counter + timestamp: the bitrate delta baseline. */
+	lastBytes: { bytes: number; timestamp: number } | null;
+	/**
+	 * Which entries the byte baseline was summed over (see
+	 * VideoTrackStats.byteEntryIds): the baseline is only comparable to a
+	 * sum over the SAME population.
+	 */
+	lastByteIds: string | null;
+	/** Last measured bitrate, carried across cached (same-timestamp) reports. */
+	lastBitrate: number | null;
+	/**
+	 * Limitation-spell tracking: the parser reports CONNECTION-CUMULATIVE
+	 * seconds, the badge shows the CURRENT spell. `limitSpellBase` anchors
+	 * the selected entry's cumulative clock, `limitSpellCarry` preserves
+	 * elapsed time across simulcast layer flips (each entry has its own
+	 * clock), and `limitSpellElapsed` is the last computed spell length -
+	 * kept HERE (not read back from the published snapshot, whose warning
+	 * fields decay on held ticks).
+	 */
+	lastLimitReason: string | null;
+	limitSpellBase: number | null;
+	limitSpellCarry: number;
+	limitSpellElapsed: number;
+}
+
+function freshStreamState(): StreamMeasureState {
+	return {
+		sawFps: false,
+		lastCounters: null,
+		lastBytes: null,
+		lastByteIds: null,
+		lastBitrate: null,
+		lastLimitReason: null,
+		limitSpellBase: null,
+		limitSpellCarry: 0,
+		limitSpellElapsed: 0,
+	};
+}
 
 /**
  * Poll/measurement state for one track. Kept OUTSIDE the consuming
@@ -74,29 +148,23 @@ type StatsTrack = LocalVideoTrack | RemoteVideoTrack;
  */
 interface TrackStatsState {
 	/**
-	 * Whether framesPerSecond has ever been reported for the CURRENT
-	 * stream. Distinguishes "not measured yet" (first second - omit the
-	 * fps segment) from "measured before, absent now" (a stall - 0fps).
+	 * Which direction this state was measured for. A track is normally
+	 * polled in one direction forever, but if a consumer ever remounts
+	 * with the other direction (isLocal correcting itself), the persisted
+	 * receive-state must not seed the send badge or vice versa.
 	 */
-	sawFps: boolean;
-	/**
-	 * Previous tick's cumulative counters, so the warning line only shows
-	 * while they're actively increasing.
-	 */
-	lastCounters: { dropped: number; freezes: number } | null;
-	/** Previous tick's byte counter + timestamp: the bitrate delta baseline. */
-	lastBytes: { bytes: number; timestamp: number } | null;
-	/** Last measured bitrate, carried across cached (same-timestamp) reports. */
-	lastBitrate: number | null;
-	/** Which inbound-rtp entry the per-stream state above belongs to. */
+	direction: StatsDirection;
+	/** Per-stream measurement baselines (see StreamMeasureState). */
+	stream: StreamMeasureState;
+	/** Which RTP entry the stream state belongs to. */
 	lastEntryId: string | null;
 	/** Consecutive ticks whose report was missing entirely. */
 	missingReports: number;
 	/**
-	 * Consecutive live reports whose inbound-rtp entry was missing after
+	 * Consecutive live reports whose RTP entry was missing after
 	 * previously being present. Tracked separately from missingReports: a
 	 * vanished ENTRY on a live surface must never slow polling down - it
-	 * settles on the honest "no frames decoded" state at full cadence.
+	 * settles on the honest "no frames" state at full cadence.
 	 */
 	entryMissing: number;
 	/** Whether polling is currently on the recovery cadence. */
@@ -105,8 +173,7 @@ interface TrackStatsState {
 	snapshot: StatsSnapshot | null;
 	/**
 	 * When the poller last completed a tick (epoch ms). Bounds how long
-	 * persisted state stays trustworthy across an unmounted gap - see
-	 * STALE_TICKS.
+	 * persisted state stays trustworthy across a gap - see STALE_TICKS.
 	 */
 	lastTickAt: number;
 	/**
@@ -116,7 +183,7 @@ interface TrackStatsState {
 	 */
 	baselineStale: boolean;
 	/**
-	 * Timestamp of the last processed inbound entry. Detects a CACHED
+	 * Timestamp of the last processed RTP entry. Detects a CACHED
 	 * report (same measurement window served twice): its counters equal
 	 * the baseline the previous tick already advanced to, so the anomaly
 	 * warning must be carried like the bitrate, not recomputed to false.
@@ -134,12 +201,10 @@ interface TrackStatsState {
  */
 const trackStates = new WeakMap<StatsTrack, TrackStatsState>();
 
-function freshState(): TrackStatsState {
+function freshState(direction: StatsDirection): TrackStatsState {
 	return {
-		sawFps: false,
-		lastCounters: null,
-		lastBytes: null,
-		lastBitrate: null,
+		direction,
+		stream: freshStreamState(),
 		lastEntryId: null,
 		missingReports: 0,
 		entryMissing: 0,
@@ -155,53 +220,53 @@ function freshState(): TrackStatsState {
  * Polls a video track's WebRTC stats once per second and exposes the
  * render-ready {@link StatsSnapshot} (null = no badge). This is the whole
  * stats state machine; the consuming component only formats and positions
- * the readout. Reads inbound-rtp (receive side, #408); #409 extends this
- * for local tracks' outbound-rtp.
+ * the readout. Reads inbound-rtp for remote tracks (receive side, #408)
+ * or outbound-rtp for local ones (send side, #409) - the direction only
+ * changes which entries are parsed, never the lifecycle logic.
  *
  * Truthfulness invariants (each locked by a test):
  * - Only measured values render: bitrate comes from tick-to-tick byte
  *   deltas ("0 kbps" is always a measured zero; unmeasured is omitted),
- *   "0fps" only ever follows an earlier fps measurement on the same
- *   stream (a real stall), and nothing is inferred from capture settings.
- * - Per-stream baselines are keyed on the inbound entry's id and reset
- *   when it changes (SSRC restart) or goes away - stale state never
- *   misreads a successor stream.
- * - Transient misses hold the last-good readout (the anomaly warning's
- *   "now" claim decays immediately); only MAX_MISSING_REPORTS consecutive
- *   missing REPORTS clear it and drop to the recovery cadence, while a
- *   missing ENTRY on a live report settles on "no frames decoded" at
- *   full speed.
- * - State survives consumer remounts via a per-track WeakMap, so tile
- *   rebuilds (speaking flips, other shares starting) don't blank or
- *   re-baseline the readout.
+ *   "0fps" only ever follows an earlier fps measurement on the SAME
+ *   selected entry (a real stall - fps history clears on any
+ *   selected-entry change), and nothing is inferred from capture
+ *   settings.
+ * - Receive-side baselines reset whenever the selected inbound entry id
+ *   changes (a restart/replaced publication). Send side deliberately
+ *   does NOT discriminate layer flips from republications (no reliable
+ *   intra-report signal exists): the limitation spell describes how
+ *   long this track's outgoing quality has been limited for a reason -
+ *   a condition an internal republication does not lift - so it
+ *   carries across any selected-entry change, rebasing onto the new
+ *   entry's cumulative clock. Byte baselines are keyed on the entry
+ *   population.
+ * - Transient misses hold the last-good readout while BOTH directions'
+ *   "now" claims (anomaly flag, encoder limitation) decay immediately;
+ *   only MAX_MISSING_REPORTS consecutive missing REPORTS clear it and
+ *   drop to the recovery cadence, while a missing ENTRY on a live report
+ *   settles on "no frames" at full speed.
+ * - State survives consumer remounts via a per-track WeakMap (stamped
+ *   with its direction). A gap beyond the soft bound re-baselines the
+ *   measurements and decays the warning claims but holds the readout
+ *   (jank tolerance); a gap beyond WHOLESALE_STALE_MS discards
+ *   everything.
  */
 export function useTrackStats(
 	track: Accessor<StatsTrack>,
+	direction: StatsDirection,
 ): Accessor<StatsSnapshot | null> {
 	const [snapshot, setSnapshot] = createSignal<StatsSnapshot | null>(null);
 
 	createEffect(
 		on(track, (t) => {
 			const existing = trackStates.get(t);
-			const state = existing ?? freshState();
+			const state = existing ?? freshState(direction);
 			if (existing === undefined) {
 				trackStates.set(t, state);
-			} else {
-				const staleAfterMs =
-					STALE_TICKS *
-					(state.slowPolling ? RECOVERY_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
-				if (Date.now() - state.lastTickAt > staleAfterMs) {
-					// The previous poller stopped a while ago: discard everything
-					// and start over as if the track were new (see STALE_TICKS).
-					// This also bounds a republished warning line's age - within
-					// the fresh window the snapshot (anomaliesActive included) is
-					// at most two ticks old and republishing it verbatim is honest.
-					Object.assign(state, freshState());
-				}
+			} else if (existing.direction !== direction) {
+				// The other direction's measurements must not seed this badge.
+				Object.assign(state, freshState(direction));
 			}
-			// Re-render the persisted readout immediately: a tile remount must
-			// not blank the badge for a tick (a genuinely new track starts null).
-			setSnapshot(state.snapshot);
 			let disposed = false;
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const publish = (s: StatsSnapshot | null): void => {
@@ -222,28 +287,79 @@ export function useTrackStats(
 					});
 				}, ms);
 			};
-			const resetStreamState = (): void => {
-				state.sawFps = false;
-				state.lastCounters = null;
-				state.lastBytes = null;
-				state.lastBitrate = null;
+			// THE staleness policy (single definition), applied both at mount
+			// and per-tick, covering unmounted gaps and throttled/janked timer
+			// chains alike. A soft-stale gap re-baselines the measurements and
+			// decays the warning claims but HOLDS the readout (routine jank must
+			// not wipe mid-call history - the limitation spell's cumulative math
+			// is gap-immune); a wholesale-stale gap discards everything.
+			const handleTickGap = (): void => {
+				if (state.lastTickAt === 0) return;
+				const gap = Date.now() - state.lastTickAt;
+				if (gap > WHOLESALE_STALE_MS) {
+					// Brand-new-track semantics: everything resets (lastTickAt 0
+					// schedules an immediate probe, which is correct - every baseline
+					// is fresh, so no delta can span the gap).
+					Object.assign(state, freshState(direction));
+					setSnapshot(null);
+					return;
+				}
+				if (gap > STALE_TICKS * cadence()) {
+					state.stream.lastBytes = null;
+					state.stream.lastBitrate = null;
+					state.baselineStale = true;
+					const held = state.snapshot;
+					if (
+						held &&
+						(held.anomaliesActive || held.qualityLimitationReason !== null)
+					) {
+						// Publish the decay, not just record it: the renderer must drop
+						// the stale "now" claims immediately, and holdLastGood no-ops on
+						// an already-decayed snapshot.
+						const decayed = {
+							...held,
+							anomaliesActive: false,
+							qualityLimitationReason: null,
+							qualityLimitationSeconds: null,
+						};
+						state.snapshot = decayed;
+						setSnapshot(decayed);
+					}
+				}
 			};
+			handleTickGap();
+			// Re-render the persisted readout immediately: a tile remount must
+			// not blank the badge for a tick (a genuinely new track starts null).
+			setSnapshot(state.snapshot);
 			const declareDead = (): void => {
-				publish(null);
-				resetStreamState();
-				state.lastEntryId = null;
-				state.entryMissing = 0;
-				// The tick chain picks the recovery cadence up on its next step.
+				// Structural reset with two carve-outs: lastTickAt preserves the
+				// poll phase (a remount must not immediately re-probe the dead
+				// surface), slowPolling puts the tick chain on the recovery
+				// cadence at its next step.
+				const keptTickAt = state.lastTickAt;
+				Object.assign(state, freshState(direction));
+				state.lastTickAt = keptTickAt;
 				state.slowPolling = true;
+				publish(null);
 			};
 			// Hold the last-good readout across what may be a transient miss
-			// instead of flickering - but the warning line's "happening NOW"
-			// claim decays immediately, since a held snapshot proves nothing
-			// about the present. No-op once already decayed.
+			// instead of flickering - but BOTH directions' "happening NOW"
+			// claims decay immediately (the receive-side anomaly flag and the
+			// send-side encoder limitation), since a held snapshot proves
+			// nothing about the present. No-op once already decayed.
 			const holdLastGood = (): void => {
 				state.baselineStale = true;
-				if (state.snapshot?.anomaliesActive) {
-					publish({ ...state.snapshot, anomaliesActive: false });
+				const held = state.snapshot;
+				if (
+					held &&
+					(held.anomaliesActive || held.qualityLimitationReason !== null)
+				) {
+					publish({
+						...held,
+						anomaliesActive: false,
+						qualityLimitationReason: null,
+						qualityLimitationSeconds: null,
+					});
 				}
 			};
 			const registerMiss = (): void => {
@@ -255,6 +371,7 @@ export function useTrackStats(
 				holdLastGood();
 			};
 			const tick = async (): Promise<void> => {
+				handleTickGap();
 				// Outer catch: the inner try guards getStats itself, but a throw
 				// anywhere later (an exotic report entry, a downstream snapshot
 				// subscriber) must degrade to "readout unchanged", not become an
@@ -278,95 +395,155 @@ export function useTrackStats(
 					state.missingReports = 0;
 					// The tick chain resumes the fast cadence on its next step.
 					state.slowPolling = false;
-					const stats = readInboundVideoStats(report);
+					const stats = readVideoTrackStats(report, direction);
 					if (stats.entryId === null && state.lastEntryId !== null) {
-						// The inbound-rtp entry vanished from a LIVE report
+						// The RTP entry vanished from a LIVE report
 						// (renegotiation, layer switch). Hold briefly like a missing
 						// report, but never via declareDead - the surface is alive,
 						// so after the hold window the badge settles on the honest
-						// "no frames decoded" state at full cadence.
+						// "no frames" state at full cadence.
 						state.entryMissing += 1;
 						if (state.entryMissing < MAX_MISSING_REPORTS) {
 							holdLastGood();
 							return;
 						}
 						// Entry really gone: the old stream ended.
-						resetStreamState();
+						state.stream = freshStreamState();
 						state.lastEntryId = null;
 					}
 					state.entryMissing = 0;
 					if (stats.entryId !== null && stats.entryId !== state.lastEntryId) {
-						// A different inbound-rtp entry (SSRC restart / replaced
-						// publication, or the first one): fresh stream, fresh state.
-						resetStreamState();
+						if (direction === "receive") {
+							// A different inbound entry is a restart/replaced publication:
+							// fresh stream, fresh state.
+							state.stream = freshStreamState();
+						} else {
+							// Send side: a selected-entry change is a simulcast layer flip
+							// or an internal republication - EITHER WAY the encoder's
+							// limitation describes the same real-world condition on this
+							// track, so the spell carries by contract, rebasing onto the
+							// new entry's cumulative clock. (No flip-vs-restart
+							// discrimination: within a single report there is no reliable
+							// signal, and continuity is the more truthful reading of a
+							// limitation the restart did not lift.) fps history is
+							// per-entry: the new entry's first fps-less tick is "not
+							// measured yet", never an inherited 0fps stall. Byte baselines
+							// are keyed on the entry population separately.
+							state.stream.limitSpellCarry = state.stream.limitSpellElapsed;
+							state.stream.limitSpellBase = null;
+							state.stream.sawFps = false;
+						}
 						state.lastEntryId = stats.entryId;
 					}
-					if (stats.framesPerSecond !== null) state.sawFps = true;
+					const stream = state.stream;
+					if (stats.framesPerSecond !== null) stream.sawFps = true;
+					// ONE cached-report check feeds every carry: a report with the
+					// same collection timestamp as the previous tick repeats the
+					// measurements the baselines were already advanced to, so the
+					// bitrate AND the anomaly warning both carry instead of blinking
+					// for a tick (see TrackStatsState.lastReportTs).
+					const cachedReport =
+						stats.timestamp !== null && stats.timestamp === state.lastReportTs;
+					state.lastReportTs = stats.timestamp;
 					// Bitrate from byte deltas (see StatsSnapshot.bitrate).
 					let bitrate: number | null = null;
-					if (stats.bytesReceived !== null && stats.timestamp !== null) {
-						const last = state.lastBytes;
-						if (last !== null && stats.timestamp === last.timestamp) {
-							// Browser served a cached report (same measurement window):
-							// carry the previous measurement instead of blinking the
-							// number out for a tick. Baseline stays put.
-							bitrate = state.lastBitrate;
+					if (stats.bytes !== null && stats.timestamp !== null) {
+						if (stats.byteEntryIds !== stream.lastByteIds) {
+							// The entry population behind the byte sum changed (e.g. a
+							// lower simulcast layer churned without the top entry
+							// changing): the old baseline measures a different sum -
+							// re-baseline (one unmeasured tick) rather than letting the
+							// delta spike and then blank.
+							stream.lastBytes = null;
+							stream.lastBitrate = null;
+							stream.lastByteIds = stats.byteEntryIds;
+						}
+						const last = stream.lastBytes;
+						if (cachedReport) {
+							bitrate = stream.lastBitrate;
 						} else {
 							if (
 								last !== null &&
 								stats.timestamp > last.timestamp &&
-								stats.bytesReceived >= last.bytes
+								stats.bytes >= last.bytes
 							) {
 								bitrate =
-									((stats.bytesReceived - last.bytes) * 8_000) /
+									((stats.bytes - last.bytes) * 8_000) /
 									(stats.timestamp - last.timestamp);
 							}
 							// A byte counter that went BACKWARDS on the same entry
 							// (receiver-internal reset) lands here with bitrate still
 							// null: re-baseline and render unmeasured for one tick,
 							// never a false "0 kbps".
-							state.lastBytes = {
-								bytes: stats.bytesReceived,
+							stream.lastBytes = {
+								bytes: stats.bytes,
 								timestamp: stats.timestamp,
 							};
-							state.lastBitrate = bitrate;
+							stream.lastBitrate = bitrate;
 						}
 					} else {
 						// Counters absent: drop the baseline so a later reappearance
 						// doesn't compute a delta across an unmeasured gap.
-						state.lastBytes = null;
-						state.lastBitrate = null;
+						stream.lastBytes = null;
+						stream.lastBitrate = null;
+						stream.lastByteIds = null;
 					}
-					// A cached report repeats the counters the baseline was already
-					// advanced to - carry the warning like the bitrate instead of
-					// blinking it off for a tick (see TrackStatsState.lastReportTs).
-					// A baseline from before a held gap can't say what happened in
-					// THIS interval - suppress the warning for the recovery tick
-					// and re-baseline (see TrackStatsState.baselineStale).
-					const cachedReport =
-						stats.timestamp !== null && stats.timestamp === state.lastReportTs;
-					state.lastReportTs = stats.timestamp;
 					const anomaliesActive = cachedReport
 						? (state.snapshot?.anomaliesActive ?? false)
 						: !state.baselineStale &&
-							state.lastCounters !== null &&
-							(stats.framesDropped > state.lastCounters.dropped ||
-								stats.freezeCount > state.lastCounters.freezes);
+							stream.lastCounters !== null &&
+							(stats.framesDropped > stream.lastCounters.dropped ||
+								stats.freezeCount > stream.lastCounters.freezes);
 					if (!cachedReport) state.baselineStale = false;
-					state.lastCounters = {
+					stream.lastCounters = {
 						dropped: stats.framesDropped,
 						freezes: stats.freezeCount,
 					};
+					// The parser reports CONNECTION-CUMULATIVE limitation seconds;
+					// render the CURRENT spell by baselining when the reason
+					// (re)starts, so a limitation from earlier in the call never
+					// inflates a just-started one. If the overlay mounts mid-spell
+					// the baseline starts at "now" - an understated "at least Ns",
+					// never an overstated one.
+					const reason = stats.qualityLimitationReason;
+					let limitSeconds: number | null = null;
+					if (
+						reason !== null &&
+						reason !== "none" &&
+						stats.qualityLimitationSeconds !== null
+					) {
+						if (stream.lastLimitReason !== reason) {
+							// A new spell starts its clock at zero.
+							stream.limitSpellCarry = 0;
+							stream.limitSpellBase = stats.qualityLimitationSeconds;
+						} else if (stream.limitSpellBase === null) {
+							// Same spell on a new cumulative clock (layer flip): rebase,
+							// keeping the elapsed time carried over.
+							stream.limitSpellBase = stats.qualityLimitationSeconds;
+						}
+						limitSeconds =
+							stream.limitSpellCarry +
+							(stats.qualityLimitationSeconds - stream.limitSpellBase);
+						stream.limitSpellElapsed = limitSeconds;
+					} else {
+						stream.limitSpellBase = null;
+						stream.limitSpellCarry = 0;
+						stream.limitSpellElapsed = 0;
+					}
+					stream.lastLimitReason = reason;
 					publish({
 						frameWidth: stats.frameWidth,
 						frameHeight: stats.frameHeight,
 						// See formatFrameLine: null omits the fps segment (never
-						// measured), 0 means a stall on a previously decoding stream.
-						framesPerSecond: stats.framesPerSecond ?? (state.sawFps ? 0 : null),
+						// measured), 0 means a stall on a previously flowing stream.
+						framesPerSecond:
+							stats.framesPerSecond ?? (stream.sawFps ? 0 : null),
 						codec: stats.codec,
-						decoder: stats.decoder,
+						accel: stats.accel,
 						framesDropped: stats.framesDropped,
 						freezeCount: stats.freezeCount,
+						qualityLimitationReason: stats.qualityLimitationReason,
+						qualityLimitationSeconds: limitSeconds,
 						anomaliesActive,
 						bitrate,
 					});

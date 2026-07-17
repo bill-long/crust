@@ -57,10 +57,12 @@ export interface UserSettings {
 	 */
 	rtcScreenShareQuality: ScreenShareQuality;
 	/**
-	 * Whether call video tiles render a diagnostic overlay with the live
-	 * received resolution, frame rate, bitrate, and codec (#408). Off by
-	 * default; useful for verifying screen-share quality end-to-end
-	 * without server-side wire inspection.
+	 * Whether call video tiles render a diagnostic stats overlay: remote
+	 * tiles show the live received resolution/frame rate/bitrate/codec
+	 * (#408), the local user's own tiles show what the encoder is sending
+	 * plus its live quality-limitation reason (#409). Off by default;
+	 * useful for verifying screen-share quality end-to-end without
+	 * server-side wire inspection.
 	 */
 	rtcShowCallStats: boolean;
 	/**

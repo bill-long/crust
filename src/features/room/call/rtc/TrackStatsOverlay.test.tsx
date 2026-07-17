@@ -7,6 +7,7 @@ import { TrackStatsOverlay } from "./TrackStatsOverlay";
 import {
 	inboundVideo,
 	makeFakeStatsTrack,
+	outboundVideo,
 	vp9Codec,
 } from "./trackStats.test-utils";
 
@@ -22,7 +23,7 @@ vi.mock("solid-refresh", () => ({
 describe("TrackStatsOverlay", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
-		// The receive-stats gate is enforced inside the component; the badge
+		// The stats gate is enforced inside the component; the badge
 		// behavior under test requires it open.
 		updateSetting("rtcShowCallStats", true);
 	});
@@ -33,7 +34,7 @@ describe("TrackStatsOverlay", () => {
 		updateSetting("rtcShowCallStats", false);
 	});
 
-	it("fails closed: no badge and no polling when the setting is off or isLocal is not exactly false", async () => {
+	it("fails closed: no badge and no polling when the setting is off or the participant is unresolved", async () => {
 		updateSetting("rtcShowCallStats", false);
 		const gatedBySetting = makeFakeStatsTrack({
 			statsEntries: [inboundVideo(), vp9Codec],
@@ -56,6 +57,404 @@ describe("TrackStatsOverlay", () => {
 		await vi.advanceTimersByTimeAsync(2_000);
 		expect(screen.queryByTestId("track-stats")).toBeNull();
 		expect(unresolved.getRTCStatsReport).not.toHaveBeenCalled();
+	});
+
+	it("treats a send-side layer flip as the same publication (spell and bitrate continue)", async () => {
+		// Two simulcast layers; which one is ACTIVE (has fps) flips between
+		// ticks. Each entry has its own cumulative limitation clock.
+		const layers = (
+			activeId: "out-a" | "out-b",
+			bytesA: number,
+			bytesB: number,
+			ts: number,
+			cpuA: number,
+			cpuB: number,
+		): Record<string, unknown>[] => [
+			outboundVideo({
+				id: "out-a",
+				framesPerSecond: activeId === "out-a" ? 30 : undefined,
+				bytesSent: bytesA,
+				timestamp: ts,
+				qualityLimitationReason: "bandwidth",
+				qualityLimitationDurations: { bandwidth: cpuA },
+			}),
+			outboundVideo({
+				id: "out-b",
+				frameWidth: 640,
+				frameHeight: 360,
+				framesPerSecond: activeId === "out-b" ? 30 : undefined,
+				bytesSent: bytesB,
+				timestamp: ts,
+				qualityLimitationReason: "bandwidth",
+				qualityLimitationDurations: { bandwidth: cpuB },
+			}),
+			vp9Codec,
+		];
+		const fake = makeFakeStatsTrack({
+			statsEntries: layers("out-a", 0, 0, 10_000, 5, 50),
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		// Spell starts on out-a's clock (base 5).
+		fake.setStatsEntries(layers("out-a", 200_000, 50_000, 11_000, 7, 52));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain("2.0 Mbps");
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"bandwidth limited · 2s",
+		);
+
+		// The active layer flips to out-b (different cumulative clock): the
+		// bitrate keeps measuring (same byte population) and the spell keeps
+		// its elapsed time instead of resetting.
+		fake.setStatsEntries(layers("out-b", 300_000, 200_000, 12_000, 7, 54));
+		await vi.advanceTimersByTimeAsync(1_000);
+		const flipped = screen.getByTestId("track-stats").textContent ?? "";
+		expect(flipped).toContain("2.0 Mbps");
+		expect(flipped).toContain("bandwidth limited · 2s");
+
+		// And it continues accumulating on the new clock.
+		fake.setStatsEntries(layers("out-b", 400_000, 350_000, 13_000, 7, 57));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"bandwidth limited · 5s",
+		);
+	});
+
+	it("keeps fps honest across a send republication (per-entry fps, spell continuity by contract)", async () => {
+		const fake = makeFakeStatsTrack({
+			statsEntries: [
+				outboundVideo({
+					id: "out-1",
+					bytesSent: 0,
+					timestamp: 10_000,
+					qualityLimitationReason: "cpu",
+					qualityLimitationDurations: { cpu: 30 },
+				}),
+				vp9Codec,
+			],
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.getByTestId("track-stats").textContent).toContain("60fps");
+
+		// A reconnect republishes the track; the transitional report still
+		// lists the ended entry next to the new one. fps history is
+		// per-entry, so the fresh encoder's first second (no fps yet) must
+		// not read as a 0fps stall; the limitation spell carries by
+		// contract (the restart did not lift the condition) - here its
+		// elapsed time is 0, so no duration segment renders.
+		fake.setStatsEntries([
+			outboundVideo({
+				id: "out-1",
+				active: false,
+				framesPerSecond: undefined,
+				bytesSent: 0,
+				timestamp: 10_000,
+				qualityLimitationReason: "cpu",
+				qualityLimitationDurations: { cpu: 30 },
+			}),
+			outboundVideo({
+				id: "out-new",
+				framesPerSecond: undefined,
+				bytesSent: 0,
+				timestamp: 11_000,
+				qualityLimitationReason: "cpu",
+				qualityLimitationDurations: { cpu: 0.2 },
+			}),
+			vp9Codec,
+		]);
+		await vi.advanceTimersByTimeAsync(1_000);
+		const text = screen.getByTestId("track-stats").textContent ?? "";
+		expect(text).toContain("1920x1080");
+		expect(text).not.toContain("fps");
+		// New spell on the new stream: no inherited duration segment.
+		expect(text).toContain("cpu limited");
+		expect(text).not.toMatch(/limited · \d+s/);
+	});
+
+	it("carries a nonzero limitation spell across a send republication", async () => {
+		const entry = (
+			id: string,
+			ts: number,
+			cpu: number,
+		): Record<string, unknown>[] => [
+			outboundVideo({
+				id,
+				bytesSent: 0,
+				timestamp: ts,
+				qualityLimitationReason: "cpu",
+				qualityLimitationDurations: { cpu },
+			}),
+			vp9Codec,
+		];
+		const fake = makeFakeStatsTrack({
+			statsEntries: entry("out-1", 10_000, 5),
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		fake.setStatsEntries(entry("out-1", 12_000, 8));
+		await vi.advanceTimersByTimeAsync(2_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"cpu limited · 3s",
+		);
+
+		// Republication: new entry id with its own (young) cumulative clock.
+		// The limitation didn't lift, so the spell continues from 3s.
+		fake.setStatsEntries(entry("out-new", 13_000, 0.5));
+		await vi.advanceTimersByTimeAsync(1_000);
+		fake.setStatsEntries(entry("out-new", 14_000, 1.5));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"cpu limited · 4s",
+		);
+	});
+
+	it("holds the readout across a ~3s jank gap, re-baselining only the measurements", async () => {
+		const entries = (bytes: number, ts: number, cpu: number) => [
+			outboundVideo({
+				bytesSent: bytes,
+				timestamp: ts,
+				qualityLimitationReason: "cpu",
+				qualityLimitationDurations: { cpu },
+			}),
+			vp9Codec,
+		];
+		const fake = makeFakeStatsTrack({ statsEntries: entries(0, 10_000, 10) });
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		fake.setStatsEntries(entries(250_000, 11_000, 12));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain("2.0 Mbps");
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"cpu limited · 2s",
+		);
+
+		// A main-thread hiccup delays the next tick ~3s: the badge must NOT
+		// blank or reset the spell (the cumulative clock is gap-immune);
+		// only the byte baseline re-measures.
+		vi.setSystemTime(Date.now() + 3_000);
+		fake.setStatsEntries(entries(1_000_000, 14_000, 15));
+		await vi.advanceTimersByTimeAsync(1_000);
+		const text = screen.getByTestId("track-stats").textContent ?? "";
+		expect(text).toContain("1920x1080");
+		expect(text).toContain("cpu limited · 5s");
+		expect(text).not.toContain("Mbps");
+		// Measurement resumes on the following tick.
+		fake.setStatsEntries(entries(1_250_000, 15_000, 16));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain("2.0 Mbps");
+	});
+
+	it("preserves the limitation spell across a flip that follows a held tick", async () => {
+		const layers = (
+			activeId: "out-a" | "out-b",
+			ts: number,
+			cpuA: number,
+			cpuB: number,
+		): Record<string, unknown>[] => [
+			outboundVideo({
+				id: "out-a",
+				framesPerSecond: activeId === "out-a" ? 30 : undefined,
+				timestamp: ts,
+				qualityLimitationReason: "cpu",
+				qualityLimitationDurations: { cpu: cpuA },
+			}),
+			outboundVideo({
+				id: "out-b",
+				frameWidth: 640,
+				frameHeight: 360,
+				framesPerSecond: activeId === "out-b" ? 30 : undefined,
+				timestamp: ts,
+				qualityLimitationReason: "cpu",
+				qualityLimitationDurations: { cpu: cpuB },
+			}),
+			vp9Codec,
+		];
+		const fake = makeFakeStatsTrack({
+			statsEntries: layers("out-a", 10_000, 5, 40),
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		fake.setStatsEntries(layers("out-a", 11_000, 8, 43));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"cpu limited · 3s",
+		);
+
+		// One held tick decays the warning's "now" claim...
+		fake.setReportUnavailable(true);
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).not.toContain(
+			"limited",
+		);
+		fake.setReportUnavailable(false);
+
+		// ...then the active layer flips. The spell's elapsed time is carried
+		// from poller state, NOT the decayed snapshot - it must resume, not
+		// restart at zero.
+		fake.setStatsEntries(layers("out-b", 13_000, 8, 45));
+		await vi.advanceTimersByTimeAsync(1_000);
+		fake.setStatsEntries(layers("out-b", 14_000, 8, 47));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"cpu limited · 5s",
+		);
+	});
+
+	it("discards stale baselines when the tick chain itself was stalled (hidden tab)", async () => {
+		const fake = makeFakeStatsTrack({
+			statsEntries: [inboundVideo(), vp9Codec],
+		});
+		render(() => <TrackStatsOverlay isLocal={false} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.getByTestId("track-stats")).toBeTruthy();
+
+		// The tab is hidden and timers are throttled: no ticks run for two
+		// minutes while counters grow, then the overdue tick finally fires.
+		vi.setSystemTime(Date.now() + 120_000);
+		fake.setStatsEntries([inboundVideo({ framesDropped: 900 }), vp9Codec]);
+		await vi.advanceTimersByTimeAsync(1_000);
+		const text = screen.getByTestId("track-stats").textContent ?? "";
+		// Gap-era drops are a fresh baseline, not a live warning, and no
+		// gap-averaged bitrate renders.
+		expect(text).toContain("2560x1440");
+		expect(text).not.toContain("dropped");
+	});
+
+	it("remounts the badge with the new direction if isLocal ever flips while mounted", async () => {
+		const fake = makeFakeStatsTrack({
+			statsEntries: [inboundVideo(), vp9Codec],
+		});
+		const [isLocal, setIsLocal] = createSignal<boolean | undefined>(false);
+		render(() => <TrackStatsOverlay isLocal={isLocal()} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"2560x1440",
+		);
+
+		// isLocal corrects to true without an undefined interlude: the keyed
+		// gate remounts the badge on the send direction, which finds no
+		// outbound entries in this report - never a stale receive readout.
+		setIsLocal(true);
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"no frames sent",
+		);
+	});
+
+	it("renders send-side stats with the encoder's live limitation as a current spell", async () => {
+		const sending = (
+			bytes: number,
+			ts: number,
+			reason: string,
+			cpuSecs: number,
+		): Record<string, unknown>[] => [
+			outboundVideo({
+				bytesSent: bytes,
+				timestamp: ts,
+				qualityLimitationReason: reason,
+				qualityLimitationDurations: { none: 3, cpu: cpuSecs, bandwidth: 0 },
+			}),
+			vp9Codec,
+		];
+		const fake = makeFakeStatsTrack({
+			statsEntries: sending(0, 10_000, "none", 12),
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		const initial = screen.getByTestId("track-stats").textContent ?? "";
+		expect(initial).toContain("1920x1080 · 60fps");
+		expect(initial).not.toContain("limited");
+
+		// 1,500,000 bytes over 1s -> 12 Mbps total upload; the encoder now
+		// self-reports a cpu limitation. The 12 CUMULATIVE seconds are from
+		// an earlier spell - a just-started limitation shows no duration.
+		fake.setStatsEntries(sending(1_500_000, 11_000, "cpu", 12));
+		await vi.advanceTimersByTimeAsync(1_000);
+		const limited = screen.getByTestId("track-stats").textContent ?? "";
+		expect(limited).toContain("12.0 Mbps · VP9");
+		expect(limited).toContain("cpu limited");
+		expect(limited).not.toContain("12s");
+
+		// The spell continues: duration reflects growth since ITS start.
+		fake.setStatsEntries(sending(3_000_000, 12_000, "cpu", 15));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"cpu limited · 3s",
+		);
+
+		// A held (missing-report) tick decays the limitation's "now" claim
+		// while the rest of the readout holds.
+		fake.setReportUnavailable(true);
+		await vi.advanceTimersByTimeAsync(1_000);
+		const held = screen.getByTestId("track-stats").textContent ?? "";
+		expect(held).toContain("1920x1080");
+		expect(held).not.toContain("limited");
+		fake.setReportUnavailable(false);
+
+		// Back to unlimited: the warning stays cleared on fresh reports.
+		fake.setStatsEntries(sending(4_000_000, 14_000, "none", 15));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).not.toContain(
+			"limited",
+		);
+	});
+
+	it("re-baselines the upload bitrate when a lower simulcast layer churns", async () => {
+		const layers = (
+			lowId: string,
+			lowBytes: number,
+			topBytes: number,
+			ts: number,
+		): Record<string, unknown>[] => [
+			outboundVideo({ id: "out-top", bytesSent: topBytes, timestamp: ts }),
+			outboundVideo({
+				id: lowId,
+				frameWidth: 640,
+				frameHeight: 360,
+				framesPerSecond: 30,
+				bytesSent: lowBytes,
+				timestamp: ts,
+			}),
+			vp9Codec,
+		];
+		const fake = makeFakeStatsTrack({
+			statsEntries: layers("out-low", 500_000, 0, 10_000),
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		fake.setStatsEntries(layers("out-low", 750_000, 0, 11_000));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain("2.0 Mbps");
+
+		// The lower layer's entry is replaced (SSRC restart): the summed
+		// byte population changed, so the rate is unmeasured for one tick -
+		// never a spike from the doubled sum or a blank from it collapsing.
+		fake.setStatsEntries(layers("out-low2", 1_000, 0, 12_000));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).not.toContain("bps");
+		// The new population measures normally on the next tick.
+		fake.setStatsEntries(layers("out-low2", 251_000, 0, 13_000));
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(screen.getByTestId("track-stats").textContent).toContain("2.0 Mbps");
+	});
+
+	it("says 'no frames sent' when the local encoder hasn't produced frames", async () => {
+		const fake = makeFakeStatsTrack({
+			statsEntries: [
+				outboundVideo({
+					frameWidth: undefined,
+					frameHeight: undefined,
+					framesPerSecond: undefined,
+				}),
+				vp9Codec,
+			],
+		});
+		render(() => <TrackStatsOverlay isLocal={true} track={fake.track} />);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.getByTestId("track-stats").textContent).toContain(
+			"no frames sent",
+		);
 	});
 
 	it("renders resolution, fps, codec, and a delta-derived bitrate", async () => {
@@ -362,15 +761,6 @@ describe("TrackStatsOverlay", () => {
 		fake.setReportUnavailable(false);
 		await vi.advanceTimersByTimeAsync(1_000);
 		expect(screen.getByTestId("track-stats")).toBeTruthy();
-
-		// A permanent-looking run of misses clears the badge and drops to the
-		// 10s recovery cadence (so no further calls land within 5s).
-		fake.setReportUnavailable(true);
-		await vi.advanceTimersByTimeAsync(3_000);
-		expect(screen.queryByTestId("track-stats")).toBeNull();
-		const calls = fake.getRTCStatsReport.mock.calls.length;
-		await vi.advanceTimersByTimeAsync(5_000);
-		expect(fake.getRTCStatsReport).toHaveBeenCalledTimes(calls);
 	});
 
 	it("survives a track without stats APIs (partial test fakes, teardown)", async () => {

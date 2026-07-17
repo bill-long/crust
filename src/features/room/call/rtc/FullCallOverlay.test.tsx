@@ -403,7 +403,7 @@ describe("FullCallOverlay", () => {
 		isLocal: true,
 	});
 
-	it("shows a stats overlay on remote tiles (not local) when rtcShowCallStats is on", async () => {
+	it("shows receive stats on remote tiles and send stats on local tiles when rtcShowCallStats is on", async () => {
 		updateSetting("rtcShowCallStats", true);
 		const fake = track(makeFakeCallSession());
 		fake.setLivekitParticipants([localSelf, remoteAmon]);
@@ -418,13 +418,16 @@ describe("FullCallOverlay", () => {
 		// Let the overlay's phase-scheduled first stats tick land.
 		await flushStatsTick();
 		const badges = screen.getAllByTestId("track-stats");
-		expect(badges.length).toBe(1);
-		// The resolution discriminates WHICH tile's badge rendered (remote,
-		// not local); exact formatting is locked by the trackStats unit tests.
-		expect(badges[0].textContent).toContain("1280x720");
+		expect(badges.length).toBe(2);
+		const texts = badges.map((b) => b.textContent ?? "");
+		// The remote tile's receive badge decodes the fixture's inbound
+		// frames; the local tile's send badge reads outbound-rtp, which the
+		// receive-shaped fixture doesn't carry - honest "no frames sent".
+		expect(texts.some((x) => x.includes("1280x720"))).toBe(true);
+		expect(texts.some((x) => x.includes("no frames sent"))).toBe(true);
 	});
 
-	it("shows stats on a remote screen-share tile but not on the local user's own share", async () => {
+	it("shows receive stats on a remote share and send stats on the local user's own share", async () => {
 		updateSetting("rtcShowCallStats", true);
 		const fake = track(makeFakeCallSession());
 		fake.setLivekitParticipants([localSelf, remoteAmon]);
@@ -438,8 +441,10 @@ describe("FullCallOverlay", () => {
 		render(() => <FullCallOverlay />);
 		await flushStatsTick();
 		const badges = screen.getAllByTestId("track-stats");
-		expect(badges.length).toBe(1);
-		expect(badges[0].textContent).toContain("2560x1440");
+		expect(badges.length).toBe(2);
+		const texts = badges.map((b) => b.textContent ?? "");
+		expect(texts.some((x) => x.includes("2560x1440"))).toBe(true);
+		expect(texts.some((x) => x.includes("no frames sent"))).toBe(true);
 	});
 
 	it("keeps the stats readout when the participant snapshot object is replaced (tile remount)", async () => {
@@ -455,14 +460,15 @@ describe("FullCallOverlay", () => {
 		expect(screen.getByTestId("track-stats").textContent).toContain("1280x720");
 
 		// A speaking flip produces a NEW participant object; the
-		// reference-keyed <For> rebuilds the tile. The badge must re-render
-		// its persisted readout immediately (same track object), not blank
-		// until the next poll.
+		// reference-keyed <For> rebuilds the tile. What only this suite can
+		// verify is that the rebuilt tile hands the badge the SAME track
+		// object, so the badge is present immediately (text-level
+		// persistence is locked by the TrackStatsOverlay unit suite).
 		fake.setLivekitParticipants([
 			participant({ identity: "a", displayName: "Amon", isSpeaking: true }),
 		]);
 		await flush();
-		expect(screen.getByTestId("track-stats").textContent).toContain("1280x720");
+		expect(screen.getByTestId("track-stats")).toBeTruthy();
 	});
 
 	it("fails closed: no stats overlay on a share whose participant record is missing", async () => {

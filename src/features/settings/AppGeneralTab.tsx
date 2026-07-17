@@ -288,7 +288,7 @@ const AppGeneralTab: Component = () => {
 				<ScreenShareQualitySelect />
 				<ToggleRow
 					label="Call stats overlay"
-					description="Show live resolution, frame rate, bitrate, and codec on other participants' call tiles"
+					description="Show live resolution, frame rate, bitrate, and codec on call video tiles. Your own tiles show outgoing stats, including why the encoder limits quality."
 					checked={userSettings().rtcShowCallStats}
 					onChange={(v) => updateSetting("rtcShowCallStats", v)}
 				/>

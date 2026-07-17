@@ -37,6 +37,20 @@ export const vp9Codec: Record<string, unknown> = {
 	mimeType: "video/VP9",
 };
 
+export const outboundVideo = (
+	overrides: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+	id: "out-1",
+	type: "outbound-rtp",
+	kind: "video",
+	frameWidth: 1920,
+	frameHeight: 1080,
+	framesPerSecond: 60,
+	qualityLimitationReason: "none",
+	codecId: "codec-1",
+	...overrides,
+});
+
 export interface FakeStatsTrackOptions {
 	statsEntries?: Record<string, unknown>[];
 	/**
