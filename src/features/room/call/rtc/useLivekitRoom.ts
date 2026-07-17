@@ -21,9 +21,9 @@ import {
 import {
 	SCREEN_SHARE_CONTENT_HINT,
 	SCREEN_SHARE_PUBLISH_OPTIONS,
+	type ScreenShareQuality,
 	screenShareQualitySpec,
 } from "../../../../lib/screenShareQuality";
-import type { ScreenShareQuality } from "../../../../stores/settings";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
 
 export type LivekitConnectionStatus =

@@ -1,4 +1,31 @@
-import type { ScreenShareQuality } from "../stores/settings";
+/**
+ * The single source of truth for screen-share quality preset keys, in
+ * picker order (lowest cost first). The union type, the persisted-value
+ * validation in `stores/settings.ts`, the settings picker, and the spec
+ * table's completeness (via `Record<ScreenShareQuality, ...>`) all
+ * derive from this list, so adding a preset is a one-place change. Kept
+ * HERE (not in the settings store) so `lib/` never imports runtime
+ * values from `stores/` - the store consumes this module, one
+ * direction, no side-effect-laden import cycle to arm.
+ */
+export const SCREEN_SHARE_QUALITIES = [
+	"720p30",
+	"1080p30",
+	"1080p60",
+	"1440p60",
+	"native60",
+] as const;
+
+/** Outgoing screen-share quality preset key. */
+export type ScreenShareQuality = (typeof SCREEN_SHARE_QUALITIES)[number];
+
+/**
+ * Membership guard for persisted/untrusted values - THE one place the
+ * "is this a known preset key" check lives.
+ */
+export function isScreenShareQuality(v: unknown): v is ScreenShareQuality {
+	return (SCREEN_SHARE_QUALITIES as readonly unknown[]).includes(v);
+}
 
 /**
  * A selectable screen-share quality, mapped to the LiveKit capture
@@ -10,7 +37,7 @@ import type { ScreenShareQuality } from "../stores/settings";
  *
  * - `resolution` is the getDisplayMedia capture constraint. LiveKit's default
  *   screen-capture constraint caps frameRate at 30, so reaching 60fps REQUIRES
- *   overriding `frameRate` here — a 60fps encoding alone would still only see
+ *   overriding `frameRate` here - a 60fps encoding alone would still only see
  *   30 captured frames.
  * - `encoding` is the encoder ceiling. LiveKit's stock default is
  *   `h1080fps15` (1080p, 15fps, ~2.5 Mbps), which is what makes a motion-heavy
@@ -67,11 +94,14 @@ export const SCREEN_SHARE_CONTENT_HINT = "motion" as const;
  *   full-res encode instead of being split across half/quarter-res layers that
  *   buy little for screen share. The 3 temporal layers are near-free and let
  *   the SFU drop frame rate for constrained subscribers without a separate
- *   resolution encode. (livekit-client already forces L1T3 for VP9 screen
- *   share; passing it keeps intent explicit and is consistent, not fighting the
- *   SDK.) Tradeoff: with a single spatial layer, a subscriber on a weak downlink
- *   can only be dropped in frame rate, not resolution - matching the issue's
- *   explicit "keep everyone on one full-res layer" decision.
+ *   resolution encode. Multi-spatial-layer (L3T3) was investigated for the
+ *   high-resolution presets (#407) and is NOT possible: livekit-client
+ *   force-overrides VP9 screen share to L1T3 ("vp9 svc with screenshare
+ *   cannot encode multiple spatial layers - doing so reduces publish
+ *   resolution to minimal resolution"), so passing it here keeps intent
+ *   explicit rather than fighting the SDK. Accepted tradeoff, sharper at
+ *   the 12-18 Mbps presets: a subscriber on a weak downlink can only be
+ *   stepped down in frame rate, never resolution.
  * - `simulcast: false` - SVC codecs already ignore simulcast, but this documents
  *   intent and covers the VP8 backup path.
  * - `degradationPreference: "maintain-framerate"` - under CPU/bandwidth
@@ -88,36 +118,65 @@ export const SCREEN_SHARE_PUBLISH_OPTIONS = {
 	degradationPreference: "maintain-framerate",
 } as const;
 
-/** Picker order, lowest cost first. */
-export const SCREEN_SHARE_QUALITY_ORDER: readonly ScreenShareQuality[] = [
-	"720p30",
-	"1080p30",
-	"1080p60",
-];
-
-/** Default when nothing is persisted — balanced 1080p30. */
+/** Default when nothing is persisted - balanced 1080p30. */
 export const DEFAULT_SCREEN_SHARE_QUALITY: ScreenShareQuality = "1080p30";
 
 export const SCREEN_SHARE_QUALITY_SPECS: Record<
 	ScreenShareQuality,
 	ScreenShareQualitySpec
 > = {
+	// Two DIFFERENT capture-box contracts, both riding getDisplayMedia's
+	// aspect-preserving, per-dimension fit-within-box downscale (ideal
+	// constraints never upscale):
+	// - The capped presets' rectangular WxH box IS their pixel budget:
+	//   any monitor - portrait included - downscales to fit within it, so
+	//   the bitrate ceiling below is never asked to carry more pixels
+	//   than the preset's nominal size. (A square box here would let a
+	//   non-16:9 monitor encode up to 2x the pixels under the same
+	//   ceiling - blockier motion at higher CPU cost, the opposite of
+	//   what a capped preset is for.)
+	// - native60's SQUARE box promises native capture instead: squareness
+	//   makes the fit orientation-proof, since a rectangular box shrinks
+	//   any monitor whose long edge exceeds the box's short side when
+	//   rotated.
+	// Bitrates are ceilings sized for VP9 motion content at the preset's
+	// nominal size; static content stays far below them, and machines
+	// that can't sustain the encode shed resolution first via
+	// maintain-framerate.
 	"720p30": {
-		label: "720p · 30fps — smooth, lowest bandwidth",
+		label: "720p · 30fps - smooth, lowest bandwidth",
 		resolution: { width: 1280, height: 720, frameRate: 30 },
 		encoding: { maxBitrate: 2_000_000, maxFramerate: 30 },
 	},
 	"1080p30": {
-		label: "1080p · 30fps — balanced (default)",
+		label: "1080p · 30fps - balanced (default)",
 		resolution: { width: 1920, height: 1080, frameRate: 30 },
 		// 8 Mbps ceiling (was 5): 5 Mbps starves 1080p under motion. It's a
 		// ceiling, not a target - static content still compresses well under it.
 		encoding: { maxBitrate: 8_000_000, maxFramerate: 30 },
 	},
 	"1080p60": {
-		label: "1080p · 60fps — high frame rate, for games/motion",
+		label: "1080p · 60fps - high frame rate, for games/motion",
 		resolution: { width: 1920, height: 1080, frameRate: 60 },
 		encoding: { maxBitrate: 8_000_000, maxFramerate: 60 },
+	},
+	"1440p60": {
+		label: "1440p · 60fps - high resolution, more upload/CPU",
+		resolution: { width: 2560, height: 1440, frameRate: 60 },
+		encoding: { maxBitrate: 12_000_000, maxFramerate: 60 },
+	},
+	native60: {
+		label: "Native · 60fps - full monitor resolution, most upload/CPU",
+		// 8K square (see the contracts note above): every monitor with
+		// edges up to 7680 captures at its true native size in either
+		// orientation. (Zero dims would be livekit's uncapped convention,
+		// but livekit skips its whole dimension-constraint block INCLUDING
+		// frameRate for zero dims, and its capture options offer no other
+		// typed frame-rate carrier.) The 18 Mbps ceiling is sized for ~4K
+		// pixel rates; monitors beyond that degrade gracefully via
+		// maintain-framerate.
+		resolution: { width: 7680, height: 7680, frameRate: 60 },
+		encoding: { maxBitrate: 18_000_000, maxFramerate: 60 },
 	},
 };
 

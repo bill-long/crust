@@ -1,8 +1,26 @@
 import { createStore } from "solid-js/store";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
+import {
+	DEFAULT_SCREEN_SHARE_QUALITY,
+	isScreenShareQuality,
+	type ScreenShareQuality,
+} from "../lib/screenShareQuality";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 
 const SETTINGS_KEY = STORAGE_KEYS.settings;
+
+// Small validated-enum lists: each union type, its parse-time membership
+// check, and (where applicable) its UI options derive from ONE const
+// list, mirroring SCREEN_SHARE_QUALITIES in lib/screenShareQuality.ts.
+const TIME_FORMATS = ["12h", "24h"] as const;
+export type TimeFormat = (typeof TIME_FORMATS)[number];
+
+const MIC_MODES = ["voice-activity", "push-to-talk", "push-to-mute"] as const;
+export type MicMode = (typeof MIC_MODES)[number];
+
+function isOneOf<T extends string>(list: readonly T[], v: unknown): v is T {
+	return (list as readonly unknown[]).includes(v);
+}
 
 export interface UserSettings {
 	/** Whether to auto-fetch GIF URLs from CDN for inline display. */
@@ -10,7 +28,7 @@ export interface UserSettings {
 	/** UI zoom level as a percentage (50–200). */
 	zoomLevel: number;
 	/** Clock format. */
-	timeFormat: "12h" | "24h";
+	timeFormat: TimeFormat;
 	/** Whether desktop notifications are enabled. */
 	desktopNotifications: boolean;
 	/**
@@ -49,11 +67,12 @@ export interface UserSettings {
 	rtcCamDeviceId: string;
 	/**
 	 * Outgoing screen-share quality. Maps to a getDisplayMedia capture
-	 * constraint + encoder ceiling (see
-	 * `lib/screenShareQuality.ts`). LiveKit's stock
-	 * default encodes screen shares at 1080p15 (~2.5 Mbps), which looks
-	 * choppy for motion-heavy shares; this lets the sharing user pick a
-	 * higher frame rate / bitrate, at the cost of more upload + CPU.
+	 * constraint + encoder ceiling (see `lib/screenShareQuality.ts`).
+	 * LiveKit's stock default encodes screen shares at 1080p15
+	 * (~2.5 Mbps), which looks choppy for motion-heavy shares; presets
+	 * let the sharing user pick higher frame rates, resolutions (up to
+	 * native monitor size, #407), and bitrate ceilings, at the cost of
+	 * more upload + CPU.
 	 */
 	rtcScreenShareQuality: ScreenShareQuality;
 	/**
@@ -64,7 +83,7 @@ export interface UserSettings {
 	 */
 	rtcShowCallStats: boolean;
 	/**
-	 * Mic transmission mode (Phase 6 of #122 — issue #108).
+	 * Mic transmission mode (Phase 6 of #122 - issue #108).
 	 * - `"voice-activity"`: always transmit when not manually muted.
 	 * - `"push-to-talk"`: transmit only while `micHotkey` is held.
 	 * - `"push-to-mute"`: transmit unless `micHotkey` is held.
@@ -73,7 +92,7 @@ export interface UserSettings {
 	 * voice-activity behavior (see `src/stores/voice.ts`) so the user
 	 * isn't silently muted forever after picking a mode.
 	 */
-	micMode: "voice-activity" | "push-to-talk" | "push-to-mute";
+	micMode: MicMode;
 	/**
 	 * Hotkey combo for PTT/PTM. `code` is `KeyboardEvent.code`
 	 * (e.g. `"Space"`, `"KeyT"`); `null` means a modifier-only combo
@@ -81,9 +100,6 @@ export interface UserSettings {
 	 */
 	micHotkey: MicHotkey | null;
 }
-
-/** Outgoing screen-share quality preset key. */
-export type ScreenShareQuality = "720p30" | "1080p30" | "1080p60";
 
 export interface MicHotkey {
 	ctrl: boolean;
@@ -105,7 +121,7 @@ const defaults: UserSettings = {
 	inlineMediaPlayers: true,
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
-	rtcScreenShareQuality: "1080p30",
+	rtcScreenShareQuality: DEFAULT_SCREEN_SHARE_QUALITY,
 	rtcShowCallStats: false,
 	micMode: "voice-activity",
 	micHotkey: null,
@@ -138,10 +154,9 @@ function parseSettings(parsed: unknown): UserSettings {
 			obj.zoomLevel <= 200
 				? obj.zoomLevel
 				: defaults.zoomLevel,
-		timeFormat:
-			obj.timeFormat === "12h" || obj.timeFormat === "24h"
-				? obj.timeFormat
-				: defaults.timeFormat,
+		timeFormat: isOneOf(TIME_FORMATS, obj.timeFormat)
+			? obj.timeFormat
+			: defaults.timeFormat,
 		desktopNotifications: loadBool(
 			obj,
 			"desktopNotifications",
@@ -171,23 +186,15 @@ function parseSettings(parsed: unknown): UserSettings {
 			typeof obj.rtcCamDeviceId === "string"
 				? obj.rtcCamDeviceId
 				: defaults.rtcCamDeviceId,
-		rtcScreenShareQuality:
-			obj.rtcScreenShareQuality === "720p30" ||
-			obj.rtcScreenShareQuality === "1080p30" ||
-			obj.rtcScreenShareQuality === "1080p60"
-				? obj.rtcScreenShareQuality
-				: defaults.rtcScreenShareQuality,
+		rtcScreenShareQuality: isScreenShareQuality(obj.rtcScreenShareQuality)
+			? obj.rtcScreenShareQuality
+			: defaults.rtcScreenShareQuality,
 		rtcShowCallStats: loadBool(
 			obj,
 			"rtcShowCallStats",
 			defaults.rtcShowCallStats,
 		),
-		micMode:
-			obj.micMode === "voice-activity" ||
-			obj.micMode === "push-to-talk" ||
-			obj.micMode === "push-to-mute"
-				? obj.micMode
-				: defaults.micMode,
+		micMode: isOneOf(MIC_MODES, obj.micMode) ? obj.micMode : defaults.micMode,
 		micHotkey: parseMicHotkey(obj.micHotkey),
 	};
 }
@@ -240,7 +247,7 @@ function applyZoom(level: number): void {
 	}
 }
 
-// Module-level singleton store — property-level reactivity so consumers
+// Module-level singleton store - property-level reactivity so consumers
 // reading e.g. settings.timeFormat don't re-render on zoomLevel changes.
 const [settings, setSettings] = createStore<UserSettings>(
 	loadPersisted(SETTINGS_KEY, parseSettings, { ...defaults }),

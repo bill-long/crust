@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { ScreenShareQuality } from "../stores/settings";
 import {
 	DEFAULT_SCREEN_SHARE_QUALITY,
 	SCREEN_SHARE_CONTENT_HINT,
 	SCREEN_SHARE_PUBLISH_OPTIONS,
-	SCREEN_SHARE_QUALITY_ORDER,
+	SCREEN_SHARE_QUALITIES,
 	SCREEN_SHARE_QUALITY_SPECS,
+	type ScreenShareQuality,
 	screenShareQualitySpec,
 } from "./screenShareQuality";
 
@@ -53,6 +53,24 @@ describe("screen-share preset invariants (#385/#388)", () => {
 		expect(SCREEN_SHARE_QUALITY_SPECS["1080p60"].encoding.maxBitrate).toBe(
 			8_000_000,
 		);
+		// #407: the high-resolution ceilings, sized for VP9 motion content.
+		// A lower ceiling starves the resolution it exists to carry.
+		expect(SCREEN_SHARE_QUALITY_SPECS["1440p60"].encoding.maxBitrate).toBe(
+			12_000_000,
+		);
+		expect(SCREEN_SHARE_QUALITY_SPECS.native60.encoding.maxBitrate).toBe(
+			18_000_000,
+		);
+	});
+
+	it("captures native60 with a SQUARE 8K ideal box at 60fps (#407)", () => {
+		const spec = SCREEN_SHARE_QUALITY_SPECS.native60;
+		expect(spec.resolution).toEqual({
+			width: 7680,
+			height: 7680,
+			frameRate: 60,
+		});
+		expect(spec.encoding.maxFramerate).toBe(60);
 	});
 
 	it("actually captures the high-frame-rate preset at 60fps", () => {
@@ -63,23 +81,29 @@ describe("screen-share preset invariants (#385/#388)", () => {
 		expect(spec.resolution.height).toBe(1080);
 	});
 
+	it("capped presets keep rectangular pixel-budget boxes", () => {
+		// The rectangular box IS a capped preset's pixel budget (portrait
+		// monitors downscale INTO it). native60's square native-capture box
+		// is locked by its exact-shape test below.
+		for (const key of KEYS) {
+			if (key === "native60") continue;
+			const r = SCREEN_SHARE_QUALITY_SPECS[key].resolution;
+			expect(r.width).toBeGreaterThan(r.height);
+		}
+	});
+
 	it("orders presets lowest-cost first and covers exactly the spec keys", () => {
-		expect([...SCREEN_SHARE_QUALITY_ORDER].sort()).toEqual([...KEYS].sort());
+		expect([...SCREEN_SHARE_QUALITIES].sort()).toEqual([...KEYS].sort());
 		// Non-decreasing pixel-rate (width*height*fps) down the picker order.
 		const cost = (q: ScreenShareQuality): number => {
 			const r = SCREEN_SHARE_QUALITY_SPECS[q].resolution;
 			return r.width * r.height * r.frameRate;
 		};
-		for (let i = 1; i < SCREEN_SHARE_QUALITY_ORDER.length; i++) {
-			expect(cost(SCREEN_SHARE_QUALITY_ORDER[i])).toBeGreaterThanOrEqual(
-				cost(SCREEN_SHARE_QUALITY_ORDER[i - 1]),
+		for (let i = 1; i < SCREEN_SHARE_QUALITIES.length; i++) {
+			expect(cost(SCREEN_SHARE_QUALITIES[i])).toBeGreaterThanOrEqual(
+				cost(SCREEN_SHARE_QUALITIES[i - 1]),
 			);
 		}
-	});
-
-	it("uses a valid, known key as the default", () => {
-		expect(KEYS).toContain(DEFAULT_SCREEN_SHARE_QUALITY);
-		expect(SCREEN_SHARE_QUALITY_ORDER).toContain(DEFAULT_SCREEN_SHARE_QUALITY);
 	});
 });
 
