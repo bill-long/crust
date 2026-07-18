@@ -46,6 +46,33 @@ for (const icon of manifestIcons) {
 
 export default defineConfig({
 	base: basePath,
+	build: {
+		rolldownOptions: {
+			output: {
+				// Vendor chunking (#307): split the two heaviest dependencies out of
+				// the app chunk so they cache independently across deploys - app
+				// code changes every release, matrix-js-sdk and Kobalte change only
+				// on dependency bumps, so returning users re-download a small app
+				// chunk instead of the whole bundle. Groups are evaluated in
+				// priority order; matrix-js-sdk must win over the catch-all
+				// node_modules group for its own packages.
+				advancedChunks: {
+					groups: [
+						{
+							name: "matrix-js-sdk",
+							test: /node_modules[\\/]matrix-js-sdk/,
+							priority: 20,
+						},
+						{
+							name: "kobalte",
+							test: /node_modules[\\/]@kobalte/,
+							priority: 10,
+						},
+					],
+				},
+			},
+		},
+	},
 	plugins: [
 		solid(),
 		tailwindcss(),
