@@ -15,15 +15,13 @@ import { AccountTab } from "./AccountTab";
 import { AppGeneralTab } from "./AppGeneralTab";
 import { DevicesTab } from "./DevicesTab";
 import { NotificationsTab } from "./NotificationsTab";
+import { type SettingsTab, tabMeta } from "./settingsTabs";
 
-export const tabMeta = [
-	{ id: "general", label: "General" },
-	{ id: "account", label: "Account" },
-	{ id: "notifications", label: "Notifications" },
-	{ id: "devices", label: "Devices & Security" },
-] as const;
-
-export type SettingsTab = (typeof tabMeta)[number]["id"];
+export type { SettingsTab } from "./settingsTabs";
+// Re-exported so existing import sites (Layout.tsx lazy mapping, tests) keep
+// working; the canonical home is ./settingsTabs so non-overlay modules can
+// import the tab registry without pulling in this component module (#307).
+export { tabMeta };
 
 interface SettingsOverlayProps {
 	activeTab: SettingsTab;

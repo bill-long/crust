@@ -42,10 +42,7 @@ import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
 import type { RoomSettingsTab } from "../features/room/settings/RoomSettingsOverlay";
 import { createCopyLink } from "../features/room/useCopyLink";
 import { useNotifications } from "../features/room/useNotifications";
-import {
-	type SettingsTab,
-	tabMeta,
-} from "../features/settings/SettingsOverlay";
+import { type SettingsTab, tabMeta } from "../features/settings/settingsTabs";
 import {
 	buildPartialLeaveMessage,
 	leaveChildRooms,
