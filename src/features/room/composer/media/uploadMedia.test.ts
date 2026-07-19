@@ -134,8 +134,7 @@ describe("uploadEventImage", () => {
 		});
 		// jsdom's File lacks arrayBuffer(); shadow it on the instance (the
 		// real encryptor is stubbed above and never reads the bytes).
-		file.arrayBuffer = () =>
-			Promise.resolve(new Uint8Array(50).buffer);
+		file.arrayBuffer = () => Promise.resolve(new Uint8Array(50).buffer);
 		const result = await uploadEventImage(client, ROOM, file);
 
 		expect(result.url).toBeUndefined();
