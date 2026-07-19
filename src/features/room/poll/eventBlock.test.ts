@@ -138,6 +138,23 @@ describe("parseEventBlock", () => {
 		expect(parsed?.image).toBeNull();
 	});
 
+	it("drops an encrypted file whose ciphertext url is not mxc://", () => {
+		const parsed = parseEventBlock({
+			[EVENT_BLOCK_KEY]: {
+				title: "x",
+				start_ts: 100,
+				image: {
+					file: { ...VALID_FILE, url: "https://evil.example/cipher" },
+					info: { w: 10, h: 10, mimetype: "image/png", size: 1 },
+				},
+			},
+		});
+		// No usable source left -> the whole image degrades; the card
+		// itself survives.
+		expect(parsed?.image).toBeNull();
+		expect(parsed?.title).toBe("x");
+	});
+
 	it("drops an image whose file fails EncryptedFile validation", () => {
 		const parsed = parseEventBlock({
 			[EVENT_BLOCK_KEY]: {

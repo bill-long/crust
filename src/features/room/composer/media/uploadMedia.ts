@@ -230,7 +230,16 @@ export async function uploadEventImage(
 	const room = client.getRoom(roomId);
 	if (!room) throw new Error("Room not found");
 	await validateSize(client, file);
-	const inspection = await inspectImage(file);
+	let inspection: Awaited<ReturnType<typeof inspectImage>>;
+	try {
+		inspection = await inspectImage(file);
+	} catch {
+		// createImageBitmap decode failures surface as bare DOMExceptions;
+		// this message is shown verbatim in the Create Event dialog.
+		throw new Error(
+			"Couldn't read the cover image dimensions. Try a different file.",
+		);
+	}
 	const uploaded = await uploadBlob(client, file, {
 		encrypted: room.hasEncryptionStateEvent(),
 		type: file.type || "application/octet-stream",

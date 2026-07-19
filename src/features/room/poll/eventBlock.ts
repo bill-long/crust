@@ -121,7 +121,11 @@ function parseEventImage(value: unknown): EventImage | null {
 	if (typeof i.size !== "number" || !Number.isFinite(i.size) || i.size <= 0) {
 		return null;
 	}
-	const file = parseEncryptedFile(raw.file);
+	// parseEncryptedFile validates the crypto material; the ciphertext URL
+	// still needs the same mxc:// gate as the cleartext url, or untrusted
+	// content could point the client at an arbitrary http(s) endpoint.
+	const parsedFile = parseEncryptedFile(raw.file);
+	const file = parsedFile?.url.startsWith("mxc://") ? parsedFile : null;
 	const url =
 		typeof raw.url === "string" && raw.url.startsWith("mxc://")
 			? raw.url

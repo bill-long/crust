@@ -5,10 +5,10 @@ import {
 	createSignal,
 	createUniqueId,
 	For,
-	onCleanup,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { useThirtySecondTick } from "../../../lib/relativeTime";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import {
 	type EventImage,
@@ -26,10 +26,6 @@ interface PollMessageProps {
 	/** Close the poll. Only invoked when the snapshot says canEnd. */
 	onEndPoll: () => void;
 }
-
-/** Seconds between countdown refreshes; the relative line changes at
- *  minute granularity at finest, so sub-minute ticking is invisible. */
-const COUNTDOWN_TICK_MS = 30_000;
 
 /**
  * Cover image for an event card (#418). Resolves the mxc URL (plain rooms)
@@ -116,9 +112,9 @@ const EventCoverImage: Component<{
 const EventCardHeader: Component<{ event: EventInfo }> = (props) => {
 	const navigate = useNavigate();
 	const { client } = useClient();
-	const [now, setNow] = createSignal(Date.now());
-	const timer = setInterval(() => setNow(Date.now()), COUNTDOWN_TICK_MS);
-	onCleanup(() => clearInterval(timer));
+	// Shared 30s ticker (one interval for the whole timeline, ref-counted)
+	// rather than a per-card setInterval.
+	const now = useThirtySecondTick();
 
 	const roomName = createMemo(() => {
 		const id = props.event.roomId;
