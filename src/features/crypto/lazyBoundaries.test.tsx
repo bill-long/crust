@@ -70,18 +70,24 @@ const ClientWrapper: ParentComponent<{
 };
 
 /**
- * Code-splitting smoke tests (#307): every lazy() boundary introduced for the
- * chunk split must (a) resolve its dynamic import to the named export the
- * .then((m) => ({ default: m.X })) mapping references, and (b) mount through
- * a Suspense boundary. These guard against a future refactor dropping a
- * boundary or renaming an export, both of which otherwise fail only at
- * runtime when the chunk resolves.
+ * Code-splitting smoke tests (#307) for the boundaries owned by this feature
+ * area: the /login route (App.tsx) and the four crypto dialogs
+ * (CryptoStatusBanner.tsx). The Layout settings overlays are covered in
+ * src/features/settings/lazyOverlayBoundaries.test.tsx and FullCallOverlay
+ * in src/features/room/call/rtc/FullCallOverlay.lazy.test.tsx.
+ *
+ * Each test re-declares its production lazy() boundary and asserts it (a)
+ * resolves its dynamic import to the named export the
+ * .then((m) => ({ default: m.X })) mapping references, and (b) mounts
+ * through a Suspense boundary. These guard against a future refactor
+ * dropping a boundary or renaming an export, both of which otherwise fail
+ * only at runtime when the chunk resolves.
  *
  * Each lazy() declaration mirrors the one in the production file. That is
- * deliberate: the test re-creates the boundary exactly as production uses it,
- * so a broken export mapping or missing module surfaces here.
+ * deliberate: the test re-creates the boundary exactly as production uses
+ * it, so a broken export mapping or missing module surfaces here.
  */
-describe("lazy route boundaries (#307)", () => {
+describe("lazy /login route boundary (#307)", () => {
 	afterEach(cleanup);
 
 	it("LoginPage lazy chunk resolves and renders the login form", async () => {

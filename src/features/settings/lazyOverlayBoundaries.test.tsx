@@ -69,10 +69,13 @@ const ClientWrapper: ParentComponent<{
 };
 
 /**
- * Code-splitting smoke tests (#307): the three overlay boundaries introduced
- * in src/app/Layout.tsx must resolve their dynamic imports and mount through
- * Suspense. Each lazy() declaration mirrors the production one so a dropped
- * boundary or renamed export fails here instead of at runtime.
+ * Code-splitting smoke tests (#307): the two settings overlay boundaries
+ * introduced in src/app/Layout.tsx (SettingsOverlay, RoomSettingsOverlay)
+ * must resolve their dynamic imports and mount through Suspense. The third
+ * Layout overlay, FullCallOverlay, is covered in
+ * src/features/room/call/rtc/FullCallOverlay.lazy.test.tsx. Each lazy()
+ * declaration mirrors the production one so a dropped boundary or renamed
+ * export fails here instead of at runtime.
  */
 describe("lazy Layout overlay boundaries (#307)", () => {
 	afterEach(cleanup);
