@@ -208,22 +208,37 @@ describe("buildEventBlock", () => {
 });
 
 describe("formatEventTime", () => {
-	it("renders a local time string (timezone-dependent, shape-asserted)", () => {
-		// Noon UTC on a known date; any timezone renders *something* with a
-		// month and a time.
-		const s = formatEventTime(Date.UTC(2026, 6, 26, 12, 0));
-		expect(s).toMatch(/Jul/);
-		expect(s).toMatch(/26/);
+	it("renders a local time string (locale- and timezone-stable)", () => {
+		// Noon UTC on a known date. Assert against the runner's OWN locale
+		// data (via Intl) rather than hard-coded English, so the test holds
+		// under any LC_ALL.
+		const ts = Date.UTC(2026, 6, 26, 12, 0);
+		const s = formatEventTime(ts);
+		const month = new Intl.DateTimeFormat(undefined, {
+			month: "short",
+		}).format(new Date(ts));
+		// Day as a Latin-digit regex would flake in numeral-system locales
+		// (e.g. ar-EG renders 26 as ٢٦) - derive it from Intl too.
+		const day = new Intl.DateTimeFormat(undefined, {
+			day: "numeric",
+		}).format(new Date(ts));
+		expect(s).toContain(month);
+		expect(s).toContain(day);
 	});
 });
 
 describe("formatEventRelative", () => {
 	const now = Date.UTC(2026, 6, 19, 12, 0, 0);
+	// Expected strings come from the same Intl API the implementation
+	// uses, so the tests are stable under non-English locales.
+	const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
 	it("counts down to a future start", () => {
-		expect(formatEventRelative(now + 3_600_000, null, now)).toBe("in 1 hour");
+		expect(formatEventRelative(now + 3_600_000, null, now)).toBe(
+			rtf.format(1, "hour"),
+		);
 		expect(formatEventRelative(now + 3 * 86_400_000, null, now)).toBe(
-			"in 3 days",
+			rtf.format(3, "day"),
 		);
 	});
 
@@ -234,7 +249,7 @@ describe("formatEventRelative", () => {
 
 	it("reports elapsed time after start when no end is set", () => {
 		expect(formatEventRelative(now - 2 * 3_600_000, null, now)).toBe(
-			"2 hours ago",
+			rtf.format(-2, "hour"),
 		);
 	});
 

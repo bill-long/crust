@@ -396,8 +396,14 @@ describe("PollMessage event card (#418)", () => {
 	it("renders the title, viewer-local time, and a relative line", () => {
 		setupEvent(eventInfo());
 		expect(screen.getByText("Launch Party")).toBeTruthy();
-		// The cascade truncates, so render latency can round 3 days to 2.
-		expect(screen.getByText(/in [23] days/)).toBeTruthy();
+		// Assert against the runner's own locale data (the cascade can
+		// truncate 3 days to 2 with render latency) so the test is stable
+		// under non-English locales.
+		const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+		const expected = [rtf.format(3, "day"), rtf.format(2, "day")];
+		expect(expected.some((text) => screen.queryByText(text) !== null)).toBe(
+			true,
+		);
 	});
 
 	it("renders no event chrome for a plain poll (no block)", () => {
