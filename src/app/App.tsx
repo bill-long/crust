@@ -31,6 +31,20 @@ import { useDecodedParams } from "./useDecodedParams";
 // bundle. Suspense fallback is null for /overlay (the desktop overlay window
 // paints its own background) and a full-viewport surface for /login so the
 // background never flashes while the chunk loads.
+//
+// Prefetch (#414): /login is the destination for EVERY unauthenticated
+// visit, so kicking off the module request at app startup overlaps the
+// chunk fetch with entry-chunk evaluation + router mount instead of
+// starting it only when Suspense first asks. The browser module map
+// dedupes: lazy()'s import() below resolves to the same in-flight module,
+// so this costs nothing for authenticated sessions beyond one cheap
+// parallel request that the service worker would precache anyway.
+// The rejection is swallowed deliberately: this is an optimization, not
+// the load path. If the prefetch fetch fails (transient network/CDN),
+// lazy()'s import() re-attempts on demand and the Suspense fallback
+// covers the gap — an unhandled rejection here would only be noise in
+// global error reporting.
+import("../features/auth/LoginPage").catch(() => {});
 const LoginPage = lazy(() =>
 	import("../features/auth/LoginPage").then((m) => ({ default: m.LoginPage })),
 );
