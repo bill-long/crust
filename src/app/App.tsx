@@ -39,7 +39,12 @@ import { useDecodedParams } from "./useDecodedParams";
 // dedupes: lazy()'s import() below resolves to the same in-flight module,
 // so this costs nothing for authenticated sessions beyond one cheap
 // parallel request that the service worker would precache anyway.
-import("../features/auth/LoginPage");
+// The rejection is swallowed deliberately: this is an optimization, not
+// the load path. If the prefetch fetch fails (transient network/CDN),
+// lazy()'s import() re-attempts on demand and the Suspense fallback
+// covers the gap — an unhandled rejection here would only be noise in
+// global error reporting.
+import("../features/auth/LoginPage").catch(() => {});
 const LoginPage = lazy(() =>
 	import("../features/auth/LoginPage").then((m) => ({ default: m.LoginPage })),
 );
