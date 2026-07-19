@@ -13,6 +13,8 @@ interface ComposerActionStripProps {
 	gifAvailable: boolean;
 	/** Poll dialog open state, for aria-expanded. */
 	pollOpen: boolean;
+	/** Event dialog open state, for aria-expanded. */
+	eventOpen: boolean;
 	/** GIF picker open state, for aria-expanded. */
 	gifOpen: boolean;
 	/** Emoji picker open state, for aria-expanded. */
@@ -24,6 +26,8 @@ interface ComposerActionStripProps {
 	onStartRecording: () => void;
 	/** Open the poll dialog (and close the pickers). */
 	onOpenPoll: () => void;
+	/** Open the event dialog (and close the pickers). */
+	onOpenEvent: () => void;
 	/** Files chosen via the hidden attach input. */
 	onFileSelected: (e: Event & { currentTarget: HTMLInputElement }) => void;
 	/** Toggle the GIF picker (and close the emoji picker). */
@@ -123,6 +127,32 @@ const ComposerActionStrip: Component<ComposerActionStripProps> = (props) => {
 						<path d="M6 20V10" />
 						<path d="M12 20V4" />
 						<path d="M18 20v-6" />
+					</svg>
+				</button>
+				{/* Event card button (#418) — same visibility as polls: events
+				    are new sends, and polls-in-threads are deferred (#303). */}
+				<button
+					type="button"
+					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					onClick={() => props.onOpenEvent()}
+					aria-label="Create event"
+					aria-haspopup="dialog"
+					aria-expanded={props.eventOpen}
+				>
+					<svg
+						class="h-5 w-5"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<rect x="3" y="4" width="18" height="18" rx="2" />
+						<path d="M16 2v4" />
+						<path d="M8 2v4" />
+						<path d="M3 10h18" />
 					</svg>
 				</button>
 			</Show>

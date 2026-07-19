@@ -8,6 +8,7 @@ import {
 	RelationsEvent,
 	type Room,
 } from "matrix-js-sdk";
+import { type EventInfo, parseEventBlock } from "./eventBlock";
 import {
 	PollEndEvent,
 	PollResponseEvent,
@@ -66,6 +67,9 @@ export interface PollWatcher {
 interface WatchedPoll {
 	poll: Poll;
 	start: PollStartInfo;
+	/** Validated event-card block from the start event's content; refreshed
+	 *  alongside `start` on edits. */
+	event: EventInfo | null;
 	/** Response relations, once the first fetch/emission has delivered them.
 	 *  Single source of truth for which Relations object the change
 	 *  listeners are attached to. */
@@ -191,6 +195,7 @@ export function createPollWatcher(
 				isEnded: entry.poll.isEnded,
 				undecryptableCount: entry.poll.undecryptableRelationsCount,
 				loadingResults,
+				event: entry.event,
 				interaction: {
 					canVote: !entry.poll.isEnded && !entry.endPending,
 					hasPendingVote: entry.pendingVote !== null,
@@ -254,6 +259,7 @@ export function createPollWatcher(
 			const newStart = parsePollStart(poll.rootEvent);
 			if (newStart) {
 				entry.start = newStart;
+				entry.event = parseEventBlock(poll.rootEvent.getContent());
 				recompute(pollId);
 			} else {
 				// The edit made the poll unparseable; drop the stale snapshot
@@ -288,6 +294,7 @@ export function createPollWatcher(
 		const entry: WatchedPoll = {
 			poll,
 			start,
+			event: parseEventBlock(poll.rootEvent.getContent()),
 			relations: null,
 			fetchFailed: false,
 			pendingVote: null,
@@ -394,6 +401,7 @@ export function createPollWatcher(
 				// it (pending local echo, start event still decrypting)
 				// there is nothing to load yet.
 				loadingResults: isWatchedRoom && poll !== undefined,
+				event: parseEventBlock(startEvent.getContent()),
 			});
 		},
 

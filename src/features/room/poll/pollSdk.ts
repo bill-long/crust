@@ -39,16 +39,21 @@ export const POLL_KIND_UNDISCLOSED = "org.matrix.msc3381.poll.undisclosed";
  * keyed to the SDK's known-timeline-event map, which has no entries for the
  * unstable MSC3381 types the serializers emit; the runtime accepts any type
  * string, so the cast is confined to this one helper.
+ *
+ * `extraContent` spreads additional namespaced blocks into the serialized
+ * content (e.g. the event-card block, #418). Event content is open JSON -
+ * clients that don't know the key ignore it.
  */
 export function sendSerializedPollEvent(
 	client: MatrixClient,
 	roomId: string,
 	event: { serialize(): { type: string; content: object } },
+	extraContent?: Record<string, unknown>,
 ): Promise<ISendEventResponse> {
 	const { type, content } = event.serialize();
 	return client.sendEvent(
 		roomId,
 		type as keyof TimelineEvents,
-		content as TimelineEvents[keyof TimelineEvents],
+		{ ...content, ...extraContent } as TimelineEvents[keyof TimelineEvents],
 	);
 }
