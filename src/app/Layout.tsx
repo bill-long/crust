@@ -5,9 +5,11 @@ import {
 	createEffect,
 	createMemo,
 	createSignal,
+	lazy,
 	onCleanup,
 	onMount,
 	Show,
+	Suspense,
 	untrack,
 } from "solid-js";
 import { useClient } from "../client/client";
@@ -32,23 +34,15 @@ import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
-import { FullCallOverlay } from "../features/room/call/rtc/FullCallOverlay";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { RoomList } from "../features/room/RoomList";
 import { buildRoomLinkUrl } from "../features/room/roomLink";
 import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
-import {
-	RoomSettingsOverlay,
-	type RoomSettingsTab,
-} from "../features/room/settings/RoomSettingsOverlay";
+import type { RoomSettingsTab } from "../features/room/settings/RoomSettingsOverlay";
 import { createCopyLink } from "../features/room/useCopyLink";
 import { useNotifications } from "../features/room/useNotifications";
-import {
-	SettingsOverlay,
-	type SettingsTab,
-	tabMeta,
-} from "../features/settings/SettingsOverlay";
+import { type SettingsTab, tabMeta } from "../features/settings/settingsTabs";
 import {
 	buildPartialLeaveMessage,
 	leaveChildRooms,
@@ -72,6 +66,27 @@ import { useConfig } from "./ConfigProvider";
 import { dmCanonicalTarget } from "./dmRoute";
 import { RoomPane } from "./RoomPane";
 import { useDecodedParams } from "./useDecodedParams";
+
+// Code splitting (#307): the settings overlays and the full-screen call
+// overlay are heavy subtrees that most sessions open rarely (settings) or
+// never (calls). They mount only behind user action, so they load on demand.
+// Each Suspense fallback matches the mounted component's outer box so the
+// swap causes no layout shift (AGENTS.md rule 3).
+const SettingsOverlay = lazy(() =>
+	import("../features/settings/SettingsOverlay").then((m) => ({
+		default: m.SettingsOverlay,
+	})),
+);
+const RoomSettingsOverlay = lazy(() =>
+	import("../features/room/settings/RoomSettingsOverlay").then((m) => ({
+		default: m.RoomSettingsOverlay,
+	})),
+);
+const FullCallOverlay = lazy(() =>
+	import("../features/room/call/rtc/FullCallOverlay").then((m) => ({
+		default: m.FullCallOverlay,
+	})),
+);
 
 function loadMembersWidth(): number {
 	const stored = loadPersisted<number | null>(
@@ -781,7 +796,14 @@ const Layout: Component = () => {
 								activeCallRoomId() === (roomId() ?? null)
 							}
 						>
-							<FullCallOverlay />
+							{/* Fallback matches the overlay's outer box (absolute
+							    inset-0 bg-surface-0) so joining a call never shifts
+							    layout while the chunk loads. */}
+							<Suspense
+								fallback={<div class="absolute inset-0 z-30 bg-surface-0" />}
+							>
+								<FullCallOverlay />
+							</Suspense>
 						</Show>
 					</div>
 				}
@@ -840,27 +862,37 @@ const Layout: Component = () => {
 									false,
 							);
 							return (
-								<RoomSettingsOverlay
-									client={client}
-									roomId={rid}
-									isSpace={isSpaceTarget}
-									activeTab={target().tab}
-									onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
-									onClose={() => setRoomSettings(null)}
-									onLeft={(leftRid) => {
-										setRoomSettings(null);
-										// If the user just left the space they were
-										// viewing, navigate to /home instead of trying
-										// to navigate back into the just-left space.
-										const leftCurrentSpace =
-											spaceIdAtOpen !== undefined && leftRid === spaceIdAtOpen;
-										if (spaceIdAtOpen && !leftCurrentSpace) {
-											navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
-										} else {
-											navigate("/home");
-										}
-									}}
-								/>
+								// Fallback matches the overlay's outer box (fixed
+								// inset-0 with the same backdrop) so opening room
+								// settings never shifts layout while the chunk loads.
+								<Suspense
+									fallback={
+										<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/60" />
+									}
+								>
+									<RoomSettingsOverlay
+										client={client}
+										roomId={rid}
+										isSpace={isSpaceTarget}
+										activeTab={target().tab}
+										onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
+										onClose={() => setRoomSettings(null)}
+										onLeft={(leftRid) => {
+											setRoomSettings(null);
+											// If the user just left the space they were
+											// viewing, navigate to /home instead of trying
+											// to navigate back into the just-left space.
+											const leftCurrentSpace =
+												spaceIdAtOpen !== undefined &&
+												leftRid === spaceIdAtOpen;
+											if (spaceIdAtOpen && !leftCurrentSpace) {
+												navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
+											} else {
+												navigate("/home");
+											}
+										}}
+									/>
+								</Suspense>
 							);
 						}}
 					</Show>
@@ -936,17 +968,24 @@ const Layout: Component = () => {
 
 			{/* Settings overlay */}
 			<Show when={isSettingsRoute()}>
-				<SettingsOverlay
-					activeTab={settingsTab()}
-					onTabChange={(tab) =>
-						navigate(`/settings/${tab}`, {
-							replace: true,
-							state: location.state,
-						})
+				{/* Same fixed inset-0 backdrop fallback as RoomSettingsOverlay. */}
+				<Suspense
+					fallback={
+						<div class="fixed inset-0 z-40 flex items-center justify-center bg-black/60" />
 					}
-					onClose={handleSettingsClose}
-					onLogout={handleLogout}
-				/>
+				>
+					<SettingsOverlay
+						activeTab={settingsTab()}
+						onTabChange={(tab) =>
+							navigate(`/settings/${tab}`, {
+								replace: true,
+								state: location.state,
+							})
+						}
+						onClose={handleSettingsClose}
+						onLogout={handleLogout}
+					/>
+				</Suspense>
 			</Show>
 		</div>
 	);

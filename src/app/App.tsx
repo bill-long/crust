@@ -3,18 +3,18 @@ import { Route, Router, useLocation, useNavigate } from "@solidjs/router";
 import {
 	type Component,
 	createEffect,
+	lazy,
 	Match,
 	onMount,
 	Show,
+	Suspense,
 	Switch,
 } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
 import { NoticeToasts } from "../components/NoticeToasts";
-import { LoginPage } from "../features/auth/LoginPage";
 import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
-import { OverlayRoute } from "../features/room/call/rtc/OverlayRoute";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
@@ -24,6 +24,21 @@ import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
+
+// Route-level code splitting (#307): the login page and the desktop
+// call-overlay window contents are self-contained routes that most sessions
+// never render, so they load on demand instead of inflating the initial
+// bundle. Suspense fallback is null for /overlay (the desktop overlay window
+// paints its own background) and a full-viewport surface for /login so the
+// background never flashes while the chunk loads.
+const LoginPage = lazy(() =>
+	import("../features/auth/LoginPage").then((m) => ({ default: m.LoginPage })),
+);
+const OverlayRoute = lazy(() =>
+	import("../features/room/call/rtc/OverlayRoute").then((m) => ({
+		default: m.OverlayRoute,
+	})),
+);
 
 /** Auth guard — redirects to /login if no session, otherwise boots the Matrix client. */
 const AuthGuard: Component<RouteSectionProps> = (props) => {
@@ -193,12 +208,29 @@ const App: Component = () => {
 	return (
 		<ConfigProvider>
 			<Router base={basePrefix}>
-				<Route path="/login" component={LoginPage} />
+				<Route
+					path="/login"
+					component={() => (
+						// Full-viewport fallback in the page background color: the
+						// login chunk is small and local, so this paints once and
+						// swaps to the form with no visible shift.
+						<Suspense fallback={<div class="h-full bg-surface-0" />}>
+							<LoginPage />
+						</Suspense>
+					)}
+				/>
 				{/* Standalone overlay window contents (the desktop two-window
 				    overlay). Top-level + session-free: it mirrors call state from
 				    the main window over a BroadcastChannel rather than booting a
 				    client of its own. */}
-				<Route path="/overlay" component={OverlayRoute} />
+				<Route
+					path="/overlay"
+					component={() => (
+						<Suspense fallback={null}>
+							<OverlayRoute />
+						</Suspense>
+					)}
+				/>
 				<Route path="/" component={AuthGuard}>
 					<Route path="/" component={SyncGate}>
 						<Route path="/" component={HomePage} />
