@@ -929,11 +929,13 @@ const Composer: Component<{
 					onStartRecording={() => void startRecording()}
 					onOpenPoll={() => {
 						setPollDialogOpen(true);
+						setEventDialogOpen(false);
 						setGifPickerOpen(false);
 						setEmojiPickerOpen(false);
 					}}
 					onOpenEvent={() => {
 						setEventDialogOpen(true);
+						setPollDialogOpen(false);
 						setGifPickerOpen(false);
 						setEmojiPickerOpen(false);
 					}}

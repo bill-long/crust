@@ -236,8 +236,16 @@ export async function uploadEventImage(
 		type: file.type || "application/octet-stream",
 		name: sanitizeFilename(file.name),
 	});
+	// uploadBlob returns { contentUri } for plain rooms / { file } for E2EE;
+	// the event block's m.image-style field is named `url`, so normalize
+	// here — spreading the raw result would silently drop the cleartext
+	// reference and the cover would never render in unencrypted rooms.
+	const reference =
+		"contentUri" in uploaded
+			? { url: uploaded.contentUri }
+			: { file: uploaded.file };
 	return {
-		...uploaded,
+		...reference,
 		info: {
 			w: inspection.width,
 			h: inspection.height,

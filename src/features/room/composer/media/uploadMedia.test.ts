@@ -2,7 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../../test/mockClient";
 import type { PendingAttachment } from "./types";
-import { uploadAndSend, validateSize } from "./uploadMedia";
+import { uploadAndSend, uploadEventImage, validateSize } from "./uploadMedia";
 
 // Stub the canvas-backed helper so the image path runs under jsdom.
 vi.mock("./imageProcessing", () => ({
@@ -15,6 +15,20 @@ vi.mock("./imageProcessing", () => ({
 			width: 800,
 			height: 600,
 			mimetype: "image/jpeg",
+		},
+	}),
+}));
+
+// jsdom's File has no arrayBuffer(); stub the encryptor for the
+// encrypted-room path (its own browser tests cover the real crypto).
+vi.mock("./attachmentCrypto", () => ({
+	encryptAttachment: vi.fn().mockResolvedValue({
+		ciphertext: new Uint8Array([1, 2, 3]).buffer,
+		file: {
+			v: "v2",
+			key: { k: "A".repeat(43) },
+			iv: "AAAAAAAAAAAAAAAAAAAAAA==",
+			hashes: { sha256: "A".repeat(43) },
 		},
 	}),
 }));
@@ -82,6 +96,53 @@ describe("validateSize", () => {
 		await expect(validateSize(client, f)).resolves.toBeUndefined();
 		// Second call: config now succeeds and the file exceeds the limit.
 		await expect(validateSize(client, f)).rejects.toThrow(/too large/i);
+	});
+});
+
+describe("uploadEventImage", () => {
+	it("maps uploadBlob's contentUri to the m.image-style url field (#418)", async () => {
+		const { client } = setup();
+		const upload = client.uploadContent as ReturnType<typeof vi.fn>;
+		upload.mockResolvedValueOnce({ content_uri: "mxc://srv/cover" });
+
+		const file = new File([new Uint8Array(50)], "cover.png", {
+			type: "image/png",
+		});
+		const result = await uploadEventImage(client, ROOM, file);
+
+		// Regression: uploadBlob returns { contentUri } for plain rooms,
+		// but the event block's image field is named `url` — spreading the
+		// raw result would silently drop the cleartext reference.
+		expect(result.url).toBe("mxc://srv/cover");
+		expect(result.file).toBeUndefined();
+		expect(result.info).toEqual({
+			w: 1600,
+			h: 1200,
+			mimetype: "image/png",
+			size: 50,
+		});
+	});
+
+	it("returns the EncryptedFile descriptor in encrypted rooms", async () => {
+		const { room, client } = setup();
+		room.__setEncrypted(true);
+		const upload = client.uploadContent as ReturnType<typeof vi.fn>;
+		upload.mockResolvedValueOnce({ content_uri: "mxc://srv/cipher" });
+
+		const file = new File([new Uint8Array(50)], "cover.png", {
+			type: "image/png",
+		});
+		// jsdom's File lacks arrayBuffer(); shadow it on the instance (the
+		// real encryptor is stubbed above and never reads the bytes).
+		file.arrayBuffer = () =>
+			Promise.resolve(new Uint8Array(50).buffer);
+		const result = await uploadEventImage(client, ROOM, file);
+
+		expect(result.url).toBeUndefined();
+		expect(result.file?.url).toBe("mxc://srv/cipher");
+		expect(result.file?.key.k).toBeTruthy();
+		expect(result.file?.iv).toBeTruthy();
+		expect(result.file?.hashes.sha256).toBeTruthy();
 	});
 });
 

@@ -34,7 +34,7 @@ const COUNTDOWN_TICK_MS = 30_000;
 /**
  * Cover image for an event card (#418). Resolves the mxc URL (plain rooms)
  * or decrypts via the shared attachment path (E2EE), reserving the exact
- * layout box from info.w/h in every state so the card never shifts. Any
+ * layout box from info.w/h while loading so the card never shifts. Any
  * failure renders nothing - an event without its image is still a complete
  * card, and the poll fallback is unaffected.
  */
@@ -74,18 +74,35 @@ const EventCoverImage: Component<{
 		};
 	});
 	return (
-		<Show when={!failed() && src()}>
-			{(url) => (
-				<img
-					src={url()}
-					alt={props.alt}
-					width={props.image.info.w}
-					height={props.image.info.h}
-					style={box()}
-					class="mb-2 block rounded object-cover"
-					loading="lazy"
-				/>
-			)}
+		// The reserved box renders while the image loads so the card never
+		// shifts when it lands. On failure the image (and its box) is
+		// simply absent - the card is complete without it, and the poll
+		// fallback is unaffected.
+		<Show when={!failed()}>
+			<Show
+				when={src()}
+				fallback={
+					<div
+						style={box()}
+						class="mb-2 flex items-center justify-center rounded bg-surface-3 text-xs text-text-disabled"
+						aria-busy="true"
+					>
+						Loading…
+					</div>
+				}
+			>
+				{(url) => (
+					<img
+						src={url()}
+						alt={props.alt}
+						width={props.image.info.w}
+						height={props.image.info.h}
+						style={box()}
+						class="mb-2 block rounded object-cover"
+						loading="lazy"
+					/>
+				)}
+			</Show>
 		</Show>
 	);
 };
@@ -106,7 +123,9 @@ const EventCardHeader: Component<{ event: EventInfo }> = (props) => {
 	const roomName = createMemo(() => {
 		const id = props.event.roomId;
 		if (!id) return null;
-		return client.getRoom(id)?.name ?? null;
+		// Trimmed like every other room-name label in the app: a
+		// whitespace-only name must not render as a blank pill.
+		return client.getRoom(id)?.name?.trim() || null;
 	});
 
 	return (

@@ -90,10 +90,11 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 			// DMs are 1:1 conversations; an event "in" a DM makes no sense as
 			// a shared location.
 			if (room.getInvitedAndJoinedMemberCount() <= 2) continue;
-			choices.push({
-				roomId: room.roomId,
-				name: room.name || room.roomId,
-			});
+			// Trimmed like every other room-name label in the app: a
+			// whitespace-only name falls back to the room id rather than
+			// rendering as a blank, selectable row.
+			const name = room.name?.trim() || room.roomId;
+			choices.push({ roomId: room.roomId, name });
 		}
 		choices.sort((a, b) => a.name.localeCompare(b.name));
 		return choices;
@@ -109,8 +110,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 		if (!id) return null;
 		return (
 			roomChoices().find((r) => r.roomId === id)?.name ??
-			props.client.getRoom(id)?.name ??
-			id
+			(props.client.getRoom(id)?.name?.trim() || id)
 		);
 	});
 
