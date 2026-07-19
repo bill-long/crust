@@ -39,8 +39,15 @@ const EventCoverImage: Component<{
 	alt: string;
 }> = (props) => {
 	const { client } = useClient();
+	const MAX_W = 400;
+	const MAX_H = 160;
 	const httpUrl = createMemo(() =>
-		props.image.url ? client.mxcUrlToHttp(props.image.url) : null,
+		props.image.url
+			? // Ask the server for a scaled variant - the card caps display at
+				// MAX_W x MAX_H, so fetching the original is wasted bandwidth.
+				// (Encrypted attachments can't be server-scaled.)
+				client.mxcUrlToHttp(props.image.url, MAX_W, MAX_H, "scale")
+			: null,
 	);
 	const cipherUrl = createMemo(() =>
 		props.image.file ? client.mxcUrlToHttp(props.image.file.url) : null,
@@ -59,8 +66,6 @@ const EventCoverImage: Component<{
 			true,
 	);
 	// Cap the box like Discord's event banners; w/h reserve the ratio.
-	const MAX_W = 400;
-	const MAX_H = 160;
 	const box = createMemo(() => {
 		const { w, h } = props.image.info;
 		const scale = Math.min(MAX_W / w, MAX_H / h, 1);
