@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AppSyncState, CryptoState } from "../../../client/client";
 import { ClientContext } from "../../../client/client";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import type { EventInfo } from "./eventBlock";
@@ -331,6 +332,9 @@ describe("PollMessage event card (#418)", () => {
 		return {
 			title: "Launch Party",
 			startTs: Date.now() + 3 * 86_400_000, // in 3 days
+			endTs: null,
+			roomId: null,
+			image: null,
 			...overrides,
 		};
 	}
@@ -350,8 +354,8 @@ describe("PollMessage event card (#418)", () => {
 		const rooms = new Map([[ROOM_ID, room]]);
 		const client = createMockClient(rooms);
 		opts?.tweakClient?.(client);
-		const [syncState] = createSignal("syncing" as const);
-		const [cryptoState] = createSignal("ready" as const);
+		const [syncState] = createSignal<AppSyncState>("live");
+		const [cryptoState] = createSignal<CryptoState>("ready");
 		// useNavigate needs an actual matched Route, not just a router.
 		const Subject = () => (
 			<ClientContext.Provider
@@ -420,6 +424,7 @@ describe("PollMessage event card (#418)", () => {
 			eventInfo({
 				image: {
 					url: "mxc://server/cover",
+					file: null,
 					info: { w: 800, h: 400, mimetype: "image/png", size: 1234 },
 				},
 			}),
@@ -435,6 +440,7 @@ describe("PollMessage event card (#418)", () => {
 			eventInfo({
 				image: {
 					url: "mxc://server/cover",
+					file: null,
 					info: { w: 800, h: 400, mimetype: "image/png", size: 1234 },
 				},
 			}),
