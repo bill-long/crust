@@ -18,9 +18,14 @@
 //   node scripts/check-vendor-chunks.mjs
 
 import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ASSETS_DIR = join(import.meta.dirname, "..", "dist", "assets");
+// fileURLToPath rather than import.meta.dirname: the latter needs
+// Node >= 20.11 and this script runs inside pnpm build for every
+// contributor, so it must work on any Node ESM runtime.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const ASSETS_DIR = join(SCRIPT_DIR, "..", "dist", "assets");
 
 /** Bytes. Post-#307 baseline is ~486 kB; fold-in would exceed ~1.6 MB. */
 const INDEX_CHUNK_CEILING = 800 * 1024;
