@@ -54,6 +54,9 @@ export function sendSerializedPollEvent(
 	return client.sendEvent(
 		roomId,
 		type as keyof TimelineEvents,
-		{ ...content, ...extraContent } as TimelineEvents[keyof TimelineEvents],
+		// extraContent spreads FIRST: the serialized poll content is the
+		// source of truth, so an extra block can add namespaced keys but
+		// never override keys the serializer emitted.
+		{ ...extraContent, ...content } as TimelineEvents[keyof TimelineEvents],
 	);
 }
