@@ -83,6 +83,10 @@ export function useCryptoStatus(
 	// Version counter to prevent stale async results from overwriting newer ones
 	let refreshVersion = 0;
 
+	// Cached result of the server-backup probe (undefined = not yet probed or
+	// invalidated). See the probe site in refresh() for why this exists.
+	let serverBackupCache: boolean | undefined;
+
 	const refresh = async (): Promise<void> => {
 		const crypto = client.getCrypto();
 		if (!crypto) return;
@@ -135,13 +139,21 @@ export function useCryptoStatus(
 			// Whether a backup exists on the server at all (distinct from this
 			// session having it active). fetchServerKeyBackup throws on an
 			// uncertain check; leave the signal undefined rather than guess.
+			// The probe result is cached: refresh() runs on several
+			// CryptoEvents, and with no active backup version every refresh
+			// would otherwise re-probe /room_keys/version during sync bursts.
+			// The cache is invalidated by the KeyBackupStatus handler below.
 			let bkOnServer: boolean | undefined;
 			if (bkVersion) {
 				bkOnServer = true;
+				serverBackupCache = true;
+			} else if (serverBackupCache !== undefined) {
+				bkOnServer = serverBackupCache;
 			} else {
 				try {
 					bkOnServer = (await fetchServerKeyBackup(client)) !== null;
 					if (refreshVersion !== thisVersion) return;
+					serverBackupCache = bkOnServer;
 				} catch {
 					if (refreshVersion !== thisVersion) return;
 					bkOnServer = undefined;
@@ -200,6 +212,9 @@ export function useCryptoStatus(
 		refresh();
 	};
 	const onBackupStatus = (): void => {
+		// Backup state changed on the server — drop the cached probe result
+		// so the refresh re-checks rather than replaying a stale answer.
+		serverBackupCache = undefined;
 		refresh();
 	};
 	const onBackupKeyCached = (): void => {

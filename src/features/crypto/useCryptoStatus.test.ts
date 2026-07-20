@@ -1,3 +1,4 @@
+import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useCryptoStatus } from "./useCryptoStatus";
@@ -128,6 +129,37 @@ describe("useCryptoStatus", () => {
 		const status = await createStatus(crypto);
 		expect(status.thisDeviceVerified()).toBeUndefined();
 		expect(status.crossSigningReady()).toBe(true);
+	});
+
+	it("probes the server backup once, re-probing only after a backup event", async () => {
+		// refresh() runs on several CryptoEvents; without caching, a sync
+		// burst would re-probe /room_keys/version on every one.
+		const crypto = makeCrypto({
+			getActiveSessionBackupVersion: vi.fn(async () => null),
+		});
+		const client = makeClient(crypto);
+		fetchServerKeyBackup.mockReset();
+		fetchServerKeyBackup.mockResolvedValue(null);
+		const [syncReady] = createSignal(true);
+		let status!: ReturnType<typeof useCryptoStatus>;
+		createRoot(() => {
+			status = useCryptoStatus(client, syncReady);
+		});
+		await flush();
+		expect(fetchServerKeyBackup).toHaveBeenCalledTimes(1);
+
+		// A second refresh (any non-backup CryptoEvent) reuses the cache.
+		await status.refresh();
+		expect(fetchServerKeyBackup).toHaveBeenCalledTimes(1);
+
+		// A KeyBackupStatus event invalidates the cache and re-probes.
+		const onBackupStatus = client.on.mock.calls.find(
+			(call: unknown[]) => call[0] === CryptoEvent.KeyBackupStatus,
+		)?.[1] as (() => void) | undefined;
+		expect(onBackupStatus).toBeDefined();
+		onBackupStatus?.();
+		await flush();
+		expect(fetchServerKeyBackup).toHaveBeenCalledTimes(2);
 	});
 
 	it("reports backupOnServer=false when the server has no backup", async () => {
