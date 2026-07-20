@@ -102,6 +102,31 @@ describe("ExportKeysDialog", () => {
 		expect(screen.getByText("Keys exported")).toBeTruthy();
 		expect(screen.getByText(/crust-message-keys-/)).toBeTruthy();
 	});
+
+	it("keeps Export disabled until a passphrase is entered", () => {
+		render(() => <ExportKeysDialog onClose={() => {}} />);
+		const button = screen.getByRole("button", { name: "Export" });
+		expect(button).toHaveProperty("disabled", true);
+		fireEvent.input(screen.getByLabelText("Passphrase"), {
+			target: { value: "x" },
+		});
+		expect(button).toHaveProperty("disabled", false);
+	});
+
+	it("surfaces an export failure", async () => {
+		exportRoomKeysAsJson.mockRejectedValue(new Error("crypto exploded"));
+		render(() => <ExportKeysDialog onClose={() => {}} />);
+		fireEvent.input(screen.getByLabelText("Passphrase"), {
+			target: { value: "hunter2" },
+		});
+		fireEvent.input(screen.getByLabelText("Confirm passphrase"), {
+			target: { value: "hunter2" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Export" }));
+		await waitFor(() => expect(screen.getByText("Export failed")).toBeTruthy());
+
+		expect(screen.getByRole("alert").textContent).toContain("crypto exploded");
+	});
 });
 
 describe("ImportKeysDialog", () => {
@@ -152,9 +177,32 @@ describe("ImportKeysDialog", () => {
 			target: { files: [makeFile(KEYS_JSON, "keys.json")] },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Import" }));
-		await flush();
+		await waitFor(() => expect(screen.getByText("Keys imported")).toBeTruthy());
 
 		expect(importRoomKeysAsJson).toHaveBeenCalledWith(KEYS_JSON);
-		expect(screen.getByText("Keys imported")).toBeTruthy();
+	});
+
+	it("keeps Import disabled until a file is chosen", () => {
+		render(() => <ImportKeysDialog onClose={() => {}} />);
+		const button = screen.getByRole("button", { name: "Import" });
+		expect(button).toHaveProperty("disabled", true);
+		fireEvent.change(screen.getByLabelText("Key export file"), {
+			target: { files: [makeFile(KEYS_JSON, "keys.json")] },
+		});
+		expect(button).toHaveProperty("disabled", false);
+	});
+
+	it("rejects a file that is neither an export nor valid JSON", async () => {
+		render(() => <ImportKeysDialog onClose={() => {}} />);
+		fireEvent.change(screen.getByLabelText("Key export file"), {
+			target: { files: [makeFile("not json at all", "keys.txt")] },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Import" }));
+		await waitFor(() => expect(screen.getByText("Import failed")).toBeTruthy());
+
+		expect(screen.getByRole("alert").textContent).toContain(
+			"doesn't contain valid exported keys",
+		);
+		expect(importRoomKeysAsJson).not.toHaveBeenCalled();
 	});
 });

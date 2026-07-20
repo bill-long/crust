@@ -81,6 +81,48 @@ describe("megolmKeyFile", () => {
 		);
 	});
 
+	/** Re-encode a valid export with one byte-range mutated. */
+	async function mutatePacked(
+		mutate: (packed: Uint8Array) => void,
+	): Promise<string> {
+		const file = await encryptMegolmKeyFile(SAMPLE_JSON, "pw", ITERS);
+		const lines = file.split("\n");
+		const packed = Uint8Array.from(atob(lines[1]), (c) => c.charCodeAt(0));
+		mutate(packed);
+		let binary = "";
+		for (const b of packed) binary += String.fromCharCode(b);
+		return `${lines[0]}\n${btoa(binary)}\n${lines[2]}`;
+	}
+
+	it("rejects an unsupported format version", async () => {
+		const file = await mutatePacked((p) => {
+			p[0] = 2;
+		});
+		await expect(decryptMegolmKeyFile(file, "pw")).rejects.toThrow(
+			"Unsupported key export file version.",
+		);
+	});
+
+	it("rejects a zero PBKDF2 iteration count as corrupted", async () => {
+		const file = await mutatePacked((p) => {
+			new DataView(p.buffer, 49, 4).setUint32(0, 0, false);
+		});
+		await expect(decryptMegolmKeyFile(file, "pw")).rejects.toThrow(
+			"The key export file is corrupted.",
+		);
+	});
+
+	it("rejects an absurd PBKDF2 iteration count as corrupted", async () => {
+		// Unbounded, the count is attacker-controlled input that can freeze
+		// the tab for hours (up to ~4.3B iterations) — reject instead.
+		const file = await mutatePacked((p) => {
+			new DataView(p.buffer, 49, 4).setUint32(0, 0xffffffff, false);
+		});
+		await expect(decryptMegolmKeyFile(file, "pw")).rejects.toThrow(
+			"The key export file is corrupted.",
+		);
+	});
+
 	it("tolerates whitespace-wrapped base64 bodies", async () => {
 		const file = await encryptMegolmKeyFile(SAMPLE_JSON, "pw", ITERS);
 		const lines = file.split("\n");

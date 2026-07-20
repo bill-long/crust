@@ -207,22 +207,27 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				// key's metadata before it is used to encrypt secrets. A
 				// well-formed but incorrect key would otherwise corrupt existing
 				// secret storage when used on a write path (see issue #205).
+				// The choice the candidate validated against is captured and
+				// reused below — resolving a second time could pick a
+				// different key if 4S is re-keyed mid-prompt (issue #420).
+				let validatedChoice: Awaited<ReturnType<typeof resolveChoice>> | undefined;
 				const key = await requestRecoveryKey(async (candidate) => {
 					const choice = await resolveChoice();
 					if (!choice) return false;
 					try {
-						return await matrixClient.secretStorage.checkKey(
+						const ok = await matrixClient.secretStorage.checkKey(
 							candidate,
 							choice.keyInfo,
 						);
+						if (ok) validatedChoice = choice;
+						return ok;
 					} catch {
 						return false;
 					}
 				});
 				if (!key) return null;
 
-				const choice = await resolveChoice();
-				const keyId = choice?.keyId ?? Object.keys(opts.keys)[0];
+				const keyId = validatedChoice?.keyId ?? Object.keys(opts.keys)[0];
 
 				// Cache for successive calls within the same operation
 				cachedSecretStorageKeyId = keyId;

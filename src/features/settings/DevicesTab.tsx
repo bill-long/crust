@@ -1,15 +1,20 @@
 import {
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	lazy,
+	onCleanup,
 	Show,
 	Suspense,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import { triggerCryptoAction } from "../../stores/cryptoActions";
+import { cryptoActionLabel, deriveCryptoAction } from "../../lib/cryptoAction";
+import {
+	setCryptoDialogOpen,
+	triggerCryptoAction,
+} from "../../stores/cryptoActions";
 import { BackupStatus } from "../crypto/backup/BackupStatus";
-import { cryptoActionLabel, deriveCryptoAction } from "../crypto/cryptoAction";
 import { DeviceList } from "../crypto/DeviceList";
 import { SectionHeading } from "./SettingsControls";
 
@@ -57,11 +62,22 @@ const ActionButton: Component<{
 	</button>
 );
 
+const DialogFallback: Component = () => (
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" />
+);
+
 const DevicesTab: Component = () => {
 	const { client, cryptoStatus } = useClient();
 
 	const [showExportKeys, setShowExportKeys] = createSignal(false);
 	const [showImportKeys, setShowImportKeys] = createSignal(false);
+
+	// Participate in the shared crypto-dialog coordination (inert on
+	// underlying content), like the banner-level dialogs.
+	createEffect(() => {
+		setCryptoDialogOpen(showExportKeys() || showImportKeys());
+	});
+	onCleanup(() => setCryptoDialogOpen(false));
 
 	const cryptoAction = createMemo(() =>
 		deriveCryptoAction({
@@ -204,7 +220,16 @@ const DevicesTab: Component = () => {
 								Key backup
 							</div>
 							<div class="text-xs text-text-muted">
-								Encrypted message history recovery
+								<Show
+									when={
+										cryptoStatus.backupVersion() === null &&
+										cryptoStatus.backupOnServer() === true
+									}
+									fallback="Encrypted message history recovery"
+								>
+									Backup exists but unavailable to this session — verify or
+									enter recovery key.
+								</Show>
 							</div>
 						</div>
 						<Show
@@ -309,12 +334,12 @@ const DevicesTab: Component = () => {
 			</section>
 
 			<Show when={showExportKeys()}>
-				<Suspense>
+				<Suspense fallback={<DialogFallback />}>
 					<ExportKeysDialog onClose={() => setShowExportKeys(false)} />
 				</Suspense>
 			</Show>
 			<Show when={showImportKeys()}>
-				<Suspense>
+				<Suspense fallback={<DialogFallback />}>
 					<ImportKeysDialog onClose={() => setShowImportKeys(false)} />
 				</Suspense>
 			</Show>

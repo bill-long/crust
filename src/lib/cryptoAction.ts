@@ -1,5 +1,5 @@
 import type { CrossSigningStatus } from "matrix-js-sdk/lib/crypto-api";
-import type { CryptoAction } from "../../types/crypto";
+import type { CryptoAction } from "../types/crypto";
 
 export interface CryptoActionInput {
 	crossSigningReady: boolean | undefined;
@@ -31,11 +31,15 @@ export function deriveCryptoAction(input: CryptoActionInput): CryptoAction {
 		// server but no private keys are reachable (not local, not in secret
 		// storage), plain bootstrap fails against the existing identity — the
 		// only way forward from this device is a full reset. When the private
-		// keys ARE in secret storage, bootstrap imports them instead of
-		// creating new ones, so the ordinary setup flow is safe.
+		// keys ARE reachable, bootstrap can reuse them instead of creating
+		// new ones, so the ordinary setup flow is safe. Fail toward the
+		// non-destructive flow whenever any private key source exists.
 		if (crossSigningStatus === undefined) return "loading";
 		const identityExists = crossSigningStatus.publicKeysOnDevice;
-		const recoverable = crossSigningStatus.privateKeysInSecretStorage;
+		const cached = crossSigningStatus.privateKeysCachedLocally;
+		const recoverable =
+			crossSigningStatus.privateKeysInSecretStorage ||
+			(cached.masterKey && cached.selfSigningKey && cached.userSigningKey);
 		return identityExists && !recoverable
 			? "reset-encryption"
 			: "setup-cross-signing";

@@ -24,6 +24,9 @@ const DEFAULT_ITERATIONS = 500_000;
 const SALT_LENGTH = 32;
 const IV_LENGTH = 16;
 const HMAC_LENGTH = 32;
+// Upper bound on PBKDF2 iterations accepted from an imported file
+// (Element writes 500,000 — see DEFAULT_ITERATIONS).
+const MAX_IMPORT_ITERATIONS = 5_000_000;
 
 function concatBytes(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
 	const total = parts.reduce((n, p) => n + p.length, 0);
@@ -175,6 +178,13 @@ export async function decryptMegolmKeyFile(
 		packed.byteOffset + headerLength - 4,
 		4,
 	).getUint32(0, false);
+	// The count comes from the file, so bound it: 0 makes deriveBits throw a
+	// raw DOMException, and a crafted file can encode billions of iterations
+	// and freeze the tab for hours. Legitimate exports use ~500k; allow an
+	// order of magnitude of headroom and reject the rest as corrupted.
+	if (iterations < 1 || iterations > MAX_IMPORT_ITERATIONS) {
+		throw new Error("The key export file is corrupted.");
+	}
 	const ciphertext = packed.slice(headerLength, packed.length - HMAC_LENGTH);
 	const expectedHmac = packed.slice(packed.length - HMAC_LENGTH);
 	const payload = packed.slice(0, packed.length - HMAC_LENGTH);

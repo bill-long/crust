@@ -72,6 +72,27 @@ describe("deriveCryptoAction", () => {
 		).toBe("setup-cross-signing");
 	});
 
+	it("routes a locally-cached identity (all private keys on device) to bootstrap, not reset", () => {
+		// Fail toward the non-destructive flow whenever any private key
+		// source exists: bootstrap can reuse locally cached keys.
+		expect(
+			deriveCryptoAction({
+				...HEALTHY,
+				crossSigningReady: false,
+				thisDeviceVerified: false,
+				crossSigningStatus: {
+					publicKeysOnDevice: true,
+					privateKeysInSecretStorage: false,
+					privateKeysCachedLocally: {
+						masterKey: true,
+						selfSigningKey: true,
+						userSigningKey: true,
+					},
+				},
+			}),
+		).toBe("setup-cross-signing");
+	});
+
 	it("routes an unreachable identity to reset-encryption", () => {
 		// Identity exists on the server but no private keys are reachable —
 		// plain bootstrap would fail against the existing identity

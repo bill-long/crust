@@ -256,9 +256,21 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				{/* Done (no new key was needed) */}
 				<Match when={step() === "done"}>
 					<div class="w-full max-w-sm rounded-lg bg-surface-1 p-6 shadow-xl">
-						<div class="mb-4 text-center">
-							<span class="text-4xl" role="img" aria-label="Success">
-								✅
+						<div class="mb-4 flex justify-center">
+							<span class="flex h-12 w-12 items-center justify-center rounded-full bg-success-bg">
+								<svg
+									class="h-6 w-6 text-success-text"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2.5"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									role="img"
+									aria-label="Success"
+								>
+									<path d="M20 6L9 17l-5-5" />
+								</svg>
 							</span>
 						</div>
 						<h2 class="mb-2 text-center text-lg font-semibold text-text-primary">

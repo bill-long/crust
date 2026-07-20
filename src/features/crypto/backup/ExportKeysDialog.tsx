@@ -47,14 +47,14 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 			const url = URL.createObjectURL(
 				new Blob([encrypted], { type: "text/plain" }),
 			);
-			try {
-				const a = document.createElement("a");
-				a.href = url;
-				a.download = name;
-				a.click();
-			} finally {
-				URL.revokeObjectURL(url);
-			}
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = name;
+			a.click();
+			// Revoking synchronously after click() can cancel the download in
+			// Firefox — defer revocation to the next macrotask so the browser
+			// has taken its reference first.
+			setTimeout(() => URL.revokeObjectURL(url), 0);
 
 			setFileName(name);
 			setStep("done");

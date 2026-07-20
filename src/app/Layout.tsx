@@ -26,10 +26,6 @@ import {
 	ResizableLayout,
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
-import {
-	cryptoActionLabel,
-	deriveCryptoAction,
-} from "../features/crypto/cryptoAction";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
@@ -50,6 +46,7 @@ import {
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
+import { cryptoActionLabel, deriveCryptoAction } from "../lib/cryptoAction";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
