@@ -210,7 +210,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				// The choice the candidate validated against is captured and
 				// reused below — resolving a second time could pick a
 				// different key if 4S is re-keyed mid-prompt (issue #420).
-				let validatedChoice: Awaited<ReturnType<typeof resolveChoice>> | undefined;
+				let validatedChoice:
+					| Awaited<ReturnType<typeof resolveChoice>>
+					| undefined;
 				const key = await requestRecoveryKey(async (candidate) => {
 					const choice = await resolveChoice();
 					if (!choice) return false;

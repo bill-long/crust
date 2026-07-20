@@ -186,7 +186,11 @@ describe("ImportKeysDialog", () => {
 		render(() => <ImportKeysDialog onClose={() => {}} />);
 		const button = screen.getByRole("button", { name: "Import" });
 		expect(button).toHaveProperty("disabled", true);
-		fireEvent.change(screen.getByLabelText("Key export file"), {
+		const input = screen.getByLabelText("Key export file") as HTMLInputElement;
+		// Raw JSON exports are supported by the parser, so the picker must
+		// not hide them.
+		expect(input.accept).toContain(".json");
+		fireEvent.change(input, {
 			target: { files: [makeFile(KEYS_JSON, "keys.json")] },
 		});
 		expect(button).toHaveProperty("disabled", false);

@@ -102,6 +102,21 @@ describe("useCryptoStatus", () => {
 		expect(status.backupOnServer()).toBe(true);
 	});
 
+	it("still refreshes the rest of the status when cross-signing detail fails", async () => {
+		// getCrossSigningStatus is best-effort detail for reset-vs-bootstrap
+		// routing; a transient failure must not strand the other signals.
+		const crypto = makeCrypto({
+			getCrossSigningStatus: vi.fn(async () => {
+				throw new Error("transient");
+			}),
+		});
+		const status = await createStatus(crypto);
+		expect(status.crossSigningReady()).toBe(true);
+		expect(status.thisDeviceVerified()).toBe(true);
+		expect(status.backupVersion()).toBe("1");
+		expect(status.crossSigningStatus()).toBeUndefined();
+	});
+
 	it("reports backupOnServer=false when the server has no backup", async () => {
 		const crypto = makeCrypto({
 			getActiveSessionBackupVersion: vi.fn(async () => null),

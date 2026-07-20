@@ -48,7 +48,10 @@ export function deriveCryptoAction(input: CryptoActionInput): CryptoAction {
 	if (backupVersion === null) {
 		// A backup can exist on the server while this session has no access
 		// to its decryption key — that's an unlock, not a setup (issue #420).
-		return backupOnServer === true ? "unlock-backup" : "setup-backup";
+		// While the server probe is unresolved, offering either would be a
+		// guess: stay in loading like the Devices tab's "Checking…" state.
+		if (backupOnServer === undefined) return "loading";
+		return backupOnServer ? "unlock-backup" : "setup-backup";
 	}
 	return "hidden";
 }

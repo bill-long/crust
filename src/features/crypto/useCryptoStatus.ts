@@ -90,14 +90,24 @@ export function useCryptoStatus(
 		const thisVersion = ++refreshVersion;
 
 		try {
-			const [csReady, ssReady, bkVersion, csStatus] = await Promise.all([
+			const [csReady, ssReady, bkVersion] = await Promise.all([
 				crypto.isCrossSigningReady(),
 				crypto.isSecretStorageReady(),
 				crypto.getActiveSessionBackupVersion(),
-				crypto.getCrossSigningStatus(),
 			]);
-
 			if (refreshVersion !== thisVersion) return;
+
+			// Fetched separately: a transient failure here must not take down
+			// the whole refresh — the rest of the status still applies, and an
+			// undefined detail just keeps reset-vs-bootstrap routing unresolved.
+			let csStatus: CrossSigningStatus | undefined;
+			try {
+				csStatus = await crypto.getCrossSigningStatus();
+				if (refreshVersion !== thisVersion) return;
+			} catch {
+				if (refreshVersion !== thisVersion) return;
+				csStatus = undefined;
+			}
 
 			// Check this device's verification status
 			let deviceVerified = false;

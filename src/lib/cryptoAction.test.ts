@@ -154,14 +154,17 @@ describe("deriveCryptoAction", () => {
 		).toBe("unlock-backup");
 	});
 
-	it("treats unknown server-backup state as setup (safe, non-destructive)", () => {
+	it("stays in loading while the server-backup probe is unresolved", () => {
+		// Offering setup could orphan an existing backup; offering unlock
+		// would be wrong when none exists — neither is safe until the probe
+		// resolves.
 		expect(
 			deriveCryptoAction({
 				...HEALTHY,
 				backupVersion: null,
 				backupOnServer: undefined,
 			}),
-		).toBe("setup-backup");
+		).toBe("loading");
 	});
 });
 

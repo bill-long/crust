@@ -110,7 +110,7 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 								<input
 									id="import-file"
 									type="file"
-									accept=".txt,text/plain"
+									accept=".txt,.json,text/plain,application/json"
 									onChange={(e) => {
 										setFile(e.currentTarget.files?.[0] ?? null);
 										setErrorMessage("");
