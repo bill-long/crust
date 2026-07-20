@@ -37,13 +37,18 @@ const MAX_VOTER_AVATARS = 6;
 /** 20px voter avatar for the event RSVP stacks (#418): image with the
  *  same error-fallback-to-initial policy as the shared Avatar, at the
  *  smaller size the compact row needs. The ring matches the card surface
- *  so overlapping avatars read as a Discord-style stack. */
-const VoterAvatar: Component<{ voter: PollVoter }> = (props) => {
+ *  so overlapping avatars read as a Discord-style stack. Exported for
+ *  direct unit tests of the error/reset behaviour. */
+export const VoterAvatar: Component<{ voter: PollVoter }> = (props) => {
 	const [imgFailed, setImgFailed] = createSignal(false);
+	// Reset on voter identity as well as URL: <For> keys on the voter
+	// object, and the watcher's identity cache keeps one object per
+	// userId, but two different voters can legitimately share an avatar
+	// URL string - without userId in the sources that swap would keep
+	// the failed fallback stuck on.
 	createEffect(
-		on(
-			() => props.voter.avatarUrl,
-			() => setImgFailed(false),
+		on([() => props.voter.userId, () => props.voter.avatarUrl], () =>
+			setImgFailed(false),
 		),
 	);
 	const initial = () =>

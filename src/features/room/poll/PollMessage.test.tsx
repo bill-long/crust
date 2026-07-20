@@ -7,7 +7,7 @@ import type { AppSyncState, CryptoState } from "../../../client/client";
 import { ClientContext } from "../../../client/client";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import type { EventInfo } from "./eventBlock";
-import { PollMessage } from "./PollMessage";
+import { PollMessage, VoterAvatar } from "./PollMessage";
 import type { PollSnapshot } from "./pollSnapshot";
 
 vi.mock("solid-refresh", () => ({
@@ -616,6 +616,33 @@ describe("PollMessage event card (#418)", () => {
 			container.querySelector('img[src="https://x/alice.png"]'),
 		).toBeNull();
 		expect(screen.getByText("A")).toBeTruthy();
+	});
+
+	it("retries the image when the voter changes under an identical avatar URL", () => {
+		// Render VoterAvatar directly so the voter prop can be swapped
+		// reactively: two different voters can share one avatar URL string,
+		// and the swap must not keep the failed-image fallback stuck on
+		// (Copilot review on #422).
+		const [voter, setVoter] = createSignal({
+			userId: "@alice:x",
+			name: "Alice",
+			avatarUrl: "https://x/shared.png" as string | null,
+		});
+		const { container } = render(() => <VoterAvatar voter={voter()} />);
+		const img = () =>
+			container.querySelector('img[src="https://x/shared.png"]');
+		expect(img()).toBeTruthy();
+		fireEvent.error(img() as HTMLImageElement);
+		expect(img()).toBeNull();
+		expect(screen.getByText("A")).toBeTruthy();
+		// Same URL string, different voter: the image must be attempted
+		// again rather than staying on the initial fallback.
+		setVoter({
+			userId: "@bob:x",
+			name: "Bob",
+			avatarUrl: "https://x/shared.png",
+		});
+		expect(img()).toBeTruthy();
 	});
 
 	it("strips the leading @ from a user-id fallback initial", () => {
