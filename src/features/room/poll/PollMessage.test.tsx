@@ -449,6 +449,23 @@ describe("PollMessage event card (#418)", () => {
 		expect(screen.getByText("!venue:test")).toBeTruthy();
 	});
 
+	it("fails closed (no broken-image chrome) when the cover fetch errors", () => {
+		setupEvent(
+			eventInfo({
+				image: {
+					url: "mxc://server/cover",
+					file: null,
+					info: { w: 800, h: 400, mimetype: "image/png", size: 1234 },
+				},
+			}),
+		);
+		// A 404/network error on a syntactically valid URL only surfaces via
+		// the img's error event - without onError the browser would paint a
+		// broken-image icon inside the card.
+		fireEvent.error(screen.getByAltText("Launch Party"));
+		expect(screen.queryByAltText("Launch Party")).toBeNull();
+	});
+
 	it("reserves the cover image's layout box while it loads", () => {
 		setupEvent(
 			eventInfo({

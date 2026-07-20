@@ -60,10 +60,20 @@ const EventCoverImage: Component<{
 	const src = createMemo(() =>
 		props.image.file ? decrypted.url() : httpUrl(),
 	);
+	// Fail closed on fetch/decode errors (404, network, bad bytes): the
+	// browser would otherwise paint a broken-image icon inside the card.
+	// Keyed to src() so an edited event with a fresh image resets the
+	// error state instead of staying blank forever.
+	const [loadFailedSrc, setLoadFailedSrc] = createSignal<string | null>(null);
+	const loadFailed = createMemo(() => {
+		const s = src();
+		return s !== null && s === loadFailedSrc();
+	});
 	const failed = createMemo(
 		() =>
-			(props.image.file ? !cipherUrl() || decrypted.failed() : !httpUrl()) ??
-			true,
+			loadFailed() ||
+			((props.image.file ? !cipherUrl() || decrypted.failed() : !httpUrl()) ??
+				true),
 	);
 	// Cap the box like Discord's event banners; w/h reserve the ratio.
 	const box = createMemo(() => {
@@ -101,6 +111,7 @@ const EventCoverImage: Component<{
 						style={box()}
 						class="mb-2 block rounded object-cover"
 						loading="lazy"
+						onError={() => setLoadFailedSrc(src() ?? null)}
 					/>
 				)}
 			</Show>
