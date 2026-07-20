@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	formatVoterNames,
 	isPollStartType,
 	isRenderablePollContent,
 	pollPreviewText,
@@ -132,5 +133,38 @@ describe("pollPreviewText", () => {
 
 	it("returns null for unreadable content", () => {
 		expect(pollPreviewText({})).toBeNull();
+	});
+});
+
+describe("formatVoterNames", () => {
+	it("joins short lists verbatim", () => {
+		expect(formatVoterNames([])).toBe("");
+		expect(formatVoterNames(["Alice"])).toBe("Alice");
+		expect(formatVoterNames(["Alice", "Bob", "Carol"])).toBe(
+			"Alice, Bob, Carol",
+		);
+	});
+
+	it("spells out exactly ten names without truncation", () => {
+		const names = Array.from({ length: 10 }, (_, i) => `User ${i}`);
+		expect(formatVoterNames(names)).toBe(names.join(", "));
+	});
+
+	it("truncates longer lists to the first ten plus 'and N more'", () => {
+		const names = Array.from({ length: 13 }, (_, i) => `User ${i}`);
+		expect(formatVoterNames(names)).toBe(
+			`${names.slice(0, 10).join(", ")} and 3 more`,
+		);
+	});
+
+	it("derives the 'and N more' count from the true total, not the capped list", () => {
+		// The snapshot caps the resolved voter array at 10 while counts
+		// carries the true total; the label must use the total.
+		const names = Array.from({ length: 10 }, (_, i) => `User ${i}`);
+		expect(formatVoterNames(names, 42)).toBe(`${names.join(", ")} and 32 more`);
+		// A short capped list with a larger total still truncates.
+		expect(formatVoterNames(["Alice", "Bob"], 11)).toBe(
+			"Alice, Bob and 1 more",
+		);
 	});
 });

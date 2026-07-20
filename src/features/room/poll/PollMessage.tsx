@@ -1,13 +1,17 @@
 import { useNavigate } from "@solidjs/router";
 import {
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	createUniqueId,
 	For,
+	on,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { Tooltip } from "../../../components/Tooltip";
+import { formatVoterNames } from "../../../lib/pollCopy";
 import { useThirtySecondTick } from "../../../lib/relativeTime";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import {
@@ -16,7 +20,7 @@ import {
 	formatEventRelative,
 	formatEventTime,
 } from "./eventBlock";
-import type { PollSnapshot } from "./pollSnapshot";
+import type { PollSnapshot, PollVoter } from "./pollSnapshot";
 
 interface PollMessageProps {
 	poll: PollSnapshot;
@@ -26,6 +30,70 @@ interface PollMessageProps {
 	/** Close the poll. Only invoked when the snapshot says canEnd. */
 	onEndPoll: () => void;
 }
+
+/** Cap on rendered avatars per RSVP option; the rest collapse into "+N". */
+const MAX_VOTER_AVATARS = 6;
+
+/** 20px voter avatar for the event RSVP stacks (#418): image with the
+ *  same error-fallback-to-initial policy as the shared Avatar, at the
+ *  smaller size the compact row needs. The ring matches the card surface
+ *  so overlapping avatars read as a Discord-style stack. */
+const VoterAvatar: Component<{ voter: PollVoter }> = (props) => {
+	const [imgFailed, setImgFailed] = createSignal(false);
+	createEffect(
+		on(
+			() => props.voter.avatarUrl,
+			() => setImgFailed(false),
+		),
+	);
+	const initial = () =>
+		// The name falls back to the raw user id; strip its leading @ like
+		// the MemberList sibling does so avatar-less voters get a letter.
+		(props.voter.name.trim().replace(/^@/, "").charAt(0) || "?").toUpperCase();
+	return (
+		<Show
+			when={!imgFailed() && props.voter.avatarUrl}
+			fallback={
+				<div
+					class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-surface-3 font-semibold text-[10px] text-text-secondary ring-2 ring-surface-2"
+					aria-hidden="true"
+				>
+					{initial()}
+				</div>
+			}
+		>
+			{(url) => (
+				<img
+					src={url()}
+					alt=""
+					class="h-5 w-5 shrink-0 rounded-full object-cover ring-2 ring-surface-2"
+					loading="lazy"
+					onError={() => setImgFailed(true)}
+				/>
+			)}
+		</Show>
+	);
+};
+
+/** The selected-vote check + screen-reader marker shared by the standard
+ *  poll list and the compact event RSVP row. */
+const VoteCheck: Component = () => (
+	<>
+		<svg
+			class="ml-1 inline h-3.5 w-3.5 text-accent-text"
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			stroke-width="3"
+			stroke-linecap="round"
+			stroke-linejoin="round"
+			aria-hidden="true"
+		>
+			<path d="M20 6 9 17l-5-5" />
+		</svg>
+		<span class="sr-only">(your vote)</span>
+	</>
+);
 
 /**
  * Cover image for an event card (#418). Resolves the mxc URL (plain rooms)
@@ -369,99 +437,207 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 					</p>
 				</div>
 			</div>
-			<ul
-				class="mt-2 flex flex-col gap-2"
-				aria-label="Poll options"
-				role={isMultiSelect() ? "group" : "radiogroup"}
-				onKeyDown={onGroupKeyDown}
-			>
-				<For each={props.poll.answers}>
-					{(answer) => {
-						// counts is zero-filled for every answer id (see
-						// PollSnapshot.counts), so direct indexing is safe.
-						const count = () => props.poll.counts[answer.id];
-						const isMine = () => props.poll.myAnswers.includes(answer.id);
-						const isWinner = () =>
-							props.poll.isEnded && count() > 0 && count() === maxCount();
-						// Multi-select cap: unchecked options lock once the cap
-						// is reached (checked ones stay clickable to uncheck).
-						const capLocked = () =>
-							isMultiSelect() &&
-							!isMine() &&
-							props.poll.myAnswers.length >= props.poll.maxSelections;
-						const locked = () => votingDisabled() || capLocked();
-						return (
-							<li>
-								{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the
+			<Show
+				when={props.poll.event}
+				fallback={
+					<ul
+						class="mt-2 flex flex-col gap-2"
+						aria-label="Poll options"
+						role={isMultiSelect() ? "group" : "radiogroup"}
+						onKeyDown={onGroupKeyDown}
+					>
+						<For each={props.poll.answers}>
+							{(answer) => {
+								// counts is zero-filled for every answer id (see
+								// PollSnapshot.counts), so direct indexing is safe.
+								const count = () => props.poll.counts[answer.id];
+								const isMine = () => props.poll.myAnswers.includes(answer.id);
+								const isWinner = () =>
+									props.poll.isEnded && count() > 0 && count() === maxCount();
+								// Multi-select cap: unchecked options lock once the cap
+								// is reached (checked ones stay clickable to uncheck).
+								const capLocked = () =>
+									isMultiSelect() &&
+									!isMine() &&
+									props.poll.myAnswers.length >= props.poll.maxSelections;
+								const locked = () => votingDisabled() || capLocked();
+								return (
+									<li>
+										{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the
 								    role is dynamically "radio" or "checkbox", both of which
 								    support aria-checked; Biome can only see the implicit
 								    button role through the conditional expression. */}
-								<button
-									type="button"
-									role={isMultiSelect() ? "checkbox" : "radio"}
-									aria-checked={isMine()}
-									// aria-disabled (not the disabled attribute) keeps
-									// locked options in the tab order and perceivable;
-									// toggleAnswer guards the actual interaction.
-									aria-disabled={locked()}
-									aria-describedby={
-										isMultiSelect() && !props.poll.isEnded ? hintId : undefined
-									}
-									tabindex={
-										isMultiSelect() || rovingId() === answer.id ? 0 : -1
-									}
-									class={`w-full rounded p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
-										locked() ? "cursor-default" : "hover:bg-surface-3/60"
-									}`}
-									onClick={() => {
-										if (!capLocked()) toggleAnswer(answer.id);
-									}}
-								>
-									<span class="flex items-baseline justify-between gap-2 text-sm">
-										<span
-											class={`min-w-0 break-words ${
-												isWinner()
-													? "font-medium text-text-emphasis"
-													: "text-text-secondary"
+										<button
+											type="button"
+											role={isMultiSelect() ? "checkbox" : "radio"}
+											aria-checked={isMine()}
+											// aria-disabled (not the disabled attribute) keeps
+											// locked options in the tab order and perceivable;
+											// toggleAnswer guards the actual interaction.
+											aria-disabled={locked()}
+											aria-describedby={
+												isMultiSelect() && !props.poll.isEnded
+													? hintId
+													: undefined
+											}
+											tabindex={
+												isMultiSelect() || rovingId() === answer.id ? 0 : -1
+											}
+											class={`w-full rounded p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+												locked() ? "cursor-default" : "hover:bg-surface-3/60"
 											}`}
+											onClick={() => {
+												if (!capLocked()) toggleAnswer(answer.id);
+											}}
 										>
+											<span class="flex items-baseline justify-between gap-2 text-sm">
+												<span
+													class={`min-w-0 break-words ${
+														isWinner()
+															? "font-medium text-text-emphasis"
+															: "text-text-secondary"
+													}`}
+												>
+													{answer.text}
+													<Show when={isMine()}>
+														<VoteCheck />
+													</Show>
+												</span>
+												<Show when={showResults()}>
+													<span class="shrink-0 text-xs tabular-nums text-text-muted">
+														{count()} · {percent(count())}%
+													</span>
+												</Show>
+											</span>
+											<span class="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-3">
+												<span
+													class="block h-full rounded-full bg-accent transition-[width] duration-200 motion-reduce:transition-none"
+													style={{
+														width: showResults()
+															? `${percent(count())}%`
+															: "0%",
+													}}
+												/>
+											</span>
+										</button>
+									</li>
+								);
+							}}
+						</For>
+					</ul>
+				}
+			>
+				{/* Event cards (#418): the fixed Going/Maybe/Can't answers render
+			    as one compact row - a count per option, no percentages or
+			    bars - with the voters' avatars stacked under each option. */}
+				<ul
+					class="mt-2 flex items-stretch gap-2"
+					aria-label="Poll options"
+					role={isMultiSelect() ? "group" : "radiogroup"}
+					onKeyDown={onGroupKeyDown}
+				>
+					<For each={props.poll.answers}>
+						{(answer) => {
+							const count = () => props.poll.counts[answer.id];
+							const isMine = () => props.poll.myAnswers.includes(answer.id);
+							const capLocked = () =>
+								isMultiSelect() &&
+								!isMine() &&
+								props.poll.myAnswers.length >= props.poll.maxSelections;
+							const locked = () => votingDisabled() || capLocked();
+							// voters is zero-filled for every answer id (see
+							// PollSnapshot.voters), so direct indexing is safe.
+							const voters = () => props.poll.voters[answer.id];
+							const shownVoters = () => voters().slice(0, MAX_VOTER_AVATARS);
+							// The snapshot caps voters at MAX_VOTER_NAMES; counts
+							// carries the true total, so "+N" derives from it (also
+							// avoids copying the array just to measure overflow).
+							const overflowCount = () => count() - shownVoters().length;
+							const voterNamesLabel = () =>
+								formatVoterNames(
+									voters().map((v) => v.name),
+									count(),
+								);
+							return (
+								<li class="min-w-0 flex-1">
+									{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the
+								    role is dynamically "radio" or "checkbox", both of which
+								    support aria-checked; Biome can only see the implicit
+								    button role through the conditional expression. */}
+									<button
+										type="button"
+										role={isMultiSelect() ? "checkbox" : "radio"}
+										aria-checked={isMine()}
+										aria-disabled={locked()}
+										aria-describedby={
+											isMultiSelect() && !props.poll.isEnded
+												? hintId
+												: undefined
+										}
+										tabindex={
+											isMultiSelect() || rovingId() === answer.id ? 0 : -1
+										}
+										class={`flex w-full items-center justify-between gap-1 rounded-md border px-2 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+											isMine()
+												? "border-accent/60 bg-accent/10 text-text-primary"
+												: "border-border-subtle bg-surface-3/50 text-text-secondary"
+										} ${locked() ? "cursor-default" : "hover:border-border-strong hover:text-text-primary"}`}
+										onClick={() => {
+											if (!capLocked()) toggleAnswer(answer.id);
+										}}
+									>
+										<span class="min-w-0 truncate" title={answer.text}>
 											{answer.text}
 											<Show when={isMine()}>
-												<svg
-													class="ml-1 inline h-3.5 w-3.5 text-accent-text"
-													viewBox="0 0 24 24"
-													fill="none"
-													stroke="currentColor"
-													stroke-width="3"
-													stroke-linecap="round"
-													stroke-linejoin="round"
-													aria-hidden="true"
-												>
-													<path d="M20 6 9 17l-5-5" />
-												</svg>
-												<span class="sr-only">(your vote)</span>
+												<VoteCheck />
 											</Show>
 										</span>
 										<Show when={showResults()}>
 											<span class="shrink-0 text-xs tabular-nums text-text-muted">
-												{count()} · {percent(count())}%
+												{count()}
 											</span>
 										</Show>
-									</span>
-									<span class="mt-1 block h-1.5 overflow-hidden rounded-full bg-surface-3">
-										<span
-											class="block h-full rounded-full bg-accent transition-[width] duration-200 motion-reduce:transition-none"
-											style={{
-												width: showResults() ? `${percent(count())}%` : "0%",
-											}}
-										/>
-									</span>
-								</button>
-							</li>
-						);
-					}}
-				</For>
-			</ul>
+									</button>
+									{/* The stack row is always rendered while results are
+									    visible (filled or empty) so its geometry is reserved
+									    before the async relations fetch lands - the same
+									    no-layout-shift rule the plain list's bar track
+									    follows. */}
+									<Show when={showResults()}>
+										<div class="mt-1 flex h-5 items-center">
+											<Show when={voters().length > 0}>
+												{/* One tooltip per stack (Discord-reaction style):
+												    hover or focus anywhere on the stack lists every
+												    voter. triggerTabIndex makes it keyboard-reachable
+												    without a tab stop per avatar. */}
+												<Tooltip
+													content={voterNamesLabel()}
+													triggerTabIndex={0}
+													triggerClass="flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+												>
+													{/* The tooltip is live-region-only while open,
+													    so keep the names reachable to AT as text. */}
+													<span class="sr-only">{voterNamesLabel()}</span>
+													<span class="flex -space-x-1.5">
+														<For each={shownVoters()}>
+															{(voter) => <VoterAvatar voter={voter} />}
+														</For>
+													</span>
+													<Show when={overflowCount() > 0}>
+														<span class="ml-1 text-xs text-text-muted">
+															+{overflowCount()}
+														</span>
+													</Show>
+												</Tooltip>
+											</Show>
+										</div>
+									</Show>
+								</li>
+							);
+						}}
+					</For>
+				</ul>
+			</Show>
 			<Show when={props.poll.failedAnswers}>
 				{(failed) => (
 					<p class="mt-2 text-xs text-danger-text" role="alert">
