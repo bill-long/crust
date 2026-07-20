@@ -97,7 +97,8 @@ export function pollNotificationBody(content: unknown): string {
 }
 
 /** Cap on names spelled out in a voter-list label; longer lists truncate
- *  to "… and N more". Also the poll snapshot's per-answer voter-array cap:
+ *  to the first ten names plus "and N more" (no ellipsis - the tests pin
+ *  the exact format). Also the poll snapshot's per-answer voter-array cap:
  *  it is exactly what the UI can ever display (6 avatars + this label). */
 export const MAX_VOTER_NAMES = 10;
 
