@@ -24,6 +24,7 @@ import { buildShortcodeLookup } from "../../emoji/useImagePacks";
 import { GifPicker } from "../../gif/GifPicker";
 import { useGifConfig } from "../../gif/gifConfig";
 import type { GifItem } from "../../gif/types";
+import { CreateEventDialog } from "../poll/CreateEventDialog";
 import { CreatePollDialog } from "../poll/CreatePollDialog";
 import type { TimelineEvent } from "../timeline/useTimeline";
 import { AttachmentTray } from "./AttachmentTray";
@@ -136,6 +137,7 @@ const Composer: Component<{
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
 	const [pollDialogOpen, setPollDialogOpen] = createSignal(false);
+	const [eventDialogOpen, setEventDialogOpen] = createSignal(false);
 	const [previewOpen, setPreviewOpen] = createSignal(false);
 	const {
 		attachments,
@@ -920,12 +922,20 @@ const Composer: Component<{
 					inThread={!!props.threadRootId}
 					gifAvailable={gifConfig.available()}
 					pollOpen={pollDialogOpen()}
+					eventOpen={eventDialogOpen()}
 					gifOpen={gifPickerOpen()}
 					emojiOpen={emojiPickerOpen()}
 					inert={voiceRecorder.recording()}
 					onStartRecording={() => void startRecording()}
 					onOpenPoll={() => {
 						setPollDialogOpen(true);
+						setEventDialogOpen(false);
+						setGifPickerOpen(false);
+						setEmojiPickerOpen(false);
+					}}
+					onOpenEvent={() => {
+						setEventDialogOpen(true);
+						setPollDialogOpen(false);
 						setGifPickerOpen(false);
 						setEmojiPickerOpen(false);
 					}}
@@ -998,6 +1008,12 @@ const Composer: Component<{
 					roomId={props.roomId}
 					open={pollDialogOpen}
 					onClose={() => setPollDialogOpen(false)}
+				/>
+				<CreateEventDialog
+					client={client}
+					roomId={props.roomId}
+					open={eventDialogOpen}
+					onClose={() => setEventDialogOpen(false)}
 				/>
 			</div>
 		</div>

@@ -4,6 +4,7 @@ import {
 	M_POLL_RESPONSE,
 	type MatrixEvent,
 } from "matrix-js-sdk";
+import type { EventInfo } from "./eventBlock";
 
 /** One selectable poll option, projected to plain data for rendering. */
 export interface PollAnswerOption {
@@ -41,6 +42,12 @@ export interface PollSnapshot {
 	kind: "disclosed" | "undisclosed";
 	maxSelections: number;
 	answers: PollAnswerOption[];
+	/**
+	 * The validated event-card block (#418), when this poll carries one.
+	 * Null for plain polls and for malformed blocks - a malformed block
+	 * degrades to the plain poll presentation, never a broken card.
+	 */
+	event?: EventInfo | null;
 	/**
 	 * Vote count per answer id. Always contains a key for every answer in
 	 * {@link PollSnapshot.answers} (zero-filled), so renderers can iterate
@@ -277,6 +284,9 @@ export function buildPollSnapshot(args: {
 	isEnded: boolean;
 	undecryptableCount: number;
 	loadingResults: boolean;
+	/** Validated event-card block from the start event's raw content
+	 *  (parsed by the projection, which has the MatrixEvent). */
+	event?: EventInfo | null;
 	/** Interaction state; omitted for provisional snapshots (an unwatched
 	 *  poll has no SDK model to act on yet, so it is also not votable). */
 	interaction?: {
@@ -303,6 +313,7 @@ export function buildPollSnapshot(args: {
 		kind: args.start.kind,
 		maxSelections: args.start.maxSelections,
 		answers: args.start.answers,
+		event: args.event ?? null,
 		counts,
 		totalVotes: args.tally?.totalVotes ?? 0,
 		myAnswers: args.tally?.myAnswers ?? [],

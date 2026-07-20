@@ -43,3 +43,33 @@ export function useMinuteTick(): () => number {
 	});
 	return minuteTick;
 }
+
+const HALF_MINUTE_TICK_MS = 30_000;
+const [halfMinuteTick, setHalfMinuteTick] = createSignal(Date.now());
+let halfMinuteSubscribers = 0;
+let halfMinuteTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Shared 30s ticker for countdown-style labels (event cards): ONE
+ * interval regardless of how many cards are visible in the timeline,
+ * stopped when the last subscriber unmounts. Same ref-counting pattern
+ * as useMinuteTick.
+ */
+export function useThirtySecondTick(): () => number {
+	halfMinuteSubscribers++;
+	if (halfMinuteSubscribers === 1) {
+		setHalfMinuteTick(Date.now());
+		halfMinuteTimer = setInterval(
+			() => setHalfMinuteTick(Date.now()),
+			HALF_MINUTE_TICK_MS,
+		);
+	}
+	onCleanup(() => {
+		halfMinuteSubscribers--;
+		if (halfMinuteSubscribers === 0 && halfMinuteTimer !== null) {
+			clearInterval(halfMinuteTimer);
+			halfMinuteTimer = null;
+		}
+	});
+	return halfMinuteTick;
+}

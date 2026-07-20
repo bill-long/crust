@@ -1,3 +1,4 @@
+import { useNavigate } from "@solidjs/router";
 import {
 	type Component,
 	createMemo,
@@ -6,6 +7,15 @@ import {
 	For,
 	Show,
 } from "solid-js";
+import { useClient } from "../../../client/client";
+import { useThirtySecondTick } from "../../../lib/relativeTime";
+import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
+import {
+	type EventImage,
+	type EventInfo,
+	formatEventRelative,
+	formatEventTime,
+} from "./eventBlock";
 import type { PollSnapshot } from "./pollSnapshot";
 
 interface PollMessageProps {
@@ -16,6 +26,194 @@ interface PollMessageProps {
 	/** Close the poll. Only invoked when the snapshot says canEnd. */
 	onEndPoll: () => void;
 }
+
+/**
+ * Cover image for an event card (#418). Resolves the mxc URL (plain rooms)
+ * or decrypts via the shared attachment path (E2EE), reserving the exact
+ * layout box from info.w/h while loading so the card never shifts. Any
+ * failure renders nothing - an event without its image is still a complete
+ * card, and the poll fallback is unaffected.
+ */
+const EventCoverImage: Component<{
+	image: EventImage;
+	alt: string;
+}> = (props) => {
+	const { client } = useClient();
+	const MAX_W = 400;
+	const MAX_H = 160;
+	const httpUrl = createMemo(() =>
+		props.image.url
+			? // Ask the server for a scaled variant - the card caps display at
+				// MAX_W x MAX_H, so fetching the original is wasted bandwidth.
+				// (Encrypted attachments can't be server-scaled.)
+				client.mxcUrlToHttp(props.image.url, MAX_W, MAX_H, "scale")
+			: null,
+	);
+	const cipherUrl = createMemo(() =>
+		props.image.file ? client.mxcUrlToHttp(props.image.file.url) : null,
+	);
+	const decrypted = createDecryptedObjectUrl(
+		cipherUrl,
+		() => props.image.file,
+		() => props.image.info.mimetype,
+	);
+	const src = createMemo(() =>
+		props.image.file ? decrypted.url() : httpUrl(),
+	);
+	// Fail closed on fetch/decode errors (404, network, bad bytes): the
+	// browser would otherwise paint a broken-image icon inside the card.
+	// Keyed to src() so an edited event with a fresh image resets the
+	// error state instead of staying blank forever.
+	const [loadFailedSrc, setLoadFailedSrc] = createSignal<string | null>(null);
+	const loadFailed = createMemo(() => {
+		const s = src();
+		return s !== null && s === loadFailedSrc();
+	});
+	const failed = createMemo(
+		() =>
+			loadFailed() ||
+			((props.image.file ? !cipherUrl() || decrypted.failed() : !httpUrl()) ??
+				true),
+	);
+	// Cap the box like Discord's event banners; w/h reserve the ratio.
+	const box = createMemo(() => {
+		const { w, h } = props.image.info;
+		const scale = Math.min(MAX_W / w, MAX_H / h, 1);
+		return {
+			width: `${Math.round(w * scale)}px`,
+			height: `${Math.round(h * scale)}px`,
+		};
+	});
+	return (
+		// The reserved box renders while the image loads so the card never
+		// shifts when it lands. On failure the image (and its box) is
+		// simply absent - the card is complete without it, and the poll
+		// fallback is unaffected.
+		<Show when={!failed()}>
+			<Show
+				when={src()}
+				keyed
+				fallback={
+					<div
+						style={box()}
+						class="mb-2 flex items-center justify-center rounded bg-surface-3 text-xs text-text-disabled"
+						aria-busy="true"
+					>
+						Loading…
+					</div>
+				}
+			>
+				{(url) => (
+					<img
+						src={url}
+						alt={props.alt}
+						width={props.image.info.w}
+						height={props.image.info.h}
+						style={box()}
+						class="mb-2 block rounded object-cover"
+						loading="lazy"
+						// Capture the URL bound to THIS img (keyed Show passes the
+						// plain value, not a live accessor) so a late error event
+						// can't mark a freshly edited image's new src as failed.
+						onError={() => setLoadFailedSrc(url)}
+					/>
+				)}
+			</Show>
+		</Show>
+	);
+};
+
+/**
+ * Event-card chrome (#418) around the standard poll vote UI: title,
+ * viewer-local start time, a live relative line, and the target room as a
+ * navigation pill. Rendered only for polls carrying a validated event
+ * block; everything malformed degrades to the plain poll presentation.
+ */
+const EventCardHeader: Component<{ event: EventInfo }> = (props) => {
+	const navigate = useNavigate();
+	const { client } = useClient();
+	// Shared 30s ticker (one interval for the whole timeline, ref-counted)
+	// rather than a per-card setInterval.
+	const now = useThirtySecondTick();
+
+	const roomName = createMemo(() => {
+		const id = props.event.roomId;
+		if (!id) return null;
+		// Trimmed like every other room-name label in the app: a
+		// whitespace-only name must not render as a blank pill.
+		return client.getRoom(id)?.name?.trim() || null;
+	});
+
+	return (
+		<div class="mb-2">
+			<Show when={props.event.image}>
+				{(image) => <EventCoverImage image={image()} alt={props.event.title} />}
+			</Show>
+			<div class="flex items-start gap-2">
+				<svg
+					class="mt-0.5 h-4 w-4 shrink-0 text-accent-text"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					aria-hidden="true"
+				>
+					<rect x="3" y="4" width="18" height="18" rx="2" />
+					<path d="M16 2v4" />
+					<path d="M8 2v4" />
+					<path d="M3 10h18" />
+				</svg>
+				<div class="min-w-0">
+					<p class="break-words text-sm font-semibold text-text-emphasis">
+						{props.event.title}
+					</p>
+					<p class="text-xs text-text-secondary">
+						{formatEventTime(props.event.startTs)}
+						{" · "}
+						<span class="text-accent-text">
+							{formatEventRelative(
+								props.event.startTs,
+								props.event.endTs,
+								now(),
+							)}
+						</span>
+					</p>
+					<Show when={props.event.roomId}>
+						{(roomId) => (
+							<button
+								type="button"
+								class="mt-1 inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-surface-3 px-2 py-0.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								title={roomId()}
+								onClick={() =>
+									// No /room route exists; /home/:roomId is the canonical
+									// room path (DMs canonicalize/redirect from there).
+									navigate(`/home/${encodeURIComponent(roomId())}`)
+								}
+							>
+								<svg
+									class="h-3 w-3 shrink-0"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<path d="M11 5 6 9H2v6h4l5 4V5z" />
+									<path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+								</svg>
+								<span class="truncate">{roomName() ?? roomId()}</span>
+							</button>
+						)}
+					</Show>
+				</div>
+			</div>
+		</div>
+	);
+};
 
 /**
  * Timeline renderer for an MSC3381 poll, driven entirely by the projected
@@ -139,6 +337,9 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 			aria-busy={props.poll.hasPendingVote}
 			class="max-w-md rounded-lg border border-border-subtle bg-surface-2 p-3 focus-visible:outline-none"
 		>
+			<Show when={props.poll.event}>
+				{(event) => <EventCardHeader event={event()} />}
+			</Show>
 			<div class="flex items-start gap-2">
 				<svg
 					class="mt-0.5 h-4 w-4 shrink-0 text-text-muted"

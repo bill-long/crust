@@ -77,8 +77,12 @@ type UploadedBlob = { contentUri: string } | { file: EncryptedFile };
  * `application/octet-stream` with no filename — the server never sees the real
  * type or name — returning the full {@link EncryptedFile}. Otherwise we upload
  * the cleartext blob with its real type/name and return the mxc url.
+ *
+ * Exported for send paths that attach media to non-message events (the
+ * event-card cover image, #418) so the encryption/upload policy lives in
+ * exactly one place.
  */
-async function uploadBlob(
+export async function uploadBlob(
 	client: MatrixClient,
 	blob: Blob,
 	opts: {
@@ -204,6 +208,60 @@ export async function uploadAndSend(
 
 	await client.sendMessage(roomId, opts.threadId ?? null, content);
 	return content;
+}
+
+/**
+ * Upload a cover image for an event card (#418): encrypts in E2EE rooms
+ * (same policy as composer sends), probes intrinsic dimensions, and
+ * returns the m.image-style fields for the event block. Unlike composer
+ * image sends, a failed dimension probe REJECTS the image: the card
+ * reserves its layout from info.w/h, so shipping without dimensions would
+ * reintroduce layout shift.
+ */
+export async function uploadEventImage(
+	client: MatrixClient,
+	roomId: string,
+	file: File,
+): Promise<{
+	url?: string;
+	file?: EncryptedFile;
+	info: { w: number; h: number; mimetype: string; size: number };
+}> {
+	const room = client.getRoom(roomId);
+	if (!room) throw new Error("Room not found");
+	await validateSize(client, file);
+	let inspection: Awaited<ReturnType<typeof inspectImage>>;
+	try {
+		inspection = await inspectImage(file);
+	} catch {
+		// createImageBitmap decode failures surface as bare DOMExceptions;
+		// this message is shown verbatim in the Create Event dialog.
+		throw new Error(
+			"Couldn't read the cover image dimensions. Try a different file.",
+		);
+	}
+	const uploaded = await uploadBlob(client, file, {
+		encrypted: room.hasEncryptionStateEvent(),
+		type: file.type || "application/octet-stream",
+		name: sanitizeFilename(file.name),
+	});
+	// uploadBlob returns { contentUri } for plain rooms / { file } for E2EE;
+	// the event block's m.image-style field is named `url`, so normalize
+	// here — spreading the raw result would silently drop the cleartext
+	// reference and the cover would never render in unencrypted rooms.
+	const reference =
+		"contentUri" in uploaded
+			? { url: uploaded.contentUri }
+			: { file: uploaded.file };
+	return {
+		...reference,
+		info: {
+			w: inspection.width,
+			h: inspection.height,
+			mimetype: file.type || "application/octet-stream",
+			size: file.size,
+		},
+	};
 }
 
 /**

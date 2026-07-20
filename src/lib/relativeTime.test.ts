@@ -1,6 +1,10 @@
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatRelativeTime, useMinuteTick } from "./relativeTime";
+import {
+	formatRelativeTime,
+	useMinuteTick,
+	useThirtySecondTick,
+} from "./relativeTime";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -111,6 +115,69 @@ describe("useMinuteTick", () => {
 		});
 		// Each subscribe-from-zero starts exactly one interval (the first
 		// subscriber of each cycle), so two full cycles => two setInterval calls.
+		expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("useThirtySecondTick", () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => {
+		// Same restore-order rule as the minute-tick suite: spies first,
+		// then real timers, so globalThis never keeps an orphaned fake.
+		vi.restoreAllMocks();
+		vi.useRealTimers();
+	});
+
+	it("shares one interval across subscribers and clears it after the last unsubscribes", () => {
+		const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+		const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+
+		let disposeA!: () => void;
+		let disposeB!: () => void;
+		let tick!: () => number;
+
+		// Module-global subscriber state: dispose in `finally` (idempotent)
+		// so a failed assertion can't leak a subscriber into the next test.
+		try {
+			createRoot((dispose) => {
+				disposeA = dispose;
+				tick = useThirtySecondTick();
+			});
+			// A second subscriber must NOT start its own interval.
+			createRoot((dispose) => {
+				disposeB = dispose;
+				useThirtySecondTick();
+			});
+			expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+			// The shared accessor advances on the 30s cadence.
+			const before = tick();
+			vi.advanceTimersByTime(30_000);
+			expect(tick()).toBeGreaterThan(before);
+
+			// Dropping one subscriber keeps the interval alive for the other.
+			disposeA();
+			expect(clearIntervalSpy).not.toHaveBeenCalled();
+
+			// The last unsubscribe stops the interval.
+			disposeB();
+			expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+		} finally {
+			disposeA?.();
+			disposeB?.();
+		}
+	});
+
+	it("restarts a fresh interval after all subscribers have left", () => {
+		const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+		createRoot((dispose) => {
+			useThirtySecondTick();
+			dispose();
+		});
+		createRoot((dispose) => {
+			useThirtySecondTick();
+			dispose();
+		});
 		expect(setIntervalSpy).toHaveBeenCalledTimes(2);
 	});
 });

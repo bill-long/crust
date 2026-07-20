@@ -1,5 +1,12 @@
+import { MemoryRouter, Route, useParams } from "@solidjs/router";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import type { MatrixClient } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AppSyncState, CryptoState } from "../../../client/client";
+import { ClientContext } from "../../../client/client";
+import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import type { EventInfo } from "./eventBlock";
 import { PollMessage } from "./PollMessage";
 import type { PollSnapshot } from "./pollSnapshot";
 
@@ -317,5 +324,185 @@ describe("PollMessage ending", () => {
 		expect(alert.textContent).toContain("Couldn't end the poll");
 		fireEvent.click(screen.getByText("Retry"));
 		expect(onEndPoll).toHaveBeenCalledOnce();
+	});
+});
+
+describe("PollMessage event card (#418)", () => {
+	function eventInfo(overrides?: Partial<EventInfo>): EventInfo {
+		return {
+			title: "Launch Party",
+			startTs: Date.now() + 3 * 86_400_000, // in 3 days
+			endTs: null,
+			roomId: null,
+			image: null,
+			...overrides,
+		};
+	}
+
+	function setupEvent(
+		event: EventInfo | null,
+		opts?: {
+			roomName?: string;
+			snapshot?: Partial<PollSnapshot>;
+			tweakClient?: (client: ReturnType<typeof createMockClient>) => void;
+		},
+	) {
+		const ROOM_ID = "!venue:test";
+		const room = createMockRoom(ROOM_ID, [], [], {
+			name: opts?.roomName ?? "The Venue",
+		});
+		const rooms = new Map([[ROOM_ID, room]]);
+		const client = createMockClient(rooms);
+		opts?.tweakClient?.(client);
+		const [syncState] = createSignal<AppSyncState>("live");
+		const [cryptoState] = createSignal<CryptoState>("ready");
+		// useNavigate needs an actual matched Route, not just a router.
+		const Subject = () => (
+			<ClientContext.Provider
+				value={{
+					client: client as unknown as MatrixClient,
+					syncState,
+					cryptoState,
+					summaries: {} as never,
+					cryptoStatus: {
+						crossSigningReady: () => true,
+						thisDeviceVerified: () => true,
+						backupVersion: () => null,
+						backupTrusted: () => true,
+						secretStorageReady: () => true,
+						refresh: async () => {},
+					},
+					requestRecoveryKey: async () => null,
+					setRecoveryKeyResolver: () => {},
+					clearSecretStorageCache: () => {},
+					optimisticallyMarkJoined: () => {},
+					optimisticallyMarkLeft: () => {},
+				}}
+			>
+				<PollMessage
+					poll={snapshot({ event, ...opts?.snapshot })}
+					onVote={() => {}}
+					onEndPoll={() => {}}
+				/>
+			</ClientContext.Provider>
+		);
+		return render(() => (
+			<MemoryRouter>
+				<Route path="/" component={Subject} />
+				{/* Marker for pill-navigation assertions: /home/:roomId is the
+				    canonical room path (there is no /room route). The router does
+				    NOT decode params (the app decodes at consumption, cf.
+				    useDecodedParams), so decode here to prove the id round-trips
+				    through encodeURIComponent. */}
+				<Route
+					path="/home/:roomId"
+					component={() => (
+						<div>
+							navigated-home {decodeURIComponent(useParams().roomId ?? "")}
+						</div>
+					)}
+				/>
+			</MemoryRouter>
+		));
+	}
+
+	it("renders the title, viewer-local time, and a relative line", () => {
+		setupEvent(eventInfo());
+		expect(screen.getByText("Launch Party")).toBeTruthy();
+		// Assert against the runner's own locale data (the cascade can
+		// truncate 3 days to 2 with render latency) so the test is stable
+		// under non-English locales.
+		const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+		const expected = [rtf.format(3, "day"), rtf.format(2, "day")];
+		expect(expected.some((text) => screen.queryByText(text) !== null)).toBe(
+			true,
+		);
+	});
+
+	it("renders no event chrome for a plain poll (no block)", () => {
+		setupEvent(null);
+		expect(screen.queryByText("Launch Party")).toBeNull();
+		// The vote UI itself is unaffected.
+		expect(screen.getByText("Best pizza?")).toBeTruthy();
+	});
+
+	it("shows the target room as a pill with its name", () => {
+		setupEvent(eventInfo({ roomId: "!venue:test" }));
+		expect(screen.getByText("The Venue")).toBeTruthy();
+	});
+
+	it("the room pill navigates to the canonical /home/:roomId path", async () => {
+		setupEvent(eventInfo({ roomId: "!venue:test" }));
+		fireEvent.click(screen.getByText("The Venue"));
+		// The /home/:roomId marker route only renders after a successful
+		// navigation - a broken path (e.g. the nonexistent /room) would
+		// leave the poll on screen. Router navigation is async, hence
+		// findByText rather than getByText. The marker echoes the decoded
+		// param, proving the id round-trips through encodeURIComponent.
+		expect(await screen.findByText("navigated-home !venue:test")).toBeTruthy();
+	});
+
+	it("falls back to the room id for a whitespace-only room name", () => {
+		setupEvent(eventInfo({ roomId: "!venue:test" }), { roomName: "   " });
+		// The trimmed name is empty, so the pill shows the room id itself
+		// rather than a blank label.
+		expect(screen.getByText("!venue:test")).toBeTruthy();
+	});
+
+	it("fails closed (no broken-image chrome) when the cover fetch errors", () => {
+		setupEvent(
+			eventInfo({
+				image: {
+					url: "mxc://server/cover",
+					file: null,
+					info: { w: 800, h: 400, mimetype: "image/png", size: 1234 },
+				},
+			}),
+		);
+		// A 404/network error on a syntactically valid URL only surfaces via
+		// the img's error event - without onError the browser would paint a
+		// broken-image icon inside the card.
+		fireEvent.error(screen.getByAltText("Launch Party"));
+		expect(screen.queryByAltText("Launch Party")).toBeNull();
+	});
+
+	it("reserves the cover image's layout box while it loads", () => {
+		setupEvent(
+			eventInfo({
+				image: {
+					url: "mxc://server/cover",
+					file: null,
+					info: { w: 800, h: 400, mimetype: "image/png", size: 1234 },
+				},
+			}),
+		);
+		// 800x400: the 160px height cap binds first (scale 0.4) -> 320x160.
+		const img = screen.getByAltText("Launch Party") as HTMLImageElement;
+		expect(img.style.width).toBe("320px");
+		expect(img.style.height).toBe("160px");
+	});
+
+	it("renders nothing (no broken chrome) when the image has no usable source", () => {
+		setupEvent(
+			eventInfo({
+				image: {
+					url: "mxc://server/cover",
+					file: null,
+					info: { w: 800, h: 400, mimetype: "image/png", size: 1234 },
+				},
+			}),
+			{
+				// A validated EventImage always carries url or file, but the
+				// client can still fail to resolve it (mxcUrlToHttp rejects)
+				// - the card must not render broken chrome.
+				tweakClient: (client) => {
+					client.mxcUrlToHttp = () => "";
+				},
+			},
+		);
+		// The card header still renders; the image chrome is absent.
+		expect(screen.getByText("Launch Party")).toBeTruthy();
+		expect(screen.queryByAltText("Launch Party")).toBeNull();
+		expect(screen.queryByText("Loading…")).toBeNull();
 	});
 });
