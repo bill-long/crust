@@ -14,7 +14,7 @@ import {
 export const EVENT_BLOCK_KEY = "pizza.strange.event";
 
 /** Fixed RSVP answers, in card order. `max_selections` is always 1. */
-export const EVENT_ANSWERS = ["Going", "Maybe", "Can't make it"] as const;
+export const EVENT_ANSWERS = ["Going", "Maybe", "Can't"] as const;
 
 /** Validated image reference for the cover (m.image-style fields). */
 export interface EventImage {
