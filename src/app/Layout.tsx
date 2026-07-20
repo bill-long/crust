@@ -29,7 +29,7 @@ import { UserBar } from "../components/UserBar";
 import {
 	cryptoActionLabel,
 	deriveCryptoAction,
-} from "../features/crypto/CryptoStatusBanner";
+} from "../features/crypto/cryptoAction";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
@@ -374,11 +374,13 @@ const Layout: Component = () => {
 
 	const cryptoAction = createMemo(
 		(): CryptoAction =>
-			deriveCryptoAction(
-				cryptoStatus.crossSigningReady(),
-				cryptoStatus.thisDeviceVerified(),
-				cryptoStatus.backupVersion(),
-			),
+			deriveCryptoAction({
+				crossSigningReady: cryptoStatus.crossSigningReady(),
+				thisDeviceVerified: cryptoStatus.thisDeviceVerified(),
+				backupVersion: cryptoStatus.backupVersion(),
+				backupOnServer: cryptoStatus.backupOnServer(),
+				crossSigningStatus: cryptoStatus.crossSigningStatus(),
+			}),
 	);
 
 	const needsCryptoAttention = () => {
@@ -386,7 +388,9 @@ const Layout: Component = () => {
 		return (
 			a === "setup-cross-signing" ||
 			a === "verify-session" ||
-			a === "setup-backup"
+			a === "setup-backup" ||
+			a === "unlock-backup" ||
+			a === "reset-encryption"
 		);
 	};
 

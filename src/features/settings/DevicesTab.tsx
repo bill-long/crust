@@ -1,13 +1,30 @@
-import { type Component, createMemo, Show } from "solid-js";
+import {
+	type Component,
+	createMemo,
+	createSignal,
+	lazy,
+	Show,
+	Suspense,
+} from "solid-js";
 import { useClient } from "../../client/client";
 import { triggerCryptoAction } from "../../stores/cryptoActions";
 import { BackupStatus } from "../crypto/backup/BackupStatus";
-import {
-	cryptoActionLabel,
-	deriveCryptoAction,
-} from "../crypto/CryptoStatusBanner";
+import { cryptoActionLabel, deriveCryptoAction } from "../crypto/cryptoAction";
 import { DeviceList } from "../crypto/DeviceList";
 import { SectionHeading } from "./SettingsControls";
+
+// Lazy like the other crypto dialogs (#307): only loaded when the user
+// actually opens the export/import flow from this tab.
+const ExportKeysDialog = lazy(() =>
+	import("../crypto/backup/ExportKeysDialog").then((m) => ({
+		default: m.ExportKeysDialog,
+	})),
+);
+const ImportKeysDialog = lazy(() =>
+	import("../crypto/backup/ImportKeysDialog").then((m) => ({
+		default: m.ImportKeysDialog,
+	})),
+);
 
 const StatusBadge: Component<{ ok: boolean; label: string }> = (props) => (
 	<span
@@ -22,15 +39,38 @@ const StatusBadge: Component<{ ok: boolean; label: string }> = (props) => (
 	</span>
 );
 
+const ActionButton: Component<{
+	label: string;
+	danger?: boolean;
+	onClick: () => void;
+}> = (props) => (
+	<button
+		type="button"
+		onClick={props.onClick}
+		class="rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+		classList={{
+			"bg-accent text-accent-foreground hover:bg-accent-hover": !props.danger,
+			"bg-danger text-danger-foreground hover:bg-danger/90": !!props.danger,
+		}}
+	>
+		{props.label}
+	</button>
+);
+
 const DevicesTab: Component = () => {
 	const { client, cryptoStatus } = useClient();
 
+	const [showExportKeys, setShowExportKeys] = createSignal(false);
+	const [showImportKeys, setShowImportKeys] = createSignal(false);
+
 	const cryptoAction = createMemo(() =>
-		deriveCryptoAction(
-			cryptoStatus.crossSigningReady(),
-			cryptoStatus.thisDeviceVerified(),
-			cryptoStatus.backupVersion(),
-		),
+		deriveCryptoAction({
+			crossSigningReady: cryptoStatus.crossSigningReady(),
+			thisDeviceVerified: cryptoStatus.thisDeviceVerified(),
+			backupVersion: cryptoStatus.backupVersion(),
+			backupOnServer: cryptoStatus.backupOnServer(),
+			crossSigningStatus: cryptoStatus.crossSigningStatus(),
+		}),
 	);
 
 	const actionLabel = createMemo(() => cryptoActionLabel(cryptoAction()));
@@ -40,7 +80,9 @@ const DevicesTab: Component = () => {
 		return (
 			a === "setup-cross-signing" ||
 			a === "verify-session" ||
-			a === "setup-backup"
+			a === "setup-backup" ||
+			a === "unlock-backup" ||
+			a === "reset-encryption"
 		);
 	};
 
@@ -95,14 +137,21 @@ const DevicesTab: Component = () => {
 										cryptoStatus.crossSigningReady() ? "Ready" : "Not set up"
 									}
 								/>
-								<Show when={cryptoStatus.crossSigningReady() === false}>
-									<button
-										type="button"
+								{/* An identity that exists but is unreachable from every
+								    session can only be replaced; anything else is a normal
+								    bootstrap (issue #420). */}
+								<Show when={cryptoAction() === "reset-encryption"}>
+									<ActionButton
+										label="Reset…"
+										danger
+										onClick={() => triggerCryptoAction("reset-encryption")}
+									/>
+								</Show>
+								<Show when={cryptoAction() === "setup-cross-signing"}>
+									<ActionButton
+										label="Set up"
 										onClick={() => triggerCryptoAction("setup-cross-signing")}
-										class="rounded bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-									>
-										Set up
-									</button>
+									/>
 								</Show>
 							</div>
 						</Show>
@@ -139,13 +188,10 @@ const DevicesTab: Component = () => {
 										cryptoStatus.thisDeviceVerified() === false
 									}
 								>
-									<button
-										type="button"
+									<ActionButton
+										label="Verify"
 										onClick={() => triggerCryptoAction("verify-session")}
-										class="rounded bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-									>
-										Verify
-									</button>
+									/>
 								</Show>
 							</div>
 						</Show>
@@ -172,14 +218,36 @@ const DevicesTab: Component = () => {
 									when={cryptoStatus.backupVersion()}
 									fallback={
 										<>
-											<StatusBadge ok={false} label="Not set up" />
-											<button
-												type="button"
-												onClick={() => triggerCryptoAction("setup-backup")}
-												class="rounded bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+											{/* A backup can exist on the server while this session
+											    has no access to its decryption key — offer "unlock"
+											    rather than a misleading "set up" (issue #420). */}
+											<Show
+												when={cryptoStatus.backupOnServer() === true}
+												fallback={
+													<Show
+														when={cryptoStatus.backupOnServer() === false}
+														fallback={
+															<span class="text-xs text-text-disabled">
+																Checking…
+															</span>
+														}
+													>
+														<StatusBadge ok={false} label="Not set up" />
+														<ActionButton
+															label="Set up"
+															onClick={() =>
+																triggerCryptoAction("setup-backup")
+															}
+														/>
+													</Show>
+												}
 											>
-												Set up
-											</button>
+												<StatusBadge ok={false} label="Unavailable" />
+												<ActionButton
+													label="Unlock…"
+													onClick={() => triggerCryptoAction("unlock-backup")}
+												/>
+											</Show>
 										</>
 									}
 								>
@@ -187,6 +255,28 @@ const DevicesTab: Component = () => {
 								</Show>
 							</div>
 						</Show>
+					</div>
+
+					{/* Offline key export / import */}
+					<div class="flex items-center justify-between rounded-lg bg-surface-2/50 px-4 py-3">
+						<div>
+							<div class="text-sm font-medium text-text-primary">
+								Message key export
+							</div>
+							<div class="text-xs text-text-muted">
+								Offline backup of this device's message keys
+							</div>
+						</div>
+						<div class="flex items-center gap-2">
+							<ActionButton
+								label="Export…"
+								onClick={() => setShowExportKeys(true)}
+							/>
+							<ActionButton
+								label="Import…"
+								onClick={() => setShowImportKeys(true)}
+							/>
+						</div>
 					</div>
 				</div>
 
@@ -217,6 +307,17 @@ const DevicesTab: Component = () => {
 			<section>
 				<DeviceList />
 			</section>
+
+			<Show when={showExportKeys()}>
+				<Suspense>
+					<ExportKeysDialog onClose={() => setShowExportKeys(false)} />
+				</Suspense>
+			</Show>
+			<Show when={showImportKeys()}>
+				<Suspense>
+					<ImportKeysDialog onClose={() => setShowImportKeys(false)} />
+				</Suspense>
+			</Show>
 		</div>
 	);
 };

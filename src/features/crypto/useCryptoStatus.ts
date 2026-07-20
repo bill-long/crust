@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import {
+	type CrossSigningStatus,
 	CryptoEvent,
 	type DeviceVerificationStatus,
 } from "matrix-js-sdk/lib/crypto-api";
@@ -10,18 +11,40 @@ import {
 	createSignal,
 	onCleanup,
 } from "solid-js";
+import { fetchServerKeyBackup } from "./backup/keyBackupSetup";
 
 export interface CryptoStatus {
 	/** Whether cross-signing keys are set up on this account */
 	crossSigningReady: Accessor<boolean | undefined>;
-	/** Whether this device is cross-signing verified */
+	/**
+	 * Whether this device is verified via cross-signing — i.e. signed by the
+	 * account's CURRENT self-signing key. Deliberately NOT
+	 * `DeviceVerificationStatus.isVerified()`: that also passes on
+	 * `localVerified`, which is always true for the user's own device, so the
+	 * badge stayed green after another client rotated the cross-signing
+	 * identity (issue #420).
+	 */
 	thisDeviceVerified: Accessor<boolean | undefined>;
 	/** Active key backup version, or null if none */
 	backupVersion: Accessor<string | null | undefined>;
+	/**
+	 * Whether a key backup exists on the server, regardless of whether THIS
+	 * session can use it. Distinguishes "no backup — set one up" from
+	 * "backup exists but this session can't unlock it" (issue #420):
+	 * `getActiveSessionBackupVersion()` is null in both cases.
+	 */
+	backupOnServer: Accessor<boolean | undefined>;
 	/** Whether the key backup is trusted */
 	backupTrusted: Accessor<boolean | undefined>;
 	/** Whether secret storage is ready */
 	secretStorageReady: Accessor<boolean | undefined>;
+	/**
+	 * Cross-signing key availability detail (public keys on server, private
+	 * keys in secret storage / cached locally). Used to route "not ready"
+	 * to either bootstrap (keys recoverable) or a full reset (identity
+	 * exists but no accessible session holds it — issue #420).
+	 */
+	crossSigningStatus: Accessor<CrossSigningStatus | undefined>;
 	/** Refresh all status values */
 	refresh: () => Promise<void>;
 }
@@ -44,11 +67,17 @@ export function useCryptoStatus(
 	const [backupVersion, setBackupVersion] = createSignal<
 		string | null | undefined
 	>(undefined);
+	const [backupOnServer, setBackupOnServer] = createSignal<boolean | undefined>(
+		undefined,
+	);
 	const [backupTrusted, setBackupTrusted] = createSignal<boolean | undefined>(
 		undefined,
 	);
 	const [secretStorageReady, setSecretStorageReady] = createSignal<
 		boolean | undefined
+	>(undefined);
+	const [crossSigningStatus, setCrossSigningStatus] = createSignal<
+		CrossSigningStatus | undefined
 	>(undefined);
 
 	// Version counter to prevent stale async results from overwriting newer ones
@@ -61,10 +90,11 @@ export function useCryptoStatus(
 		const thisVersion = ++refreshVersion;
 
 		try {
-			const [csReady, ssReady, bkVersion] = await Promise.all([
+			const [csReady, ssReady, bkVersion, csStatus] = await Promise.all([
 				crypto.isCrossSigningReady(),
 				crypto.isSecretStorageReady(),
 				crypto.getActiveSessionBackupVersion(),
+				crypto.getCrossSigningStatus(),
 			]);
 
 			if (refreshVersion !== thisVersion) return;
@@ -78,9 +108,29 @@ export function useCryptoStatus(
 					const status: DeviceVerificationStatus | null =
 						await crypto.getDeviceVerificationStatus(userId, deviceId);
 					if (refreshVersion !== thisVersion) return;
-					deviceVerified = status?.isVerified() ?? false;
+					// Own device is always locally trusted, so isVerified() would
+					// stay true even after the identity was rotated elsewhere.
+					// crossSigningVerified only passes when the device is signed by
+					// the current self-signing key (issue #420).
+					deviceVerified = status?.crossSigningVerified ?? false;
 				} catch {
 					if (refreshVersion !== thisVersion) return;
+				}
+			}
+
+			// Whether a backup exists on the server at all (distinct from this
+			// session having it active). fetchServerKeyBackup throws on an
+			// uncertain check; leave the signal undefined rather than guess.
+			let bkOnServer: boolean | undefined;
+			if (bkVersion) {
+				bkOnServer = true;
+			} else {
+				try {
+					bkOnServer = (await fetchServerKeyBackup(client)) !== null;
+					if (refreshVersion !== thisVersion) return;
+				} catch {
+					if (refreshVersion !== thisVersion) return;
+					bkOnServer = undefined;
 				}
 			}
 
@@ -108,8 +158,10 @@ export function useCryptoStatus(
 				setCrossSigningReady(csReady);
 				setSecretStorageReady(ssReady);
 				setBackupVersion(bkVersion);
+				setBackupOnServer(bkOnServer);
 				setThisDeviceVerified(deviceVerified);
 				setBackupTrusted(bkTrusted);
+				setCrossSigningStatus(csStatus);
 			});
 		} catch (e) {
 			console.error("Failed to refresh crypto status:", e);
@@ -164,8 +216,10 @@ export function useCryptoStatus(
 		crossSigningReady,
 		thisDeviceVerified,
 		backupVersion,
+		backupOnServer,
 		backupTrusted,
 		secretStorageReady,
+		crossSigningStatus,
 		refresh,
 	};
 }
