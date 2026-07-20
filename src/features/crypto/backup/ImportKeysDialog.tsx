@@ -1,4 +1,11 @@
-import { type Component, createSignal, Match, Show, Switch } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createSignal,
+	Match,
+	Show,
+	Switch,
+} from "solid-js";
 import { useClient } from "../../../client/client";
 import { decryptMegolmKeyFile, isMegolmKeyExportFile } from "./megolmKeyFile";
 
@@ -22,6 +29,16 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 	const [passphrase, setPassphrase] = createSignal("");
 	const [errorMessage, setErrorMessage] = createSignal("");
 	const [importedCount, setImportedCount] = createSignal(0);
+
+	let overlayEl!: HTMLDivElement;
+	let fileInput: HTMLInputElement | undefined;
+	// Focus the primary control of the current step: keyboard users land on
+	// the file picker on open; the overlay holds focus on the other steps
+	// so Escape/backdrop handling keeps working.
+	createEffect(() => {
+		if (step() === "intro") fileInput?.focus();
+		else overlayEl.focus();
+	});
 
 	const doImport = async (): Promise<void> => {
 		const crypto = client.getCrypto();
@@ -81,7 +98,7 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 			aria-modal="true"
 			aria-label="Import message keys"
 			tabIndex={-1}
-			ref={(el) => el.focus()}
+			ref={overlayEl}
 			onClick={(e) => {
 				if (e.target === e.currentTarget && !isBusy()) props.onClose();
 			}}
@@ -110,6 +127,7 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 								<input
 									id="import-file"
 									type="file"
+									ref={fileInput}
 									accept=".txt,.json,text/plain,application/json"
 									onChange={(e) => {
 										setFile(e.currentTarget.files?.[0] ?? null);

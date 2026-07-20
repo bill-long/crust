@@ -1,4 +1,11 @@
-import { type Component, createSignal, Match, Show, Switch } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createSignal,
+	Match,
+	Show,
+	Switch,
+} from "solid-js";
 import { useClient } from "../../../client/client";
 import { encryptMegolmKeyFile } from "./megolmKeyFile";
 
@@ -22,6 +29,16 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 	const [confirm, setConfirm] = createSignal("");
 	const [errorMessage, setErrorMessage] = createSignal("");
 	const [fileName, setFileName] = createSignal("");
+
+	let overlayEl!: HTMLDivElement;
+	let passphraseInput: HTMLInputElement | undefined;
+	// Focus the primary control of the current step: keyboard users land on
+	// the passphrase field on open; the overlay holds focus on the other
+	// steps so Escape/backdrop handling keeps working.
+	createEffect(() => {
+		if (step() === "intro") passphraseInput?.focus();
+		else overlayEl.focus();
+	});
 
 	const doExport = async (): Promise<void> => {
 		const crypto = client.getCrypto();
@@ -50,10 +67,12 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 			const a = document.createElement("a");
 			a.href = url;
 			a.download = name;
+			// Clicks on detached anchors are ignored by some browsers — attach,
+			// click, detach. Revocation is deferred because revoking in the
+			// same task as click() can cancel the download in Firefox.
+			document.body.appendChild(a);
 			a.click();
-			// Revoking synchronously after click() can cancel the download in
-			// Firefox — defer revocation to the next macrotask so the browser
-			// has taken its reference first.
+			a.remove();
 			setTimeout(() => URL.revokeObjectURL(url), 0);
 
 			setFileName(name);
@@ -85,7 +104,7 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 			aria-modal="true"
 			aria-label="Export message keys"
 			tabIndex={-1}
-			ref={(el) => el.focus()}
+			ref={overlayEl}
 			onClick={(e) => {
 				if (e.target === e.currentTarget && !isBusy()) props.onClose();
 			}}
@@ -115,6 +134,7 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 								<input
 									id="export-passphrase"
 									type="password"
+									ref={passphraseInput}
 									value={passphrase()}
 									onInput={(e) => setPassphrase(e.currentTarget.value)}
 									autocomplete="new-password"

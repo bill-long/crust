@@ -55,6 +55,26 @@ function isUsableKeyDescription(
 }
 
 /**
+ * Whether a cached (already validated) secret-storage key may be reused for
+ * a new SDK request without re-prompting.
+ *
+ * The SDK calls getSecretStorageKey several times within one operation
+ * (e.g. bootstrapCrossSigning), each time with the key set it currently
+ * knows about. When validation resolved a key that is NOT in that set —
+ * exactly the stale-snapshot case resolveSecretStorageKey exists for —
+ * membership alone would force a second prompt for the same operation.
+ * The cached key was validated against `cachedKeyId`'s description, so it
+ * is also safe to reuse when that id is still the account's default key.
+ */
+export function canReuseCachedSecretStorageKey(
+	cachedKeyId: string,
+	offeredKeys: Record<string, unknown>,
+	defaultKeyId: string | null,
+): boolean {
+	return cachedKeyId in offeredKeys || cachedKeyId === defaultKeyId;
+}
+
+/**
  * Pick the secret-storage key to validate a recovery key against.
  *
  * Preference order:

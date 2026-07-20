@@ -33,7 +33,10 @@ import {
 	recoveryIdentity,
 	runCryptoInit,
 } from "./cryptoRecovery";
-import { resolveSecretStorageKey } from "./secretStorageKey";
+import {
+	canReuseCachedSecretStorageKey,
+	resolveSecretStorageKey,
+} from "./secretStorageKey";
 import {
 	createSummariesStore,
 	type OptimisticJoinInfo,
@@ -158,11 +161,17 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				},
 				_name: string,
 			): Promise<[string, Uint8Array<ArrayBuffer>] | null> => {
-				// Return cached key for rapid successive calls
+				// Return cached key for rapid successive calls. The cached id
+				// may be absent from this call's (stale) offered set — reuse
+				// is still sound while it remains the account's default key.
 				if (
 					cachedSecretStorageKeyId &&
 					cachedSecretStorageKey &&
-					cachedSecretStorageKeyId in opts.keys
+					canReuseCachedSecretStorageKey(
+						cachedSecretStorageKeyId,
+						opts.keys,
+						await matrixClient.secretStorage.getDefaultKeyId(),
+					)
 				) {
 					return [cachedSecretStorageKeyId, cachedSecretStorageKey];
 				}

@@ -109,8 +109,11 @@ export function useCryptoStatus(
 				csStatus = undefined;
 			}
 
-			// Check this device's verification status
-			let deviceVerified = false;
+			// Check this device's verification status. Stays undefined until a
+			// definitive answer arrives: reporting false on a transient failure
+			// would misroute the UI into verify-session (and hide genuine
+			// "loading" states) — undefined is the honest value.
+			let deviceVerified: boolean | undefined;
 			const userId = client.getUserId();
 			const deviceId = client.getDeviceId();
 			if (userId && deviceId) {
@@ -125,6 +128,7 @@ export function useCryptoStatus(
 					deviceVerified = status?.crossSigningVerified ?? false;
 				} catch {
 					if (refreshVersion !== thisVersion) return;
+					deviceVerified = undefined;
 				}
 			}
 

@@ -103,6 +103,11 @@ describe("ExportKeysDialog", () => {
 		expect(screen.getByText(/crust-message-keys-/)).toBeTruthy();
 	});
 
+	it("focuses the passphrase input on open", () => {
+		render(() => <ExportKeysDialog onClose={() => {}} />);
+		expect(document.activeElement).toBe(screen.getByLabelText("Passphrase"));
+	});
+
 	it("keeps Export disabled until a passphrase is entered", () => {
 		render(() => <ExportKeysDialog onClose={() => {}} />);
 		const button = screen.getByRole("button", { name: "Export" });
@@ -180,6 +185,13 @@ describe("ImportKeysDialog", () => {
 		await waitFor(() => expect(screen.getByText("Keys imported")).toBeTruthy());
 
 		expect(importRoomKeysAsJson).toHaveBeenCalledWith(KEYS_JSON);
+	});
+
+	it("focuses the file input on open", () => {
+		render(() => <ImportKeysDialog onClose={() => {}} />);
+		expect(document.activeElement).toBe(
+			screen.getByLabelText("Key export file"),
+		);
 	});
 
 	it("keeps Import disabled until a file is chosen", () => {

@@ -1,6 +1,9 @@
 import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
 import { describe, expect, it, vi } from "vitest";
-import { resolveSecretStorageKey } from "./secretStorageKey";
+import {
+	canReuseCachedSecretStorageKey,
+	resolveSecretStorageKey,
+} from "./secretStorageKey";
 
 const KEY_INFO: SecretStorageKeyDescription = {
 	name: "Recovery key",
@@ -79,5 +82,24 @@ describe("resolveSecretStorageKey", () => {
 		});
 
 		expect(choice).toBeNull();
+	});
+});
+
+describe("canReuseCachedSecretStorageKey", () => {
+	it("reuses when the cached id is in the offered set", () => {
+		expect(
+			canReuseCachedSecretStorageKey("k1", { k1: {} }, "other-default"),
+		).toBe(true);
+	});
+
+	it("reuses when the cached id is absent from the offered set but still the default", () => {
+		// The stale-snapshot case: validation resolved the fresh default key,
+		// which the SDK's cached key set doesn't know about yet.
+		expect(canReuseCachedSecretStorageKey("k1", { old: {} }, "k1")).toBe(true);
+	});
+
+	it("does not reuse when the cached id is neither offered nor default", () => {
+		expect(canReuseCachedSecretStorageKey("k1", { old: {} }, "k2")).toBe(false);
+		expect(canReuseCachedSecretStorageKey("k1", { old: {} }, null)).toBe(false);
 	});
 });

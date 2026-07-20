@@ -117,6 +117,19 @@ describe("useCryptoStatus", () => {
 		expect(status.crossSigningStatus()).toBeUndefined();
 	});
 
+	it("keeps thisDeviceVerified unknown (not false) when the check fails", async () => {
+		// A transient failure must not masquerade as "not verified" — that
+		// would misroute the UI into verify-session during refresh errors.
+		const crypto = makeCrypto({
+			getDeviceVerificationStatus: vi.fn(async () => {
+				throw new Error("transient");
+			}),
+		});
+		const status = await createStatus(crypto);
+		expect(status.thisDeviceVerified()).toBeUndefined();
+		expect(status.crossSigningReady()).toBe(true);
+	});
+
 	it("reports backupOnServer=false when the server has no backup", async () => {
 		const crypto = makeCrypto({
 			getActiveSessionBackupVersion: vi.fn(async () => null),
