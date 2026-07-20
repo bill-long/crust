@@ -17,11 +17,11 @@ vi.mock("solid-refresh", () => ({
 }));
 
 const triggerCryptoAction = vi.fn();
-const setCryptoDialogOpen = vi.fn();
+const acquireCryptoDialog = vi.fn(() => vi.fn());
 
 vi.mock("../../stores/cryptoActions", () => ({
 	triggerCryptoAction: (...args: unknown[]) => triggerCryptoAction(...args),
-	setCryptoDialogOpen: (...args: unknown[]) => setCryptoDialogOpen(...args),
+	acquireCryptoDialog: () => acquireCryptoDialog(),
 	registerCryptoHandler: () => () => {},
 	restoreCryptoTriggerFocus: () => {},
 }));
@@ -188,7 +188,7 @@ describe("DevicesTab", () => {
 		await waitFor(() =>
 			expect(screen.getByLabelText("Export message keys")).toBeTruthy(),
 		);
-		expect(setCryptoDialogOpen).toHaveBeenLastCalledWith(true);
+		expect(acquireCryptoDialog).toHaveBeenCalled();
 	});
 
 	it("opens the import dialog", async () => {
@@ -198,6 +198,6 @@ describe("DevicesTab", () => {
 		await waitFor(() =>
 			expect(screen.getByLabelText("Import message keys")).toBeTruthy(),
 		);
-		expect(setCryptoDialogOpen).toHaveBeenLastCalledWith(true);
+		expect(acquireCryptoDialog).toHaveBeenCalled();
 	});
 });

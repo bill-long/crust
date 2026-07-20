@@ -9,9 +9,9 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import {
+	acquireCryptoDialog,
 	registerCryptoHandler,
 	restoreCryptoTriggerFocus,
-	setCryptoDialogOpen,
 } from "../../stores/cryptoActions";
 import type { CryptoAction } from "../../types/crypto";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
@@ -70,15 +70,19 @@ const CryptoStatusBanner: Component = () => {
 	const [showRecoveryReset, setShowRecoveryReset] = createSignal(false);
 	const [showEncryptionReset, setShowEncryptionReset] = createSignal(false);
 
-	// Expose whether any crypto dialog is open (for inert on underlying content)
+	// Hold the shared crypto-dialog-open flag while any dialog is open (for
+	// inert on underlying content). Reference-counted: releasing happens via
+	// the disposer, including when the banner unmounts mid-dialog.
 	createEffect(() => {
-		setCryptoDialogOpen(
+		const anyOpen =
 			showSetup() ||
-				showVerification() ||
-				showBackupSetup() ||
-				showRecoveryReset() ||
-				showEncryptionReset(),
-		);
+			showVerification() ||
+			showBackupSetup() ||
+			showRecoveryReset() ||
+			showEncryptionReset();
+		if (!anyOpen) return;
+		const release = acquireCryptoDialog();
+		onCleanup(release);
 	});
 
 	const verification = useVerification(client);
@@ -90,9 +94,7 @@ const CryptoStatusBanner: Component = () => {
 	};
 
 	// Register handler so the user panel can trigger crypto flows.
-	// Clear stale state if the banner unmounts while a dialog is open
 	onCleanup(() => {
-		setCryptoDialogOpen(false);
 		restoreCryptoTriggerFocus();
 	});
 

@@ -11,7 +11,7 @@ import {
 import { useClient } from "../../client/client";
 import { cryptoActionLabel, deriveCryptoAction } from "../../lib/cryptoAction";
 import {
-	setCryptoDialogOpen,
+	acquireCryptoDialog,
 	triggerCryptoAction,
 } from "../../stores/cryptoActions";
 import { BackupStatus } from "../crypto/backup/BackupStatus";
@@ -71,13 +71,14 @@ const DevicesTab: Component = () => {
 
 	const [showExportKeys, setShowExportKeys] = createSignal(false);
 	const [showImportKeys, setShowImportKeys] = createSignal(false);
-
-	// Participate in the shared crypto-dialog coordination (inert on
-	// underlying content), like the banner-level dialogs.
+	// Hold the shared crypto-dialog-open flag while the export or import
+	// dialog is open, so inert gating of underlying content also covers
+	// dialogs launched from the Devices tab.
 	createEffect(() => {
-		setCryptoDialogOpen(showExportKeys() || showImportKeys());
+		if (!showExportKeys() && !showImportKeys()) return;
+		const release = acquireCryptoDialog();
+		onCleanup(release);
 	});
-	onCleanup(() => setCryptoDialogOpen(false));
 
 	const cryptoAction = createMemo(() =>
 		deriveCryptoAction({

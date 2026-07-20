@@ -102,4 +102,11 @@ describe("canReuseCachedSecretStorageKey", () => {
 		expect(canReuseCachedSecretStorageKey("k1", { old: {} }, "k2")).toBe(false);
 		expect(canReuseCachedSecretStorageKey("k1", { old: {} }, null)).toBe(false);
 	});
+
+	it("does not treat inherited properties as offered keys", () => {
+		// Server-controlled key ids index a plain object: "__proto__" would
+		// pass an `in` check without Object.hasOwn.
+		expect(canReuseCachedSecretStorageKey("__proto__", {}, null)).toBe(false);
+		expect(canReuseCachedSecretStorageKey("constructor", {}, null)).toBe(false);
+	});
 });

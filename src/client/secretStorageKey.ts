@@ -71,7 +71,11 @@ export function canReuseCachedSecretStorageKey(
 	offeredKeys: Record<string, unknown>,
 	defaultKeyId: string | null,
 ): boolean {
-	return cachedKeyId in offeredKeys || cachedKeyId === defaultKeyId;
+	// Server-controlled key ids index a plain object — `in` would also match
+	// inherited members like "__proto__", so require an own property.
+	return (
+		Object.hasOwn(offeredKeys, cachedKeyId) || cachedKeyId === defaultKeyId
+	);
 }
 
 /**
@@ -97,8 +101,10 @@ export async function resolveSecretStorageKey(
 		} catch {
 			// Fresh fetch failed — fall through to the offered set.
 		}
-		const offeredDefault = source.offeredKeys[defaultKeyId];
-		if (isUsableKeyDescription(offeredDefault ?? null)) {
+		const offeredDefault = Object.hasOwn(source.offeredKeys, defaultKeyId)
+			? source.offeredKeys[defaultKeyId]
+			: null;
+		if (isUsableKeyDescription(offeredDefault)) {
 			return { keyId: defaultKeyId, keyInfo: offeredDefault };
 		}
 	}
