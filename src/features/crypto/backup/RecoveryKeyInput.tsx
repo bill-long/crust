@@ -25,30 +25,58 @@ const RecoveryKeyInput: Component = () => {
 	const [isChecking, setIsChecking] = createSignal(false);
 	const errorId = "recovery-key-error";
 
-	// All pending resolve functions for concurrent SDK requests
-	let pendingResolvers: Array<(key: Uint8Array<ArrayBuffer> | null) => void> =
-		[];
-	// Validator supplied with the first request of a batch; used to reject a
-	// well-formed but incorrect key before resolving (issue #205).
-	let pendingValidate:
-		| ((key: Uint8Array<ArrayBuffer>) => Promise<boolean>)
-		| null = null;
+	// All pending requests for concurrent SDK calls. Each caller keeps its
+	// own validate so EVERY caller pairs the resolved key with the choice it
+	// validated against — resolving a whole batch with only the first
+	// caller's validation mis-pairs the keyId for the rest (issue #420:
+	// callers 2..N would fall back to the first offered keyId, which a stale
+	// offered set can pair with the default key's secret).
+	interface PendingKeyRequest {
+		resolve: (key: Uint8Array<ArrayBuffer> | null) => void;
+		validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>;
+	}
+	let pendingRequests: PendingKeyRequest[] = [];
 	// Generation token: bumped whenever a prompt batch opens or settles, so an
 	// in-flight async validation from a superseded batch cannot resolve a newer
 	// one if the user cancels and a fresh SDK request arrives mid-check.
 	let batchId = 0;
 
-	const resolveWith = (key: Uint8Array<ArrayBuffer> | null): void => {
-		const resolvers = pendingResolvers;
-		pendingResolvers = [];
-		pendingValidate = null;
+	const resetPromptState = (): void => {
 		batchId++;
 		setIsPrompting(false);
 		setInputValue("");
 		setErrorText("");
 		setIsChecking(false);
-		for (const resolve of resolvers) {
-			resolve(key);
+	};
+
+	const resolveWith = (key: Uint8Array<ArrayBuffer> | null): void => {
+		const requests = pendingRequests;
+		pendingRequests = [];
+		resetPromptState();
+		for (const req of requests) {
+			req.resolve(key);
+		}
+	};
+
+	// Settle a batch the user submitted and the first caller's validate
+	// approved. Sibling callers each re-validate the same key themselves so
+	// their caller-side keyId pairing is the choice THEY resolved; a sibling
+	// whose validation fails gets null rather than a mis-paired key.
+	const resolveValidated = (key: Uint8Array<ArrayBuffer>): void => {
+		const requests = pendingRequests;
+		pendingRequests = [];
+		resetPromptState();
+		const [first, ...rest] = requests;
+		first?.resolve(key);
+		for (const req of rest) {
+			if (!req.validate) {
+				req.resolve(key);
+				continue;
+			}
+			void req.validate(key).then(
+				(ok) => req.resolve(ok ? key : null),
+				() => req.resolve(null),
+			);
 		}
 	};
 
@@ -56,15 +84,11 @@ const RecoveryKeyInput: Component = () => {
 		validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
 	): Promise<Uint8Array<ArrayBuffer> | null> => {
 		return new Promise((resolve) => {
-			pendingResolvers.push(resolve);
-			if (pendingResolvers.length === 1) {
+			pendingRequests.push({ resolve, validate });
+			if (pendingRequests.length === 1) {
 				// First request — show the dialog
-				pendingValidate = validate ?? null;
-				batchId++;
+				resetPromptState();
 				setIsPrompting(true);
-				setInputValue("");
-				setErrorText("");
-				setIsChecking(false);
 			}
 		});
 	};
@@ -97,30 +121,35 @@ const RecoveryKeyInput: Component = () => {
 			return;
 		}
 
-		const validate = pendingValidate;
+		const validate = pendingRequests[0]?.validate;
 		if (validate) {
 			const submittedBatch = batchId;
 			setIsChecking(true);
-			let valid = false;
+			// A thrown validate is infrastructure failure (e.g. the 4S
+			// metadata fetch rejecting), NOT a key mismatch — the messages
+			// must differ or the user re-types a correct key forever.
+			let outcome: "valid" | "invalid" | "unknown";
 			try {
-				valid = await validate(keyBytes);
+				outcome = (await validate(keyBytes)) ? "valid" : "invalid";
 			} catch {
-				valid = false;
+				outcome = "unknown";
 			}
 			// A concurrent cancel/cleanup (and possibly a fresh SDK request)
 			// may have superseded this prompt while we were checking; bail out
 			// without resolving so we never hand a stale key to a newer batch.
 			if (batchId !== submittedBatch) return;
 			setIsChecking(false);
-			if (!valid) {
+			if (outcome !== "valid") {
 				setErrorText(
-					"Incorrect recovery key. Check that you entered it correctly.",
+					outcome === "unknown"
+						? "Couldn't verify the key right now. Check your connection and try again."
+						: "Incorrect recovery key. Check that you entered it correctly.",
 				);
 				return;
 			}
 		}
 
-		resolveWith(keyBytes);
+		resolveValidated(keyBytes);
 	};
 
 	const handleCancel = (): void => {

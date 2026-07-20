@@ -18,12 +18,16 @@ vi.mock("solid-refresh", () => ({
 
 const triggerCryptoAction = vi.fn();
 const acquireCryptoDialog = vi.fn(() => vi.fn());
+const setCryptoTriggerElement = vi.fn();
+const restoreCryptoTriggerFocus = vi.fn();
 
 vi.mock("../../stores/cryptoActions", () => ({
 	triggerCryptoAction: (...args: unknown[]) => triggerCryptoAction(...args),
 	acquireCryptoDialog: () => acquireCryptoDialog(),
 	registerCryptoHandler: () => () => {},
-	restoreCryptoTriggerFocus: () => {},
+	restoreCryptoTriggerFocus: () => restoreCryptoTriggerFocus(),
+	setCryptoTriggerElement: (...args: unknown[]) =>
+		setCryptoTriggerElement(...args),
 }));
 
 // Keep the tab focused on its own logic; these children have their own
@@ -74,9 +78,13 @@ vi.mock("../../client/client", () => ({
 		client: {},
 		cryptoStatus: {
 			crossSigningReady: () =>
-				statusOverrides.crossSigningReady ?? HEALTHY.crossSigningReady,
+				"crossSigningReady" in statusOverrides
+					? statusOverrides.crossSigningReady
+					: HEALTHY.crossSigningReady,
 			thisDeviceVerified: () =>
-				statusOverrides.thisDeviceVerified ?? HEALTHY.thisDeviceVerified,
+				"thisDeviceVerified" in statusOverrides
+					? statusOverrides.thisDeviceVerified
+					: HEALTHY.thisDeviceVerified,
 			backupVersion: () =>
 				statusOverrides.backupVersion !== undefined
 					? statusOverrides.backupVersion
@@ -88,7 +96,9 @@ vi.mock("../../client/client", () => ({
 			backupTrusted: () => true,
 			secretStorageReady: () => true,
 			crossSigningStatus: () =>
-				statusOverrides.crossSigningStatus ?? HEALTHY.crossSigningStatus,
+				"crossSigningStatus" in statusOverrides
+					? statusOverrides.crossSigningStatus
+					: HEALTHY.crossSigningStatus,
 			refresh: async () => {},
 		},
 	}),
@@ -189,6 +199,37 @@ describe("DevicesTab", () => {
 			expect(screen.getByLabelText("Export message keys")).toBeTruthy(),
 		);
 		expect(acquireCryptoDialog).toHaveBeenCalled();
+	});
+
+	it("captures and restores focus around the export dialog", async () => {
+		// The dialogs bypass triggerCryptoAction, so the tab itself must
+		// register the trigger element and restore focus on close.
+		render(() => <DevicesTab />);
+		fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+		expect(setCryptoTriggerElement).toHaveBeenCalled();
+
+		const overlay = await screen.findByLabelText("Export message keys");
+		fireEvent.keyDown(overlay, { key: "Escape" });
+
+		await waitFor(() => expect(restoreCryptoTriggerFocus).toHaveBeenCalled());
+		await waitFor(() =>
+			expect(screen.queryByLabelText("Export message keys")).toBeNull(),
+		);
+	});
+
+	it("shows Loading… while cross-signing or verification state is unknown", () => {
+		// Transient probe failures surface as undefined — the row must show
+		// a pending label, never a guessed badge.
+		statusOverrides = {
+			crossSigningReady: undefined,
+			thisDeviceVerified: undefined,
+		};
+		render(() => <DevicesTab />);
+
+		expect(screen.getAllByText("Loading…")).toHaveLength(2);
+		expect(screen.queryByText("Ready")).toBeNull();
+		expect(screen.queryByText("Verified")).toBeNull();
+		expect(screen.queryByText("Not verified")).toBeNull();
 	});
 
 	it("opens the import dialog", async () => {

@@ -7,6 +7,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { encryptMegolmKeyFile } from "./megolmKeyFile";
 
 type ExportStep = "intro" | "working" | "done" | "error";
@@ -80,7 +81,7 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 		} catch (e) {
 			console.error("Key export failed:", e);
 			setErrorMessage(
-				e instanceof Error ? e.message : "Export failed. Please try again.",
+				userFacingErrorMessage(e, "Export failed. Please try again."),
 			);
 			setStep("error");
 		} finally {

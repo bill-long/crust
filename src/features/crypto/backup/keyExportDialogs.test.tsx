@@ -44,8 +44,6 @@ vi.mock("../../../client/client", () => ({
 	}),
 }));
 
-const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
 const KEYS_JSON = JSON.stringify([
 	{ room_id: "!r:example.com", session_id: "s1", session_key: "k" },
 	{ room_id: "!r:example.com", session_id: "s2", session_key: "k" },
@@ -80,9 +78,10 @@ describe("ExportKeysDialog", () => {
 			target: { value: "two" },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Export" }));
-		await flush();
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain("don't match"),
+		);
 
-		expect(screen.getByRole("alert").textContent).toContain("don't match");
 		expect(exportRoomKeysAsJson).not.toHaveBeenCalled();
 	});
 
@@ -131,6 +130,30 @@ describe("ExportKeysDialog", () => {
 		await waitFor(() => expect(screen.getByText("Export failed")).toBeTruthy());
 
 		expect(screen.getByRole("alert").textContent).toContain("crypto exploded");
+	});
+
+	it("shows the curated fallback for raw platform exceptions", async () => {
+		// A WebCrypto DOMException carries browser jargon — the user gets
+		// the fallback, the console keeps the detail.
+		exportRoomKeysAsJson.mockRejectedValue(
+			new DOMException(
+				"The operation failed for some reason",
+				"OperationError",
+			),
+		);
+		render(() => <ExportKeysDialog onClose={() => {}} />);
+		fireEvent.input(screen.getByLabelText("Passphrase"), {
+			target: { value: "hunter2" },
+		});
+		fireEvent.input(screen.getByLabelText("Confirm passphrase"), {
+			target: { value: "hunter2" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Export" }));
+		await waitFor(() => expect(screen.getByText("Export failed")).toBeTruthy());
+
+		expect(screen.getByRole("alert").textContent).toBe(
+			"Export failed. Please try again.",
+		);
 	});
 });
 
@@ -220,5 +243,27 @@ describe("ImportKeysDialog", () => {
 			"doesn't contain valid exported keys",
 		);
 		expect(importRoomKeysAsJson).not.toHaveBeenCalled();
+	});
+
+	it("shows the curated fallback for raw platform exceptions", async () => {
+		// A DOMException from the SDK import path is browser jargon — the
+		// user gets the fallback, the console keeps the detail.
+		importRoomKeysAsJson.mockRejectedValue(
+			new DOMException(
+				"The operation failed for some reason",
+				"OperationError",
+			),
+		);
+		render(() => <ImportKeysDialog onClose={() => {}} />);
+		const input = screen.getByLabelText("Key export file") as HTMLInputElement;
+		fireEvent.change(input, {
+			target: { files: [makeFile(KEYS_JSON, "keys.json")] },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Import" }));
+		await waitFor(() => expect(screen.getByText("Import failed")).toBeTruthy());
+
+		expect(screen.getByRole("alert").textContent).toBe(
+			"Import failed. Please try again.",
+		);
 	});
 });

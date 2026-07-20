@@ -7,6 +7,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { decryptMegolmKeyFile, isMegolmKeyExportFile } from "./megolmKeyFile";
 
 type ImportStep = "intro" | "working" | "done" | "error";
@@ -76,7 +77,7 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 		} catch (e) {
 			console.error("Key import failed:", e);
 			setErrorMessage(
-				e instanceof Error ? e.message : "Import failed. Please try again.",
+				userFacingErrorMessage(e, "Import failed. Please try again."),
 			);
 			setStep("error");
 		} finally {

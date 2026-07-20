@@ -1,3 +1,4 @@
+import { waitFor } from "@solidjs/testing-library";
 import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,8 +47,6 @@ function makeClient(crypto: ReturnType<typeof makeCrypto>) {
 	} as any;
 }
 
-const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
 async function createStatus(
 	crypto: ReturnType<typeof makeCrypto>,
 	serverBackup?: { resolves?: unknown; rejects?: unknown },
@@ -64,7 +63,9 @@ async function createStatus(
 	createRoot(() => {
 		status = useCryptoStatus(client, syncReady);
 	});
-	await flush();
+	// isCrossSigningReady resolves in every makeCrypto variant, so the
+	// signal leaving undefined marks the initial refresh as settled.
+	await waitFor(() => expect(status.crossSigningReady()).not.toBeUndefined());
 	return status;
 }
 
@@ -145,8 +146,7 @@ describe("useCryptoStatus", () => {
 		createRoot(() => {
 			status = useCryptoStatus(client, syncReady);
 		});
-		await flush();
-		expect(fetchServerKeyBackup).toHaveBeenCalledTimes(1);
+		await waitFor(() => expect(fetchServerKeyBackup).toHaveBeenCalledTimes(1));
 
 		// A second refresh (any non-backup CryptoEvent) reuses the cache.
 		await status.refresh();
@@ -158,8 +158,7 @@ describe("useCryptoStatus", () => {
 		)?.[1] as (() => void) | undefined;
 		expect(onBackupStatus).toBeDefined();
 		onBackupStatus?.();
-		await flush();
-		expect(fetchServerKeyBackup).toHaveBeenCalledTimes(2);
+		await waitFor(() => expect(fetchServerKeyBackup).toHaveBeenCalledTimes(2));
 	});
 
 	it("reports backupOnServer=false when the server has no backup", async () => {

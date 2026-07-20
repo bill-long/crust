@@ -12,6 +12,8 @@ import { useClient } from "../../client/client";
 import { cryptoActionLabel, deriveCryptoAction } from "../../lib/cryptoAction";
 import {
 	acquireCryptoDialog,
+	restoreCryptoTriggerFocus,
+	setCryptoTriggerElement,
 	triggerCryptoAction,
 } from "../../stores/cryptoActions";
 import { BackupStatus } from "../crypto/backup/BackupStatus";
@@ -296,11 +298,17 @@ const DevicesTab: Component = () => {
 						<div class="flex items-center gap-2">
 							<ActionButton
 								label="Export…"
-								onClick={() => setShowExportKeys(true)}
+								onClick={() => {
+									setCryptoTriggerElement(document.activeElement);
+									setShowExportKeys(true);
+								}}
 							/>
 							<ActionButton
 								label="Import…"
-								onClick={() => setShowImportKeys(true)}
+								onClick={() => {
+									setCryptoTriggerElement(document.activeElement);
+									setShowImportKeys(true);
+								}}
 							/>
 						</div>
 					</div>
@@ -336,12 +344,22 @@ const DevicesTab: Component = () => {
 
 			<Show when={showExportKeys()}>
 				<Suspense fallback={<DialogFallback />}>
-					<ExportKeysDialog onClose={() => setShowExportKeys(false)} />
+					<ExportKeysDialog
+						onClose={() => {
+							setShowExportKeys(false);
+							restoreCryptoTriggerFocus();
+						}}
+					/>
 				</Suspense>
 			</Show>
 			<Show when={showImportKeys()}>
 				<Suspense fallback={<DialogFallback />}>
-					<ImportKeysDialog onClose={() => setShowImportKeys(false)} />
+					<ImportKeysDialog
+						onClose={() => {
+							setShowImportKeys(false);
+							restoreCryptoTriggerFocus();
+						}}
+					/>
 				</Suspense>
 			</Show>
 		</div>

@@ -222,4 +222,28 @@ describe("lazy crypto dialog boundaries (#307)", () => {
 			await screen.findByRole("dialog", {}, { timeout: 5000 }),
 		).toBeTruthy();
 	});
+
+	it("ResetEncryptionDialog lazy chunk resolves and mounts", async () => {
+		// Mirrors src/features/crypto/CryptoStatusBanner.tsx.
+		const ResetEncryptionDialog = lazy(() =>
+			import("./ResetEncryptionDialog").then((m) => ({
+				default: m.ResetEncryptionDialog,
+			})),
+		);
+		render(() => (
+			<ClientWrapper client={client}>
+				<Suspense fallback={<div data-testid="fallback" />}>
+					<ResetEncryptionDialog onClose={() => {}} />
+				</Suspense>
+			</ClientWrapper>
+		));
+		// The intro step's heading is its user-visible marker.
+		expect(
+			await screen.findByRole(
+				"heading",
+				{ name: "Reset encryption" },
+				{ timeout: 5000 },
+			),
+		).toBeTruthy();
+	});
 });

@@ -66,8 +66,10 @@ afterEach(() => {
 	resetClientState();
 });
 
-async function runThroughPassword(): Promise<void> {
-	render(() => <ResetEncryptionDialog onClose={() => {}} />);
+async function runThroughPassword(
+	onClose: () => void = () => {},
+): Promise<void> {
+	render(() => <ResetEncryptionDialog onClose={onClose} />);
 	fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
 	fireEvent.input(await screen.findByLabelText("Password"), {
 		target: { value: "hunter2" },
@@ -210,5 +212,79 @@ describe("ResetEncryptionDialog", () => {
 			).toBeTruthy(),
 		);
 		expect(resetEncryption).not.toHaveBeenCalled();
+	});
+
+	it("moves focus to the password input on the UIA step", async () => {
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
+		expect(document.activeElement).toBe(overlay);
+
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+		await waitFor(() =>
+			expect(document.activeElement).toBe(screen.getByLabelText("Password")),
+		);
+	});
+
+	it("shows the curated fallback for raw platform exceptions", async () => {
+		// A WebCrypto DOMException carries browser jargon — the user gets the
+		// fallback, the console keeps the detail.
+		resetEncryption.mockRejectedValue(
+			new DOMException(
+				"The operation failed for some reason",
+				"OperationError",
+			),
+		);
+
+		await runThroughPassword();
+		await waitFor(() => expect(screen.getByText("Reset failed")).toBeTruthy());
+
+		expect(screen.getByRole("alert").textContent).toBe(
+			"Reset failed. Please try again.",
+		);
+	});
+
+	it("ignores Escape and backdrop clicks while the reset is in flight", async () => {
+		// A dismiss mid-reset would strand the SDK operation with no UI.
+		const onClose = vi.fn();
+		resetEncryption.mockReturnValue(new Promise(() => {}));
+
+		await runThroughPassword(onClose);
+		await waitFor(() =>
+			expect(screen.getByText("Resetting encryption…")).toBeTruthy(),
+		);
+		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
+
+		fireEvent.keyDown(overlay, { key: "Escape" });
+		fireEvent.click(overlay);
+
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByText("Resetting encryption…")).toBeTruthy();
+	});
+
+	it("ignores Escape and backdrop clicks while the new key is shown", async () => {
+		// Dismissing before the user saves the key could lock them out.
+		const onClose = vi.fn();
+		resetEncryption.mockResolvedValue(undefined);
+		ensureKeyBackup.mockImplementation(
+			async (
+				_crypto: unknown,
+				createKey: () => Promise<unknown>,
+			): Promise<{ outcome: string }> => {
+				await createKey();
+				return { outcome: "reused" };
+			},
+		);
+
+		await runThroughPassword(onClose);
+		await waitFor(() =>
+			expect(screen.getByText("Save your new recovery key")).toBeTruthy(),
+		);
+		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
+
+		fireEvent.keyDown(overlay, { key: "Escape" });
+		fireEvent.click(overlay);
+
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByText("Save your new recovery key")).toBeTruthy();
 	});
 });

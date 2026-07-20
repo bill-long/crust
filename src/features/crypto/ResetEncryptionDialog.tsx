@@ -1,6 +1,7 @@
 import type { GeneratedSecretStorageKey } from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Component,
+	createEffect,
 	createSignal,
 	Match,
 	onCleanup,
@@ -8,6 +9,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { ensureKeyBackup, fetchServerKeyBackup } from "./backup/keyBackupSetup";
 import { RecoveryKeyDisplay } from "./backup/RecoveryKeyDisplay";
 import { UiaDialog } from "./UiaDialog";
@@ -51,6 +53,20 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 
 	onCleanup(() => {
 		disposed = true;
+	});
+
+	// Focus follows the step: the password step's primary control is its
+	// input; every other step keeps focus on the overlay so Escape/backdrop
+	// handling works from anywhere.
+	let overlayEl!: HTMLDivElement;
+	createEffect(() => {
+		if (step() === "uia") {
+			overlayEl
+				.querySelector<HTMLInputElement>("input[type=password]")
+				?.focus();
+		} else {
+			overlayEl.focus();
+		}
 	});
 
 	const doReset = async (password: string): Promise<void> => {
@@ -119,7 +135,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				setStep("show-key");
 			} else {
 				setErrorMessage(
-					e instanceof Error ? e.message : "Reset failed. Please try again.",
+					userFacingErrorMessage(e, "Reset failed. Please try again."),
 				);
 				setStep("error");
 			}
@@ -154,7 +170,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 			aria-modal="true"
 			aria-label="Reset encryption"
 			tabIndex={-1}
-			ref={(el) => el.focus()}
+			ref={overlayEl}
 			onClick={handleBackdropClick}
 			onKeyDown={handleKeyDown}
 		>
