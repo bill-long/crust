@@ -92,6 +92,7 @@ const EventCoverImage: Component<{
 		<Show when={!failed()}>
 			<Show
 				when={src()}
+				keyed
 				fallback={
 					<div
 						style={box()}
@@ -104,14 +105,17 @@ const EventCoverImage: Component<{
 			>
 				{(url) => (
 					<img
-						src={url()}
+						src={url}
 						alt={props.alt}
 						width={props.image.info.w}
 						height={props.image.info.h}
 						style={box()}
 						class="mb-2 block rounded object-cover"
 						loading="lazy"
-						onError={() => setLoadFailedSrc(src() ?? null)}
+						// Capture the URL bound to THIS img (keyed Show passes the
+						// plain value, not a live accessor) so a late error event
+						// can't mark a freshly edited image's new src as failed.
+						onError={() => setLoadFailedSrc(url)}
 					/>
 				)}
 			</Show>
