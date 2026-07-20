@@ -8,6 +8,7 @@ import {
 	RelationsEvent,
 	type Room,
 } from "matrix-js-sdk";
+import { hasControlChar } from "../timeline/timelineHelpers";
 import { type EventInfo, parseEventBlock } from "./eventBlock";
 import {
 	PollEndEvent,
@@ -17,8 +18,10 @@ import {
 import {
 	buildPollSnapshot,
 	computePollTally,
+	MAX_VOTER_NAME_LENGTH,
 	type PollSnapshot,
 	type PollStartInfo,
+	type PollVoter,
 	parsePollStart,
 } from "./pollSnapshot";
 
@@ -78,6 +81,17 @@ interface WatchedPoll {
 	 *  provisional zero state, but the loading indicator must not spin
 	 *  forever). */
 	fetchFailed: boolean;
+	/**
+	 * Voter-id → resolved voter cache. Resolution (member lookup, name
+	 * normalization, avatar URL building) happens once per voter instead
+	 * of on every recompute (recomputes fire per fetched relation page
+	 * during the initial fetch), and the identity-stable objects let the
+	 * renderer's <For> reuse avatar DOM instead of remounting it. Never
+	 * invalidated: name/avatar changes already wait for the next tally
+	 * event (the reaction aggregation's point-in-time policy), so a stale
+	 * cache entry is no staler than an uncached recompute would be.
+	 */
+	voterCache: Map<string, PollVoter>;
 	/**
 	 * In-flight optimistic vote. `sentEventId` is filled once the send
 	 * resolves; the overlay clears when that exact event id shows up in the
@@ -186,6 +200,31 @@ export function createPollWatcher(
 		const loadingResults = entry.relations
 			? entry.poll.isFetchingResponses
 			: !entry.fetchFailed;
+		// Resolve voter ids to display names/avatars from the watched room's
+		// membership (the watcher is the SDK seam; the snapshot stays plain
+		// data). Same name policy as the reaction aggregation: trimmed
+		// display name, control chars rejected, user id as fallback; wire
+		// names are additionally length-capped so a 10-name tooltip label
+		// stays bounded. Results are cached per voter (see
+		// WatchedPoll.voterCache) so a recompute is tally + sort only.
+		const resolveVoter = (userId: string): PollVoter => {
+			const cached = entry.voterCache.get(userId);
+			if (cached) return cached;
+			const member = watchedRoom?.getMember(userId);
+			const rawName = member?.name?.trim().slice(0, MAX_VOTER_NAME_LENGTH);
+			const mxc = member?.getMxcAvatarUrl();
+			const voter: PollVoter = {
+				userId,
+				name: rawName && !hasControlChar(rawName) ? rawName : userId,
+				// || (not ??): mxcUrlToHttp returns "" for non-mxc input, and
+				// the PollVoter contract is null-or-URL.
+				avatarUrl: mxc
+					? client.mxcUrlToHttp(mxc, 32, 32, "crop") || null
+					: null,
+			};
+			entry.voterCache.set(userId, voter);
+			return voter;
+		};
 		snapshots.set(
 			pollId,
 			buildPollSnapshot({
@@ -196,6 +235,7 @@ export function createPollWatcher(
 				undecryptableCount: entry.poll.undecryptableRelationsCount,
 				loadingResults,
 				event: entry.event,
+				resolveVoter,
 				interaction: {
 					canVote: !entry.poll.isEnded && !entry.endPending,
 					hasPendingVote: entry.pendingVote !== null,
@@ -297,6 +337,7 @@ export function createPollWatcher(
 			event: parseEventBlock(poll.rootEvent.getContent()),
 			relations: null,
 			fetchFailed: false,
+			voterCache: new Map(),
 			pendingVote: null,
 			failedVote: null,
 			endPending: false,

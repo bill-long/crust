@@ -4,6 +4,12 @@ import {
 	M_POLL_RESPONSE,
 	type MatrixEvent,
 } from "matrix-js-sdk";
+import { MAX_VOTER_NAMES } from "../../../lib/pollCopy";
+
+import {
+	type EncryptedFileInfo,
+	parseEncryptedFile,
+} from "../composer/media/attachmentCrypto";
 import type { EventInfo } from "./eventBlock";
 
 /** One selectable poll option, projected to plain data for rendering. */
@@ -11,6 +17,28 @@ export interface PollAnswerOption {
 	id: string;
 	text: string;
 }
+
+/** A voter as the renderer needs them: display-ready name and avatar. */
+export interface PollVoter {
+	userId: string;
+	/** Trimmed display name, falling back to the user id. */
+	name: string;
+	/** HTTP avatar URL (server-scaled), or null for the initial fallback. */
+	avatarUrl: string | null;
+}
+
+/** Bound on a resolved voter display name (wire-controlled input): long
+ *  enough for any real name, short enough that a 10-name tooltip label
+ *  can't become an unbounded DOM string. Applied at the resolution
+ *  boundary (the watcher), not here. */
+export const MAX_VOTER_NAME_LENGTH = 100;
+
+/** Shared comparator for voter-name sorts. Creating the Collator once
+ *  matters: voter lists re-sort on every relation page during the initial
+ *  fetch, and localeCompare re-parses its options on every call. */
+const voterNameCollator = new Intl.Collator(undefined, {
+	sensitivity: "base",
+});
 
 /**
  * Static poll definition parsed from an `m.poll.start` event. Plain data so
@@ -57,6 +85,16 @@ export interface PollSnapshot {
 	counts: Record<string, number>;
 	/** Number of users with a currently-valid (non-spoiled) ballot. */
 	totalVotes: number;
+	/**
+	 * Voters per answer id, resolved to display-ready names/avatars by the
+	 * projection (which has room access). Same key invariant as
+	 * {@link PollSnapshot.counts}: a key for every answer id, empty arrays
+	 * when no tally is available yet. Sorted by display name (locale-aware,
+	 * case-insensitive, user id tiebreak) for deterministic rendering.
+	 * Capped at MAX_VOTER_NAMES entries per answer - the true total per
+	 * answer is {@link PollSnapshot.counts} (used for "+N" overflow).
+	 */
+	voters: Record<string, PollVoter[]>;
 	/** The local user's currently-valid answer ids (empty when not voted).
 	 *  Reflects an optimistic pending vote while one is in flight. */
 	myAnswers: string[];
@@ -100,6 +138,12 @@ export interface PollTally {
 	counts: Record<string, number>;
 	totalVotes: number;
 	myAnswers: string[];
+	/**
+	 * User ids of the current valid ballots per answer id (null-prototype,
+	 * a key for every answer id, like the counts map). Unresolved - the
+	 * snapshot builder maps these to {@link PollVoter} via its resolver.
+	 */
+	votersByAnswer: Record<string, string[]>;
 }
 
 /**
@@ -258,16 +302,23 @@ export function computePollTally(
 	}
 
 	const counts = Object.create(null) as Record<string, number>;
-	for (const answer of start.answers) counts[answer.id] = 0;
+	const votersByAnswer = Object.create(null) as Record<string, string[]>;
+	for (const answer of start.answers) {
+		counts[answer.id] = 0;
+		votersByAnswer[answer.id] = [];
+	}
 	let totalVotes = 0;
 	let myAnswers: string[] = [];
 	for (const [sender, ballot] of bestBySender) {
 		if (ballot.answers === null) continue;
 		totalVotes++;
-		for (const id of ballot.answers) counts[id]++;
+		for (const id of ballot.answers) {
+			counts[id]++;
+			votersByAnswer[id].push(sender);
+		}
 		if (myUserId && sender === myUserId) myAnswers = ballot.answers;
 	}
-	return { counts, totalVotes, myAnswers };
+	return { counts, totalVotes, myAnswers, votersByAnswer };
 }
 
 /**
@@ -287,6 +338,10 @@ export function buildPollSnapshot(args: {
 	/** Validated event-card block from the start event's raw content
 	 *  (parsed by the projection, which has the MatrixEvent). */
 	event?: EventInfo | null;
+	/** Resolve a voter user id to display-ready name/avatar. Provided by
+	 *  the projection (which has room access); without it `voters` stays
+	 *  zero-filled (provisional snapshots, tests). */
+	resolveVoter?: (userId: string) => PollVoter;
 	/** Interaction state; omitted for provisional snapshots (an unwatched
 	 *  poll has no SDK model to act on yet, so it is also not votable). */
 	interaction?: {
@@ -304,8 +359,23 @@ export function buildPollSnapshot(args: {
 	// this also drops counts for answer ids that no longer exist after a
 	// poll edit.
 	const counts = Object.create(null) as Record<string, number>;
+	const voters = Object.create(null) as Record<string, PollVoter[]>;
 	for (const answer of args.start.answers) {
 		counts[answer.id] = args.tally?.counts[answer.id] ?? 0;
+		// Resolve and sort by display name (locale-aware, case-insensitive,
+		// user id tiebreak) - the same convention as the reaction tooltip
+		// sender lists, so avatar stacks render in a deterministic order.
+		// The array is capped at MAX_VOTER_NAMES: the UI can only ever
+		// display 6 avatars plus a 10-name label, and counts[answer.id]
+		// already carries the true total for the "+N" overflow.
+		const resolved = args.resolveVoter
+			? (args.tally?.votersByAnswer[answer.id] ?? []).map(args.resolveVoter)
+			: [];
+		resolved.sort((a, b) => {
+			const cmp = voterNameCollator.compare(a.name, b.name);
+			return cmp !== 0 ? cmp : a.userId.localeCompare(b.userId);
+		});
+		voters[answer.id] = resolved.slice(0, MAX_VOTER_NAMES);
 	}
 	return {
 		pollId: args.pollId,
@@ -316,6 +386,7 @@ export function buildPollSnapshot(args: {
 		event: args.event ?? null,
 		counts,
 		totalVotes: args.tally?.totalVotes ?? 0,
+		voters,
 		myAnswers: args.tally?.myAnswers ?? [],
 		canVote: args.interaction?.canVote ?? false,
 		hasPendingVote: args.interaction?.hasPendingVote ?? false,

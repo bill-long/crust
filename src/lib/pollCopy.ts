@@ -95,3 +95,24 @@ export function pollPreviewText(content: unknown): string | null {
 export function pollNotificationBody(content: unknown): string {
 	return pollPreviewText(content) ?? "Poll";
 }
+
+/** Cap on names spelled out in a voter-list label; longer lists truncate
+ *  to the first ten names plus "and N more" (no ellipsis - the tests pin
+ *  the exact format). Also the poll snapshot's per-answer voter-array cap:
+ *  it is exactly what the UI can ever display (6 avatars + this label). */
+export const MAX_VOTER_NAMES = 10;
+
+/**
+ * Comma-joined voter names for the event-card RSVP stack tooltip and its
+ * sr-only text (#418). `names` is the (already capped) resolved voter list;
+ * `total` is the true voter count for the answer - when it exceeds
+ * {@link MAX_VOTER_NAMES} the label truncates to the first ten names plus
+ * "and N more", so a large room can't build an unbounded label.
+ */
+export function formatVoterNames(
+	names: readonly string[],
+	total: number = names.length,
+): string {
+	if (total <= MAX_VOTER_NAMES) return names.join(", ");
+	return `${names.slice(0, MAX_VOTER_NAMES).join(", ")} and ${total - MAX_VOTER_NAMES} more`;
+}

@@ -200,6 +200,45 @@ describe("computePollTally", () => {
 		expect(tally.myAnswers).toEqual(["a"]);
 	});
 
+	it("collects the voter user ids per answer", () => {
+		const tally = computePollTally(
+			[
+				responseEvent({
+					eventId: "$1",
+					sender: "@alice:example.com",
+					answers: ["a"],
+					ts: 100,
+				}),
+				responseEvent({
+					eventId: "$2",
+					sender: "@bob:example.com",
+					answers: ["a"],
+					ts: 110,
+				}),
+				responseEvent({
+					eventId: "$3",
+					sender: "@carol:example.com",
+					answers: ["b"],
+					ts: 120,
+				}),
+				// A spoiled ballot retracts the sender's vote: no voter entry.
+				responseEvent({
+					eventId: "$4",
+					sender: "@dave:example.com",
+					answers: [],
+					ts: 130,
+				}),
+			],
+			start,
+			null,
+		);
+		expect(tally.votersByAnswer).toEqual({
+			a: ["@alice:example.com", "@bob:example.com"],
+			b: ["@carol:example.com"],
+			c: [],
+		});
+	});
+
 	it("keeps the latest ballot per sender by timestamp", () => {
 		const tally = computePollTally(
 			[
@@ -448,6 +487,7 @@ describe("buildPollSnapshot", () => {
 		expect(snapshot.counts).toEqual({ a: 0, b: 0, c: 0 });
 		expect(snapshot.totalVotes).toBe(0);
 		expect(snapshot.myAnswers).toEqual([]);
+		expect(snapshot.voters).toEqual({ a: [], b: [], c: [] });
 		expect(snapshot.loadingResults).toBe(true);
 		expect(snapshot.question).toBe("Best pizza?");
 	});
@@ -458,7 +498,12 @@ describe("buildPollSnapshot", () => {
 			start,
 			// A tally carrying a stale id (e.g. from before a poll edit) and
 			// missing one of the current answers.
-			tally: { counts: { a: 2, gone: 5 }, totalVotes: 2, myAnswers: [] },
+			tally: {
+				counts: { a: 2, gone: 5 },
+				totalVotes: 2,
+				myAnswers: [],
+				votersByAnswer: { a: ["@a:x", "@b:x"], gone: ["@c:x"] },
+			},
 			isEnded: false,
 			undecryptableCount: 0,
 			loadingResults: false,
@@ -471,7 +516,12 @@ describe("buildPollSnapshot", () => {
 		const snapshot = buildPollSnapshot({
 			pollId: POLL_ID,
 			start,
-			tally: { counts: { a: 2, b: 0, c: 1 }, totalVotes: 3, myAnswers: ["c"] },
+			tally: {
+				counts: { a: 2, b: 0, c: 1 },
+				totalVotes: 3,
+				myAnswers: ["c"],
+				votersByAnswer: { a: ["@a:x", "@b:x"], b: [], c: ["@c:x"] },
+			},
 			isEnded: true,
 			undecryptableCount: 2,
 			loadingResults: false,
@@ -481,5 +531,75 @@ describe("buildPollSnapshot", () => {
 		expect(snapshot.myAnswers).toEqual(["c"]);
 		expect(snapshot.isEnded).toBe(true);
 		expect(snapshot.undecryptableCount).toBe(2);
+	});
+
+	it("resolves voters per answer, sorted by display name", () => {
+		const snapshot = buildPollSnapshot({
+			pollId: POLL_ID,
+			start,
+			tally: {
+				counts: { a: 2, b: 0, c: 1 },
+				totalVotes: 3,
+				myAnswers: [],
+				votersByAnswer: { a: ["@zoe:x", "@amy:x"], b: [], c: ["@bob:x"] },
+			},
+			isEnded: false,
+			undecryptableCount: 0,
+			loadingResults: false,
+			resolveVoter: (userId) => ({
+				userId,
+				name: userId.slice(1, 4),
+				avatarUrl: null,
+			}),
+		});
+		// Zoe sorts after Amy despite casting first (deterministic order,
+		// matching the reaction tooltip sender convention).
+		expect(snapshot.voters.a.map((v) => v.userId)).toEqual([
+			"@amy:x",
+			"@zoe:x",
+		]);
+		expect(snapshot.voters.b).toEqual([]);
+		expect(snapshot.voters.c.map((v) => v.name)).toEqual(["bob"]);
+		expect(Object.getPrototypeOf(snapshot.voters)).toBeNull();
+	});
+
+	it("keeps voters zero-filled when no resolver is provided", () => {
+		const snapshot = buildPollSnapshot({
+			pollId: POLL_ID,
+			start,
+			tally: {
+				counts: { a: 1, b: 0, c: 0 },
+				totalVotes: 1,
+				myAnswers: [],
+				votersByAnswer: { a: ["@amy:x"], b: [], c: [] },
+			},
+			isEnded: false,
+			undecryptableCount: 0,
+			loadingResults: false,
+		});
+		expect(snapshot.voters).toEqual({ a: [], b: [], c: [] });
+	});
+
+	it("caps the resolved voter list per answer while counts keeps the true total", () => {
+		const manyIds = Array.from({ length: 12 }, (_, i) => `@u${i}:x`);
+		const snapshot = buildPollSnapshot({
+			pollId: POLL_ID,
+			start,
+			tally: {
+				counts: { a: 12, b: 0, c: 0 },
+				totalVotes: 12,
+				myAnswers: [],
+				votersByAnswer: { a: manyIds, b: [], c: [] },
+			},
+			isEnded: false,
+			undecryptableCount: 0,
+			loadingResults: false,
+			resolveVoter: (userId) => ({ userId, name: userId, avatarUrl: null }),
+		});
+		// The UI only displays 6 avatars + a 10-name label, so the snapshot
+		// caps retention; the renderer reads the true total from counts
+		// for its "+N".
+		expect(snapshot.counts.a).toBe(12);
+		expect(snapshot.voters.a.length).toBe(10);
 	});
 });

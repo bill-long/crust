@@ -7,7 +7,7 @@ import type { AppSyncState, CryptoState } from "../../../client/client";
 import { ClientContext } from "../../../client/client";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import type { EventInfo } from "./eventBlock";
-import { PollMessage } from "./PollMessage";
+import { PollMessage, VoterAvatar } from "./PollMessage";
 import type { PollSnapshot } from "./pollSnapshot";
 
 vi.mock("solid-refresh", () => ({
@@ -33,6 +33,7 @@ function snapshot(overrides?: Partial<PollSnapshot>): PollSnapshot {
 		],
 		counts: { a: 2, b: 1 },
 		totalVotes: 3,
+		voters: { a: [], b: [] },
 		myAnswers: [],
 		canVote: true,
 		hasPendingVote: false,
@@ -344,6 +345,7 @@ describe("PollMessage event card (#418)", () => {
 		opts?: {
 			roomName?: string;
 			snapshot?: Partial<PollSnapshot>;
+			onVote?: (answerIds: string[]) => void;
 			tweakClient?: (client: ReturnType<typeof createMockClient>) => void;
 		},
 	) {
@@ -383,7 +385,7 @@ describe("PollMessage event card (#418)", () => {
 			>
 				<PollMessage
 					poll={snapshot({ event, ...opts?.snapshot })}
-					onVote={() => {}}
+					onVote={opts?.onVote ?? (() => {})}
 					onEndPoll={() => {}}
 				/>
 			</ClientContext.Provider>
@@ -506,5 +508,244 @@ describe("PollMessage event card (#418)", () => {
 		expect(screen.getByText("Launch Party")).toBeTruthy();
 		expect(screen.queryByAltText("Launch Party")).toBeNull();
 		expect(screen.queryByText("Loading…")).toBeNull();
+	});
+
+	function rsvpSnapshot(
+		overrides?: Partial<PollSnapshot>,
+	): Partial<PollSnapshot> {
+		return {
+			answers: [
+				{ id: "going", text: "Going" },
+				{ id: "maybe", text: "Maybe" },
+				{ id: "cant", text: "Can't" },
+			],
+			counts: { going: 1, maybe: 0, cant: 0 },
+			totalVotes: 1,
+			voters: { going: [], maybe: [], cant: [] },
+			...overrides,
+		};
+	}
+
+	it("renders the options as one compact row with counts, no percentages or bars", () => {
+		const { container } = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot(),
+		});
+		expect(optionButton("Going").textContent).toContain("1");
+		expect(optionButton("Maybe").textContent).toContain("0");
+		expect(optionButton("Can't").textContent).toContain("0");
+		expect(container.textContent).not.toContain("%");
+		// The vertical result-bar list is a plain-poll presentation; event
+		// cards render a single horizontal row instead.
+		expect(container.querySelector("ul.flex-col")).toBeNull();
+		expect(container.querySelectorAll(".bg-accent").length).toBe(0);
+	});
+
+	it("casts a single-select vote from the compact row", () => {
+		const onVote = vi.fn();
+		setupEvent(eventInfo(), { snapshot: rsvpSnapshot(), onVote });
+		fireEvent.click(optionButton("Maybe"));
+		expect(onVote).toHaveBeenCalledExactlyOnceWith(["maybe"]);
+	});
+
+	it("stacks the voters' avatars under their option", () => {
+		const { container } = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({
+				counts: { going: 2, maybe: 0, cant: 0 },
+				totalVotes: 2,
+				voters: {
+					going: [
+						{
+							userId: "@alice:x",
+							name: "Alice",
+							avatarUrl: "https://x/alice.png",
+						},
+						{ userId: "@bob:x", name: "Bob", avatarUrl: null },
+					],
+					maybe: [],
+					cant: [],
+				},
+			}),
+		});
+		const img = container.querySelector('img[src="https://x/alice.png"]');
+		expect(img).not.toBeNull();
+		// Bob has no avatar: the initial fallback renders instead.
+		expect(screen.getByText("B")).toBeTruthy();
+		// Screen readers get the names as text (the stack tooltip's content
+		// only exists while open).
+		expect(screen.getByText("Alice, Bob")).toBeTruthy();
+		// The stack's tooltip trigger is keyboard-reachable (one tab stop
+		// per stack, not one per avatar).
+		expect(container.querySelector(".mt-1.h-5 [tabindex='0']")).not.toBeNull();
+		// No avatars under the empty options.
+		expect(container.querySelectorAll("img").length).toBe(1);
+	});
+
+	it("reserves the stack row's geometry even for options with no voters", () => {
+		const { container } = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot(),
+		});
+		// All three options get the fixed-height stack row up front, so the
+		// async relations fetch landing can't shift the card.
+		expect(container.querySelectorAll(".mt-1.h-5").length).toBe(3);
+	});
+
+	it("falls back to the voter's initial when their avatar image errors", () => {
+		const { container } = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({
+				voters: {
+					going: [
+						{
+							userId: "@alice:x",
+							name: "Alice",
+							avatarUrl: "https://x/alice.png",
+						},
+					],
+					maybe: [],
+					cant: [],
+				},
+			}),
+		});
+		// A 404/decode failure must not paint the browser's broken-image
+		// icon inside the stack.
+		fireEvent.error(
+			container.querySelector(
+				'img[src="https://x/alice.png"]',
+			) as HTMLImageElement,
+		);
+		expect(
+			container.querySelector('img[src="https://x/alice.png"]'),
+		).toBeNull();
+		expect(screen.getByText("A")).toBeTruthy();
+	});
+
+	it("retries the image when the voter changes under an identical avatar URL", () => {
+		// Render VoterAvatar directly so the voter prop can be swapped
+		// reactively: two different voters can share one avatar URL string,
+		// and the swap must not keep the failed-image fallback stuck on
+		// (Copilot review on #422).
+		const [voter, setVoter] = createSignal({
+			userId: "@alice:x",
+			name: "Alice",
+			avatarUrl: "https://x/shared.png" as string | null,
+		});
+		const { container } = render(() => <VoterAvatar voter={voter()} />);
+		const img = () =>
+			container.querySelector('img[src="https://x/shared.png"]');
+		expect(img()).toBeTruthy();
+		fireEvent.error(img() as HTMLImageElement);
+		expect(img()).toBeNull();
+		expect(screen.getByText("A")).toBeTruthy();
+		// Same URL string, different voter: the image must be attempted
+		// again rather than staying on the initial fallback.
+		setVoter({
+			userId: "@bob:x",
+			name: "Bob",
+			avatarUrl: "https://x/shared.png",
+		});
+		expect(img()).toBeTruthy();
+	});
+
+	it("strips the leading @ from a user-id fallback initial", () => {
+		setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({
+				voters: {
+					going: [{ userId: "@dave:x", name: "@dave:x", avatarUrl: null }],
+					maybe: [],
+					cant: [],
+				},
+			}),
+		});
+		expect(screen.getByText("D")).toBeTruthy();
+		expect(screen.queryByText("@")).toBeNull();
+	});
+
+	it("marks the local user's vote on the event row", () => {
+		setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({ myAnswers: ["going"] }),
+		});
+		expect(screen.getByText("(your vote)")).toBeTruthy();
+		expect(optionButton("Going").getAttribute("aria-checked")).toBe("true");
+		expect(optionButton("Maybe").getAttribute("aria-checked")).toBe("false");
+	});
+
+	it("uses a roving tabindex and arrow-key focus (no voting) on the event row", () => {
+		const onVote = vi.fn();
+		setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({ myAnswers: ["maybe"] }),
+			onVote,
+		});
+		expect(optionButton("Maybe").tabIndex).toBe(0);
+		expect(optionButton("Going").tabIndex).toBe(-1);
+		const going = optionButton("Going");
+		going.focus();
+		fireEvent.keyDown(going, { key: "ArrowDown" });
+		expect(document.activeElement).toBe(optionButton("Maybe"));
+		fireEvent.keyDown(optionButton("Maybe"), { key: "ArrowDown" });
+		expect(document.activeElement).toBe(optionButton("Can't"));
+		// Wraps around.
+		fireEvent.keyDown(optionButton("Can't"), { key: "ArrowDown" });
+		expect(document.activeElement).toBe(optionButton("Going"));
+		expect(onVote).not.toHaveBeenCalled();
+	});
+
+	it("disables voting on the event row once the poll has ended", () => {
+		const onVote = vi.fn();
+		setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({ isEnded: true }),
+			onVote,
+		});
+		expect(optionButton("Going").getAttribute("aria-disabled")).toBe("true");
+		fireEvent.click(optionButton("Going"));
+		expect(onVote).not.toHaveBeenCalled();
+	});
+
+	it("hides counts and the avatar stacks for an undisclosed event poll", () => {
+		const { container } = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({
+				kind: "undisclosed",
+				voters: {
+					going: [{ userId: "@a:x", name: "Alice", avatarUrl: null }],
+					maybe: [],
+					cant: [],
+				},
+			}),
+		});
+		// The options stay votable; only the results are hidden.
+		expect(optionButton("Going")).toBeTruthy();
+		expect(container.querySelectorAll(".tabular-nums").length).toBe(0);
+		expect(container.querySelectorAll(".mt-1.h-5").length).toBe(0);
+		expect(screen.queryByText("Alice")).toBeNull();
+		cleanup();
+		// Ending the (undisclosed) poll reveals them.
+		const revealed = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({
+				kind: "undisclosed",
+				isEnded: true,
+				voters: {
+					going: [{ userId: "@a:x", name: "Alice", avatarUrl: null }],
+					maybe: [],
+					cant: [],
+				},
+			}),
+		});
+		expect(revealed.container.querySelectorAll(".tabular-nums").length).toBe(3);
+		expect(screen.getByText("A")).toBeTruthy();
+	});
+
+	it("caps the avatar stack and collapses the rest into +N", () => {
+		const many = Array.from({ length: 8 }, (_, i) => ({
+			userId: `@u${i}:x`,
+			name: `User ${i}`,
+			avatarUrl: `https://x/u${i}.png`,
+		}));
+		const { container } = setupEvent(eventInfo(), {
+			snapshot: rsvpSnapshot({
+				counts: { going: 8, maybe: 0, cant: 0 },
+				totalVotes: 8,
+				voters: { going: many, maybe: [], cant: [] },
+			}),
+		});
+		expect(container.querySelectorAll("img").length).toBe(6);
+		expect(screen.getByText("+2")).toBeTruthy();
 	});
 });

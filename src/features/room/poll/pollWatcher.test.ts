@@ -139,6 +139,154 @@ describe("createPollWatcher", () => {
 		expect(updated?.loadingResults).toBe(false);
 	});
 
+	it("resolves voter display names and avatars from room membership", async () => {
+		room = createMockRoom(
+			ROOM_ID,
+			[],
+			[
+				{ userId: "@bob:example.com", name: "Bob", avatarUrl: "mxc://s/bob" },
+				{ userId: "@carol:example.com", name: "  " },
+				{ userId: "@erin:example.com", name: "Er\nin" },
+			],
+		);
+		client = createMockClient(new Map([[ROOM_ID, room]]));
+		updates = [];
+		watcher = createPollWatcher(client as unknown as MatrixClient, (pollId) =>
+			updates.push(pollId),
+		);
+		watcher.watchRoom(room as unknown as Room);
+		setupPoll([
+			makeResponse({
+				eventId: "$v1",
+				sender: "@bob:example.com",
+				answers: ["a"],
+				ts: 2000,
+			}),
+			makeResponse({
+				eventId: "$v2",
+				sender: "@carol:example.com",
+				answers: ["b"],
+				ts: 2100,
+			}),
+			makeResponse({
+				eventId: "$v3",
+				sender: "@dave:example.com",
+				answers: ["b"],
+				ts: 2200,
+			}),
+			makeResponse({
+				eventId: "$v4",
+				sender: "@erin:example.com",
+				answers: ["a"],
+				ts: 2300,
+			}),
+		]);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		// Erin's name carries a control char and is rejected wholesale, so
+		// she falls back to her user id (and sorts before "Bob" -
+		// punctuation before letters in a base collation).
+		expect(snapshot?.voters.a).toEqual([
+			{
+				userId: "@erin:example.com",
+				name: "@erin:example.com",
+				avatarUrl: null,
+			},
+			{
+				userId: "@bob:example.com",
+				name: "Bob",
+				avatarUrl: "https://example.com/_matrix/media/v3/download/s/bob",
+			},
+		]);
+		// Carol's whitespace-only name falls back to her user id; Dave isn't a
+		// room member, so he also falls back to his user id, without an avatar.
+		expect(snapshot?.voters.b).toEqual([
+			{
+				userId: "@carol:example.com",
+				name: "@carol:example.com",
+				avatarUrl: null,
+			},
+			{
+				userId: "@dave:example.com",
+				name: "@dave:example.com",
+				avatarUrl: null,
+			},
+		]);
+	});
+
+	it("caps a wire display name at MAX_VOTER_NAME_LENGTH", async () => {
+		room = createMockRoom(
+			ROOM_ID,
+			[],
+			[{ userId: "@frank:example.com", name: "F".repeat(150) }],
+		);
+		client = createMockClient(new Map([[ROOM_ID, room]]));
+		updates = [];
+		watcher = createPollWatcher(client as unknown as MatrixClient, (pollId) =>
+			updates.push(pollId),
+		);
+		watcher.watchRoom(room as unknown as Room);
+		setupPoll([
+			makeResponse({
+				eventId: "$v1",
+				sender: "@frank:example.com",
+				answers: ["a"],
+				ts: 2000,
+			}),
+		]);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		expect(snapshot?.voters.a[0].name).toBe("F".repeat(100));
+	});
+
+	it("resolves each voter once and reuses the object across recomputes", async () => {
+		room = createMockRoom(
+			ROOM_ID,
+			[],
+			[{ userId: "@bob:example.com", name: "Bob" }],
+		);
+		client = createMockClient(new Map([[ROOM_ID, room]]));
+		updates = [];
+		watcher = createPollWatcher(client as unknown as MatrixClient, (pollId) =>
+			updates.push(pollId),
+		);
+		watcher.watchRoom(room as unknown as Room);
+		setupPoll([
+			makeResponse({
+				eventId: "$v1",
+				sender: "@bob:example.com",
+				answers: ["a"],
+				ts: 2000,
+			}),
+		]);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+		const first = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		const firstBob = first?.voters.a.find(
+			(v) => v.userId === "@bob:example.com",
+		);
+		expect(firstBob).toBeTruthy();
+
+		// A new vote triggers a recompute; the unchanged voter's resolved
+		// object must be reused (identity-stable), not re-resolved - this
+		// is what keeps the renderer's <For> from remounting avatars.
+		poll.onNewRelation(
+			makeResponse({
+				eventId: "$v2",
+				sender: "@amy:example.com",
+				answers: ["a"],
+				ts: 2100,
+			}),
+		);
+		const second = watcher.getSnapshot(rootEvent, room as unknown as Room);
+		const secondBob = second?.voters.a.find(
+			(v) => v.userId === "@bob:example.com",
+		);
+		expect(secondBob).toBe(firstBob);
+	});
+
 	it("does not refetch on subsequent snapshot reads", async () => {
 		setupPoll();
 		watcher.getSnapshot(rootEvent, room as unknown as Room);
