@@ -198,10 +198,15 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 							undefined,
 							{ prefix: ClientPrefix.V3 },
 						);
-					} catch {
-						// 404 (no such key) or any transient failure: treat as
-						// unavailable so resolution falls back to the offered set.
-						return null;
+					} catch (e) {
+						// 404 means the key genuinely isn't in account data — fall
+						// back to the offered set. Anything else (network, 5xx) is
+						// infrastructure: propagate so the prompt can blame the
+						// connection instead of the user's key.
+						if ((e as { httpStatus?: number }).httpStatus === 404) {
+							return null;
+						}
+						throw e;
 					}
 				};
 
@@ -225,16 +230,16 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				const key = await requestRecoveryKey(async (candidate) => {
 					const choice = await resolveChoice();
 					if (!choice) return false;
-					try {
-						const ok = await matrixClient.secretStorage.checkKey(
-							candidate,
-							choice.keyInfo,
-						);
-						if (ok) validatedChoice = choice;
-						return ok;
-					} catch {
-						return false;
-					}
+					// No try/catch around checkKey: a throw here is infrastructure
+					// failure (crypto store, SDK state), not a key mismatch — let it
+					// propagate so RecoveryKeyInput can report a connection problem
+					// instead of "Incorrect recovery key".
+					const ok = await matrixClient.secretStorage.checkKey(
+						candidate,
+						choice.keyInfo,
+					);
+					if (ok) validatedChoice = choice;
+					return ok;
 				});
 				if (!key) return null;
 
