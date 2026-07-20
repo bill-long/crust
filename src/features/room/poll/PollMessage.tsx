@@ -172,7 +172,9 @@ const EventCardHeader: Component<{ event: EventInfo }> = (props) => {
 								class="mt-1 inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-surface-3 px-2 py-0.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 								title={roomId()}
 								onClick={() =>
-									navigate(`/room/${encodeURIComponent(roomId())}`)
+									// No /room route exists; /home/:roomId is the canonical
+									// room path (DMs canonicalize/redirect from there).
+									navigate(`/home/${encodeURIComponent(roomId())}`)
 								}
 							>
 								<svg

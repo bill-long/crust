@@ -1,4 +1,4 @@
-import { MemoryRouter, Route } from "@solidjs/router";
+import { MemoryRouter, Route, useParams } from "@solidjs/router";
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal } from "solid-js";
@@ -389,6 +389,19 @@ describe("PollMessage event card (#418)", () => {
 		return render(() => (
 			<MemoryRouter>
 				<Route path="/" component={Subject} />
+				{/* Marker for pill-navigation assertions: /home/:roomId is the
+				    canonical room path (there is no /room route). The router does
+				    NOT decode params (the app decodes at consumption, cf.
+				    useDecodedParams), so decode here to prove the id round-trips
+				    through encodeURIComponent. */}
+				<Route
+					path="/home/:roomId"
+					component={() => (
+						<div>
+							navigated-home {decodeURIComponent(useParams().roomId ?? "")}
+						</div>
+					)}
+				/>
 			</MemoryRouter>
 		));
 	}
@@ -416,6 +429,17 @@ describe("PollMessage event card (#418)", () => {
 	it("shows the target room as a pill with its name", () => {
 		setupEvent(eventInfo({ roomId: "!venue:test" }));
 		expect(screen.getByText("The Venue")).toBeTruthy();
+	});
+
+	it("the room pill navigates to the canonical /home/:roomId path", async () => {
+		setupEvent(eventInfo({ roomId: "!venue:test" }));
+		fireEvent.click(screen.getByText("The Venue"));
+		// The /home/:roomId marker route only renders after a successful
+		// navigation - a broken path (e.g. the nonexistent /room) would
+		// leave the poll on screen. Router navigation is async, hence
+		// findByText rather than getByText. The marker echoes the decoded
+		// param, proving the id round-trips through encodeURIComponent.
+		expect(await screen.findByText("navigated-home !venue:test")).toBeTruthy();
 	});
 
 	it("falls back to the room id for a whitespace-only room name", () => {
