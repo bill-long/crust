@@ -26,10 +26,6 @@ import {
 	ResizableLayout,
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
-import {
-	cryptoActionLabel,
-	deriveCryptoAction,
-} from "../features/crypto/CryptoStatusBanner";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
@@ -50,6 +46,7 @@ import {
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
+import { cryptoActionLabel, deriveCryptoAction } from "../lib/cryptoAction";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
@@ -374,11 +371,13 @@ const Layout: Component = () => {
 
 	const cryptoAction = createMemo(
 		(): CryptoAction =>
-			deriveCryptoAction(
-				cryptoStatus.crossSigningReady(),
-				cryptoStatus.thisDeviceVerified(),
-				cryptoStatus.backupVersion(),
-			),
+			deriveCryptoAction({
+				crossSigningReady: cryptoStatus.crossSigningReady(),
+				thisDeviceVerified: cryptoStatus.thisDeviceVerified(),
+				backupVersion: cryptoStatus.backupVersion(),
+				backupOnServer: cryptoStatus.backupOnServer(),
+				crossSigningStatus: cryptoStatus.crossSigningStatus(),
+			}),
 	);
 
 	const needsCryptoAttention = () => {
@@ -386,7 +385,9 @@ const Layout: Component = () => {
 		return (
 			a === "setup-cross-signing" ||
 			a === "verify-session" ||
-			a === "setup-backup"
+			a === "setup-backup" ||
+			a === "unlock-backup" ||
+			a === "reset-encryption"
 		);
 	};
 

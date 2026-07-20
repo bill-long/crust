@@ -9,9 +9,9 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import {
+	acquireCryptoDialog,
 	registerCryptoHandler,
 	restoreCryptoTriggerFocus,
-	setCryptoDialogOpen,
 } from "../../stores/cryptoActions";
 import type { CryptoAction } from "../../types/crypto";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
@@ -41,6 +41,11 @@ const RecoveryKeyResetDialog = lazy(() =>
 		default: m.RecoveryKeyResetDialog,
 	})),
 );
+const ResetEncryptionDialog = lazy(() =>
+	import("./ResetEncryptionDialog").then((m) => ({
+		default: m.ResetEncryptionDialog,
+	})),
+);
 
 /**
  * Shared fallback matching the crypto dialogs' outer box. A component (not a
@@ -51,33 +56,6 @@ const RecoveryKeyResetDialog = lazy(() =>
 const CryptoDialogFallback: Component = () => (
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" />
 );
-
-export function deriveCryptoAction(
-	crossSigningReady: boolean | undefined,
-	thisDeviceVerified: boolean | undefined,
-	backupVersion: string | null | undefined,
-): CryptoAction {
-	if (crossSigningReady === undefined || thisDeviceVerified === undefined)
-		return "loading";
-	if (!crossSigningReady) return "setup-cross-signing";
-	if (thisDeviceVerified === false) return "verify-session";
-	if (backupVersion === null) return "setup-backup";
-	return "hidden";
-}
-
-/** Label for crypto action shown in the user panel tooltip. */
-export function cryptoActionLabel(action: CryptoAction): string {
-	switch (action) {
-		case "setup-cross-signing":
-			return "Set up secure messaging";
-		case "verify-session":
-			return "Verify this session";
-		case "setup-backup":
-			return "Set up key backup";
-		default:
-			return "";
-	}
-}
 
 /**
  * Global crypto overlays — modals, toasts, recovery key input.
@@ -90,15 +68,21 @@ const CryptoStatusBanner: Component = () => {
 	const [showVerification, setShowVerification] = createSignal(false);
 	const [showBackupSetup, setShowBackupSetup] = createSignal(false);
 	const [showRecoveryReset, setShowRecoveryReset] = createSignal(false);
+	const [showEncryptionReset, setShowEncryptionReset] = createSignal(false);
 
-	// Expose whether any crypto dialog is open (for inert on underlying content)
+	// Hold the shared crypto-dialog-open flag while any dialog is open (for
+	// inert on underlying content). Reference-counted: releasing happens via
+	// the disposer, including when the banner unmounts mid-dialog.
 	createEffect(() => {
-		setCryptoDialogOpen(
+		const anyOpen =
 			showSetup() ||
-				showVerification() ||
-				showBackupSetup() ||
-				showRecoveryReset(),
-		);
+			showVerification() ||
+			showBackupSetup() ||
+			showRecoveryReset() ||
+			showEncryptionReset();
+		if (!anyOpen) return;
+		const release = acquireCryptoDialog();
+		onCleanup(release);
 	});
 
 	const verification = useVerification(client);
@@ -110,9 +94,7 @@ const CryptoStatusBanner: Component = () => {
 	};
 
 	// Register handler so the user panel can trigger crypto flows.
-	// Clear stale state if the banner unmounts while a dialog is open
 	onCleanup(() => {
-		setCryptoDialogOpen(false);
 		restoreCryptoTriggerFocus();
 	});
 
@@ -126,10 +108,16 @@ const CryptoStatusBanner: Component = () => {
 				setShowVerification(true);
 				break;
 			case "setup-backup":
+			case "unlock-backup":
+				// BackupSetupDialog detects an existing server backup and routes
+				// to its unlock/restore path, so both actions land here.
 				setShowBackupSetup(true);
 				break;
 			case "reset-recovery-key":
 				setShowRecoveryReset(true);
+				break;
+			case "reset-encryption":
+				setShowEncryptionReset(true);
 				break;
 		}
 	});
@@ -174,6 +162,18 @@ const CryptoStatusBanner: Component = () => {
 					<RecoveryKeyResetDialog
 						onClose={() => {
 							setShowRecoveryReset(false);
+							cryptoStatus.refresh();
+							restoreCryptoTriggerFocus();
+						}}
+					/>
+				</Suspense>
+			</Show>
+
+			<Show when={showEncryptionReset()}>
+				<Suspense fallback={<CryptoDialogFallback />}>
+					<ResetEncryptionDialog
+						onClose={() => {
+							setShowEncryptionReset(false);
 							cryptoStatus.refresh();
 							restoreCryptoTriggerFocus();
 						}}

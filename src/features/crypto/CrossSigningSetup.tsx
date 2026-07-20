@@ -1,7 +1,7 @@
-import { AuthType } from "matrix-js-sdk";
 import { type Component, createSignal, Match, Switch } from "solid-js";
 import { useClient } from "../../client/client";
 import { UiaDialog } from "./UiaDialog";
+import { passwordUiaCallback } from "./uiaPassword";
 
 type SetupStep = "intro" | "uia" | "working" | "done" | "error";
 
@@ -44,33 +44,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			}
 
 			await crypto.bootstrapCrossSigning({
-				authUploadDeviceSigningKeys: async (makeRequest) => {
-					// First attempt without auth to get the session ID
-					try {
-						await makeRequest(null);
-						return;
-					} catch (uiaError: unknown) {
-						// Expected: server returns 401 with UIA flow info
-						const err = uiaError as {
-							httpStatus?: number;
-							data?: { session?: string };
-						};
-						if (err.httpStatus !== 401 || !err.data?.session) {
-							throw uiaError;
-						}
-
-						// Use the password provided by the UIA dialog
-						await makeRequest({
-							type: AuthType.Password,
-							identifier: {
-								type: "m.id.user",
-								user: userId,
-							},
-							password,
-							session: err.data.session,
-						});
-					}
-				},
+				authUploadDeviceSigningKeys: passwordUiaCallback(userId, password),
 			});
 
 			await cryptoStatus.refresh();

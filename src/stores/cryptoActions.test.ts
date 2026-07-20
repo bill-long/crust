@@ -1,22 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	acquireCryptoDialog,
 	cryptoDialogOpen,
 	registerCryptoHandler,
 	restoreCryptoTriggerFocus,
-	setCryptoDialogOpen,
 	setCryptoTriggerElement,
 	triggerCryptoAction,
 } from "./cryptoActions";
 
 // The store is a module-level singleton; reset the shared state between tests.
+let releases: Array<() => void> = [];
 afterEach(() => {
 	// Clear any registered handler (register-then-unregister sets it back to null
 	// since the unregister only fires while it is still the current handler).
 	registerCryptoHandler(() => {})();
 	setCryptoTriggerElement(null);
-	setCryptoDialogOpen(false);
+	for (const release of releases) release();
+	releases = [];
 	document.body.replaceChildren();
 });
+
+/** Acquire a crypto-dialog hold tracked for afterEach release. */
+function acquire(): () => void {
+	const release = acquireCryptoDialog();
+	releases.push(release);
+	return release;
+}
 
 /** Attach a focusable element to the document and return it. */
 function attachInput(): HTMLInputElement {
@@ -120,12 +129,30 @@ describe("crypto trigger focus target", () => {
 	});
 });
 
-describe("cryptoDialogOpen signal", () => {
-	it("reflects setCryptoDialogOpen", () => {
+describe("cryptoDialogOpen (reference-counted)", () => {
+	it("is open while at least one hold is acquired", () => {
 		expect(cryptoDialogOpen()).toBe(false);
-		setCryptoDialogOpen(true);
+		acquire();
 		expect(cryptoDialogOpen()).toBe(true);
-		setCryptoDialogOpen(false);
+	});
+
+	it("stays open until every hold is released", () => {
+		const first = acquire();
+		const second = acquire();
+		first();
+		expect(cryptoDialogOpen()).toBe(true);
+		second();
 		expect(cryptoDialogOpen()).toBe(false);
+	});
+
+	it("release is idempotent and never drives the count negative", () => {
+		const release = acquire();
+		release();
+		release();
+		expect(cryptoDialogOpen()).toBe(false);
+		// A stale release must not cancel a later, independent hold.
+		acquire();
+		release();
+		expect(cryptoDialogOpen()).toBe(true);
 	});
 });

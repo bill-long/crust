@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("solid-refresh", () => ({
@@ -141,5 +147,78 @@ describe("RecoveryKeyInput", () => {
 		releaseA(true);
 		await new Promise((r) => setTimeout(r, 0));
 		expect(resolvedB).toBeUndefined();
+	});
+
+	it("validates the submitted key per batched caller, not just the first", async () => {
+		// Concurrent SDK requests share one prompt. Every caller must run its
+		// own validate so its caller-side keyId pairing is the choice IT
+		// validated against (issue #420: first-offered-keyId fallback).
+		render(() => <RecoveryKeyInput />);
+		const validateA = vi.fn().mockResolvedValue(true);
+		const validateB = vi.fn().mockResolvedValue(true);
+
+		let resolvedA: Uint8Array<ArrayBuffer> | null | undefined;
+		let resolvedB: Uint8Array<ArrayBuffer> | null | undefined;
+		registeredResolver?.(validateA).then((k) => {
+			resolvedA = k;
+		});
+		registeredResolver?.(validateB).then((k) => {
+			resolvedB = k;
+		});
+		await Promise.resolve();
+
+		typeAndSubmit("good-key");
+		await waitFor(() => expect(resolvedA).toEqual(new Uint8Array([1, 2, 3])));
+		await waitFor(() => expect(resolvedB).toEqual(new Uint8Array([1, 2, 3])));
+		expect(validateA).toHaveBeenCalledTimes(1);
+		expect(validateB).toHaveBeenCalledTimes(1);
+	});
+
+	it("resolves a batched sibling with null when its own validation fails", async () => {
+		render(() => <RecoveryKeyInput />);
+		const validateA = vi.fn().mockResolvedValue(true);
+		const validateB = vi.fn().mockResolvedValue(false);
+
+		let resolvedA: Uint8Array<ArrayBuffer> | null | undefined;
+		let resolvedB: Uint8Array<ArrayBuffer> | null | undefined;
+		registeredResolver?.(validateA).then((k) => {
+			resolvedA = k;
+		});
+		registeredResolver?.(validateB).then((k) => {
+			resolvedB = k;
+		});
+		await Promise.resolve();
+
+		typeAndSubmit("good-key");
+		await waitFor(() => expect(resolvedA).toEqual(new Uint8Array([1, 2, 3])));
+		// The sibling rejects the key — it must get null, never a key its
+		// caller would pair with an unvalidated keyId.
+		await waitFor(() => expect(resolvedB).toBeNull());
+	});
+
+	it("blames the connection, not the key, when validation itself fails", async () => {
+		// A thrown validate (e.g. the 4S metadata fetch rejecting) is
+		// infrastructure failure — "Incorrect recovery key" would send the
+		// user re-typing a correct key forever.
+		render(() => <RecoveryKeyInput />);
+		const validate = vi.fn().mockRejectedValue(new Error("network down"));
+
+		let resolved: Uint8Array<ArrayBuffer> | null | undefined;
+		registeredResolver?.(validate).then((k) => {
+			resolved = k;
+		});
+		await Promise.resolve();
+
+		typeAndSubmit("good-key");
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain(
+				"Couldn't verify the key right now",
+			),
+		);
+		expect(screen.getByRole("alert").textContent).not.toContain(
+			"Incorrect recovery key",
+		);
+		// Still pending — the SDK must not receive a key we couldn't verify.
+		expect(resolved).toBeUndefined();
 	});
 });

@@ -5,10 +5,30 @@ type CryptoActionHandler = (action: CryptoAction) => void;
 
 const [handler, setHandler] = createSignal<CryptoActionHandler | null>(null);
 
-/** Whether a crypto dialog is currently open (used by SettingsOverlay for inert). */
-const [cryptoDialogOpen, setCryptoDialogOpen] = createSignal(false);
+/**
+ * Number of currently open crypto dialogs. Reference-counted rather than a
+ * boolean because several independent owners (the banner's setup flows, the
+ * Devices tab's export/import dialogs) can hold it at once — a boolean's
+ * last-writer-wins would clear the flag while another dialog is still open.
+ */
+const [cryptoDialogHolds, setCryptoDialogHolds] = createSignal(0);
 
-export { cryptoDialogOpen, setCryptoDialogOpen };
+/** Whether any crypto dialog is currently open (inert gating for content beneath it). */
+export const cryptoDialogOpen = (): boolean => cryptoDialogHolds() > 0;
+
+/**
+ * Mark a crypto dialog open. Returns an idempotent disposer that releases
+ * the hold; the open flag clears only once every hold is released.
+ */
+export function acquireCryptoDialog(): () => void {
+	setCryptoDialogHolds((n) => n + 1);
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		setCryptoDialogHolds((n) => Math.max(0, n - 1));
+	};
+}
 
 /** The element that had focus when the crypto dialog was triggered. */
 let triggerElement: HTMLElement | null = null;

@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setCryptoDialogOpen } from "../../../../stores/cryptoActions";
+import { acquireCryptoDialog } from "../../../../stores/cryptoActions";
 import {
 	_resetAppModalStackForTests,
 	pushAppModal,
@@ -34,6 +34,8 @@ vi.mock("solid-refresh", () => ({
 
 const flush = (): Promise<void> => new Promise((r) => queueMicrotask(r));
 
+let releaseCrypto: (() => void) | null = null;
+
 // The stats badge's first poll is phase-scheduled via setTimeout(0), so
 // letting it land needs a macrotask turn, not just microtasks.
 const flushStatsTick = (): Promise<void> =>
@@ -52,7 +54,8 @@ describe("FullCallOverlay", () => {
 		_resetCallSessionForTests();
 		_resetAppModalStackForTests();
 		_resetVoiceForTests();
-		setCryptoDialogOpen(false);
+		releaseCrypto?.();
+		releaseCrypto = null;
 		updateSetting("rtcShowCallStats", false);
 	});
 
@@ -126,7 +129,7 @@ describe("FullCallOverlay", () => {
 		const fake = track(makeFakeCallSession());
 		publishCallSession(fake.api);
 		render(() => <FullCallOverlay />);
-		setCryptoDialogOpen(true);
+		releaseCrypto = acquireCryptoDialog();
 		const region = screen.getByRole("region", { name: /Native call/ });
 		region.dispatchEvent(
 			new KeyboardEvent("keydown", {
@@ -167,7 +170,7 @@ describe("FullCallOverlay", () => {
 		const fake = track(makeFakeCallSession());
 		publishCallSession(fake.api);
 		render(() => <FullCallOverlay />);
-		setCryptoDialogOpen(true);
+		releaseCrypto = acquireCryptoDialog();
 		await flush();
 		const region = screen.getByRole("region", { name: /Native call/ });
 		expect((region as HTMLElement & { inert?: boolean }).inert).toBe(true);

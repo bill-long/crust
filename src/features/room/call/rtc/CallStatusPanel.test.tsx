@@ -10,7 +10,7 @@ import {
 	setOverlayHandlers,
 	setOverlayWindow,
 } from "../../../../stores/callOverlay";
-import { setCryptoDialogOpen } from "../../../../stores/cryptoActions";
+import { acquireCryptoDialog } from "../../../../stores/cryptoActions";
 import {
 	_resetAppModalStackForTests,
 	pushAppModal,
@@ -34,6 +34,7 @@ vi.mock("solid-refresh", () => ({
 
 const navigateMock = vi.fn();
 let mockParams: { roomId?: string; spaceId?: string } = {};
+let releaseCrypto: (() => void) | null = null;
 
 vi.mock("@solidjs/router", () => ({
 	useNavigate: () => navigateMock,
@@ -60,7 +61,8 @@ describe("CallStatusPanel", () => {
 		_resetActiveCallForTests();
 		_resetAppModalStackForTests();
 		_resetVoiceForTests();
-		setCryptoDialogOpen(false);
+		releaseCrypto?.();
+		releaseCrypto = null;
 		navigateMock.mockReset();
 		mockParams = {};
 		_resetCallOverlayForTests();
@@ -220,7 +222,7 @@ describe("CallStatusPanel", () => {
 		publishCallSession(fake.api);
 		setActiveCallRoomId("!call:example.com");
 		render(() => <CallStatusPanel summaries={emptySummaries()} />);
-		setCryptoDialogOpen(true);
+		releaseCrypto = acquireCryptoDialog();
 		await flush();
 		const aside = screen.getByTestId("call-status-panel");
 		expect((aside as HTMLElement & { inert?: boolean }).inert).toBe(true);

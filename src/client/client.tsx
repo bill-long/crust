@@ -1,8 +1,10 @@
 import {
 	ClientEvent,
+	ClientPrefix,
 	createClient,
 	HttpApiEvent,
 	type MatrixClient,
+	Method,
 	SyncState,
 } from "matrix-js-sdk";
 import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
@@ -31,6 +33,10 @@ import {
 	recoveryIdentity,
 	runCryptoInit,
 } from "./cryptoRecovery";
+import {
+	canReuseCachedSecretStorageKey,
+	resolveSecretStorageKey,
+} from "./secretStorageKey";
 import {
 	createSummariesStore,
 	type OptimisticJoinInfo,
@@ -155,41 +161,89 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				},
 				_name: string,
 			): Promise<[string, Uint8Array<ArrayBuffer>] | null> => {
-				// Return cached key for rapid successive calls
+				// Return cached key for rapid successive calls. The cached id
+				// may be absent from this call's (stale) offered set — reuse
+				// is still sound while it remains the account's default key.
 				if (
 					cachedSecretStorageKeyId &&
 					cachedSecretStorageKey &&
-					cachedSecretStorageKeyId in opts.keys
+					canReuseCachedSecretStorageKey(
+						cachedSecretStorageKeyId,
+						opts.keys,
+						await matrixClient.secretStorage.getDefaultKeyId(),
+					)
 				) {
 					return [cachedSecretStorageKeyId, cachedSecretStorageKey];
 				}
 
-				// Prefer the account's default key ID; fall back to first available
-				const availableKeys = Object.keys(opts.keys);
-				if (availableKeys.length === 0) return null;
+				if (Object.keys(opts.keys).length === 0) return null;
 
-				const defaultKeyId = await matrixClient.secretStorage.getDefaultKeyId();
-				const keyId =
-					defaultKeyId && defaultKeyId in opts.keys
-						? defaultKeyId
-						: availableKeys[0];
-				const keyInfo = opts.keys[keyId];
+				// Resolve WHICH key to validate against at use time, not when the
+				// prompt is created: the SDK's offered key set is a snapshot, and
+				// account data can change while the recovery-key dialog is open
+				// (e.g. another client re-keys 4S via "Change recovery key").
+				// Validating against the stale snapshot rejects the genuine
+				// current recovery key (issue #420), so prefer the default key's
+				// description fetched fresh from the server.
+				const fetchKeyInfo = async (
+					keyId: string,
+				): Promise<SecretStorageKeyDescription | null> => {
+					const userId = matrixClient.getUserId();
+					if (!userId) return null;
+					try {
+						return await matrixClient.http.authedRequest<SecretStorageKeyDescription>(
+							Method.Get,
+							`/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(`m.secret_storage.key.${keyId}`)}`,
+							undefined,
+							undefined,
+							{ prefix: ClientPrefix.V3 },
+						);
+					} catch (e) {
+						// 404 means the key genuinely isn't in account data — fall
+						// back to the offered set. Anything else (network, 5xx) is
+						// infrastructure: propagate so the prompt can blame the
+						// connection instead of the user's key.
+						if ((e as { httpStatus?: number }).httpStatus === 404) {
+							return null;
+						}
+						throw e;
+					}
+				};
+
+				const resolveChoice = () =>
+					resolveSecretStorageKey({
+						offeredKeys: opts.keys,
+						getDefaultKeyId: () => matrixClient.secretStorage.getDefaultKeyId(),
+						fetchKeyInfo,
+					});
 
 				// Prompt user for recovery key, validating it against the chosen
-				// key's metadata before it is used to encrypt/store secrets. A
+				// key's metadata before it is used to encrypt secrets. A
 				// well-formed but incorrect key would otherwise corrupt existing
 				// secret storage when used on a write path (see issue #205).
+				// The choice the candidate validated against is captured and
+				// reused below — resolving a second time could pick a
+				// different key if 4S is re-keyed mid-prompt (issue #420).
+				let validatedChoice:
+					| Awaited<ReturnType<typeof resolveChoice>>
+					| undefined;
 				const key = await requestRecoveryKey(async (candidate) => {
-					try {
-						return await matrixClient.secretStorage.checkKey(
-							candidate,
-							keyInfo,
-						);
-					} catch {
-						return false;
-					}
+					const choice = await resolveChoice();
+					if (!choice) return false;
+					// No try/catch around checkKey: a throw here is infrastructure
+					// failure (crypto store, SDK state), not a key mismatch — let it
+					// propagate so RecoveryKeyInput can report a connection problem
+					// instead of "Incorrect recovery key".
+					const ok = await matrixClient.secretStorage.checkKey(
+						candidate,
+						choice.keyInfo,
+					);
+					if (ok) validatedChoice = choice;
+					return ok;
 				});
 				if (!key) return null;
+
+				const keyId = validatedChoice?.keyId ?? Object.keys(opts.keys)[0];
 
 				// Cache for successive calls within the same operation
 				cachedSecretStorageKeyId = keyId;
