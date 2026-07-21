@@ -38,6 +38,13 @@ describe("reportError", () => {
 		});
 	});
 
+	it("treats an empty or whitespace-only userMessage as omitted (no blank toast)", () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		reportError(new Error("boom"), { userMessage: "" });
+		reportError(new Error("boom"), { userMessage: "   " });
+		expect(notices()).toHaveLength(0);
+	});
+
 	it("always logs even when a toast is shown", () => {
 		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 		reportError(new Error("boom"), {

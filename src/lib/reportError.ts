@@ -31,7 +31,9 @@ export function reportError(
 ): void {
 	const { userMessage, logLabel } = options;
 	console.error(`${logLabel ?? "Unhandled error"}:`, err);
-	if (userMessage !== undefined) {
+	// Treat an empty / whitespace-only userMessage as omitted: a blank toast is
+	// still clickable and announced, which is worse than console-only.
+	if (userMessage !== undefined && userMessage.trim() !== "") {
 		pushNotice(userMessage, "error");
 	}
 }
