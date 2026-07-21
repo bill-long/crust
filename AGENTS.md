@@ -131,6 +131,19 @@ Token namespace (defined via `@theme` in `src/styles/global.css` as `--color-*` 
 
 ---
 
+## Error handling
+
+One convention for a caught error, by where the failure is visible:
+
+- **Inside a dialog / form** - render the error inline (a `setError` signal near the affected control). Derive the text with `userFacingErrorMessage(e, fallback)` (`src/lib/errorMessage.ts`), which keeps human-written server/SDK messages and swaps browser jargon (`DOMException`, fetch `TypeError`) for the fallback.
+- **Everywhere else** - route it through `reportError(err, { userMessage, logLabel })` (`src/lib/reportError.ts`). It always `console.error`s (`logLabel`), and shows a dismissable error toast when `userMessage` is set (via `pushNotice` / `NoticeToasts`, which outlive a disposed emitter and a room switch).
+  - A **user-initiated** action that fails with **no other visible feedback** → pass a short, friendly `userMessage`.
+  - Anything else → omit `userMessage`; it stays console-only. That covers both **background noise** (best-effort work, expected quirks like the `turnServer` 404) **and** actions that already have their own failure surface (see next point).
+- Don't double-signal. Most user actions here already surface failure inline - not just dialogs, but the timeline's optimistic-echo Retry / Discard affordances (send / react / edit / delete), per-panel `lastError` (pins, room-state saves via `useOptimisticState`), poll `failedVote` / `endFailed`, search `error`, `useCopyLink` state. When one of those exists, a toast is a redundant second surface - stay console-only. Only reach for `userMessage` where none of them fire (e.g. removing your own reaction, which has no inline affordance - `useMessageActions.onReact`).
+- Don't stack toasts for a batch - collect the outcome and push one.
+
+---
+
 ## File / folder layout
 
 ```
@@ -224,6 +237,7 @@ Only stamp after an actual clean local review - the stamp is an attestation, not
 - Use design tokens for color, spacing, radii, shadows.
 - Provide a `focus-visible` ring on every focusable element.
 - Use `<Show when={}>` rather than `&&` in JSX (better reactivity, no falsy-render footguns).
+- Surface a failed user action outside a dialog with `reportError(err, { userMessage })` (see "Error handling").
 
 ## Never do
 

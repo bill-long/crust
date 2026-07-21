@@ -1,6 +1,7 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import { EventStatus, EventType, RelationType } from "matrix-js-sdk";
 import type { Accessor } from "solid-js";
+import { reportError } from "../../../lib/reportError";
 import { composerTextareaSelector } from "../composer/composerTextarea";
 import type { TimelineEvent } from "./timelineTypes";
 import type { OptimisticActions } from "./useOptimisticActions";
@@ -50,10 +51,27 @@ export function useMessageActions(
 		const existingId = Object.hasOwn(ev.myReactions, key)
 			? ev.myReactions[key]
 			: undefined;
-		try {
-			if (existingId) {
+		if (existingId) {
+			// Removing your own reaction redacts the annotation. Unlike a failed
+			// reaction *send* (which surfaces inline via FailedReactionPills) or a
+			// failed message redaction (which shows the "Delete failed" overlay on
+			// the message row), a failed reaction *redaction* has no inline
+			// affordance - the pill just stays - so the action would fail silently.
+			// Route it through reportError so the user gets a visible toast.
+			try {
 				await client.redactEvent(roomId(), sendThreadId(), existingId);
-			} else {
+			} catch (e) {
+				reportError(e, {
+					logLabel: "Un-react failed",
+					userMessage: "Couldn't remove reaction. Try again.",
+				});
+			}
+		} else {
+			// A failed send transitions the echo to NOT_SENT and renders inline
+			// Retry / Discard (FailedReactionPills), so no userMessage here - a
+			// toast would be a redundant second surface. Still route through the
+			// funnel (logLabel-only) so all caught errors have one destination.
+			try {
 				await client.sendEvent(roomId(), sendThreadId(), EventType.Reaction, {
 					"m.relates_to": {
 						rel_type: RelationType.Annotation,
@@ -61,9 +79,9 @@ export function useMessageActions(
 						key,
 					},
 				});
+			} catch (e) {
+				reportError(e, { logLabel: "Reaction failed" });
 			}
-		} catch (e) {
-			console.error("Reaction failed:", e);
 		}
 	};
 
@@ -71,7 +89,7 @@ export function useMessageActions(
 		try {
 			await client.redactEvent(roomId(), sendThreadId(), eventId);
 		} catch (e) {
-			console.error("Delete failed:", e);
+			reportError(e, { logLabel: "Delete failed" });
 		}
 	};
 
@@ -110,7 +128,7 @@ export function useMessageActions(
 		try {
 			await client.resendEvent(matrixEvent, room);
 		} catch (e) {
-			console.error("Resend failed:", e);
+			reportError(e, { logLabel: "Resend failed" });
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -130,7 +148,7 @@ export function useMessageActions(
 		try {
 			client.cancelPendingEvent(matrixEvent);
 		} catch (e) {
-			console.error("cancelPendingEvent failed:", e);
+			reportError(e, { logLabel: "cancelPendingEvent failed" });
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -155,7 +173,7 @@ export function useMessageActions(
 		try {
 			await client.resendEvent(pending.redactionEvent, room);
 		} catch (e) {
-			console.error("resendEvent (redaction) failed:", e);
+			reportError(e, { logLabel: "resendEvent (redaction) failed" });
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -176,7 +194,7 @@ export function useMessageActions(
 		try {
 			client.cancelPendingEvent(pending.redactionEvent);
 		} catch (e) {
-			console.error("cancelPendingEvent (redaction) failed:", e);
+			reportError(e, { logLabel: "cancelPendingEvent (redaction) failed" });
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -204,7 +222,7 @@ export function useMessageActions(
 		try {
 			await client.resendEvent(last, room);
 		} catch (e) {
-			console.error("resendEvent (reaction) failed:", e);
+			reportError(e, { logLabel: "resendEvent (reaction) failed" });
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -229,7 +247,7 @@ export function useMessageActions(
 			try {
 				client.cancelPendingEvent(ev);
 			} catch (e) {
-				console.error("cancelPendingEvent (reaction) failed:", e);
+				reportError(e, { logLabel: "cancelPendingEvent (reaction) failed" });
 			}
 		}
 		focusComposer(originalRoomId);
@@ -247,7 +265,7 @@ export function useMessageActions(
 		try {
 			await client.resendEvent(last, room);
 		} catch (e) {
-			console.error("resendEvent (edit) failed:", e);
+			reportError(e, { logLabel: "resendEvent (edit) failed" });
 		} finally {
 			focusComposer(originalRoomId);
 		}
@@ -264,7 +282,7 @@ export function useMessageActions(
 			try {
 				client.cancelPendingEvent(ev);
 			} catch (e) {
-				console.error("cancelPendingEvent (edit) failed:", e);
+				reportError(e, { logLabel: "cancelPendingEvent (edit) failed" });
 			}
 		}
 		focusComposer(originalRoomId);
