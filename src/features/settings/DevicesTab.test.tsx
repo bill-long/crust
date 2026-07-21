@@ -195,9 +195,15 @@ describe("DevicesTab", () => {
 		render(() => <DevicesTab />);
 		fireEvent.click(screen.getByRole("button", { name: "Export…" }));
 
-		await waitFor(() =>
-			expect(screen.getByLabelText("Export message keys")).toBeTruthy(),
-		);
+		// Lazy-loaded dialog: the dynamic import + render can exceed the default
+		// 1s findBy timeout under full-suite CPU contention (#423).
+		expect(
+			await screen.findByLabelText(
+				"Export message keys",
+				{},
+				{ timeout: 5000 },
+			),
+		).toBeTruthy();
 		expect(acquireCryptoDialog).toHaveBeenCalled();
 	});
 
@@ -208,7 +214,11 @@ describe("DevicesTab", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Export…" }));
 		expect(setCryptoTriggerElement).toHaveBeenCalled();
 
-		const overlay = await screen.findByLabelText("Export message keys");
+		const overlay = await screen.findByLabelText(
+			"Export message keys",
+			{},
+			{ timeout: 5000 },
+		);
 		fireEvent.keyDown(overlay, { key: "Escape" });
 
 		await waitFor(() => expect(restoreCryptoTriggerFocus).toHaveBeenCalled());
@@ -236,9 +246,14 @@ describe("DevicesTab", () => {
 		render(() => <DevicesTab />);
 		fireEvent.click(screen.getByRole("button", { name: "Import…" }));
 
-		await waitFor(() =>
-			expect(screen.getByLabelText("Import message keys")).toBeTruthy(),
-		);
+		// Same lazy-dialog import as the export case above (#423).
+		expect(
+			await screen.findByLabelText(
+				"Import message keys",
+				{},
+				{ timeout: 5000 },
+			),
+		).toBeTruthy();
 		expect(acquireCryptoDialog).toHaveBeenCalled();
 	});
 });
