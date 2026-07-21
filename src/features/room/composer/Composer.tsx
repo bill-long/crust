@@ -36,6 +36,7 @@ import {
 } from "./buildMessageContent";
 import { ComposerActionStrip } from "./ComposerActionStrip";
 import { ComposerContextBanner } from "./ComposerContextBanner";
+import { ComposerPlusMenu } from "./ComposerPlusMenu";
 import { createComposerFormatting } from "./composerFormatting";
 import { composerTextareaScope } from "./composerTextarea";
 import { FormattingToolbar } from "./FormattingToolbar";
@@ -153,11 +154,15 @@ const Composer: Component<{
 	/** Measured width of the action strip; the textarea reserves exactly
 	 *  this so text never runs under the buttons regardless of which are
 	 *  visible. Initial value approximates the full strip pre-measure. */
-	const [stripWidth, setStripWidth] = createSignal(160);
+	const [stripWidth, setStripWidth] = createSignal(72);
+	/** Measured width of the "+" menu trigger, mirroring stripWidth on the
+	 *  left so restyling the trigger can never run text under it. Initial
+	 *  value approximates the trigger button pre-measure. */
+	const [plusWidth, setPlusWidth] = createSignal(28);
 
-	// Voice notes (MSC3245). Feature-detected once: the mic button is
-	// hidden entirely where MediaRecorder/AudioContext/getUserMedia are
-	// unavailable.
+	// Voice notes (MSC3245). Feature-detected once: the "+" menu's record
+	// item is hidden entirely where MediaRecorder/AudioContext/getUserMedia
+	// are unavailable.
 	const voiceSupported = isVoiceRecordingSupported();
 	/** Guards the STOP phase only (not the upload): a double-click on the
 	 *  bar's send button must not deliver the same recording twice, but
@@ -909,37 +914,60 @@ const Composer: Component<{
 					style={{
 						// Reserve exactly the action strip's measured width, so
 						// the padding tracks whichever buttons are visible
-						// (editing, GIF availability, voice support).
+						// (editing, GIF availability).
 						"padding-right": `${stripWidth() + 12}px`,
+						// Same contract for the "+" menu trigger on the left
+						// (hidden while editing, where px-4 applies instead).
+						"padding-left": props.editingEvent
+							? undefined
+							: `${plusWidth() + 16}px`,
 					}}
 					rows={1}
 				/>
+				{/* Discord-style "+" menu on the left: attach, poll, event, voice.
+				    Hidden while editing (all of its actions are new sends, and
+				    edits are text-only replacements). Inert while recording: the
+				    recording bar overlays it. */}
+				<Show when={!props.editingEvent}>
+					<ComposerPlusMenu
+						voiceSupported={voiceSupported}
+						inThread={!!props.threadRootId}
+						inert={voiceRecorder.recording()}
+						onOpen={() => {
+							// A picker left open would float under the portaled
+							// menu as a confusing double-popover (z-20 vs z-50).
+							setGifPickerOpen(false);
+							setEmojiPickerOpen(false);
+						}}
+						onStartRecording={() => void startRecording()}
+						onOpenPoll={() => {
+							// Park focus on the textarea BEFORE opening: the dialog
+							// snapshots document.activeElement to restore on close,
+							// and at this point that's the menu item - a portaled
+							// node that unmounts when the menu closes on select, so
+							// restoring to it would silently drop focus to <body>.
+							textareaRef?.focus();
+							setPollDialogOpen(true);
+							setEventDialogOpen(false);
+						}}
+						onOpenEvent={() => {
+							// Same activeElement parking as onOpenPoll above.
+							textareaRef?.focus();
+							setEventDialogOpen(true);
+							setPollDialogOpen(false);
+						}}
+						onFileSelected={onFileInputChange}
+						onMeasure={setPlusWidth}
+					/>
+				</Show>
 				{/* Inert while recording: the recording bar overlays it, and its
 				    buttons must not be reachable underneath. */}
 				<ComposerActionStrip
-					voiceSupported={voiceSupported}
 					editing={!!props.editingEvent}
-					inThread={!!props.threadRootId}
 					gifAvailable={gifConfig.available()}
-					pollOpen={pollDialogOpen()}
-					eventOpen={eventDialogOpen()}
 					gifOpen={gifPickerOpen()}
 					emojiOpen={emojiPickerOpen()}
 					inert={voiceRecorder.recording()}
-					onStartRecording={() => void startRecording()}
-					onOpenPoll={() => {
-						setPollDialogOpen(true);
-						setEventDialogOpen(false);
-						setGifPickerOpen(false);
-						setEmojiPickerOpen(false);
-					}}
-					onOpenEvent={() => {
-						setEventDialogOpen(true);
-						setPollDialogOpen(false);
-						setGifPickerOpen(false);
-						setEmojiPickerOpen(false);
-					}}
-					onFileSelected={onFileInputChange}
 					onToggleGif={() => {
 						setGifPickerOpen((v) => !v);
 						setEmojiPickerOpen(false);

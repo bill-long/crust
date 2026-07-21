@@ -1,20 +1,11 @@
 import { type Component, onCleanup, Show } from "solid-js";
 
 interface ComposerActionStripProps {
-	/** Voice recording is supported in this environment (static per session). */
-	voiceSupported: boolean;
-	/** True while editing a message - hides voice/poll/attach/gif (edits are
+	/** True while editing a message - hides the GIF button (edits are
 	 *  text-only replacements). */
 	editing: boolean;
-	/** True when composing in a thread - hides the poll button
-	 *  (polls-in-threads are deferred, #303). */
-	inThread: boolean;
 	/** GIF search is configured and available. */
 	gifAvailable: boolean;
-	/** Poll dialog open state, for aria-expanded. */
-	pollOpen: boolean;
-	/** Event dialog open state, for aria-expanded. */
-	eventOpen: boolean;
 	/** GIF picker open state, for aria-expanded. */
 	gifOpen: boolean;
 	/** Emoji picker open state, for aria-expanded. */
@@ -22,14 +13,6 @@ interface ComposerActionStripProps {
 	/** Make the strip inert (the recording bar overlays it, and its buttons
 	 *  must not be reachable underneath). */
 	inert?: boolean;
-	/** Start a voice recording. */
-	onStartRecording: () => void;
-	/** Open the poll dialog (and close the pickers). */
-	onOpenPoll: () => void;
-	/** Open the event dialog (and close the pickers). */
-	onOpenEvent: () => void;
-	/** Files chosen via the hidden attach input. */
-	onFileSelected: (e: Event & { currentTarget: HTMLInputElement }) => void;
 	/** Toggle the GIF picker (and close the emoji picker). */
 	onToggleGif: () => void;
 	/** Toggle the emoji picker (and close the GIF picker). */
@@ -46,19 +29,20 @@ interface ComposerActionStripProps {
 }
 
 /**
- * The composer action strip: one flex row of trigger buttons (voice, poll,
- * attach, GIF, emoji) anchored to the bottom-right of the textarea. One flex
- * row instead of per-button absolute offsets, so adding/hiding buttons never
- * requires recomputing right-N positions or the textarea padding (the textarea
- * reserves this strip's measured width, reported via onMeasure).
+ * The composer action strip: one flex row of picker trigger buttons (GIF,
+ * emoji) anchored to the bottom-right of the textarea. Everything else
+ * (attach, poll, event, voice) lives in the "+" menu on the left
+ * (ComposerPlusMenu), Discord-style, so the right edge stays uncluttered.
+ * One flex row instead of per-button absolute offsets, so adding/hiding
+ * buttons never requires recomputing right-N positions or the textarea
+ * padding (the textarea reserves this strip's measured width, reported via
+ * onMeasure).
  *
- * Purely presentational: the composer owns the pickers, the recorder, and the
- * file queue; the strip only triggers callbacks. The GIF/emoji picker popovers
- * live in the composer, so their trigger buttons forward refs back out.
+ * Purely presentational: the composer owns the pickers; the strip only
+ * triggers callbacks. The GIF/emoji picker popovers live in the composer,
+ * so their trigger buttons forward refs back out.
  */
 const ComposerActionStrip: Component<ComposerActionStripProps> = (props) => {
-	let fileInputRef: HTMLInputElement | undefined;
-
 	return (
 		<div
 			ref={(el) => {
@@ -81,118 +65,6 @@ const ComposerActionStrip: Component<ComposerActionStripProps> = (props) => {
 			inert={props.inert || undefined}
 			class="absolute bottom-2.5 right-2 flex items-center gap-1"
 		>
-			<Show when={props.voiceSupported && !props.editing}>
-				<button
-					type="button"
-					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-					onClick={() => props.onStartRecording()}
-					aria-label="Record voice message"
-				>
-					<svg
-						class="h-5 w-5"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<rect x="9" y="2" width="6" height="12" rx="3" />
-						<path d="M5 10v1a7 7 0 0 0 14 0v-1" />
-						<path d="M12 18v4" />
-					</svg>
-				</button>
-			</Show>
-			{/* Poll button (hidden when editing - polls are new sends - and in
-			    threads: polls-in-threads are deferred, #303). */}
-			<Show when={!props.editing && !props.inThread}>
-				<button
-					type="button"
-					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-					onClick={() => props.onOpenPoll()}
-					aria-label="Create poll"
-					aria-haspopup="dialog"
-					aria-expanded={props.pollOpen}
-				>
-					<svg
-						class="h-5 w-5"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						aria-hidden="true"
-					>
-						<path d="M6 20V10" />
-						<path d="M12 20V4" />
-						<path d="M18 20v-6" />
-					</svg>
-				</button>
-				{/* Event card button (#418) — same visibility as polls: events
-				    are new sends, and polls-in-threads are deferred (#303). */}
-				<button
-					type="button"
-					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-					onClick={() => props.onOpenEvent()}
-					aria-label="Create event"
-					aria-haspopup="dialog"
-					aria-expanded={props.eventOpen}
-				>
-					<svg
-						class="h-5 w-5"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<rect x="3" y="4" width="18" height="18" rx="2" />
-						<path d="M16 2v4" />
-						<path d="M8 2v4" />
-						<path d="M3 10h18" />
-					</svg>
-				</button>
-			</Show>
-			{/* Attach file button (hidden when editing - edits can't carry
-			    attachments). The hidden input accepts images and arbitrary files;
-			    non-media files are classified as m.file at send. */}
-			<Show when={!props.editing}>
-				<input
-					ref={(el) => {
-						fileInputRef = el;
-					}}
-					type="file"
-					multiple
-					data-composer-file-input
-					class="hidden"
-					onChange={props.onFileSelected}
-				/>
-				<button
-					type="button"
-					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-					onClick={() => fileInputRef?.click()}
-					aria-label="Attach file"
-				>
-					{/* Inline paperclip, replacing the paperclip emoji (which reads
-					    as Clippy on some platforms and renders inconsistently). Matches
-					    the sibling icons' stroke/size and inherits currentColor. */}
-					<svg
-						class="h-5 w-5"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-					</svg>
-				</button>
-			</Show>
 			{/* GIF picker button (only when GIF search is available and not editing) */}
 			<Show when={props.gifAvailable && !props.editing}>
 				<button

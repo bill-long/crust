@@ -6,6 +6,7 @@
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { userEvent } from "vitest/browser";
 import "../../../styles/global.css";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
@@ -155,15 +156,21 @@ describe("Composer thread sends", () => {
 		expect(relates?.event_id).toBe("$mine");
 	});
 
-	it("hides the poll button inside threads (polls-in-threads deferred)", () => {
+	it("hides the poll/event menu items inside threads (polls-in-threads deferred)", async () => {
 		const client = makeClient();
-		const { container } = render(() => (
+		const { getByLabelText } = render(() => (
 			<TestClientProvider client={client}>
 				<Composer roomId={ROOM} threadRootId="$root" packs={[]} />
 			</TestClientProvider>
 		));
-		expect(
-			container.querySelector('button[aria-label="Create poll"]'),
-		).toBeNull();
+		// The items live in the portaled "+" menu (rendered on document.body,
+		// only while open), so open it with a real click and query by role.
+		await userEvent.click(getByLabelText("Message actions"));
+		const items = [...document.body.querySelectorAll('[role="menuitem"]')].map(
+			(el) => el.textContent?.trim(),
+		);
+		expect(items).toContain("Attach file");
+		expect(items).not.toContain("Create poll");
+		expect(items).not.toContain("Create event");
 	});
 });
