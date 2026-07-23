@@ -1,4 +1,4 @@
-import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
+import { type MatrixClient, MatrixEvent, type Room } from "matrix-js-sdk";
 import {
 	type Component,
 	createMemo,
@@ -6,6 +6,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { threadJumpTarget } from "../../../lib/threadEvents";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
 
@@ -47,6 +48,28 @@ function projectEvent(room: Room, ev: MatrixEvent): ResolvedPinnedEvent {
 	};
 }
 
+/** Last-resort resolve for events outside every cached timeline (in
+ *  practice: pinned thread replies). Returns null on any failure so the
+ *  row falls back to "(message unavailable)". */
+async function fetchStandalone(
+	client: MatrixClient,
+	room: Room,
+	eventId: string,
+): Promise<ResolvedPinnedEvent | null> {
+	try {
+		const raw = await client.fetchRoomEvent(room.roomId, eventId);
+		if (!raw?.event_id) return null;
+		const event = new MatrixEvent(raw);
+		// No-op for unencrypted events; decrypts with cached keys otherwise
+		// (a bare fetched event is never scheduled for decryption by the
+		// SDK). Mirrors ensureThread's root fetch.
+		await client.decryptEventIfNeeded(event);
+		return projectEvent(room, event);
+	} catch {
+		return null;
+	}
+}
+
 function formatPinnedTime(ts: number): string {
 	const d = new Date(ts);
 	const now = new Date();
@@ -72,7 +95,10 @@ const PinnedMessageRow: Component<{
 	shortcodeLookup: Map<string, ResolvedEmote>;
 	tabIndex: number;
 	rowRef?: (el: HTMLElement | null, prevEl?: HTMLElement) => void;
-	onJump: () => void;
+	/** `threadRootId` is set when the pinned event is a thread reply. The
+	 *  row supplies it (rather than the panel) because a standalone-fetched
+	 *  reply exists only in this row's resource, not in the SDK cache. */
+	onJump: (threadRootId?: string) => void;
 	onUnpin: () => void;
 	onFocus?: () => void;
 }> = (props) => {
@@ -93,7 +119,14 @@ const PinnedMessageRow: Component<{
 					props.room.getUnfilteredTimelineSet(),
 					id,
 				);
-				return resolveSync(props.room, id);
+				const resolved = resolveSync(props.room, id);
+				if (resolved) return resolved;
+				// A pinned THREAD reply never lands in a room timeline set
+				// (the SDK's context path refuses thread events), so fetch it
+				// standalone: enough to render the row and carry the thread
+				// root for the jump, without materializing the whole thread
+				// up front — the thread panel does that when the user jumps.
+				return await fetchStandalone(props.client, props.room, id);
 			} catch {
 				return null;
 			}
@@ -194,7 +227,7 @@ const PinnedMessageRow: Component<{
 							<button
 								type="button"
 								class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-								onClick={() => props.onJump()}
+								onClick={() => props.onJump(threadJumpTarget(r.event))}
 							>
 								Jump to
 							</button>

@@ -162,14 +162,17 @@ const PinnedMessagesPanel: Component<{
 		}
 	};
 
-	const handleJump = (eventId: string): void => {
+	const handleJump = (eventId: string, threadRootId?: string): void => {
 		// A pinned thread reply can't be reached in the main timeline; hand
 		// the root along so the jump opens the thread panel (issue #334).
-		// Whenever the row rendered content the event is in the SDK cache
-		// (resolveSync hit or the row's getEventTimeline fetch); if it
-		// isn't, fall back to a plain main-timeline jump.
-		const ev = room()?.findEventById(eventId);
-		props.onJump(eventId, ev ? threadJumpTarget(ev) : undefined);
+		// The row supplies the root when it resolved the event itself (a
+		// standalone-fetched reply lives only in the row's resource); the
+		// keyboard Enter path has no row event, so consult the SDK cache.
+		const resolveRoot = (): string | undefined => {
+			const ev = room()?.findEventById(eventId);
+			return ev ? threadJumpTarget(ev) : undefined;
+		};
+		props.onJump(eventId, threadRootId ?? resolveRoot());
 		setOpen(false);
 	};
 
@@ -227,7 +230,7 @@ const PinnedMessagesPanel: Component<{
 					}
 				}}
 				onFocus={() => setFocusedId(eventId)}
-				onJump={() => handleJump(eventId)}
+				onJump={(threadRootId) => handleJump(eventId, threadRootId)}
 				onUnpin={() => handleUnpin(eventId)}
 			/>
 		);
