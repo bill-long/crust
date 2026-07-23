@@ -40,23 +40,36 @@ export const POLL_KIND_UNDISCLOSED = "org.matrix.msc3381.poll.undisclosed";
  * unstable MSC3381 types the serializers emit; the runtime accepts any type
  * string, so the cast is confined to this one helper.
  *
- * `extraContent` spreads additional namespaced blocks into the serialized
- * content (e.g. the event-card block, #418). Event content is open JSON -
- * clients that don't know the key ignore it.
+ * `opts.extraContent` spreads additional namespaced blocks into the
+ * serialized content (e.g. the event-card block, #418). Event content is
+ * open JSON - clients that don't know the key ignore it.
+ *
+ * `opts.threadId` routes the send into a thread via the SDK's thread-aware
+ * overload (issue #332). For a poll START (no `m.relates_to`) the SDK adds
+ * the MSC3440 thread relation; a response/end already carries its
+ * `m.reference` relation, which the SDK leaves untouched - the threadId
+ * then only routes the local echo into the thread's timeline.
  */
 export function sendSerializedPollEvent(
 	client: MatrixClient,
 	roomId: string,
 	event: { serialize(): { type: string; content: object } },
-	extraContent?: Record<string, unknown>,
+	opts?: {
+		extraContent?: Record<string, unknown>;
+		threadId?: string | null;
+	},
 ): Promise<ISendEventResponse> {
 	const { type, content } = event.serialize();
 	return client.sendEvent(
 		roomId,
+		opts?.threadId ?? null,
 		type as keyof TimelineEvents,
 		// extraContent spreads FIRST: the serialized poll content is the
 		// source of truth, so an extra block can add namespaced keys but
 		// never override keys the serializer emitted.
-		{ ...extraContent, ...content } as TimelineEvents[keyof TimelineEvents],
+		{
+			...opts?.extraContent,
+			...content,
+		} as TimelineEvents[keyof TimelineEvents],
 	);
 }

@@ -4,8 +4,9 @@ import { type Component, onCleanup, Show } from "solid-js";
 interface ComposerPlusMenuProps {
 	/** Voice recording is supported in this environment (static per session). */
 	voiceSupported: boolean;
-	/** True when composing in a thread - hides the poll/event items
-	 *  (polls-in-threads are deferred, #303). */
+	/** True when composing in a thread - hides the event item (its dialog
+	 *  picks a target room, which conflicts with a thread scope). Polls
+	 *  are thread-capable (#332) and stay visible. */
 	inThread: boolean;
 	/** Make the trigger inert (the recording bar overlays the input area, and
 	 *  the button must not be reachable underneath). */
@@ -152,31 +153,35 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 							Attach file
 						</DropdownMenu.Item>
 						{/* Poll/event items are new sends, so they never show while
-						    editing (the whole menu is hidden then); in threads they're
-						    hidden because polls-in-threads are deferred (#303). */}
-						<Show when={!props.inThread}>
-							{/* aria-haspopup carried over from the old strip buttons:
-							    these items open modal dialogs, not immediate actions. */}
-							<DropdownMenu.Item
-								class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
-								aria-haspopup="dialog"
-								onSelect={() => props.onOpenPoll()}
+						    editing (the whole menu is hidden then). The poll item is
+						    available in threads too (#332): the dialog sends into the
+						    thread via the SDK's thread overload. aria-haspopup carried
+						    over from the old strip buttons: these items open modal
+						    dialogs, not immediate actions. */}
+						<DropdownMenu.Item
+							class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
+							aria-haspopup="dialog"
+							onSelect={() => props.onOpenPoll()}
+						>
+							<svg
+								class="h-4 w-4 shrink-0"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								aria-hidden="true"
 							>
-								<svg
-									class="h-4 w-4 shrink-0"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									stroke-linecap="round"
-									aria-hidden="true"
-								>
-									<path d="M6 20V10" />
-									<path d="M12 20V4" />
-									<path d="M18 20v-6" />
-								</svg>
-								Create poll
-							</DropdownMenu.Item>
+								<path d="M6 20V10" />
+								<path d="M12 20V4" />
+								<path d="M18 20v-6" />
+							</svg>
+							Create poll
+						</DropdownMenu.Item>
+						{/* Event cards stay main-timeline-only: CreateEventDialog
+						    picks a TARGET room, which has no coherent meaning inside
+						    a thread scope. */}
+						<Show when={!props.inThread}>
 							<DropdownMenu.Item
 								class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
 								aria-haspopup="dialog"

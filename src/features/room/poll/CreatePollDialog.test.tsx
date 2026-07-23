@@ -18,7 +18,7 @@ afterEach(cleanup);
 
 const ROOM_ID = "!room:example.com";
 
-function setup() {
+function setup(opts?: { threadRootId?: string }) {
 	const client = createMockClient();
 	const [open, setOpen] = createSignal(true);
 	const onClose = vi.fn(() => setOpen(false));
@@ -26,6 +26,7 @@ function setup() {
 		<CreatePollDialog
 			client={client as unknown as MatrixClient}
 			roomId={ROOM_ID}
+			threadRootId={opts?.threadRootId}
 			open={open}
 			onClose={onClose}
 		/>
@@ -53,19 +54,22 @@ function fillValidPoll(): void {
 	fireEvent.input(optionInput(2), { target: { value: "Pepperoni" } });
 }
 
-/** The single (type, content) pair sent through client.sendEvent. */
+/** The single send through client.sendEvent (thread-aware 4-arg form:
+ *  roomId, threadId, type, content). */
 function sentEvent(client: ReturnType<typeof createMockClient>): {
 	roomId: string;
+	threadId: string | null;
 	type: string;
 	content: Record<string, unknown>;
 } {
 	expect(client.sendEvent).toHaveBeenCalledOnce();
-	const [roomId, type, content] = client.sendEvent.mock.calls[0] as [
+	const [roomId, threadId, type, content] = client.sendEvent.mock.calls[0] as [
 		string,
+		string | null,
 		string,
 		Record<string, unknown>,
 	];
-	return { roomId, type, content };
+	return { roomId, threadId, type, content };
 }
 
 describe("CreatePollDialog", () => {
@@ -102,8 +106,11 @@ describe("CreatePollDialog", () => {
 		fillValidPoll();
 		fireEvent.click(submitButton());
 
-		const { roomId, type, content } = sentEvent(client);
+		const { roomId, threadId, type, content } = sentEvent(client);
 		expect(roomId).toBe(ROOM_ID);
+		// Main composer: no thread scope, so the SDK's thread-aware overload
+		// gets an explicit null.
+		expect(threadId).toBeNull();
 		expect(type).toBe("org.matrix.msc3381.poll.start");
 		const start = content["org.matrix.msc3381.poll.start"] as {
 			question: Record<string, unknown>;
@@ -117,6 +124,17 @@ describe("CreatePollDialog", () => {
 		expect(start.answers).toHaveLength(2);
 		// Distinct generated answer ids.
 		expect(new Set(start.answers.map((a) => a.id)).size).toBe(2);
+		expect(onClose).toHaveBeenCalledOnce();
+	});
+
+	it("sends the poll into the thread when scoped with threadRootId (#332)", () => {
+		const { client, onClose } = setup({ threadRootId: "$root:example.com" });
+		fillValidPoll();
+		fireEvent.click(submitButton());
+		const { roomId, threadId, type } = sentEvent(client);
+		expect(roomId).toBe(ROOM_ID);
+		expect(threadId).toBe("$root:example.com");
+		expect(type).toBe("org.matrix.msc3381.poll.start");
 		expect(onClose).toHaveBeenCalledOnce();
 	});
 

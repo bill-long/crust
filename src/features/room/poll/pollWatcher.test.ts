@@ -641,6 +641,7 @@ describe("createPollWatcher", () => {
 		expect(updates).toContain(POLL_ID);
 		expect(client.sendEvent).toHaveBeenCalledExactlyOnceWith(
 			ROOM_ID,
+			null,
 			"org.matrix.msc3381.poll.response",
 			expect.objectContaining({
 				"m.relates_to": { rel_type: "m.reference", event_id: POLL_ID },
@@ -716,12 +717,16 @@ describe("createPollWatcher", () => {
 
 		await watcher.votePoll(POLL_ID, []);
 		expect(client.sendEvent).toHaveBeenCalledOnce();
-		const [roomId, type, content] = client.sendEvent.mock.calls[0] as [
+		const [roomId, threadId, type, content] = client.sendEvent.mock
+			.calls[0] as [
 			string,
+			string | null,
 			string,
 			Record<string, { answers?: unknown }>,
 		];
 		expect(roomId).toBe(ROOM_ID);
+		// A main-timeline poll's responses carry no thread routing.
+		expect(threadId).toBeNull();
 		expect(type).toBe("org.matrix.msc3381.poll.response");
 		// A spoiled ballot omits the answers array entirely.
 		expect(content["org.matrix.msc3381.poll.response"].answers).toBeUndefined();
@@ -730,6 +735,54 @@ describe("createPollWatcher", () => {
 	it("ignores votes on polls without a watched SDK model", async () => {
 		await watcher.votePoll("$unknown", ["a"]);
 		expect(client.sendEvent).not.toHaveBeenCalled();
+	});
+
+	it("routes votes and ends of a thread poll through the SDK thread overload (#332)", async () => {
+		// A poll START living in a thread carries the MSC3440 relation on
+		// the wire; its threadRootId getter reads it back. Created by the
+		// local user so endPoll's creator gate passes.
+		client.relations.mockResolvedValue({ events: [], nextBatch: null });
+		const mock = pollStartEvent(ROOM_ID, POLL_ID, ME, "Best pizza?", [
+			{ id: "a", text: "Margherita" },
+			{ id: "b", text: "Pepperoni" },
+		]);
+		rootEvent = new MatrixEvent({
+			type: mock.type,
+			content: {
+				...mock.content,
+				"m.relates_to": {
+					rel_type: "m.thread",
+					event_id: "$threadroot:example.com",
+					is_falling_back: true,
+				},
+			},
+			event_id: mock.eventId,
+			room_id: mock.roomId,
+			sender: mock.sender,
+			origin_server_ts: mock.ts,
+		});
+		poll = new Poll(
+			rootEvent,
+			client as unknown as MatrixClient,
+			room as unknown as Room,
+		);
+		room.polls.set(poll.pollId, poll);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(client.sendEvent).toHaveBeenCalledTimes(1);
+		expect(client.sendEvent.mock.calls[0][1]).toBe("$threadroot:example.com");
+		expect(client.sendEvent.mock.calls[0][2]).toBe(
+			"org.matrix.msc3381.poll.response",
+		);
+
+		await watcher.endPoll(POLL_ID);
+		expect(client.sendEvent).toHaveBeenCalledTimes(2);
+		expect(client.sendEvent.mock.calls[1][1]).toBe("$threadroot:example.com");
+		expect(client.sendEvent.mock.calls[1][2]).toBe(
+			"org.matrix.msc3381.poll.end",
+		);
 	});
 
 	it("marks canEnd only for the poll creator while the poll is open", async () => {
@@ -783,6 +836,7 @@ describe("createPollWatcher", () => {
 		await endPromise;
 		expect(client.sendEvent).toHaveBeenCalledExactlyOnceWith(
 			ROOM_ID,
+			null,
 			"org.matrix.msc3381.poll.end",
 			expect.objectContaining({
 				"m.relates_to": { rel_type: "m.reference", event_id: POLL_ID },

@@ -1034,6 +1034,7 @@ const Composer: Component<{
 				<CreatePollDialog
 					client={client}
 					roomId={props.roomId}
+					threadRootId={props.threadRootId}
 					open={pollDialogOpen}
 					onClose={() => setPollDialogOpen(false)}
 				/>
