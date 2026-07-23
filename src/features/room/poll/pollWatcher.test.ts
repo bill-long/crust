@@ -737,6 +737,22 @@ describe("createPollWatcher", () => {
 		expect(client.sendEvent).not.toHaveBeenCalled();
 	});
 
+	it("keeps null routing for a main-timeline poll that is itself a thread ROOT", async () => {
+		setupPoll();
+		// Someone opened a thread ON the poll message: the SDK attaches the
+		// thread, so rootEvent.threadRootId returns the poll's own id. Votes
+		// must keep main-timeline (null) routing - only polls that are
+		// wire-shape thread REPLIES route through the thread overload.
+		rootEvent.setThreadId(POLL_ID);
+		expect(rootEvent.threadRootId).toBe(POLL_ID);
+		watcher.getSnapshot(rootEvent, room as unknown as Room);
+		await flushPromises();
+
+		await watcher.votePoll(POLL_ID, ["a"]);
+		expect(client.sendEvent).toHaveBeenCalledTimes(1);
+		expect(client.sendEvent.mock.calls[0][1]).toBeNull();
+	});
+
 	it("routes votes and ends of a thread poll through the SDK thread overload (#332)", async () => {
 		// A poll START living in a thread carries the MSC3440 relation on
 		// the wire; its threadRootId getter reads it back. Created by the

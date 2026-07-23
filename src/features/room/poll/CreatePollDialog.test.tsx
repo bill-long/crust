@@ -280,6 +280,30 @@ describe("CreatePollDialog", () => {
 		expect(sentEvent(client).roomId).toBe("!original:example.com");
 	});
 
+	it("sends to the thread the dialog was opened in, not the current one", () => {
+		// Same snapshot rule as the room: the thread target is captured at
+		// open time, so a scope change while composing can't redirect it.
+		const client = createMockClient();
+		const [open, setOpen] = createSignal(false);
+		const [threadRootId, setThreadRootId] = createSignal<string | undefined>(
+			"$original-root:example.com",
+		);
+		render(() => (
+			<CreatePollDialog
+				client={client as unknown as MatrixClient}
+				roomId={ROOM_ID}
+				threadRootId={threadRootId()}
+				open={open}
+				onClose={vi.fn(() => setOpen(false))}
+			/>
+		));
+		setOpen(true);
+		fillValidPoll();
+		setThreadRootId(undefined);
+		fireEvent.click(submitButton());
+		expect(sentEvent(client).threadId).toBe("$original-root:example.com");
+	});
+
 	it("resets the form when reopened", () => {
 		const { setOpen } = setup();
 		fillValidPoll();

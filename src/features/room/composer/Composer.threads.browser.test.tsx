@@ -1,7 +1,8 @@
 /**
- * Browser-mode tests for compose-into-threads (#303 3d): thread sends go
- * through the SDK's 3-arg overload (which builds the MSC3440 relation),
- * never a hand-built m.thread relation.
+ * Browser-mode tests for compose-into-threads (#303 3d, #332): thread
+ * message sends go through the SDK's 3-arg sendMessage overload and poll
+ * sends through the thread-aware sendEvent form (both build the MSC3440
+ * relation SDK-side), never a hand-built m.thread relation.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";

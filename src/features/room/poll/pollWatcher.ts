@@ -8,6 +8,7 @@ import {
 	RelationsEvent,
 	type Room,
 } from "matrix-js-sdk";
+import { threadJumpTarget } from "../../../lib/threadEvents";
 import { hasControlChar } from "../timeline/timelineHelpers";
 import { type EventInfo, parseEventBlock } from "./eventBlock";
 import {
@@ -468,11 +469,15 @@ export function createPollWatcher(
 					client,
 					room.roomId,
 					PollResponseEvent.from(answerIds, pollId),
-					// A poll living in a thread gets its responses sent via the
+					// A poll living IN a thread gets its responses sent via the
 					// SDK's thread overload (issue #332): the m.reference
 					// relation is untouched, but the local echo routes into the
 					// thread's timeline instead of the room's pending list.
-					{ threadId: entry.poll.rootEvent.threadRootId ?? null },
+					// threadJumpTarget (not rootEvent.threadRootId): the getter
+					// returns a thread ROOT's own id once someone opens a thread
+					// on the poll message, and a main-timeline poll's votes must
+					// keep null routing regardless.
+					{ threadId: threadJumpTarget(entry.poll.rootEvent) ?? null },
 				);
 				const current = watched.get(pollId);
 				// Stale if unwatched meanwhile, or superseded by a newer vote.
@@ -521,7 +526,7 @@ export function createPollWatcher(
 					room.roomId,
 					PollEndEvent.from(pollId, "The poll has ended."),
 					// Same thread routing as votePoll (issue #332).
-					{ threadId: entry.poll.rootEvent.threadRootId ?? null },
+					{ threadId: threadJumpTarget(entry.poll.rootEvent) ?? null },
 				);
 				// endPending intentionally stays set: it clears when the
 				// confirmed end event round-trips (PollEvent.End ->
