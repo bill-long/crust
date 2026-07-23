@@ -18,7 +18,11 @@ import {
 	type NotifyPing,
 } from "../../lib/notifyChannel";
 import { isPollStartType, isRenderablePollContent } from "../../lib/pollCopy";
-import { isThreadReply, isThreadTimelineData } from "../../lib/threadEvents";
+import {
+	isThreadReply,
+	isThreadTimelineData,
+	threadJumpTarget,
+} from "../../lib/threadEvents";
 import { userSettings } from "../../stores/settings";
 import { buildNotificationBody } from "./notificationCopy";
 import { playNotificationSound, primeAudioContext } from "./notificationSound";
@@ -142,7 +146,7 @@ export function useNotifications(
 				const base = isDm ? `/dm/${encoded}` : `/home/${encoded}`;
 				// A thread reply deep-links to its thread: the room opens with
 				// the panel for the reply's root (RoomPane reads ?thread).
-				const rootId = isThreadReply(event) ? event.threadRootId : undefined;
+				const rootId = threadJumpTarget(event);
 				navigate(
 					rootId ? `${base}?thread=${encodeURIComponent(rootId)}` : base,
 				);

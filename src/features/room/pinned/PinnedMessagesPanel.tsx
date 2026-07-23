@@ -12,7 +12,6 @@ import {
 	Show,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
-import { threadJumpTarget } from "../../../lib/threadEvents";
 import type { ResolvedEmote } from "../../emoji/types";
 import { PinIcon } from "./PinIcon";
 import { PinnedMessageRow } from "./PinnedMessageRow";
@@ -129,9 +128,11 @@ const PinnedMessagesPanel: Component<{
 	const onKeyDown = (e: KeyboardEvent): void => {
 		if (items().length === 0) return;
 		// Skip when focus is inside an interactive descendant (e.g. the
-		// row's Jump/Unpin <button>s). Otherwise the panel-level Enter
-		// shortcut would preventDefault the button's own activation and
-		// the Arrow keys would steal scroll/select behaviour from inputs.
+		// row's Jump/Unpin <button>s). Otherwise the Arrow keys would steal
+		// scroll/select behaviour from inputs. Enter-to-jump lives on the
+		// ROW, not here: the row owns the resolved event and its thread-
+		// root routing (a standalone-fetched thread reply exists only in
+		// the row's resource, invisible to any panel-side cache lookup).
 		const target = e.target as HTMLElement | null;
 		if (target?.closest("button, a, input, textarea, select")) {
 			return;
@@ -153,26 +154,14 @@ const PinnedMessagesPanel: Component<{
 				e.preventDefault();
 				focusIndex(items().length - 1);
 				break;
-			case "Enter": {
-				e.preventDefault();
-				const id = focusedId();
-				if (id) handleJump(id);
-				break;
-			}
 		}
 	};
 
 	const handleJump = (eventId: string, threadRootId?: string): void => {
-		// A pinned thread reply can't be reached in the main timeline; hand
-		// the root along so the jump opens the thread panel (issue #334).
-		// The row supplies the root when it resolved the event itself (a
-		// standalone-fetched reply lives only in the row's resource); the
-		// keyboard Enter path has no row event, so consult the SDK cache.
-		const resolveRoot = (): string | undefined => {
-			const ev = room()?.findEventById(eventId);
-			return ev ? threadJumpTarget(ev) : undefined;
-		};
-		props.onJump(eventId, threadRootId ?? resolveRoot());
+		// threadRootId is row-resolved: set when the pinned event is a
+		// thread reply, routing the jump into its root's panel (issue
+		// #334) instead of the main timeline (which cannot contain it).
+		props.onJump(eventId, threadRootId);
 		setOpen(false);
 	};
 

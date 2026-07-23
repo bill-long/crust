@@ -125,4 +125,27 @@ describe("PinnedMessageRow", () => {
 		renderRow(makeClient(), makeRoom());
 		expect(await screen.findByText("(message unavailable)")).toBeTruthy();
 	});
+
+	it("Enter on the focused row jumps with the row-resolved thread root", async () => {
+		const client = makeClient({
+			fetchRoomEvent: vi.fn().mockResolvedValue(
+				rawMessage("$pinned:hs", {
+					msgtype: "m.text",
+					body: "reply in a thread",
+					"m.relates_to": { rel_type: "m.thread", event_id: "$root:hs" },
+				}),
+			) as MatrixClient["fetchRoomEvent"],
+		});
+		const onJump = renderRow(client, makeRoom());
+		await screen.findByText("reply in a thread");
+		fireEvent.keyDown(screen.getByRole("article"), { key: "Enter" });
+		expect(onJump).toHaveBeenCalledWith("$root:hs");
+	});
+
+	it("Enter on an unavailable row is a no-op (no doomed main-timeline jump)", async () => {
+		const onJump = renderRow(makeClient(), makeRoom());
+		await screen.findByText("(message unavailable)");
+		fireEvent.keyDown(screen.getByRole("article"), { key: "Enter" });
+		expect(onJump).not.toHaveBeenCalled();
+	});
 });

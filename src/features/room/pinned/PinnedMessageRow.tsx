@@ -159,6 +159,20 @@ const PinnedMessageRow: Component<{
 			tabIndex={props.tabIndex}
 			aria-current={props.tabIndex === 0 ? "true" : undefined}
 			onFocus={() => props.onFocus?.()}
+			onKeyDown={(e) => {
+				// Enter on the (roving-focused) row jumps, same as its "Jump
+				// to" button - handled HERE because only the row can resolve
+				// the thread root of a standalone-fetched reply. Unresolved
+				// rows no-op: a jump with no known target would just yank the
+				// main timeline (issue #334).
+				if (e.key !== "Enter") return;
+				const target = e.target as HTMLElement | null;
+				if (target?.closest("button, a, input, textarea, select")) return;
+				const r = resolved();
+				if (!r) return;
+				e.preventDefault();
+				props.onJump(threadJumpTarget(r.event));
+			}}
 			aria-label={
 				resolved()
 					? `Pinned message from ${resolved()?.senderName}`
