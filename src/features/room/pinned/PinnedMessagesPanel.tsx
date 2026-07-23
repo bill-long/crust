@@ -24,7 +24,9 @@ const PinnedMessagesPanel: Component<{
 	client: MatrixClient;
 	pins: UsePinnedEvents;
 	shortcodeLookup: Map<string, ResolvedEmote>;
-	onJump: (eventId: string) => void;
+	/** `threadRootId` is set when the pinned event is a thread reply - the
+	 *  jump must open that root's thread panel, not the main timeline. */
+	onJump: (eventId: string, threadRootId?: string) => void;
 }> = (props) => {
 	const [open, setOpen] = createSignal(false);
 	const panelId = createUniqueId();
@@ -126,9 +128,11 @@ const PinnedMessagesPanel: Component<{
 	const onKeyDown = (e: KeyboardEvent): void => {
 		if (items().length === 0) return;
 		// Skip when focus is inside an interactive descendant (e.g. the
-		// row's Jump/Unpin <button>s). Otherwise the panel-level Enter
-		// shortcut would preventDefault the button's own activation and
-		// the Arrow keys would steal scroll/select behaviour from inputs.
+		// row's Jump/Unpin <button>s). Otherwise the Arrow keys would steal
+		// scroll/select behaviour from inputs. Enter-to-jump lives on the
+		// ROW, not here: the row owns the resolved event and its thread-
+		// root routing (a standalone-fetched thread reply exists only in
+		// the row's resource, invisible to any panel-side cache lookup).
 		const target = e.target as HTMLElement | null;
 		if (target?.closest("button, a, input, textarea, select")) {
 			return;
@@ -150,17 +154,14 @@ const PinnedMessagesPanel: Component<{
 				e.preventDefault();
 				focusIndex(items().length - 1);
 				break;
-			case "Enter": {
-				e.preventDefault();
-				const id = focusedId();
-				if (id) handleJump(id);
-				break;
-			}
 		}
 	};
 
-	const handleJump = (eventId: string): void => {
-		props.onJump(eventId);
+	const handleJump = (eventId: string, threadRootId?: string): void => {
+		// threadRootId is row-resolved: set when the pinned event is a
+		// thread reply, routing the jump into its root's panel (issue
+		// #334) instead of the main timeline (which cannot contain it).
+		props.onJump(eventId, threadRootId);
 		setOpen(false);
 	};
 
@@ -218,7 +219,7 @@ const PinnedMessagesPanel: Component<{
 					}
 				}}
 				onFocus={() => setFocusedId(eventId)}
-				onJump={() => handleJump(eventId)}
+				onJump={(threadRootId) => handleJump(eventId, threadRootId)}
 				onUnpin={() => handleUnpin(eventId)}
 			/>
 		);

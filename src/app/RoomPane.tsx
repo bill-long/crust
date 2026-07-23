@@ -29,6 +29,7 @@ import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { SearchPanel } from "../features/room/search/SearchPanel";
 import { ThreadPanel } from "../features/room/threads/ThreadPanel";
+import { createThreadPanelState } from "../features/room/threads/threadPanelState";
 import { TimelineView } from "../features/room/timeline/TimelineView";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { isMobile } from "../stores/viewport";
@@ -179,16 +180,29 @@ const RoomPane: Component<{
 
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
 
-	// Open thread (root event id) shown in the right-hand panel; closed on
-	// room switch so a thread never renders under another room's header.
-	const [openThreadId, setOpenThreadId] = createSignal<string | null>(null);
+	// Thread shown in the right-hand panel (root event id) plus an optional
+	// jump target inside it; closed on room switch so a thread never
+	// renders under another room's header.
+	const threadPanel = createThreadPanelState();
+
 	createEffect(
 		on(
 			() => props.rid,
-			() => setOpenThreadId(null),
+			() => threadPanel.close(),
 			{ defer: true },
 		),
 	);
+
+	/** Route a pin/search jump: a thread reply opens its root's panel and
+	 *  scrolls it there (the reply isn't in the main timeline); anything
+	 *  else anchors the main timeline as before (issue #334). */
+	const requestJump = (eventId: string, threadRootId?: string): void => {
+		if (threadRootId) {
+			threadPanel.open(threadRootId, eventId);
+		} else {
+			setJumpRequest(eventId);
+		}
+	};
 
 	// Deep-link: a notification click navigates to `?thread=<rootId>` to open
 	// that thread's panel. Consume the param (open the panel, then strip it so
@@ -199,7 +213,7 @@ const RoomPane: Component<{
 	createEffect(() => {
 		const requested = searchParams.thread;
 		if (typeof requested === "string" && requested) {
-			setOpenThreadId(requested);
+			threadPanel.open(requested);
 			setSearchParams({ thread: undefined }, { replace: true });
 		}
 	});
@@ -362,12 +376,12 @@ const RoomPane: Component<{
 						client={props.client}
 						pins={pins}
 						shortcodeLookup={shortcodeLookup()}
-						onJump={(eventId) => setJumpRequest(eventId)}
+						onJump={requestJump}
 					/>
 					<SearchPanel
 						client={props.client}
 						roomId={props.rid}
-						onJump={(eventId) => setJumpRequest(eventId)}
+						onJump={requestJump}
 					/>
 					<button
 						type="button"
@@ -458,14 +472,14 @@ const RoomPane: Component<{
 						jumpRequest={jumpRequest}
 						onJumpHandled={() => setJumpRequest(null)}
 						packs={packs}
-						onOpenThread={(threadId) => setOpenThreadId(threadId)}
+						onOpenThread={(threadId) => threadPanel.open(threadId)}
 					/>
 				</div>
 				{/* Desktop: inline thread panel column. Keyed so switching to
 					another thread remounts the panel: mount-time focus capture,
 					focus-into-panel (live Escape), and restore target all track
 					the thread the user actually opened. */}
-				<Show when={!isMobile() && openThreadId()} keyed>
+				<Show when={!isMobile() && threadPanel.openThreadId()} keyed>
 					{(threadId) => (
 						<>
 							{/* Divider on the panel's LEFT edge; the panel sits to its
@@ -492,7 +506,9 @@ const RoomPane: Component<{
 								<ThreadPanel
 									roomId={props.rid}
 									threadId={threadId}
-									onClose={() => setOpenThreadId(null)}
+									onClose={threadPanel.close}
+									jumpRequest={threadPanel.threadJumpRequest}
+									onJumpHandled={threadPanel.consumeJump}
 								/>
 							</div>
 						</>
@@ -523,9 +539,9 @@ const RoomPane: Component<{
 			{/* Mobile: thread panel as a focus-trapped slide-over dialog
 				(Escape-to-close, focus return, aria-modal for free). */}
 			<Dialog
-				open={isMobile() && openThreadId() !== null}
+				open={isMobile() && threadPanel.openThreadId() !== null}
 				onOpenChange={(open) => {
-					if (!open) setOpenThreadId(null);
+					if (!open) threadPanel.close();
 				}}
 			>
 				<Dialog.Portal>
@@ -534,12 +550,14 @@ const RoomPane: Component<{
 						<Dialog.Title class="sr-only">Thread</Dialog.Title>
 						{/* Keyed for the same per-thread remount as the desktop
 							column (fresh focus capture per thread switch). */}
-						<Show when={openThreadId()} keyed>
+						<Show when={threadPanel.openThreadId()} keyed>
 							{(threadId) => (
 								<ThreadPanel
 									roomId={props.rid}
 									threadId={threadId}
-									onClose={() => setOpenThreadId(null)}
+									onClose={threadPanel.close}
+									jumpRequest={threadPanel.threadJumpRequest}
+									onJumpHandled={threadPanel.consumeJump}
 								/>
 							)}
 						</Show>

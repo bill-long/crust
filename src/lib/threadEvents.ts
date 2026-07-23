@@ -3,7 +3,9 @@ import { THREAD_RELATION_TYPE } from "matrix-js-sdk";
 
 /**
  * Gates that keep thread replies out of main-timeline surfaces (timeline
- * rows, room previews, notifications, search). Safety direction: when a
+ * rows, room previews, notifications). Surfaces that DO list them (search
+ * hits, pinned messages) use {@link threadJumpTarget} to route a jump to
+ * the thread panel instead. Safety direction: when a
  * signal is missing or ambiguous the gates err toward KEEPING an event
  * visible - hiding a real message is worse than briefly showing a thread
  * reply, and the SDK's own timeline partition is the primary defense.
@@ -62,4 +64,18 @@ export function isThreadTimelineData(data: {
 	timeline?: EventTimeline;
 }): boolean {
 	return !!data.timeline?.getTimelineSet().thread;
+}
+
+/** Where a jump to `event` must land: the id of the thread ROOT whose
+ *  panel shows the event, or undefined when the event lives in the main
+ *  timeline (jump there as usual). Only wire-shape thread replies
+ *  (Gate S) route to a panel - thread roots and plain replies to a root
+ *  are dual-homed into the main timeline and jump there. The self-guard
+ *  drops a malformed event that relates to itself, which would otherwise
+ *  open a panel "rooted" on the reply. */
+export function threadJumpTarget(event: MatrixEvent): string | undefined {
+	if (!isThreadReply(event)) return undefined;
+	const rootId = event.threadRootId;
+	if (!rootId || rootId === event.getId()) return undefined;
+	return rootId;
 }

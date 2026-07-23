@@ -37,6 +37,10 @@ function makeEvent(init: FakeEventInit): MatrixEvent {
 				relates.event_id &&
 				(relType ? relates.rel_type === relType : true)
 			),
+		// Mirrors the SDK getter: a wire m.thread relation yields its
+		// event_id (threadJumpTarget only reads it behind isThreadReply).
+		threadRootId:
+			relates?.rel_type === "m.thread" ? relates.event_id : undefined,
 	} as unknown as MatrixEvent;
 }
 
@@ -123,7 +127,7 @@ describe("projectEvent", () => {
 		expect(projectEvent(room, ev)).not.toBeNull();
 	});
 
-	it("rejects thread replies (m.thread relations live in the thread)", () => {
+	it("includes thread replies, carrying the root id for panel routing", () => {
 		const room = makeRoom({});
 		const ev = makeEvent({
 			content: {
@@ -137,7 +141,18 @@ describe("projectEvent", () => {
 				},
 			},
 		});
-		expect(projectEvent(room, ev)).toBeNull();
+		const hit = projectEvent(room, ev);
+		expect(hit?.body).toBe("in a thread");
+		expect(hit?.threadRootId).toBe("$root:test");
+	});
+
+	it("leaves threadRootId unset for main-timeline events", () => {
+		const room = makeRoom({});
+		const hit = projectEvent(
+			room,
+			makeEvent({ content: { msgtype: "m.text", body: "plain" } }),
+		);
+		expect(hit?.threadRootId).toBeUndefined();
 	});
 
 	it("rejects events without an id", () => {
@@ -235,21 +250,27 @@ describe("matchesAllTokens", () => {
 interface FakeRoomOpts {
 	encrypted?: boolean;
 	timelineEvents?: MatrixEvent[];
+	/** Per-thread cached events, keyed nowhere - each entry becomes one
+	 *  Thread whose timelineSet serves these events. */
+	threadEvents?: MatrixEvent[][];
 }
 
 function makeHookRoom(roomId: string, opts: FakeRoomOpts = {}): Room {
 	const events = opts.timelineEvents ?? [];
+	const setOf = (evs: MatrixEvent[]) => ({
+		getTimelines: () => [
+			{
+				getEvents: () => evs,
+			},
+		],
+	});
 	return {
 		roomId,
 		hasEncryptionStateEvent: () => opts.encrypted ?? false,
 		getMember: () => null,
-		getUnfilteredTimelineSet: () => ({
-			getTimelines: () => [
-				{
-					getEvents: () => events,
-				},
-			],
-		}),
+		getUnfilteredTimelineSet: () => setOf(events),
+		getThreads: () =>
+			(opts.threadEvents ?? []).map((evs) => ({ timelineSet: setOf(evs) })),
 	} as unknown as Room;
 }
 
@@ -349,6 +370,59 @@ describe("useRoomSearch (hook)", () => {
 					resolveTest();
 				});
 			});
+		});
+	});
+
+	it("local search covers cached thread replies and dedupes dual-homed roots", () => {
+		createRoot((dispose) => {
+			const root = makeEvent({
+				id: "$root:test",
+				content: { msgtype: "m.text", body: "needle root" },
+				ts: 1000,
+			});
+			const reply = makeEvent({
+				id: "$reply:test",
+				content: {
+					msgtype: "m.text",
+					body: "needle reply",
+					"m.relates_to": { rel_type: "m.thread", event_id: "$root:test" },
+				},
+				ts: 3000,
+			});
+			const plain = makeEvent({
+				id: "$plain:test",
+				content: { msgtype: "m.text", body: "needle plain" },
+				ts: 2000,
+			});
+			const rooms = new Map<string, Room>();
+			rooms.set(
+				"!enc:test",
+				makeHookRoom("!enc:test", {
+					encrypted: true,
+					timelineEvents: [root, plain],
+					// The SDK dual-homes the root into its thread's timeline too.
+					threadEvents: [[root, reply]],
+				}),
+			);
+			const client = makeHookClient(rooms);
+			const hook = useRoomSearch(
+				client as unknown as Parameters<typeof useRoomSearch>[0],
+				() => "!enc:test",
+			);
+			hook.submit("needle");
+			// Newest-first across sets; the root appears exactly once; only
+			// the thread reply carries a panel-routing root id.
+			expect(hook.results().map((h) => h.eventId)).toEqual([
+				"$reply:test",
+				"$plain:test",
+				"$root:test",
+			]);
+			expect(hook.results().map((h) => h.threadRootId)).toEqual([
+				"$root:test",
+				undefined,
+				undefined,
+			]);
+			dispose();
 		});
 	});
 

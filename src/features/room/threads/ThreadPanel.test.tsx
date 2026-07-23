@@ -13,10 +13,26 @@ vi.mock("solid-refresh", () => ({
 }));
 
 // The panel's job under test is its own chrome (header, close, Esc,
-// resource states); the timeline machinery has its own suites.
+// resource states) plus prop forwarding; the timeline machinery has its
+// own suites. The mock mirrors the forwarded jump contract: it exposes
+// the current request and a way to report it handled.
 vi.mock("../timeline/TimelineView", () => ({
-	TimelineView: (props: { thread?: { threadId: string } }) => (
-		<div data-testid="thread-timeline">{props.thread?.threadId}</div>
+	TimelineView: (props: {
+		thread?: { threadId: string };
+		jumpRequest?: () => string | null;
+		onJumpHandled?: () => void;
+	}) => (
+		<div data-testid="thread-timeline" data-jump={props.jumpRequest?.() ?? ""}>
+			{props.thread?.threadId}
+			{/* Text-free so sibling assertions on textContent still see only
+				the thread id. */}
+			<button
+				type="button"
+				data-testid="consume-jump"
+				aria-label="consume jump"
+				onClick={() => props.onJumpHandled?.()}
+			/>
+		</div>
 	),
 }));
 
@@ -137,6 +153,30 @@ describe("ThreadPanel", () => {
 		await screen.findByTestId("thread-timeline");
 		expect(screen.getByTestId("thread-timeline").textContent).toBe("$b");
 		expect(document.activeElement).toBe(screen.getByLabelText("Thread"));
+	});
+
+	it("forwards the jump request to the thread timeline and its handled callback", async () => {
+		getRoom.mockReturnValue(
+			roomWithThread({ id: "$root", initialEventsFetched: true }),
+		);
+		const [jump, setJump] = createSignal<string | null>("$reply");
+		const onJumpHandled = vi.fn(() => setJump(null));
+		render(() => (
+			<ThreadPanel
+				roomId="!r:hs"
+				threadId="$root"
+				onClose={() => {}}
+				jumpRequest={jump}
+				onJumpHandled={onJumpHandled}
+			/>
+		));
+		// The target set before the thread resolved still reaches the
+		// timeline once it mounts (the pin/search -> panel handoff).
+		const tl = await screen.findByTestId("thread-timeline");
+		expect(tl.getAttribute("data-jump")).toBe("$reply");
+		fireEvent.click(screen.getByTestId("consume-jump"));
+		expect(onJumpHandled).toHaveBeenCalledTimes(1);
+		expect(tl.getAttribute("data-jump")).toBe("");
 	});
 
 	it("closes via the button and via Escape", async () => {
