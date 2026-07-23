@@ -1,4 +1,5 @@
 import {
+	type EventTimelineSet,
 	type IRoomEventFilter,
 	type ISearchResults,
 	type MatrixClient,
@@ -14,7 +15,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
-import { isThreadReply } from "../../../lib/threadEvents";
+import { threadJumpTarget } from "../../../lib/threadEvents";
 
 /**
  * Server search returns results across all the user's rooms by default;
@@ -31,6 +32,10 @@ export interface SearchHit {
 	senderName: string;
 	timestamp: number;
 	body: string;
+	/** Set when the hit is a thread reply: the root whose panel shows it.
+	 *  Jumps carry it so the room pane opens the thread panel instead of
+	 *  anchoring the main timeline (issue #334). */
+	threadRootId?: string;
 }
 
 export type SearchStatus = "idle" | "searching" | "results" | "empty" | "error";
@@ -86,10 +91,10 @@ export function projectEvent(
 	const content = (ev.getContent?.() ?? {}) as Record<string, unknown>;
 	const relates = content["m.relates_to"] as { rel_type?: string } | undefined;
 	if (relates?.rel_type === "m.replace") return null;
-	// Thread replies aren't part of the main timeline; searching them is
-	// thread-panel territory (issue #303). Belt-and-suspenders: the search
-	// scan iterates the unfiltered set, which no longer contains them.
-	if (isThreadReply(ev)) return null;
+	// Thread replies aren't part of the main timeline, but they ARE
+	// searchable: carry the root id so the jump opens the thread panel
+	// instead of the (doomed) main-timeline anchor (issue #334).
+	const threadRootId = threadJumpTarget(ev);
 	const body = typeof content.body === "string" ? content.body : "";
 	if (!body) return null;
 	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
@@ -104,20 +109,32 @@ export function projectEvent(
 		senderName: member?.name ?? sender,
 		timestamp: ev.getTs?.() ?? 0,
 		body,
+		threadRootId,
 	};
 }
 
 function collectLocalEvents(room: Room): MatrixEvent[] {
 	const out: MatrixEvent[] = [];
 	const seen = new Set<string>();
-	for (const tl of room.getUnfilteredTimelineSet().getTimelines()) {
-		for (const ev of tl.getEvents()) {
-			if (ev.getType() !== "m.room.message") continue;
-			const id = ev.getId();
-			if (!id || seen.has(id)) continue;
-			seen.add(id);
-			out.push(ev);
+	const collect = (set: EventTimelineSet): void => {
+		for (const tl of set.getTimelines()) {
+			for (const ev of tl.getEvents()) {
+				if (ev.getType() !== "m.room.message") continue;
+				const id = ev.getId();
+				if (!id || seen.has(id)) continue;
+				seen.add(id);
+				out.push(ev);
+			}
 		}
+	};
+	collect(room.getUnfilteredTimelineSet());
+	// Cached thread replies are searchable too (their hits carry
+	// threadRootId, so a jump opens the panel). Only threads the SDK has
+	// materialized are covered - consistent with local mode's "messages
+	// already loaded in this client" caveat. The `seen` set dedupes thread
+	// roots, which the SDK dual-homes into both timelines.
+	for (const thread of room.getThreads()) {
+		collect(thread.timelineSet);
 	}
 	return out;
 }
@@ -213,6 +230,10 @@ export function useRoomSearch(
 			if (!proj) continue;
 			if (matchesAllTokens(proj.body, needles)) hits.push(proj);
 		}
+		// collectLocalEvents concatenates the main set's timelines and then
+		// each thread's, so reverse iteration alone no longer yields
+		// newest-first. Stable-sort by timestamp to interleave them.
+		hits.sort((a, b) => b.timestamp - a.timestamp);
 		if (myGen !== gen) return;
 		localAll = hits;
 		localCursor = Math.min(LOCAL_PAGE_SIZE, hits.length);

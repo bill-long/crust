@@ -182,13 +182,41 @@ const RoomPane: Component<{
 	// Open thread (root event id) shown in the right-hand panel; closed on
 	// room switch so a thread never renders under another room's header.
 	const [openThreadId, setOpenThreadId] = createSignal<string | null>(null);
+	// Jump target INSIDE the open thread's panel (a pin/search hit that is
+	// a thread reply). Consumed by the panel's TimelineView; cleared via
+	// onJumpHandled, and replaced on every open so a stale target can't
+	// fire inside a thread opened later for another reason.
+	const [threadJumpRequest, setThreadJumpRequest] = createSignal<string | null>(
+		null,
+	);
+
+	const openThreadPanel = (threadId: string, jumpToEventId?: string): void => {
+		setThreadJumpRequest(jumpToEventId ?? null);
+		setOpenThreadId(threadId);
+	};
+	const closeThreadPanel = (): void => {
+		setOpenThreadId(null);
+		setThreadJumpRequest(null);
+	};
+
 	createEffect(
 		on(
 			() => props.rid,
-			() => setOpenThreadId(null),
+			() => closeThreadPanel(),
 			{ defer: true },
 		),
 	);
+
+	/** Route a pin/search jump: a thread reply opens its root's panel and
+	 *  scrolls it there (the reply isn't in the main timeline); anything
+	 *  else anchors the main timeline as before (issue #334). */
+	const requestJump = (eventId: string, threadRootId?: string): void => {
+		if (threadRootId) {
+			openThreadPanel(threadRootId, eventId);
+		} else {
+			setJumpRequest(eventId);
+		}
+	};
 
 	// Deep-link: a notification click navigates to `?thread=<rootId>` to open
 	// that thread's panel. Consume the param (open the panel, then strip it so
@@ -199,7 +227,7 @@ const RoomPane: Component<{
 	createEffect(() => {
 		const requested = searchParams.thread;
 		if (typeof requested === "string" && requested) {
-			setOpenThreadId(requested);
+			openThreadPanel(requested);
 			setSearchParams({ thread: undefined }, { replace: true });
 		}
 	});
@@ -362,12 +390,12 @@ const RoomPane: Component<{
 						client={props.client}
 						pins={pins}
 						shortcodeLookup={shortcodeLookup()}
-						onJump={(eventId) => setJumpRequest(eventId)}
+						onJump={requestJump}
 					/>
 					<SearchPanel
 						client={props.client}
 						roomId={props.rid}
-						onJump={(eventId) => setJumpRequest(eventId)}
+						onJump={requestJump}
 					/>
 					<button
 						type="button"
@@ -458,7 +486,7 @@ const RoomPane: Component<{
 						jumpRequest={jumpRequest}
 						onJumpHandled={() => setJumpRequest(null)}
 						packs={packs}
-						onOpenThread={(threadId) => setOpenThreadId(threadId)}
+						onOpenThread={(threadId) => openThreadPanel(threadId)}
 					/>
 				</div>
 				{/* Desktop: inline thread panel column. Keyed so switching to
@@ -492,7 +520,9 @@ const RoomPane: Component<{
 								<ThreadPanel
 									roomId={props.rid}
 									threadId={threadId}
-									onClose={() => setOpenThreadId(null)}
+									onClose={closeThreadPanel}
+									jumpRequest={threadJumpRequest}
+									onJumpHandled={() => setThreadJumpRequest(null)}
 								/>
 							</div>
 						</>
@@ -525,7 +555,7 @@ const RoomPane: Component<{
 			<Dialog
 				open={isMobile() && openThreadId() !== null}
 				onOpenChange={(open) => {
-					if (!open) setOpenThreadId(null);
+					if (!open) closeThreadPanel();
 				}}
 			>
 				<Dialog.Portal>
@@ -539,7 +569,9 @@ const RoomPane: Component<{
 								<ThreadPanel
 									roomId={props.rid}
 									threadId={threadId}
-									onClose={() => setOpenThreadId(null)}
+									onClose={closeThreadPanel}
+									jumpRequest={threadJumpRequest}
+									onJumpHandled={() => setThreadJumpRequest(null)}
 								/>
 							)}
 						</Show>

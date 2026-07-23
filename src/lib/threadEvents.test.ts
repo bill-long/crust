@@ -1,6 +1,10 @@
 import { MatrixEvent } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
-import { isThreadReply, isThreadTimelineData } from "./threadEvents";
+import {
+	isThreadReply,
+	isThreadTimelineData,
+	threadJumpTarget,
+} from "./threadEvents";
 
 /** Real SDK events so the gates exercise the real isRelation predicate
  *  (wire content, state-event exclusion, single latched relation name). */
@@ -131,6 +135,61 @@ describe("isThreadReply", () => {
 			"m.relates_to": { rel_type: "m.thread" },
 		});
 		expect(isThreadReply(ev)).toBe(false);
+	});
+});
+
+describe("threadJumpTarget", () => {
+	it("returns the root id for a wire m.thread reply", () => {
+		const ev = realEvent({
+			msgtype: "m.text",
+			body: "in thread",
+			"m.relates_to": {
+				rel_type: "m.thread",
+				event_id: "$root",
+				is_falling_back: true,
+				"m.in_reply_to": { event_id: "$root" },
+			},
+		});
+		expect(threadJumpTarget(ev)).toBe("$root");
+	});
+
+	it("is undefined for a thread ROOT (dual-homed in the main timeline)", () => {
+		const root = realEvent(
+			{ msgtype: "m.text", body: "root" },
+			{
+				unsigned: {
+					"m.relations": {
+						"m.thread": {
+							count: 2,
+							current_user_participated: false,
+							latest_event: null,
+						},
+					},
+				},
+			},
+		);
+		expect(threadJumpTarget(root)).toBeUndefined();
+	});
+
+	it("is undefined for a plain reply, even one attached to a thread", () => {
+		const replyToRoot = realEvent({
+			msgtype: "m.text",
+			body: "reply to a thread root",
+			"m.relates_to": { "m.in_reply_to": { event_id: "$root" } },
+		});
+		replyToRoot.setThreadId("$root");
+		expect(threadJumpTarget(replyToRoot)).toBeUndefined();
+	});
+
+	it("is undefined for a malformed self-relating event", () => {
+		// realEvent's event_id is "$self"; relating to itself must not open
+		// a panel "rooted" on the reply.
+		const ev = realEvent({
+			msgtype: "m.text",
+			body: "narcissist",
+			"m.relates_to": { rel_type: "m.thread", event_id: "$self" },
+		});
+		expect(threadJumpTarget(ev)).toBeUndefined();
 	});
 });
 

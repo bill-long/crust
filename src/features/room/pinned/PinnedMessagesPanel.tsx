@@ -12,6 +12,7 @@ import {
 	Show,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
+import { threadJumpTarget } from "../../../lib/threadEvents";
 import type { ResolvedEmote } from "../../emoji/types";
 import { PinIcon } from "./PinIcon";
 import { PinnedMessageRow } from "./PinnedMessageRow";
@@ -24,7 +25,9 @@ const PinnedMessagesPanel: Component<{
 	client: MatrixClient;
 	pins: UsePinnedEvents;
 	shortcodeLookup: Map<string, ResolvedEmote>;
-	onJump: (eventId: string) => void;
+	/** `threadRootId` is set when the pinned event is a thread reply - the
+	 *  jump must open that root's thread panel, not the main timeline. */
+	onJump: (eventId: string, threadRootId?: string) => void;
 }> = (props) => {
 	const [open, setOpen] = createSignal(false);
 	const panelId = createUniqueId();
@@ -160,7 +163,13 @@ const PinnedMessagesPanel: Component<{
 	};
 
 	const handleJump = (eventId: string): void => {
-		props.onJump(eventId);
+		// A pinned thread reply can't be reached in the main timeline; hand
+		// the root along so the jump opens the thread panel (issue #334).
+		// Whenever the row rendered content the event is in the SDK cache
+		// (resolveSync hit or the row's getEventTimeline fetch); if it
+		// isn't, fall back to a plain main-timeline jump.
+		const ev = room()?.findEventById(eventId);
+		props.onJump(eventId, ev ? threadJumpTarget(ev) : undefined);
 		setOpen(false);
 	};
 

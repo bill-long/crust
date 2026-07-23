@@ -52,7 +52,9 @@ const SearchIcon: Component<{ class?: string }> = (props) => (
 const SearchPanel: Component<{
 	client: MatrixClient;
 	roomId: string;
-	onJump: (eventId: string) => void;
+	/** `threadRootId` is set when the hit is a thread reply - the jump
+	 *  must open that root's thread panel, not the main timeline. */
+	onJump: (eventId: string, threadRootId?: string) => void;
 }> = (props) => {
 	const search = useRoomSearch(props.client, () => props.roomId);
 	const [open, setOpen] = createSignal(false);
@@ -146,7 +148,7 @@ const SearchPanel: Component<{
 		const hit = results()[index];
 		if (!hit) return;
 		closeViaJump = true;
-		props.onJump(hit.eventId);
+		props.onJump(hit.eventId, hit.threadRootId);
 		setOpen(false);
 	};
 

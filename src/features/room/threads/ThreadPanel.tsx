@@ -23,6 +23,12 @@ export const ThreadPanel: Component<{
 	roomId: string;
 	threadId: string;
 	onClose: () => void;
+	/** Scroll target inside this thread (a pin/search jump to a reply,
+	 *  issue #334). Forwarded to the thread-scoped TimelineView, whose
+	 *  mount-time jump effect anchors the window on it - so a target set
+	 *  before the thread resolves still lands once the timeline mounts. */
+	jumpRequest?: () => string | null;
+	onJumpHandled?: () => void;
 }> = (props) => {
 	const { client } = useClient();
 	const [thread] = createResource(
@@ -115,6 +121,8 @@ export const ThreadPanel: Component<{
 						<TimelineView
 							roomId={props.roomId}
 							thread={{ threadId: props.threadId }}
+							jumpRequest={props.jumpRequest}
+							onJumpHandled={props.onJumpHandled}
 						/>
 					</div>
 				</Match>
