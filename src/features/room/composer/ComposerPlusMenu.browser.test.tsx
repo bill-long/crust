@@ -113,6 +113,24 @@ describe("Composer plus menu", () => {
 		});
 	});
 
+	it("does not steal focus when the menu is dismissed by clicking the textarea", async () => {
+		const { container, getByLabelText } = renderComposer();
+		const trigger = getByLabelText("Message actions");
+		await userEvent.click(trigger);
+		expect(menuItems()).not.toEqual([]);
+		// Dismiss by clicking a focusable element: focus has legitimately
+		// moved on, so the close must NOT yank it back to the trigger (the
+		// onCloseAutoFocus handler defers to Kobalte's pre-applied
+		// preventDefault in this case).
+		const textarea = container.querySelector("textarea");
+		if (!textarea) throw new Error("no textarea");
+		await userEvent.click(textarea);
+		await vi.waitFor(() => {
+			expect(menuItems()).toEqual([]);
+			expect(document.activeElement).toBe(textarea);
+		});
+	});
+
 	it("returns focus to the textarea after closing a poll dialog opened from the menu", async () => {
 		const { container, getByLabelText } = renderComposer();
 		await userEvent.click(getByLabelText("Message actions"));
