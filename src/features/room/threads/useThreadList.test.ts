@@ -435,9 +435,9 @@ describe("useThreadList", () => {
 			room.__emit(ThreadEvent.NewReply, b);
 			await flushMicrotasks();
 			expect(list.rows().find((r) => r.rootId === "$a")).toBe(rowA);
-			expect(list.rows().find((r) => r.rootId === "$b")?.summary.replyCount).toBe(
-				4,
-			);
+			expect(
+				list.rows().find((r) => r.rootId === "$b")?.summary.replyCount,
+			).toBe(4);
 			dispose();
 		});
 	});

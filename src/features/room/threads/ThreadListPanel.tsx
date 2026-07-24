@@ -3,13 +3,13 @@ import type { MatrixClient } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
-	createMemo,
 	createSignal,
 	createUniqueId,
 	For,
 	on,
 	onCleanup,
 	Show,
+	untrack,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { formatRelativeTime, useMinuteTick } from "../../../lib/relativeTime";
@@ -43,19 +43,35 @@ const ThreadListPanel: Component<{
 	let scrollRef: HTMLDivElement | undefined;
 	const rowEls = new Map<string, HTMLElement>();
 
-	createEffect(
-		on([open, rows], ([isOpen, listRows]) => {
-			if (!isOpen) return;
-			if (listRows.length === 0) {
-				setFocusedId(null);
-				return;
-			}
-			const current = focusedId();
-			if (!current || !listRows.some((r) => r.rootId === current)) {
-				setFocusedId(listRows[0]?.rootId ?? null);
-			}
-		}),
-	);
+	// Seed/repair the roving-focus target. A plain effect that reads the
+	// row IDS - a tracked store read; `on([open, rows], ...)` would only
+	// see the store PROXY and never re-run when rows arrive or leave - so
+	// late-loaded rows seed focusedId and a removed focused row falls back
+	// to the top.
+	createEffect(() => {
+		if (!open()) return;
+		const ids = rows().map((r) => r.rootId);
+		if (ids.length === 0) {
+			setFocusedId(null);
+			return;
+		}
+		const current = untrack(focusedId);
+		if (current && ids.includes(current)) return;
+		const next = ids[0] ?? null;
+		setFocusedId(next);
+		// The removal case (current set, row gone): the focused button just
+		// unmounted, dropping focus to <body> where the panel's key handler
+		// can't hear it. Hand focus to the new target - never stealing a
+		// deliberate move elsewhere.
+		if (current && next) {
+			queueMicrotask(() => {
+				if (!open() || untrack(focusedId) !== next) return;
+				const active = document.activeElement;
+				if (active && active !== document.body) return;
+				rowEls.get(next)?.focus();
+			});
+		}
+	});
 
 	// Focus the current row a frame after opening (content mounts in a
 	// portal); cancel on close/unmount so a late frame can't focus a

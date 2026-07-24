@@ -122,6 +122,24 @@ describe("ThreadListPanel", () => {
 		expect(panelRoot()?.textContent).toContain("No threads in this room.");
 	});
 
+	it("seeds the roving-focus target when rows arrive after opening", async () => {
+		// Regression: rows() returns a store proxy, so a dep that never
+		// reads INTO the array tracks nothing - rows loaded after open then
+		// never seeded focusedId and no row was tabbable.
+		const { getByLabelText } = setup((room) => {
+			room.fetchRoomThreads.mockImplementation(async () => {
+				room.threads.set("$late", fakeThread("$late"));
+			});
+		});
+		await userEvent.click(getByLabelText("Threads"));
+		await new Promise((r) => setTimeout(r, 0));
+		const row = [...(panelRoot()?.querySelectorAll("button") ?? [])].find((b) =>
+			b.textContent?.includes("root of $late"),
+		);
+		if (!row) throw new Error("late row did not render");
+		expect(row.tabIndex).toBe(0);
+	});
+
 	it("moves roving focus between rows with the arrow keys", async () => {
 		const { getByLabelText } = setup((room) => {
 			room.threads.set("$a", fakeThread("$a", { latestTs: 9000 }));
