@@ -108,7 +108,9 @@ describe("ThreadListPanel", () => {
 			.mockImplementation(() => {});
 		await userEvent.click(getByLabelText("Threads"));
 		const panel = panelRoot();
-		expect(panel?.textContent).toContain("This server can't list all threads");
+		expect(panel?.textContent).toContain(
+			"Couldn't fetch the room's full thread list",
+		);
 		// The session's known threads still render behind the notice.
 		expect(panel?.textContent).toContain("root of $known");
 		consoleError.mockRestore();

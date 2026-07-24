@@ -107,7 +107,16 @@ describe("rootSnippet", () => {
 			...base,
 			getContent: () => ({ msgtype: "m.image" }),
 		} as unknown as MatrixEvent;
-		expect(rootSnippet(ev)).toBe("(message)");
+		expect(rootSnippet(ev)).toBe("Message");
+	});
+
+	it("labels redacted roots instead of leaking leftover content", () => {
+		const ev = {
+			...base,
+			isRedacted: () => true,
+			getContent: () => ({ msgtype: "m.text", body: "stale" }),
+		} as unknown as MatrixEvent;
+		expect(rootSnippet(ev)).toBe("Message deleted");
 	});
 });
 
@@ -274,6 +283,150 @@ describe("useThreadList", () => {
 			await flushMicrotasks();
 			expect(roomB.fetchRoomThreads).toHaveBeenCalledOnce();
 			expect(list.rows().map((r) => r.rootId)).toEqual(["$b"]);
+			dispose();
+		});
+	});
+
+	it("ignores a fetch that settles after the room switched (generation guard)", async () => {
+		await createRoot(async (dispose) => {
+			const roomA = createMockRoom("!a:example.com");
+			const roomB = createMockRoom("!b:example.com");
+			roomA.threads.set("$a", fakeThread({ id: "$a" }));
+			roomB.threads.set("$b", fakeThread({ id: "$b" }));
+			let resolveA: (() => void) | undefined;
+			roomA.fetchRoomThreads.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						resolveA = resolve;
+					}),
+			);
+			// Room A's list set would report more pages - the stale resolve
+			// must not leak that into room B's state.
+			roomA.threadsTimelineSets = [
+				{ getLiveTimeline: () => ({ getPaginationToken: () => "tok" }) },
+			];
+			const client = createMockClient(
+				new Map([
+					["!a:example.com", roomA],
+					["!b:example.com", roomB],
+				]),
+			);
+			const [open] = createSignal(true);
+			const [rid, setRid] = createSignal("!a:example.com");
+			const list = useThreadList(client as unknown as MatrixClient, rid, open);
+			await flushMicrotasks();
+			// A's fetch still pending: rows already painted from known threads.
+			expect(list.status()).toBe("loading");
+			expect(list.rows().map((r) => r.rootId)).toEqual(["$a"]);
+
+			setRid("!b:example.com");
+			await flushMicrotasks();
+			expect(list.rows().map((r) => r.rootId)).toEqual(["$b"]);
+
+			resolveA?.();
+			await flushMicrotasks();
+			// The stale resolution must not flip status/hasMore or rebuild
+			// against room A.
+			expect(list.rows().map((r) => r.rootId)).toEqual(["$b"]);
+			expect(list.hasMore()).toBe(false);
+			dispose();
+		});
+	});
+
+	it("paints known threads immediately while the server fetch is in flight", async () => {
+		await createRoot(async (dispose) => {
+			const { room, client } = setup();
+			room.threads.set("$known", fakeThread({ id: "$known" }));
+			room.fetchRoomThreads.mockImplementation(
+				() => new Promise<void>(() => {}),
+			);
+			const [open, setOpen] = createSignal(false);
+			const list = useThreadList(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				open,
+			);
+			setOpen(true);
+			await flushMicrotasks();
+			expect(list.status()).toBe("loading");
+			expect(list.rows().map((r) => r.rootId)).toEqual(["$known"]);
+			dispose();
+		});
+	});
+
+	it("retries a degraded load on the next open", async () => {
+		await createRoot(async (dispose) => {
+			const { room, client } = setup();
+			room.threads.set("$t", fakeThread({ id: "$t" }));
+			room.fetchRoomThreads.mockRejectedValueOnce(new Error("blip"));
+			const consoleError = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => {});
+			const [open, setOpen] = createSignal(true);
+			const list = useThreadList(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				open,
+			);
+			await flushMicrotasks();
+			expect(list.degraded()).toBe(true);
+
+			// Close resets a degraded list to idle; reopening refetches, and
+			// this time the (transient) failure is gone.
+			setOpen(false);
+			setOpen(true);
+			await flushMicrotasks();
+			expect(room.fetchRoomThreads).toHaveBeenCalledTimes(2);
+			expect(list.degraded()).toBe(false);
+			consoleError.mockRestore();
+			dispose();
+		});
+	});
+
+	it("defers rebuilds while closed and applies them once on reopen", async () => {
+		await createRoot(async (dispose) => {
+			const { room, client } = setup();
+			const a = fakeThread({ id: "$a", latestTs: 2000 });
+			room.threads.set("$a", a);
+			const [open, setOpen] = createSignal(true);
+			const list = useThreadList(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				open,
+			);
+			await flushMicrotasks();
+			expect(list.rows()[0]?.summary.replyCount).toBe(1);
+
+			// Replies land while the popover is closed: no rebuild yet.
+			setOpen(false);
+			a.length = 5;
+			room.__emit(ThreadEvent.NewReply, a);
+			await flushMicrotasks();
+			expect(list.rows()[0]?.summary.replyCount).toBe(1);
+
+			setOpen(true);
+			await flushMicrotasks();
+			expect(list.rows()[0]?.summary.replyCount).toBe(5);
+			dispose();
+		});
+	});
+
+	it("ignores room-level unread changes (no threadId) entirely", async () => {
+		await createRoot(async (dispose) => {
+			const { room, client } = setup();
+			room.threads.set("$t", fakeThread({ id: "$t" }));
+			const [open, setOpen] = createSignal(true);
+			const list = useThreadList(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				open,
+			);
+			await flushMicrotasks();
+			const before = list.rows();
+			room.__emit(RoomEvent.UnreadNotifications, { total: 7 });
+			await flushMicrotasks();
+			// Same array identity: no rebuild ran for a room-level change.
+			expect(list.rows()).toBe(before);
 			dispose();
 		});
 	});

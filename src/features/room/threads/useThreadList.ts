@@ -17,7 +17,6 @@ import {
 /** Plain-data row for the room-wide thread list (issue #331). */
 export interface ThreadListRow {
 	rootId: string;
-	senderId: string;
 	senderName: string;
 	/** One-line description of the root message (body, poll question, or a
 	 *  typed placeholder). */
@@ -46,17 +45,20 @@ export interface UseThreadList {
 /** Page size for thread-list backfill, matching Element's panel. */
 const PAGE_SIZE = 20;
 
-/** One-line snippet for a thread root. Poll roots show their question
+/** @internal Exported for tests.
+ *  One-line snippet for a thread root. Poll roots show their question
  *  (the body of a poll start is a text fallback for non-poll clients and
- *  often stale); encrypted-but-undecrypted roots get a fixed label. */
+ *  often stale); redacted and encrypted-but-undecrypted roots get fixed
+ *  labels. */
 export function rootSnippet(event: MatrixEvent): string {
+	if (event.isRedacted?.()) return "Message deleted";
 	if (event.isDecryptionFailure?.()) return "Encrypted message";
 	const poll = parsePollStart(event);
 	if (poll) return poll.question;
 	const content = event.getContent?.() ?? {};
 	const body = typeof content.body === "string" ? content.body.trim() : "";
 	if (body) return body;
-	return "(message)";
+	return "Message";
 }
 
 /**
@@ -104,7 +106,6 @@ export function useThreadList(
 		const member = senderId ? room.getMember(senderId) : null;
 		return {
 			rootId: thread.id,
-			senderId,
 			senderName: member?.name ?? senderId,
 			snippet: rootSnippet(root),
 			summary,
@@ -132,6 +133,10 @@ export function useThreadList(
 
 	async function ensureLoaded(room: Room, myGen: number): Promise<void> {
 		setStatus("loading");
+		// Paint what the client already knows in the same frame (AGENTS.md:
+		// no spinner for synchronously available content); the server fetch
+		// below only augments the set with roots this client hasn't seen.
+		rebuild(room);
 		try {
 			await room.createThreadsTimelineSets();
 			await room.fetchRoomThreads();
@@ -151,9 +156,17 @@ export function useThreadList(
 	}
 
 	// Coalesce burst emissions (Update+NewReply fire per incoming reply)
-	// into one rebuild per microtask.
+	// into one rebuild per microtask. While the popover is CLOSED, emissions
+	// only mark the list stale - the reopen effect rebuilds once - so a busy
+	// room doesn't pay a projection+sort per reply for an invisible list.
 	let rebuildQueued = false;
+	let staleWhileClosed = false;
 	function queueRebuild(room: Room): void {
+		if (status() === "idle") return;
+		if (!open()) {
+			staleWhileClosed = true;
+			return;
+		}
 		if (rebuildQueued) return;
 		rebuildQueued = true;
 		const myGen = gen;
@@ -172,6 +185,7 @@ export function useThreadList(
 		on(roomId, (rid, prevRid) => {
 			if (prevRid !== undefined) {
 				gen++;
+				staleWhileClosed = false;
 				setStatus("idle");
 				setRows([]);
 				setDegraded(false);
@@ -181,25 +195,47 @@ export function useThreadList(
 			const room = client.getRoom(rid);
 			if (!room) return;
 			const onThreadChange = (): void => queueRebuild(room);
+			// Room-level unread changes (threadId undefined) don't affect any
+			// row; only thread-scoped ones re-project (threadWatcher's rule).
+			const onUnread = (_counts: unknown, threadId?: string): void => {
+				if (threadId) queueRebuild(room);
+			};
 			room.on(ThreadEvent.Update, onThreadChange);
 			room.on(ThreadEvent.NewReply, onThreadChange);
 			room.on(ThreadEvent.Delete, onThreadChange);
-			room.on(RoomEvent.UnreadNotifications, onThreadChange);
+			room.on(RoomEvent.UnreadNotifications, onUnread);
 			onCleanup(() => {
 				room.off(ThreadEvent.Update, onThreadChange);
 				room.off(ThreadEvent.NewReply, onThreadChange);
 				room.off(ThreadEvent.Delete, onThreadChange);
-				room.off(RoomEvent.UnreadNotifications, onThreadChange);
+				room.off(RoomEvent.UnreadNotifications, onUnread);
 			});
 		}),
 	);
 
-	// Lazy load on first open per room (status resets to idle on switch).
+	// A degraded load retries on the NEXT open: a network blip must not
+	// brand the server "can't list threads" for the rest of the session.
+	createEffect(
+		on(open, (isOpen, wasOpen) => {
+			if (wasOpen && !isOpen && degraded()) setStatus("idle");
+		}),
+	);
+
+	// Lazy load on first open per room (status resets to idle on switch and
+	// after a degraded close); reopening a loaded list applies any updates
+	// that arrived while it was closed.
 	createEffect(() => {
-		if (!open() || status() !== "idle") return;
+		if (!open()) return;
 		const room = client.getRoom(roomId());
 		if (!room) return;
-		void ensureLoaded(room, gen);
+		if (status() === "idle") {
+			void ensureLoaded(room, gen);
+			return;
+		}
+		if (staleWhileClosed) {
+			staleWhileClosed = false;
+			rebuild(room);
+		}
 	});
 
 	onCleanup(() => {

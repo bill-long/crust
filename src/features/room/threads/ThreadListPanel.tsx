@@ -32,7 +32,7 @@ const ThreadListPanel: Component<{
 	const [open, setOpen] = createSignal(false);
 	const panelId = createUniqueId();
 	const list = useThreadList(props.client, () => props.roomId, open);
-	const rows = createMemo(() => list.rows());
+	const rows = list.rows;
 	const tick = useMinuteTick();
 
 	// Roving focus, tracked by rootId (stable across list reorders), same
@@ -116,9 +116,18 @@ const ThreadListPanel: Component<{
 
 	const onKeyDown = (e: KeyboardEvent): void => {
 		if (rows().length === 0) return;
-		// Rows are buttons; Enter/Space activate natively. Skip other
-		// interactive descendants (the Load more button) so arrows don't
-		// steal their behavior.
+		// Rows are buttons, so Enter/Space activate natively and the arrows
+		// only move the roving focus. Skip OTHER interactive descendants
+		// (the Load more button) so arrows don't yank focus off them - the
+		// rows themselves are buttons too, hence the data-attribute check
+		// rather than the pinned panel's bare closest("button") guard.
+		const target = e.target as HTMLElement | null;
+		if (
+			target?.closest("button, a, input, textarea, select") &&
+			!target.closest("[data-thread-row]")
+		) {
+			return;
+		}
 		switch (e.key) {
 			case "ArrowDown":
 				e.preventDefault();
@@ -147,6 +156,7 @@ const ThreadListPanel: Component<{
 	const renderRow = (row: ThreadListRow) => (
 		<button
 			type="button"
+			data-thread-row
 			ref={(el) => {
 				rowEls.set(row.rootId, el);
 				onCleanup(() => {
@@ -157,12 +167,10 @@ const ThreadListPanel: Component<{
 			onFocus={() => setFocusedId(row.rootId)}
 			onClick={() => handleOpenThread(row.rootId)}
 			class="flex w-full flex-col gap-0.5 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-			aria-label={`Open thread started by ${row.senderName}: ${
-				row.summary.replyCount === 1
-					? "1 reply"
-					: `${row.summary.replyCount} replies`
-			}${row.summary.unreadCount > 0 ? ", unread" : ""}`}
 		>
+			{/* No aria-label: the visible content (sender, time, snippet, reply
+				count, sr-only unread) IS the accessible name - an authored label
+				would erase the snippet for screen readers. */}
 			<span class="flex w-full items-baseline gap-2">
 				<span class="min-w-0 truncate text-xs font-semibold text-text-emphasis">
 					{row.senderName}
@@ -185,6 +193,7 @@ const ThreadListPanel: Component<{
 						class="h-1.5 w-1.5 shrink-0 rounded-full bg-indicator"
 						aria-hidden="true"
 					/>
+					<span class="sr-only">unread</span>
 				</Show>
 			</span>
 		</button>
@@ -236,68 +245,72 @@ const ThreadListPanel: Component<{
 						<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
 							Threads
 						</span>
+						{/* Count hidden while more pages exist: a partial count
+							presented like a total would mislead. */}
 						<span class="text-[11px] text-text-disabled">
-							{rows().length > 0 ? rows().length : ""}
+							{rows().length > 0 && !list.hasMore() ? rows().length : ""}
 						</span>
 					</div>
 					<Show when={list.degraded()}>
 						<div class="rounded border border-border-subtle bg-surface-2/60 px-2 py-1 text-[11px] text-text-muted">
-							This server can't list all threads. Showing threads seen in this
-							session.
+							Couldn't fetch the room's full thread list. Showing threads seen
+							in this session.
 						</div>
 					</Show>
+					{/* Known threads paint immediately even while the server fetch
+						runs; the placeholders only cover the genuinely empty cases. */}
 					<Show
-						when={list.status() === "ready"}
+						when={rows().length > 0}
 						fallback={
-							<div class="px-2 py-6 text-center text-xs text-text-muted">
-								Loading threads…
-							</div>
-						}
-					>
-						<Show
-							when={rows().length > 0}
-							fallback={
-								<div class="px-2 py-6 text-center text-xs text-text-muted">
-									No threads in this room.
-								</div>
-							}
-						>
 							<Show
-								when={rows().length > VIRTUALIZE_THRESHOLD}
+								when={list.status() === "ready"}
 								fallback={
-									<div class="flex max-h-[420px] flex-col gap-1 overflow-y-auto">
-										<For each={rows()}>{(row) => renderRow(row)}</For>
+									<div class="px-2 py-6 text-center text-xs text-text-muted">
+										Loading threads…
 									</div>
 								}
 							>
-								<div
-									ref={(el) => {
-										scrollRef = el;
-									}}
-									class="max-h-[420px] overflow-y-auto"
-								>
-									<Virtualizer
-										ref={(h) => {
-											virtRef = h ?? undefined;
-										}}
-										scrollRef={scrollRef}
-										data={rows()}
-									>
-										{(row) => <div class="py-0.5">{renderRow(row)}</div>}
-									</Virtualizer>
+								<div class="px-2 py-6 text-center text-xs text-text-muted">
+									No threads in this room.
 								</div>
 							</Show>
-						</Show>
-						<Show when={list.hasMore()}>
-							<button
-								type="button"
-								onClick={() => list.loadMore()}
-								disabled={list.loadingMore()}
-								class="self-center rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						}
+					>
+						<Show
+							when={rows().length > VIRTUALIZE_THRESHOLD}
+							fallback={
+								<div class="flex max-h-[420px] flex-col gap-1 overflow-y-auto">
+									<For each={rows()}>{(row) => renderRow(row)}</For>
+								</div>
+							}
+						>
+							<div
+								ref={(el) => {
+									scrollRef = el;
+								}}
+								class="max-h-[420px] overflow-y-auto"
 							>
-								{list.loadingMore() ? "Loading…" : "Load more"}
-							</button>
+								<Virtualizer
+									ref={(h) => {
+										virtRef = h ?? undefined;
+									}}
+									scrollRef={scrollRef}
+									data={rows()}
+								>
+									{(row) => <div class="py-0.5">{renderRow(row)}</div>}
+								</Virtualizer>
+							</div>
 						</Show>
+					</Show>
+					<Show when={list.hasMore()}>
+						<button
+							type="button"
+							onClick={() => list.loadMore()}
+							disabled={list.loadingMore()}
+							class="self-center rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						>
+							{list.loadingMore() ? "Loading…" : "Load more"}
+						</button>
 					</Show>
 				</Popover.Content>
 			</Popover.Portal>
