@@ -17,8 +17,9 @@ services:
       - ./config.json:/usr/share/nginx/html/config.json:ro
     ports:
       # Bind to loopback only; TLS terminated by the host's nginx,
-      # which proxies /crust/ -> 127.0.0.1:8083/.
-      - "127.0.0.1:8083:80"
+      # which proxies /crust/ -> 127.0.0.1:8083/. Container port is 8080:
+      # the image runs nginx-unprivileged (non-root), which can't bind 80.
+      - "127.0.0.1:8083:8080"
 
   # Optional push gateway for background Web Push notifications.
   # Only started when the "push" profile is enabled, e.g.
