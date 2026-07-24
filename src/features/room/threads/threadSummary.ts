@@ -1,5 +1,7 @@
 import {
 	type MatrixEvent,
+	NotificationCountType,
+	type Room,
 	THREAD_RELATION_TYPE,
 	type Thread,
 } from "matrix-js-sdk";
@@ -39,6 +41,19 @@ export interface ThreadSummary {
 	 * that bundled them, and upgrade automatically once a Thread exists.
 	 */
 	provisional: boolean;
+}
+
+/** Per-thread unread count from the room's counter (populated by
+ *  `unread_thread_notifications` in /sync, MSC3771/3773). Optional call:
+ *  mock rooms and servers without that support read 0. Shared by the
+ *  timeline chip watcher and the room-wide thread list. */
+export function threadUnreadCount(room: Room, threadId: string): number {
+	return (
+		room.getThreadUnreadNotificationCount?.(
+			threadId,
+			NotificationCountType.Total,
+		) ?? 0
+	);
 }
 
 /** Shape of the server-aggregated m.thread bundle on a root event. */

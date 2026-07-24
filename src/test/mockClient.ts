@@ -295,6 +295,13 @@ export function createMockRoom(
 		polls: new Map<string, unknown>(),
 		threads: threadsMap,
 		getThread: (id: string): unknown => threadsMap.get(id) ?? null,
+		getThreads: (): unknown[] => Array.from(threadsMap.values()),
+		/** Thread-list fetch surface (issue #331). Overridable per test:
+		 *  reject fetchRoomThreads to exercise the degraded path, or set
+		 *  threadsTimelineSets[0] to expose a pagination token. */
+		createThreadsTimelineSets: vi.fn().mockResolvedValue(undefined),
+		fetchRoomThreads: vi.fn().mockResolvedValue(undefined),
+		threadsTimelineSets: [] as unknown[],
 		getThreadUnreadNotificationCount: (threadId: string, _type?: unknown) =>
 			threadUnread.get(threadId) ?? 0,
 		__setThreadUnread: (threadId: string, count: number) => {

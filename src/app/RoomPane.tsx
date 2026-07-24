@@ -28,6 +28,7 @@ import { PinnedMessagesPanel } from "../features/room/pinned/PinnedMessagesPanel
 import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { SearchPanel } from "../features/room/search/SearchPanel";
+import { ThreadListPanel } from "../features/room/threads/ThreadListPanel";
 import { ThreadPanel } from "../features/room/threads/ThreadPanel";
 import { createThreadPanelState } from "../features/room/threads/threadPanelState";
 import { TimelineView } from "../features/room/timeline/TimelineView";
@@ -372,6 +373,11 @@ const RoomPane: Component<{
 								? "Failed to copy room link"
 								: ""}
 					</span>
+					<ThreadListPanel
+						client={props.client}
+						roomId={props.rid}
+						onOpenThread={(rootId) => threadPanel.open(rootId)}
+					/>
 					<PinnedMessagesPanel
 						client={props.client}
 						pins={pins}

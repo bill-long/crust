@@ -1,9 +1,10 @@
 import type { MatrixEvent, Room, Thread } from "matrix-js-sdk";
-import { NotificationCountType, RoomEvent, ThreadEvent } from "matrix-js-sdk";
+import { RoomEvent, ThreadEvent } from "matrix-js-sdk";
 import {
 	buildProvisionalThreadSummary,
 	buildThreadSummaryFromThread,
 	type ThreadSummary,
+	threadUnreadCount,
 } from "./threadSummary";
 
 /**
@@ -65,24 +66,12 @@ export function createThreadWatcher(
 		);
 	}
 
-	/** Per-thread unread count from the room's counter, folded into the
-	 *  summary so the chip can show an unread dot. Optional call: mock rooms
-	 *  and servers without MSC3771/3773 support read 0. */
-	function unreadFor(room: Room, threadId: string): number {
-		return (
-			room.getThreadUnreadNotificationCount?.(
-				threadId,
-				NotificationCountType.Total,
-			) ?? 0
-		);
-	}
-
 	function recompute(thread: Thread): void {
 		if (!projectedEvents.has(thread.id)) return;
 		const room = watchedRoom;
 		const summary = buildThreadSummaryFromThread(
 			thread,
-			room ? unreadFor(room, thread.id) : 0,
+			room ? threadUnreadCount(room, thread.id) : 0,
 		);
 		const cached = summaries.get(thread.id);
 		if (summary) {
@@ -117,7 +106,7 @@ export function createThreadWatcher(
 		if (!threadId || !projectedEvents.has(threadId)) return;
 		const cached = summaries.get(threadId);
 		if (!cached) return;
-		const unread = watchedRoom ? unreadFor(watchedRoom, threadId) : 0;
+		const unread = watchedRoom ? threadUnreadCount(watchedRoom, threadId) : 0;
 		if (unread === cached.unreadCount) return;
 		summaries.set(threadId, { ...cached, unreadCount: unread });
 		onUpdate(threadId);
@@ -163,7 +152,7 @@ export function createThreadWatcher(
 			// Optional call: mock rooms without thread support read as "no
 			// Thread object", falling through to the provisional bundle.
 			const thread = room.getThread?.(rootId) ?? null;
-			const unread = unreadFor(room, rootId);
+			const unread = threadUnreadCount(room, rootId);
 			// A live Thread that hasn't fetched its initial events yet reads
 			// length 0; fall back to the root's bundle so an existing chip
 			// doesn't blink out during the fetch. Once fetched, the Thread
