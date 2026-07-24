@@ -153,6 +153,27 @@ const ThreadListPanel: Component<{
 		setOpen(false);
 	};
 
+	// When the final page loads, the still-focused "Load more" button
+	// unmounts and focus would fall to <body>, killing keyboard navigation
+	// (the pins panel's unpin-restore precedent). Hand focus to the current
+	// row - but only when it actually dropped, never stealing from a
+	// control the user moved to meanwhile.
+	createEffect(
+		on(
+			() => list.hasMore(),
+			(has, had) => {
+				if (!had || has || !open()) return;
+				queueMicrotask(() => {
+					if (!open()) return;
+					const active = document.activeElement;
+					if (active && active !== document.body) return;
+					const id = focusedId() ?? rows()[0]?.rootId;
+					if (id) rowEls.get(id)?.focus();
+				});
+			},
+		),
+	);
+
 	const renderRow = (row: ThreadListRow) => (
 		<button
 			type="button"

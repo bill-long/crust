@@ -7,6 +7,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { parsePollStart } from "../poll/pollSnapshot";
 import {
 	buildThreadSummaryFromThread,
@@ -83,7 +84,13 @@ export function useThreadList(
 	open: Accessor<boolean>,
 ): UseThreadList {
 	const [status, setStatus] = createSignal<ThreadListStatus>("idle");
-	const [rows, setRows] = createSignal<ThreadListRow[]>([]);
+	// Store + keyed reconcile (the useTimeline pattern): unchanged rows keep
+	// their object identity across rebuilds, so the panel's reference-keyed
+	// <For> preserves their DOM. A plain signal of fresh arrays would
+	// remount EVERY row button on any live update, dropping keyboard focus
+	// to <body> mid-navigation whenever a reply lands anywhere in the room.
+	const [rowsStore, setRowsStore] = createStore<ThreadListRow[]>([]);
+	const rows: Accessor<ThreadListRow[]> = () => rowsStore;
 	const [degraded, setDegraded] = createSignal(false);
 	const [hasMore, setHasMore] = createSignal(false);
 	const [loadingMore, setLoadingMore] = createSignal(false);
@@ -120,7 +127,7 @@ export function useThreadList(
 			if (row) next.push(row);
 		}
 		next.sort((a, b) => b.lastActivityTs - a.lastActivityTs);
-		setRows(next);
+		setRowsStore(reconcile(next, { key: "rootId", merge: false }));
 	}
 
 	/** Pagination availability: the All-threads list set's backward token.
@@ -187,7 +194,7 @@ export function useThreadList(
 				gen++;
 				staleWhileClosed = false;
 				setStatus("idle");
-				setRows([]);
+				setRowsStore(reconcile([], { key: "rootId", merge: false }));
 				setDegraded(false);
 				setHasMore(false);
 				setLoadingMore(false);

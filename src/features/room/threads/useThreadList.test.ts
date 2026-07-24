@@ -411,22 +411,56 @@ describe("useThreadList", () => {
 		});
 	});
 
-	it("ignores room-level unread changes (no threadId) entirely", async () => {
+	it("preserves untouched rows' identity across rebuilds (keyed reconcile)", async () => {
 		await createRoot(async (dispose) => {
 			const { room, client } = setup();
-			room.threads.set("$t", fakeThread({ id: "$t" }));
-			const [open, setOpen] = createSignal(true);
+			const a = fakeThread({ id: "$a", latestTs: 9000 });
+			const b = fakeThread({ id: "$b", latestTs: 2000 });
+			room.threads.set("$a", a);
+			room.threads.set("$b", b);
+			const [open] = createSignal(true);
 			const list = useThreadList(
 				client as unknown as MatrixClient,
 				() => ROOM_ID,
 				open,
 			);
 			await flushMicrotasks();
-			const before = list.rows();
+			const rowA = list.rows()[0];
+			expect(rowA?.rootId).toBe("$a");
+
+			// A reply lands in $b only: $a's row must keep its object
+			// identity, or the panel's reference-keyed <For> would remount
+			// every row button and drop keyboard focus to <body>.
+			b.length = 4;
+			room.__emit(ThreadEvent.NewReply, b);
+			await flushMicrotasks();
+			expect(list.rows().find((r) => r.rootId === "$a")).toBe(rowA);
+			expect(list.rows().find((r) => r.rootId === "$b")?.summary.replyCount).toBe(
+				4,
+			);
+			dispose();
+		});
+	});
+
+	it("skips even the coalesced rebuild for room-level unread changes (no threadId)", async () => {
+		await createRoot(async (dispose) => {
+			const { room, client } = setup();
+			const t = fakeThread({ id: "$t" });
+			room.threads.set("$t", t);
+			const [open] = createSignal(true);
+			const list = useThreadList(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				open,
+			);
+			await flushMicrotasks();
+			// Mutate the thread WITHOUT an accompanying thread event, then
+			// fire a room-level unread change: if the hook rebuilt, the new
+			// count would leak through - it must not.
+			t.length = 9;
 			room.__emit(RoomEvent.UnreadNotifications, { total: 7 });
 			await flushMicrotasks();
-			// Same array identity: no rebuild ran for a room-level change.
-			expect(list.rows()).toBe(before);
+			expect(list.rows()[0]?.summary.replyCount).toBe(1);
 			dispose();
 		});
 	});
