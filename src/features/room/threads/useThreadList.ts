@@ -8,6 +8,7 @@ import {
 	onCleanup,
 } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { reportError } from "../../../lib/reportError";
 import { parsePollStart } from "../poll/pollSnapshot";
 import {
 	buildThreadSummaryFromThread,
@@ -152,9 +153,11 @@ export function useThreadList(
 			setHasMore(readHasMore(room));
 		} catch (e) {
 			if (myGen !== gen) return;
-			// No user-facing toast: the panel renders its own degraded notice
-			// (the error-handling convention's "own failure surface" case).
-			console.error(`Thread list fetch failed in ${room.roomId}:`, e);
+			// No userMessage: the panel renders its own degraded notice (the
+			// error-handling convention's "own failure surface" case).
+			reportError(e, {
+				logLabel: `Thread list fetch failed in ${room.roomId}`,
+			});
 			setDegraded(true);
 			setHasMore(false);
 		}
@@ -267,8 +270,11 @@ export function useThreadList(
 			})
 			.catch((e: unknown) => {
 				if (myGen !== gen) return;
-				// Leave hasMore set so the user can retry the button.
-				console.error(`Thread list pagination failed in ${room.roomId}:`, e);
+				// Leave hasMore set so the user can retry the button; no
+				// userMessage - the button itself is the failure surface.
+				reportError(e, {
+					logLabel: `Thread list pagination failed in ${room.roomId}`,
+				});
 			})
 			.finally(() => {
 				if (myGen === gen) setLoadingMore(false);
