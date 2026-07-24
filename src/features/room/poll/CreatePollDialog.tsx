@@ -28,6 +28,9 @@ const MIN_ANSWERS = 2;
 interface CreatePollDialogProps {
 	client: MatrixClient;
 	roomId: string;
+	/** Thread scope: the poll start is sent into this thread via the SDK's
+	 *  thread-aware overload (issue #332). Absent for the main composer. */
+	threadRootId?: string;
 	open: () => boolean;
 	onClose: () => void;
 }
@@ -69,8 +72,12 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 	/** roomId captured at dialog-open time: the composer is one reused
 	 *  instance across room switches, so props.roomId at submit time could
 	 *  point at a different room than the one the user composed the poll
-	 *  for (same race CreateRoomDialog snapshots spaceId against). */
+	 *  for (same race CreateRoomDialog snapshots spaceId against). The
+	 *  thread root is snapshotted with it - they identify one send target. */
 	const [snapshotRoomId, setSnapshotRoomId] = createSignal("");
+	const [snapshotThreadRootId, setSnapshotThreadRootId] = createSignal<
+		string | null
+	>(null);
 
 	const validAnswers = createMemo(() =>
 		answers.map((a) => a.text.trim()).filter((text) => text.length > 0),
@@ -118,6 +125,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 				previousFocus = document.activeElement as HTMLElement | null;
 				resetForm();
 				setSnapshotRoomId(props.roomId);
+				setSnapshotThreadRootId(props.threadRootId ?? null);
 				queueMicrotask(() => questionRef?.focus());
 			} else if (!isOpen && wasOpen) {
 				if (previousFocus && document.body.contains(previousFocus)) {
@@ -160,11 +168,11 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 		// NOT_SENT retry affordances. The console.error mirrors the
 		// reaction-send precedent. Sends to the open-time room snapshot.
 		const roomId = snapshotRoomId();
-		sendSerializedPollEvent(props.client, roomId, poll).catch(
-			(err: unknown) => {
-				console.error(`Poll create failed in ${roomId}:`, err);
-			},
-		);
+		sendSerializedPollEvent(props.client, roomId, poll, {
+			threadId: snapshotThreadRootId(),
+		}).catch((err: unknown) => {
+			console.error(`Poll create failed in ${roomId}:`, err);
+		});
 		props.onClose();
 	};
 

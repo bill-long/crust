@@ -1,7 +1,8 @@
 /**
- * Browser-mode tests for compose-into-threads (#303 3d): thread sends go
- * through the SDK's 3-arg overload (which builds the MSC3440 relation),
- * never a hand-built m.thread relation.
+ * Browser-mode tests for compose-into-threads (#303 3d, #332): thread
+ * message sends go through the SDK's 3-arg sendMessage overload and poll
+ * sends through the thread-aware sendEvent form (both build the MSC3440
+ * relation SDK-side), never a hand-built m.thread relation.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -156,7 +157,7 @@ describe("Composer thread sends", () => {
 		expect(relates?.event_id).toBe("$mine");
 	});
 
-	it("hides the poll/event menu items inside threads (polls-in-threads deferred)", async () => {
+	it("offers the poll item inside threads but keeps the event item hidden (#332)", async () => {
 		const client = makeClient();
 		const { getByLabelText } = render(() => (
 			<TestClientProvider client={client}>
@@ -170,7 +171,40 @@ describe("Composer thread sends", () => {
 			(el) => el.textContent?.trim(),
 		);
 		expect(items).toContain("Attach file");
-		expect(items).not.toContain("Create poll");
+		// Polls send into the thread via the SDK's thread overload.
+		expect(items).toContain("Create poll");
+		// Event cards stay main-timeline-only: their dialog picks a TARGET
+		// room, which has no coherent meaning inside a thread scope.
 		expect(items).not.toContain("Create event");
+	});
+
+	it("sends a poll created from the thread composer into the thread", async () => {
+		const client = makeClient();
+		const { getByLabelText } = render(() => (
+			<TestClientProvider client={client}>
+				<Composer roomId={ROOM} threadRootId="$root" packs={[]} />
+			</TestClientProvider>
+		));
+		await userEvent.click(getByLabelText("Message actions"));
+		const pollItem = [
+			...document.body.querySelectorAll('[role="menuitem"]'),
+		].find((el) => el.textContent?.trim() === "Create poll");
+		if (!pollItem) throw new Error("no poll item");
+		await userEvent.click(pollItem);
+		// The dialog renders in the composer subtree; its inputs are
+		// label-associated, so getByLabelText resolves them.
+		await userEvent.type(getByLabelText("Question"), "Best pizza?");
+		await userEvent.type(getByLabelText("Option 1"), "Margherita");
+		await userEvent.type(getByLabelText("Option 2"), "Pepperoni");
+		const submit = [...document.body.querySelectorAll("button")].find(
+			(el) => el.textContent?.trim() === "Create poll",
+		);
+		if (!submit) throw new Error("no submit button");
+		await userEvent.click(submit);
+		expect(client.sendEvent).toHaveBeenCalledTimes(1);
+		const [roomId, threadId, type] = client.sendEvent.mock.calls[0];
+		expect(roomId).toBe(ROOM);
+		expect(threadId).toBe("$root");
+		expect(type).toBe("org.matrix.msc3381.poll.start");
 	});
 });

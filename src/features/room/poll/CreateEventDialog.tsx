@@ -251,7 +251,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 		// Fire-and-forget send like a message: the local echo renders the
 		// card and failures surface through the timeline NOT_SENT retry.
 		sendSerializedPollEvent(props.client, roomId, poll, {
-			[EVENT_BLOCK_KEY]: buildEventBlock(blockInput),
+			extraContent: { [EVENT_BLOCK_KEY]: buildEventBlock(blockInput) },
 		}).catch((err: unknown) => {
 			console.error(`Event create failed in ${roomId}:`, err);
 		});
