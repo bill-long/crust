@@ -354,6 +354,47 @@ describe("useThreadList", () => {
 		});
 	});
 
+	it("returns to idle when the fetch fails after the panel already closed", async () => {
+		await createRoot(async (dispose) => {
+			const { room, client } = setup();
+			room.threads.set("$t", fakeThread({ id: "$t" }));
+			let rejectFetch: ((e: Error) => void) | undefined;
+			room.fetchRoomThreads.mockImplementationOnce(
+				() =>
+					new Promise<void>((_resolve, reject) => {
+						rejectFetch = reject;
+					}),
+			);
+			const consoleError = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => {});
+			const [open, setOpen] = createSignal(true);
+			const list = useThreadList(
+				client as unknown as MatrixClient,
+				() => ROOM_ID,
+				open,
+			);
+			await flushMicrotasks();
+			expect(list.status()).toBe("loading");
+
+			// Close while the fetch is in flight - the close edge sees
+			// degraded=false and can't schedule the retry - then fail.
+			setOpen(false);
+			rejectFetch?.(new Error("late failure"));
+			await flushMicrotasks();
+			expect(list.status()).toBe("idle");
+
+			// Reopen retries; this time the (default-resolved) fetch works.
+			setOpen(true);
+			await flushMicrotasks();
+			expect(room.fetchRoomThreads).toHaveBeenCalledTimes(2);
+			expect(list.degraded()).toBe(false);
+			expect(list.status()).toBe("ready");
+			consoleError.mockRestore();
+			dispose();
+		});
+	});
+
 	it("retries a degraded load on the next open", async () => {
 		await createRoot(async (dispose) => {
 			const { room, client } = setup();

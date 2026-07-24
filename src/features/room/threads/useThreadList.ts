@@ -160,6 +160,14 @@ export function useThreadList(
 			});
 			setDegraded(true);
 			setHasMore(false);
+			// Failure landing AFTER the panel closed: the close edge already
+			// fired (and saw degraded=false), so the retry-on-reopen effect
+			// can't reset us - return to idle here or the next open would be
+			// stuck with a stale degraded list and no refetch.
+			if (!open()) {
+				setStatus("idle");
+				return;
+			}
 		}
 		rebuild(room);
 		setStatus("ready");
