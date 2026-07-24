@@ -144,17 +144,21 @@ export function extractTauriCsps(json) {
  *  two dev policies cannot drift apart:
  *  - connect-src ws:: the Vite HMR websocket (`'self'` does not cover ws: -
  *    CSP's 'self' only matches the page scheme plus https:/wss: upgrades);
- *  - http loopback sources: the app deliberately supports plain-http
- *    loopback endpoints in development - an `http://localhost:8008`
- *    homeserver (src/features/auth/discovery.ts) and a loopback Element
- *    Call url (isSecureCallUrl in src/types/config.ts) - and the media/
- *    avatars such a homeserver serves. Production copies stay https-only. */
-const DEV_LOOPBACK = ["http://localhost:*", "http://127.0.0.1:*"];
+ *  - http:: the app deliberately supports plain-http loopback endpoints in
+ *    development - an `http://localhost:8008` homeserver
+ *    (src/features/auth/discovery.ts), a loopback Element Call url, and the
+ *    media/avatars such a homeserver serves. The scheme source is the only
+ *    CSP expression that can cover what the app accepts: isSecureCallUrl
+ *    (src/types/config.ts) allows localhost, the whole 127.0.0.0/8 range,
+ *    and [::1], and CSP's host-source grammar can express neither an IP
+ *    range nor an IPv6 literal. Dev-only; production copies stay
+ *    https-only. */
+const DEV_HTTP = ["http:"];
 export const DEV_EXTRA_SOURCES = {
-	"connect-src": ["ws:", ...DEV_LOOPBACK],
-	"frame-src": DEV_LOOPBACK,
-	"img-src": DEV_LOOPBACK,
-	"media-src": DEV_LOOPBACK,
+	"connect-src": ["ws:", ...DEV_HTTP],
+	"frame-src": DEV_HTTP,
+	"img-src": DEV_HTTP,
+	"media-src": DEV_HTTP,
 };
 
 /** Append the DEV_EXTRA_SOURCES to the CSP meta tag in an index.html
