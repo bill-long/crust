@@ -1,9 +1,10 @@
 # Deploying Crust
 
-Crust ships as a static SPA inside an `nginx:alpine` container. The image is
-published to GitHub Container Registry (GHCR) by the `publish` job in the CI
-workflow (`.github/workflows/ci.yml`) - after the tests pass - on every push
-to `main` and on `v*` tags.
+Crust ships as a static SPA inside an `nginx-unprivileged` container
+(non-root, listening on port 8080). The image is published to GitHub
+Container Registry (GHCR) by the `publish` job in the CI workflow
+(`.github/workflows/ci.yml`) - after the tests pass - on every push to
+`main` and on `v*` tags.
 
 Image: `ghcr.io/bill-long/crust`
 
@@ -68,6 +69,13 @@ certbot run is needed.
 cd ~/crust
 docker compose pull && docker compose up -d && docker image prune -f
 ```
+
+> **Upgrade note (nginx-unprivileged switch):** deployments created while the
+> image still ran root nginx on port 80 must edit their existing
+> `docker-compose.yml` before pulling: change the port mapping from
+> `"127.0.0.1:8083:80"` to `"127.0.0.1:8083:8080"`. The container now listens
+> on 8080 only, so the old mapping serves nothing (the host proxy will 502)
+> without any error from `docker compose`.
 
 Rollback to a known-good build by pinning a sha tag in `docker-compose.yml`:
 

@@ -100,7 +100,7 @@ proxy.
 
 ```bash
 docker build -t crust .
-docker run -p 8080:80 -v $(pwd)/config.json:/usr/share/nginx/html/config.json:ro crust
+docker run -p 8080:8080 -v $(pwd)/config.json:/usr/share/nginx/html/config.json:ro crust
 ```
 
 Mount your own `config.json` to set the default homeserver, enable GIF search,
@@ -127,7 +127,7 @@ location = /crust {
     return 301 /crust/;
 }
 location /crust/ {
-    proxy_pass http://crust:80/;
+    proxy_pass http://crust:8080/;
 }
 ```
 

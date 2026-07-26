@@ -1,8 +1,9 @@
 import tailwindcss from "@tailwindcss/vite";
 import { playwright } from "@vitest/browser-playwright";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import solid from "vite-plugin-solid";
+import { appendDevCspSources } from "./scripts/csp-lib.mjs";
 import { ICON_FILENAMES } from "./src/lib/iconRuntimeCache";
 
 // Public base path the app is served from. Override with VITE_BASE_PATH
@@ -44,6 +45,27 @@ for (const icon of manifestIcons) {
 	}
 }
 
+// Dev-only CSP tweak (issue #314): the baseline CSP meta tag in index.html is
+// the single source of truth and applies in dev too, but dev needs sources
+// production must not allow - the HMR websocket (ws:) and http loopback
+// endpoints (local homeserver / Element Call). The extras live in
+// DEV_EXTRA_SOURCES (scripts/csp-lib.mjs), shared with the tauri devCsp
+// check so browser dev and desktop dev cannot drift apart. Production
+// builds keep the untouched baseline.
+const devCsp = (): Plugin => ({
+	name: "crust:dev-csp",
+	apply: "serve",
+	transformIndexHtml(html) {
+		// Only the app shell carries the CSP meta tag; other served pages
+		// (e.g. Vitest browser-mode tester pages) pass through untouched.
+		// index.html losing the tag entirely is caught by check-csp-sync.
+		if (!/<meta\s[^>]*http-equiv="Content-Security-Policy"/i.test(html)) {
+			return html;
+		}
+		return appendDevCspSources(html);
+	},
+});
+
 export default defineConfig({
 	base: basePath,
 	build: {
@@ -74,6 +96,7 @@ export default defineConfig({
 		},
 	},
 	plugins: [
+		devCsp(),
 		solid(),
 		tailwindcss(),
 		VitePWA({
@@ -138,7 +161,9 @@ export default defineConfig({
 				test: {
 					name: "unit",
 					environment: "jsdom",
-					include: ["src/**/*.test.{ts,tsx}"],
+					// scripts/: node-side build/check helpers (e.g. csp-lib) keep
+					// their tests next to the code; they run fine under jsdom.
+					include: ["src/**/*.test.{ts,tsx}", "scripts/*.test.mjs"],
 					exclude: ["src/**/*.browser.test.{ts,tsx}"],
 				},
 			},
