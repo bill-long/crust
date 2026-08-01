@@ -41,7 +41,7 @@ export interface UserSettings {
 	notificationSound: boolean;
 	/**
 	 * Whether to play a cue when someone joins or leaves the voice channel
-	 * the user is currently in. One flag covers both directions — they are
+	 * the user is currently in. One flag covers both directions - they are
 	 * the same "who is in here with me" signal. Distinct from
 	 * `notificationSound`, which governs the incoming-message chime.
 	 */

@@ -26,16 +26,8 @@ import {
 } from "../../../../lib/screenShareQuality";
 import { userSettings } from "../../../../stores/settings";
 import { playPresenceCue } from "../../notificationSound";
-import { createPresenceCue } from "./callPresenceCue";
+import { createPresenceCue, type PresenceCueDeps } from "./callPresenceCue";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
-
-/**
- * `ConnectionState.Connected` as a bare string. livekit-client is only ever
- * imported dynamically here (app boot and opening the overlay must not pull
- * the chunk), so we can't reference the runtime enum at module scope. It is a
- * string enum, so the literal is the value.
- */
-const LIVEKIT_STATE_CONNECTED = "connected";
 
 export type LivekitConnectionStatus =
 	| "idle"
@@ -105,6 +97,13 @@ export interface UseLivekitRoomOptions {
 	 * loader returning a mock module.
 	 */
 	loadLivekit?: () => Promise<typeof import("livekit-client")>;
+	/**
+	 * Timer seam for the join/leave presence cue's coalescing window. Defaults
+	 * to `setTimeout`/`clearTimeout`. Tests inject a controllable pair so they
+	 * can drive the window without sleeping on real time (same idiom as
+	 * `loadLivekit`).
+	 */
+	presenceCueTimers?: Pick<PresenceCueDeps, "setTimer" | "clearTimer">;
 	/**
 	 * Phase 4 E2EE bridge context. When present and non-null, the hook
 	 * passes `e2eeOptions` to the LiveKit `Room` constructor and
@@ -305,17 +304,25 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// the loop and sets this true; concurrent triggers just rely on the loop
 	// re-reading `opts.micEnabled()` on its next iteration.
 	let micOpPending = false;
-	// Voice-channel join/leave cue (#431). Only wired here — all the gating
-	// rules (coalescing, arm-on-connect, reconnect suppression) live in
+	// `ConnectionState.Connected`, captured off the dynamically-imported module
+	// at connect time. livekit-client must not be imported at module scope
+	// (app boot and opening the overlay must not pull the chunk), and a
+	// hand-copied "connected" literal would silently stop matching if the SDK
+	// ever changed the value, disabling every cue with no error.
+	let livekitConnectedState: string | null = null;
+	// Voice-channel join/leave cue (#431). Only wired here - all the gating
+	// rules (coalescing, arm-on-connect, reconnect deferral) live in
 	// `callPresenceCue.ts`. `isLive` reads LiveKit's own connection state
 	// rather than our `status()`, because a LiveKit reconnect never surfaces
 	// as a `Disconnected` event and so leaves `status()` at "connected" while
 	// the SDK churns the whole roster.
 	const presenceCue = createPresenceCue({
 		roster: () => room?.remoteParticipants.keys() ?? [],
-		isLive: () => room?.state === LIVEKIT_STATE_CONNECTED,
+		isLive: () =>
+			livekitConnectedState !== null && room?.state === livekitConnectedState,
 		enabled: () => userSettings().voiceJoinLeaveSound,
 		play: playPresenceCue,
+		...opts.presenceCueTimers,
 	});
 	const attachments = new Map<string, AttachedAudio>();
 	// Mutable mirror of `videoTracks` for in-place updates; published as a
@@ -770,6 +777,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// Dynamic import: this is the moment LiveKit's chunk first loads.
 			const lk = await (opts.loadLivekit ?? (() => import("livekit-client")))();
 			if (disposed || myAttempt !== attempt) return;
+			// Now that the module is loaded, the presence cue's liveness check
+			// can compare against the SDK's own enum value instead of a copy.
+			livekitConnectedState = lk.ConnectionState.Connected;
 
 			const openIdToken = await opts.client.getOpenIdToken();
 			if (disposed || myAttempt !== attempt) return;
@@ -1045,10 +1055,18 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 			room = r;
 			binding = localBinding;
-			// Promoted to module-level — clear the pending handle so the
+			// Promoted to module-level - clear the pending handle so the
 			// catch path doesn't double-release a binding that `teardown`
 			// now owns.
 			pendingBinding = null;
+
+			// Seed the presence baseline from the roster we joined, so everyone
+			// already in the channel is known and silent from here on. Armed
+			// HERE, before the mic publish below, because acquiring the mic can
+			// block for seconds on a permission prompt - anyone who joined
+			// during that wait would otherwise be folded into the baseline and
+			// never announced.
+			presenceCue.arm();
 
 			// Honour the user's pre-call mic intent and serialize against the
 			// reconcile loop. Holding `micOpPending` for the publish call
@@ -1125,9 +1143,6 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			}
 
 			snapshotParticipants(r);
-			// Seed the presence baseline from the roster we just joined, so
-			// everyone already in the channel is known and silent from here on.
-			presenceCue.arm();
 			setStatus("connected");
 		} catch (e) {
 			// Compute the final user-facing error BEFORE any await so a fresh

@@ -7,7 +7,7 @@ import {
 
 /**
  * Drives `createPresenceCue` with a fully injected clock so every flush is
- * explicit. Nothing here touches an AudioContext — the synthesis lives in
+ * explicit. Nothing here touches an AudioContext - the synthesis lives in
  * `notificationSound.ts` and is only reached through the `play` spy.
  */
 function setup(overrides: Partial<PresenceCueDeps> = {}): {
@@ -171,10 +171,9 @@ describe("createPresenceCue", () => {
 
 		// Reconnected: the buffered ParticipantConnected events replay and the
 		// roster comes back unchanged. The baseline was never clobbered by the
-		// suppressed flush, so this diffs to nothing.
+		// deferred flush, so this diffs to nothing.
 		h.setRoster(["alice", "bob"]);
 		h.setLive(true);
-		h.cue.schedule();
 		h.tick();
 		expect(h.play).not.toHaveBeenCalled();
 	});
@@ -189,12 +188,55 @@ describe("createPresenceCue", () => {
 
 		h.setRoster(["alice", "bob"]);
 		h.setLive(true);
-		h.cue.schedule();
 		h.tick();
 		expect(h.play).toHaveBeenCalledExactlyOnceWith({
 			join: true,
 			leave: false,
 		});
+	});
+
+	it("keeps retrying while not live, and reconciles without a new event", () => {
+		h.setRoster(["alice"]);
+		h.cue.arm();
+
+		// Reconnect starts; the roster empties and liveness drops.
+		h.setRoster([]);
+		h.cue.schedule();
+		h.setLive(false);
+
+		// Several windows pass with the room still down. Each one must re-open
+		// so recovery doesn't depend on some unrelated later event.
+		for (let i = 0; i < 3; i++) {
+			h.tick();
+			expect(h.play).not.toHaveBeenCalled();
+			expect(h.pendingCount()).toBe(1);
+		}
+
+		// Alice actually hung up during the outage, so the post-reconnect
+		// roster is empty and no buffered join event replays for her. The
+		// retry is the only thing that can notice, and it must announce the
+		// leave now rather than attaching it to a much later unrelated join.
+		h.setLive(true);
+		h.tick();
+		expect(h.play).toHaveBeenCalledExactlyOnceWith({
+			join: false,
+			leave: true,
+		});
+	});
+
+	it("stops retrying once reset disarms it", () => {
+		h.setRoster(["alice"]);
+		h.cue.arm();
+		h.cue.schedule();
+		h.setLive(false);
+		h.tick();
+		expect(h.pendingCount()).toBe(1);
+
+		h.cue.reset();
+		expect(h.pendingCount()).toBe(0);
+		h.tick();
+		expect(h.pendingCount()).toBe(0);
+		expect(h.play).not.toHaveBeenCalled();
 	});
 
 	it("goes silent after reset and drops any pending window", () => {
@@ -231,7 +273,7 @@ describe("createPresenceCue", () => {
 		h.tick();
 
 		// Re-enabling mid-call must not announce the two who arrived while it
-		// was off — the baseline tracked them even though nothing sounded.
+		// was off - the baseline tracked them even though nothing sounded.
 		h.setEnabled(true);
 		h.cue.schedule();
 		h.tick();

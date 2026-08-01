@@ -3,7 +3,7 @@
  *
  * Decides WHEN a presence cue should sound; `notificationSound.ts` owns the
  * actual synthesis. Split out of `useLivekitRoom.ts` (already ~1,475 lines)
- * so the gating rules — which carry all the subtlety here — get their own
+ * so the gating rules - which carry all the subtlety here - get their own
  * focused test.
  *
  * The central decision: LiveKit participant events are treated purely as
@@ -13,25 +13,37 @@
  * rather than needing its own guard:
  *
  * - A burst of joins collapses into one flush, so one cue.
- * - The local participant is never in `remoteParticipants`, so self can't
- *   trigger a cue in either direction.
+ * - The local SESSION is never in `remoteParticipants`, so our own join and
+ *   hangup are silent. Note this is per-session, not per-user: LiveKit
+ *   identities are `<userId>:<deviceId>`, so a second device of the same
+ *   Matrix user IS an ordinary remote participant and does cue. That matches
+ *   the participant list, which shows that device as its own tile.
  * - Hangup disarms via `reset()` before `r.disconnect()` runs.
- * - Reconnect — the case that defeats per-event bookkeeping — is skipped by
+ * - Reconnect - the case that defeats per-event bookkeeping - is deferred by
  *   the liveness check, and crucially the known set is left UNTOUCHED while
- *   disarmed. livekit-client's `handleRestarting` emits
+ *   not live. livekit-client's `handleRestarting` emits
  *   `ParticipantDisconnected` for every remote participant before flipping
  *   to `Reconnecting`, then replays a buffered `ParticipantConnected` for
  *   each one after resuming. Because we never consumed those events, the
  *   post-reconnect roster diffs against the pre-reconnect set to nothing and
- *   the blip stays silent.
+ *   an unchanged roster stays silent.
+ *
+ * Deferred, NOT dropped: a flush that finds the room not live re-opens the
+ * window and keeps retrying until liveness returns (or `reset()` disarms).
+ * Without that retry the stale baseline would sit unreconciled until some
+ * unrelated later event happened to schedule a flush, so someone who left
+ * during the outage would go unannounced and then surface as a phantom leave
+ * cue attached to a much later, unrelated join.
  */
 
 /** Coalescing window (ms). Folds a group join/leave into a single cue, and
- *  is long enough for a reconnect's state transition to land before we look. */
+ *  is long enough for a reconnect's state transition to land before we look.
+ *  Doubles as the rate limit on cues, so the synthesis layer needs no
+ *  debounce of its own. */
 export const PRESENCE_COALESCE_MS = 250;
 
 export interface PresenceCueDeps {
-	/** Current remote participant identities. Excludes the local participant. */
+	/** Current remote participant identities. Excludes the local session. */
 	roster: () => Iterable<string>;
 	/** False while the room is absent, reconnecting, or otherwise not live. */
 	isLive: () => boolean;
@@ -72,12 +84,23 @@ export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
 		}
 	};
 
-	const flush = (): void => {
+	const openWindow = (): void => {
+		if (pending !== null) return; // window already open, let it run
+		pending = setTimer(flush, PRESENCE_COALESCE_MS);
+	};
+
+	function flush(): void {
 		pending = null;
-		// Disarmed or mid-reconnect: drop this delta and leave `known` alone.
-		// Re-reading the roster here would bake a transient empty/partial
-		// roster into the baseline and make the recovery diff spuriously loud.
-		if (!armed || !deps.isLive()) return;
+		if (!armed) return;
+		// Not live (mid-reconnect): leave `known` alone and try again next
+		// window. Re-reading the roster here would bake the transient empty
+		// roster into the baseline and make the recovery diff spuriously loud;
+		// simply returning would strand the baseline until an unrelated event
+		// re-opened a window. `reset()` ends this loop on teardown/drop.
+		if (!deps.isLive()) {
+			openWindow();
+			return;
+		}
 
 		const current = new Set(deps.roster());
 		let join = false;
@@ -102,7 +125,7 @@ export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
 		// it was off as one spurious cue.
 		if (!deps.enabled()) return;
 		deps.play({ join, leave });
-	};
+	}
 
 	return {
 		arm: (): void => {
@@ -112,8 +135,7 @@ export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
 		},
 		schedule: (): void => {
 			if (!armed) return;
-			if (pending !== null) return; // window already open — let it run
-			pending = setTimer(flush, PRESENCE_COALESCE_MS);
+			openWindow();
 		},
 		reset: (): void => {
 			cancelPending();
