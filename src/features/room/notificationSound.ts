@@ -10,6 +10,11 @@
 let ctx: AudioContext | null = null;
 let primed = false;
 let lastPlayTime = 0;
+// Separate debounce clock for the voice-channel presence cues. Sharing
+// `lastPlayTime` with the message chime would let an incoming message
+// swallow a join cue that lands in the same window (and vice versa) —
+// they are unrelated signals and must not suppress each other.
+let lastPresencePlayTime = 0;
 let primeHandler: (() => void) | null = null;
 
 /** Minimum gap between consecutive plays (ms). */
@@ -82,6 +87,7 @@ export function closeNotificationSound(): void {
 	}
 	primed = false;
 	lastPlayTime = 0;
+	lastPresencePlayTime = 0;
 }
 
 /**
@@ -106,6 +112,55 @@ export function playNotificationSound(): void {
 			playTone(c, 880, t, 0.08);
 			// Note 2 — C6 (1047 Hz), 100 ms, offset 60 ms
 			playTone(c, 1047, t + 0.06, 0.1);
+		} catch {
+			// Best-effort — silently ignore playback failures
+		}
+	})();
+}
+
+// Voice-channel presence cues. Deliberately lower and wider-intervalled than
+// the message chime (880 -> 1047) so a join can't be mistaken for a new
+// message: D5 -> A5 rising for join, the same pair falling for leave.
+const PRESENCE_LOW_HZ = 587;
+const PRESENCE_HIGH_HZ = 880;
+/** Gap between a join and a leave cue played from the same flush (seconds). */
+const PRESENCE_STAGGER_S = 0.25;
+
+/**
+ * Play the voice-channel presence cue(s) for one coalesced roster change:
+ * a rising two-note cue for joins, a falling one for leaves.
+ *
+ * Takes both directions in a single call because a join and a leave can land
+ * in the same coalescing window; they are then staggered rather than played
+ * on top of each other, and the debounce applies once to the pair instead of
+ * the second cue suppressing the first.
+ *
+ * All errors are caught internally — callers never need to handle rejections.
+ */
+export function playPresenceCue(opts: { join: boolean; leave: boolean }): void {
+	if (!opts.join && !opts.leave) return;
+
+	const now = performance.now();
+	if (now - lastPresencePlayTime < DEBOUNCE_MS) return;
+	lastPresencePlayTime = now;
+
+	void (async () => {
+		try {
+			if (!(await ensureRunning())) return;
+			// biome-ignore lint/style/noNonNullAssertion: ensureRunning() guarantees ctx is set
+			const c = ctx!;
+			const t = c.currentTime;
+
+			if (opts.join) {
+				playTone(c, PRESENCE_LOW_HZ, t, 0.08);
+				playTone(c, PRESENCE_HIGH_HZ, t + 0.06, 0.1);
+			}
+			// Offset only when a join already occupies the head of the window.
+			const leaveStart = t + (opts.join ? PRESENCE_STAGGER_S : 0);
+			if (opts.leave) {
+				playTone(c, PRESENCE_HIGH_HZ, leaveStart, 0.08);
+				playTone(c, PRESENCE_LOW_HZ, leaveStart + 0.06, 0.1);
+			}
 		} catch {
 			// Best-effort — silently ignore playback failures
 		}

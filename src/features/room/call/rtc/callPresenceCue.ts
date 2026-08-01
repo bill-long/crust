@@ -1,0 +1,124 @@
+/**
+ * Voice-channel join/leave cue gating (#431).
+ *
+ * Decides WHEN a presence cue should sound; `notificationSound.ts` owns the
+ * actual synthesis. Split out of `useLivekitRoom.ts` (already ~1,475 lines)
+ * so the gating rules — which carry all the subtlety here — get their own
+ * focused test.
+ *
+ * The central decision: LiveKit participant events are treated purely as
+ * "something changed, look again" triggers. Their payloads are ignored.
+ * At flush time we re-read the authoritative remote-participant roster and
+ * diff it against the last known set. Every edge case falls out of that
+ * rather than needing its own guard:
+ *
+ * - A burst of joins collapses into one flush, so one cue.
+ * - The local participant is never in `remoteParticipants`, so self can't
+ *   trigger a cue in either direction.
+ * - Hangup disarms via `reset()` before `r.disconnect()` runs.
+ * - Reconnect — the case that defeats per-event bookkeeping — is skipped by
+ *   the liveness check, and crucially the known set is left UNTOUCHED while
+ *   disarmed. livekit-client's `handleRestarting` emits
+ *   `ParticipantDisconnected` for every remote participant before flipping
+ *   to `Reconnecting`, then replays a buffered `ParticipantConnected` for
+ *   each one after resuming. Because we never consumed those events, the
+ *   post-reconnect roster diffs against the pre-reconnect set to nothing and
+ *   the blip stays silent.
+ */
+
+/** Coalescing window (ms). Folds a group join/leave into a single cue, and
+ *  is long enough for a reconnect's state transition to land before we look. */
+export const PRESENCE_COALESCE_MS = 250;
+
+export interface PresenceCueDeps {
+	/** Current remote participant identities. Excludes the local participant. */
+	roster: () => Iterable<string>;
+	/** False while the room is absent, reconnecting, or otherwise not live. */
+	isLive: () => boolean;
+	/** Whether the user has the cue enabled. */
+	enabled: () => boolean;
+	/** Plays the coalesced cue(s). */
+	play: (opts: { join: boolean; leave: boolean }) => void;
+	/** Injected for tests. */
+	setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+	clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
+}
+
+export interface PresenceCue {
+	/**
+	 * Seed the known roster and enable cues. Called once the connection is
+	 * established, so participants already present when we joined are known
+	 * from the start and never announce themselves.
+	 */
+	arm: () => void;
+	/** Note that the roster may have changed; starts the coalescing window. */
+	schedule: () => void;
+	/** Disarm and forget. Called from call-derived state reset. */
+	reset: () => void;
+}
+
+export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
+	const setTimer = deps.setTimer ?? setTimeout;
+	const clearTimer = deps.clearTimer ?? clearTimeout;
+
+	let known = new Set<string>();
+	let armed = false;
+	let pending: ReturnType<typeof setTimeout> | null = null;
+
+	const cancelPending = (): void => {
+		if (pending !== null) {
+			clearTimer(pending);
+			pending = null;
+		}
+	};
+
+	const flush = (): void => {
+		pending = null;
+		// Disarmed or mid-reconnect: drop this delta and leave `known` alone.
+		// Re-reading the roster here would bake a transient empty/partial
+		// roster into the baseline and make the recovery diff spuriously loud.
+		if (!armed || !deps.isLive()) return;
+
+		const current = new Set(deps.roster());
+		let join = false;
+		let leave = false;
+		for (const id of current) {
+			if (!known.has(id)) {
+				join = true;
+				break;
+			}
+		}
+		for (const id of known) {
+			if (!current.has(id)) {
+				leave = true;
+				break;
+			}
+		}
+		known = current;
+
+		if (!join && !leave) return;
+		// The roster is still adopted above when the setting is off, so
+		// re-enabling it mid-call doesn't replay everything that changed while
+		// it was off as one spurious cue.
+		if (!deps.enabled()) return;
+		deps.play({ join, leave });
+	};
+
+	return {
+		arm: (): void => {
+			cancelPending();
+			known = new Set(deps.roster());
+			armed = true;
+		},
+		schedule: (): void => {
+			if (!armed) return;
+			if (pending !== null) return; // window already open — let it run
+			pending = setTimer(flush, PRESENCE_COALESCE_MS);
+		},
+		reset: (): void => {
+			cancelPending();
+			known = new Set();
+			armed = false;
+		},
+	};
+}

@@ -24,7 +24,18 @@ import {
 	type ScreenShareQuality,
 	screenShareQualitySpec,
 } from "../../../../lib/screenShareQuality";
+import { userSettings } from "../../../../stores/settings";
+import { playPresenceCue } from "../../notificationSound";
+import { createPresenceCue } from "./callPresenceCue";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
+
+/**
+ * `ConnectionState.Connected` as a bare string. livekit-client is only ever
+ * imported dynamically here (app boot and opening the overlay must not pull
+ * the chunk), so we can't reference the runtime enum at module scope. It is a
+ * string enum, so the literal is the value.
+ */
+const LIVEKIT_STATE_CONNECTED = "connected";
 
 export type LivekitConnectionStatus =
 	| "idle"
@@ -294,6 +305,18 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// the loop and sets this true; concurrent triggers just rely on the loop
 	// re-reading `opts.micEnabled()` on its next iteration.
 	let micOpPending = false;
+	// Voice-channel join/leave cue (#431). Only wired here — all the gating
+	// rules (coalescing, arm-on-connect, reconnect suppression) live in
+	// `callPresenceCue.ts`. `isLive` reads LiveKit's own connection state
+	// rather than our `status()`, because a LiveKit reconnect never surfaces
+	// as a `Disconnected` event and so leaves `status()` at "connected" while
+	// the SDK churns the whole roster.
+	const presenceCue = createPresenceCue({
+		roster: () => room?.remoteParticipants.keys() ?? [],
+		isLive: () => room?.state === LIVEKIT_STATE_CONNECTED,
+		enabled: () => userSettings().voiceJoinLeaveSound,
+		play: playPresenceCue,
+	});
 	const attachments = new Map<string, AttachedAudio>();
 	// Mutable mirror of `videoTracks` for in-place updates; published as a
 	// fresh Map to the signal whenever the contents change so Solid sees the
@@ -672,6 +695,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		setParticipants([]);
 		setAudioBlocked(false);
 		participantCache.clear();
+		// Disarm BEFORE `teardown()` reaches `r.disconnect()` so the roster
+		// collapsing to empty can never sound a leave cue for our own hangup.
+		presenceCue.reset();
 		if (videoTrackMap.size > 0) {
 			videoTrackMap.clear();
 			publishVideoTracks();
@@ -814,7 +840,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			};
 			r.on(
 				lk.RoomEvent.ParticipantConnected,
-				ifLive(() => snapshotParticipants(r)),
+				ifLive(() => {
+					snapshotParticipants(r);
+					presenceCue.schedule();
+				}),
 			);
 			r.on(
 				lk.RoomEvent.ActiveSpeakersChanged,
@@ -954,6 +983,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 						publishScreenShareTracks();
 					}
 					snapshotParticipants(r);
+					presenceCue.schedule();
 				}),
 			);
 			r.on(
@@ -1095,6 +1125,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			}
 
 			snapshotParticipants(r);
+			// Seed the presence baseline from the roster we just joined, so
+			// everyone already in the channel is known and silent from here on.
+			presenceCue.arm();
 			setStatus("connected");
 		} catch (e) {
 			// Compute the final user-facing error BEFORE any await so a fresh
