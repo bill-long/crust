@@ -28,12 +28,14 @@
  *   post-reconnect roster diffs against the pre-reconnect set to nothing and
  *   an unchanged roster stays silent.
  *
- * Deferred, NOT dropped: a flush that finds the room not live re-opens the
- * window and keeps retrying until liveness returns (or `reset()` disarms).
- * Without that retry the stale baseline would sit unreconciled until some
- * unrelated later event happened to schedule a flush, so someone who left
- * during the outage would go unannounced and then surface as a phantom leave
- * cue attached to a much later, unrelated join.
+ * Deferred, NOT dropped: a flush that finds the room not live keeps the
+ * baseline and waits to be re-scheduled. Without that reconciliation the
+ * stale baseline would sit unreconciled until some unrelated later event
+ * happened to schedule a flush, so someone who left during the outage would
+ * go unannounced and then surface as a phantom leave cue attached to a much
+ * later, unrelated join. The caller is responsible for re-`schedule()`ing
+ * when liveness returns - it drives that off LiveKit's connection-state
+ * changes rather than having this module poll.
  */
 
 /** Coalescing window (ms). Folds a group join/leave into a single cue, and
@@ -92,15 +94,17 @@ export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
 	function flush(): void {
 		pending = null;
 		if (!armed) return;
-		// Not live (mid-reconnect): leave `known` alone and try again next
-		// window. Re-reading the roster here would bake the transient empty
-		// roster into the baseline and make the recovery diff spuriously loud;
-		// simply returning would strand the baseline until an unrelated event
-		// re-opened a window. `reset()` ends this loop on teardown/drop.
-		if (!deps.isLive()) {
-			openWindow();
-			return;
-		}
+		// Not live (mid-reconnect, or connected to the SFU but not yet a call
+		// the user can see): leave `known` alone and wait. Re-reading the
+		// roster here would bake the transient empty roster into the baseline
+		// and make the recovery diff spuriously loud.
+		//
+		// Recovery is EVENT-DRIVEN, not polled: the caller re-`schedule()`s on
+		// every LiveKit connection-state change and once the call reaches its
+		// connected status, so liveness returning always re-opens a window.
+		// Polling here instead would re-arm a 250 ms timer for the whole
+		// outage and would only terminate if something else disarmed us.
+		if (!deps.isLive()) return;
 
 		const current = new Set(deps.roster());
 		let join = false;

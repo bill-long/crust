@@ -1,10 +1,18 @@
 /**
  * Notification sound utility.
  *
- * Synthesises a short two-note chime via the Web Audio API so the app
- * needs no audio asset files.  The AudioContext singleton is created
- * lazily and primed on the first trusted user gesture to satisfy
- * browser autoplay policies.
+ * Synthesises every sound the app makes via the Web Audio API, so it needs
+ * no audio asset files: the incoming-message chime and the voice-channel
+ * join/leave presence cues. The AudioContext singleton is created lazily and
+ * primed on the first trusted user gesture to satisfy browser autoplay
+ * policies.
+ *
+ * All sounds go through `playNotes`, which owns the autoplay contract, the
+ * envelope and the failure handling, and which serialises playback so two
+ * sounds never overlap into a garbled, double-gain blur. Rate limiting is
+ * per-caller and deliberately NOT uniform: the message chime debounces on
+ * `DEBOUNCE_MS`, while the presence cues are undebounced here because their
+ * caller already coalesces (see `playPresenceCue`).
  */
 
 let ctx: AudioContext | null = null;
@@ -82,6 +90,9 @@ export function closeNotificationSound(): void {
 	}
 	primed = false;
 	lastPlayTime = 0;
+	// The next context starts its clock at 0, so a carried-over end time from
+	// the old one would sit far in the future and mute everything.
+	nextFreeTime = 0;
 }
 
 /** One scheduled note, relative to the moment playback starts. */
@@ -94,9 +105,27 @@ interface Note {
 }
 
 /**
- * Resume the context and schedule `notes` from the current playback time.
- * Shared by every sound this module emits so the autoplay contract, the
- * failure handling and the envelope live in exactly one place.
+ * AudioContext-clock time at which the last scheduled sound finishes. Used to
+ * serialise playback: a sound arriving while another is still sounding starts
+ * after it rather than on top of it. Without this, any caller whose rate limit
+ * is shorter than a sound's own duration produces overlapping oscillators at
+ * summed gain - and the presence cues, whose 250 ms coalescing window is
+ * shorter than a 410 ms join+leave pair, are exactly such a caller.
+ */
+let nextFreeTime = 0;
+
+/**
+ * Cap on how far ahead playback may be queued (seconds). Past this the roster
+ * is churning faster than the cues can sound, so the extra beeps convey
+ * nothing and are dropped rather than piling into an ever-lengthening queue
+ * that lags further behind reality with each one.
+ */
+const MAX_QUEUE_AHEAD_S = 1;
+
+/**
+ * Resume the context and schedule `notes`, starting after any sound still
+ * playing. Shared by every sound this module emits so the autoplay contract,
+ * the failure handling and the envelope live in exactly one place.
  *
  * All errors are caught internally - callers never need to handle rejections.
  */
@@ -106,8 +135,14 @@ function playNotes(notes: readonly Note[]): void {
 			if (!(await ensureRunning())) return;
 			// biome-ignore lint/style/noNonNullAssertion: ensureRunning() guarantees ctx is set
 			const c = ctx!;
-			const t = c.currentTime;
-			for (const n of notes) playTone(c, n.hz, t + n.at, n.dur);
+			const start = Math.max(c.currentTime, nextFreeTime);
+			if (start - c.currentTime > MAX_QUEUE_AHEAD_S) return;
+			let end = start;
+			for (const n of notes) {
+				playTone(c, n.hz, start + n.at, n.dur);
+				end = Math.max(end, start + n.at + n.dur);
+			}
+			nextFreeTime = end;
 		} catch {
 			// Best-effort - silently ignore playback failures
 		}
@@ -146,9 +181,11 @@ const PRESENCE_STAGGER_S = 0.25;
  * on top of each other.
  *
  * Deliberately undebounced. `callPresenceCue` already coalesces roster churn
- * into at most one call per PRESENCE_COALESCE_MS window and consumes the
- * delta as it does so, so a debounce here could only discard a cue that has
- * already been folded into the baseline and can never be replayed.
+ * into at most one call per coalescing window and consumes the delta as it
+ * does so, so a debounce here could only discard a cue that has already been
+ * folded into the baseline and can never be replayed. That window is shorter
+ * than a join+leave pair takes to sound, so overlap is prevented by
+ * `playNotes` serialising playback rather than by a rate limit here.
  */
 export function playPresenceCue(opts: { join: boolean; leave: boolean }): void {
 	const notes: Note[] = [];

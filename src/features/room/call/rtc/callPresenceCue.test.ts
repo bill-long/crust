@@ -174,6 +174,7 @@ describe("createPresenceCue", () => {
 		// deferred flush, so this diffs to nothing.
 		h.setRoster(["alice", "bob"]);
 		h.setLive(true);
+		h.cue.schedule();
 		h.tick();
 		expect(h.play).not.toHaveBeenCalled();
 	});
@@ -188,6 +189,7 @@ describe("createPresenceCue", () => {
 
 		h.setRoster(["alice", "bob"]);
 		h.setLive(true);
+		h.cue.schedule();
 		h.tick();
 		expect(h.play).toHaveBeenCalledExactlyOnceWith({
 			join: true,
@@ -195,7 +197,21 @@ describe("createPresenceCue", () => {
 		});
 	});
 
-	it("keeps retrying while not live, and reconciles without a new event", () => {
+	it("does not poll while not live", () => {
+		h.setRoster(["alice"]);
+		h.cue.arm();
+		h.cue.schedule();
+		h.setLive(false);
+		h.tick();
+
+		// A suppressed flush must NOT re-arm itself. Recovery is the caller's
+		// job (it re-schedules on connection-state changes); polling here
+		// would run a timer for the whole outage.
+		expect(h.pendingCount()).toBe(0);
+		expect(h.play).not.toHaveBeenCalled();
+	});
+
+	it("announces a departure that happened during an outage, once rescheduled", () => {
 		h.setRoster(["alice"]);
 		h.cue.arm();
 
@@ -203,40 +219,21 @@ describe("createPresenceCue", () => {
 		h.setRoster([]);
 		h.cue.schedule();
 		h.setLive(false);
-
-		// Several windows pass with the room still down. Each one must re-open
-		// so recovery doesn't depend on some unrelated later event.
-		for (let i = 0; i < 3; i++) {
-			h.tick();
-			expect(h.play).not.toHaveBeenCalled();
-			expect(h.pendingCount()).toBe(1);
-		}
+		h.tick();
+		expect(h.play).not.toHaveBeenCalled();
 
 		// Alice actually hung up during the outage, so the post-reconnect
 		// roster is empty and no buffered join event replays for her. The
-		// retry is the only thing that can notice, and it must announce the
-		// leave now rather than attaching it to a much later unrelated join.
+		// caller's connection-state reschedule is the only thing that can
+		// notice, and the preserved baseline makes it announce the leave now
+		// rather than attaching it to a much later unrelated join.
 		h.setLive(true);
+		h.cue.schedule();
 		h.tick();
 		expect(h.play).toHaveBeenCalledExactlyOnceWith({
 			join: false,
 			leave: true,
 		});
-	});
-
-	it("stops retrying once reset disarms it", () => {
-		h.setRoster(["alice"]);
-		h.cue.arm();
-		h.cue.schedule();
-		h.setLive(false);
-		h.tick();
-		expect(h.pendingCount()).toBe(1);
-
-		h.cue.reset();
-		expect(h.pendingCount()).toBe(0);
-		h.tick();
-		expect(h.pendingCount()).toBe(0);
-		expect(h.play).not.toHaveBeenCalled();
 	});
 
 	it("goes silent after reset and drops any pending window", () => {

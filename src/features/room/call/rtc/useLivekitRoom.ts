@@ -318,8 +318,18 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// the SDK churns the whole roster.
 	const presenceCue = createPresenceCue({
 		roster: () => room?.remoteParticipants.keys() ?? [],
+		// Both halves matter. The SDK state rules out reconnect churn, which
+		// never surfaces as a `Disconnected` event and so leaves `status()` at
+		// "connected" while the whole roster is torn down and rebuilt. Our own
+		// status rules out the window between `connect()` resolving and the
+		// call actually being joined - the mic publish sits in there and can
+		// block on a permission prompt, and if the user denies it the attempt
+		// ends in an error teardown. Cues must never sound for a call the user
+		// has not visibly entered.
 		isLive: () =>
-			livekitConnectedState !== null && room?.state === livekitConnectedState,
+			livekitConnectedState !== null &&
+			room?.state === livekitConnectedState &&
+			status() === "connected",
 		enabled: () => userSettings().voiceJoinLeaveSound,
 		play: playPresenceCue,
 		...opts.presenceCueTimers,
@@ -996,6 +1006,15 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					presenceCue.schedule();
 				}),
 			);
+			// Presence-cue recovery. A flush that lands while the room is
+			// reconnecting keeps its baseline and gives up its window, so
+			// something has to re-open one when liveness returns; this is that
+			// something. Cheaper and more prompt than having the cue poll, and
+			// it terminates on its own because it is edge-driven.
+			r.on(
+				lk.RoomEvent.ConnectionStateChanged,
+				ifLive(() => presenceCue.schedule()),
+			);
 			r.on(
 				lk.RoomEvent.Disconnected,
 				ifLive(() => {
@@ -1144,6 +1163,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 			snapshotParticipants(r);
 			setStatus("connected");
+			// The call is now visibly joined, so the cue is audible. Anyone who
+			// arrived while the mic was being acquired was tracked but held
+			// back by the `status()` half of `isLive`; this releases them.
+			presenceCue.schedule();
 		} catch (e) {
 			// Compute the final user-facing error BEFORE any await so a fresh
 			// `doConnect` that races in during teardown (which clears
