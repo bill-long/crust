@@ -16,6 +16,11 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 		current: null as null | (() => unknown),
 		callCount: 0,
 		lastOptions: null as unknown,
+		// The instance the hook actually holds. `Object.assign` copies
+		// primitives by value, so mutating a scalar like `state` on the
+		// fixture would never reach the hook - tests that need to drive the
+		// connection state have to go through this.
+		lastInstance: null as null | Record<string, unknown>,
 	};
 	class MockRoom {
 		constructor(options?: unknown) {
@@ -25,6 +30,7 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 				throw new Error("roomFactory.current not set by test");
 			}
 			Object.assign(this, roomFactory.current());
+			roomFactory.lastInstance = this as unknown as Record<string, unknown>;
 		}
 	}
 	const lkMock = {
@@ -39,6 +45,7 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 			TrackUnsubscribed: "trackUnsubscribed",
 			LocalTrackPublished: "localTrackPublished",
 			LocalTrackUnpublished: "localTrackUnpublished",
+			ConnectionStateChanged: "connectionStateChanged",
 			Disconnected: "disconnected",
 		},
 		Track: {
@@ -48,6 +55,16 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 				Microphone: "microphone",
 				ScreenShare: "screen_share",
 			},
+		},
+		// Mirrors livekit-client's `ConnectionState` string enum. The presence
+		// cue reads Connected off the loaded module rather than hard-coding the
+		// literal, so the mock has to carry it.
+		ConnectionState: {
+			Disconnected: "disconnected",
+			Connecting: "connecting",
+			Connected: "connected",
+			Reconnecting: "reconnecting",
+			SignalReconnecting: "signalReconnecting",
 		},
 	};
 	const jwtMock = vi.fn(async () => ({ url: "wss://sfu", jwt: "JWT" }));
@@ -61,6 +78,17 @@ vi.mock("./fetchLivekitToken", () => ({
 	},
 }));
 
+// The cue's own gating rules are covered in `callPresenceCue.test.ts`; here we
+// only assert that this hook arms, schedules and resets it at the right
+// moments. Stubbing the synthesis keeps jsdom out of AudioContext territory.
+const { playPresenceCueMock } = vi.hoisted(() => ({
+	playPresenceCueMock: vi.fn(),
+}));
+vi.mock("../../notificationSound", () => ({
+	playPresenceCue: playPresenceCueMock,
+}));
+
+import { PRESENCE_COALESCE_MS } from "./callPresenceCue";
 import { useLivekitRoom } from "./useLivekitRoom";
 
 const loadLivekit = async () =>
@@ -89,6 +117,7 @@ interface FakeRoom {
 	};
 	remoteParticipants: Map<string, unknown>;
 	activeSpeakers: { identity: string }[];
+	state: string;
 }
 
 function createFakeRoom(opts?: {
@@ -139,6 +168,9 @@ function createFakeRoom(opts?: {
 		localParticipant,
 		remoteParticipants: new Map(),
 		activeSpeakers: [],
+		// Mirrors livekit-client's `ConnectionState` string enum. The presence
+		// cue reads this to tell a live roster change from reconnect churn.
+		state: "connected",
 	};
 	return room;
 }
@@ -179,8 +211,10 @@ beforeEach(() => {
 	roomFactory.current = null;
 	roomFactory.callCount = 0;
 	roomFactory.lastOptions = null;
+	roomFactory.lastInstance = null;
 	jwtMock.mockReset();
 	jwtMock.mockResolvedValue({ url: "wss://sfu", jwt: "JWT" });
+	playPresenceCueMock.mockReset();
 	// jsdom has no navigator.mediaDevices; provide getDisplayMedia so the
 	// screen-share feature-detect (`screenShareSupported`) is true by default.
 	// The "unsupported" test deletes it before rendering.
@@ -1957,6 +1991,226 @@ describe("useLivekitRoom", () => {
 			setEnabled(true);
 			await waitFor(() => result.status() === "connected");
 			expect(roomFactory.callCount).toBe(1);
+		});
+	});
+
+	describe("voice-channel presence cue wiring (#431)", () => {
+		// The cue's coalescing window is driven through the injected timer seam
+		// (same idiom as `loadLivekit`) rather than real time, so these tests
+		// fire the flush explicitly instead of sleeping on a timing guess.
+		let cueTimers: (() => void)[] = [];
+		const presenceCueTimers = {
+			setTimer: (fn: () => void, ms: number) => {
+				expect(ms).toBe(PRESENCE_COALESCE_MS);
+				cueTimers.push(fn);
+				return cueTimers.length as unknown as ReturnType<typeof setTimeout>;
+			},
+			clearTimer: (handle: ReturnType<typeof setTimeout>) => {
+				cueTimers[(handle as unknown as number) - 1] = () => {};
+			},
+		};
+		/** Drive the connection state the hook's room instance reports. */
+		const setRoomState = (state: string): void => {
+			if (!roomFactory.lastInstance) throw new Error("no room constructed");
+			roomFactory.lastInstance.state = state;
+		};
+
+		/** Run every coalescing window opened so far. */
+		const settleCue = (): void => {
+			const due = cueTimers;
+			cueTimers = [];
+			for (const fn of due) fn();
+		};
+
+		beforeEach(() => {
+			cueTimers = [];
+		});
+
+		// The post-connect scan walks both publication maps on every remote,
+		// so a stub participant needs both to survive `connect()`.
+		const addRemote = (fakeRoom: FakeRoom, identity: string): void => {
+			fakeRoom.remoteParticipants.set(identity, {
+				identity,
+				audioTrackPublications: new Map(),
+				videoTrackPublications: new Map(),
+			});
+		};
+
+		const connectWith = async (
+			fakeRoom: FakeRoom,
+		): Promise<ReturnType<typeof useLivekitRoom>> => {
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+					presenceCueTimers,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			return result;
+		};
+
+		it("announces someone who joins after we connected", async () => {
+			const fakeRoom = createFakeRoom();
+			await connectWith(fakeRoom);
+
+			addRemote(fakeRoom, "remote-1");
+			fakeRoom.emit("participantConnected", { identity: "remote-1" });
+			settleCue();
+
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: true,
+				leave: false,
+			});
+		});
+
+		it("stays silent for participants already in the channel when we join", async () => {
+			const fakeRoom = createFakeRoom();
+			addRemote(fakeRoom, "remote-1");
+			await connectWith(fakeRoom);
+
+			// A late-delivered event for someone the arm-time roster already
+			// covered must not announce them.
+			fakeRoom.emit("participantConnected", { identity: "remote-1" });
+			settleCue();
+
+			expect(playPresenceCueMock).not.toHaveBeenCalled();
+		});
+
+		it("announces someone who joins while the mic is still being acquired", async () => {
+			// `setMicrophoneEnabled` can block for seconds on a permission
+			// prompt. The cue must already be armed by then, so a join landing
+			// in that window is announced rather than absorbed into the
+			// baseline.
+			let releaseMic = (): void => {};
+			const micGate = new Promise<void>((r) => {
+				releaseMic = r;
+			});
+			const fakeRoom = createFakeRoom({ enableMicImpl: () => micGate });
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+					presenceCueTimers,
+				}),
+			);
+
+			// The mic call having started means connect() resolved and the cue
+			// was armed; the gate keeps us inside that window.
+			await waitFor(
+				() =>
+					fakeRoom.localParticipant.setMicrophoneEnabled.mock.calls.length > 0,
+			);
+			expect(result.status()).not.toBe("connected");
+
+			// Someone joins mid-acquisition, before we ever reach "connected".
+			addRemote(fakeRoom, "remote-1");
+			fakeRoom.emit("participantConnected", { identity: "remote-1" });
+
+			// Tracked, but HELD: the call is not one the user has visibly
+			// entered yet, and this attempt could still end in an error
+			// teardown if they deny the mic.
+			settleCue();
+			expect(playPresenceCueMock).not.toHaveBeenCalled();
+
+			releaseMic();
+			await waitFor(() => result.status() === "connected");
+			settleCue();
+
+			// Released once connected, and not lost to the baseline.
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: true,
+				leave: false,
+			});
+		});
+
+		it("plays nothing when the connect attempt ends in an error", async () => {
+			// Denying the mic makes the publish throw, so doConnect's catch
+			// tears the attempt down. A join seen while the prompt was up must
+			// never be announced for a call that never started.
+			const fakeRoom = createFakeRoom({
+				enableMicImpl: async () => {
+					throw new Error("NotAllowedError");
+				},
+			});
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+					presenceCueTimers,
+				}),
+			);
+
+			await waitFor(() => result.status() === "error");
+			addRemote(fakeRoom, "remote-1");
+			fakeRoom.emit("participantConnected", { identity: "remote-1" });
+			settleCue();
+
+			expect(playPresenceCueMock).not.toHaveBeenCalled();
+		});
+
+		it("reconciles a departure across a reconnect via the state-change event", async () => {
+			const fakeRoom = createFakeRoom();
+			addRemote(fakeRoom, "remote-1");
+			await connectWith(fakeRoom);
+
+			// handleRestarting drops every remote and emits a disconnect for
+			// each, then LiveKit flips to Reconnecting.
+			fakeRoom.remoteParticipants.clear();
+			setRoomState("reconnecting");
+			fakeRoom.emit("participantDisconnected", { identity: "remote-1" });
+			fakeRoom.emit("connectionStateChanged", "reconnecting");
+			settleCue();
+			expect(playPresenceCueMock).not.toHaveBeenCalled();
+
+			// Reconnected, but remote-1 really did leave during the outage, so
+			// no buffered join replays for them. The state-change reschedule is
+			// what notices, and the preserved baseline makes it a leave.
+			setRoomState("connected");
+			fakeRoom.emit("connectionStateChanged", "connected");
+			settleCue();
+
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: false,
+				leave: true,
+			});
+		});
+
+		it("does not cue a leave when we hang up ourselves", async () => {
+			const fakeRoom = createFakeRoom();
+			addRemote(fakeRoom, "remote-1");
+			const result = await connectWith(fakeRoom);
+
+			await result.disconnect();
+			fakeRoom.remoteParticipants.clear();
+			fakeRoom.emit("participantDisconnected", { identity: "remote-1" });
+			settleCue();
+
+			expect(playPresenceCueMock).not.toHaveBeenCalled();
 		});
 	});
 });

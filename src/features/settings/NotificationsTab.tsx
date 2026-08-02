@@ -216,6 +216,12 @@ const NotificationsTab: Component = () => {
 					checked={userSettings().notificationSound}
 					onChange={(v) => updateSetting("notificationSound", v)}
 				/>
+				<ToggleRow
+					label="Voice channel join/leave sound"
+					description="Play a sound when someone joins or leaves a voice channel you're in"
+					checked={userSettings().voiceJoinLeaveSound}
+					onChange={(v) => updateSetting("voiceJoinLeaveSound", v)}
+				/>
 			</section>
 
 			{/* @room suppression */}

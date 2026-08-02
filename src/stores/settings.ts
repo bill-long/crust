@@ -40,6 +40,13 @@ export interface UserSettings {
 	/** Whether to play a sound for incoming messages in other rooms. */
 	notificationSound: boolean;
 	/**
+	 * Whether to play a cue when someone joins or leaves the voice channel
+	 * the user is currently in. One flag covers both directions - they are
+	 * the same "who is in here with me" signal. Distinct from
+	 * `notificationSound`, which governs the incoming-message chime.
+	 */
+	voiceJoinLeaveSound: boolean;
+	/**
 	 * Whether to fetch and render OpenGraph preview cards for links in
 	 * messages. Mirrors the Matrix `m.room.preview_urls` account-data
 	 * `disable` flag (inverted).
@@ -119,6 +126,7 @@ const defaults: UserSettings = {
 	desktopNotifications: false,
 	backgroundNotifications: false,
 	notificationSound: true,
+	voiceJoinLeaveSound: true,
 	urlPreviews: true,
 	inlineMediaPlayers: true,
 	rtcMicDeviceId: "",
@@ -173,6 +181,11 @@ function parseSettings(parsed: unknown): UserSettings {
 			obj,
 			"notificationSound",
 			defaults.notificationSound,
+		),
+		voiceJoinLeaveSound: loadBool(
+			obj,
+			"voiceJoinLeaveSound",
+			defaults.voiceJoinLeaveSound,
 		),
 		urlPreviews: loadBool(obj, "urlPreviews", defaults.urlPreviews),
 		inlineMediaPlayers: loadBool(
