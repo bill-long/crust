@@ -1,11 +1,13 @@
 /**
  * Notification sound utility.
  *
- * Synthesises every sound the app makes via the Web Audio API, so it needs
- * no audio asset files: the incoming-message chime and the voice-channel
- * join/leave presence cues. The AudioContext singleton is created lazily and
- * primed on the first trusted user gesture to satisfy browser autoplay
- * policies.
+ * Synthesises the app's notification sounds via the Web Audio API, so they
+ * need no audio asset files: the incoming-message chime and the voice-channel
+ * join/leave presence cues. Media playback owns its audio separately (see
+ * `timeline/voicePlaybackContext.ts` and `composer/media/voiceRecorder.ts`);
+ * this module's AudioContext singleton is only for generated cues, created
+ * lazily and primed on the first trusted user gesture to satisfy browser
+ * autoplay policies.
  *
  * All sounds go through `playNotes`, which owns the autoplay contract, the
  * envelope and the failure handling, and which serialises playback so two
