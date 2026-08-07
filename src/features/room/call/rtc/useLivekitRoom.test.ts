@@ -2058,9 +2058,22 @@ describe("useLivekitRoom", () => {
 			return result;
 		};
 
+		/**
+		 * Connect, then drop the self-join cue that firing produces. Tests
+		 * about REMOTE roster cues use this so they assert only what they are
+		 * actually about; the self cues have their own tests below.
+		 */
+		const connectAndClear = async (
+			fakeRoom: FakeRoom,
+		): Promise<ReturnType<typeof useLivekitRoom>> => {
+			const result = await connectWith(fakeRoom);
+			playPresenceCueMock.mockClear();
+			return result;
+		};
+
 		it("announces someone who joins after we connected", async () => {
 			const fakeRoom = createFakeRoom();
-			await connectWith(fakeRoom);
+			await connectAndClear(fakeRoom);
 
 			addRemote(fakeRoom, "remote-1");
 			fakeRoom.emit("participantConnected", { identity: "remote-1" });
@@ -2075,7 +2088,7 @@ describe("useLivekitRoom", () => {
 		it("stays silent for participants already in the channel when we join", async () => {
 			const fakeRoom = createFakeRoom();
 			addRemote(fakeRoom, "remote-1");
-			await connectWith(fakeRoom);
+			await connectAndClear(fakeRoom);
 
 			// A late-delivered event for someone the arm-time roster already
 			// covered must not announce them.
@@ -2131,6 +2144,8 @@ describe("useLivekitRoom", () => {
 
 			releaseMic();
 			await waitFor(() => result.status() === "connected");
+			// Drop the self-join cue; this test is about the remote arrival.
+			playPresenceCueMock.mockClear();
 			settleCue();
 
 			// Released once connected, and not lost to the baseline.
@@ -2176,7 +2191,7 @@ describe("useLivekitRoom", () => {
 		it("reconciles a departure across a reconnect via the state-change event", async () => {
 			const fakeRoom = createFakeRoom();
 			addRemote(fakeRoom, "remote-1");
-			await connectWith(fakeRoom);
+			await connectAndClear(fakeRoom);
 
 			// handleRestarting drops every remote and emits a disconnect for
 			// each, then LiveKit flips to Reconnecting.
@@ -2200,17 +2215,129 @@ describe("useLivekitRoom", () => {
 			});
 		});
 
-		it("does not cue a leave when we hang up ourselves", async () => {
+		it("cues our own join on connect and our own leave on disconnect", async () => {
 			const fakeRoom = createFakeRoom();
-			addRemote(fakeRoom, "remote-1");
 			const result = await connectWith(fakeRoom);
 
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: true,
+				leave: false,
+			});
+
+			playPresenceCueMock.mockClear();
 			await result.disconnect();
-			fakeRoom.remoteParticipants.clear();
-			fakeRoom.emit("participantDisconnected", { identity: "remote-1" });
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: false,
+				leave: true,
+			});
+		});
+
+		it("stays silent across an internal focus-change reconnect", async () => {
+			// A MatrixRTC focus change tears the room down and builds a new
+			// one. The user never left the call, so neither direction may
+			// sound - not the teardown's `Disconnected`, not the new room
+			// reaching "connected".
+			const roomA = createFakeRoom();
+			const roomB = createFakeRoom();
+			const queue = [roomA, roomB];
+			roomFactory.current = (): FakeRoom => {
+				const next = queue.shift();
+				if (!next) throw new Error("room queue exhausted");
+				return next;
+			};
+			const otherFocus: LivekitTransport = {
+				type: "livekit",
+				livekit_service_url: "https://sfu-other.example.com",
+				livekit_alias: "!room:example.com",
+			};
+			const { client } = createClient();
+			const [focus, setFocus] = createSignal<LivekitTransport | null>(
+				livekitFocus,
+			);
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+					presenceCueTimers,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			playPresenceCueMock.mockClear();
+
+			setFocus(otherFocus);
+			await waitFor(
+				() => result.status() === "connected" && roomFactory.callCount === 2,
+			);
 			settleCue();
 
 			expect(playPresenceCueMock).not.toHaveBeenCalled();
+		});
+
+		it("cues a leave when the connection drops unsolicited", async () => {
+			const fakeRoom = createFakeRoom();
+			await connectWith(fakeRoom);
+			playPresenceCueMock.mockClear();
+
+			// LiveKit gave up reconnecting while we still believed we were in
+			// the call.
+			fakeRoom.emit("disconnected");
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: false,
+				leave: true,
+			});
+		});
+
+		it("stays silent when a connect attempt fails before joining", async () => {
+			const fakeRoom = createFakeRoom({
+				enableMicImpl: async () => {
+					throw new Error("NotAllowedError");
+				},
+			});
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+					presenceCueTimers,
+				}),
+			);
+
+			await waitFor(() => result.status() === "error");
+			settleCue();
+			expect(playPresenceCueMock).not.toHaveBeenCalled();
+		});
+
+		it("emits one leave for our own hangup, not one per remaining participant", async () => {
+			const fakeRoom = createFakeRoom();
+			addRemote(fakeRoom, "remote-1");
+			addRemote(fakeRoom, "remote-2");
+			const result = await connectAndClear(fakeRoom);
+
+			await result.disconnect();
+			// The roster collapsing to empty must not add a cue per remote who
+			// was still in the call when we left.
+			fakeRoom.remoteParticipants.clear();
+			fakeRoom.emit("participantDisconnected", { identity: "remote-1" });
+			fakeRoom.emit("participantDisconnected", { identity: "remote-2" });
+			settleCue();
+
+			expect(playPresenceCueMock).toHaveBeenCalledExactlyOnceWith({
+				join: false,
+				leave: true,
+			});
 		});
 	});
 });
