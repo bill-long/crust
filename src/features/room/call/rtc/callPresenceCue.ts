@@ -13,11 +13,14 @@
  * rather than needing its own guard:
  *
  * - A burst of joins collapses into one flush, so one cue.
- * - The local SESSION is never in `remoteParticipants`, so our own join and
- *   hangup are silent. Note this is per-session, not per-user: LiveKit
- *   identities are `<userId>:<deviceId>`, so a second device of the same
- *   Matrix user IS an ordinary remote participant and does cue. That matches
- *   the participant list, which shows that device as its own tile.
+ * - The local SESSION is never in `remoteParticipants`, so the roster diff
+ *   cannot see our own arrival or departure at all. Those cue through the
+ *   separate `selfJoined` / `selfLeft` entry points instead, driven by the
+ *   call's own lifecycle rather than by roster churn. Note the roster is
+ *   per-session, not per-user: LiveKit identities are `<userId>:<deviceId>`,
+ *   so a second device of the same Matrix user IS an ordinary remote
+ *   participant and cues through the diff. That matches the participant list,
+ *   which shows that device as its own tile.
  * - Hangup disarms via `reset()` before `r.disconnect()` runs.
  * - Reconnect - the case that defeats per-event bookkeeping - is deferred by
  *   the liveness check, and crucially the known set is left UNTOUCHED while
@@ -69,6 +72,23 @@ export interface PresenceCue {
 	schedule: () => void;
 	/** Disarm and forget. Called from call-derived state reset. */
 	reset: () => void;
+	/**
+	 * The local user has joined the call. Cues immediately rather than through
+	 * the coalescing window: this is a direct response to the user's own
+	 * action, so latency reads as lag.
+	 *
+	 * Idempotent while already in the call. That is what keeps an internal
+	 * focus-change reconnect - which tears the room down and builds a new one
+	 * without the user ever leaving - from re-announcing a join they never
+	 * made.
+	 */
+	selfJoined: () => void;
+	/**
+	 * The local user has left the call. Only cues if `selfJoined` previously
+	 * fired, so a connect attempt that dies before the call is joined stays
+	 * silent, and a teardown can never emit a stray leave.
+	 */
+	selfLeft: () => void;
 }
 
 export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
@@ -78,6 +98,12 @@ export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
 	let known = new Set<string>();
 	let armed = false;
 	let pending: ReturnType<typeof setTimeout> | null = null;
+	// Whether the local user is currently in the call, as the USER perceives
+	// it - deliberately not the same lifetime as `armed`. `reset()` runs on
+	// every teardown including internal ones (focus change), whereas this only
+	// clears when the user has actually left, which is what makes the
+	// self-cues survive churn the user never sees.
+	let selfInCall = false;
 
 	const cancelPending = (): void => {
 		if (pending !== null) {
@@ -145,6 +171,20 @@ export function createPresenceCue(deps: PresenceCueDeps): PresenceCue {
 			cancelPending();
 			known = new Set();
 			armed = false;
+			// `selfInCall` is intentionally NOT cleared here - see its
+			// declaration. Only `selfLeft()` ends the user's call.
+		},
+		selfJoined: (): void => {
+			if (selfInCall) return;
+			selfInCall = true;
+			if (!deps.enabled()) return;
+			deps.play({ join: true, leave: false });
+		},
+		selfLeft: (): void => {
+			if (!selfInCall) return;
+			selfInCall = false;
+			if (!deps.enabled()) return;
+			deps.play({ join: false, leave: true });
 		},
 	};
 }

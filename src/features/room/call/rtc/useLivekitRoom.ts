@@ -1018,6 +1018,20 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			r.on(
 				lk.RoomEvent.Disconnected,
 				ifLive(() => {
+					// Announce a drop we did not ask for. LiveKit auto-reconnects
+					// silently, so a `Disconnected` that reaches a handler means
+					// it gave up and the user really is out of the call.
+					//
+					// Teardowns WE initiated never reach here at all: every
+					// teardown path bumps `attempt` before tearing down, so the
+					// `ifLive` wrapper above has already bailed. That is what
+					// keeps an explicit leave from double-cueing (it cues in
+					// `disconnect()`) and a focus-change reconnect from cueing
+					// at all. The `status()` check is a second line of defence
+					// for any future teardown path that forgets the bump; no
+					// test distinguishes it, because nothing today can reach
+					// this line with a status other than "connected".
+					if (status() === "connected") presenceCue.selfLeft();
 					// Bump the attempt counter so any subsequent track/participant
 					// events from this disconnecting room bail via `ifLive`. Without
 					// this, late events could re-populate `participants` or re-attach
@@ -1163,9 +1177,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 
 			snapshotParticipants(r);
 			setStatus("connected");
-			// The call is now visibly joined, so the cue is audible. Anyone who
-			// arrived while the mic was being acquired was tracked but held
-			// back by the `status()` half of `isLive`; this releases them.
+			// Announce our own arrival. No-ops when a focus-change reconnect
+			// lands us back in a call we never left.
+			presenceCue.selfJoined();
+			// The call is now visibly joined, so remote cues are audible too.
+			// Anyone who arrived while the mic was being acquired was tracked
+			// but held back by the `status()` half of `isLive`; this releases
+			// them.
 			presenceCue.schedule();
 		} catch (e) {
 			// Compute the final user-facing error BEFORE any await so a fresh
@@ -1478,6 +1496,11 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		try {
 			attempt += 1;
 			if (status() === "idle") return;
+			// The user asked to leave, so cue BEFORE the teardown: `status()`
+			// becomes "disconnecting" below, which is exactly what suppresses
+			// the `Disconnected` handler's cue, and tearing down first would
+			// close the AudioContext path mid-cue on the logout route.
+			presenceCue.selfLeft();
 			setStatus("disconnecting");
 			await trackTeardown();
 			if (!disposed) setStatus("idle");

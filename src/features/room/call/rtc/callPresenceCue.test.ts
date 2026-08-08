@@ -277,6 +277,82 @@ describe("createPresenceCue", () => {
 		expect(h.play).not.toHaveBeenCalled();
 	});
 
+	describe("self join/leave", () => {
+		it("cues immediately on self join, without waiting for a window", () => {
+			h.cue.selfJoined();
+			expect(h.play).toHaveBeenCalledExactlyOnceWith({
+				join: true,
+				leave: false,
+			});
+			expect(h.pendingCount()).toBe(0);
+		});
+
+		it("cues on self leave", () => {
+			h.cue.selfJoined();
+			h.play.mockClear();
+			h.cue.selfLeft();
+			expect(h.play).toHaveBeenCalledExactlyOnceWith({
+				join: false,
+				leave: true,
+			});
+		});
+
+		it("does not re-announce a join across an internal reconnect", () => {
+			h.cue.selfJoined();
+			h.play.mockClear();
+
+			// Focus-change teardown: reset() runs, but the user never left.
+			h.cue.reset();
+			h.cue.arm();
+			h.cue.selfJoined();
+			expect(h.play).not.toHaveBeenCalled();
+		});
+
+		it("stays silent on a teardown that never reached a joined call", () => {
+			// Connect attempt dies before selfJoined() - e.g. the user denies
+			// the mic and doConnect's catch tears down.
+			h.cue.arm();
+			h.cue.reset();
+			h.cue.selfLeft();
+			expect(h.play).not.toHaveBeenCalled();
+		});
+
+		it("does not emit a second leave for one departure", () => {
+			h.cue.selfJoined();
+			h.play.mockClear();
+			h.cue.selfLeft();
+			h.cue.selfLeft();
+			expect(h.play).toHaveBeenCalledTimes(1);
+		});
+
+		it("announces a rejoin after leaving", () => {
+			h.cue.selfJoined();
+			h.cue.selfLeft();
+			h.play.mockClear();
+			h.cue.selfJoined();
+			expect(h.play).toHaveBeenCalledExactlyOnceWith({
+				join: true,
+				leave: false,
+			});
+		});
+
+		it("respects the setting in both directions", () => {
+			h.setEnabled(false);
+			h.cue.selfJoined();
+			h.cue.selfLeft();
+			expect(h.play).not.toHaveBeenCalled();
+
+			// State still tracked while muted, so re-enabling mid-call does not
+			// leave the next transition mis-paired.
+			h.setEnabled(true);
+			h.cue.selfJoined();
+			expect(h.play).toHaveBeenCalledExactlyOnceWith({
+				join: true,
+				leave: false,
+			});
+		});
+	});
+
 	it("re-seeds the baseline on a second arm without sounding", () => {
 		h.setRoster(["alice"]);
 		h.cue.arm();
