@@ -46,6 +46,66 @@ export function getSpaceUnreadRollup(
 }
 
 /**
+ * Rooms (non-space) the user has a pending invite to, sorted alphabetically.
+ * Invites carry no reliable activity timestamp in the summary (invite_state
+ * has no messages), so name order keeps the section stable.
+ *
+ * Includes invited rooms that are children of a joined space - an invite must
+ * be discoverable from Home even when the user never opens that space. The
+ * space view additionally lists its own children's invites via
+ * {@link getSpaceInvitedRooms}.
+ */
+export function getInvitedRooms(summaries: SummariesStore): RoomSummary[] {
+	return Object.values(summaries)
+		.filter((s) => !s.isSpace && s.membership === "invite")
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Number of non-space rooms the user has a pending invite to - the size of
+ * {@link getInvitedRooms} without the sort/allocation, for badge counts that
+ * recompute on every summaries change.
+ */
+export function getInvitedRoomCount(summaries: SummariesStore): number {
+	let count = 0;
+	for (const s of Object.values(summaries)) {
+		if (!s.isSpace && s.membership === "invite") count++;
+	}
+	return count;
+}
+
+/**
+ * Spaces the user has a pending invite to, sorted alphabetically. Rendered in
+ * the spaces sidebar alongside joined spaces (with an invite affordance).
+ */
+export function getInvitedSpaces(summaries: SummariesStore): RoomSummary[] {
+	return Object.values(summaries)
+		.filter((s) => s.isSpace && s.membership === "invite")
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Pending room invites among a joined space's direct children, sorted
+ * alphabetically. Mirrors {@link getSpaceRooms}' space gating: a space the
+ * user hasn't joined exposes no authoritative child list.
+ */
+export function getSpaceInvitedRooms(
+	summaries: SummariesStore,
+	spaceId: string,
+): RoomSummary[] {
+	const space = summaries[spaceId];
+	if (!space?.isSpace || space.membership !== "join") return [];
+
+	return space.children
+		.map((id) => summaries[id])
+		.filter(
+			(s): s is RoomSummary =>
+				s !== undefined && s.membership === "invite" && !s.isSpace,
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * Joined spaces, sorted alphabetically.
  */
 export function getSpaces(summaries: SummariesStore): RoomSummary[] {

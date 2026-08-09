@@ -208,7 +208,7 @@ describe("filterDiscoverableRooms", () => {
 		expect(result[0].roomId).toBe("!notjoined:example.com");
 	});
 
-	it("includes rooms with non-join membership (invite, leave, ban)", () => {
+	it("excludes invited rooms (they render in the Invites section) but keeps left rooms", () => {
 		const rooms: HierarchyRoom[] = [
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
@@ -231,7 +231,8 @@ describe("filterDiscoverableRooms", () => {
 			summaries,
 			mockMxcToHttp,
 		);
-		expect(result).toHaveLength(2);
+		expect(result).toHaveLength(1);
+		expect(result[0].roomId).toBe("!left:example.com");
 	});
 
 	it("maps room fields correctly", () => {

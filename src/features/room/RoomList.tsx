@@ -18,12 +18,15 @@ import { useClient } from "../../client/client";
 import type { RoomSummary } from "../../client/summaries";
 import {
 	getDmRooms,
+	getInvitedRooms,
 	getOrphanRooms,
+	getSpaceInvitedRooms,
 	getSpaceRooms,
 } from "../../client/summaries-selectors";
 import { VirtualList } from "../../components/VirtualList";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
+import { SpaceInvitePanel } from "./invites/SpaceInvitePanel";
 import { NewDmDialog } from "./NewDmDialog";
 
 /**
@@ -41,10 +44,11 @@ function homeRowHeight(): number {
 /** Only window the Home list once it's long enough to matter (cf. PinnedMessagesPanel). */
 const VIRTUALIZE_THRESHOLD = 50;
 
-/** A flattened Home-list entry: a section header or a room row. */
+/** A flattened Home-list entry: a section header, a room row, or a
+    pending-invite row. */
 type HomeItem =
 	| { readonly type: "header"; readonly label: string }
-	| { readonly type: "room"; readonly room: RoomSummary };
+	| { readonly type: "room" | "invite"; readonly room: RoomSummary };
 
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
@@ -222,6 +226,44 @@ const RoomEntry: Component<{
 	);
 };
 
+/** Row for a room the user has a pending invite to. Same 2.25rem pitch as
+    RoomEntry (px-3 py-2 + a text-sm line) so the two row kinds share the
+    virtualized list's fixed row height. Clicking opens the room, where the
+    invite view offers Accept/Decline (#438). */
+const InviteEntry: Component<{
+	room: RoomSummary;
+	isSelected: boolean;
+	onClick: () => void;
+}> = (props) => {
+	return (
+		<button
+			type="button"
+			onClick={props.onClick}
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors ${
+				props.isSelected
+					? "bg-surface-3 text-text-primary"
+					: "text-text-secondary hover:bg-surface-2"
+			}`}
+			aria-current={props.isSelected ? "true" : undefined}
+		>
+			<div class="flex min-w-0 flex-1 items-center gap-2">
+				<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
+					<ChannelTypeIcon kind={props.room.kind} />
+				</Show>
+				<span class="min-w-0 flex-1 truncate text-sm font-medium">
+					{props.room.name.trim() || "Unnamed room"}
+				</span>
+				<Show when={props.room.isEncrypted}>
+					<EncryptedBadge />
+				</Show>
+			</div>
+			<span class="flex h-5 shrink-0 items-center rounded-full bg-accent px-2 text-[10px] font-bold text-accent-foreground">
+				Invite
+			</span>
+		</button>
+	);
+};
+
 interface RoomListProps {
 	/**
 	 * Called when the user clicks the gear button in the header while
@@ -280,6 +322,18 @@ const RoomList: Component<RoomListProps> = (props) => {
 
 	const dmRooms = createMemo(() => getDmRooms(summaries));
 	const orphanRooms = createMemo(() => getOrphanRooms(summaries));
+	const invitedRooms = createMemo(() => getInvitedRooms(summaries));
+	const spaceInvites = createMemo(() => {
+		if (isHome() || !params.spaceId) return [];
+		return getSpaceInvitedRooms(summaries, params.spaceId);
+	});
+	// The selected space's own membership: "join" renders the normal
+	// rooms + Discover view; "invite" renders the accept/decline panel and
+	// hides the joined-space-only header actions (settings, create room).
+	const spaceMembership = createMemo(() => {
+		if (isHome() || !params.spaceId) return null;
+		return summaries[params.spaceId]?.membership ?? null;
+	});
 
 	const spaceName = createMemo(() => {
 		if (isHome() || !params.spaceId) return "Home";
@@ -320,41 +374,53 @@ const RoomList: Component<RoomListProps> = (props) => {
 		}
 	};
 
-	// Stable header refs + a per-room wrapper cache, so building homeItems() on a
+	// Stable header refs + a per-row wrapper cache, so building homeItems() on a
 	// summary change (e.g. an unread bump) doesn't hand VirtualList's
 	// reference-keyed <For> brand-new items and remount every visible row.
+	// Keyed by kind + roomId: the same room re-wraps when it moves between the
+	// invite and room sections (accepting an invite), and each wrapper's type
+	// must match its section.
+	const INVITES_HEADER: HomeItem = { type: "header", label: "Invites" };
 	const DM_HEADER: HomeItem = { type: "header", label: "Direct Messages" };
 	const ROOMS_HEADER: HomeItem = { type: "header", label: "Rooms" };
 	const roomItems = new Map<string, { room: RoomSummary; item: HomeItem }>();
-	const roomItem = (room: RoomSummary): HomeItem => {
-		const cached = roomItems.get(room.roomId);
+	const roomItem = (room: RoomSummary, type: "room" | "invite"): HomeItem => {
+		const key = `${type}:${room.roomId}`;
+		const cached = roomItems.get(key);
 		if (cached && cached.room === room) return cached.item;
-		const item: HomeItem = { type: "room", room };
-		roomItems.set(room.roomId, { room, item });
+		const item: HomeItem = { type, room };
+		roomItems.set(key, { room, item });
 		return item;
 	};
 
-	// Flattened Home list: [DM header?, ...dms, Rooms header?, ...orphans].
+	// Flattened Home list:
+	// [Invites header?, ...invites, DM header?, ...dms, Rooms header?, ...orphans].
 	const homeItems = createMemo<HomeItem[]>(() => {
 		const out: HomeItem[] = [];
+		const invites = invitedRooms();
 		const dms = dmRooms();
 		const orphans = orphanRooms();
+		if (invites.length > 0) {
+			out.push(INVITES_HEADER);
+			for (const room of invites) out.push(roomItem(room, "invite"));
+		}
 		if (dms.length > 0) {
 			out.push(DM_HEADER);
-			for (const room of dms) out.push(roomItem(room));
+			for (const room of dms) out.push(roomItem(room, "room"));
 		}
 		if (orphans.length > 0) {
 			out.push(ROOMS_HEADER);
-			for (const room of orphans) out.push(roomItem(room));
+			for (const room of orphans) out.push(roomItem(room, "room"));
 		}
-		// Drop cached wrappers for rooms that are no longer present so the map
+		// Drop cached wrappers for rows that are no longer present so the map
 		// doesn't retain every room ever seen this session.
-		if (roomItems.size > dms.length + orphans.length) {
+		if (roomItems.size > invites.length + dms.length + orphans.length) {
 			const live = new Set<string>();
-			for (const room of dms) live.add(room.roomId);
-			for (const room of orphans) live.add(room.roomId);
-			for (const id of roomItems.keys()) {
-				if (!live.has(id)) roomItems.delete(id);
+			for (const room of invites) live.add(`invite:${room.roomId}`);
+			for (const room of dms) live.add(`room:${room.roomId}`);
+			for (const room of orphans) live.add(`room:${room.roomId}`);
+			for (const key of roomItems.keys()) {
+				if (!live.has(key)) roomItems.delete(key);
 			}
 		}
 		return out;
@@ -369,6 +435,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 		/>
 	);
 
+	const renderInvite = (room: RoomSummary): JSX.Element => (
+		<InviteEntry
+			room={room}
+			isSelected={selectedRoomId() === room.roomId}
+			onClick={() => navigateToRoom(room.roomId)}
+		/>
+	);
+
 	const renderHomeItem = (item: HomeItem): JSX.Element =>
 		item.type === "header" ? (
 			// h-9 pins the header to 2.25rem so it matches the room pitch exactly
@@ -379,6 +453,8 @@ const RoomList: Component<RoomListProps> = (props) => {
 					{item.label}
 				</span>
 			</div>
+		) : item.type === "invite" ? (
+			renderInvite(item.room)
 		) : (
 			renderRoom(item.room)
 		);
@@ -389,7 +465,13 @@ const RoomList: Component<RoomListProps> = (props) => {
 				<span class="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
 					{spaceName()}
 				</span>
-				<Show when={!isHome() && props.onOpenSpaceSettings && params.spaceId}>
+				<Show
+					when={
+						spaceMembership() === "join" &&
+						props.onOpenSpaceSettings &&
+						params.spaceId
+					}
+				>
 					{(spaceId) => (
 						<button
 							type="button"
@@ -438,27 +520,32 @@ const RoomList: Component<RoomListProps> = (props) => {
 						</svg>
 					</button>
 				</Show>
-				<button
-					type="button"
-					onClick={openCreate}
-					aria-label="Create room"
-					title="Create room"
-					class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
-				>
-					<svg
-						aria-hidden="true"
-						width="16"
-						height="16"
-						viewBox="0 0 16 16"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
+				{/* Create-room targets the current space, so it needs a joined
+					space (or Home). An invited space would 403 the create /
+					m.space.child write. */}
+				<Show when={isHome() || spaceMembership() === "join"}>
+					<button
+						type="button"
+						onClick={openCreate}
+						aria-label="Create room"
+						title="Create room"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
 					>
-						<line x1="8" y1="3" x2="8" y2="13" />
-						<line x1="3" y1="8" x2="13" y2="8" />
-					</svg>
-				</button>
+						<svg
+							aria-hidden="true"
+							width="16"
+							height="16"
+							viewBox="0 0 16 16"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+						>
+							<line x1="8" y1="3" x2="8" y2="13" />
+							<line x1="3" y1="8" x2="13" y2="8" />
+						</svg>
+					</button>
+				</Show>
 			</div>
 
 			{/* Home mode above the threshold windows the flattened list. Space
@@ -471,11 +558,37 @@ const RoomList: Component<RoomListProps> = (props) => {
 				when={isHome() && homeItems().length > VIRTUALIZE_THRESHOLD}
 				fallback={
 					<div class="flex-1 overflow-y-auto p-1">
-						<Show when={!isHome()}>
+						{/* Space the user is only invited to: no authoritative
+							child list exists, so show the accept/decline panel
+							instead of rooms + Discover. Keyed so in-flight/error
+							state can't leak across a switch between two invited
+							spaces. */}
+						<Show when={!isHome() && spaceMembership() === "invite"}>
+							<Show when={params.spaceId} keyed>
+								{(sid) => (
+									<SpaceInvitePanel
+										spaceId={sid}
+										onDeclined={() => navigate("/home")}
+									/>
+								)}
+							</Show>
+						</Show>
+
+						<Show when={!isHome() && spaceMembership() !== "invite"}>
+							<Show when={spaceInvites().length > 0}>
+								<div class="h-9 px-3 pb-1 pt-2">
+									<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
+										Invites
+									</span>
+								</div>
+								<For each={spaceInvites()}>{(room) => renderInvite(room)}</For>
+							</Show>
 							<For each={spaceRooms()}>{(room) => renderRoom(room)}</For>
 							<SpaceDiscoverList
 								spaceId={() => params.spaceId}
-								hasJoinedRooms={() => spaceRooms().length > 0}
+								hasListedRooms={() =>
+									spaceRooms().length > 0 || spaceInvites().length > 0
+								}
 							/>
 						</Show>
 

@@ -85,15 +85,16 @@ const DiscoverEntry: Component<{
  * hook.
  *
  * Also owns the combined "No rooms in this space" empty state, which depends on
- * BOTH the caller's joined-room count (`hasJoinedRooms`) and this component's
+ * BOTH the caller's listed-room count (`hasListedRooms`) and this component's
  * discoverable state — so it renders only when the space has nothing to show at
  * all.
  */
 export const SpaceDiscoverList: Component<{
 	/** The space whose hierarchy to fetch (undefined = nothing to show). */
 	spaceId: () => string | undefined;
-	/** Whether the caller is already rendering joined rooms for this space. */
-	hasJoinedRooms: () => boolean;
+	/** Whether the caller is already rendering rooms for this space
+	    (joined rooms or pending-invite rows). */
+	hasListedRooms: () => boolean;
 }> = (props) => {
 	const hierarchy = useSpaceHierarchy(props.spaceId);
 
@@ -104,7 +105,7 @@ export const SpaceDiscoverList: Component<{
 		<Show when={props.spaceId()}>
 			<Show
 				when={
-					!props.hasJoinedRooms() &&
+					!props.hasListedRooms() &&
 					!hierarchy.loading &&
 					!hierarchy.error &&
 					hierarchy.discoverableRooms.length === 0 &&
