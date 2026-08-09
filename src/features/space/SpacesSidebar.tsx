@@ -13,7 +13,7 @@ import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import {
 	getHomeUnreadRollup,
-	getInvitedRooms,
+	getInvitedRoomCount,
 	getInvitedSpaces,
 	getSpaceRooms,
 	getSpaces,
@@ -68,7 +68,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	// Pending room invites (all of them - Home's Invites section lists every
 	// invited room, including space children), badged on the Home button so
 	// an invite is discoverable without opening any list (#438).
-	const homeInviteCount = createMemo(() => getInvitedRooms(summaries).length);
+	const homeInviteCount = createMemo(() => getInvitedRoomCount(summaries));
 	const homeSelected = () => !params.spaceId;
 	const homeRollup = createMemo(() => getHomeUnreadRollup(summaries));
 	const neverSelected = () => false;

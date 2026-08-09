@@ -62,6 +62,19 @@ export function getInvitedRooms(summaries: SummariesStore): RoomSummary[] {
 }
 
 /**
+ * Number of non-space rooms the user has a pending invite to - the size of
+ * {@link getInvitedRooms} without the sort/allocation, for badge counts that
+ * recompute on every summaries change.
+ */
+export function getInvitedRoomCount(summaries: SummariesStore): number {
+	let count = 0;
+	for (const s of Object.values(summaries)) {
+		if (!s.isSpace && s.membership === "invite") count++;
+	}
+	return count;
+}
+
+/**
  * Spaces the user has a pending invite to, sorted alphabetically. Rendered in
  * the spaces sidebar alongside joined spaces (with an invite affordance).
  */

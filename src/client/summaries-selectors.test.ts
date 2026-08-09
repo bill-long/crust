@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "./summaries";
 import {
 	getHomeUnreadRollup,
+	getInvitedRoomCount,
 	getInvitedRooms,
 	getInvitedSpaces,
 	getSpaceInvitedRooms,
@@ -100,6 +101,21 @@ describe("getInvitedRooms", () => {
 			room({ roomId: "!dm", isDirect: true, membership: "invite" }),
 		]);
 		expect(getInvitedRooms(s).map((r) => r.roomId)).toEqual(["!child", "!dm"]);
+	});
+});
+
+describe("getInvitedRoomCount", () => {
+	it("matches getInvitedRooms().length", () => {
+		const s = store([
+			room({ roomId: "!joined" }),
+			room({ roomId: "!a", membership: "invite" }),
+			room({ roomId: "!dm", isDirect: true, membership: "invite" }),
+			room({ roomId: "!space", isSpace: true, membership: "invite" }),
+			room({ roomId: "!left", membership: "leave" }),
+		]);
+		expect(getInvitedRoomCount(s)).toBe(getInvitedRooms(s).length);
+		expect(getInvitedRoomCount(s)).toBe(2);
+		expect(getInvitedRoomCount(store([]))).toBe(0);
 	});
 });
 
