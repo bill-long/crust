@@ -13,6 +13,8 @@ import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import {
 	getHomeUnreadRollup,
+	getInvitedRooms,
+	getInvitedSpaces,
 	getSpaceRooms,
 	getSpaces,
 	getSpaceUnreadRollup,
@@ -62,6 +64,11 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	const [createOpen, setCreateOpen] = createSignal(false);
 
 	const spaces = createMemo(() => getSpaces(summaries));
+	const invitedSpaces = createMemo(() => getInvitedSpaces(summaries));
+	// Pending room invites (all of them - Home's Invites section lists every
+	// invited room, including space children), badged on the Home button so
+	// an invite is discoverable without opening any list (#438).
+	const homeInviteCount = createMemo(() => getInvitedRooms(summaries).length);
 	const homeSelected = () => !params.spaceId;
 	const homeRollup = createMemo(() => getHomeUnreadRollup(summaries));
 	const neverSelected = () => false;
@@ -128,6 +135,19 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 								aria-label={`${homeRollup().unread} unread${homeRollup().highlight > 0 ? `, ${homeRollup().highlight} highlighted` : ""}`}
 							>
 								{homeRollup().unread > 99 ? "99+" : homeRollup().unread}
+							</span>
+						</Show>
+
+						{/* Pending-invite badge - bottom corner so it can coexist
+							with the unread badge above. Accent = action needed,
+							distinct from unread (indicator) and mention (danger). */}
+						<Show when={homeInviteCount() > 0}>
+							<span
+								class="absolute -bottom-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-accent-foreground"
+								role="status"
+								aria-label={`${homeInviteCount()} pending invite${homeInviteCount() === 1 ? "" : "s"}`}
+							>
+								{homeInviteCount() > 99 ? "99+" : homeInviteCount()}
 							</span>
 						</Show>
 					</button>
@@ -253,6 +273,53 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 										</ContextMenu.Portal>
 									</ContextMenu>
 								</Show>
+							</SidebarItem>
+						);
+					}}
+				</For>
+
+				{/* Spaces the user has a pending invite to. Clicking opens the
+					space route, where RoomList shows the accept/decline panel
+					(SpaceInvitePanel). The accent ring + dot mark them apart
+					from joined spaces (#438). */}
+				<For each={invitedSpaces()}>
+					{(space) => {
+						const isSelected = () => params.spaceId === space.roomId;
+						return (
+							<SidebarItem selected={isSelected}>
+								<button
+									type="button"
+									onClick={() =>
+										navigate(`/space/${encodeURIComponent(space.roomId)}`)
+									}
+									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-accent transition-all ${
+										isSelected()
+											? "rounded-xl bg-surface-2 text-text-primary"
+											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
+									}`}
+									title={`${space.name.trim() || "Unnamed space"} (invitation pending)`}
+									aria-label={`${space.name.trim() || "Unnamed space"} (invitation pending)`}
+									aria-current={isSelected() ? "page" : undefined}
+								>
+									<Show
+										when={space.avatarUrl}
+										fallback={
+											<span class="text-sm font-semibold">
+												{(space.name.trim() || "?").charAt(0).toUpperCase()}
+											</span>
+										}
+									>
+										<img
+											src={space.avatarUrl ?? ""}
+											alt={space.name.trim() || "Space"}
+											class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
+										/>
+									</Show>
+									<span
+										aria-hidden="true"
+										class="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface-1 bg-accent"
+									/>
+								</button>
 							</SidebarItem>
 						);
 					}}

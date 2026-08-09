@@ -38,7 +38,13 @@ export function filterDiscoverableRooms(
 		.filter((room) => {
 			if (room.room_id === spaceId) return false;
 			if (room.room_type === "m.space") return false;
-			if (summaries[room.room_id]?.membership === "join") return false;
+			// Joined rooms live in the joined list; rooms with a pending invite
+			// render in the space's Invites section (with a working Accept),
+			// not as a Discover entry - which for an invite-only room would be
+			// an unjoinable "Invite only" label even though the viewer holds an
+			// invite (#438).
+			const membership = summaries[room.room_id]?.membership;
+			if (membership === "join" || membership === "invite") return false;
 			return true;
 		})
 		.map((room) => {

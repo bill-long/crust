@@ -31,6 +31,7 @@ import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
 import { InviteDialog } from "../features/room/InviteDialog";
+import { InvitePane } from "../features/room/invites/InvitePane";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { RoomList } from "../features/room/RoomList";
 import { buildRoomLinkUrl } from "../features/room/roomLink";
@@ -757,30 +758,50 @@ const Layout: Component = () => {
 							}
 						>
 							{(rid) => (
-								<RoomPane
-									client={client}
-									rid={rid}
-									roomName={roomName()}
-									onBack={backToList}
-									callActive={callActive}
-									copyState={copyLink.copyState}
-									onCopyLink={() => handleCopyRoomLink(rid)}
-									canInvite={canInviteHere}
-									onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
-									leaving={() => isLeaving(rid)}
-									onLeave={handleLeave}
-									onOpenSettings={() =>
-										setRoomSettings({ roomId: rid, tab: "general" })
+								// A room the user is only invited to gets the
+								// accept/decline pane: the timeline isn't readable
+								// and the composer can't send, so none of RoomPane
+								// applies (#438). Accepting flips the summary
+								// membership to "join", which swaps in the real
+								// RoomPane right here without a route change.
+								<Show
+									when={summaries[rid]?.membership !== "invite"}
+									fallback={
+										<InvitePane
+											rid={rid}
+											roomName={roomName()}
+											onBack={backToList}
+											onDeclined={backToList}
+										/>
 									}
-									membersVisible={membersVisible}
-									onToggleMembers={handleToggleMembers}
-									membersWidth={membersWidth}
-									onMembersWidthChange={(next) => setMembersWidth(next)}
-									onMembersWidthCommit={() => saveMembersWidth(membersWidth())}
-									threadWidth={threadWidth}
-									onThreadWidthChange={(next) => setThreadWidth(next)}
-									onThreadWidthCommit={() => saveThreadWidth(threadWidth())}
-								/>
+								>
+									<RoomPane
+										client={client}
+										rid={rid}
+										roomName={roomName()}
+										onBack={backToList}
+										callActive={callActive}
+										copyState={copyLink.copyState}
+										onCopyLink={() => handleCopyRoomLink(rid)}
+										canInvite={canInviteHere}
+										onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
+										leaving={() => isLeaving(rid)}
+										onLeave={handleLeave}
+										onOpenSettings={() =>
+											setRoomSettings({ roomId: rid, tab: "general" })
+										}
+										membersVisible={membersVisible}
+										onToggleMembers={handleToggleMembers}
+										membersWidth={membersWidth}
+										onMembersWidthChange={(next) => setMembersWidth(next)}
+										onMembersWidthCommit={() =>
+											saveMembersWidth(membersWidth())
+										}
+										threadWidth={threadWidth}
+										onThreadWidthChange={(next) => setThreadWidth(next)}
+										onThreadWidthCommit={() => saveThreadWidth(threadWidth())}
+									/>
+								</Show>
 							)}
 						</Show>
 						{/* Full-overlay chrome for the active call, scoped to the

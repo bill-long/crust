@@ -102,7 +102,13 @@ export interface StartDmOptions {
  */
 const directWriteChains = new WeakMap<MatrixClient, Promise<void>>();
 
-function recordDmInDirectMap(
+/**
+ * Record `roomId` as a DM with `userId` in the `m.direct` account-data map.
+ * Serialized per client (see {@link directWriteChains}). Exported for the
+ * invite-accept path (`useInviteActions`), which must record a DM invite the
+ * same way a freshly created DM is recorded.
+ */
+export function recordDmInDirectMap(
 	client: MatrixClient,
 	userId: string,
 	roomId: string,
