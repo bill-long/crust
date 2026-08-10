@@ -448,6 +448,8 @@ export function createMockClient(
 		sendEvent: vi.fn().mockResolvedValue({ event_id: "$sent" }),
 		sendStateEvent: vi.fn().mockResolvedValue({ event_id: "$state" }),
 		createRoom: vi.fn().mockResolvedValue({ room_id: "!created:example.com" }),
+		// Mirrors the SDK's Promise<Room> resolution: consumers read .roomId.
+		joinRoom: vi.fn().mockResolvedValue({ roomId: "!joined:example.com" }),
 		getRoomDirectoryVisibility: vi
 			.fn()
 			.mockResolvedValue({ visibility: "private" }),
