@@ -145,6 +145,7 @@ describe("JoinRoomDialog", () => {
 		expect(optimisticallyMarkJoined).toHaveBeenCalledWith(JOINED_ID, {
 			name: "#general:example.org",
 			avatarUrl: null,
+			isSpace: false,
 		});
 		expect(navigateMock).toHaveBeenCalledWith(
 			`/home/${encodeURIComponent(JOINED_ID)}`,
@@ -165,6 +166,7 @@ describe("JoinRoomDialog", () => {
 		expect(optimisticallyMarkJoined).toHaveBeenCalledWith(JOINED_ID, {
 			name: "!abc:example.org",
 			avatarUrl: null,
+			isSpace: false,
 		});
 	});
 
@@ -558,7 +560,7 @@ describe("JoinRoomDialog knock offer (#442)", () => {
 		});
 		expect(optimisticallyMarkKnocked).toHaveBeenCalledWith(
 			"!knocked:example.com",
-			{ name: "!restricted:example.org", avatarUrl: null },
+			{ name: "!restricted:example.org", avatarUrl: null, isSpace: false },
 		);
 		expect(notices().some((n) => n.message === "Request to join sent.")).toBe(
 			true,
@@ -837,5 +839,88 @@ describe("describeJoinError", () => {
 		const fallback = "Couldn't join the room. Please try again.";
 		expect(describeJoinError(null)).toBe(fallback);
 		expect(describeJoinError({ errcode: "M_UNKNOWN" })).toBe(fallback);
+	});
+});
+
+describe("JoinRoomDialog isSpace prefill flag (#443)", () => {
+	const FORBIDDEN = { errcode: "M_FORBIDDEN" };
+
+	function setupSpacePrefill(opts: { knockOffered?: boolean } = {}) {
+		const client = createMockClient();
+		const [open, setOpen] = createSignal(true);
+		const onClose = vi.fn(() => setOpen(false));
+		render(() => (
+			<Wrapper client={client}>
+				<JoinRoomDialog
+					client={client as unknown as MatrixClient}
+					open={open}
+					onClose={onClose}
+					prefill={() => ({
+						idOrAlias: "!subspace:example.org",
+						viaServers: ["one.org"],
+					})}
+					knockOffered={() => opts.knockOffered ?? false}
+					isSpace={() => true}
+				/>
+			</Wrapper>
+		));
+		return { client, setOpen, onClose };
+	}
+
+	it("knocking a prefilled subspace marks the optimistic stub as a space", async () => {
+		const { client, onClose } = setupSpacePrefill({ knockOffered: true });
+		// The offer is pre-engaged: the reason field shows immediately.
+		expect(addressInput().value).toBe("!subspace:example.org one.org");
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(client.knockRoom).toHaveBeenCalledWith("!subspace:example.org", {
+			reason: undefined,
+			viaServers: ["one.org"],
+		});
+		expect(optimisticallyMarkKnocked).toHaveBeenCalledWith(
+			"!knocked:example.com",
+			{ name: "!subspace:example.org", avatarUrl: null, isSpace: true },
+		);
+	});
+
+	it("editing the address clears the isSpace flag before the knock", async () => {
+		const { client, onClose } = setupSpacePrefill({ knockOffered: true });
+		client.joinRoom.mockRejectedValue(FORBIDDEN);
+
+		// Edit: the typed address is no longer the known-space prefill, and
+		// the pre-engaged offer is reset (pre-existing behavior).
+		fireEvent.input(addressInput(), {
+			target: { value: "!other:example.org" },
+		});
+		// Re-reach the offer through the plain join 403.
+		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: /^Request to join$/i }),
+			).toBeTruthy(),
+		);
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(optimisticallyMarkKnocked).toHaveBeenCalledWith(
+			"!knocked:example.com",
+			{ name: "!other:example.org", avatarUrl: null, isSpace: false },
+		);
+	});
+
+	it("joining a prefilled space stubs as a space and navigates to the space route", async () => {
+		const { onClose } = setupSpacePrefill();
+		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
+
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(optimisticallyMarkJoined).toHaveBeenCalledWith(JOINED_ID, {
+			name: "!subspace:example.org",
+			avatarUrl: null,
+			isSpace: true,
+		});
+		expect(navigateMock).toHaveBeenCalledWith(
+			`/space/${encodeURIComponent(JOINED_ID)}`,
+		);
 	});
 });

@@ -19,6 +19,14 @@ export interface JoinDialogRequest {
 	 * attempt and show the reason field immediately).
 	 */
 	knockOffered?: boolean;
+	/**
+	 * Marks the prefill target as a space. Only space discovery knows
+	 * this for certain (from the hierarchy's room_type); used so the
+	 * optimistic knocked/joined stub surfaces in the spaces sidebar
+	 * instead of Home's room lists until /sync delivers the
+	 * authoritative m.room.create (#443).
+	 */
+	isSpace?: boolean;
 }
 
 const [joinDialogRequest, setJoinDialogRequest] =
@@ -34,9 +42,13 @@ export { joinDialogRequest };
  */
 export function requestJoinDialog(
 	prefill: JoinAddress | null = null,
-	options?: { knockOffered?: boolean },
+	options?: { knockOffered?: boolean; isSpace?: boolean },
 ): void {
-	setJoinDialogRequest({ prefill, knockOffered: options?.knockOffered });
+	setJoinDialogRequest({
+		prefill,
+		knockOffered: options?.knockOffered,
+		isSpace: options?.isSpace,
+	});
 }
 
 /** Clear the pending request (the dialog closed). */

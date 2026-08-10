@@ -16,6 +16,13 @@ export interface DiscoverableRoom {
 	 * heuristic canJoin uses for restricted rooms).
 	 */
 	canKnock: boolean;
+	/**
+	 * Whether this entry is itself a space (a subspace of the fetched
+	 * space). Subspaces are carried through instead of dropped (#443) so
+	 * they can be discovered and joined like rooms; joining one surfaces
+	 * it in the spaces sidebar.
+	 */
+	isSpace: boolean;
 }
 
 /** Extract via servers for a child room from the space hierarchy response. */
@@ -33,7 +40,7 @@ export function extractViaServers(
 	return childRelation?.content?.via ?? [];
 }
 
-/** Filter hierarchy rooms to only discoverable (non-joined, non-space) rooms. */
+/** Filter hierarchy rooms to discoverable (non-joined) rooms and subspaces. */
 export function filterDiscoverableRooms(
 	hierarchyRooms: HierarchyRoom[],
 	spaceId: string,
@@ -43,8 +50,8 @@ export function filterDiscoverableRooms(
 	return hierarchyRooms
 		.filter((room) => {
 			if (room.room_id === spaceId) return false;
-			if (room.room_type === "m.space") return false;
-			// Joined rooms live in the joined list; rooms with a pending invite
+			// Joined rooms live in the joined list (joined subspaces in the
+			// space's subspace rows, #443); rooms with a pending invite
 			// render in the space's Invites section (with a working Accept),
 			// not as a Discover entry - which for an invite-only room would be
 			// an unjoinable "Invite only" label even though the viewer holds an
@@ -80,6 +87,7 @@ export function filterDiscoverableRooms(
 				canJoin: rule === "public" || (isRestricted && isSpaceMember),
 				canKnock:
 					rule === "knock" || (rule === "knock_restricted" && isSpaceMember),
+				isSpace: room.room_type === "m.space",
 			};
 		});
 }

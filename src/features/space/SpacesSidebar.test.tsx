@@ -435,3 +435,243 @@ describe("SpacesSidebar Home unread badge", () => {
 		expect(homeBadge()?.textContent).toBe("2");
 	});
 });
+
+describe("SpacesSidebar nested subspaces (#443)", () => {
+	function renderWith(seed: RoomSummary[]): void {
+		render(() => (
+			<Wrapper client={createMockClient()} seed={seed}>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+	}
+
+	function space(
+		roomId: string,
+		name: string,
+		children: string[] = [],
+	): RoomSummary {
+		const s = makeSpaceSummary(roomId, name);
+		s.children = children;
+		return s;
+	}
+
+	it("renders a joined subspace indented under its parent, each exactly once", () => {
+		renderWith([
+			space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+			space("!beta:example.com", "Beta"),
+		]);
+		const alphas = screen.getAllByRole("button", { name: "Alpha" });
+		const betas = screen.getAllByRole("button", { name: "Beta" });
+		expect(alphas).toHaveLength(1);
+		expect(betas).toHaveLength(1);
+		// The nested tile's SidebarItem wrapper carries the depth indent.
+		expect(betas[0].closest(".pl-4")).not.toBeNull();
+		expect(alphas[0].closest(".pl-4")).toBeNull();
+		// Parent renders before its nested child.
+		expect(
+			alphas[0].compareDocumentPosition(betas[0]) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+	});
+
+	it("clicking the subspace tile navigates to the subspace's space view", () => {
+		renderWith([
+			space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+			space("!beta:example.com", "Beta"),
+		]);
+		fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+		expect(navigateMock).toHaveBeenCalledWith(
+			`/space/${encodeURIComponent("!beta:example.com")}`,
+		);
+	});
+
+	it("clicking the subspace tile re-opens its remembered channel (#226 semantics)", () => {
+		const child = makeRoomSummary("!general:example.com", "general");
+		renderWith([
+			space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+			space("!beta:example.com", "Beta", ["!general:example.com"]),
+			child,
+		]);
+		setLastChannel("!beta:example.com", "!general:example.com");
+		fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+		expect(navigateMock).toHaveBeenCalledWith(
+			`/space/${encodeURIComponent("!beta:example.com")}/${encodeURIComponent("!general:example.com")}`,
+		);
+	});
+
+	it("badges the parent tile with unread from a subspace's room (recursive rollup)", () => {
+		const grandchildRoom = makeRoomSummary("!gc:example.com", "gc");
+		grandchildRoom.unreadCount = 3;
+		renderWith([
+			space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+			space("!beta:example.com", "Beta", ["!gc:example.com"]),
+			grandchildRoom,
+		]);
+		const alphaTile = screen.getByRole("button", { name: "Alpha" });
+		const badge = within(alphaTile).getByRole("status");
+		expect(badge.textContent).toBe("3");
+		expect(badge.getAttribute("aria-label")).toBe("3 unread");
+		// The subspace tile badges its own subtree too.
+		const betaTile = screen.getByRole("button", { name: "Beta" });
+		expect(within(betaTile).getByRole("status").textContent).toBe("3");
+	});
+
+	it("renders every member of an A<->B space cycle exactly once", () => {
+		renderWith([
+			space("!a:example.com", "Aaa", ["!b:example.com"]),
+			space("!b:example.com", "Bbb", ["!a:example.com"]),
+		]);
+		expect(screen.getAllByRole("button", { name: "Aaa" })).toHaveLength(1);
+		expect(screen.getAllByRole("button", { name: "Bbb" })).toHaveLength(1);
+	});
+
+	it("keeps a beyond-cap nested space reachable as a root tile", () => {
+		renderWith([
+			space("!a:example.com", "Aaa", ["!b:example.com"]),
+			space("!b:example.com", "Bbb", ["!c:example.com"]),
+			space("!c:example.com", "Ccc", ["!d:example.com"]),
+			space("!d:example.com", "Ddd"),
+		]);
+		for (const name of ["Aaa", "Bbb", "Ccc", "Ddd"]) {
+			expect(screen.getAllByRole("button", { name })).toHaveLength(1);
+		}
+	});
+
+	it("renders a subspace shared by two parents exactly once (diamond)", () => {
+		renderWith([
+			space("!a:example.com", "Aaa", ["!shared:example.com"]),
+			space("!b:example.com", "Bbb", ["!shared:example.com"]),
+			space("!shared:example.com", "Shared"),
+		]);
+		expect(screen.getAllByRole("button", { name: "Shared" })).toHaveLength(1);
+	});
+
+	it("does not nest subspaces the user has not joined", () => {
+		const invitedSub = space("!invited:example.com", "Invited");
+		invitedSub.membership = "invite";
+		renderWith([
+			space("!alpha:example.com", "Alpha", ["!invited:example.com"]),
+			invitedSub,
+		]);
+		// The invited subspace renders as an invited tile (accent ring),
+		// not nested under Alpha.
+		expect(screen.queryByRole("button", { name: "Invited" })).toBeNull();
+		expect(
+			screen.getByRole("button", {
+				name: "Invited (invitation pending)",
+			}),
+		).toBeTruthy();
+	});
+});
+
+describe("SpacesSidebar nested tile branches (#443)", () => {
+	function space(
+		roomId: string,
+		name: string,
+		children: string[] = [],
+	): RoomSummary {
+		const s = makeSpaceSummary(roomId, name);
+		s.children = children;
+		return s;
+	}
+
+	it("renders the nested tile smaller than the root tile", () => {
+		render(() => (
+			<Wrapper
+				client={createMockClient()}
+				seed={[
+					space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+					space("!beta:example.com", "Beta"),
+				]}
+			>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const root = screen.getByRole("button", { name: "Alpha" });
+		const nested = screen.getByRole("button", { name: "Beta" });
+		expect(root.className).toContain("h-10 w-10");
+		expect(nested.className).toContain("h-8 w-8");
+	});
+
+	it("marks the selected nested tile with aria-current and the smaller pill", () => {
+		paramsState.spaceId = "!beta:example.com";
+		render(() => (
+			<Wrapper
+				client={createMockClient()}
+				seed={[
+					space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+					space("!beta:example.com", "Beta"),
+				]}
+			>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const nested = screen.getByRole("button", { name: "Beta" });
+		expect(nested.getAttribute("aria-current")).toBe("page");
+		expect(nested.className).toContain("rounded-lg");
+		// The selected rail pill on a nested item is the shorter h-8 bar.
+		const item = nested.closest(".pl-4");
+		expect(item).not.toBeNull();
+		const pill = item?.querySelector(".h-8.rounded-r-full");
+		expect(pill).not.toBeNull();
+	});
+
+	it("indents a depth-2 tile with pl-8", () => {
+		render(() => (
+			<Wrapper
+				client={createMockClient()}
+				seed={[
+					space("!a:example.com", "Aaa", ["!b:example.com"]),
+					space("!b:example.com", "Bbb", ["!c:example.com"]),
+					space("!c:example.com", "Ccc"),
+				]}
+			>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const depth2 = screen.getByRole("button", { name: "Ccc" });
+		expect(depth2.closest(".pl-8")).not.toBeNull();
+	});
+
+	it("opens the context menu on a nested tile and fires the handler with the subspace id", async () => {
+		const onLeaveSpace = vi.fn();
+		render(() => (
+			<Wrapper
+				client={createMockClient()}
+				seed={[
+					space("!alpha:example.com", "Alpha", ["!beta:example.com"]),
+					space("!beta:example.com", "Beta"),
+				]}
+			>
+				<SpacesSidebar onLeaveSpace={onLeaveSpace} />
+			</Wrapper>
+		));
+		const nested = screen.getByRole("button", { name: "Beta" });
+		fireEvent.contextMenu(nested, { clientX: 10, clientY: 10 });
+		await screen.findByText("Leave space");
+		const item = screen
+			.getAllByRole("menuitem")
+			.find((el) => el.textContent === "Leave space") as HTMLElement;
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(onLeaveSpace).toHaveBeenCalledWith("!beta:example.com");
+	});
+});
+
+describe("SpacesSidebar tile avatar fallback (#443)", () => {
+	it("falls back to the space initial when the avatar image errors", () => {
+		const space = makeSpaceSummary("!alpha:example.com", "Alpha");
+		space.avatarUrl = "https://example.com/broken.png";
+		render(() => (
+			<Wrapper client={createMockClient()} seed={[space]}>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const tile = screen.getByRole("button", { name: "Alpha" });
+		const img = tile.querySelector("img");
+		expect(img).not.toBeNull();
+		fireEvent.error(img as HTMLImageElement);
+		expect(tile.querySelector("img")).toBeNull();
+		// The initial-letter fallback renders in its place.
+		expect(within(tile).getByText("A")).toBeTruthy();
+	});
+});

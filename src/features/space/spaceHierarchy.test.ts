@@ -158,12 +158,13 @@ describe("filterDiscoverableRooms", () => {
 		expect(result[0].roomId).toBe("!room1:example.com");
 	});
 
-	it("excludes sub-spaces (room_type m.space)", () => {
+	it("carries sub-spaces (room_type m.space) through with isSpace=true", () => {
 		const rooms: HierarchyRoom[] = [
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
 				room_id: "!subspace:example.com",
 				room_type: "m.space",
+				join_rule: "public",
 			}),
 			makeHierarchyRoom({
 				room_id: "!room1:example.com",
@@ -178,8 +179,73 @@ describe("filterDiscoverableRooms", () => {
 			summaries,
 			mockMxcToHttp,
 		);
-		expect(result).toHaveLength(1);
-		expect(result[0].roomId).toBe("!room1:example.com");
+		expect(result).toHaveLength(2);
+		expect(result[0].roomId).toBe("!subspace:example.com");
+		expect(result[0].isSpace).toBe(true);
+		expect(result[0].canJoin).toBe(true);
+		expect(result[1].roomId).toBe("!room1:example.com");
+		expect(result[1].isSpace).toBe(false);
+	});
+
+	it("excludes joined, invited, and knocked subspaces (they render in the space view / sidebar)", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!joinedsub:example.com",
+				room_type: "m.space",
+				join_rule: "public",
+			}),
+			makeHierarchyRoom({
+				room_id: "!invitedsub:example.com",
+				room_type: "m.space",
+				join_rule: "public",
+			}),
+			makeHierarchyRoom({
+				room_id: "!knockedsub:example.com",
+				room_type: "m.space",
+				join_rule: "knock",
+			}),
+		];
+		const summaries: SummariesStore = {
+			"!joinedsub:example.com": makeSummary(
+				"!joinedsub:example.com",
+				"join",
+				true,
+			),
+			"!invitedsub:example.com": makeSummary(
+				"!invitedsub:example.com",
+				"invite",
+				true,
+			),
+			"!knockedsub:example.com": makeSummary(
+				"!knockedsub:example.com",
+				"knock",
+				true,
+			),
+		};
+
+		const result = filterDiscoverableRooms(
+			rooms,
+			SPACE_ID,
+			summaries,
+			mockMxcToHttp,
+		);
+		expect(result).toEqual([]);
+	});
+
+	it("sets canKnock for knock-rule subspaces", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!knocksub:example.com",
+				room_type: "m.space",
+				join_rule: "knock",
+			}),
+		];
+		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
+		expect(result[0].isSpace).toBe(true);
+		expect(result[0].canJoin).toBe(false);
+		expect(result[0].canKnock).toBe(true);
 	});
 
 	it("excludes rooms the user has already joined", () => {
@@ -266,6 +332,7 @@ describe("filterDiscoverableRooms", () => {
 			joinRule: "public",
 			canJoin: true,
 			canKnock: false,
+			isSpace: false,
 		});
 	});
 

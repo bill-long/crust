@@ -516,6 +516,13 @@ export function createSummariesStore(client: MatrixClient): {
 			if (existing.membership !== "knock") {
 				setSummaries(roomId, "membership", "knock");
 			}
+			// Forward-only isSpace promotion, mirroring
+			// optimisticallyMarkJoined: a caller that knows for certain (a
+			// knock on a subspace from space discovery, #443) can flip a stale
+			// stub; we never demote an authoritative isSpace:false.
+			if (info.isSpace === true && existing.isSpace !== true) {
+				setSummaries(roomId, "isSpace", true);
+			}
 			return;
 		}
 		setSummaries(
@@ -530,7 +537,7 @@ export function createSummariesStore(client: MatrixClient): {
 					membership: "knock",
 					isEncrypted: false,
 					isDirect: false,
-					isSpace: false,
+					isSpace: info.isSpace === true,
 					kind: "text",
 					callActive: false,
 					children: [],

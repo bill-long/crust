@@ -23,21 +23,62 @@ export function getSpaceRooms(
 }
 
 /**
- * Rollup unread + highlight counts for a space's direct joined non-space children.
+ * Joined subspaces of a joined space: direct children that are themselves
+ * joined spaces, sorted alphabetically (spaces carry no reliable activity
+ * timestamp, so name order keeps the section stable). Rendered as rows in
+ * the space's room list (#443). A space listing ITSELF as a child
+ * (wire-legal nonsense) is excluded - it would render a row that
+ * navigates to the view you're already on.
+ */
+export function getSpaceSubspaces(
+	summaries: SummariesStore,
+	spaceId: string,
+): RoomSummary[] {
+	const space = summaries[spaceId];
+	if (!space?.isSpace || space.membership !== "join") return [];
+
+	return space.children
+		.map((id) => summaries[id])
+		.filter(
+			(s): s is RoomSummary =>
+				s !== undefined &&
+				s.roomId !== spaceId &&
+				s.membership === "join" &&
+				s.isSpace,
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Rollup unread + highlight counts for a space's joined non-space
+ * descendants: direct child rooms plus, recursively, the rooms of joined
+ * subspaces (#443). Traversal is membership-gated (only a joined space
+ * exposes an authoritative child list) and cycle-safe - space graphs are
+ * user-controlled and can contain A<->B loops or self-references, so each
+ * room/space is entered at most once. Iterative so pathologically deep
+ * nesting can't overflow the call stack.
  */
 export function getSpaceUnreadRollup(
 	summaries: SummariesStore,
 	spaceId: string,
 ): { unread: number; highlight: number } {
-	const space = summaries[spaceId];
-	if (!space?.isSpace || space.membership !== "join")
+	const root = summaries[spaceId];
+	if (!root?.isSpace || root.membership !== "join")
 		return { unread: 0, highlight: 0 };
 
 	let unread = 0;
 	let highlight = 0;
-	for (const childId of space.children) {
-		const child = summaries[childId];
-		if (child && child.membership === "join" && !child.isSpace) {
+	const visited = new Set<string>([spaceId]);
+	const stack: string[] = [...root.children];
+	while (stack.length > 0) {
+		const id = stack.pop();
+		if (id === undefined || visited.has(id)) continue;
+		visited.add(id);
+		const child = summaries[id];
+		if (!child || child.membership !== "join") continue;
+		if (child.isSpace) {
+			for (const grandchildId of child.children) stack.push(grandchildId);
+		} else {
 			unread += child.unreadCount;
 			highlight += child.highlightCount;
 		}
@@ -158,6 +199,106 @@ export function getSpaces(summaries: SummariesStore): RoomSummary[] {
 	return Object.values(summaries)
 		.filter((s) => s.isSpace && s.membership === "join")
 		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Deepest nesting tier rendered under a root tile in the spaces sidebar
+ * (#443). Roots sit at depth 0, so MAX_SIDEBAR_SPACE_DEPTH = 2 renders a
+ * root plus two nested tiers; joined spaces nested deeper fall back to
+ * root tiles so nothing disappears from the rail.
+ */
+export const MAX_SIDEBAR_SPACE_DEPTH = 2;
+
+/** A node in the spaces-sidebar tree: a joined space and its joined
+    subspaces, nested up to {@link MAX_SIDEBAR_SPACE_DEPTH}. */
+export interface SpaceTreeNode {
+	space: RoomSummary;
+	children: SpaceTreeNode[];
+}
+
+/**
+ * Build the spaces-sidebar tree from the summary store (#443).
+ *
+ * Roots are joined spaces no other joined space claims as a child; each
+ * root carries its joined subspaces nested (name-sorted) up to
+ * {@link MAX_SIDEBAR_SPACE_DEPTH}. Space graphs are user-controlled and
+ * can contain cycles (A contains B contains A), diamonds (two parents
+ * sharing a subspace), or self-references, so construction guards with a
+ * visited set: every joined space is placed EXACTLY once. Spaces left
+ * unplaced after the forest is built (cycle members with no parentless
+ * entry point, or spaces nested deeper than the depth cap) are appended
+ * as root tiles so they stay reachable.
+ */
+export function getSpaceTree(summaries: SummariesStore): SpaceTreeNode[] {
+	const spaces = getSpaces(summaries);
+	const byId = new Map(spaces.map((s) => [s.roomId, s]));
+
+	const hasJoinedParent = new Set<string>();
+	for (const space of spaces) {
+		for (const childId of space.children) {
+			if (byId.has(childId)) hasJoinedParent.add(childId);
+		}
+	}
+
+	const visited = new Set<string>();
+	const build = (space: RoomSummary, depth: number): SpaceTreeNode => {
+		visited.add(space.roomId);
+		const children: SpaceTreeNode[] = [];
+		if (depth < MAX_SIDEBAR_SPACE_DEPTH) {
+			const childSpaces = space.children
+				.map((id) => byId.get(id))
+				.filter((s): s is RoomSummary => s !== undefined)
+				.sort((a, b) => a.name.localeCompare(b.name));
+			for (const child of childSpaces) {
+				// Re-check inside the loop: the children array can list the
+				// same id twice, and an earlier sibling's subtree may have
+				// claimed this child (diamond).
+				if (visited.has(child.roomId)) continue;
+				children.push(build(child, depth + 1));
+			}
+		}
+		return { space, children };
+	};
+
+	const roots: SpaceTreeNode[] = [];
+	for (const space of spaces) {
+		if (hasJoinedParent.has(space.roomId) || visited.has(space.roomId))
+			continue;
+		roots.push(build(space, 0));
+	}
+	// Cycle members and depth-capped spaces never got placed; append them
+	// as roots rather than dropping them from the rail, then re-sort so
+	// natural and fallback roots form one name-sorted run.
+	for (const space of spaces) {
+		if (!visited.has(space.roomId)) roots.push(build(space, 0));
+	}
+	roots.sort((a, b) => a.space.name.localeCompare(b.space.name));
+	return roots;
+}
+
+/** Flattened sidebar view of {@link getSpaceTree}: the spaces in render
+    order plus each space's nesting depth. The flat list keeps `<For>`
+    keyed on stable RoomSummary references (tree nodes are re-minted
+    whenever a structural summaries change re-runs the tree memo, and
+    re-minted node wrappers would remount every tile). */
+export interface FlatSpaceTree {
+	spaces: RoomSummary[];
+	depths: ReadonlyMap<string, number>;
+}
+
+/** Flatten a space tree depth-first into render order. */
+export function flattenSpaceTree(tree: SpaceTreeNode[]): FlatSpaceTree {
+	const spaces: RoomSummary[] = [];
+	const depths = new Map<string, number>();
+	const walk = (nodes: SpaceTreeNode[], depth: number): void => {
+		for (const node of nodes) {
+			spaces.push(node.space);
+			depths.set(node.space.roomId, depth);
+			walk(node.children, depth + 1);
+		}
+	};
+	walk(tree, 0);
+	return { spaces, depths };
 }
 
 /**

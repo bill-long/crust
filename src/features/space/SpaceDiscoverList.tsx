@@ -1,4 +1,5 @@
 import { type Component, For, Show } from "solid-js";
+import { SpaceIcon } from "../../components/SpaceIcon";
 import { requestJoinDialog } from "../../stores/joinDialog";
 import {
 	type DiscoverableRoom,
@@ -21,6 +22,9 @@ const DiscoverEntry: Component<{
 		<div class="flex w-full items-center gap-2 rounded px-3 py-2 text-text-muted">
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-1">
+					<Show when={props.room.isSpace}>
+						<SpaceIcon />
+					</Show>
 					<span class="truncate text-sm font-medium text-text-secondary">
 						{props.room.name}
 					</span>
@@ -114,8 +118,9 @@ export { DiscoverEntry };
 export const SpaceDiscoverList: Component<{
 	/** The space whose hierarchy to fetch (undefined = nothing to show). */
 	spaceId: () => string | undefined;
-	/** Whether the caller is already rendering rooms for this space
-	    (joined rooms or pending-invite rows). */
+	/** Whether the caller is already rendering entries for this space
+	    (joined rooms, joined subspace rows, or pending-invite /
+	    pending-knock rows). */
 	hasListedRooms: () => boolean;
 }> = (props) => {
 	const hierarchy = useSpaceHierarchy(props.spaceId);
@@ -169,7 +174,7 @@ export const SpaceDiscoverList: Component<{
 										idOrAlias: room.roomId,
 										viaServers: hierarchy.viaServersFor(room.roomId),
 									},
-									{ knockOffered: true },
+									{ knockOffered: true, isSpace: room.isSpace },
 								)
 							}
 						/>

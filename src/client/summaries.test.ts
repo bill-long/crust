@@ -936,6 +936,56 @@ describe("createSummariesStore optimisticallyMarkKnocked", () => {
 
 		store.cleanup();
 	});
+
+	it("creates a space stub when the caller knows the knock target is a space (#443)", () => {
+		const store = makeStore();
+		store.optimisticallyMarkKnocked("!sub:x", {
+			name: "Subspace",
+			avatarUrl: null,
+			isSpace: true,
+		});
+
+		const s = store.summaries["!sub:x"];
+		expect(s.membership).toBe("knock");
+		expect(s.isSpace).toBe(true);
+
+		store.cleanup();
+	});
+
+	it("promotes a stale non-space stub to isSpace (forward-only, never demotes)", () => {
+		const store = makeStore();
+		store.setSummaries("!sub:x", {
+			roomId: "!sub:x",
+			name: "Subspace",
+			avatarUrl: null,
+			lastMessage: null,
+			unreadCount: 0,
+			highlightCount: 0,
+			membership: "leave",
+			isEncrypted: false,
+			isDirect: false,
+			isSpace: false,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkKnocked("!sub:x", {
+			name: "Ignored",
+			avatarUrl: null,
+			isSpace: true,
+		});
+		expect(store.summaries["!sub:x"].isSpace).toBe(true);
+
+		// And a plain knock never demotes an authoritative isSpace:true.
+		store.optimisticallyMarkKnocked("!sub:x", {
+			name: "Ignored",
+			avatarUrl: null,
+		});
+		expect(store.summaries["!sub:x"].isSpace).toBe(true);
+
+		store.cleanup();
+	});
 });
 
 describe("createSummariesStore optimisticallyMarkLeft", () => {

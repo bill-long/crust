@@ -3,41 +3,227 @@ import { useNavigate } from "@solidjs/router";
 import {
 	type Accessor,
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	For,
 	type JSX,
+	on,
 	Show,
 } from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
+import type { RoomSummary } from "../../client/summaries";
 import {
+	flattenSpaceTree,
 	getHomeUnreadRollup,
 	getInvitedRoomCount,
 	getInvitedSpaces,
 	getKnockedSpaces,
-	getSpaceRooms,
-	getSpaces,
+	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
-import { getLastChannel } from "../../stores/lastChannel";
+import { spaceLandingPath } from "../../lib/spaceLanding";
 import { CreateSpaceDialog } from "./CreateSpaceDialog";
+
+/** Nesting indent per sidebar depth tier (static strings so Tailwind's
+    scanner picks them up; depth is capped by MAX_SIDEBAR_SPACE_DEPTH). */
+const DEPTH_INDENT_CLASSES = ["", "pl-4", "pl-8"] as const;
 
 interface SidebarItemProps {
 	selected: Accessor<boolean>;
+	/** Nesting depth in the space tree (0 = root tile). */
+	depth?: Accessor<number>;
 	children: JSX.Element;
 }
 
-const SidebarItem: Component<SidebarItemProps> = (props) => (
-	<div class="relative flex justify-center">
-		{props.children}
+const SidebarItem: Component<SidebarItemProps> = (props) => {
+	const depth = () => props.depth?.() ?? 0;
+	return (
 		<div
-			class={`pointer-events-none absolute left-0 top-1/2 w-1 -translate-y-1/2 rounded-r-full bg-text-primary transition-all duration-150 ${
-				props.selected() ? "h-10" : "h-0 peer-hover:h-5"
-			}`}
-		/>
-	</div>
-);
+			class={`relative flex justify-center ${DEPTH_INDENT_CLASSES[Math.min(depth(), DEPTH_INDENT_CLASSES.length - 1)]}`}
+		>
+			{props.children}
+			<div
+				class={`pointer-events-none absolute left-0 top-1/2 w-1 -translate-y-1/2 rounded-r-full bg-text-primary transition-all duration-150 ${
+					props.selected()
+						? depth() > 0
+							? "h-8"
+							: "h-10"
+						: "h-0 peer-hover:h-5"
+				}`}
+			/>
+		</div>
+	);
+};
+
+interface SpaceTileProps {
+	/** The space this tile represents. */
+	space: RoomSummary;
+	/** Nesting depth in the sidebar tree (0 = root tile). Accessor so a
+	    tree restructure re-indents the row without remounting it. */
+	depth: Accessor<number>;
+	onOpenSpaceSettings?: (spaceId: string) => void;
+	onLeaveSpace?: (spaceId: string) => void;
+	onInviteSpace?: (spaceId: string) => void;
+}
+
+/**
+ * One joined-space tile in the sidebar rail: avatar button with unread
+ * badge, right-click context menu, and the selected/hover rail pill (via
+ * SidebarItem). Nested subspace tiles render smaller and indented (#443).
+ */
+const SpaceTile: Component<SpaceTileProps> = (props) => {
+	const { client, summaries } = useClient();
+	const params = useDecodedParams<{ spaceId?: string }>();
+	const navigate = useNavigate();
+
+	// Recursive rollup: a parent tile badges unread from its subspaces'
+	// rooms too, so nested activity is visible without expanding (#443).
+	const rollup = createMemo(() =>
+		getSpaceUnreadRollup(summaries, props.space.roomId),
+	);
+	const isSelected = () => params.spaceId === props.space.roomId;
+	const nested = () => props.depth() > 0;
+
+	// Render-time check: hide the Invite item when the local user lacks
+	// invite permission in this space, or when the space room isn't yet
+	// loaded into the SDK store. This accepts mild staleness (no
+	// state-event subscription) — the invite call itself will reject with
+	// M_FORBIDDEN if permissions change after the menu opens.
+	const canInviteToSpace = (): boolean => {
+		if (!props.onInviteSpace) return false;
+		const userId = client.getUserId();
+		if (!userId) return false;
+		const room = client.getRoom(props.space.roomId);
+		return !!room?.canInvite(userId);
+	};
+	const hasMenu = (): boolean =>
+		!!props.onOpenSpaceSettings || !!props.onLeaveSpace || canInviteToSpace();
+
+	const openSpace = (): void => {
+		navigate(spaceLandingPath(summaries, props.space.roomId));
+	};
+
+	const sizeClass = () => (nested() ? "h-8 w-8" : "h-10 w-10");
+	const roundingClass = () =>
+		isSelected()
+			? nested()
+				? "rounded-lg"
+				: "rounded-xl"
+			: nested()
+				? "rounded-xl hover:rounded-lg"
+				: "rounded-2xl hover:rounded-xl";
+
+	// Fail-closed avatar: a 404/decode failure falls back to the initial
+	// instead of the browser's broken-image icon. Reset when the avatar
+	// URL changes so a synced-in avatar retries (mirrors components/Avatar).
+	const [imgFailed, setImgFailed] = createSignal(false);
+	createEffect(
+		on(
+			() => props.space.avatarUrl,
+			() => setImgFailed(false),
+		),
+	);
+
+	const triggerInner = (
+		<>
+			<button
+				type="button"
+				onClick={openSpace}
+				class={`relative flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${sizeClass()} ${roundingClass()} ${
+					isSelected()
+						? "bg-surface-2 text-text-primary"
+						: "bg-surface-3 text-text-secondary hover:bg-surface-4"
+				}`}
+				title={props.space.name.trim() || "Unnamed space"}
+				aria-label={props.space.name.trim() || "Unnamed space"}
+				aria-current={isSelected() ? "page" : undefined}
+			>
+				<Show
+					when={!imgFailed() && props.space.avatarUrl}
+					fallback={
+						<span class={`font-semibold ${nested() ? "text-xs" : "text-sm"}`}>
+							{(props.space.name.trim() || "?").charAt(0).toUpperCase()}
+						</span>
+					}
+				>
+					{(url) => (
+						<img
+							src={url()}
+							alt={props.space.name.trim() || "Space"}
+							class={`${sizeClass()} rounded-[inherit] object-cover transition-[border-radius]`}
+							onError={() => setImgFailed(true)}
+						/>
+					)}
+				</Show>
+
+				{/* Unread badge */}
+				<Show when={rollup().unread > 0}>
+					<span
+						class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
+							rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
+						}`}
+						role="status"
+						aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
+					>
+						{rollup().unread > 99 ? "99+" : rollup().unread}
+					</span>
+				</Show>
+			</button>
+		</>
+	);
+
+	return (
+		<SidebarItem selected={isSelected} depth={props.depth}>
+			{/* Only mount the ContextMenu when at least one menu item will
+			    render — otherwise right-clicking would open an empty
+			    popover. When no handlers are wired, render the avatar block
+			    in a plain wrapper that preserves the `peer` hook. */}
+			<Show
+				when={hasMenu()}
+				fallback={<div class="peer relative">{triggerInner}</div>}
+			>
+				<ContextMenu>
+					<ContextMenu.Trigger class="peer relative">
+						{triggerInner}
+					</ContextMenu.Trigger>
+
+					<ContextMenu.Portal>
+						<ContextMenu.Content class="z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-none">
+							<Show when={props.onOpenSpaceSettings}>
+								<ContextMenu.Item
+									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+									onSelect={() =>
+										props.onOpenSpaceSettings?.(props.space.roomId)
+									}
+								>
+									Space settings
+								</ContextMenu.Item>
+							</Show>
+							<Show when={canInviteToSpace()}>
+								<ContextMenu.Item
+									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+									onSelect={() => props.onInviteSpace?.(props.space.roomId)}
+								>
+									Invite people
+								</ContextMenu.Item>
+							</Show>
+							<Show when={props.onLeaveSpace}>
+								<ContextMenu.Item
+									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+									onSelect={() => props.onLeaveSpace?.(props.space.roomId)}
+								>
+									Leave space
+								</ContextMenu.Item>
+							</Show>
+						</ContextMenu.Content>
+					</ContextMenu.Portal>
+				</ContextMenu>
+			</Show>
+		</SidebarItem>
+	);
+};
 
 interface SpacesSidebarProps {
 	/**
@@ -64,7 +250,13 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	const navigate = useNavigate();
 	const [createOpen, setCreateOpen] = createSignal(false);
 
-	const spaces = createMemo(() => getSpaces(summaries));
+	// Joined spaces as a nested tree (#443): subspaces render indented
+	// under their parent instead of as flat top-level tiles. The flattened
+	// form keeps <For> keyed on stable RoomSummary references - the tree
+	// nodes are re-minted whenever a structural summaries change (child
+	// list, membership, name) re-runs the memo, and re-minted node
+	// wrappers would remount every tile (and any open context menu).
+	const spaceTree = createMemo(() => flattenSpaceTree(getSpaceTree(summaries)));
 	const invitedSpaces = createMemo(() => getInvitedSpaces(summaries));
 	// Spaces with a pending join request (knock). Surfaced as tiles because
 	// no room-level selector includes spaces - without these, a knocked
@@ -77,23 +269,6 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	const homeSelected = () => !params.spaceId;
 	const homeRollup = createMemo(() => getHomeUnreadRollup(summaries));
 	const neverSelected = () => false;
-
-	// Navigate to a space, re-opening the last-viewed channel when one is
-	// remembered and still a joined child of the space; otherwise fall back
-	// to the space landing view (issue #226).
-	const openSpace = (spaceId: string): void => {
-		const remembered = getLastChannel(spaceId);
-		if (
-			remembered &&
-			getSpaceRooms(summaries, spaceId).some((r) => r.roomId === remembered)
-		) {
-			navigate(
-				`/space/${encodeURIComponent(spaceId)}/${encodeURIComponent(remembered)}`,
-			);
-			return;
-		}
-		navigate(`/space/${encodeURIComponent(spaceId)}`);
-	};
 
 	return (
 		<aside class="flex h-full flex-col items-stretch bg-surface-1 py-3">
@@ -160,127 +335,19 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 
 				<div class="mx-auto my-1 h-px w-8 bg-surface-3" />
 
-				{/* Space list */}
-				<For each={spaces()}>
-					{(space) => {
-						const rollup = createMemo(() =>
-							getSpaceUnreadRollup(summaries, space.roomId),
-						);
-						const isSelected = () => params.spaceId === space.roomId;
-						// Render-time check: hide the Invite item when the local
-						// user lacks invite permission in this space, or when the
-						// space room isn't yet loaded into the SDK store. This
-						// accepts mild staleness (no state-event subscription) —
-						// the invite call itself will reject with M_FORBIDDEN if
-						// permissions change after the menu opens.
-						const canInviteToSpace = (): boolean => {
-							if (!props.onInviteSpace) return false;
-							const userId = client.getUserId();
-							if (!userId) return false;
-							const room = client.getRoom(space.roomId);
-							return !!room?.canInvite(userId);
-						};
-						const hasMenu = (): boolean =>
-							!!props.onOpenSpaceSettings ||
-							!!props.onLeaveSpace ||
-							canInviteToSpace();
-
-						const triggerInner = (
-							<>
-								<button
-									type="button"
-									onClick={() => openSpace(space.roomId)}
-									class={`relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
-										isSelected()
-											? "rounded-xl bg-surface-2 text-text-primary"
-											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
-									}`}
-									title={space.name.trim() || "Unnamed space"}
-									aria-label={space.name.trim() || "Unnamed space"}
-									aria-current={isSelected() ? "page" : undefined}
-								>
-									<Show
-										when={space.avatarUrl}
-										fallback={
-											<span class="text-sm font-semibold">
-												{(space.name.trim() || "?").charAt(0).toUpperCase()}
-											</span>
-										}
-									>
-										<img
-											src={space.avatarUrl ?? ""}
-											alt={space.name.trim() || "Space"}
-											class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
-										/>
-									</Show>
-
-									{/* Unread badge */}
-									<Show when={rollup().unread > 0}>
-										<span
-											class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-												rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-											}`}
-											role="status"
-											aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
-										>
-											{rollup().unread > 99 ? "99+" : rollup().unread}
-										</span>
-									</Show>
-								</button>
-							</>
-						);
-
-						return (
-							<SidebarItem selected={isSelected}>
-								{/* Only mount the ContextMenu when at least one menu item
-								    will render — otherwise right-clicking would open an
-								    empty popover. When no handlers are wired, render the
-								    avatar block in a plain wrapper that preserves the
-								    `peer` hook. */}
-								<Show
-									when={hasMenu()}
-									fallback={<div class="peer relative">{triggerInner}</div>}
-								>
-									<ContextMenu>
-										<ContextMenu.Trigger class="peer relative">
-											{triggerInner}
-										</ContextMenu.Trigger>
-
-										<ContextMenu.Portal>
-											<ContextMenu.Content class="z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-none">
-												<Show when={props.onOpenSpaceSettings}>
-													<ContextMenu.Item
-														class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
-														onSelect={() =>
-															props.onOpenSpaceSettings?.(space.roomId)
-														}
-													>
-														Space settings
-													</ContextMenu.Item>
-												</Show>
-												<Show when={canInviteToSpace()}>
-													<ContextMenu.Item
-														class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
-														onSelect={() => props.onInviteSpace?.(space.roomId)}
-													>
-														Invite people
-													</ContextMenu.Item>
-												</Show>
-												<Show when={props.onLeaveSpace}>
-													<ContextMenu.Item
-														class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
-														onSelect={() => props.onLeaveSpace?.(space.roomId)}
-													>
-														Leave space
-													</ContextMenu.Item>
-												</Show>
-											</ContextMenu.Content>
-										</ContextMenu.Portal>
-									</ContextMenu>
-								</Show>
-							</SidebarItem>
-						);
-					}}
+				{/* Joined spaces, nested: subspaces render indented under their
+				    parent (#443). Depth comes from the flattened tree's map so a
+				    restructure re-indents without remounting the tile. */}
+				<For each={spaceTree().spaces}>
+					{(space) => (
+						<SpaceTile
+							space={space}
+							depth={() => spaceTree().depths.get(space.roomId) ?? 0}
+							onOpenSpaceSettings={props.onOpenSpaceSettings}
+							onLeaveSpace={props.onLeaveSpace}
+							onInviteSpace={props.onInviteSpace}
+						/>
+					)}
 				</For>
 
 				{/* Spaces the user has a pending invite to. Clicking opens the

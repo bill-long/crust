@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "./summaries";
 import {
+	flattenSpaceTree,
 	getHomeUnreadRollup,
 	getInvitedRoomCount,
 	getInvitedRooms,
@@ -9,7 +10,11 @@ import {
 	getKnockedSpaces,
 	getSpaceInvitedRooms,
 	getSpaceKnockedRooms,
+	getSpaceSubspaces,
+	getSpaceTree,
+	getSpaceUnreadRollup,
 	getTotalUnread,
+	MAX_SIDEBAR_SPACE_DEPTH,
 } from "./summaries-selectors";
 
 function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
@@ -272,5 +277,339 @@ describe("getTotalUnread", () => {
 			room({ roomId: "!dm", isDirect: true, unreadCount: 4 }),
 		]);
 		expect(getTotalUnread(s)).toBe(4);
+	});
+});
+
+describe("getSpaceSubspaces (#443)", () => {
+	it("returns joined space children sorted by name", () => {
+		const s = store([
+			room({
+				roomId: "!space",
+				isSpace: true,
+				children: ["!zeta", "!alpha", "!room"],
+			}),
+			room({ roomId: "!zeta", isSpace: true, name: "Zeta" }),
+			room({ roomId: "!alpha", isSpace: true, name: "Alpha" }),
+			room({ roomId: "!room", name: "room" }),
+		]);
+		expect(getSpaceSubspaces(s, "!space").map((r) => r.roomId)).toEqual([
+			"!alpha",
+			"!zeta",
+		]);
+	});
+
+	it("excludes subspaces the user has not joined", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!sub"] }),
+			room({ roomId: "!sub", isSpace: true, membership: "invite" }),
+		]);
+		expect(getSpaceSubspaces(s, "!space")).toEqual([]);
+	});
+
+	it("returns empty for a space the user has not joined or a non-space", () => {
+		const s = store([
+			room({
+				roomId: "!space",
+				isSpace: true,
+				membership: "leave",
+				children: ["!sub"],
+			}),
+			room({ roomId: "!sub", isSpace: true }),
+			room({ roomId: "!plain", children: ["!sub"] }),
+		]);
+		expect(getSpaceSubspaces(s, "!space")).toEqual([]);
+		expect(getSpaceSubspaces(s, "!plain")).toEqual([]);
+		expect(getSpaceSubspaces(s, "!unknown")).toEqual([]);
+	});
+});
+
+describe("getSpaceUnreadRollup recursion (#443)", () => {
+	it("sums direct joined child rooms (pre-existing behavior)", () => {
+		const s = store([
+			room({
+				roomId: "!space",
+				isSpace: true,
+				children: ["!a", "!b", "!invited"],
+			}),
+			room({ roomId: "!a", unreadCount: 2, highlightCount: 1 }),
+			room({ roomId: "!b", unreadCount: 3 }),
+			room({ roomId: "!invited", membership: "invite", unreadCount: 9 }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
+			unread: 5,
+			highlight: 1,
+		});
+	});
+
+	it("rolls up rooms of joined subspaces recursively", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!sub", "!a"] }),
+			room({
+				roomId: "!sub",
+				isSpace: true,
+				children: ["!grandchild"],
+			}),
+			room({ roomId: "!grandchild", unreadCount: 4, highlightCount: 2 }),
+			room({ roomId: "!a", unreadCount: 1 }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
+			unread: 5,
+			highlight: 2,
+		});
+		// The subspace's own rollup is just its subtree.
+		expect(getSpaceUnreadRollup(s, "!sub")).toEqual({
+			unread: 4,
+			highlight: 2,
+		});
+	});
+
+	it("does not descend into subspaces the user has not joined", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!sub"] }),
+			room({
+				roomId: "!sub",
+				isSpace: true,
+				membership: "invite",
+				children: ["!grandchild"],
+			}),
+			room({ roomId: "!grandchild", unreadCount: 4 }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
+			unread: 0,
+			highlight: 0,
+		});
+	});
+
+	it("is cycle-safe: an A<->B space loop counts each room once and terminates", () => {
+		const s = store([
+			room({ roomId: "!a", isSpace: true, children: ["!b", "!ra"] }),
+			room({ roomId: "!b", isSpace: true, children: ["!a", "!rb"] }),
+			room({ roomId: "!ra", unreadCount: 2 }),
+			room({ roomId: "!rb", unreadCount: 3 }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
+			unread: 5,
+			highlight: 0,
+		});
+	});
+
+	it("is self-reference safe", () => {
+		const s = store([
+			room({ roomId: "!a", isSpace: true, children: ["!a", "!r"] }),
+			room({ roomId: "!r", unreadCount: 1 }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
+			unread: 1,
+			highlight: 0,
+		});
+	});
+
+	it("counts a shared room once when two subspaces list it (diamond)", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!x", "!y"] }),
+			room({ roomId: "!x", isSpace: true, children: ["!shared"] }),
+			room({ roomId: "!y", isSpace: true, children: ["!shared"] }),
+			room({ roomId: "!shared", unreadCount: 7 }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
+			unread: 7,
+			highlight: 0,
+		});
+	});
+});
+
+describe("getSpaceTree (#443)", () => {
+	it("nests joined subspaces under their parent, name-sorted", () => {
+		const s = store([
+			room({
+				roomId: "!root",
+				isSpace: true,
+				name: "Root",
+				children: ["!zeta", "!alpha"],
+			}),
+			room({ roomId: "!zeta", isSpace: true, name: "Zeta" }),
+			room({ roomId: "!alpha", isSpace: true, name: "Alpha" }),
+			room({ roomId: "!other", isSpace: true, name: "Other" }),
+		]);
+		const tree = getSpaceTree(s);
+		expect(tree.map((n) => n.space.roomId)).toEqual(["!other", "!root"]);
+		const root = tree.find((n) => n.space.roomId === "!root");
+		expect(root?.children.map((n) => n.space.roomId)).toEqual([
+			"!alpha",
+			"!zeta",
+		]);
+	});
+
+	it("treats a subspace whose parent is not joined as a root", () => {
+		const s = store([
+			room({
+				roomId: "!unjoined-parent",
+				isSpace: true,
+				membership: "leave",
+				children: ["!sub"],
+			}),
+			room({ roomId: "!sub", isSpace: true, name: "Sub" }),
+		]);
+		const tree = getSpaceTree(s);
+		expect(tree.map((n) => n.space.roomId)).toEqual(["!sub"]);
+		expect(tree[0].children).toEqual([]);
+	});
+
+	it("places every cycle member exactly once (A<->B)", () => {
+		const s = store([
+			room({ roomId: "!a", isSpace: true, name: "A", children: ["!b"] }),
+			room({ roomId: "!b", isSpace: true, name: "B", children: ["!a"] }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces.map((r) => r.roomId).sort()).toEqual(["!a", "!b"]);
+		// A renders as a root with B nested; neither hangs nor loop-renders.
+		expect(flat.spaces.filter((r) => r.roomId === "!a")).toHaveLength(1);
+		expect(flat.spaces.filter((r) => r.roomId === "!b")).toHaveLength(1);
+	});
+
+	it("places a self-referencing space exactly once", () => {
+		const s = store([
+			room({ roomId: "!a", isSpace: true, name: "A", children: ["!a"] }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces).toHaveLength(1);
+		expect(flat.depths.get("!a")).toBe(0);
+	});
+
+	it("places a shared subspace once when two parents claim it (diamond)", () => {
+		const s = store([
+			room({ roomId: "!a", isSpace: true, name: "A", children: ["!shared"] }),
+			room({ roomId: "!b", isSpace: true, name: "B", children: ["!shared"] }),
+			room({ roomId: "!shared", isSpace: true, name: "Shared" }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces.map((r) => r.roomId).sort()).toEqual([
+			"!a",
+			"!b",
+			"!shared",
+		]);
+		expect(flat.depths.get("!shared")).toBe(1);
+	});
+
+	it("falls back to a root tile beyond the depth cap so nothing disappears", () => {
+		// Chain !a -> !b -> !c -> !d: !d nests deeper than the cap.
+		const s = store([
+			room({ roomId: "!a", isSpace: true, name: "A", children: ["!b"] }),
+			room({ roomId: "!b", isSpace: true, name: "B", children: ["!c"] }),
+			room({ roomId: "!c", isSpace: true, name: "C", children: ["!d"] }),
+			room({ roomId: "!d", isSpace: true, name: "D" }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces).toHaveLength(4);
+		expect(flat.depths.get("!a")).toBe(0);
+		expect(flat.depths.get("!b")).toBe(1);
+		expect(flat.depths.get("!c")).toBe(MAX_SIDEBAR_SPACE_DEPTH);
+		// D exceeds the cap: appended as a root so it stays reachable.
+		expect(flat.depths.get("!d")).toBe(0);
+	});
+
+	it("ignores non-joined and non-space children when nesting", () => {
+		const s = store([
+			room({
+				roomId: "!root",
+				isSpace: true,
+				name: "Root",
+				children: ["!room", "!invited-sub", "!joined-sub"],
+			}),
+			room({ roomId: "!room", name: "room" }),
+			room({
+				roomId: "!invited-sub",
+				isSpace: true,
+				membership: "invite",
+			}),
+			room({ roomId: "!joined-sub", isSpace: true, name: "Joined Sub" }),
+		]);
+		const tree = getSpaceTree(s);
+		expect(tree).toHaveLength(1);
+		expect(tree[0].children.map((n) => n.space.roomId)).toEqual([
+			"!joined-sub",
+		]);
+	});
+
+	it("flattens depth-first in render order", () => {
+		const s = store([
+			room({
+				roomId: "!root",
+				isSpace: true,
+				name: "Root",
+				children: ["!sub"],
+			}),
+			room({
+				roomId: "!sub",
+				isSpace: true,
+				name: "Sub",
+				children: ["!grand"],
+			}),
+			room({ roomId: "!grand", isSpace: true, name: "Grand" }),
+			room({ roomId: "!zzz", isSpace: true, name: "Zzz" }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces.map((r) => r.roomId)).toEqual([
+			"!root",
+			"!sub",
+			"!grand",
+			"!zzz",
+		]);
+		expect(flat.depths.get("!grand")).toBe(2);
+	});
+});
+
+describe("getSpaceSubspaces self-reference guard (#443)", () => {
+	it("excludes a space that lists itself as a child", () => {
+		const s = store([
+			room({
+				roomId: "!space",
+				isSpace: true,
+				children: ["!space", "!sub"],
+			}),
+			room({ roomId: "!sub", isSpace: true, name: "Sub" }),
+		]);
+		expect(getSpaceSubspaces(s, "!space").map((r) => r.roomId)).toEqual([
+			"!sub",
+		]);
+	});
+});
+
+describe("getSpaceTree / rollup wire-debris edges (#443)", () => {
+	it("places and counts duplicate child ids in one children array only once", () => {
+		const s = store([
+			room({
+				roomId: "!a",
+				isSpace: true,
+				name: "A",
+				children: ["!r", "!r", "!sub", "!sub"],
+			}),
+			room({ roomId: "!sub", isSpace: true, name: "Sub" }),
+			room({ roomId: "!r", unreadCount: 5 }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces.filter((r) => r.roomId === "!sub")).toHaveLength(1);
+		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
+			unread: 5,
+			highlight: 0,
+		});
+	});
+
+	it("skips children missing from the store (unsynced child id)", () => {
+		const s = store([
+			room({
+				roomId: "!a",
+				isSpace: true,
+				name: "A",
+				children: ["!ghost", "!r"],
+			}),
+			room({ roomId: "!r", unreadCount: 1 }),
+		]);
+		const flat = flattenSpaceTree(getSpaceTree(s));
+		expect(flat.spaces.map((r) => r.roomId)).toEqual(["!a"]);
+		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
+			unread: 1,
+			highlight: 0,
+		});
 	});
 });
