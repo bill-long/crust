@@ -3,10 +3,12 @@ import { useNavigate } from "@solidjs/router";
 import {
 	type Accessor,
 	type Component,
+	createEffect,
 	createMemo,
 	createSignal,
 	For,
 	type JSX,
+	on,
 	Show,
 } from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
@@ -113,12 +115,23 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				? "rounded-xl hover:rounded-lg"
 				: "rounded-2xl hover:rounded-xl";
 
+	// Fail-closed avatar: a 404/decode failure falls back to the initial
+	// instead of the browser's broken-image icon. Reset when the avatar
+	// URL changes so a synced-in avatar retries (mirrors components/Avatar).
+	const [imgFailed, setImgFailed] = createSignal(false);
+	createEffect(
+		on(
+			() => props.space.avatarUrl,
+			() => setImgFailed(false),
+		),
+	);
+
 	const triggerInner = (
 		<>
 			<button
 				type="button"
 				onClick={openSpace}
-				class={`relative flex items-center justify-center transition-all ${sizeClass()} ${roundingClass()} ${
+				class={`relative flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${sizeClass()} ${roundingClass()} ${
 					isSelected()
 						? "bg-surface-2 text-text-primary"
 						: "bg-surface-3 text-text-secondary hover:bg-surface-4"
@@ -128,18 +141,21 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				aria-current={isSelected() ? "page" : undefined}
 			>
 				<Show
-					when={props.space.avatarUrl}
+					when={!imgFailed() && props.space.avatarUrl}
 					fallback={
 						<span class={`font-semibold ${nested() ? "text-xs" : "text-sm"}`}>
 							{(props.space.name.trim() || "?").charAt(0).toUpperCase()}
 						</span>
 					}
 				>
-					<img
-						src={props.space.avatarUrl ?? ""}
-						alt={props.space.name.trim() || "Space"}
-						class={`${sizeClass()} rounded-[inherit] object-cover transition-[border-radius]`}
-					/>
+					{(url) => (
+						<img
+							src={url()}
+							alt={props.space.name.trim() || "Space"}
+							class={`${sizeClass()} rounded-[inherit] object-cover transition-[border-radius]`}
+							onError={() => setImgFailed(true)}
+						/>
+					)}
 				</Show>
 
 				{/* Unread badge */}

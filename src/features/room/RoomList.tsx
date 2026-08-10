@@ -329,7 +329,7 @@ const SubspaceEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-text-secondary transition-colors hover:bg-surface-2"
+			class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-text-secondary transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 		>
 			<div class="flex min-w-0 flex-1 items-center gap-2">
 				<SpaceIcon />

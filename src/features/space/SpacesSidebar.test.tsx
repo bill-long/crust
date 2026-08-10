@@ -656,3 +656,22 @@ describe("SpacesSidebar nested tile branches (#443)", () => {
 		expect(onLeaveSpace).toHaveBeenCalledWith("!beta:example.com");
 	});
 });
+
+describe("SpacesSidebar tile avatar fallback (#443)", () => {
+	it("falls back to the space initial when the avatar image errors", () => {
+		const space = makeSpaceSummary("!alpha:example.com", "Alpha");
+		space.avatarUrl = "https://example.com/broken.png";
+		render(() => (
+			<Wrapper client={createMockClient()} seed={[space]}>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+		const tile = screen.getByRole("button", { name: "Alpha" });
+		const img = tile.querySelector("img");
+		expect(img).not.toBeNull();
+		fireEvent.error(img as HTMLImageElement);
+		expect(tile.querySelector("img")).toBeNull();
+		// The initial-letter fallback renders in its place.
+		expect(within(tile).getByText("A")).toBeTruthy();
+	});
+});
