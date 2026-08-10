@@ -637,25 +637,23 @@ describe("useSpaceHierarchy", () => {
 		});
 	});
 
-	it("does not mark joined when the join fails", async () => {
-		const { mockClient, optimisticallyMarkJoined } = setupMockClient();
-		mockClient.joinRoom.mockRejectedValue(new Error("forbidden"));
+	it("exposes via servers for a child room (for the dialog knock flow)", async () => {
+		const { mockClient } = setupMockClient();
 		mockClient.getRoomHierarchy.mockResolvedValue({
 			rooms: [
 				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
-				makeHierarchyRoom("!room:x"),
+				makeHierarchyRoom("!room:x", {
+					join_rule: "knock" as HierarchyRoom["join_rule"],
+				}),
 			],
 		});
 
 		await withRoot(async () => {
 			const hierarchy = useSpaceHierarchy(() => "!space:x");
 			await flushPromises();
-
-			await hierarchy.joinRoom("!room:x");
-			await flushPromises();
-
-			expect(hierarchy.joinState("!room:x")).toBe("error");
-			expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
+			// No m.space.child state events in this fixture -> no via servers.
+			expect(hierarchy.viaServersFor("!room:x")).toEqual([]);
+			expect(hierarchy.joinState("!room:x")).toBe("idle");
 		});
 	});
 

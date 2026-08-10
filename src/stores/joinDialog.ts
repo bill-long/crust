@@ -13,6 +13,12 @@ import type { JoinAddress } from "../lib/joinAddressParsing";
 export interface JoinDialogRequest {
 	/** Address to prefill (permalink routing), or null for a blank manual open. */
 	prefill: JoinAddress | null;
+	/**
+	 * Open with the knock offer pre-engaged (space discovery's Request
+	 * button - the room is known knock-rule, so skip the doomed join
+	 * attempt and show the reason field immediately).
+	 */
+	knockOffered?: boolean;
 }
 
 const [joinDialogRequest, setJoinDialogRequest] =
@@ -26,8 +32,11 @@ export { joinDialogRequest };
  * swallowed: the modal blocks the link clicks that produce requests, and
  * the open dialog only reads the prefill on its closed -> open transition.
  */
-export function requestJoinDialog(prefill: JoinAddress | null = null): void {
-	setJoinDialogRequest({ prefill });
+export function requestJoinDialog(
+	prefill: JoinAddress | null = null,
+	options?: { knockOffered?: boolean },
+): void {
+	setJoinDialogRequest({ prefill, knockOffered: options?.knockOffered });
 }
 
 /** Clear the pending request (the dialog closed). */

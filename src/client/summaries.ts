@@ -385,6 +385,7 @@ export function createSummariesStore(client: MatrixClient): {
 	init: () => void;
 	cleanup: () => void;
 	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
+	optimisticallyMarkKnocked: (roomId: string, info: OptimisticJoinInfo) => void;
 	optimisticallyMarkLeft: (roomId: string) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
@@ -497,6 +498,46 @@ export function createSummariesStore(client: MatrixClient): {
 			}),
 		);
 	}
+
+	/**
+	 * Optimistically populate (or flip) a summary entry to `membership:
+	 * "knock"` after a successful `client.knockRoom`, so the room appears
+	 * in the sidebar's Requests section immediately instead of waiting for
+	 * the knock-membership /sync event. The eventual authoritative update
+	 * (`onNewRoom` -> `upsertRoom`) overwrites the stub with real data.
+	 */
+	const optimisticallyMarkKnocked = (
+		roomId: string,
+		info: OptimisticJoinInfo,
+	): void => {
+		const existing = summaries[roomId];
+		if (existing) {
+			if (existing.membership === "join") return;
+			if (existing.membership !== "knock") {
+				setSummaries(roomId, "membership", "knock");
+			}
+			return;
+		}
+		setSummaries(
+			produce((s) => {
+				s[roomId] = {
+					roomId,
+					name: info.name,
+					avatarUrl: info.avatarUrl,
+					lastMessage: null,
+					unreadCount: 0,
+					highlightCount: 0,
+					membership: "knock",
+					isEncrypted: false,
+					isDirect: false,
+					isSpace: false,
+					kind: "text",
+					callActive: false,
+					children: [],
+				};
+			}),
+		);
+	};
 
 	/**
 	 * Flip an existing summary entry to `membership: "leave"` so every
@@ -802,6 +843,7 @@ export function createSummariesStore(client: MatrixClient): {
 		init,
 		cleanup,
 		optimisticallyMarkJoined,
+		optimisticallyMarkKnocked,
 		optimisticallyMarkLeft,
 	};
 }

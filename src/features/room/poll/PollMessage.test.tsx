@@ -380,6 +380,7 @@ describe("PollMessage event card (#418)", () => {
 					setRecoveryKeyResolver: () => {},
 					clearSecretStorageCache: () => {},
 					optimisticallyMarkJoined: () => {},
+					optimisticallyMarkKnocked: () => {},
 					optimisticallyMarkLeft: () => {},
 				}}
 			>

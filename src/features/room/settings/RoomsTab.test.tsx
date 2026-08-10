@@ -69,6 +69,7 @@ const Wrapper: ParentComponent<{
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: () => {},
+				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
 			}}
 		>

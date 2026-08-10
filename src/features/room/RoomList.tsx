@@ -19,8 +19,10 @@ import type { RoomSummary } from "../../client/summaries";
 import {
 	getDmRooms,
 	getInvitedRooms,
+	getKnockedRooms,
 	getOrphanRooms,
 	getSpaceInvitedRooms,
+	getSpaceKnockedRooms,
 	getSpaceRooms,
 } from "../../client/summaries-selectors";
 import { VirtualList } from "../../components/VirtualList";
@@ -46,10 +48,10 @@ function homeRowHeight(): number {
 const VIRTUALIZE_THRESHOLD = 50;
 
 /** A flattened Home-list entry: a section header, a room row, or a
-    pending-invite row. */
+    pending-invite / pending-knock row. */
 type HomeItem =
 	| { readonly type: "header"; readonly label: string }
-	| { readonly type: "room" | "invite"; readonly room: RoomSummary };
+	| { readonly type: "room" | "invite" | "knock"; readonly room: RoomSummary };
 
 /** Small bell-off icon for muted rooms. */
 const BellOffBadge: Component = () => (
@@ -265,6 +267,45 @@ const InviteEntry: Component<{
 	);
 };
 
+/** Row for a room the user has a pending join request (knock) in. Same
+    2.25rem pitch as InviteEntry/RoomEntry. The muted "Requested" pill is
+    deliberately quieter than the accent Invite pill: a knock needs no
+    action from the viewer, it's just waiting on a moderator (#442).
+    Clicking opens the room, where the knock view offers cancellation. */
+const KnockEntry: Component<{
+	room: RoomSummary;
+	isSelected: boolean;
+	onClick: () => void;
+}> = (props) => {
+	return (
+		<button
+			type="button"
+			onClick={props.onClick}
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors ${
+				props.isSelected
+					? "bg-surface-3 text-text-primary"
+					: "text-text-secondary hover:bg-surface-2"
+			}`}
+			aria-current={props.isSelected ? "true" : undefined}
+		>
+			<div class="flex min-w-0 flex-1 items-center gap-2">
+				<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
+					<ChannelTypeIcon kind={props.room.kind} />
+				</Show>
+				<span class="min-w-0 flex-1 truncate text-sm font-medium">
+					{props.room.name.trim() || "Unnamed room"}
+				</span>
+				<Show when={props.room.isEncrypted}>
+					<EncryptedBadge />
+				</Show>
+			</div>
+			<span class="flex h-5 shrink-0 items-center rounded-full bg-surface-3 px-2 text-[10px] font-bold text-text-muted">
+				Requested
+			</span>
+		</button>
+	);
+};
+
 interface RoomListProps {
 	/**
 	 * Called when the user clicks the gear button in the header while
@@ -324,9 +365,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 	const dmRooms = createMemo(() => getDmRooms(summaries));
 	const orphanRooms = createMemo(() => getOrphanRooms(summaries));
 	const invitedRooms = createMemo(() => getInvitedRooms(summaries));
+	const knockedRooms = createMemo(() => getKnockedRooms(summaries));
 	const spaceInvites = createMemo(() => {
 		if (isHome() || !params.spaceId) return [];
 		return getSpaceInvitedRooms(summaries, params.spaceId);
+	});
+	const spaceKnocks = createMemo(() => {
+		if (isHome() || !params.spaceId) return [];
+		return getSpaceKnockedRooms(summaries, params.spaceId);
 	});
 	// The selected space's own membership: "join" renders the normal
 	// rooms + Discover view; "invite" renders the accept/decline panel and
@@ -388,10 +434,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 	// invite and room sections (accepting an invite), and each wrapper's type
 	// must match its section.
 	const INVITES_HEADER: HomeItem = { type: "header", label: "Invites" };
+	const REQUESTS_HEADER: HomeItem = { type: "header", label: "Requests" };
 	const DM_HEADER: HomeItem = { type: "header", label: "Direct Messages" };
 	const ROOMS_HEADER: HomeItem = { type: "header", label: "Rooms" };
 	const roomItems = new Map<string, { room: RoomSummary; item: HomeItem }>();
-	const roomItem = (room: RoomSummary, type: "room" | "invite"): HomeItem => {
+	const roomItem = (
+		room: RoomSummary,
+		type: "room" | "invite" | "knock",
+	): HomeItem => {
 		const key = `${type}:${room.roomId}`;
 		const cached = roomItems.get(key);
 		if (cached && cached.room === room) return cached.item;
@@ -400,16 +450,21 @@ const RoomList: Component<RoomListProps> = (props) => {
 		return item;
 	};
 
-	// Flattened Home list:
-	// [Invites header?, ...invites, DM header?, ...dms, Rooms header?, ...orphans].
+	// Flattened Home list: [Invites header?, ...invites, Requests header?,
+	// ...knocks, DM header?, ...dms, Rooms header?, ...orphans].
 	const homeItems = createMemo<HomeItem[]>(() => {
 		const out: HomeItem[] = [];
 		const invites = invitedRooms();
+		const knocks = knockedRooms();
 		const dms = dmRooms();
 		const orphans = orphanRooms();
 		if (invites.length > 0) {
 			out.push(INVITES_HEADER);
 			for (const room of invites) out.push(roomItem(room, "invite"));
+		}
+		if (knocks.length > 0) {
+			out.push(REQUESTS_HEADER);
+			for (const room of knocks) out.push(roomItem(room, "knock"));
 		}
 		if (dms.length > 0) {
 			out.push(DM_HEADER);
@@ -421,9 +476,13 @@ const RoomList: Component<RoomListProps> = (props) => {
 		}
 		// Drop cached wrappers for rows that are no longer present so the map
 		// doesn't retain every room ever seen this session.
-		if (roomItems.size > invites.length + dms.length + orphans.length) {
+		if (
+			roomItems.size >
+			invites.length + knocks.length + dms.length + orphans.length
+		) {
 			const live = new Set<string>();
 			for (const room of invites) live.add(`invite:${room.roomId}`);
+			for (const room of knocks) live.add(`knock:${room.roomId}`);
 			for (const room of dms) live.add(`room:${room.roomId}`);
 			for (const room of orphans) live.add(`room:${room.roomId}`);
 			for (const key of roomItems.keys()) {
@@ -450,6 +509,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 		/>
 	);
 
+	const renderKnock = (room: RoomSummary): JSX.Element => (
+		<KnockEntry
+			room={room}
+			isSelected={selectedRoomId() === room.roomId}
+			onClick={() => navigateToRoom(room.roomId)}
+		/>
+	);
+
 	const renderHomeItem = (item: HomeItem): JSX.Element =>
 		item.type === "header" ? (
 			// h-9 pins the header to 2.25rem so it matches the room pitch exactly
@@ -462,6 +529,8 @@ const RoomList: Component<RoomListProps> = (props) => {
 			</div>
 		) : item.type === "invite" ? (
 			renderInvite(item.room)
+		) : item.type === "knock" ? (
+			renderKnock(item.room)
 		) : (
 			renderRoom(item.room)
 		);
@@ -618,11 +687,21 @@ const RoomList: Component<RoomListProps> = (props) => {
 								</div>
 								<For each={spaceInvites()}>{(room) => renderInvite(room)}</For>
 							</Show>
+							<Show when={spaceKnocks().length > 0}>
+								<div class="h-9 px-3 pb-1 pt-2">
+									<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
+										Requests
+									</span>
+								</div>
+								<For each={spaceKnocks()}>{(room) => renderKnock(room)}</For>
+							</Show>
 							<For each={spaceRooms()}>{(room) => renderRoom(room)}</For>
 							<SpaceDiscoverList
 								spaceId={() => params.spaceId}
 								hasListedRooms={() =>
-									spaceRooms().length > 0 || spaceInvites().length > 0
+									spaceRooms().length > 0 ||
+									spaceInvites().length > 0 ||
+									spaceKnocks().length > 0
 								}
 							/>
 						</Show>

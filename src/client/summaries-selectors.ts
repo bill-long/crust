@@ -75,12 +75,58 @@ export function getInvitedRoomCount(summaries: SummariesStore): number {
 }
 
 /**
+ * Rooms (non-space) the user has a pending join request (knock) in, sorted
+ * alphabetically. Mirrors {@link getInvitedRooms}: knock_state carries no
+ * activity timestamp, so name order keeps the section stable. Includes
+ * knocked rooms that are children of a joined space so a pending request is
+ * visible from Home without opening the space.
+ */
+export function getKnockedRooms(summaries: SummariesStore): RoomSummary[] {
+	return Object.values(summaries)
+		.filter((s) => !s.isSpace && s.membership === "knock")
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Pending join requests among a joined space's direct children, sorted
+ * alphabetically. Mirrors {@link getSpaceInvitedRooms}.
+ */
+export function getSpaceKnockedRooms(
+	summaries: SummariesStore,
+	spaceId: string,
+): RoomSummary[] {
+	const space = summaries[spaceId];
+	if (!space?.isSpace || space.membership !== "join") return [];
+
+	return space.children
+		.map((id) => summaries[id])
+		.filter(
+			(s): s is RoomSummary =>
+				s !== undefined && s.membership === "knock" && !s.isSpace,
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * Spaces the user has a pending invite to, sorted alphabetically. Rendered in
  * the spaces sidebar alongside joined spaces (with an invite affordance).
  */
 export function getInvitedSpaces(summaries: SummariesStore): RoomSummary[] {
 	return Object.values(summaries)
 		.filter((s) => s.isSpace && s.membership === "invite")
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Spaces the user has a pending join request (knock) in, sorted
+ * alphabetically. Surfaced in the spaces sidebar alongside invited spaces:
+ * the room-level {@link getKnockedRooms} deliberately excludes spaces, so
+ * without this a knocked space would render nowhere after the authoritative
+ * sync flags `isSpace` (#442).
+ */
+export function getKnockedSpaces(summaries: SummariesStore): RoomSummary[] {
+	return Object.values(summaries)
+		.filter((s) => s.isSpace && s.membership === "knock")
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 

@@ -164,6 +164,48 @@ describe("stateNotice", () => {
 			expect(notice?.text).toBe("Alice withdrew the invite to Bob");
 		});
 
+		it("renders a withdrawn knock (subject cancels their own request)", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: { membership: "leave" },
+					prevContent: { membership: "knock", displayname: "Bob" },
+				}),
+				makeRoom({ "@bob:test": "Bob" }),
+			);
+			expect(notice?.text).toBe("Bob withdrew their request to join");
+		});
+
+		it("renders a declined knock (moderator cancels the request)", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@alice:test",
+					stateKey: "@bob:test",
+					content: { membership: "leave" },
+					prevContent: { membership: "knock", displayname: "Bob" },
+				}),
+				makeRoom({ "@alice:test": "Alice", "@bob:test": "Bob" }),
+			);
+			expect(notice?.text).toBe("Alice declined Bob's request to join");
+		});
+
+		it("renders an approved knock (invite superseding the request)", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@alice:test",
+					stateKey: "@bob:test",
+					content: { membership: "invite" },
+					prevContent: { membership: "knock", displayname: "Bob" },
+				}),
+				makeRoom({ "@alice:test": "Alice", "@bob:test": "Bob" }),
+			);
+			expect(notice?.text).toBe("Alice approved Bob's request to join");
+		});
+
 		it("renders ban and unban", () => {
 			const ban = buildStateNotice(
 				makeEvent({

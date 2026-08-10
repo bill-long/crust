@@ -28,6 +28,11 @@ export interface SpaceHierarchy {
 	/** Fetch the next page of hierarchy rooms. */
 	loadMore: () => Promise<void>;
 	joinRoom: (roomId: string) => Promise<void>;
+	/**
+	 * Via servers for a child room from the hierarchy's m.space.child
+	 * state (for prefilling the join dialog / knock flow).
+	 */
+	viaServersFor: (roomId: string) => string[];
 	joinState: (roomId: string) => JoinState;
 }
 
@@ -204,6 +209,18 @@ export function useSpaceHierarchy(
 		}
 	};
 
+	/**
+	 * Via servers for a child room from the hierarchy's m.space.child
+	 * state. SpaceDiscoverList uses this to prefill the join dialog's
+	 * knock flow (the dialog owns the actual knockRoom call - a knock
+	 * accepts an optional reason, which needs the dialog's UI).
+	 */
+	const viaServersFor = (roomId: string): string[] => {
+		const id = spaceId();
+		const rooms = allRooms();
+		return rooms.length > 0 && id ? extractViaServers(rooms, id, roomId) : [];
+	};
+
 	return {
 		get discoverableRooms() {
 			return discoverableRooms();
@@ -234,6 +251,7 @@ export function useSpaceHierarchy(
 		},
 		loadMore,
 		joinRoom,
+		viaServersFor,
 		joinState,
 	};
 }

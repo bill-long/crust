@@ -5,7 +5,10 @@ import {
 	getInvitedRoomCount,
 	getInvitedRooms,
 	getInvitedSpaces,
+	getKnockedRooms,
+	getKnockedSpaces,
 	getSpaceInvitedRooms,
+	getSpaceKnockedRooms,
 	getTotalUnread,
 } from "./summaries-selectors";
 
@@ -172,6 +175,76 @@ describe("getSpaceInvitedRooms", () => {
 			room({ roomId: "!child", membership: "invite" }),
 		]);
 		expect(getSpaceInvitedRooms(s, "!space")).toEqual([]);
+	});
+});
+
+describe("getKnockedRooms", () => {
+	it("returns non-space knocked rooms sorted by name, including space children", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!child"] }),
+			room({ roomId: "!b", name: "beta", membership: "knock" }),
+			room({ roomId: "!a", name: "alpha", membership: "knock" }),
+			room({ roomId: "!child", name: "child room", membership: "knock" }),
+			room({ roomId: "!joined" }),
+			room({ roomId: "!invited", membership: "invite" }),
+			room({ roomId: "!knockspace", isSpace: true, membership: "knock" }),
+		]);
+		expect(getKnockedRooms(s).map((r) => r.roomId)).toEqual([
+			"!a",
+			"!b",
+			"!child",
+		]);
+	});
+});
+
+describe("getSpaceKnockedRooms", () => {
+	it("returns pending knocks among a joined space's children", () => {
+		const s = store([
+			room({
+				roomId: "!space",
+				isSpace: true,
+				children: ["!b", "!a", "!joined"],
+			}),
+			room({ roomId: "!b", name: "beta", membership: "knock" }),
+			room({ roomId: "!a", name: "alpha", membership: "knock" }),
+			room({ roomId: "!joined" }),
+			room({ roomId: "!elsewhere", membership: "knock" }),
+		]);
+		expect(getSpaceKnockedRooms(s, "!space").map((r) => r.roomId)).toEqual([
+			"!a",
+			"!b",
+		]);
+	});
+
+	it("returns empty for a space the user has not joined", () => {
+		const s = store([
+			room({
+				roomId: "!space",
+				isSpace: true,
+				membership: "invite",
+				children: ["!child"],
+			}),
+			room({ roomId: "!child", membership: "knock" }),
+		]);
+		expect(getSpaceKnockedRooms(s, "!space")).toEqual([]);
+	});
+});
+
+describe("getKnockedSpaces", () => {
+	it("returns knocked spaces sorted by name", () => {
+		const s = store([
+			room({ roomId: "!s2", isSpace: true, name: "zeta", membership: "knock" }),
+			room({
+				roomId: "!s1",
+				isSpace: true,
+				name: "alpha",
+				membership: "knock",
+			}),
+			room({ roomId: "!joined-space", isSpace: true }),
+			room({ roomId: "!knock-room", membership: "knock" }),
+			room({ roomId: "!invited-space", isSpace: true, membership: "invite" }),
+		]);
+		expect(getKnockedSpaces(s).map((r) => r.roomId)).toEqual(["!s1", "!s2"]);
 	});
 });
 

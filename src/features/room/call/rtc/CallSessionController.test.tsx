@@ -175,6 +175,7 @@ function renderController(opts?: { encrypted?: boolean }): {
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: () => {},
+				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
 			}}
 		>

@@ -231,6 +231,7 @@ export const TestClientProvider: ParentComponent<{
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: () => {},
+				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
 			}}
 		>

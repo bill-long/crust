@@ -19,6 +19,7 @@ import {
 } from "../../lib/joinAddressParsing";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
+import { pushNotice } from "../../stores/notices";
 
 /**
  * User-facing message for a failed `client.joinRoom`. Maps the common
@@ -35,7 +36,7 @@ export function describeJoinError(err: unknown): string {
 		return "Couldn't find a room at that address. Check the address and try again.";
 	}
 	if (code === "M_FORBIDDEN") {
-		return "That room isn't open to join. Ask a member to invite you.";
+		return INVITE_ONLY_MESSAGE;
 	}
 	if (code === "M_LIMIT_EXCEEDED") {
 		return "You're being rate-limited. Wait a moment, then try again.";
@@ -45,6 +46,22 @@ export function describeJoinError(err: unknown): string {
 		"Couldn't join the room. Please try again.",
 	);
 }
+
+/** Extract the MatrixError errcode, if the thrown value carries one. */
+function errcode(err: unknown): unknown {
+	return err && typeof err === "object" && "errcode" in err
+		? (err as { errcode?: unknown }).errcode
+		: undefined;
+}
+
+/**
+ * The invite-only message: shown by describeJoinError for a forbidden
+ * join, and by handleKnock when the knock itself is forbidden (proving
+ * the room isn't knock-rule after all). One constant so the two arms
+ * can't drift.
+ */
+const INVITE_ONLY_MESSAGE =
+	"That room isn't open to join. Ask a member to invite you.";
 
 interface JoinRoomDialogProps {
 	client: MatrixClient;
@@ -56,15 +73,22 @@ interface JoinRoomDialogProps {
 	 * the user clicked but hasn't joined (issue #441).
 	 */
 	prefill?: () => JoinAddress | null;
+	/**
+	 * Open with the knock offer already engaged (space discovery's Request
+	 * button - the room is known knock-rule, so the doomed join attempt is
+	 * skipped and the reason field shows immediately).
+	 */
+	knockOffered?: () => boolean;
 }
 
 const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 	trackAppModalOpen(props.open);
 	const navigate = useNavigate();
-	const { optimisticallyMarkJoined } = useClient();
+	const { optimisticallyMarkJoined, optimisticallyMarkKnocked } = useClient();
 
 	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
+	let reasonRef: HTMLInputElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	onCleanup(() => {
@@ -80,16 +104,25 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 	const titleId = createUniqueId();
 	const inputId = createUniqueId();
 	const errorId = createUniqueId();
+	const reasonId = createUniqueId();
+	const offerId = createUniqueId();
 
 	const [inputValue, setInputValue] = createSignal("");
 	const [error, setError] = createSignal<string | null>(null);
 	const [submitting, setSubmitting] = createSignal(false);
+	// Knock offer (#442): set when a join attempt 403s - the room may be
+	// knock-rule, so the dialog offers "Request to join" (with an optional
+	// reason) instead of only the M_FORBIDDEN error text.
+	const [knockOffered, setKnockOffered] = createSignal(false);
+	const [knockReason, setKnockReason] = createSignal("");
 
 	function reset(): void {
 		submitGeneration++;
 		setInputValue("");
 		setError(null);
 		setSubmitting(false);
+		setKnockOffered(false);
+		setKnockReason("");
 	}
 
 	createEffect(
@@ -101,7 +134,12 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 				// prefill from an earlier open can't survive a fresh one.
 				const prefill = props.prefill?.();
 				if (prefill) setInputValue(formatJoinAddress(prefill));
-				queueMicrotask(() => inputRef?.focus());
+				if (props.knockOffered?.()) {
+					setKnockOffered(true);
+					queueMicrotask(() => reasonRef?.focus());
+				} else {
+					queueMicrotask(() => inputRef?.focus());
+				}
 			} else if (!isOpen && wasOpen) {
 				if (previousFocus && document.body.contains(previousFocus)) {
 					previousFocus.focus();
@@ -138,6 +176,15 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 		e.preventDefault();
 		if (submitting()) return;
 
+		// With the knock offer engaged, submitting the form (Enter in either
+		// input) sends the knock - the Join submit button is unmounted in
+		// this state, so without this routing Enter would re-fire the
+		// doomed join against the address that just 403'd.
+		if (knockOffered()) {
+			await handleKnock();
+			return;
+		}
+
 		const parsed = parseJoinAddress(inputValue());
 		if (!parsed.ok) {
 			setError(parsed.error);
@@ -170,12 +217,82 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)
 				return;
 			console.error(`Failed to join room ${idOrAlias}:`, err);
-			setError(describeJoinError(err));
 			setSubmitting(false);
+			if (errcode(err) === "M_FORBIDDEN") {
+				// The room may be knock-rule - the 403 carries no join-rule
+				// hint, so offer the knock path and let knockRoom itself
+				// decide (it 403s on invite-only rooms too). Focus the
+				// reason input: the Join button that had focus is about to
+				// unmount, and the reason field is the offer's first control.
+				setKnockOffered(true);
+				queueMicrotask(() => reasonRef?.focus());
+				return;
+			}
+			setError(describeJoinError(err));
 			// Disabling the input during submit dropped focus to <body>; restore
 			// it so a keyboard/screen-reader user lands back on the field to fix
 			// their input rather than being stranded outside the dialog.
 			inputRef?.focus();
+		}
+	};
+
+	const handleKnock = async (): Promise<void> => {
+		if (submitting()) return;
+		// Editing the address resets the offer (see onInput), so the parsed
+		// address here is the one that just 403'd. Guard anyway.
+		const parsed = parseJoinAddress(inputValue());
+		if (!parsed.ok) {
+			setKnockOffered(false);
+			setError(parsed.error);
+			return;
+		}
+		const { idOrAlias, viaServers } = parsed.address;
+		const reason = knockReason().trim();
+
+		const myGeneration = ++submitGeneration;
+		setError(null);
+		setSubmitting(true);
+		try {
+			const { room_id } = await props.client.knockRoom(idOrAlias, {
+				reason: reason || undefined,
+				viaServers,
+			});
+			if (!mounted || !props.open() || myGeneration !== submitGeneration)
+				return;
+			// Stub the summary entry with membership "knock" so the room
+			// appears in the sidebar's Requests section immediately - the
+			// same reconciliation joinRoom's stub does for joined rooms.
+			optimisticallyMarkKnocked(room_id, {
+				name: idOrAlias,
+				avatarUrl: null,
+			});
+			pushNotice("Request to join sent.");
+			props.onClose();
+		} catch (err) {
+			if (!mounted || !props.open() || myGeneration !== submitGeneration)
+				return;
+			console.error(`Failed to knock room ${idOrAlias}:`, err);
+			setSubmitting(false);
+			if (errcode(err) === "M_FORBIDDEN") {
+				// knockRoom 403 means the room isn't knock-rule after all -
+				// drop the offer and show the plain invite-only message.
+				// The focused Request-to-join button unmounts with the
+				// offer, so land focus back on the address input (the
+				// thing the user can change), as the join catch does.
+				setKnockOffered(false);
+				setError(INVITE_ONLY_MESSAGE);
+				inputRef?.focus();
+			} else {
+				setError(
+					userFacingErrorMessage(
+						err,
+						"Couldn't send the join request. Please try again.",
+					),
+				);
+				// The offer stays mounted; the disabled-during-submit reason
+				// input re-enabled without focus, so restore it.
+				reasonRef?.focus();
+			}
 		}
 	};
 
@@ -222,6 +339,14 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 						onInput={(e) => {
 							setInputValue(e.currentTarget.value);
 							if (error()) setError(null);
+							// Editing the address after a 403 invalidates the knock
+							// offer - it was for the old address. Clear the typed
+							// reason too, so it can't leak into a re-triggered
+							// offer for a different room.
+							if (knockOffered()) {
+								setKnockOffered(false);
+								setKnockReason("");
+							}
 						}}
 						placeholder="#general:example.org"
 						autocomplete="off"
@@ -238,6 +363,35 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 						</p>
 					</Show>
 
+					<Show when={knockOffered()}>
+						<div class="mb-2 rounded bg-surface-2 p-3">
+							<p id={offerId} class="mb-2 text-sm text-text-secondary">
+								That room needs an invitation - or send a join request and a
+								moderator can let you in.
+							</p>
+							<label
+								for={reasonId}
+								class="mb-1 block text-xs font-medium text-text-secondary"
+							>
+								Reason (optional)
+							</label>
+							<input
+								id={reasonId}
+								ref={(el) => {
+									reasonRef = el;
+								}}
+								type="text"
+								value={knockReason()}
+								onInput={(e) => setKnockReason(e.currentTarget.value)}
+								placeholder="Let me in, please"
+								autocomplete="off"
+								disabled={submitting()}
+								aria-describedby={offerId}
+								class="w-full rounded bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							/>
+						</div>
+					</Show>
+
 					<div class="mt-4 flex justify-end gap-2">
 						<button
 							type="button"
@@ -247,13 +401,27 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 						>
 							Cancel
 						</button>
-						<button
-							type="submit"
-							disabled={submitting()}
-							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+						<Show
+							when={knockOffered()}
+							fallback={
+								<button
+									type="submit"
+									disabled={submitting()}
+									class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									{submitting() ? "Joining…" : "Join"}
+								</button>
+							}
 						>
-							{submitting() ? "Joining…" : "Join"}
-						</button>
+							<button
+								type="button"
+								onClick={() => void handleKnock()}
+								disabled={submitting()}
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							>
+								{submitting() ? "Sending…" : "Request to join"}
+							</button>
+						</Show>
 					</div>
 				</form>
 			</div>

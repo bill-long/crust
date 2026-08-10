@@ -75,6 +75,7 @@ function setup(opts: {
 		client,
 		summaries,
 		optimisticallyMarkJoined,
+		optimisticallyMarkKnocked: vi.fn(),
 		optimisticallyMarkLeft,
 	});
 	return { client, optimisticallyMarkJoined, optimisticallyMarkLeft };
