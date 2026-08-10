@@ -17,6 +17,10 @@ import {
 	type SummariesStore,
 } from "../../client/summaries";
 import {
+	_resetExploreDialogForTests,
+	exploreDialogOpen,
+} from "../../stores/exploreDialog";
+import {
 	_resetLastChannelsForTests,
 	setLastChannel,
 } from "../../stores/lastChannel";
@@ -38,28 +42,6 @@ vi.mock("@solidjs/router", () => ({
 	useParams: () => paramsState,
 }));
 
-function makeSpaceSummary(
-	roomId: string,
-	name: string,
-	children: string[] = [],
-): RoomSummary {
-	return {
-		roomId,
-		name,
-		avatarUrl: null,
-		lastMessage: null,
-		unreadCount: 0,
-		highlightCount: 0,
-		membership: "join",
-		isEncrypted: false,
-		isDirect: false,
-		isSpace: true,
-		kind: "text",
-		callActive: false,
-		children,
-	};
-}
-
 function makeRoomSummary(roomId: string, name: string): RoomSummary {
 	return {
 		roomId,
@@ -76,6 +58,14 @@ function makeRoomSummary(roomId: string, name: string): RoomSummary {
 		callActive: false,
 		children: [],
 	};
+}
+
+function makeSpaceSummary(
+	roomId: string,
+	name: string,
+	children: string[] = [],
+): RoomSummary {
+	return { ...makeRoomSummary(roomId, name), isSpace: true, children };
 }
 
 const Wrapper: ParentComponent<{
@@ -131,6 +121,7 @@ afterEach(() => {
 	navigateMock.mockReset();
 	paramsState.spaceId = undefined;
 	paramsState.roomId = undefined;
+	_resetExploreDialogForTests();
 	_resetLastChannelsForTests();
 });
 
@@ -265,5 +256,24 @@ describe("RoomList SubspaceEntry badge branches (#443)", () => {
 		expect(badge.getAttribute("aria-label")).toBe("150 unread");
 		expect(badge.className).toContain("bg-indicator");
 		expect(badge.className).not.toContain("bg-danger");
+	});
+});
+
+describe("RoomList directory browse (#304)", () => {
+	it("opens the Explore dialog from the Home header button", () => {
+		renderRoomList([makeRoomSummary("!general:example.com", "general")]);
+		expect(exploreDialogOpen()).toBe(false);
+		fireEvent.click(
+			screen.getByRole("button", { name: "Explore public rooms" }),
+		);
+		expect(exploreDialogOpen()).toBe(true);
+	});
+
+	it("hides the Explore button inside a space", () => {
+		paramsState.spaceId = "!alpha:example.com";
+		renderRoomList([makeSpaceSummary("!alpha:example.com", "Alpha")]);
+		expect(
+			screen.queryByRole("button", { name: "Explore public rooms" }),
+		).toBeNull();
 	});
 });

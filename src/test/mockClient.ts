@@ -453,6 +453,13 @@ export function createMockClient(
 		// Mirrors the SDK's Promise<{room_id}> resolution.
 		knockRoom: vi.fn().mockResolvedValue({ room_id: "!knocked:example.com" }),
 		invite: vi.fn().mockResolvedValue({}),
+		// Ignore list (m.ignored_user_list account data). Tests override
+		// per-case; the SDK returns [] when no list is set.
+		getIgnoredUsers: vi.fn().mockReturnValue([]),
+		setIgnoredUsers: vi.fn().mockResolvedValue(undefined),
+		// Public room directory (/publicRooms). Default to an empty page;
+		// tests override per-case.
+		publicRooms: vi.fn().mockResolvedValue({ chunk: [] }),
 		kick: vi.fn().mockResolvedValue({}),
 		ban: vi.fn().mockResolvedValue({}),
 		getRoomDirectoryVisibility: vi

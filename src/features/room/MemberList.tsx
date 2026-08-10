@@ -12,6 +12,8 @@ import {
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
+import { reportError } from "../../lib/reportError";
+import { isUserIgnored, setUserIgnored } from "../../stores/ignoredUsers";
 import { startDm } from "./startDm";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
@@ -47,9 +49,11 @@ const MemberRow: Component<{
 	member: MemberEntry;
 	isSelf: boolean;
 	onMessage: (member: MemberEntry) => void;
+	onToggleIgnore: (member: MemberEntry) => void;
 }> = (props) => {
 	const rowClass =
 		"flex w-full items-center gap-2 px-3 py-1.5 text-text-secondary hover:bg-surface-2/50";
+	const isIgnored = () => isUserIgnored(props.member.userId);
 
 	return (
 		<Show
@@ -74,6 +78,12 @@ const MemberRow: Component<{
 							onSelect={() => props.onMessage(props.member)}
 						>
 							Message
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+							onSelect={() => props.onToggleIgnore(props.member)}
+						>
+							{isIgnored() ? "Unblock" : "Block"}
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Portal>
@@ -121,6 +131,21 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 			);
 		} finally {
 			if (mounted) setStartingDm(false);
+		}
+	};
+
+	const handleToggleIgnore = async (member: MemberEntry): Promise<void> => {
+		const ignoring = !isUserIgnored(member.userId);
+		try {
+			await setUserIgnored(client, member.userId, ignoring);
+		} catch (err) {
+			// The dropdown closes on select, leaving no inline surface - toast.
+			reportError(err, {
+				logLabel: "Toggle ignore failed",
+				userMessage: ignoring
+					? `Couldn't block ${member.displayName}. Try again.`
+					: `Couldn't unblock ${member.displayName}. Try again.`,
+			});
 		}
 	};
 
@@ -236,6 +261,9 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 												member={m().member}
 												isSelf={m().member.userId === selfId()}
 												onMessage={(member) => void handleMessage(member)}
+												onToggleIgnore={(member) =>
+													void handleToggleIgnore(member)
+												}
 											/>
 										)}
 									</Match>
