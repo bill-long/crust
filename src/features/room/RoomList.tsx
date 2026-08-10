@@ -24,8 +24,12 @@ import {
 	getSpaceInvitedRooms,
 	getSpaceKnockedRooms,
 	getSpaceRooms,
+	getSpaceSubspaces,
+	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import { SpaceIcon } from "../../components/SpaceIcon";
 import { VirtualList } from "../../components/VirtualList";
+import { spaceLandingPath } from "../../lib/spaceLanding";
 import { requestJoinDialog } from "../../stores/joinDialog";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
@@ -306,6 +310,48 @@ const KnockEntry: Component<{
 	);
 };
 
+/** Row for a joined subspace of the viewed space (#443). Same 2.25rem
+    pitch as RoomEntry. Clicking navigates into the subspace's own space
+    view; the unread badge rolls up the subspace's whole room subtree.
+    Unlike its RoomEntry siblings it carries no isSelected/aria-current
+    state: selecting it navigates AWAY to the subspace's view (which
+    re-renders this list for the subspace), it never stays selected in
+    the current list. */
+const SubspaceEntry: Component<{
+	space: RoomSummary;
+	unreadRollup: () => { unread: number; highlight: number };
+	onClick: () => void;
+}> = (props) => {
+	// Memoized so the subtree walk runs once per summaries change, not
+	// once per JSX expression that reads it (mirrors SpaceTile).
+	const rollup = createMemo(() => props.unreadRollup());
+	return (
+		<button
+			type="button"
+			onClick={props.onClick}
+			class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-text-secondary transition-colors hover:bg-surface-2"
+		>
+			<div class="flex min-w-0 flex-1 items-center gap-2">
+				<SpaceIcon />
+				<span class="min-w-0 flex-1 truncate text-sm font-medium">
+					{props.space.name.trim() || "Unnamed space"}
+				</span>
+			</div>
+			<Show when={rollup().unread > 0}>
+				<span
+					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
+						rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
+					}`}
+					role="status"
+					aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
+				>
+					{rollup().unread > 99 ? "99+" : rollup().unread}
+				</span>
+			</Show>
+		</button>
+	);
+};
+
 interface RoomListProps {
 	/**
 	 * Called when the user clicks the gear button in the header while
@@ -360,6 +406,13 @@ const RoomList: Component<RoomListProps> = (props) => {
 	const spaceRooms = createMemo(() => {
 		if (isHome() || !params.spaceId) return [];
 		return getSpaceRooms(summaries, params.spaceId);
+	});
+
+	// Joined subspaces of the viewed space, rendered as rows above its
+	// rooms (#443). Clicking one navigates into the subspace's own view.
+	const spaceSubspaces = createMemo(() => {
+		if (isHome() || !params.spaceId) return [];
+		return getSpaceSubspaces(summaries, params.spaceId);
 	});
 
 	const dmRooms = createMemo(() => getDmRooms(summaries));
@@ -514,6 +567,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 			room={room}
 			isSelected={selectedRoomId() === room.roomId}
 			onClick={() => navigateToRoom(room.roomId)}
+		/>
+	);
+
+	const renderSubspace = (space: RoomSummary): JSX.Element => (
+		<SubspaceEntry
+			space={space}
+			unreadRollup={() => getSpaceUnreadRollup(summaries, space.roomId)}
+			onClick={() => navigate(spaceLandingPath(summaries, space.roomId))}
 		/>
 	);
 
@@ -695,11 +756,15 @@ const RoomList: Component<RoomListProps> = (props) => {
 								</div>
 								<For each={spaceKnocks()}>{(room) => renderKnock(room)}</For>
 							</Show>
+							<For each={spaceSubspaces()}>
+								{(space) => renderSubspace(space)}
+							</For>
 							<For each={spaceRooms()}>{(room) => renderRoom(room)}</For>
 							<SpaceDiscoverList
 								spaceId={() => params.spaceId}
 								hasListedRooms={() =>
 									spaceRooms().length > 0 ||
+									spaceSubspaces().length > 0 ||
 									spaceInvites().length > 0 ||
 									spaceKnocks().length > 0
 								}

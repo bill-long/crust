@@ -2,7 +2,11 @@ import type { HierarchyRoom } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
-import type { RoomSummary, SummariesStore } from "../../client/summaries";
+import type {
+	OptimisticJoinInfo,
+	RoomSummary,
+	SummariesStore,
+} from "../../client/summaries";
 
 // Mock useClient before importing the hook
 vi.mock("../../client/client", () => ({
@@ -74,7 +78,7 @@ function setupMockClient(overrides: Record<string, unknown> = {}) {
 	// optimisticallyMarkJoined mutates membership.
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const optimisticallyMarkJoined = vi.fn(
-		(roomId: string, info: { name: string; avatarUrl: string | null }) => {
+		(roomId: string, info: OptimisticJoinInfo) => {
 			const stub: RoomSummary = {
 				roomId,
 				name: info.name,
@@ -85,7 +89,7 @@ function setupMockClient(overrides: Record<string, unknown> = {}) {
 				membership: "join",
 				isEncrypted: false,
 				isDirect: false,
-				isSpace: false,
+				isSpace: info.isSpace === true,
 				kind: "text",
 				callActive: false,
 				children: [],
@@ -599,6 +603,7 @@ describe("useSpaceHierarchy", () => {
 				name: "General",
 				avatarUrl:
 					"https://example.com/_matrix/media/v3/download/example.com/abc",
+				isSpace: false,
 			});
 			expect(summaries["!room:x"]?.membership).toBe("join");
 
@@ -606,6 +611,71 @@ describe("useSpaceHierarchy", () => {
 			// excludes anything with membership='join'.
 			expect(
 				hierarchy.discoverableRooms.find((r) => r.roomId === "!room:x"),
+			).toBeUndefined();
+		});
+	});
+
+	it("carries subspaces into discoverableRooms with isSpace=true (#443)", async () => {
+		const { mockClient } = setupMockClient();
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!subspace:x", {
+					name: "Subspace",
+					room_type: "m.space",
+				}),
+				makeHierarchyRoom("!room:x", { name: "General" }),
+			],
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			const subspace = hierarchy.discoverableRooms.find(
+				(r) => r.roomId === "!subspace:x",
+			);
+			expect(subspace?.isSpace).toBe(true);
+			expect(subspace?.canJoin).toBe(true);
+			expect(
+				hierarchy.discoverableRooms.find((r) => r.roomId === "!room:x")
+					?.isSpace,
+			).toBe(false);
+		});
+	});
+
+	it("optimistically marks a joined subspace as a space so the sidebar picks it up (#443)", async () => {
+		const { mockClient, summaries, optimisticallyMarkJoined } =
+			setupMockClient();
+		mockClient.joinRoom.mockResolvedValue(undefined);
+		mockClient.getRoomHierarchy.mockResolvedValue({
+			rooms: [
+				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
+				makeHierarchyRoom("!subspace:x", {
+					name: "Subspace",
+					room_type: "m.space",
+				}),
+			],
+		});
+
+		await withRoot(async () => {
+			const hierarchy = useSpaceHierarchy(() => "!space:x");
+			await flushPromises();
+
+			await hierarchy.joinRoom("!subspace:x");
+			await flushPromises();
+
+			expect(optimisticallyMarkJoined).toHaveBeenCalledWith("!subspace:x", {
+				name: "Subspace",
+				avatarUrl: null,
+				isSpace: true,
+			});
+			expect(summaries["!subspace:x"]?.membership).toBe("join");
+			expect(summaries["!subspace:x"]?.isSpace).toBe(true);
+
+			// The joined subspace leaves Discover (membership=join exclusion).
+			expect(
+				hierarchy.discoverableRooms.find((r) => r.roomId === "!subspace:x"),
 			).toBeUndefined();
 		});
 	});
@@ -633,6 +703,7 @@ describe("useSpaceHierarchy", () => {
 			expect(optimisticallyMarkJoined).toHaveBeenCalledWith("!room:x", {
 				name: "#general:x",
 				avatarUrl: null,
+				isSpace: false,
 			});
 		});
 	});

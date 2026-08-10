@@ -79,6 +79,15 @@ interface JoinRoomDialogProps {
 	 * skipped and the reason field shows immediately).
 	 */
 	knockOffered?: () => boolean;
+	/**
+	 * The prefill target is known to be a space (space discovery reads the
+	 * hierarchy's room_type, #443). Snapshotted at open time alongside the
+	 * prefill and cleared when the user edits the address - it only
+	 * describes the prefilled target. Used to mark optimistic
+	 * joined/knocked stubs as spaces so they surface in the spaces
+	 * sidebar rather than Home's room lists until /sync.
+	 */
+	isSpace?: () => boolean;
 }
 
 const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
@@ -114,6 +123,10 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 	// knock-rule, so the dialog offers "Request to join" (with an optional
 	// reason) instead of only the M_FORBIDDEN error text.
 	const [knockOffered, setKnockOffered] = createSignal(false);
+	// Snapshot of the request's isSpace flag, taken at the open edge with
+	// the prefill and cleared by reset() and by any address edit (the
+	// flag only describes the prefilled target).
+	const [prefillIsSpace, setPrefillIsSpace] = createSignal(false);
 	const [knockReason, setKnockReason] = createSignal("");
 
 	function reset(): void {
@@ -123,6 +136,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 		setSubmitting(false);
 		setKnockOffered(false);
 		setKnockReason("");
+		setPrefillIsSpace(false);
 	}
 
 	createEffect(
@@ -134,6 +148,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 				// prefill from an earlier open can't survive a fresh one.
 				const prefill = props.prefill?.();
 				if (prefill) setInputValue(formatJoinAddress(prefill));
+				setPrefillIsSpace(props.isSpace?.() ?? false);
 				if (props.knockOffered?.()) {
 					setKnockOffered(true);
 					queueMicrotask(() => reasonRef?.focus());
@@ -206,12 +221,19 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 			// the summary entry to make the room appear in the Home list (and
 			// RoomPane renderable) immediately - the same reconciliation the
 			// space-discovery join relies on (#132). The address is the best
-			// name available until sync overwrites the stub.
+			// name available until sync overwrites the stub. A target known
+			// to be a space (prefill flag, #443) stubs as a space and lands
+			// on the space route instead of Home.
 			optimisticallyMarkJoined(room.roomId, {
 				name: idOrAlias,
 				avatarUrl: null,
+				isSpace: prefillIsSpace(),
 			});
-			navigate(`/home/${encodeURIComponent(room.roomId)}`);
+			navigate(
+				prefillIsSpace()
+					? `/space/${encodeURIComponent(room.roomId)}`
+					: `/home/${encodeURIComponent(room.roomId)}`,
+			);
 			props.onClose();
 		} catch (err) {
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)
@@ -265,6 +287,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 			optimisticallyMarkKnocked(room_id, {
 				name: idOrAlias,
 				avatarUrl: null,
+				isSpace: prefillIsSpace(),
 			});
 			pushNotice("Request to join sent.");
 			props.onClose();
@@ -339,6 +362,9 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 						onInput={(e) => {
 							setInputValue(e.currentTarget.value);
 							if (error()) setError(null);
+							// Editing the address invalidates the prefill's isSpace
+							// flag - it only described the prefilled target.
+							if (prefillIsSpace()) setPrefillIsSpace(false);
 							// Editing the address after a 403 invalidates the knock
 							// offer - it was for the old address. Clear the typed
 							// reason too, so it can't leak into a re-triggered

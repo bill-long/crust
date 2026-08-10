@@ -466,6 +466,9 @@ export function createMockClient(
 		getDomain: () => "example.com",
 		sendTyping: vi.fn().mockResolvedValue(undefined),
 		sendReadReceipt: vi.fn().mockResolvedValue(undefined),
+		// Space discovery (useSpaceHierarchy): default to an empty hierarchy;
+		// tests override per-case.
+		getRoomHierarchy: vi.fn().mockResolvedValue({ rooms: [] }),
 		redactEvent: vi.fn().mockResolvedValue(undefined),
 		resendEvent: vi.fn().mockResolvedValue(undefined),
 		cancelPendingEvent: vi.fn(),

@@ -21,6 +21,7 @@ function makeRoom(overrides: Partial<DiscoverableRoom> = {}): DiscoverableRoom {
 		joinRule: "knock",
 		canJoin: false,
 		canKnock: true,
+		isSpace: false,
 		...overrides,
 	};
 }
@@ -87,5 +88,46 @@ describe("DiscoverEntry knock button (#442)", () => {
 		});
 		expect(joined.textContent).toBe("Joined");
 		expect((joined as HTMLButtonElement).disabled).toBe(true);
+	});
+});
+
+describe("DiscoverEntry subspace marker (#443)", () => {
+	it("renders the Space icon for subspace entries", () => {
+		render(() => (
+			<DiscoverEntry
+				room={makeRoom({ isSpace: true })}
+				joinState="idle"
+				onJoin={vi.fn()}
+				onRequest={vi.fn()}
+			/>
+		));
+		expect(screen.getByRole("img", { name: "Space" })).toBeTruthy();
+	});
+
+	it("renders no Space icon for plain room entries", () => {
+		render(() => (
+			<DiscoverEntry
+				room={makeRoom()}
+				joinState="idle"
+				onJoin={vi.fn()}
+				onRequest={vi.fn()}
+			/>
+		));
+		expect(screen.queryByRole("img", { name: "Space" })).toBeNull();
+	});
+
+	it("a joinable subspace offers the Join button (join flow reuses the room wrapper)", () => {
+		const onJoin = vi.fn();
+		render(() => (
+			<DiscoverEntry
+				room={makeRoom({ isSpace: true, canJoin: true, canKnock: false })}
+				joinState="idle"
+				onJoin={onJoin}
+				onRequest={vi.fn()}
+			/>
+		));
+		const button = screen.getByRole("button", { name: "Join Clubhouse" });
+		fireEvent.click(button);
+		expect(onJoin).toHaveBeenCalledOnce();
 	});
 });

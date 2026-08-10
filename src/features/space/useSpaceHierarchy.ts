@@ -37,12 +37,17 @@ export interface SpaceHierarchy {
 }
 
 const HIERARCHY_LIMIT = 100;
+// Depth cap: one level per view. Subspace children are carried through
+// (#443), and entering a subspace navigates to its own space view, which
+// fetches its own hierarchy - the same one-level-per-expand model Cinny
+// uses.
 const HIERARCHY_MAX_DEPTH = 1;
 
 /**
- * Hook that fetches the space hierarchy and exposes discoverable rooms.
- * Uses createResource for the initial page with automatic stale-request
- * handling, and manual signals for subsequent pages via loadMore().
+ * Hook that fetches the space hierarchy and exposes discoverable rooms
+ * and subspaces. Uses createResource for the initial page with automatic
+ * stale-request handling, and manual signals for subsequent pages via
+ * loadMore().
  */
 export function useSpaceHierarchy(
 	spaceId: () => string | undefined,
@@ -195,6 +200,10 @@ export function useSpaceHierarchy(
 						avatarUrl: hierarchyRoom.avatar_url
 							? mxcToHttp(hierarchyRoom.avatar_url)
 							: null,
+						// A joined subspace must surface in the spaces sidebar
+						// immediately (#443), not after the next /sync delivers
+						// the authoritative m.room.create.
+						isSpace: hierarchyRoom.room_type === "m.space",
 					});
 				} else {
 					optimisticallyMarkJoined(roomId, { name: roomId, avatarUrl: null });
