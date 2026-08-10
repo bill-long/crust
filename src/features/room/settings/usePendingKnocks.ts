@@ -54,15 +54,6 @@ export function usePendingKnocks(
 ): Accessor<PendingKnock[]> {
 	const [knocks, setKnocks] = createSignal<PendingKnock[]>([]);
 
-	let pendingFrame: number | null = null;
-	const scheduleRefresh = (): void => {
-		if (pendingFrame !== null) return;
-		pendingFrame = requestAnimationFrame(() => {
-			pendingFrame = null;
-			refresh();
-		});
-	};
-
 	const refresh = (): void => {
 		const rid = roomId();
 		if (!rid) {
@@ -80,6 +71,15 @@ export function usePendingKnocks(
 			.map((m) => buildKnock(m, client))
 			.sort((a, b) => a.displayName.localeCompare(b.displayName));
 		setKnocks(pending);
+	};
+
+	let pendingFrame: number | null = null;
+	const scheduleRefresh = (): void => {
+		if (pendingFrame !== null) return;
+		pendingFrame = requestAnimationFrame(() => {
+			pendingFrame = null;
+			refresh();
+		});
 	};
 
 	refresh();

@@ -340,8 +340,13 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 							setInputValue(e.currentTarget.value);
 							if (error()) setError(null);
 							// Editing the address after a 403 invalidates the knock
-							// offer - it was for the old address.
-							if (knockOffered()) setKnockOffered(false);
+							// offer - it was for the old address. Clear the typed
+							// reason too, so it can't leak into a re-triggered
+							// offer for a different room.
+							if (knockOffered()) {
+								setKnockOffered(false);
+								setKnockReason("");
+							}
 						}}
 						placeholder="#general:example.org"
 						autocomplete="off"

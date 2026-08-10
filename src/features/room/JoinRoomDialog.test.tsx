@@ -616,6 +616,26 @@ describe("JoinRoomDialog knock offer (#442)", () => {
 		expect(screen.getByRole("button", { name: /^Join$/i })).toBeTruthy();
 	});
 
+	it("clears the typed reason when editing the address dismisses the offer", async () => {
+		const { client } = await reachKnockOffer("!restricted:example.org");
+		fireEvent.input(screen.getByLabelText(/^Reason \(optional\)$/i), {
+			target: { value: "my reason" },
+		});
+		// Dismiss the offer by editing the address...
+		fireEvent.input(addressInput(), {
+			target: { value: "!other:example.org" },
+		});
+		// ...then re-trigger it for the new address: the reason must not
+		// leak across rooms.
+		client.joinRoom.mockRejectedValue({ errcode: "M_FORBIDDEN" });
+		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
+		await screen.findByRole("button", { name: /^Request to join$/i });
+		expect(
+			(screen.getByLabelText(/^Reason \(optional\)$/i) as HTMLInputElement)
+				.value,
+		).toBe("");
+	});
+
 	it("does not offer a knock for non-forbidden join failures", async () => {
 		const { client } = setup();
 		client.joinRoom.mockRejectedValue({ errcode: "M_NOT_FOUND" });
