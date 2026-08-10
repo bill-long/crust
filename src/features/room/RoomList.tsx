@@ -27,6 +27,7 @@ import { VirtualList } from "../../components/VirtualList";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
 import { SpaceInvitePanel } from "./invites/SpaceInvitePanel";
+import { JoinRoomDialog } from "./JoinRoomDialog";
 import { NewDmDialog } from "./NewDmDialog";
 
 /**
@@ -357,6 +358,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 		setNewDmOpen(false);
 	};
 
+	const [joinOpen, setJoinOpen] = createSignal(false);
+	const openJoin = (): void => {
+		setJoinOpen(true);
+	};
+	const closeJoin = (): void => {
+		setJoinOpen(false);
+	};
+
 	const navigateToRoom = (roomId: string): void => {
 		const room = summaries[roomId];
 		if (!room) return;
@@ -520,6 +529,34 @@ const RoomList: Component<RoomListProps> = (props) => {
 						</svg>
 					</button>
 				</Show>
+				{/* Join-by-address lands the room under Home regardless of the
+					current space (it doesn't add the room to a space), so like
+					New DM it's Home-only (#440). */}
+				<Show when={isHome()}>
+					<button
+						type="button"
+						onClick={openJoin}
+						aria-label="Join a room"
+						title="Join a room"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+					>
+						<svg
+							aria-hidden="true"
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+							<polyline points="10 17 15 12 10 7" />
+							<line x1="15" y1="12" x2="3" y2="12" />
+						</svg>
+					</button>
+				</Show>
 				{/* Create-room targets the current space, so it needs a joined
 					space (or Home). An invited space would 403 the create /
 					m.space.child write. */}
@@ -619,6 +656,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 				spaceId={params.spaceId}
 			/>
 			<NewDmDialog client={client} open={newDmOpen} onClose={closeNewDm} />
+			<JoinRoomDialog client={client} open={joinOpen} onClose={closeJoin} />
 		</aside>
 	);
 };
