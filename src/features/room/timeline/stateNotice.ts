@@ -495,6 +495,18 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 				icon: "info",
 			};
 		}
+		if (prevMembership === "knock") {
+			if (sender === stateKey) {
+				return {
+					text: `${subject} withdrew their request to join`,
+					icon: "info",
+				};
+			}
+			return {
+				text: `${actor} declined ${subject}'s request to join`,
+				icon: "info",
+			};
+		}
 		if (prevMembership === "ban") {
 			return { text: `${subject} was unbanned by ${actor}`, icon: "info" };
 		}
@@ -507,6 +519,15 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 		return { text: `${subject} was banned by ${actor}`, icon: "leave" };
 	}
 	if (membership === "invite") {
+		if (prevMembership === "knock") {
+			// A moderator approving a knock re-memberships the user as
+			// invited (they still need to accept - or the server auto-joins
+			// them, arriving as a separate join event).
+			return {
+				text: `${actor} approved ${subject}'s request to join`,
+				icon: "join",
+			};
+		}
 		return { text: `${actor} invited ${subject}`, icon: "join" };
 	}
 	if (membership === "knock") {

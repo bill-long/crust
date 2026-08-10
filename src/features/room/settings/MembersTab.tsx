@@ -2,6 +2,7 @@ import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { EventType, type MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { Virtualizer } from "virtua/solid";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { useMemberList } from "../useMemberList";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteByUserIdForm } from "./InviteByUserIdForm";
@@ -11,6 +12,7 @@ import {
 	withUserLevel,
 } from "./powerLevelPresets";
 import { usePendingInvites } from "./usePendingInvites";
+import { usePendingKnocks } from "./usePendingKnocks";
 import { useRoomPermissions } from "./useRoomPermissions";
 import { useRoomStateContent } from "./useRoomStateContent";
 
@@ -30,6 +32,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 	const perms = useRoomPermissions(props.client, roomId);
 	const memberList = useMemberList(props.client, roomId);
 	const invites = usePendingInvites(props.client, roomId);
+	const knocks = usePendingKnocks(props.client, roomId);
 	const plContent = useRoomStateContent<PowerLevelContent>(
 		props.client,
 		roomId,
@@ -175,6 +178,44 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 		}
 	};
 
+	const [knockPending, setKnockPending] = createSignal<{
+		userId: string;
+		action: "approve" | "decline";
+	} | null>(null);
+	const [knockError, setKnockError] = createSignal<{
+		userId: string;
+		message: string;
+	} | null>(null);
+
+	/** Approve (invite) or decline (kick) a pending join request (#442). */
+	const resolveKnock = async (
+		userId: string,
+		action: "approve" | "decline",
+	): Promise<void> => {
+		if (knockPending()) return;
+		setKnockError(null);
+		setKnockPending({ userId, action });
+		try {
+			if (action === "approve") {
+				await props.client.invite(props.roomId, userId);
+			} else {
+				await props.client.kick(props.roomId, userId);
+			}
+		} catch (e) {
+			setKnockError({
+				userId,
+				message: userFacingErrorMessage(
+					e,
+					action === "approve"
+						? "Could not approve the request."
+						: "Could not decline the request.",
+				),
+			});
+		} finally {
+			setKnockPending(null);
+		}
+	};
+
 	const initial = (name: string): string =>
 		name.trim().charAt(0).toUpperCase() || "?";
 
@@ -252,6 +293,89 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{revoking() === inv.userId ? "Revoking…" : "Revoke"}
+										</button>
+									</div>
+								</li>
+							)}
+						</For>
+					</ul>
+				</Show>
+			</section>
+
+			{/* Pending join requests (knocks) */}
+			<section>
+				<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+					Pending join requests ({knocks().length})
+				</h3>
+				<Show
+					when={knocks().length > 0}
+					fallback={
+						<p class="text-sm text-text-muted">No pending join requests.</p>
+					}
+				>
+					<ul class="space-y-2">
+						<For each={knocks()}>
+							{(k) => (
+								<li class="flex items-center justify-between gap-3 rounded bg-surface-1 px-3 py-2">
+									<div class="flex min-w-0 items-center gap-3">
+										<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2 text-xs font-semibold text-text-secondary">
+											<Show
+												when={k.avatarUrl}
+												fallback={<span>{initial(k.displayName)}</span>}
+											>
+												<img
+													src={k.avatarUrl ?? ""}
+													alt=""
+													class="h-full w-full object-cover"
+												/>
+											</Show>
+										</div>
+										<div class="min-w-0">
+											<div class="truncate text-sm text-text-primary">
+												{k.displayName}
+											</div>
+											<div class="truncate font-mono text-xs text-text-muted">
+												{k.userId}
+											</div>
+											<Show when={k.reason}>
+												{(reason) => (
+													<div class="truncate text-xs italic text-text-muted">
+														{reason()}
+													</div>
+												)}
+											</Show>
+										</div>
+									</div>
+									<div class="flex shrink-0 items-center gap-2">
+										<Show when={knockError()?.userId === k.userId}>
+											<span class="text-xs text-danger-text" role="alert">
+												{knockError()?.message}
+											</span>
+										</Show>
+										<button
+											type="button"
+											onClick={() => void resolveKnock(k.userId, "approve")}
+											disabled={knockPending() !== null || !perms.canInvite()}
+											class="rounded px-2 py-1 text-xs font-medium text-success-text hover:bg-success-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-text disabled:cursor-not-allowed disabled:opacity-60"
+										>
+											{knockPending()?.userId === k.userId &&
+											knockPending()?.action === "approve"
+												? "Approving…"
+												: "Approve"}
+										</button>
+										<button
+											type="button"
+											onClick={() => void resolveKnock(k.userId, "decline")}
+											disabled={
+												knockPending() !== null ||
+												!perms.canKickTarget(k.userId)
+											}
+											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
+										>
+											{knockPending()?.userId === k.userId &&
+											knockPending()?.action === "decline"
+												? "Declining…"
+												: "Decline"}
 										</button>
 									</div>
 								</li>

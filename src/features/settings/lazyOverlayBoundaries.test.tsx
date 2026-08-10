@@ -62,6 +62,7 @@ const ClientWrapper: ParentComponent<{
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined,
+				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
 			}}
 		>

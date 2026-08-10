@@ -854,6 +854,90 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 	});
 });
 
+describe("createSummariesStore optimisticallyMarkKnocked", () => {
+	function makeStore() {
+		const rooms = new Map<string, ReturnType<typeof createMockRoom>>();
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		return store;
+	}
+
+	it("creates a knock stub summary entry when none exists", () => {
+		const store = makeStore();
+		store.optimisticallyMarkKnocked("!new:x", {
+			name: "Restricted Club",
+			avatarUrl: null,
+		});
+
+		const s = store.summaries["!new:x"];
+		expect(s).toBeDefined();
+		expect(s.name).toBe("Restricted Club");
+		expect(s.membership).toBe("knock");
+		expect(s.isSpace).toBe(false);
+
+		store.cleanup();
+	});
+
+	it("flips an existing leave summary to membership='knock' without clobbering fields", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			roomId: "!r:x",
+			name: "Existing name",
+			avatarUrl: "existing.png",
+			lastMessage: null,
+			unreadCount: 2,
+			highlightCount: 0,
+			membership: "leave",
+			isEncrypted: true,
+			isDirect: false,
+			isSpace: false,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkKnocked("!r:x", {
+			name: "Ignored",
+			avatarUrl: null,
+		});
+
+		const s = store.summaries["!r:x"];
+		expect(s.membership).toBe("knock");
+		expect(s.name).toBe("Existing name");
+		expect(s.isEncrypted).toBe(true);
+
+		store.cleanup();
+	});
+
+	it("is a no-op for an already-joined room (never demotes join to knock)", () => {
+		const store = makeStore();
+		store.setSummaries("!r:x", {
+			roomId: "!r:x",
+			name: "Real name",
+			avatarUrl: null,
+			lastMessage: null,
+			unreadCount: 0,
+			highlightCount: 0,
+			membership: "join",
+			isEncrypted: false,
+			isDirect: false,
+			isSpace: false,
+			kind: "text",
+			callActive: false,
+			children: [],
+		});
+
+		store.optimisticallyMarkKnocked("!r:x", {
+			name: "Ignored",
+			avatarUrl: null,
+		});
+
+		expect(store.summaries["!r:x"].membership).toBe("join");
+
+		store.cleanup();
+	});
+});
+
 describe("createSummariesStore optimisticallyMarkLeft", () => {
 	function makeStore() {
 		const rooms = new Map<string, ReturnType<typeof createMockRoom>>();

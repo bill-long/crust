@@ -15,6 +15,7 @@ import {
 	type SummariesStore,
 } from "../../client/summaries";
 import type { JoinAddress } from "../../lib/joinAddressParsing";
+import { clearNotices, notices } from "../../stores/notices";
 import { createMockClient } from "../../test/mockClient";
 import { describeJoinError, JoinRoomDialog } from "./JoinRoomDialog";
 
@@ -32,6 +33,7 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 const optimisticallyMarkJoined = vi.fn();
+const optimisticallyMarkKnocked = vi.fn();
 
 const Wrapper: ParentComponent<{
 	client: ReturnType<typeof createMockClient>;
@@ -62,6 +64,7 @@ const Wrapper: ParentComponent<{
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined,
+				optimisticallyMarkKnocked,
 				optimisticallyMarkLeft: vi.fn(),
 			}}
 		>
@@ -74,6 +77,8 @@ afterEach(() => {
 	cleanup();
 	navigateMock.mockReset();
 	optimisticallyMarkJoined.mockReset();
+	optimisticallyMarkKnocked.mockReset();
+	clearNotices();
 });
 
 function setup() {
@@ -228,7 +233,7 @@ describe("JoinRoomDialog", () => {
 		);
 	});
 
-	it("maps M_FORBIDDEN to an ask-for-an-invite message", async () => {
+	it("offers the knock path (not the invite-only alert) after M_FORBIDDEN", async () => {
 		const { client } = setup();
 		client.joinRoom.mockRejectedValueOnce({
 			errcode: "M_FORBIDDEN",
@@ -239,12 +244,17 @@ describe("JoinRoomDialog", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
 
-		await screen.findByRole("alert");
-		expect(screen.getByRole("alert").textContent).toBe(
-			"That room isn't open to join. Ask a member to invite you.",
+		// #442: a forbidden join may be a knock-rule room, so the dialog
+		// offers Request to join instead of the plain error alert. The
+		// invite-only text only appears if the knock itself 403s (see the
+		// knock-offer suite below).
+		await screen.findByRole("button", { name: /^Request to join$/i });
+		expect(screen.queryByRole("alert")).toBeNull();
+		// Focus lands on the offer's first control (the reason input), not
+		// the void left by the unmounted Join button.
+		expect(document.activeElement).toBe(
+			screen.getByLabelText(/^Reason \(optional\)$/i),
 		);
-		// The catch path restores focus to the input.
-		expect(document.activeElement).toBe(addressInput());
 	});
 
 	it("maps M_LIMIT_EXCEEDED to a rate-limit message", async () => {
@@ -505,6 +515,274 @@ describe("JoinRoomDialog prefill", () => {
 		address = null;
 		setOpen(true);
 		await waitFor(() => expect(addressInput().value).toBe(""));
+	});
+});
+
+describe("JoinRoomDialog knock offer (#442)", () => {
+	const FORBIDDEN = { errcode: "M_FORBIDDEN" };
+
+	async function reachKnockOffer(address: string) {
+		const { client, setOpen, onClose } = setup();
+		client.joinRoom.mockRejectedValue(FORBIDDEN);
+		fireEvent.input(addressInput(), { target: { value: address } });
+		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: /^Request to join$/i }),
+			).toBeTruthy(),
+		);
+		return { client, setOpen, onClose };
+	}
+
+	it("offers Request to join (with an optional reason) after a forbidden join", async () => {
+		await reachKnockOffer("!restricted:example.org");
+		// The offer replaces the plain error + Join button.
+		expect(screen.getByLabelText(/^Reason \(optional\)$/i)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /^Join$/i })).toBeNull();
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("sends the knock with reason and via servers, marks knocked, toasts, and closes", async () => {
+		const { client, onClose } = await reachKnockOffer(
+			"!restricted:example.org one.org",
+		);
+		fireEvent.input(screen.getByLabelText(/^Reason \(optional\)$/i), {
+			target: { value: "  let me in  " },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(client.knockRoom).toHaveBeenCalledWith("!restricted:example.org", {
+			reason: "let me in",
+			viaServers: ["one.org"],
+		});
+		expect(optimisticallyMarkKnocked).toHaveBeenCalledWith(
+			"!knocked:example.com",
+			{ name: "!restricted:example.org", avatarUrl: null },
+		);
+		expect(notices().some((n) => n.message === "Request to join sent.")).toBe(
+			true,
+		);
+	});
+
+	it("omits the reason when left blank", async () => {
+		const { client, onClose } = await reachKnockOffer(
+			"!restricted:example.org",
+		);
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(client.knockRoom).toHaveBeenCalledWith("!restricted:example.org", {
+			reason: undefined,
+			viaServers: [],
+		});
+	});
+
+	it("drops the offer and shows invite-only when the knock itself is forbidden", async () => {
+		const { client } = await reachKnockOffer("!restricted:example.org");
+		client.knockRoom.mockRejectedValue(FORBIDDEN);
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toBe(
+				"That room isn't open to join. Ask a member to invite you.",
+			),
+		);
+		expect(
+			screen.queryByRole("button", { name: /^Request to join$/i }),
+		).toBeNull();
+		expect(optimisticallyMarkKnocked).not.toHaveBeenCalled();
+	});
+
+	it("shows a curated error when the knock fails for another reason", async () => {
+		const { client } = await reachKnockOffer("!restricted:example.org");
+		client.knockRoom.mockRejectedValue(new TypeError("Failed to fetch"));
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toBe(
+				"Couldn't send the join request. Please try again.",
+			),
+		);
+	});
+
+	it("editing the address after the offer hides it", async () => {
+		await reachKnockOffer("!restricted:example.org");
+		fireEvent.input(addressInput(), {
+			target: { value: "!other:example.org" },
+		});
+		expect(
+			screen.queryByRole("button", { name: /^Request to join$/i }),
+		).toBeNull();
+		expect(screen.getByRole("button", { name: /^Join$/i })).toBeTruthy();
+	});
+
+	it("does not offer a knock for non-forbidden join failures", async () => {
+		const { client } = setup();
+		client.joinRoom.mockRejectedValue({ errcode: "M_NOT_FOUND" });
+		fireEvent.input(addressInput(), {
+			target: { value: "!missing:example.org" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
+		await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+		expect(
+			screen.queryByRole("button", { name: /^Request to join$/i }),
+		).toBeNull();
+	});
+
+	it("Enter in the reason input sends the knock", async () => {
+		const { client, onClose } = await reachKnockOffer(
+			"!restricted:example.org",
+		);
+		// Implicit submission: the form's submit event routes to the knock
+		// while the offer is engaged (the Join submit button is unmounted).
+		const form = screen.getByRole("dialog").querySelector("form");
+		expect(form).toBeTruthy();
+		fireEvent.submit(form as HTMLFormElement);
+
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(client.knockRoom).toHaveBeenCalledWith("!restricted:example.org", {
+			reason: undefined,
+			viaServers: [],
+		});
+		expect(client.joinRoom).toHaveBeenCalledTimes(1); // the original 403
+	});
+
+	it("keeps the Request button disabled and labelled Sending… while the knock is in flight", async () => {
+		const { client, onClose } = await reachKnockOffer(
+			"!restricted:example.org",
+		);
+		let resolveKnock: ((value: { room_id: string }) => void) | undefined;
+		client.knockRoom.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveKnock = resolve;
+				}),
+		);
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		const button = screen.getByRole("button", {
+			name: /^Sending…$/i,
+		}) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		expect(
+			(screen.getByLabelText(/^Reason \(optional\)$/i) as HTMLInputElement)
+				.disabled,
+		).toBe(true);
+		expect(addressInput().disabled).toBe(true);
+
+		resolveKnock?.({ room_id: "!knocked:example.com" });
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+	});
+
+	it("blocks Escape and backdrop close while the knock is in flight", async () => {
+		const { client, onClose } = await reachKnockOffer(
+			"!restricted:example.org",
+		);
+		let resolveKnock: ((value: { room_id: string }) => void) | undefined;
+		client.knockRoom.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveKnock = resolve;
+				}),
+		);
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+		await screen.findByRole("button", { name: /^Sending…$/i });
+
+		const dialog = screen.getByRole("dialog");
+		fireEvent.keyDown(dialog, { key: "Escape" });
+		fireEvent.click(dialog); // backdrop: target === currentTarget
+		expect(onClose).not.toHaveBeenCalled();
+
+		resolveKnock?.({ room_id: "!knocked:example.com" });
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+	});
+
+	it("commits nothing when the parent closes the dialog mid-knock", async () => {
+		const { client, setOpen, onClose } = await reachKnockOffer(
+			"!restricted:example.org",
+		);
+		let resolveKnock: ((value: { room_id: string }) => void) | undefined;
+		client.knockRoom.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveKnock = resolve;
+				}),
+		);
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+		await screen.findByRole("button", { name: /^Sending…$/i });
+
+		// Parent-driven close (route change, etc.): tryClose is blocked
+		// while submitting, so this is the only way out mid-knock.
+		setOpen(false);
+		resolveKnock?.({ room_id: "!knocked:example.com" });
+		// Settle the microtask-only continuation chain (no timers involved).
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(optimisticallyMarkKnocked).not.toHaveBeenCalled();
+		expect(notices()).toEqual([]);
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("opens with the knock offer pre-engaged (space discovery Request button)", async () => {
+		const client = createMockClient();
+		const [open, setOpen] = createSignal(false);
+		const onClose = vi.fn(() => setOpen(false));
+		render(() => (
+			<Wrapper client={client}>
+				<JoinRoomDialog
+					client={client as unknown as MatrixClient}
+					open={open}
+					onClose={onClose}
+					prefill={() => ({
+						idOrAlias: "!restricted:example.org",
+						viaServers: ["one.org"],
+					})}
+					knockOffered={() => true}
+				/>
+			</Wrapper>
+		));
+
+		setOpen(true);
+		// Offer is immediately visible - no doomed join attempt first.
+		await screen.findByRole("button", { name: /^Request to join$/i });
+		expect(client.joinRoom).not.toHaveBeenCalled();
+		expect(addressInput().value).toBe("!restricted:example.org one.org");
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByLabelText(/^Reason \(optional\)$/i),
+			),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(client.knockRoom).toHaveBeenCalledWith("!restricted:example.org", {
+			reason: undefined,
+			viaServers: ["one.org"],
+		});
+	});
+
+	it("restores focus to the address input when the knock itself is forbidden", async () => {
+		const { client } = await reachKnockOffer("!restricted:example.org");
+		client.knockRoom.mockRejectedValue({ errcode: "M_FORBIDDEN" });
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await screen.findByRole("alert");
+		// The focused Request button unmounted with the offer; focus lands
+		// back on the address input rather than <body>.
+		expect(document.activeElement).toBe(addressInput());
+	});
+
+	it("restores focus to the reason input after a non-forbidden knock failure", async () => {
+		const { client } = await reachKnockOffer("!restricted:example.org");
+		client.knockRoom.mockRejectedValue(new TypeError("Failed to fetch"));
+		fireEvent.click(screen.getByRole("button", { name: /^Request to join$/i }));
+
+		await screen.findByRole("alert");
+		expect(document.activeElement).toBe(
+			screen.getByLabelText(/^Reason \(optional\)$/i),
+		);
 	});
 });
 

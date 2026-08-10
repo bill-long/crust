@@ -70,6 +70,13 @@ interface ClientContextValue {
 	 */
 	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
 	/**
+	 * Optimistically populate (or flip) a summary entry to `membership:
+	 * "knock"` after `client.knockRoom` resolves, so the room shows in the
+	 * sidebar's Requests section before /sync confirms. The eventual
+	 * authoritative update overwrites the stub. Idempotent.
+	 */
+	optimisticallyMarkKnocked: (roomId: string, info: OptimisticJoinInfo) => void;
+	/**
 	 * Optimistically flip `roomId`'s summary entry to "leave" so it disappears
 	 * from all join-filtered lists (channels, spaces sidebar) immediately when
 	 * the user leaves, without waiting for the leave-membership /sync event.
@@ -275,6 +282,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		init: initSummaries,
 		cleanup: cleanupSummaries,
 		optimisticallyMarkJoined,
+		optimisticallyMarkKnocked,
 		optimisticallyMarkLeft,
 	} = createSummariesStore(matrixClient);
 
@@ -425,6 +433,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				summaries,
 				cryptoStatus,
 				optimisticallyMarkJoined,
+				optimisticallyMarkKnocked,
 				optimisticallyMarkLeft,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,

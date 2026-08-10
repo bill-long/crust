@@ -37,6 +37,7 @@ const JoinRoomDialogHost: Component<{ client: MatrixClient }> = (props) => {
 			open={open}
 			onClose={close}
 			prefill={() => joinDialogRequest()?.prefill ?? null}
+			knockOffered={() => joinDialogRequest()?.knockOffered ?? false}
 		/>
 	);
 };

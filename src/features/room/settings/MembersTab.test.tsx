@@ -53,6 +53,8 @@ function setup(options?: {
 	myPower?: number;
 	powerLevels?: Record<string, unknown>;
 	includeInvite?: boolean;
+	includeKnock?: boolean;
+	knockReason?: string;
 }) {
 	const myPower = options?.myPower ?? 100;
 	const members: {
@@ -74,7 +76,34 @@ function setup(options?: {
 			membership: "invite",
 		});
 	}
+	if (options?.includeKnock) {
+		members.push({
+			userId: "@carol:example.com",
+			name: "Carol",
+			powerLevel: 0,
+			membership: "knock",
+		});
+	}
 	const room = createMockRoom("!room:example.com", [], members);
+	if (options?.includeKnock && options?.knockReason !== undefined) {
+		// Attach the knock's member event the way the SDK's
+		// RoomMember.events.member presents it, so usePendingKnocks can
+		// surface the reason.
+		const member = room.getMember("@carol:example.com") as unknown as Record<
+			string,
+			unknown
+		>;
+		member.events = {
+			member: {
+				getContent: () => ({
+					membership: "knock",
+					reason: options.knockReason,
+				}),
+				getTs: () => 1234,
+				getSender: () => "@carol:example.com",
+			},
+		};
+	}
 	room.__setStateEvent("m.room.power_levels", "", {
 		users: {
 			"@test:example.com": myPower,
@@ -316,5 +345,107 @@ describe("MembersTab", () => {
 		expect(
 			screen.getByText("You don't have permission to invite users."),
 		).toBeTruthy();
+	});
+});
+
+describe("MembersTab pending join requests", () => {
+	it("renders pending knocks with Approve/Decline actions", () => {
+		setup({ includeKnock: true });
+		expect(screen.getByText("Pending join requests (1)")).toBeTruthy();
+		expect(screen.getByText("Carol")).toBeTruthy();
+		expect(screen.getByText("@carol:example.com")).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Decline" })).toBeTruthy();
+	});
+
+	it("shows the empty state when there are no pending knocks", () => {
+		setup();
+		expect(screen.getByText("Pending join requests (0)")).toBeTruthy();
+		expect(screen.getByText("No pending join requests.")).toBeTruthy();
+	});
+
+	it("approving a knock invites the user", async () => {
+		const { client } = setup({ includeKnock: true });
+		fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+		await waitFor(() =>
+			expect(client.invite).toHaveBeenCalledWith(
+				"!room:example.com",
+				"@carol:example.com",
+			),
+		);
+		expect(client.kick).not.toHaveBeenCalled();
+	});
+
+	it("declining a knock kicks the user", async () => {
+		const { client } = setup({ includeKnock: true });
+		fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+		await waitFor(() =>
+			expect(client.kick).toHaveBeenCalledWith(
+				"!room:example.com",
+				"@carol:example.com",
+			),
+		);
+		expect(client.invite).not.toHaveBeenCalled();
+	});
+
+	it("surfaces an approve failure inline", async () => {
+		const { client } = setup({ includeKnock: true });
+		client.invite.mockRejectedValueOnce(new Error("M_FORBIDDEN: nope"));
+		fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain("nope"),
+		);
+	});
+
+	it("renders the knock reason when the requester supplied one", () => {
+		setup({ includeKnock: true, knockReason: "let me in please" });
+		expect(screen.getByText("let me in please")).toBeTruthy();
+	});
+
+	it("surfaces a decline failure inline", async () => {
+		const { client } = setup({ includeKnock: true });
+		client.kick.mockRejectedValueOnce(new Error("no decline"));
+		fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain("no decline"),
+		);
+	});
+
+	it("uses the curated fallback for platform-jargon approve failures", async () => {
+		const { client } = setup({ includeKnock: true });
+		client.invite.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+		fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toBe(
+				"Could not approve the request.",
+			),
+		);
+	});
+
+	it("uses the curated fallback for platform-jargon decline failures", async () => {
+		const { client } = setup({ includeKnock: true });
+		client.kick.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+		fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toBe(
+				"Could not decline the request.",
+			),
+		);
+	});
+
+	it("disables both actions without the permissions", () => {
+		setup({
+			includeKnock: true,
+			myPower: 0,
+			powerLevels: { invite: 50, kick: 50 },
+		});
+		expect(
+			(screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true);
+		expect(
+			(screen.getByRole("button", { name: "Decline" }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true);
 	});
 });

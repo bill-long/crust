@@ -450,6 +450,11 @@ export function createMockClient(
 		createRoom: vi.fn().mockResolvedValue({ room_id: "!created:example.com" }),
 		// Mirrors the SDK's Promise<Room> resolution: consumers read .roomId.
 		joinRoom: vi.fn().mockResolvedValue({ roomId: "!joined:example.com" }),
+		// Mirrors the SDK's Promise<{room_id}> resolution.
+		knockRoom: vi.fn().mockResolvedValue({ room_id: "!knocked:example.com" }),
+		invite: vi.fn().mockResolvedValue({}),
+		kick: vi.fn().mockResolvedValue({}),
+		ban: vi.fn().mockResolvedValue({}),
 		getRoomDirectoryVisibility: vi
 			.fn()
 			.mockResolvedValue({ visibility: "private" }),

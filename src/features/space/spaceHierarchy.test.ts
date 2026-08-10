@@ -265,6 +265,7 @@ describe("filterDiscoverableRooms", () => {
 			memberCount: 42,
 			joinRule: "public",
 			canJoin: true,
+			canKnock: false,
 		});
 	});
 
@@ -329,7 +330,7 @@ describe("filterDiscoverableRooms", () => {
 		expect(result[0].canJoin).toBe(true);
 	});
 
-	it("sets canJoin=false for knock rooms", () => {
+	it("sets canJoin=false and canKnock=true for knock rooms", () => {
 		const rooms: HierarchyRoom[] = [
 			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
 			makeHierarchyRoom({
@@ -339,6 +340,43 @@ describe("filterDiscoverableRooms", () => {
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
 		expect(result[0].canJoin).toBe(false);
+		expect(result[0].canKnock).toBe(true);
+	});
+
+	it("sets canKnock for knock_restricted rooms based on parent-space membership", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!kr:example.com",
+				join_rule: "knock_restricted",
+			}),
+		];
+		const member: SummariesStore = {
+			[SPACE_ID]: makeSummary(SPACE_ID, "join", true),
+		};
+		expect(
+			filterDiscoverableRooms(rooms, SPACE_ID, member, mockMxcToHttp)[0]
+				.canKnock,
+		).toBe(true);
+		expect(
+			filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp)[0].canKnock,
+		).toBe(false);
+	});
+
+	it("excludes rooms with a pending knock from discoverable rooms", () => {
+		const rooms: HierarchyRoom[] = [
+			makeHierarchyRoom({ room_id: SPACE_ID, room_type: "m.space" }),
+			makeHierarchyRoom({
+				room_id: "!knocked:example.com",
+				join_rule: "knock",
+			}),
+		];
+		const summaries: SummariesStore = {
+			"!knocked:example.com": makeSummary("!knocked:example.com", "knock"),
+		};
+		expect(
+			filterDiscoverableRooms(rooms, SPACE_ID, summaries, mockMxcToHttp),
+		).toEqual([]);
 	});
 
 	it("sets canJoin=true for restricted rooms when joined to parent space", () => {

@@ -33,6 +33,7 @@ import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { InvitePane } from "../features/room/invites/InvitePane";
 import { JoinRoomDialogHost } from "../features/room/JoinRoomDialogHost";
+import { KnockPane } from "../features/room/knocks/KnockPane";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { PermalinkRouting } from "../features/room/PermalinkRouting";
 import { RoomList } from "../features/room/RoomList";
@@ -775,15 +776,32 @@ const Layout: Component = () => {
 								// applies (#438). Accepting flips the summary
 								// membership to "join", which swaps in the real
 								// RoomPane right here without a route change.
+								// A pending knock gets the same treatment with a
+								// status/cancel pane (#442).
 								<Show
-									when={summaries[rid]?.membership !== "invite"}
+									when={
+										summaries[rid]?.membership !== "invite" &&
+										summaries[rid]?.membership !== "knock"
+									}
 									fallback={
-										<InvitePane
-											rid={rid}
-											roomName={roomName()}
-											onBack={backToList}
-											onDeclined={backToList}
-										/>
+										<Show
+											when={summaries[rid]?.membership === "invite"}
+											fallback={
+												<KnockPane
+													rid={rid}
+													roomName={roomName()}
+													onBack={backToList}
+													onCancelled={backToList}
+												/>
+											}
+										>
+											<InvitePane
+												rid={rid}
+												roomName={roomName()}
+												onBack={backToList}
+												onDeclined={backToList}
+											/>
+										</Show>
 									}
 								>
 									<RoomPane

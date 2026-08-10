@@ -104,6 +104,7 @@ const Wrapper: ParentComponent<{
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: vi.fn(),
+				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
 			}}
 		>

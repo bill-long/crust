@@ -15,6 +15,7 @@ import {
 	getHomeUnreadRollup,
 	getInvitedRoomCount,
 	getInvitedSpaces,
+	getKnockedSpaces,
 	getSpaceRooms,
 	getSpaces,
 	getSpaceUnreadRollup,
@@ -65,6 +66,10 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 
 	const spaces = createMemo(() => getSpaces(summaries));
 	const invitedSpaces = createMemo(() => getInvitedSpaces(summaries));
+	// Spaces with a pending join request (knock). Surfaced as tiles because
+	// no room-level selector includes spaces - without these, a knocked
+	// space would be invisible after the authoritative sync (#442).
+	const knockedSpaces = createMemo(() => getKnockedSpaces(summaries));
 	// Pending room invites (all of them - Home's Invites section lists every
 	// invited room, including space children), badged on the Home button so
 	// an invite is discoverable without opening any list (#438).
@@ -318,6 +323,54 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									<span
 										aria-hidden="true"
 										class="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface-1 bg-accent"
+									/>
+								</button>
+							</SidebarItem>
+						);
+					}}
+				</For>
+
+				{/* Spaces with a pending join request. Same affordance as the
+					invited tiles but muted - a knock needs no action from the
+					viewer, it only shows the request is outstanding (#442).
+					Clicking opens the space route, where Layout renders the
+					KnockPane (status + Cancel request). */}
+				<For each={knockedSpaces()}>
+					{(space) => {
+						const isSelected = () => params.spaceId === space.roomId;
+						return (
+							<SidebarItem selected={isSelected}>
+								<button
+									type="button"
+									onClick={() =>
+										navigate(`/space/${encodeURIComponent(space.roomId)}`)
+									}
+									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-border-strong transition-all ${
+										isSelected()
+											? "rounded-xl bg-surface-2 text-text-primary"
+											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
+									}`}
+									title={`${space.name.trim() || "Unnamed space"} (join request pending)`}
+									aria-label={`${space.name.trim() || "Unnamed space"} (join request pending)`}
+									aria-current={isSelected() ? "page" : undefined}
+								>
+									<Show
+										when={space.avatarUrl}
+										fallback={
+											<span class="text-sm font-semibold">
+												{(space.name.trim() || "?").charAt(0).toUpperCase()}
+											</span>
+										}
+									>
+										<img
+											src={space.avatarUrl ?? ""}
+											alt={space.name.trim() || "Space"}
+											class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
+										/>
+									</Show>
+									<span
+										aria-hidden="true"
+										class="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface-1 bg-text-disabled"
 									/>
 								</button>
 							</SidebarItem>

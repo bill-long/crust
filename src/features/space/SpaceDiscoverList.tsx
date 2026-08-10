@@ -1,14 +1,17 @@
 import { type Component, For, Show } from "solid-js";
+import { requestJoinDialog } from "../../stores/joinDialog";
 import {
 	type DiscoverableRoom,
 	type JoinState,
 	useSpaceHierarchy,
 } from "./useSpaceHierarchy";
 
+/** Exported for render tests (the four-state Join/Request button matrix). */
 const DiscoverEntry: Component<{
 	room: DiscoverableRoom;
 	joinState: JoinState;
 	onJoin: () => void;
+	onRequest: () => void;
 }> = (props) => {
 	const isJoining = () => props.joinState === "joining";
 	const isJoined = () => props.joinState === "joined";
@@ -31,7 +34,7 @@ const DiscoverEntry: Component<{
 			</div>
 
 			<Show
-				when={props.room.canJoin}
+				when={props.room.canJoin || props.room.canKnock}
 				fallback={
 					<span
 						class="shrink-0 text-[10px] text-text-faint"
@@ -41,41 +44,60 @@ const DiscoverEntry: Component<{
 					</span>
 				}
 			>
-				<button
-					type="button"
-					onClick={props.onJoin}
-					disabled={isJoining() || isJoined()}
-					aria-label={
-						isJoined()
-							? `Joined ${props.room.name}`
-							: isJoining()
-								? `Joining ${props.room.name}`
-								: isError()
-									? `Retry joining ${props.room.name}`
-									: `Join ${props.room.name}`
+				<Show
+					when={props.room.canJoin}
+					fallback={
+						// A knock has no in-flight state here: the click opens the
+						// join dialog with the knock offer engaged (the reason
+						// input lives there), and the dialog owns the request.
+						<button
+							type="button"
+							onClick={props.onRequest}
+							aria-label={`Request to join ${props.room.name}`}
+							class="shrink-0 rounded bg-accent/80 px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						>
+							Request
+						</button>
 					}
-					class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
-						isJoined()
-							? "bg-success-bg/50 text-success-text"
-							: isError()
-								? "bg-danger-bg/50 text-danger-text hover:bg-danger-strong/50"
-								: isJoining()
-									? "cursor-wait bg-surface-3 text-text-muted"
-									: "bg-accent/80 text-text-primary hover:bg-accent"
-					}`}
 				>
-					{isJoined()
-						? "Joined"
-						: isJoining()
-							? "Joining…"
-							: isError()
-								? "Retry"
-								: "Join"}
-				</button>
+					<button
+						type="button"
+						onClick={props.onJoin}
+						disabled={isJoining() || isJoined()}
+						aria-label={
+							isJoined()
+								? `Joined ${props.room.name}`
+								: isJoining()
+									? `Joining ${props.room.name}`
+									: isError()
+										? `Retry joining ${props.room.name}`
+										: `Join ${props.room.name}`
+						}
+						class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+							isJoined()
+								? "bg-success-bg/50 text-success-text"
+								: isError()
+									? "bg-danger-bg/50 text-danger-text hover:bg-danger-strong/50"
+									: isJoining()
+										? "cursor-wait bg-surface-3 text-text-muted"
+										: "bg-accent/80 text-text-primary hover:bg-accent"
+						}`}
+					>
+						{isJoined()
+							? "Joined"
+							: isJoining()
+								? "Joining…"
+								: isError()
+									? "Retry"
+									: "Join"}
+					</button>
+				</Show>
 			</Show>
 		</div>
 	);
 };
+
+export { DiscoverEntry };
 
 /**
  * The "Discover" section shown under a space's joined-room list: fetches the
@@ -141,6 +163,15 @@ export const SpaceDiscoverList: Component<{
 							room={room}
 							joinState={hierarchy.joinState(room.roomId)}
 							onJoin={() => hierarchy.joinRoom(room.roomId)}
+							onRequest={() =>
+								requestJoinDialog(
+									{
+										idOrAlias: room.roomId,
+										viaServers: hierarchy.viaServersFor(room.roomId),
+									},
+									{ knockOffered: true },
+								)
+							}
 						/>
 					)}
 				</For>

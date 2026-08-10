@@ -106,6 +106,7 @@ function renderButton(opts: {
 				setRecoveryKeyResolver: () => {},
 				clearSecretStorageCache: () => {},
 				optimisticallyMarkJoined: () => {},
+				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
 			}}
 		>

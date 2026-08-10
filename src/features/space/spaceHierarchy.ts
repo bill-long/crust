@@ -10,6 +10,12 @@ export interface DiscoverableRoom {
 	joinRule: string | null;
 	/** Whether the user can self-join (public or restricted with space membership). */
 	canJoin: boolean;
+	/**
+	 * Whether the user can request to join (knock rule, or knock_restricted
+	 * with membership in the parent space as the allow heuristic - the same
+	 * heuristic canJoin uses for restricted rooms).
+	 */
+	canKnock: boolean;
 }
 
 /** Extract via servers for a child room from the space hierarchy response. */
@@ -42,9 +48,15 @@ export function filterDiscoverableRooms(
 			// render in the space's Invites section (with a working Accept),
 			// not as a Discover entry - which for an invite-only room would be
 			// an unjoinable "Invite only" label even though the viewer holds an
-			// invite (#438).
+			// invite (#438). Rooms with a pending knock likewise render in the
+			// Requests section, not as a re-knockable Discover entry (#442).
 			const membership = summaries[room.room_id]?.membership;
-			if (membership === "join" || membership === "invite") return false;
+			if (
+				membership === "join" ||
+				membership === "invite" ||
+				membership === "knock"
+			)
+				return false;
 			return true;
 		})
 		.map((room) => {
@@ -66,6 +78,8 @@ export function filterDiscoverableRooms(
 				memberCount: room.num_joined_members,
 				joinRule: rule ?? null,
 				canJoin: rule === "public" || (isRestricted && isSpaceMember),
+				canKnock:
+					rule === "knock" || (rule === "knock_restricted" && isSpaceMember),
 			};
 		});
 }
