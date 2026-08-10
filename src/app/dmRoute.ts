@@ -14,15 +14,19 @@
  * @param relativePath base-stripped pathname (e.g. "/home/!abc:server")
  * @param roomId decoded room id from the route params, if any
  * @param isDirect whether summaries currently know the room is a DM
+ * @param search the current query string ("" or "?..."), preserved so
+ *               deep-link params (`?event=` permalink jumps, `?thread=`
+ *               notification opens) survive the redirect for DM rooms
  * @returns the `/dm/<roomId>` target to redirect to, or null to stay put
  */
 export function dmCanonicalTarget(
 	relativePath: string,
 	roomId: string | undefined,
 	isDirect: boolean | undefined,
+	search = "",
 ): string | null {
 	if (!roomId) return null;
 	if (!relativePath.startsWith("/home/")) return null;
 	if (isDirect !== true) return null;
-	return `/dm/${encodeURIComponent(roomId)}`;
+	return `/dm/${encodeURIComponent(roomId)}${search}`;
 }

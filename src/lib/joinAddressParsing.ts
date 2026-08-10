@@ -116,7 +116,14 @@ function parseMatrixToFragment(fragment: string): ParseJoinAddressResult {
 	return { ok: true, address: { idOrAlias: identifier, viaServers } };
 }
 
-function validateRoomIdOrAlias(
+/** Inverse of {@link parseJoinAddress}'s bare form: the address followed by
+ *  any via servers as trailing tokens. Round-trips through the parser, so it
+ *  can prefill the join dialog's free-form input. */
+export function formatJoinAddress(address: JoinAddress): string {
+	return [address.idOrAlias, ...address.viaServers].join(" ");
+}
+
+export function validateRoomIdOrAlias(
 	input: string,
 ): { ok: true } | { ok: false; error: string } {
 	const sigil = input[0];

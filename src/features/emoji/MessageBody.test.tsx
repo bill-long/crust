@@ -71,6 +71,42 @@ describe("MessageBody — Phase 6 markdown round-trip through DOMPurify", () => 
 	});
 });
 
+describe("MessageBody Matrix permalinks", () => {
+	it("keeps matrix.to anchors clickable in-app (target=_blank fallback retained)", () => {
+		const { container } = render(() => (
+			<MessageBody
+				body="x"
+				format="org.matrix.custom.html"
+				formattedBody='<a href="https://matrix.to/#/!room:example.org">room</a>'
+				isEdited={false}
+				client={client}
+				shortcodeLookup={new Map()}
+			/>
+		));
+		const a = container.querySelector("a");
+		expect(a?.getAttribute("href")).toBe(
+			"https://matrix.to/#/!room:example.org",
+		);
+		expect(a?.getAttribute("target")).toBe("_blank");
+	});
+
+	it("lets matrix: URIs survive sanitization so the click router can intercept them", () => {
+		const { container } = render(() => (
+			<MessageBody
+				body="x"
+				format="org.matrix.custom.html"
+				formattedBody='<a href="matrix:u/alice:example.org">alice</a>'
+				isEdited={false}
+				client={client}
+				shortcodeLookup={new Map()}
+			/>
+		));
+		expect(container.querySelector("a")?.getAttribute("href")).toBe(
+			"matrix:u/alice:example.org",
+		);
+	});
+});
+
 describe("MessageBody rich-reply fallback", () => {
 	it("strips the <mx-reply> block so relation-driven reply context isn't duplicated", () => {
 		// A rich reply's formatted_body carries the legacy in-band fallback. The

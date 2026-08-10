@@ -12,7 +12,11 @@ import {
 import { useClient } from "../../client/client";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { trapTabKey } from "../../lib/focusTrap";
-import { parseJoinAddress } from "../../lib/joinAddressParsing";
+import {
+	formatJoinAddress,
+	type JoinAddress,
+	parseJoinAddress,
+} from "../../lib/joinAddressParsing";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
 
@@ -46,6 +50,12 @@ interface JoinRoomDialogProps {
 	client: MatrixClient;
 	open: () => boolean;
 	onClose: () => void;
+	/**
+	 * Optional prefill for the address input, read each time the dialog
+	 * opens. Used by the permalink router to prefill a matrix.to room link
+	 * the user clicked but hasn't joined (issue #441).
+	 */
+	prefill?: () => JoinAddress | null;
 }
 
 const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
@@ -87,6 +97,10 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 			if (isOpen && !wasOpen) {
 				previousFocus = document.activeElement as HTMLElement | null;
 				reset();
+				// Prefill after reset() (which clears the input) so a stale
+				// prefill from an earlier open can't survive a fresh one.
+				const prefill = props.prefill?.();
+				if (prefill) setInputValue(formatJoinAddress(prefill));
 				queueMicrotask(() => inputRef?.focus());
 			} else if (!isOpen && wasOpen) {
 				if (previousFocus && document.body.contains(previousFocus)) {

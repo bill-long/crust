@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseJoinAddress } from "./joinAddressParsing";
+import { formatJoinAddress, parseJoinAddress } from "./joinAddressParsing";
 
 describe("parseJoinAddress", () => {
 	it("parses a bare alias", () => {
@@ -187,6 +187,34 @@ describe("parseJoinAddress", () => {
 		expect(r).toEqual({
 			ok: false,
 			error: "That matrix.to link is malformed.",
+		});
+	});
+});
+
+describe("formatJoinAddress", () => {
+	it("formats a bare alias with no via servers", () => {
+		expect(
+			formatJoinAddress({ idOrAlias: "#general:example.org", viaServers: [] }),
+		).toBe("#general:example.org");
+	});
+
+	it("appends via servers as trailing tokens", () => {
+		expect(
+			formatJoinAddress({
+				idOrAlias: "!abc123:example.org",
+				viaServers: ["one.org", "two.org:8448"],
+			}),
+		).toBe("!abc123:example.org one.org two.org:8448");
+	});
+
+	it("round-trips through parseJoinAddress", () => {
+		const address = {
+			idOrAlias: "!abc123:example.org",
+			viaServers: ["one.org", "two.org"],
+		};
+		expect(parseJoinAddress(formatJoinAddress(address))).toEqual({
+			ok: true,
+			address,
 		});
 	});
 });

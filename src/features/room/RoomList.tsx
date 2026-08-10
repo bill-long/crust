@@ -24,10 +24,10 @@ import {
 	getSpaceRooms,
 } from "../../client/summaries-selectors";
 import { VirtualList } from "../../components/VirtualList";
+import { requestJoinDialog } from "../../stores/joinDialog";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
 import { SpaceInvitePanel } from "./invites/SpaceInvitePanel";
-import { JoinRoomDialog } from "./JoinRoomDialog";
 import { NewDmDialog } from "./NewDmDialog";
 
 /**
@@ -358,12 +358,10 @@ const RoomList: Component<RoomListProps> = (props) => {
 		setNewDmOpen(false);
 	};
 
-	const [joinOpen, setJoinOpen] = createSignal(false);
 	const openJoin = (): void => {
-		setJoinOpen(true);
-	};
-	const closeJoin = (): void => {
-		setJoinOpen(false);
+		// The dialog lives in JoinRoomDialogHost (Layout-mounted, so it also
+		// works on mobile where this list unmounts); ask for a blank open.
+		requestJoinDialog();
 	};
 
 	const navigateToRoom = (roomId: string): void => {
@@ -656,7 +654,6 @@ const RoomList: Component<RoomListProps> = (props) => {
 				spaceId={params.spaceId}
 			/>
 			<NewDmDialog client={client} open={newDmOpen} onClose={closeNewDm} />
-			<JoinRoomDialog client={client} open={joinOpen} onClose={closeJoin} />
 		</aside>
 	);
 };

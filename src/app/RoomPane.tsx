@@ -210,12 +210,20 @@ const RoomPane: Component<{
 	// a later manual close, room switch, or reload doesn't reopen it). Reading
 	// happens in an effect so it also fires when a notification arrives while
 	// the room is already open.
+	// `?event=<eventId>` is the same shape for event permalinks (#441): hand
+	// the id to the timeline's jump request (scroll + flash, anchored context
+	// load when the event is outside the current window), then strip it.
 	const [searchParams, setSearchParams] = useSearchParams();
 	createEffect(() => {
 		const requested = searchParams.thread;
 		if (typeof requested === "string" && requested) {
 			threadPanel.open(requested);
 			setSearchParams({ thread: undefined }, { replace: true });
+		}
+		const requestedEvent = searchParams.event;
+		if (typeof requestedEvent === "string" && requestedEvent) {
+			setJumpRequest(requestedEvent);
+			setSearchParams({ event: undefined }, { replace: true });
 		}
 	});
 

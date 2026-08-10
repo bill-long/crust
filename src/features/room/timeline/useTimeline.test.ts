@@ -7,6 +7,7 @@ import {
 	runWithOwner,
 } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
+import { clearNotices, notices } from "../../../stores/notices";
 import {
 	createMatrixEvent,
 	createMockClient,
@@ -4249,5 +4250,117 @@ describe("useTimeline", () => {
 			expect(pendingReactions.$target).toBeUndefined();
 			expect(pendingEdits.$target).toBeUndefined();
 		});
+	});
+});
+
+describe("useTimeline jumpToEvent anchored loads", () => {
+	/** Install a controllable getEventTimeline on the mock client (the mock
+	 *  has none; TimelineWindow.load(eventId) calls it for events outside
+	 *  the known timeline set). */
+	function stubGetEventTimeline(
+		client: ReturnType<typeof createMockClient>,
+		impl: () => Promise<unknown>,
+	): void {
+		(client as unknown as Record<string, unknown>).getEventTimeline = vi
+			.fn()
+			.mockImplementation(impl);
+	}
+
+	/** Minimal EventTimeline shape TimelineWindow.load + canPaginate need. */
+	function contextTimelineWith(event: ReturnType<typeof createFakeEvent>) {
+		return {
+			getEvents: () => [event],
+			getBaseIndex: () => 0,
+			getNeighbouringTimeline: () => null,
+			setNeighbouringTimeline: () => {},
+			getPaginationToken: () => null,
+		};
+	}
+
+	it("keeps the jump when /context emissions fire mid-load (#441)", async () => {
+		// Regression test: jumpToEvent's generation bump cancels the initial
+		// live load, so the events store is empty while the anchored
+		// tw.load() is in flight. The SDK emits Room.timeline with
+		// liveEvent:false for every /context insertion during that load;
+		// pre-fix, those emissions tripped the just-joined backfill reload
+		// (events.length === 0), reloading the room and stranding the jump
+		// on the generation check. Empty room so the store is provably
+		// empty at emission time.
+		const roomA = createMockRoom("!roomA:test", []);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+		const target = createFakeEvent(
+			"!roomA:test",
+			"$target",
+			"@alice:test",
+			"jump target",
+			500,
+		);
+		let resolveContext: (timeline: unknown) => void = () => {};
+		stubGetEventTimeline(
+			client,
+			() =>
+				new Promise((resolve) => {
+					resolveContext = resolve;
+				}),
+		);
+
+		await withRoot(async () => {
+			const { events, pendingScrollToId, jumpToEvent } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events.length).toBe(0);
+
+			void jumpToEvent("$target");
+			// Faithful /context emission while the anchored load awaits.
+			client.__emit("Room.timeline", target, roomA, false, false, {
+				liveEvent: false,
+			});
+			resolveContext(contextTimelineWith(target));
+			await flushPromises();
+
+			expect(pendingScrollToId()).toBe("$target");
+			expect(events.some((e) => e.eventId === "$target")).toBe(true);
+		});
+	});
+
+	it("reports a user-facing error and falls back to live when the anchored load fails", async () => {
+		clearNotices();
+		const roomA = createMockRoom("!roomA:test", [
+			textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+		]);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+		stubGetEventTimeline(client, () =>
+			Promise.reject(new Error("M_NOT_FOUND")),
+		);
+
+		await withRoot(async () => {
+			const { events, loading, pendingScrollToId, jumpToEvent } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			void jumpToEvent("$missing");
+			await flushPromises();
+
+			// The user gets a toast, not a silent landing on live chat.
+			expect(
+				notices().some(
+					(n) =>
+						n.tone === "error" &&
+						n.message ===
+							"Couldn't load that message. It may have been deleted.",
+				),
+			).toBe(true);
+			// Live fallback loaded instead of stranding on a blank timeline.
+			expect(events.length).toBe(1);
+			expect(events[0].body).toBe("hello");
+			expect(loading()).toBe(false);
+			expect(pendingScrollToId()).toBeNull();
+		});
+		clearNotices();
 	});
 });
