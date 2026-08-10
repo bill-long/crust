@@ -5,10 +5,13 @@ export interface JoinAddress {
 	/** Room alias (`#general:example.org`) or room ID (`!id:example.org`). */
 	idOrAlias: string;
 	/**
-	 * Servers to join through. Aliases self-resolve via their own server,
-	 * so this stays empty for alias input; room IDs need at least one
-	 * server already participating in the room (matrix.to `via` params or
-	 * trailing tokens in the bare form).
+	 * Servers to join through (`client.joinRoom`'s `viaServers`). Aliases
+	 * self-resolve via their own server, so this is usually empty for
+	 * alias input - but any via servers the user supplied (trailing
+	 * tokens in the bare form, `via` params in a matrix.to link) are
+	 * forwarded verbatim for either sigil. Room IDs typically need at
+	 * least one: the joining server must reach a server already
+	 * participating in the room.
 	 */
 	viaServers: string[];
 }
@@ -21,9 +24,10 @@ export type ParseJoinAddressResult =
  * Parse a free-form "join a room" string into a `client.joinRoom` target.
  *
  * Accepted forms:
- *   - `#alias:server`                        -> alias, no via servers
- *   - `!id:server`                           -> room ID, no via servers
- *   - `!id:server s1.org s2.org`             -> room ID + via servers
+ *   - `#alias:server`
+ *   - `!id:server`
+ *   - `#alias:server s1.org` / `!id:server s1.org s2.org`
+ *     (trailing tokens become via servers, for either sigil)
  *   - `https://matrix.to/#/!id:server?via=s1.org&via=s2.org`
  *   - `https://matrix.to/#/%23alias:server`  (aliases are %23-encoded in
  *     matrix.to fragments because `#` would terminate the fragment)
