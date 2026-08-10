@@ -71,9 +71,11 @@ const ALLOWED_ATTR = [
 	"rowspan",
 ];
 
-// Allow mxc:// scheme in URI attributes so DOMPurify doesn't strip img src
+// Allow mxc:// scheme in URI attributes so DOMPurify doesn't strip img src,
+// and matrix: so in-spec `matrix:u/...` permalinks survive to the click
+// router (see PermalinkRouting, issue #441).
 const ALLOWED_URI_REGEXP =
-	/^(?:(?:https?|mxc|mailto|tel|xmpp|geo|magnet):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
+	/^(?:(?:https?|mxc|mailto|tel|xmpp|geo|magnet|matrix):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Build a shortcode regex (Safari-safe, no lookbehind). */
 function shortcodeRegex(): RegExp {

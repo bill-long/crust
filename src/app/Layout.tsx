@@ -32,7 +32,9 @@ import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog"
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { InvitePane } from "../features/room/invites/InvitePane";
+import { JoinRoomDialogHost } from "../features/room/JoinRoomDialogHost";
 import { closeNotificationSound } from "../features/room/notificationSound";
+import { PermalinkRouting } from "../features/room/PermalinkRouting";
 import { RoomList } from "../features/room/RoomList";
 import { buildRoomLinkUrl } from "../features/room/roomLink";
 import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
@@ -270,12 +272,16 @@ const Layout: Component = () => {
 	// re-canonicalizes when the store learns the room is direct. `replace: true`
 	// avoids leaving a `/home/<dmId>` entry in history. After redirecting, the
 	// path starts with `/dm/`, so dmCanonicalTarget returns null (no loop).
+	// `location.search` is forwarded so deep-link params (`?event=` permalink
+	// jumps, `?thread=` notification opens) survive the canonicalization
+	// instead of being silently dropped for DM rooms.
 	createEffect(() => {
 		const roomId = params.roomId;
 		const target = dmCanonicalTarget(
 			relativePath(),
 			roomId,
 			roomId ? summaries[roomId]?.isDirect : undefined,
+			location.search,
 		);
 		if (target) navigate(target, { replace: true });
 	});
@@ -679,6 +685,11 @@ const Layout: Component = () => {
 
 	return (
 		<div class="flex min-h-0 flex-1 bg-surface-0 text-text-primary">
+			{/* Document-level matrix.to / matrix: permalink routing (renders nothing) */}
+			<PermalinkRouting />
+			{/* Session-long join-room dialog host (store-driven open; renders
+				the dialog only while open) */}
+			<JoinRoomDialogHost client={client} />
 			{/* Resizable layout with user bar spanning left sidebar */}
 			<ResizableLayout
 				showMainOnMobile={() => roomId() !== undefined}

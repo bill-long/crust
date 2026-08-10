@@ -14,6 +14,7 @@ import {
 	createSummariesStore,
 	type SummariesStore,
 } from "../../client/summaries";
+import type { JoinAddress } from "../../lib/joinAddressParsing";
 import { createMockClient } from "../../test/mockClient";
 import { describeJoinError, JoinRoomDialog } from "./JoinRoomDialog";
 
@@ -451,6 +452,59 @@ describe("JoinRoomDialog", () => {
 		// Shift+Tab on the first wraps to last.
 		fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
 		expect(document.activeElement).toBe(joinButton);
+	});
+});
+
+describe("JoinRoomDialog prefill", () => {
+	function setupPrefill(prefill: () => JoinAddress | null) {
+		const client = createMockClient();
+		const [open, setOpen] = createSignal(true);
+		const onClose = vi.fn(() => setOpen(false));
+		render(() => (
+			<Wrapper client={client}>
+				<JoinRoomDialog
+					client={client as unknown as MatrixClient}
+					open={open}
+					onClose={onClose}
+					prefill={prefill}
+				/>
+			</Wrapper>
+		));
+		return { client, setOpen, onClose };
+	}
+
+	it("prefills the address input on open and joins with the parsed via servers", async () => {
+		const { client, onClose } = setupPrefill(() => ({
+			idOrAlias: "!linked:example.org",
+			viaServers: ["one.org"],
+		}));
+		expect(addressInput().value).toBe("!linked:example.org one.org");
+
+		fireEvent.click(screen.getByRole("button", { name: /^Join$/i }));
+		await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(client.joinRoom).toHaveBeenCalledWith("!linked:example.org", {
+			viaServers: ["one.org"],
+		});
+	});
+
+	it("starts empty when the prefill returns null", () => {
+		setupPrefill(() => null);
+		expect(addressInput().value).toBe("");
+	});
+
+	it("does not carry a stale prefill into a later open", async () => {
+		let address: JoinAddress | null = {
+			idOrAlias: "#linked:example.org",
+			viaServers: [],
+		};
+		const { setOpen } = setupPrefill(() => address);
+		expect(addressInput().value).toBe("#linked:example.org");
+
+		// Close, clear the prefill (as JoinRoomDialogHost's close does), reopen.
+		fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+		address = null;
+		setOpen(true);
+		await waitFor(() => expect(addressInput().value).toBe(""));
 	});
 });
 

@@ -19,6 +19,7 @@ import {
 	MATERIAL_OFFSET_CHANGE_MS,
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import { reportError } from "../../../lib/reportError";
 import { isThreadReply } from "../../../lib/threadEvents";
 import { parsePollStart } from "../poll/pollSnapshot";
 import { createPollWatcher } from "../poll/pollWatcher";
@@ -270,6 +271,16 @@ export function useTimeline(
 	// publishing the new window. On completion, the window extends
 	// forward by this count to capture the deferred events.
 	let deferredLiveCount = 0;
+	// Anchored jump loads in flight (jumpToEvent's tw.load). The SDK emits
+	// Room.timeline with liveEvent:false for every /context insertion
+	// during such a load; with the events store still empty (the jump's
+	// generation bump cancels the initial live load), those emissions
+	// would trip the just-joined backfill reload in onTimelineEvent and
+	// reload the room out from under the jump - whose post-await
+	// continuation then bails on the generation check, silently stranding
+	// it (#441). A counter, not a boolean, so overlapping jumps stay
+	// protected until the last one settles.
+	let anchoredLoadsInFlight = 0;
 
 	// Poll subscriptions + snapshot cache. Poll votes/ends arrive as
 	// m.reference relations that no timeline handler displays, so without
@@ -869,6 +880,7 @@ export function useTimeline(
 		setCanLoadOlder(false);
 		setCanLoadNewer(false);
 
+		anchoredLoadsInFlight++;
 		try {
 			await tw.load(eventId, initialWindowSize);
 			if (gen !== roomGeneration) return;
@@ -878,12 +890,18 @@ export function useTimeline(
 			setCanLoadNewer(tw.canPaginate(Direction.Forward));
 			setLoading(false);
 			setPendingScrollToId(eventId);
-		} catch {
+		} catch (err) {
 			if (gen !== roomGeneration) return;
 			// Fall back to a fresh live load so we don't strand the user
 			// on a blank timeline.
 			setLoading(false);
+			reportError(err, {
+				userMessage: "Couldn't load that message. It may have been deleted.",
+				logLabel: "Failed to jump to event",
+			});
 			loadRoom(rid);
+		} finally {
+			anchoredLoadsInFlight--;
 		}
 	}
 
@@ -1060,8 +1078,15 @@ export function useTimeline(
 		// timeline so we pick up historical events that weren't available
 		// when loadRoom first ran. Only attempt once per room to prevent
 		// infinite reload loops when a room has only non-displayable events.
+		// Skipped while an anchored jump load is in flight: those /context
+		// emissions are the jump's own load, and reloading here would kill
+		// it (see anchoredLoadsInFlight above).
 		if (!data.liveEvent) {
-			if (events.length === 0 && !backfillReloadAttempted) {
+			if (
+				events.length === 0 &&
+				!backfillReloadAttempted &&
+				anchoredLoadsInFlight === 0
+			) {
 				backfillReloadAttempted = true;
 				loadRoom(currentRoomId);
 			}

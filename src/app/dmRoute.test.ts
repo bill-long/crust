@@ -40,4 +40,21 @@ describe("dmCanonicalTarget", () => {
 		const encoded = target?.slice("/dm/".length) ?? "";
 		expect(decodeURIComponent(encoded)).toBe(roomId);
 	});
+
+	it("preserves the query string so deep-link params survive the redirect", () => {
+		expect(
+			dmCanonicalTarget(
+				"/home/!abc:server",
+				"!abc:server",
+				true,
+				"?event=$ev:s",
+			),
+		).toBe("/dm/!abc%3Aserver?event=$ev:s");
+	});
+
+	it("defaults to no query string", () => {
+		expect(dmCanonicalTarget("/home/!abc:server", "!abc:server", true)).toBe(
+			"/dm/!abc%3Aserver",
+		);
+	});
 });
