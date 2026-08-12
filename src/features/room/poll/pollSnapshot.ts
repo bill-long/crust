@@ -5,11 +5,6 @@ import {
 	type MatrixEvent,
 } from "matrix-js-sdk";
 import { MAX_VOTER_NAMES } from "../../../lib/pollCopy";
-
-import {
-	type EncryptedFileInfo,
-	parseEncryptedFile,
-} from "../composer/media/attachmentCrypto";
 import type { EventInfo } from "./eventBlock";
 
 /** One selectable poll option, projected to plain data for rendering. */

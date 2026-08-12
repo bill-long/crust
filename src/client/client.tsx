@@ -17,6 +17,7 @@ import {
 	type ParentComponent,
 	useContext,
 } from "solid-js";
+import { createOidcTokenRefreshFn } from "../features/auth/oidcRefresh";
 import {
 	type CryptoStatus,
 	useCryptoStatus,
@@ -161,6 +162,11 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		accessToken: props.session.accessToken,
 		userId: props.session.userId,
 		deviceId: props.session.deviceId,
+		// OIDC (MSC3861) sessions only: rotate access tokens at the OP instead
+		// of dying at expiry. Undefined for password sessions (no refresh
+		// token), leaving their behavior unchanged (#460).
+		refreshToken: props.session.refreshToken,
+		tokenRefreshFunction: createOidcTokenRefreshFn(props.session),
 		cryptoCallbacks: {
 			getSecretStorageKey: async (
 				opts: {

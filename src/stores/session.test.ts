@@ -128,6 +128,52 @@ describe("loadSession", () => {
 		);
 		expect(loadSession()?.homeserverUrl).toBe("http://localhost:8008");
 	});
+
+	it("round-trips an OIDC session with refreshToken and oidc metadata", () => {
+		const oidcSession: Session = {
+			...VALID,
+			refreshToken: "refresh-abc",
+			oidc: {
+				issuer: "https://auth.example.com/",
+				clientId: "client-123",
+				idToken: "header.payload.signature",
+			},
+		};
+		saveSession(oidcSession);
+		expect(loadSession()).toEqual(oidcSession);
+	});
+
+	it("rejects an empty refreshToken", () => {
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({ ...VALID, refreshToken: "" }),
+		);
+		expect(loadSession()).toBeNull();
+	});
+
+	it("rejects a non-string refreshToken", () => {
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({ ...VALID, refreshToken: 42 }),
+		);
+		expect(loadSession()).toBeNull();
+	});
+
+	it("rejects a malformed oidc block", () => {
+		// Each missing/empty sub-field must invalidate the session: a partial
+		// oidc block would break token refresh in confusing ways later.
+		for (const oidc of [
+			{ clientId: "c", idToken: "t" }, // issuer missing
+			{ issuer: "", clientId: "c", idToken: "t" },
+			{ issuer: "i", clientId: 7, idToken: "t" },
+			{ issuer: "i", clientId: "c", idToken: "" },
+			"not-an-object",
+			[],
+		]) {
+			localStorage.setItem(SESSION_KEY, JSON.stringify({ ...VALID, oidc }));
+			expect(loadSession()).toBeNull();
+		}
+	});
 });
 
 describe("saveSession validation", () => {
