@@ -1,26 +1,26 @@
 /**
- * Access-token refresh wiring for OIDC (MSC3861) sessions.
+ * Access-token refresh wiring for OAuth2 (MSC3861) sessions.
  *
  * Password sessions never carry a refresh token, so this is a no-op for
- * them. OIDC sessions get an `OidcTokenRefresher` subclass whose
- * `persistTokens` writes rotated tokens back into the session store, so a
- * reload keeps the freshest (still-valid) refresh token.
+ * them. OAuth sessions get the SDK's TokenRefresher, built lazily on first
+ * use (constructing it needs the OP metadata, which is a network fetch),
+ * with an onRefresh that persists rotated tokens back into the session
+ * store - identity-guarded, so a replaced session is never clobbered.
  *
- * Two SDK-inherent caveats, documented so their symptoms aren't mysteries:
+ * Caveats, documented so their symptoms aren't mysteries:
  *
- *  - An OP that does NOT rotate refresh tokens (response without a new
- *    refresh_token) leaves the RUNNING client without one at the second
- *    expiry (oidc-client-ts doesn't carry the old token forward), ending
- *    the session via the normal SessionLoggedOut flow. The persisted
- *    store keeps the old token, so a reload recovers. MSC3861 OPs rotate,
- *    so this is latent for our servers.
+ *  - If the OP does NOT rotate refresh tokens (response without a new
+ *    refresh_token), the SDK's http-api ends up with no refresh token for
+ *    the RUNNING client at the second expiry, ending the session via the
+ *    normal SessionLoggedOut flow. The persisted store keeps the old
+ *    token, so a reload recovers.
  *  - Two open tabs each hold their own in-memory refresh token; when both
  *    refresh, the slower tab presents a rotated-out token and is logged
- *    out (invalid_grant). The persistTokens reload below prevents the
- *    losing tab from resurrecting the stale token in storage, but cannot
- *    save the tab itself.
+ *    out (invalid_grant). The guarded persistence prevents the losing tab
+ *    from resurrecting the stale token in storage, but cannot save the
+ *    tab itself.
  */
-import { decodeIdToken, OidcTokenRefresher } from "matrix-js-sdk";
+import { createClient, OAuth2, TokenRefresher } from "matrix-js-sdk";
 import type { TokenRefreshFunction } from "matrix-js-sdk/lib/http-api";
 import {
 	loadSession,
@@ -30,85 +30,90 @@ import {
 } from "../../stores/session";
 import { oidcRedirectUri } from "./oidc";
 
-class PersistingOidcTokenRefresher extends OidcTokenRefresher {
-	/** Identity of the session this refresher was built for, used to avoid
-	 *  clobbering a DIFFERENT session that has since replaced it in storage. */
-	private readonly sessionIdentity: {
-		userId: string;
-		deviceId: string;
-		issuer: string;
-		clientId: string;
+/** Identity of a boot-time session, for the clobber guard below. */
+interface SessionIdentity {
+	userId: string;
+	deviceId: string;
+	issuer: string;
+	clientId: string;
+}
+
+function identityOf(session: Session & { oidc: SessionOidc }): SessionIdentity {
+	return {
+		userId: session.userId,
+		deviceId: session.deviceId,
+		issuer: session.oidc.issuer,
+		clientId: session.oidc.clientId,
 	};
+}
 
-	constructor(session: Session & { oidc: SessionOidc }) {
-		super(
-			session.oidc.issuer,
-			session.oidc.clientId,
-			oidcRedirectUri(),
-			session.deviceId,
-			decodeIdToken(session.oidc.idToken),
-		);
-		this.sessionIdentity = {
-			userId: session.userId,
-			deviceId: session.deviceId,
-			issuer: session.oidc.issuer,
-			clientId: session.oidc.clientId,
-		};
+/**
+ * Persist refreshed tokens, but ONLY when storage still holds the exact
+ * session this refresher was built for. A logout/login since boot
+ * (different account, a new device, or a password session) must not have
+ * its tokens overwritten by a late refresh from the replaced session.
+ * Best-effort: a failed write leaves the in-memory client working at the
+ * cost of a forced re-login after the next reload once the old refresh
+ * token has been rotated out.
+ */
+function persistRefreshedTokens(
+	identity: SessionIdentity,
+	tokens: { accessToken: string; refreshToken?: string },
+): void {
+	// Reload from storage rather than closing over the boot-time session:
+	// another tab may have rotated the refresh token since this window
+	// loaded, and we must not resurrect the stale one.
+	const session = loadSession();
+	if (!session?.oidc) return;
+	if (
+		session.userId !== identity.userId ||
+		session.deviceId !== identity.deviceId ||
+		session.oidc.issuer !== identity.issuer ||
+		session.oidc.clientId !== identity.clientId
+	) {
+		return;
 	}
-
-	protected override async persistTokens(tokens: {
-		accessToken: string;
-		refreshToken?: string;
-	}): Promise<void> {
-		// Reload from storage rather than closing over the boot-time session:
-		// another tab may have rotated the refresh token since this window
-		// loaded, and we must not resurrect the stale one.
-		const session = loadSession();
-		// Write back only when storage still holds THIS OIDC session. A
-		// logout/login since boot (different account, or a password session)
-		// must not have its tokens overwritten by a late refresh from the
-		// session that was replaced.
-		if (!session?.oidc) return;
-		if (
-			session.userId !== this.sessionIdentity.userId ||
-			session.deviceId !== this.sessionIdentity.deviceId ||
-			session.oidc.issuer !== this.sessionIdentity.issuer ||
-			session.oidc.clientId !== this.sessionIdentity.clientId
-		) {
-			return;
-		}
-		session.accessToken = tokens.accessToken;
-		if (tokens.refreshToken) session.refreshToken = tokens.refreshToken;
-		try {
-			saveSession(session);
-		} catch (e) {
-			// A failed write leaves the in-memory client working; the cost is
-			// a forced re-login after the next reload once the old refresh
-			// token has been rotated out.
-			console.warn("Failed to persist refreshed OIDC tokens:", e);
-		}
+	session.accessToken = tokens.accessToken;
+	if (tokens.refreshToken) session.refreshToken = tokens.refreshToken;
+	try {
+		saveSession(session);
+	} catch (e) {
+		console.warn("Failed to persist refreshed OAuth2 tokens:", e);
 	}
 }
 
 /**
  * Build the SDK `tokenRefreshFunction` for a session, or undefined when the
- * session has nothing to refresh with (password sessions, or OIDC sessions
- * whose OP issued no refresh token).
+ * session has nothing to refresh with (password sessions, or OAuth2 sessions
+ * whose OP issued no refresh token). The SDK TokenRefresher is constructed
+ * lazily because it needs the OP's auth metadata (a network fetch); the
+ * refresh mapping is the SDK's: 4xx -> TokenRefreshLogoutError (session
+ * ends), 5xx/network -> transient retry.
  */
 export function createOidcTokenRefreshFn(
 	session: Session,
 ): TokenRefreshFunction | undefined {
 	if (!session.oidc || !session.refreshToken) return undefined;
-	try {
-		const refresher = new PersistingOidcTokenRefresher(
-			session as Session & { oidc: SessionOidc },
-		);
-		return (refreshToken) => refresher.doRefreshAccessToken(refreshToken);
-	} catch (e) {
-		// A corrupt persisted ID token must not take down client boot - the
-		// session still works until the access token expires, after which the
-		// normal SessionLoggedOut flow sends the user back to login.
-		console.warn("Failed to initialize OIDC token refresh:", e);
-		return undefined;
-	}
+	const oidcSession = session as Session & { oidc: SessionOidc };
+	const identity = identityOf(oidcSession);
+
+	let refresherPromise: Promise<TokenRefresher> | null = null;
+	const getRefresher = (): Promise<TokenRefresher> =>
+		(refresherPromise ??= (async () => {
+			const metadata = await createClient({
+				baseUrl: session.homeserverUrl,
+			}).getAuthMetadata();
+			const auth = new OAuth2(metadata, {
+				clientId: oidcSession.oidc.clientId,
+				redirectUri: oidcRedirectUri(),
+			});
+			return new TokenRefresher(auth, async (tokens) => {
+				persistRefreshedTokens(identity, tokens);
+			});
+		})());
+
+	return async (refreshToken) => {
+		const refresher = await getRefresher();
+		return refresher.tokenRefreshFunction(refreshToken);
+	};
 }

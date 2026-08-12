@@ -43,7 +43,6 @@ const GRANT_RESULT = {
 	oidc: {
 		issuer: "https://strange.pizza/",
 		clientId: "client-xyz",
-		idToken: "header.payload.signature",
 	},
 };
 

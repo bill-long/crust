@@ -3,7 +3,7 @@ import {
 	createClient,
 	type ILoginFlowsResponse,
 	type LoginResponse,
-	type OidcClientConfig,
+	type ValidatedAuthMetadata,
 } from "matrix-js-sdk";
 import { type Component, createSignal, Match, Show, Switch } from "solid-js";
 import { useConfig } from "../../app/ConfigProvider";
@@ -17,7 +17,7 @@ import { sanitizeReturnTo } from "./returnTo";
 interface ServerCapabilities {
 	baseUrl: string;
 	/** Validated OP metadata when the server delegates auth (MSC3861). */
-	delegatedAuth: OidcClientConfig | null;
+	delegatedAuth: ValidatedAuthMetadata | null;
 	/** The server still advertises m.login.password. */
 	hasPassword: boolean;
 }
@@ -58,7 +58,7 @@ const LoginPage: Component = () => {
 			// Legacy flows and delegated auth are independent probes - run them
 			// together so the methods stage appears after one round trip.
 			let flows: ILoginFlowsResponse;
-			let delegatedAuth: OidcClientConfig | null;
+			let delegatedAuth: ValidatedAuthMetadata | null;
 			try {
 				[flows, delegatedAuth] = await Promise.all([
 					tempClient.loginFlows(),
