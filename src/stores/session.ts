@@ -1,3 +1,4 @@
+import { pushMediaAuthToSw } from "../lib/authedMedia";
 import { loadPersisted, safeLocalStorage } from "../lib/persistedSignal";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 
@@ -110,6 +111,13 @@ export function saveSession(session: Session): void {
 	// Keep the raw write (not the best-effort helper): a failed session persist
 	// must surface at login rather than silently logging the user out on reload.
 	localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+	// Keep the service worker's media auth (MSC3916, see lib/authedMedia.ts)
+	// in step with every session write - login and OIDC token rotation both
+	// land here, so the worker always attaches the freshest access token.
+	pushMediaAuthToSw({
+		accessToken: session.accessToken,
+		homeserverUrl: session.homeserverUrl,
+	});
 }
 
 export function clearSession(): void {
@@ -117,4 +125,6 @@ export function clearSession(): void {
 	// Also drop any un-migrated legacy value so logout leaves no stale token
 	// behind (e.g. if migration never ran or its write failed).
 	safeLocalStorage.remove(LEGACY_SESSION_KEY);
+	// The worker must stop attaching the now-invalid token to media requests.
+	pushMediaAuthToSw(null);
 }

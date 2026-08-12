@@ -11,6 +11,14 @@ import {
 	type PushPayload,
 	trimmedField,
 } from "./features/notifications/pushCopy";
+import {
+	isMediaV3Path,
+	MEDIA_AUTH_MESSAGE,
+	MEDIA_AUTH_REQUEST,
+	type MediaAuth,
+	supportsAuthedMedia,
+	toAuthedMediaUrl,
+} from "./lib/authedMedia";
 import { iconCacheUrls, isIconRequest } from "./lib/iconRuntimeCache";
 import { NOTIFY_CHANNEL_NAME, type NotifyPong } from "./lib/notifyChannel";
 import { staleWhileRevalidate } from "./lib/swrCache";
@@ -114,6 +122,177 @@ registerRoute(
 		);
 	},
 );
+
+// ─── Authenticated media (MSC3916) ───
+// Homeservers that enforce authenticated media (e.g. matrix.org for media
+// uploaded after its rollout) 404 unauthenticated `/_matrix/media/v3/*`
+// requests, and a bare <img> can't send an Authorization header. Like
+// Element Web, this worker upgrades those requests in flight: rewrite the
+// URL to `/_matrix/client/v1/media/*` and attach the session access token.
+// The token arrives via MEDIA_AUTH_MESSAGE pushes on every session write
+// (login / OIDC rotation / logout); because the browser can kill this
+// worker and wipe its memory at any time, a media request that finds no
+// token in memory also pulls one from the requesting client
+// (MEDIA_AUTH_REQUEST round-trip). Every failure path falls back to the
+// original unauthenticated request, so servers without authenticated media
+// behave exactly as before. The token is never logged.
+let mediaAuth: MediaAuth | null = null;
+/** In-flight pull, deduped so a burst of media requests asks the page once. */
+let mediaAuthPull: Promise<MediaAuth | null> | null = null;
+/** Per-origin `/versions` support cache, keyed by homeserver origin. */
+const authedMediaSupport = new Map<
+	string,
+	{ supported: boolean; expiresAt: number }
+>();
+const AUTHED_MEDIA_SUPPORT_CACHE_MS = 2 * 60 * 60 * 1000; // 2h, like Element
+const MEDIA_AUTH_PULL_TIMEOUT_MS = 1000;
+
+sw.addEventListener("message", (event) => {
+	const data = event.data as {
+		type?: string;
+		accessToken?: unknown;
+		homeserverUrl?: unknown;
+	} | null;
+	if (data?.type !== MEDIA_AUTH_MESSAGE) return;
+	// Only accept auth state from a client within this SW's scope (a Crust
+	// window), not an unrelated same-origin tab — same rule as SKIP_WAITING.
+	const source = event.source;
+	const inScope =
+		!!source && "url" in source && source.url.startsWith(sw.registration.scope);
+	if (!inScope) return;
+	mediaAuth =
+		typeof data.accessToken === "string" &&
+		data.accessToken.length > 0 &&
+		typeof data.homeserverUrl === "string" &&
+		data.homeserverUrl.length > 0
+			? { accessToken: data.accessToken, homeserverUrl: data.homeserverUrl }
+			: null;
+});
+
+/** Ask the requesting page for the current session's media auth. Resolves
+ *  null on timeout or when the page is logged out - fail-open. */
+function pullMediaAuth(clientId: string): Promise<MediaAuth | null> {
+	if (mediaAuthPull) return mediaAuthPull;
+	mediaAuthPull = (async (): Promise<MediaAuth | null> => {
+		try {
+			const client = await sw.clients.get(clientId);
+			if (!client) return null;
+			return await new Promise<MediaAuth | null>((resolve) => {
+				const responseKey = crypto.randomUUID();
+				let settled = false;
+				const onMessage = (event: ExtendableMessageEvent): void => {
+					const data = event.data as {
+						type?: string;
+						responseKey?: unknown;
+						accessToken?: unknown;
+						homeserverUrl?: unknown;
+					} | null;
+					if (
+						data?.type !== MEDIA_AUTH_MESSAGE ||
+						data.responseKey !== responseKey
+					) {
+						return;
+					}
+					finish(
+						typeof data.accessToken === "string" &&
+							data.accessToken.length > 0 &&
+							typeof data.homeserverUrl === "string" &&
+							data.homeserverUrl.length > 0
+							? {
+									accessToken: data.accessToken,
+									homeserverUrl: data.homeserverUrl,
+								}
+							: null,
+					);
+				};
+				const finish = (auth: MediaAuth | null): void => {
+					if (settled) return;
+					settled = true;
+					clearTimeout(timer);
+					sw.removeEventListener("message", onMessage);
+					resolve(auth);
+				};
+				const timer = setTimeout(
+					() => finish(null),
+					MEDIA_AUTH_PULL_TIMEOUT_MS,
+				);
+				sw.addEventListener("message", onMessage);
+				client.postMessage({ type: MEDIA_AUTH_REQUEST, responseKey });
+			});
+		} finally {
+			mediaAuthPull = null;
+		}
+	})();
+	return mediaAuthPull;
+}
+
+/** Cached `/versions` check for MSC3916 support on the session homeserver. */
+async function homeserverSupportsAuthedMedia(
+	auth: MediaAuth,
+): Promise<boolean> {
+	const origin = new URL(auth.homeserverUrl).origin;
+	const cached = authedMediaSupport.get(origin);
+	if (cached && cached.expiresAt > Date.now()) return cached.supported;
+	const response = await fetch(`${origin}/_matrix/client/versions`, {
+		headers: { Authorization: `Bearer ${auth.accessToken}` },
+	});
+	// Only a well-formed /versions response earns a cache entry. Caching a
+	// transient failure (bad gateway, proxy blip, unparseable body) as
+	// supported=false would suppress authenticated upgrades for the whole
+	// cache window on servers that require MSC3916; returning false
+	// uncached fails this request open and lets the next one retry.
+	if (!response.ok) return false;
+	const body: unknown = await response.json().catch(() => null);
+	if (body === null) return false;
+	const supported = supportsAuthedMedia(body);
+	authedMediaSupport.set(origin, {
+		supported,
+		expiresAt: Date.now() + AUTHED_MEDIA_SUPPORT_CACHE_MS,
+	});
+	return supported;
+}
+
+async function handleMediaRequest(
+	event: FetchEvent,
+	requestUrl: URL,
+): Promise<Response> {
+	try {
+		if (!mediaAuth) mediaAuth = await pullMediaAuth(event.clientId);
+		if (!mediaAuth) return fetch(event.request);
+		// toAuthedMediaUrl returns null for media URLs on any origin other than
+		// the session homeserver's, so the token can never leak cross-origin.
+		const target = toAuthedMediaUrl(requestUrl.href, mediaAuth.homeserverUrl);
+		if (!target) return fetch(event.request);
+		if (!(await homeserverSupportsAuthedMedia(mediaAuth))) {
+			return fetch(event.request);
+		}
+		// Preserve the original request's headers (Accept, and Range -
+		// video/audio elements issue Range requests whose 206 handling
+		// would break if the header were dropped) and add the token on
+		// top. A fresh Headers object is required: the original request's
+		// headers may be immutable (no-cors image requests), and
+		// Authorization is not a CORS-safelisted header.
+		const headers = new Headers(event.request.headers);
+		headers.set("Authorization", `Bearer ${mediaAuth.accessToken}`);
+		return await fetch(target, { headers });
+	} catch {
+		// Fail open: a worker restart, a /versions network error, or a page
+		// that never answers must not break image loading.
+		return fetch(event.request);
+	}
+}
+
+sw.addEventListener("fetch", (event) => {
+	if (event.request.method !== "GET") return;
+	let requestUrl: URL;
+	try {
+		requestUrl = new URL(event.request.url);
+	} catch {
+		return;
+	}
+	if (!isMediaV3Path(requestUrl.pathname)) return;
+	event.respondWith(handleMediaRequest(event, requestUrl));
+});
 
 // Deliberately do NOT skipWaiting()/clientsClaim() automatically: a new worker
 // stays in "waiting" until every tab is closed, so deploys never force-reload a
