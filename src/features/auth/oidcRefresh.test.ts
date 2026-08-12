@@ -2,54 +2,63 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../stores/session";
 import { saveSession } from "../../stores/session";
 
-// Mock the SDK boundary: a fake OidcTokenRefresher that records constructor
-// args and lets each test script what a refresh yields, plus a stubbed
-// decodeIdToken. What stays under test is OUR wiring: constructor argument
-// mapping, the password-session no-op, corrupt-token tolerance, and the
-// persistTokens override writing rotated tokens into the session store.
-const decodeIdTokenMock = vi.hoisted(() => vi.fn());
-vi.mock("matrix-js-sdk", () => {
-	class FakeOidcTokenRefresher {
-		static instances: unknown[][] = [];
-		static nextTokens: { accessToken: string; refreshToken?: string } = {
-			accessToken: "new-access",
-			refreshToken: "new-refresh",
+// Mock the SDK boundary: a fake TokenRefresher that captures constructor
+// args and lets each test script what a refresh yields. What stays under
+// test is OUR wiring: lazy construction (metadata fetch + OAuth2 context),
+// the password-session no-op, and the identity-guarded persistence.
+const oauth2Contexts = vi.hoisted(() => ({
+	args: [] as Array<Record<string, unknown>>,
+}));
+const tokenRefresherInstances = vi.hoisted(() => ({
+	instances: [] as Array<{
+		auth: unknown;
+		onRefresh: (tokens: {
+			accessToken: string;
+			refreshToken?: string;
+		}) => Promise<void>;
+	}>,
+	nextTokens: { accessToken: "new-access", refreshToken: "new-refresh" } as {
+		accessToken: string;
+		refreshToken?: string;
+	},
+}));
+const createClientMock = vi.hoisted(() => vi.fn());
+vi.mock("matrix-js-sdk", () => ({
+	createClient: (...args: unknown[]) => createClientMock(...args),
+	OAuth2: class FakeOAuth2 {
+		constructor(
+			public metadata: unknown,
+			public context: Record<string, unknown>,
+		) {
+			oauth2Contexts.args.push(context);
+		}
+	},
+	TokenRefresher: class FakeTokenRefresher {
+		constructor(
+			public auth: unknown,
+			public onRefresh: (tokens: {
+				accessToken: string;
+				refreshToken?: string;
+			}) => Promise<void>,
+		) {
+			tokenRefresherInstances.instances.push({ auth, onRefresh });
+		}
+		tokenRefreshFunction = async (_refreshToken: string) => {
+			const tokens = { ...tokenRefresherInstances.nextTokens };
+			await this.onRefresh(tokens);
+			// Faithful to the real SDK (tokenRefresher.js getNewTokens): the
+			// returned refreshToken is undefined when the OP did not rotate it.
+			return { ...tokens, refreshToken: tokens.refreshToken };
 		};
+	},
+}));
 
-		constructor(...args: unknown[]) {
-			FakeOidcTokenRefresher.instances.push(args);
-		}
-
-		async doRefreshAccessToken(refreshToken: string): Promise<{
-			accessToken: string;
-			refreshToken?: string;
-		}> {
-			await this.persistTokens({
-				...FakeOidcTokenRefresher.nextTokens,
-			});
-			return { ...FakeOidcTokenRefresher.nextTokens, refreshToken };
-		}
-
-		// The underscore prefix marks the parameter as intentionally unused.
-		protected async persistTokens(_tokens: {
-			accessToken: string;
-			refreshToken?: string;
-		}): Promise<void> {}
-	}
-	return {
-		decodeIdToken: decodeIdTokenMock,
-		OidcTokenRefresher: FakeOidcTokenRefresher,
-	};
-});
-
-import { OidcTokenRefresher } from "matrix-js-sdk";
 import { createOidcTokenRefreshFn } from "./oidcRefresh";
 
-type FakeClass = typeof OidcTokenRefresher & {
-	instances: unknown[][];
-	nextTokens: { accessToken: string; refreshToken?: string };
+const METADATA = {
+	issuer: "https://auth.example.com/",
+	token_endpoint: "https://auth.example.com/token",
 };
-const fake = OidcTokenRefresher as unknown as FakeClass;
 
 const PASSWORD_SESSION: Session = {
 	accessToken: "access-old",
@@ -64,55 +73,58 @@ const OIDC_SESSION: Session = {
 	oidc: {
 		issuer: "https://auth.example.com/",
 		clientId: "client-xyz",
-		idToken: "header.payload.signature",
 	},
 };
 
 beforeEach(() => {
 	localStorage.clear();
-	fake.instances = [];
-	fake.nextTokens = { accessToken: "new-access", refreshToken: "new-refresh" };
-	decodeIdTokenMock.mockReturnValue({ sub: "@alice:example.com" });
+	oauth2Contexts.args.length = 0;
+	tokenRefresherInstances.instances.length = 0;
+	tokenRefresherInstances.nextTokens = {
+		accessToken: "new-access",
+		refreshToken: "new-refresh",
+	};
+	createClientMock.mockReturnValue({
+		getAuthMetadata: vi.fn(async () => METADATA),
+	});
 });
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.unstubAllGlobals();
 	localStorage.clear();
 });
 
 describe("createOidcTokenRefreshFn", () => {
 	it("returns undefined for a password session", () => {
 		expect(createOidcTokenRefreshFn(PASSWORD_SESSION)).toBeUndefined();
-		expect(fake.instances).toHaveLength(0);
 	});
 
 	it("returns undefined when the OIDC session has no refresh token", () => {
 		const session: Session = { ...OIDC_SESSION };
 		delete session.refreshToken;
 		expect(createOidcTokenRefreshFn(session)).toBeUndefined();
-		expect(fake.instances).toHaveLength(0);
 	});
 
-	it("maps the session into refresher constructor arguments", () => {
+	it("builds the SDK refresher lazily on first refresh with the right context", async () => {
 		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
-		expect(fn).toBeTypeOf("function");
-		expect(fake.instances).toHaveLength(1);
-		const [issuer, clientId, redirectUri, deviceId, claims] = fake.instances[0];
-		expect(issuer).toBe("https://auth.example.com/");
-		expect(clientId).toBe("client-xyz");
-		expect(redirectUri).toBe(`${window.location.origin}/login/callback`);
-		expect(deviceId).toBe("DEVICE42");
-		expect(claims).toEqual({ sub: "@alice:example.com" });
-		expect(decodeIdTokenMock).toHaveBeenCalledWith("header.payload.signature");
-	});
+		if (!fn) throw new Error("expected a refresh function");
 
-	it("returns undefined (and warns) when the persisted ID token is corrupt", () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		decodeIdTokenMock.mockImplementation(() => {
-			throw new Error("Invalid token");
+		// Nothing constructed until the first refresh actually fires.
+		expect(oauth2Contexts.args).toHaveLength(0);
+
+		const tokens = await fn("refresh-old");
+
+		expect(oauth2Contexts.args).toHaveLength(1);
+		expect(oauth2Contexts.args[0]).toEqual({
+			clientId: "client-xyz",
+			redirectUri: `${window.location.origin}/login/callback`,
 		});
-
-		expect(createOidcTokenRefreshFn(OIDC_SESSION)).toBeUndefined();
-		expect(warn).toHaveBeenCalled();
+		expect(createClientMock).toHaveBeenCalledWith({
+			baseUrl: "https://matrix.example.com",
+		});
+		expect(tokenRefresherInstances.instances).toHaveLength(1);
+		expect(tokens.accessToken).toBe("new-access");
+		expect(tokens.refreshToken).toBe("new-refresh");
 	});
 
 	it("persists rotated tokens back into the stored session on refresh", async () => {
@@ -131,7 +143,7 @@ describe("createOidcTokenRefreshFn", () => {
 	});
 
 	it("keeps the stored refresh token when the OP does not rotate it", async () => {
-		fake.nextTokens = { accessToken: "new-access" };
+		tokenRefresherInstances.nextTokens = { accessToken: "new-access" };
 		saveSession(OIDC_SESSION);
 		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
@@ -143,19 +155,7 @@ describe("createOidcTokenRefreshFn", () => {
 		expect(stored.refreshToken).toBe("refresh-old");
 	});
 
-	it("does not throw when the session was cleared before a refresh lands", async () => {
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
-		if (!fn) throw new Error("expected a refresh function");
-		localStorage.clear();
-
-		await expect(fn("refresh-old")).resolves.toBeDefined();
-		expect(localStorage.getItem("crust:session")).toBeNull();
-	});
-
 	it("does not persist into a password session that replaced the OIDC one", async () => {
-		// The user logged out of the OIDC session and back in with a password
-		// since this window booted; a late refresh from the old session must
-		// not overwrite the replacement's tokens.
 		saveSession(PASSWORD_SESSION);
 		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
@@ -183,5 +183,27 @@ describe("createOidcTokenRefreshFn", () => {
 		expect(stored.accessToken).toBe("access-old");
 		expect(stored.refreshToken).toBe("refresh-old");
 		expect(stored.userId).toBe("@bob:example.com");
+	});
+
+	it("does not throw when the session was cleared before a refresh lands", async () => {
+		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+		localStorage.clear();
+
+		await expect(fn("refresh-old")).resolves.toBeDefined();
+		expect(localStorage.getItem("crust:session")).toBeNull();
+	});
+
+	it("propagates a metadata-fetch failure as a transient error", async () => {
+		createClientMock.mockReturnValue({
+			getAuthMetadata: vi.fn(async () => {
+				throw new TypeError("Failed to fetch");
+			}),
+		});
+		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		// Not a TokenRefreshLogoutError: the SDK treats this as transient.
+		await expect(fn("refresh-old")).rejects.toThrow("Failed to fetch");
 	});
 });

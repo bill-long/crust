@@ -11,9 +11,9 @@ vi.mock("solid-refresh", () => ({
 }));
 
 // Capture createClient's options while keeping the rest of the SDK real:
-// the OIDC refresh wiring under test (createOidcTokenRefreshFn ->
-// OidcTokenRefresher with decodeIdToken) runs for real, so the test proves
-// the whole hop from session shape to SDK options, not a mock's shape.
+// the OIDC refresh wiring under test (createOidcTokenRefreshFn) runs for
+// real, so the test proves the whole hop from session shape to SDK
+// options, not a mock's shape.
 const createClientMock = vi.hoisted(() => vi.fn());
 vi.mock("matrix-js-sdk", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("matrix-js-sdk")>();
@@ -59,16 +59,6 @@ const mockSdkClient = {
 	getHomeserverUrl: () => "https://matrix.example.com",
 };
 
-/** A syntactically valid (unsigned) JWT for decodeIdToken to parse. */
-function fakeIdToken(claims: Record<string, unknown>): string {
-	const segment = (value: Record<string, unknown>): string =>
-		btoa(JSON.stringify(value))
-			.replace(/\+/g, "-")
-			.replace(/\//g, "_")
-			.replace(/=+$/, "");
-	return `${segment({ alg: "RS256", typ: "JWT" })}.${segment(claims)}.sig`;
-}
-
 const PASSWORD_SESSION: Session = {
 	accessToken: "access-old",
 	userId: "@alice:example.com",
@@ -82,7 +72,6 @@ const OIDC_SESSION: Session = {
 	oidc: {
 		issuer: "https://auth.example.com/",
 		clientId: "client-xyz",
-		idToken: fakeIdToken({ sub: "@alice:example.com", nonce: "n" }),
 	},
 };
 

@@ -155,6 +155,15 @@ export default defineConfig({
 	],
 	test: {
 		globals: true,
+		server: {
+			deps: {
+				// matrix-js-sdk 42.x's built artifacts contain extensionless
+				// directory imports (`from "../http-api"` in lib/oauth/*), which
+				// native Node ESM rejects. Inline the package so vitest resolves
+				// it through Vite's resolver, like the app build does.
+				inline: ["matrix-js-sdk"],
+			},
+		},
 		projects: [
 			{
 				extends: true,

@@ -136,7 +136,6 @@ describe("loadSession", () => {
 			oidc: {
 				issuer: "https://auth.example.com/",
 				clientId: "client-123",
-				idToken: "header.payload.signature",
 			},
 		};
 		saveSession(oidcSession);
@@ -163,10 +162,10 @@ describe("loadSession", () => {
 		// Each missing/empty sub-field must invalidate the session: a partial
 		// oidc block would break token refresh in confusing ways later.
 		for (const oidc of [
-			{ clientId: "c", idToken: "t" }, // issuer missing
-			{ issuer: "", clientId: "c", idToken: "t" },
-			{ issuer: "i", clientId: 7, idToken: "t" },
-			{ issuer: "i", clientId: "c", idToken: "" },
+			{ clientId: "c" }, // issuer missing
+			{ issuer: "", clientId: "c" },
+			{ issuer: "i", clientId: 7 },
+			{ issuer: "i", clientId: "" },
 			"not-an-object",
 			[],
 		]) {

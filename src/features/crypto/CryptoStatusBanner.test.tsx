@@ -61,6 +61,9 @@ afterEach(() => {
 });
 
 describe("CryptoStatusBanner action wiring", () => {
+	// 20s timeout: the lazy dialog chunk pulls in matrix-js-sdk, whose
+	// transform under vitest (inlined, see vite.config.ts) can exceed the
+	// 5s default when the full suite runs under load.
 	it("routes reset-encryption to the ResetEncryptionDialog", async () => {
 		// DevicesTab/UserBar trigger this action when the server identity is
 		// unreachable; the banner must map it to the reset dialog (the lazy
@@ -73,8 +76,8 @@ describe("CryptoStatusBanner action wiring", () => {
 			await screen.findByRole(
 				"heading",
 				{ name: "Reset encryption" },
-				{ timeout: 5000 },
+				{ timeout: 15000 },
 			),
 		).toBeTruthy();
-	});
+	}, 20000);
 });

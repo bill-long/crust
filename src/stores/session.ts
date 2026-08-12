@@ -13,9 +13,8 @@ export interface Session {
 	homeserverUrl: string;
 	/**
 	 * OIDC session metadata needed to refresh tokens across a reload:
-	 * the OP issuer, this install's dynamically registered client_id, and
-	 * the raw ID token from the authorization grant (its claims validate
-	 * refreshed ID tokens per OIDC Core). Absent on password sessions.
+	 * the OP issuer and this install's dynamically registered client_id.
+	 * Absent on password sessions.
 	 */
 	oidc?: SessionOidc;
 }
@@ -23,7 +22,6 @@ export interface Session {
 export interface SessionOidc {
 	issuer: string;
 	clientId: string;
-	idToken: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -45,9 +43,7 @@ function isSessionOidc(value: unknown): value is SessionOidc {
 		typeof value.issuer === "string" &&
 		value.issuer.length > 0 &&
 		typeof value.clientId === "string" &&
-		value.clientId.length > 0 &&
-		typeof value.idToken === "string" &&
-		value.idToken.length > 0
+		value.clientId.length > 0
 	);
 }
 

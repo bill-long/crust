@@ -1,20 +1,32 @@
-import type { OidcClientConfig } from "matrix-js-sdk";
+import type { ValidatedAuthMetadata } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The module under test talks to matrix-js-sdk at exactly four functions;
-// mock that boundary so discovery/registration/exchange behavior is
-// scripted per test without a network.
-const createClientMock = vi.fn();
-const completeAuthorizationCodeGrantMock = vi.fn();
-const generateOidcAuthorizationUrlMock = vi.fn();
-const registerOidcClientMock = vi.fn();
+// The module under test talks to matrix-js-sdk at two places: createClient
+// (probe + metadata refetch + whoami) and the OAuth2 class (registration +
+// URL generation + code exchange). Mock that boundary; everything else
+// (signin state, URL guards, error curation, result mapping) runs for real.
+const createClientMock = vi.hoisted(() => vi.fn());
+const registerClientMock = vi.hoisted(() => vi.fn());
+const generateUrlMock = vi.hoisted(() => vi.fn());
+const completeGrantMock = vi.hoisted(() => vi.fn());
+const oauth2Instances = vi.hoisted(() => ({
+	contexts: [] as Array<Record<string, unknown>>,
+}));
 vi.mock("matrix-js-sdk", () => ({
 	createClient: (...args: unknown[]) => createClientMock(...args),
-	completeAuthorizationCodeGrant: (...args: unknown[]) =>
-		completeAuthorizationCodeGrantMock(...args),
-	generateOidcAuthorizationUrl: (...args: unknown[]) =>
-		generateOidcAuthorizationUrlMock(...args),
-	registerOidcClient: (...args: unknown[]) => registerOidcClientMock(...args),
+	OAuth2: class FakeOAuth2 {
+		static registerClient = registerClientMock;
+		readonly context: Record<string, unknown>;
+		constructor(
+			public metadata: unknown,
+			context: Record<string, unknown>,
+		) {
+			this.context = { codeVerifier: "sdk-generated-verifier", ...context };
+			oauth2Instances.contexts.push(this.context);
+		}
+		generateAuthorizationCodeGrantUrl = generateUrlMock;
+		completeAuthorizationCodeGrant = completeGrantMock;
+	},
 }));
 
 import {
@@ -36,16 +48,43 @@ const METADATA = {
 	response_types_supported: ["code"],
 	grant_types_supported: ["authorization_code", "refresh_token"],
 	code_challenge_methods_supported: ["S256"],
-} as OidcClientConfig;
+} as ValidatedAuthMetadata;
 
 const REGISTRATIONS_KEY = "crust:oidc-client-registrations";
+const SIGNIN_STATE_KEY = "crust:oidc-signin-state";
+
+/** The signin state a real startOidcLogin would have stored. */
+const STORED_SIGNIN = {
+	state: "state-123",
+	codeVerifier: "sdk-generated-verifier",
+	homeserverUrl: "https://matrix.example.com",
+	issuer: "https://auth.example.com/",
+	clientId: "client-xyz",
+};
+
+function seedSigninState(overrides?: Partial<typeof STORED_SIGNIN>): void {
+	sessionStorage.setItem(
+		SIGNIN_STATE_KEY,
+		JSON.stringify({ ...STORED_SIGNIN, ...overrides }),
+	);
+}
 
 beforeEach(() => {
 	localStorage.clear();
 	sessionStorage.clear();
+	oauth2Instances.contexts.length = 0;
+	// Default: the metadata refetch at callback time succeeds.
+	createClientMock.mockReturnValue({
+		getAuthMetadata: vi.fn(async () => METADATA),
+	});
+	generateUrlMock.mockImplementation(
+		async (state: string) =>
+			`https://auth.example.com/authorize?response_type=code&client_id=client-xyz&state=${state}`,
+	);
 });
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.unstubAllGlobals();
 	localStorage.clear();
 	sessionStorage.clear();
 });
@@ -64,8 +103,6 @@ describe("probeDelegatedAuth", () => {
 	});
 
 	it("returns null when the server has no delegated auth", async () => {
-		// A legacy-only homeserver 404s /auth_metadata and /auth_issuer; the
-		// SDK surfaces that as a rejection.
 		const getAuthMetadata = vi.fn(async () => {
 			throw new Error("404");
 		});
@@ -103,36 +140,41 @@ describe("client registration cache", () => {
 });
 
 describe("startOidcLogin", () => {
-	it("registers on first login, caches the client_id, and builds the authorization URL", async () => {
-		registerOidcClientMock.mockResolvedValue("client-xyz");
-		generateOidcAuthorizationUrlMock.mockResolvedValue(
-			"https://auth.example.com/authorize?...",
-		);
+	it("registers on first login, caches the client_id, and returns the authorization URL", async () => {
+		registerClientMock.mockResolvedValue("client-xyz");
 
 		const url = await startOidcLogin(METADATA, "https://matrix.example.com");
 
-		expect(url).toBe("https://auth.example.com/authorize?...");
-		expect(registerOidcClientMock).toHaveBeenCalledTimes(1);
-		const [metadataArg, registrationArg] = registerOidcClientMock.mock.calls[0];
+		expect(registerClientMock).toHaveBeenCalledTimes(1);
+		const [metadataArg, registrationArg] = registerClientMock.mock.calls[0];
 		expect(metadataArg).toBe(METADATA);
-		expect(registrationArg).toEqual({
-			clientName: "Crust",
-			clientUri: `${window.location.origin}/`,
-			applicationType: "web",
-			redirectUris: [`${window.location.origin}/login/callback`],
+		expect(registrationArg).toMatchObject({
+			client_name: "Crust",
+			client_uri: `${window.location.origin}/`,
+			application_type: "web",
+			redirect_uris: [`${window.location.origin}/login/callback`],
 		});
-		// The registration is cached under the issuer.
 		expect(getCachedClientId("https://auth.example.com/")).toBe("client-xyz");
 
-		const authArgs = generateOidcAuthorizationUrlMock.mock.calls[0][0];
-		expect(authArgs).toMatchObject({
-			metadata: METADATA,
-			clientId: "client-xyz",
+		// The URL comes from the SDK's OAuth2 instance, called with query
+		// response mode and our state.
+		expect(generateUrlMock).toHaveBeenCalledTimes(1);
+		const [stateArg, responseMode] = generateUrlMock.mock.calls[0];
+		expect(responseMode).toBe("query");
+		expect(url).toContain(`state=${stateArg}`);
+
+		// The signin state stored for the callback carries the SDK-generated
+		// PKCE verifier and matches the URL's state.
+		const stored = JSON.parse(
+			sessionStorage.getItem(SIGNIN_STATE_KEY) ?? "null",
+		);
+		expect(stored).toMatchObject({
 			homeserverUrl: "https://matrix.example.com",
-			redirectUri: `${window.location.origin}/login/callback`,
+			issuer: "https://auth.example.com/",
+			clientId: "client-xyz",
+			codeVerifier: "sdk-generated-verifier",
 		});
-		// 128 bits of entropy base64url-encoded: 22 chars, URL-safe alphabet.
-		expect(authArgs.nonce).toMatch(/^[A-Za-z0-9_-]{22}$/);
+		expect(stored.state).toBe(stateArg);
 	});
 
 	it("reuses the cached registration instead of re-registering", async () => {
@@ -140,32 +182,29 @@ describe("startOidcLogin", () => {
 			REGISTRATIONS_KEY,
 			JSON.stringify({ "https://auth.example.com/": "cached-client" }),
 		);
-		generateOidcAuthorizationUrlMock.mockResolvedValue("https://auth/url");
 
 		await startOidcLogin(METADATA, "https://matrix.example.com");
 
-		expect(registerOidcClientMock).not.toHaveBeenCalled();
-		expect(generateOidcAuthorizationUrlMock.mock.calls[0][0].clientId).toBe(
-			"cached-client",
-		);
+		expect(registerClientMock).not.toHaveBeenCalled();
+		expect(oauth2Instances.contexts[0].clientId).toBe("cached-client");
 	});
 
-	it("generates a fresh nonce per login", async () => {
+	it("generates a fresh state per login", async () => {
 		localStorage.setItem(
 			REGISTRATIONS_KEY,
 			JSON.stringify({ "https://auth.example.com/": "cached-client" }),
 		);
-		generateOidcAuthorizationUrlMock.mockResolvedValue("https://auth/url");
 
 		await startOidcLogin(METADATA, "https://matrix.example.com");
+		const first = sessionStorage.getItem(SIGNIN_STATE_KEY);
 		await startOidcLogin(METADATA, "https://matrix.example.com");
+		const second = sessionStorage.getItem(SIGNIN_STATE_KEY);
 
-		const [first, second] = generateOidcAuthorizationUrlMock.mock.calls;
-		expect(first[0].nonce).not.toBe(second[0].nonce);
+		expect(first).not.toBe(second);
 	});
 
-	it("propagates a registration failure without caching", async () => {
-		registerOidcClientMock.mockRejectedValue(
+	it("propagates a registration failure without caching or storing state", async () => {
+		registerClientMock.mockRejectedValue(
 			new Error("Dynamic registration failed"),
 		);
 
@@ -173,19 +212,15 @@ describe("startOidcLogin", () => {
 			startOidcLogin(METADATA, "https://matrix.example.com"),
 		).rejects.toThrow("Dynamic registration failed");
 		expect(getCachedClientId("https://auth.example.com/")).toBeNull();
+		expect(sessionStorage.getItem(SIGNIN_STATE_KEY)).toBeNull();
 	});
 
 	it("rejects a non-web authorization URL (javascript: would execute in our origin)", async () => {
-		// The SDK emits the homeserver-supplied authorization_endpoint
-		// verbatim; a malicious homeserver must not turn the redirect into
-		// script execution via location.assign.
 		localStorage.setItem(
 			REGISTRATIONS_KEY,
 			JSON.stringify({ "https://auth.example.com/": "cached-client" }),
 		);
-		generateOidcAuthorizationUrlMock.mockResolvedValue(
-			"javascript:alert(document.domain)",
-		);
+		generateUrlMock.mockResolvedValue("javascript:alert(document.domain)");
 
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
@@ -197,7 +232,7 @@ describe("startOidcLogin", () => {
 			REGISTRATIONS_KEY,
 			JSON.stringify({ "https://auth.example.com/": "cached-client" }),
 		);
-		generateOidcAuthorizationUrlMock.mockResolvedValue("not a url");
+		generateUrlMock.mockResolvedValue("not a url");
 
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
@@ -209,7 +244,6 @@ describe("returnTo stash", () => {
 	it("round-trips the stashed path exactly once", () => {
 		stashOidcReturnTo("/home/!room:example.com");
 		expect(takeOidcReturnTo()).toBe("/home/!room:example.com");
-		// Consumed: a second read must not replay a stale target.
 		expect(takeOidcReturnTo()).toBeNull();
 	});
 
@@ -223,24 +257,17 @@ describe("completeOidcLogin", () => {
 		user_id: string;
 		device_id?: string;
 	}): void {
-		completeAuthorizationCodeGrantMock.mockResolvedValue({
-			oidcClientSettings: {
-				issuer: "https://auth.example.com/",
-				clientId: "client-xyz",
-			},
-			tokenResponse: {
-				token_type: "Bearer",
-				access_token: "access-123",
-				refresh_token: "refresh-abc",
-				scope: "openid",
-				id_token: "header.payload.signature",
-			},
-			homeserverUrl: "https://matrix.example.com/",
-			idTokenClaims: { sub: "@alice:example.com" },
+		completeGrantMock.mockResolvedValue({
+			access_token: "access-123",
+			token_type: "Bearer",
+			refresh_token: "refresh-abc",
+			expires_in: 3600,
 		});
-		createClientMock.mockReturnValue({
-			whoami: vi.fn(async () => whoami),
-		});
+		createClientMock.mockImplementation((opts: Record<string, unknown>) =>
+			opts.accessToken
+				? { whoami: vi.fn(async () => whoami) }
+				: { getAuthMetadata: vi.fn(async () => METADATA) },
+		);
 	}
 
 	it("throws the OP's error_description when the redirect carries an error", async () => {
@@ -267,22 +294,39 @@ describe("completeOidcLogin", () => {
 		);
 	});
 
-	it("exchanges the code and maps grant + whoami into a session payload", async () => {
+	it("throws when no signin state was stored (wrong tab / expired)", async () => {
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow(
+			"This login session has expired or was started elsewhere.",
+		);
+	});
+
+	it("throws when the returned state doesn't match the stored state (login CSRF)", async () => {
+		seedSigninState();
+		await expect(completeOidcLogin("?code=abc&state=WRONG")).rejects.toThrow(
+			"This login session has expired or was started elsewhere.",
+		);
+	});
+
+	it("exchanges the code via the SDK and maps grant + whoami into a session payload", async () => {
+		seedSigninState();
 		stubGrantAndWhoami({
 			user_id: "@alice:example.com",
 			device_id: "DEVICE42",
 		});
 
-		const result = await completeOidcLogin("?code=abc&state=xyz");
+		const result = await completeOidcLogin("?code=abc&state=state-123");
 
-		expect(completeAuthorizationCodeGrantMock).toHaveBeenCalledWith(
-			"abc",
-			"xyz",
-		);
-		expect(createClientMock).toHaveBeenCalledWith({
-			baseUrl: "https://matrix.example.com/",
-			accessToken: "access-123",
+		// The OAuth2 context was rebuilt from the stored signin state.
+		const ctx = oauth2Instances.contexts[0];
+		expect(ctx).toMatchObject({
+			clientId: "client-xyz",
+			codeVerifier: "sdk-generated-verifier",
+			redirectUri: `${window.location.origin}/login/callback`,
 		});
+		expect(completeGrantMock).toHaveBeenCalledWith("abc");
+
 		expect(result).toEqual({
 			accessToken: "access-123",
 			refreshToken: "refresh-abc",
@@ -293,51 +337,86 @@ describe("completeOidcLogin", () => {
 			oidc: {
 				issuer: "https://auth.example.com/",
 				clientId: "client-xyz",
-				idToken: "header.payload.signature",
 			},
 		});
-	});
 
-	it("throws when the server assigns no device ID", async () => {
-		stubGrantAndWhoami({ user_id: "@alice:example.com" });
-
-		await expect(completeOidcLogin("?code=abc&state=xyz")).rejects.toThrow(
-			"The homeserver did not assign a device ID to this session.",
+		// The signin state is single-use: a replayed callback fails closed.
+		expect(sessionStorage.getItem(SIGNIN_STATE_KEY)).toBeNull();
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow(
+			"This login session has expired or was started elsewhere.",
 		);
 	});
 
 	it("swaps platform jargon from the exchange leg for the curated fallback", async () => {
-		// A network failure rejects with TypeError("Failed to fetch") -
-		// meaningless in the login UI (the #421 error-quality class).
-		completeAuthorizationCodeGrantMock.mockRejectedValue(
-			new TypeError("Failed to fetch"),
-		);
+		seedSigninState();
+		completeGrantMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
-		await expect(completeOidcLogin("?code=abc&state=xyz")).rejects.toThrow(
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow(
 			"Could not complete the login with the homeserver. Try again.",
 		);
 	});
 
 	it("keeps human-written messages from the exchange leg", async () => {
-		completeAuthorizationCodeGrantMock.mockRejectedValue(
+		seedSigninState();
+		completeGrantMock.mockRejectedValue(
 			new Error("The authorization code has expired."),
 		);
 
-		await expect(completeOidcLogin("?code=abc&state=xyz")).rejects.toThrow(
-			"The authorization code has expired.",
-		);
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow("The authorization code has expired.");
 	});
 
-	it("swaps platform jargon from the whoami leg for the curated fallback", async () => {
-		stubGrantAndWhoami({ user_id: "@alice:example.com" });
+	it("curates a metadata-refetch failure at callback time", async () => {
+		seedSigninState();
 		createClientMock.mockReturnValue({
-			whoami: vi.fn(async () => {
+			getAuthMetadata: vi.fn(async () => {
 				throw new TypeError("Failed to fetch");
 			}),
 		});
 
-		await expect(completeOidcLogin("?code=abc&state=xyz")).rejects.toThrow(
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow(
+			"Could not complete the login with the homeserver. Try again.",
+		);
+	});
+
+	it("swaps platform jargon from the whoami leg for the curated fallback", async () => {
+		seedSigninState();
+		completeGrantMock.mockResolvedValue({
+			access_token: "access-123",
+			token_type: "Bearer",
+		});
+		createClientMock.mockImplementation((opts: Record<string, unknown>) =>
+			opts.accessToken
+				? {
+						whoami: vi.fn(async () => {
+							throw new TypeError("Failed to fetch");
+						}),
+					}
+				: { getAuthMetadata: vi.fn(async () => METADATA) },
+		);
+
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow(
 			"The homeserver could not confirm the new session. Try logging in again.",
+		);
+	});
+
+	it("throws when the server assigns no device ID", async () => {
+		seedSigninState();
+		stubGrantAndWhoami({ user_id: "@alice:example.com" });
+
+		await expect(
+			completeOidcLogin("?code=abc&state=state-123"),
+		).rejects.toThrow(
+			"The homeserver did not assign a device ID to this session.",
 		);
 	});
 });
