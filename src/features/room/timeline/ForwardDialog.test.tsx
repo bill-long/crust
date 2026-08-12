@@ -259,6 +259,17 @@ describe("ForwardDialog", () => {
 		expect(screen.getByText("DM")).toBeTruthy();
 	});
 
+	it("reflects listbox presence in aria-expanded", async () => {
+		setup([makeRoomSummary("!a:example.com", "alpha")]);
+		const input = screen.getByPlaceholderText("Search rooms");
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		expect(input.getAttribute("aria-expanded")).toBe("true");
+		// No matches: the listbox unmounts, and the combobox must say so
+		// (Composer's pickerExpanded sibling idiom, not a hard-coded true).
+		fireEvent.input(input, { target: { value: "zzz" } });
+		await waitFor(() => expect(input.getAttribute("aria-expanded")).toBeNull());
+	});
+
 	it("focuses the search input on open", async () => {
 		setup([makeRoomSummary("!a:example.com", "alpha")]);
 		await waitFor(() =>

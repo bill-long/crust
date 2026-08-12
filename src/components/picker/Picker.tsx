@@ -30,6 +30,7 @@ const ITEM_HEIGHT = 36;
 export function createPicker<T>() {
 	let handleKey: ((e: KeyboardEvent) => boolean) | undefined;
 	let activeDescendantRef: (() => string | undefined) | undefined;
+	let expandedRef: (() => boolean) | undefined;
 	const pickerId = createUniqueId();
 	const listboxId = `picker-listbox-${pickerId}`;
 
@@ -71,6 +72,7 @@ export function createPicker<T>() {
 		};
 
 		activeDescendantRef = activeDescendant;
+		expandedRef = () => props.visible && filtered().length > 0;
 
 		// Returns true if the event was handled (consumed)
 		handleKey = (e: KeyboardEvent): boolean => {
@@ -167,5 +169,16 @@ export function createPicker<T>() {
 		return activeDescendantRef ? activeDescendantRef() : undefined;
 	}
 
-	return { Picker, handlePickerKey, getActiveDescendant, listboxId };
+	/** Whether the listbox is currently rendered (visible with matches). */
+	function getExpanded(): boolean {
+		return expandedRef ? expandedRef() : false;
+	}
+
+	return {
+		Picker,
+		handlePickerKey,
+		getActiveDescendant,
+		getExpanded,
+		listboxId,
+	};
 }

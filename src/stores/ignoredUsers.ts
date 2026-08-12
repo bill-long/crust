@@ -12,9 +12,10 @@ import { createSignal } from "solid-js";
  *
  * Scope decision (#304): ignored senders are collapsed in the timeline but
  * NOT filtered out of notifications. Element hides ignored senders' events
- * from both; we keep notifications because a collapse keeps the messages
- * one click away while a notification filter would silently drop mentions
- * with no in-app record. Revisit if hiding proves insufficient.
+ * from both; we keep notifications because the collapse only swaps the
+ * message for a non-interactive placeholder (reading requires unblocking),
+ * so dropping notifications too would silently lose mentions with no
+ * in-app record at all. Revisit if hiding proves insufficient.
  */
 
 /** The account-data event type carrying the ignore list. Not in the SDK's

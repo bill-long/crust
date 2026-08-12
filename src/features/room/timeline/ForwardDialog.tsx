@@ -30,7 +30,7 @@ interface ForwardDialogProps {
 	onClose: () => void;
 }
 
-const { Picker, handlePickerKey, getActiveDescendant, listboxId } =
+const { Picker, handlePickerKey, getActiveDescendant, getExpanded, listboxId } =
 	createPicker<RoomSummary>();
 
 const ForwardDialog: Component<ForwardDialogProps> = (props) => {
@@ -204,7 +204,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 								spellcheck={false}
 								disabled={forwarding()}
 								role="combobox"
-								aria-expanded={true}
+								aria-expanded={getExpanded() ? true : undefined}
 								aria-controls={listboxId}
 								aria-activedescendant={getActiveDescendant()}
 								aria-describedby={error() ? errorId : undefined}
