@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { useClient } from "../../../client/client";
+import { ignoredUsers } from "../../../stores/ignoredUsers";
 import type { ImagePack } from "../../emoji/types";
 import {
 	buildEmoteLookup,
@@ -31,6 +32,8 @@ import {
 	useDayTick,
 } from "./dateFormatting";
 import { findLastEditableEvent } from "./editableEvents";
+import { ForwardDialog } from "./ForwardDialog";
+import { canForward } from "./forwardMessage";
 import { GroupedMembershipNotice } from "./GroupedMembershipNotice";
 import { ImageLightbox } from "./ImageLightbox";
 import type { MembershipGroup } from "./membershipGrouping";
@@ -189,6 +192,10 @@ const TimelineView: Component<{
 	// upward user gesture (wheel up, ArrowUp/PageUp/Home).
 	const [wantsBottom, setWantsBottom] = createSignal(true);
 	const [replyTo, setReplyTo] = createSignal<TimelineEvent | null>(null);
+	/** Message being forwarded; non-null opens the Forward dialog. */
+	const [forwardTarget, setForwardTarget] = createSignal<TimelineEvent | null>(
+		null,
+	);
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
 	);
@@ -1047,12 +1054,20 @@ const TimelineView: Component<{
 													onEndPoll={() => void endPoll(event.eventId)}
 													onOpenThread={props.onOpenThread}
 													onReply={() => setReplyTo(event)}
+													onForward={
+														canForward(event)
+															? () => setForwardTarget(event)
+															: undefined
+													}
 													onJumpToReply={(id) => {
 														setWantsBottom(false);
 														void jumpToEvent(id);
 													}}
 													onEdit={() => onEdit(event)}
 													onDelete={() => onDelete(event.eventId)}
+													isSenderIgnored={ignoredUsers().includes(
+														event.senderId,
+													)}
 													onRetry={() => onRetry(event.eventId)}
 													onDiscard={() => cancelPending(event.eventId)}
 													onCancel={() => cancelPending(event.eventId)}
@@ -1219,6 +1234,12 @@ const TimelineView: Component<{
 				hasPrev={hasPrev}
 				hasNext={hasNext}
 				fallbackFocus={() => scrollRef ?? null}
+			/>
+
+			<ForwardDialog
+				target={forwardTarget}
+				getSourceEvent={getSourceEvent}
+				onClose={() => setForwardTarget(null)}
 			/>
 		</main>
 	);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "./summaries";
 import {
 	flattenSpaceTree,
+	getForwardableRooms,
 	getHomeUnreadRollup,
 	getInvitedRoomCount,
 	getInvitedRooms,
@@ -611,5 +612,30 @@ describe("getSpaceTree / rollup wire-debris edges (#443)", () => {
 			unread: 1,
 			highlight: 0,
 		});
+	});
+});
+
+describe("getForwardableRooms", () => {
+	it("returns joined non-space rooms sorted by name", () => {
+		const s = store([
+			room({ roomId: "!b:x", name: "beta" }),
+			room({ roomId: "!a:x", name: "alpha" }),
+			room({ roomId: "!dm:x", name: "carol", isDirect: true }),
+		]);
+		expect(getForwardableRooms(s).map((r) => r.roomId)).toEqual([
+			"!a:x",
+			"!b:x",
+			"!dm:x",
+		]);
+	});
+
+	it("excludes spaces and non-joined rooms", () => {
+		const s = store([
+			room({ roomId: "!r:x", name: "room" }),
+			room({ roomId: "!space:x", name: "space", isSpace: true }),
+			room({ roomId: "!inv:x", name: "invited", membership: "invite" }),
+			room({ roomId: "!knock:x", name: "knocked", membership: "knock" }),
+		]);
+		expect(getForwardableRooms(s).map((r) => r.roomId)).toEqual(["!r:x"]);
 	});
 });

@@ -306,6 +306,9 @@ const HoverToolbar: Component<{
 	onEdit: () => void;
 	onDelete: () => void;
 	onTogglePin: () => void;
+	/** Forward the message to another room. Absent for non-forwardable
+	    events (polls, echoes, decryption failures, stickers). */
+	onForward?: () => void;
 }> = (props) => {
 	const [pickerOpen, setPickerOpen] = createSignal(false);
 	const handlePick = (item: PickerEmoji): void => {
@@ -395,6 +398,28 @@ const HoverToolbar: Component<{
 					</svg>
 				</button>
 			</Show>
+			<Show when={props.onForward}>
+				<button
+					type="button"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					onClick={() => props.onForward?.()}
+					aria-label="Forward"
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<polyline points="15 17 20 12 15 7" />
+						<path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+					</svg>
+				</button>
+			</Show>
 			<Show when={props.isOwnMessage && props.msgtype === "m.text"}>
 				<button
 					type="button"
@@ -476,6 +501,9 @@ const TimelineItem: Component<{
 	/** Close the poll (only offered when the snapshot says canEnd). */
 	onEndPoll: () => void;
 	onReply: () => void;
+	/** Open the Forward dialog for this event. Absent for
+	    non-forwardable events (see `canForward`). */
+	onForward?: () => void;
 	onJumpToReply: (eventId: string) => void;
 	onEdit: () => void;
 	onDelete: () => void;
@@ -515,6 +543,13 @@ const TimelineItem: Component<{
 	 * for server-confirmed (non-pending, non-failed) image events.
 	 */
 	onOpenImage?: (eventId: string) => void;
+	/**
+	 * True when the sender is on the account's ignore list: the row
+	 * collapses to a one-line placeholder (no body, hover toolbar, or
+	 * reactions) instead of the message. State/membership notices are
+	 * unaffected - they render through the stateNotice branch.
+	 */
+	isSenderIgnored?: boolean;
 }> = (props) => {
 	const ev = props.event;
 	const formattedTime = createMemo(() =>
@@ -640,32 +675,63 @@ const TimelineItem: Component<{
 
 	return (
 		<Show
-			when={!ev.stateNotice}
+			when={!ev.stateNotice && !props.isSenderIgnored}
 			fallback={
-				<div
-					data-event-id={ev.eventId}
-					class="group flex items-center gap-3 px-4 py-0.5 hover:bg-surface-1/50"
-					role="note"
+				<Show
+					when={ev.stateNotice}
+					fallback={
+						<div
+							data-event-id={ev.eventId}
+							class="flex items-center gap-3 px-4 py-0.5"
+							role="note"
+						>
+							<div class="flex w-8 shrink-0 justify-center text-text-faint">
+								<svg
+									class="h-3.5 w-3.5"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									aria-hidden="true"
+								>
+									<circle cx="12" cy="12" r="10" />
+									<line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+								</svg>
+							</div>
+							<span class="min-w-0 flex-1 truncate text-xs text-text-faint">
+								Message hidden - {ev.senderName.trim() || "this sender"} is
+								blocked
+							</span>
+						</div>
+					}
 				>
-					<div class="flex w-8 shrink-0 justify-center text-text-faint">
-						<StateNoticeIcon variant={ev.stateNotice?.icon ?? "info"} />
+					<div
+						data-event-id={ev.eventId}
+						class="group flex items-center gap-3 px-4 py-0.5 hover:bg-surface-1/50"
+						role="note"
+					>
+						<div class="flex w-8 shrink-0 justify-center text-text-faint">
+							<StateNoticeIcon variant={ev.stateNotice?.icon ?? "info"} />
+						</div>
+						<div class="flex min-w-0 flex-1 items-baseline gap-2">
+							<span
+								class="min-w-0 flex-1 truncate text-xs text-text-muted"
+								title={`${ev.stateNotice?.text ?? ""} • ${fullDateTime()}`}
+							>
+								{ev.stateNotice?.text}
+							</span>
+							<span
+								class="shrink-0 text-[10px] text-text-muted select-none"
+								aria-hidden="true"
+							>
+								{formattedTime()}
+							</span>
+							<span class="sr-only"> • {fullDateTime()}</span>
+						</div>
 					</div>
-					<div class="flex min-w-0 flex-1 items-baseline gap-2">
-						<span
-							class="min-w-0 flex-1 truncate text-xs text-text-muted"
-							title={`${ev.stateNotice?.text ?? ""} • ${fullDateTime()}`}
-						>
-							{ev.stateNotice?.text}
-						</span>
-						<span
-							class="shrink-0 text-[10px] text-text-muted select-none"
-							aria-hidden="true"
-						>
-							{formattedTime()}
-						</span>
-						<span class="sr-only"> • {fullDateTime()}</span>
-					</div>
-				</div>
+				</Show>
 			}
 		>
 			<div
@@ -700,6 +766,7 @@ const TimelineItem: Component<{
 						onEdit={props.onEdit}
 						onDelete={props.onDelete}
 						onTogglePin={() => props.onTogglePin?.()}
+						onForward={props.onForward}
 					/>
 				</Show>
 

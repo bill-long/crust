@@ -302,6 +302,17 @@ export function flattenSpaceTree(tree: SpaceTreeNode[]): FlatSpaceTree {
 }
 
 /**
+ * Every joined non-space room (channels and DMs), sorted alphabetically -
+ * the Forward dialog's target list. Spaces are excluded: a message can
+ * only be forwarded into a room, not a container.
+ */
+export function getForwardableRooms(summaries: SummariesStore): RoomSummary[] {
+	return Object.values(summaries)
+		.filter((s) => !s.isSpace && s.membership === "join")
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
  * DM rooms the user has joined, sorted by recent activity.
  */
 export function getDmRooms(summaries: SummariesStore): RoomSummary[] {

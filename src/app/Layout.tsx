@@ -30,6 +30,7 @@ import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
+import { ExploreDialog } from "../features/room/ExploreDialog";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { InvitePane } from "../features/room/invites/InvitePane";
 import { JoinRoomDialogHost } from "../features/room/JoinRoomDialogHost";
@@ -55,6 +56,8 @@ import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
+import { closeExploreDialog, exploreDialogOpen } from "../stores/exploreDialog";
+import { cleanupIgnoredUsers, initIgnoredUsers } from "../stores/ignoredUsers";
 import { setLastChannel } from "../stores/lastChannel";
 import { getLastRoom, setLastRoom } from "../stores/lastRoom";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
@@ -502,6 +505,16 @@ const Layout: Component = () => {
 		copyLink.reset();
 	});
 
+	// Bind the ignored-users store to this session's client (member-list
+	// Block/Unblock + timeline sender collapsing). Layout lives for the
+	// whole authenticated session, so init once here and clean up on unmount.
+	onMount(() => {
+		initIgnoredUsers(client);
+	});
+	onCleanup(() => {
+		cleanupIgnoredUsers();
+	});
+
 	const roomName = () => {
 		const rid = roomId();
 		if (!rid) return "";
@@ -691,6 +704,8 @@ const Layout: Component = () => {
 			{/* Session-long join-room dialog host (store-driven open; renders
 				the dialog only while open) */}
 			<JoinRoomDialogHost client={client} />
+			{/* Public room directory (store-driven open, session-long host) */}
+			<ExploreDialog open={exploreDialogOpen} onClose={closeExploreDialog} />
 			{/* Resizable layout with user bar spanning left sidebar */}
 			<ResizableLayout
 				showMainOnMobile={() => roomId() !== undefined}

@@ -30,6 +30,7 @@ import {
 import { SpaceIcon } from "../../components/SpaceIcon";
 import { VirtualList } from "../../components/VirtualList";
 import { spaceLandingPath } from "../../lib/spaceLanding";
+import { requestExploreDialog } from "../../stores/exploreDialog";
 import { requestJoinDialog } from "../../stores/joinDialog";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
@@ -463,6 +464,11 @@ const RoomList: Component<RoomListProps> = (props) => {
 		requestJoinDialog();
 	};
 
+	const openExplore = (): void => {
+		// Same Layout-hosted pattern as the join dialog (see openJoin).
+		requestExploreDialog();
+	};
+
 	const navigateToRoom = (roomId: string): void => {
 		const room = summaries[roomId];
 		if (!room) return;
@@ -682,6 +688,33 @@ const RoomList: Component<RoomListProps> = (props) => {
 							<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
 							<polyline points="10 17 15 12 10 7" />
 							<line x1="15" y1="12" x2="3" y2="12" />
+						</svg>
+					</button>
+				</Show>
+				{/* Directory browse is Home-only for the same reason as
+				    join-by-address above: a directory join lands under
+				    Home regardless of the current space (#440). */}
+				<Show when={isHome()}>
+					<button
+						type="button"
+						onClick={openExplore}
+						aria-label="Explore public rooms"
+						title="Explore public rooms"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+					>
+						<svg
+							aria-hidden="true"
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						>
+							<circle cx="12" cy="12" r="10" />
+							<polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
 						</svg>
 					</button>
 				</Show>
