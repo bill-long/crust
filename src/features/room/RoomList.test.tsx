@@ -272,6 +272,9 @@ describe("RoomList directory browse (#304)", () => {
 	it("hides the Explore button inside a space", () => {
 		paramsState.spaceId = "!alpha:example.com";
 		renderRoomList([makeSpaceSummary("!alpha:example.com", "Alpha")]);
+		// Positive anchor: the list rendered in space context (Create room
+		// is space-visible), so the Explore absence below is meaningful.
+		expect(screen.getByRole("button", { name: "Create room" })).toBeTruthy();
 		expect(
 			screen.queryByRole("button", { name: "Explore public rooms" }),
 		).toBeNull();

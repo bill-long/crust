@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient } from "../../../test/mockClient";
@@ -61,7 +61,11 @@ function makeEvent(overrides: Partial<TimelineEvent> = {}): TimelineEvent {
 	};
 }
 
-function renderItem(event: TimelineEvent, isSenderIgnored: boolean) {
+function renderItem(
+	event: TimelineEvent,
+	isSenderIgnored: boolean,
+	extra: { onForward?: () => void } = {},
+) {
 	const client = createMockClient();
 	return render(() => (
 		<TimelineItem
@@ -69,6 +73,7 @@ function renderItem(event: TimelineEvent, isSenderIgnored: boolean) {
 			showHeader={true}
 			isOwnMessage={false}
 			isSenderIgnored={isSenderIgnored}
+			onForward={extra.onForward}
 			onReact={() => {}}
 			onVote={() => {}}
 			onEndPoll={() => {}}
@@ -118,5 +123,23 @@ describe("TimelineItem ignored sender", () => {
 		);
 		expect(screen.getByText("Mallory joined the room")).toBeTruthy();
 		expect(screen.queryByText(/Message hidden/)).toBeNull();
+	});
+});
+
+describe("TimelineItem Forward action", () => {
+	it("renders the Forward toolbar button when wired and fires it", () => {
+		const onForward = vi.fn();
+		renderItem(makeEvent(), false, { onForward });
+		const button = screen.getByLabelText("Forward");
+		fireEvent.click(button);
+		expect(onForward).toHaveBeenCalledTimes(1);
+	});
+
+	it("omits the Forward button when the prop is absent (non-forwardable)", () => {
+		renderItem(makeEvent(), false);
+		// Positive anchor first: sibling actions render, so the Forward
+		// absence is the gating, not a broken toolbar.
+		expect(screen.getByLabelText("Reply")).toBeTruthy();
+		expect(screen.queryByLabelText("Forward")).toBeNull();
 	});
 });

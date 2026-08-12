@@ -54,13 +54,29 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 	const [error, setError] = createSignal<string | null>(null);
 	const [forwarding, setForwarding] = createSignal(false);
 
+	// Bumped on every open and on every submit. An in-flight forward
+	// captures the value and re-checks it - plus mounted and open - after
+	// each await, so a close→reopen cycle can't let a stale continuation
+	// commit the notice / close against the fresh dialog (the dialog is
+	// hosted session-long in TimelineView, so `mounted` alone can't).
+	let submitGeneration = 0;
+
 	const rooms = () => getForwardableRooms(summaries);
 
 	function reset(): void {
+		submitGeneration++;
 		setQuery("");
 		setError(null);
 		setForwarding(false);
 	}
+
+	/** Close paths share one guard: no closing while a forward is in
+	    flight (the media re-upload is uncancellable, so the #440 shape is
+	    to keep the modal up and let the inline error / success land). */
+	const tryClose = (): void => {
+		if (forwarding()) return;
+		props.onClose();
+	};
 
 	createEffect(
 		on(open, (isOpen, wasOpen) => {
@@ -95,13 +111,16 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 		}
 		setError(null);
 		setForwarding(true);
+		const myGeneration = ++submitGeneration;
+		const stillCurrent = (): boolean =>
+			mounted && open() && myGeneration === submitGeneration;
 		try {
 			await forwardMessage(client, source, room.roomId);
-			if (!mounted) return;
+			if (!stillCurrent()) return;
 			pushNotice(`Forwarded to ${room.name.trim() || "room"}.`);
 			props.onClose();
 		} catch (err) {
-			if (!mounted) return;
+			if (!stillCurrent()) return;
 			console.error("Failed to forward message:", err);
 			setForwarding(false);
 			setError(
@@ -115,6 +134,11 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 	};
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
+		if (e.key === "Escape") {
+			e.stopPropagation();
+			tryClose();
+			return;
+		}
 		if (e.key === "Tab") {
 			trapTabKey(overlayRef, e);
 		}
@@ -133,7 +157,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 					tabIndex={-1}
 					onKeyDown={handleKeyDown}
 					onClick={(e) => {
-						if (e.target === e.currentTarget && !forwarding()) props.onClose();
+						if (e.target === e.currentTarget) tryClose();
 					}}
 				>
 					<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
@@ -170,7 +194,9 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 									// "select the highlighted room", which would fire an
 									// unexpected forward while keyboard-navigating. The
 									// dialog's own keydown traps Tab for focus cycling.
-									if (e.key === "Tab") return;
+									// Escape bubbles to the overlay's guarded close instead
+									// of the picker's unguarded one.
+									if (e.key === "Tab" || e.key === "Escape") return;
 									handlePickerKey(e);
 								}}
 								placeholder="Search rooms"
@@ -191,7 +217,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 								visible={true}
 								position={{ bottom: "auto", left: "0" }}
 								onSelect={(room) => void handleForward(room)}
-								onClose={props.onClose}
+								onClose={tryClose}
 								filterFn={(room, q) =>
 									room.name.toLowerCase().includes(q.trim().toLowerCase())
 								}
@@ -221,9 +247,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 						<div class="mt-4 flex justify-end">
 							<button
 								type="button"
-								onClick={() => {
-									if (!forwarding()) props.onClose();
-								}}
+								onClick={tryClose}
 								disabled={forwarding()}
 								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							>

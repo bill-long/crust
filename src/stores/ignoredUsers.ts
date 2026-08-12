@@ -8,7 +8,13 @@ import { createSignal } from "solid-js";
  * the SDK's AccountData events (so blocks made in Settings or by another
  * client land without a reload), and updated optimistically by
  * {@link setUserIgnored} after a successful write. Consumed by the member
- * list (Ignore/Unignore row action) and the timeline (sender collapsing).
+ * list (Block/Unblock row action) and the timeline (sender collapsing).
+ *
+ * Scope decision (#304): ignored senders are collapsed in the timeline but
+ * NOT filtered out of notifications. Element hides ignored senders' events
+ * from both; we keep notifications because a collapse keeps the messages
+ * one click away while a notification filter would silently drop mentions
+ * with no in-app record. Revisit if hiding proves insufficient.
  */
 
 /** The account-data event type carrying the ignore list. Not in the SDK's

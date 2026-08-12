@@ -5,11 +5,11 @@ import {
 	createEffect,
 	createSignal,
 	createUniqueId,
-	For,
 	on,
 	onCleanup,
 	Show,
 } from "solid-js";
+import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
@@ -65,6 +65,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 
 	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
+	let scrollRef: HTMLDivElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	onCleanup(() => {
@@ -142,6 +143,10 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 	const search = async (): Promise<void> => {
 		const myGeneration = ++requestGeneration;
 		setLoading(true);
+		// A superseding search also cancels any in-flight load-more; its
+		// continuation skips the flag reset on generation mismatch, so
+		// clear it here or the button would stick on "Loading…".
+		setLoadingMore(false);
 		setError(null);
 		setResults([]);
 		setNextBatch(null);
@@ -195,18 +200,38 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 		const roomId = room.room_id;
 		const state = joinStates()[roomId];
 		if (state === "joining" || state === "joined") return;
+		// Stale-continuation guard: the dialog is hosted session-long, so
+		// `mounted` never flips on close. Capture the generation (bumped by
+		// reset on every open and by every search) and re-check it - plus
+		// the dialog still being open - after the await, so an Escape /
+		// backdrop close mid-join can't navigate the user into the room or
+		// pop the knock hand-off after they've dismissed the dialog.
+		const myGeneration = requestGeneration;
 		setJoinStates((prev) => ({ ...prev, [roomId]: "joining" }));
+		const stillCurrent = (): boolean =>
+			mounted && props.open() && myGeneration === requestGeneration;
+		// Join by alias when the directory entry has one (aliases
+		// self-resolve); a bare room ID joins THROUGH the server whose
+		// directory listed the room - it's necessarily participating, so
+		// it's a valid via server. Without this a room found by browsing a
+		// remote server's directory can never be joined.
+		const idOrAlias = room.canonical_alias ?? roomId;
+		const viaServers = room.canonical_alias
+			? []
+			: [server().trim() || client.getDomain() || ""].filter(Boolean);
 		try {
-			await client.joinRoom(roomId, { viaServers: [] });
-			if (!mounted) return;
+			await client.joinRoom(idOrAlias, { viaServers });
+			if (!stillCurrent()) return;
 			// joinRoom resolves before /sync delivers the room's state, so
 			// stub the summary entry to surface the room immediately - the
 			// same reconciliation space discovery and the join dialog use.
 			const isSpace = room.room_type === "m.space";
 			optimisticallyMarkJoined(roomId, {
 				name: directoryRoomName(room),
+				// mxcUrlToHttp returns "" for non-mxc input - normalize to the
+				// null the summary contract expects (#418 sentinel class).
 				avatarUrl: room.avatar_url
-					? client.mxcUrlToHttp(room.avatar_url)
+					? client.mxcUrlToHttp(room.avatar_url) || null
 					: null,
 				isSpace,
 			});
@@ -217,7 +242,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 					: `/home/${encodeURIComponent(roomId)}`,
 			);
 		} catch (err) {
-			if (!mounted) return;
+			if (!stillCurrent()) return;
 			const code =
 				err && typeof err === "object" && "errcode" in err
 					? (err as { errcode?: unknown }).errcode
@@ -235,13 +260,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 				// Note: no isSpace hint here - the join dialog's isSpace
 				// prefill flag is #443 work; without it a knocked space
 				// stubs as a room until /sync delivers the create event.
-				requestJoinDialog(
-					{
-						idOrAlias: room.canonical_alias ?? roomId,
-						viaServers: [],
-					},
-					{ knockOffered: true },
-				);
+				requestJoinDialog({ idOrAlias, viaServers }, { knockOffered: true });
 				return;
 			}
 			console.error(`Failed to join room ${roomId}:`, err);
@@ -305,9 +324,8 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 								placeholder="Search rooms"
 								autocomplete="off"
 								spellcheck={false}
-								disabled={loading()}
 								aria-describedby={error() ? errorId : undefined}
-								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 						</div>
 						<div class="w-36 shrink-0">
@@ -322,8 +340,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 								placeholder="Server (optional)"
 								autocomplete="off"
 								spellcheck={false}
-								disabled={loading()}
-								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 						</div>
 						<button
@@ -341,7 +358,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 						</p>
 					</Show>
 
-					<div class="min-h-0 flex-1 overflow-y-auto">
+					<div ref={scrollRef} class="min-h-0 flex-1 overflow-y-auto">
 						<Show
 							when={!loading()}
 							fallback={
@@ -358,7 +375,10 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 									</div>
 								}
 							>
-								<For each={results()}>
+								{/* Virtualized: Load-more pages accumulate results
+								    unboundedly, so this list crosses the ~50-item
+								    virtualization threshold after three pages. */}
+								<Virtualizer scrollRef={scrollRef} data={results()}>
 									{(room) => {
 										const joinState = () => joinStates()[room.room_id];
 										const alreadyJoined = () =>
@@ -373,7 +393,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 																	64,
 																	64,
 																	"crop",
-																)
+																) || null
 															: null
 													}
 													initial={(
@@ -440,7 +460,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 											</div>
 										);
 									}}
-								</For>
+								</Virtualizer>
 								<Show when={nextBatch()}>
 									<div class="flex justify-center py-2">
 										<button

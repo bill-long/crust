@@ -140,14 +140,20 @@ const Wrapper: ParentComponent<{
 	);
 };
 
-function setup(seed: RoomSummary[]) {
+function setup(
+	seed: RoomSummary[],
+	options?: {
+		target?: () => TimelineEvent | null;
+		getSourceEvent?: () => MatrixEvent | undefined;
+	},
+) {
 	const client = createMockClient();
 	const onClose = vi.fn();
 	render(() => (
 		<Wrapper client={client} seed={seed}>
 			<ForwardDialog
-				target={() => makeTimelineEvent()}
-				getSourceEvent={() => sourceEvent}
+				target={options?.target ?? (() => makeTimelineEvent())}
+				getSourceEvent={options?.getSourceEvent ?? (() => sourceEvent)}
 				onClose={onClose}
 			/>
 		</Wrapper>
@@ -218,5 +224,115 @@ describe("ForwardDialog", () => {
 			expect(screen.getByRole("alert").textContent).toContain("nope"),
 		);
 		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("shows the curated fallback for browser-jargon errors", async () => {
+		const { client } = setup([makeRoomSummary("!a:example.com", "alpha")]);
+		client.sendMessage.mockRejectedValue(new TypeError("Failed to fetch"));
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.mouseDown(screen.getByText("alpha"));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toBe(
+				"Couldn't forward the message. Please try again.",
+			),
+		);
+	});
+
+	it("reports a missing source event instead of forwarding", async () => {
+		setup([makeRoomSummary("!a:example.com", "alpha")], {
+			getSourceEvent: () => undefined,
+		});
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.mouseDown(screen.getByText("alpha"));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toBe(
+				"Couldn't find the original message. Try again.",
+			),
+		);
+	});
+
+	it("falls back to 'Attachment' for a bodiless message and badges DMs", async () => {
+		setup([makeRoomSummary("!dm:example.com", "carol", { isDirect: true })], {
+			target: () => ({ ...makeTimelineEvent(), body: "" }),
+		});
+		await waitFor(() => expect(screen.getByText("Attachment")).toBeTruthy());
+		expect(screen.getByText("DM")).toBeTruthy();
+	});
+
+	it("focuses the search input on open", async () => {
+		setup([makeRoomSummary("!a:example.com", "alpha")]);
+		await waitFor(() =>
+			expect(document.activeElement).toBe(
+				screen.getByPlaceholderText("Search rooms"),
+			),
+		);
+	});
+
+	it("restores focus to the pre-open element on close", async () => {
+		const trigger = document.createElement("button");
+		document.body.appendChild(trigger);
+		trigger.focus();
+		try {
+			const [target, setTarget] = createSignal<TimelineEvent | null>(
+				makeTimelineEvent(),
+			);
+			setup([makeRoomSummary("!a:example.com", "alpha")], { target });
+			// Opening captured the trigger as previousFocus and moved focus
+			// into the dialog.
+			await waitFor(() =>
+				expect(document.activeElement).toBe(
+					screen.getByPlaceholderText("Search rooms"),
+				),
+			);
+			setTarget(null);
+			await waitFor(() => expect(document.activeElement).toBe(trigger));
+		} finally {
+			trigger.remove();
+		}
+	});
+
+	it("closes via Cancel, backdrop click, and Escape", async () => {
+		// Cancel
+		const first = setup([makeRoomSummary("!a:example.com", "alpha")]);
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(first.onClose).toHaveBeenCalledTimes(1);
+		cleanup();
+
+		// Backdrop
+		const second = setup([makeRoomSummary("!a:example.com", "alpha")]);
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.click(screen.getByRole("dialog"));
+		expect(second.onClose).toHaveBeenCalledTimes(1);
+		cleanup();
+
+		// Escape (from the Cancel button, i.e. outside the picker input)
+		const third = setup([makeRoomSummary("!a:example.com", "alpha")]);
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+		expect(third.onClose).toHaveBeenCalledTimes(1);
+	});
+
+	it("blocks every close path while a forward is in flight", async () => {
+		const { client, onClose } = setup([
+			makeRoomSummary("!a:example.com", "alpha"),
+		]);
+		let resolveSend!: (v: { event_id: string }) => void;
+		client.sendMessage.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					resolveSend = resolve;
+				}),
+		);
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.mouseDown(screen.getByText("alpha"));
+		await waitFor(() => expect(client.sendMessage).toHaveBeenCalled());
+
+		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+		fireEvent.click(screen.getByRole("dialog"));
+		expect(onClose).not.toHaveBeenCalled();
+
+		resolveSend({ event_id: "$done" });
+		await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
 	});
 });

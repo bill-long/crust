@@ -18,6 +18,7 @@ import {
 	_resetIgnoredUsersForTests,
 	initIgnoredUsers,
 } from "../../stores/ignoredUsers";
+import { clearNotices, notices } from "../../stores/notices";
 import { createMockClient, createMockRoom } from "../../test/mockClient";
 import { MemberList } from "./MemberList";
 
@@ -129,6 +130,7 @@ async function clickItem(label: string): Promise<void> {
 afterEach(() => {
 	cleanup();
 	_resetIgnoredUsersForTests();
+	clearNotices();
 });
 
 beforeEach(() => {
@@ -168,5 +170,20 @@ describe("MemberList block/unblock", () => {
 		setup();
 		await waitFor(() => expect(screen.getByText("Me")).toBeTruthy());
 		expect(screen.queryByLabelText("Actions for Me")).toBeNull();
+	});
+
+	it("surfaces a failed block write as a toast and keeps the list", async () => {
+		const { client } = setup();
+		client.setIgnoredUsers.mockRejectedValue(new TypeError("Failed to fetch"));
+		await waitFor(() =>
+			expect(screen.getByLabelText("Actions for Alice")).toBeTruthy(),
+		);
+		await openMenu("Alice");
+		await clickItem("Block");
+		await waitFor(() =>
+			expect(
+				notices().some((n) => n.message === "Couldn't block Alice. Try again."),
+			).toBe(true),
+		);
 	});
 });
