@@ -151,4 +151,37 @@ describe("createOidcTokenRefreshFn", () => {
 		await expect(fn("refresh-old")).resolves.toBeDefined();
 		expect(localStorage.getItem("crust:session")).toBeNull();
 	});
+
+	it("does not persist into a password session that replaced the OIDC one", async () => {
+		// The user logged out of the OIDC session and back in with a password
+		// since this window booted; a late refresh from the old session must
+		// not overwrite the replacement's tokens.
+		saveSession(PASSWORD_SESSION);
+		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await fn("refresh-old");
+
+		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+		expect(stored.accessToken).toBe("access-old");
+		expect(stored.refreshToken).toBeUndefined();
+	});
+
+	it("does not persist into a different account's OIDC session", async () => {
+		const otherSession: Session = {
+			...OIDC_SESSION,
+			userId: "@bob:example.com",
+			deviceId: "DEVICE99",
+		};
+		saveSession(otherSession);
+		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await fn("refresh-old");
+
+		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+		expect(stored.accessToken).toBe("access-old");
+		expect(stored.refreshToken).toBe("refresh-old");
+		expect(stored.userId).toBe("@bob:example.com");
+	});
 });

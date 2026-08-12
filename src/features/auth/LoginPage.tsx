@@ -238,6 +238,10 @@ const LoginPage: Component = () => {
 									onClick={() => {
 										setCapabilities(null);
 										setError("");
+										// Credentials typed for one server must not
+										// pre-fill the login form of the next probe.
+										setUsername("");
+										setPassword("");
 									}}
 									class="shrink-0 text-sm text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
 								>

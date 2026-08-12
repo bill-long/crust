@@ -256,16 +256,31 @@ describe("LoginPage methods stage", () => {
 		await screen.findByRole("button", { name: "Continue with strange.pizza" });
 	});
 
-	it("'Use a different server' returns to the server stage", async () => {
+	it("'Use a different server' returns to the server stage and clears credentials", async () => {
 		stubProbe({ password: true });
 		await renderAndProbe();
 
-		await screen.findByLabelText("Username");
+		const usernameInput = await screen.findByLabelText("Username");
+		fireEvent.input(usernameInput, { target: { value: "alice" } });
+		fireEvent.input(screen.getByLabelText("Password"), {
+			target: { value: "hunter2" },
+		});
 		fireEvent.click(
 			screen.getByRole("button", { name: "Use a different server" }),
 		);
 
 		await screen.findByLabelText("Homeserver");
 		expect(screen.queryByLabelText("Username")).toBeNull();
+
+		// Re-probe: the previous server's credentials must not pre-fill.
+		stubProbe({ password: true });
+		fireEvent.submit(screen.getByRole("button", { name: "Continue" }));
+		const refilled = (await screen.findByLabelText(
+			"Username",
+		)) as HTMLInputElement;
+		expect(refilled.value).toBe("");
+		expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe(
+			"",
+		);
 	});
 });

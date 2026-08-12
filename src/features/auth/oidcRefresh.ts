@@ -31,6 +31,15 @@ import {
 import { oidcRedirectUri } from "./oidc";
 
 class PersistingOidcTokenRefresher extends OidcTokenRefresher {
+	/** Identity of the session this refresher was built for, used to avoid
+	 *  clobbering a DIFFERENT session that has since replaced it in storage. */
+	private readonly sessionIdentity: {
+		userId: string;
+		deviceId: string;
+		issuer: string;
+		clientId: string;
+	};
+
 	constructor(session: Session & { oidc: SessionOidc }) {
 		super(
 			session.oidc.issuer,
@@ -39,6 +48,12 @@ class PersistingOidcTokenRefresher extends OidcTokenRefresher {
 			session.deviceId,
 			decodeIdToken(session.oidc.idToken),
 		);
+		this.sessionIdentity = {
+			userId: session.userId,
+			deviceId: session.deviceId,
+			issuer: session.oidc.issuer,
+			clientId: session.oidc.clientId,
+		};
 	}
 
 	protected override async persistTokens(tokens: {
@@ -49,7 +64,19 @@ class PersistingOidcTokenRefresher extends OidcTokenRefresher {
 		// another tab may have rotated the refresh token since this window
 		// loaded, and we must not resurrect the stale one.
 		const session = loadSession();
-		if (!session) return;
+		// Write back only when storage still holds THIS OIDC session. A
+		// logout/login since boot (different account, or a password session)
+		// must not have its tokens overwritten by a late refresh from the
+		// session that was replaced.
+		if (!session?.oidc) return;
+		if (
+			session.userId !== this.sessionIdentity.userId ||
+			session.deviceId !== this.sessionIdentity.deviceId ||
+			session.oidc.issuer !== this.sessionIdentity.issuer ||
+			session.oidc.clientId !== this.sessionIdentity.clientId
+		) {
+			return;
+		}
 		session.accessToken = tokens.accessToken;
 		if (tokens.refreshToken) session.refreshToken = tokens.refreshToken;
 		try {
