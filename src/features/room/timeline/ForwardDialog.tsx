@@ -205,7 +205,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 								disabled={forwarding()}
 								role="combobox"
 								aria-expanded={getExpanded() ? true : undefined}
-								aria-controls={listboxId}
+								aria-controls={getExpanded() ? listboxId : undefined}
 								aria-activedescendant={getActiveDescendant()}
 								aria-describedby={error() ? errorId : undefined}
 								aria-invalid={error() ? true : undefined}

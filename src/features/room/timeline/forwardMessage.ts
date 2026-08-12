@@ -143,7 +143,7 @@ function readMimetype(content: Record<string, unknown>): string | null {
 /**
  * Rebuild media content for the target room. When the source is cleartext
  * AND the target room is unencrypted the event is copied verbatim (minus
- * the reply relation) - the same MXC stays valid. Whenever the encryption
+ * the reply relation and fallback) - the same MXC stays valid. Whenever the encryption
  * side differs (encrypted source, encrypted target, or both) the bytes are
  * downloaded (decrypting the source when needed) and re-uploaded under the
  * target room's policy: encrypted attachment keys are per-upload, so a
@@ -160,9 +160,15 @@ async function buildMediaForwardContent(
 	const targetEncrypted = targetRoom.hasEncryptionStateEvent();
 	const sourceEncrypted = parseEncryptedFile(content.file) !== null;
 
+	const rawBody = typeof content.body === "string" ? content.body : "";
+	// Reply fallbacks live in `body` for media events too, so strip the
+	// quoted preamble here exactly like the text path - the forward must
+	// not attribute text the forwarder never wrote. Fall back to the raw
+	// body if stripping empties it: a media body doubles as the caption.
+	const body = stripReplyFallback(rawBody).trim() || rawBody.trim();
 	const base: Record<string, unknown> = {
 		msgtype: content.msgtype,
-		body: typeof content.body === "string" ? content.body : "",
+		body,
 	};
 	if (typeof content.filename === "string") base.filename = content.filename;
 	// Voice-message and other top-level rendering hints ride along in both
@@ -189,9 +195,7 @@ async function buildMediaForwardContent(
 		name:
 			typeof content.filename === "string"
 				? content.filename
-				: typeof content.body === "string"
-					? content.body
-					: undefined,
+				: body || undefined,
 	});
 	const info = infoWithoutThumbnails(content.info) ?? {};
 	info.size = blob.size;

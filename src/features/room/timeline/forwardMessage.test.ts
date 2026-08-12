@@ -217,6 +217,55 @@ describe("forwardMessage - media", () => {
 		expect(uploadBlobMock).not.toHaveBeenCalled();
 	});
 
+	it("strips the reply fallback from a media body", async () => {
+		const targetRoom = createMockRoom("!target:example.com");
+		targetRoom.hasEncryptionStateEvent = () => false;
+		const rooms = new Map([["!target:example.com", targetRoom]]);
+		const client = createMockClient(rooms as never);
+		// Reply fallbacks live in `body` for media events too: the quoted
+		// preamble must not ride the forward into the target room.
+		const source = makeSourceEvent({
+			msgtype: "m.image",
+			body: "> <@bob:example.com> quoted\n\nphoto.png",
+			filename: "photo.png",
+			url: "mxc://example.com/image",
+		});
+		await forwardMessage(client as never, source, "!target:example.com");
+		expect(client.sendMessage).toHaveBeenCalledWith(
+			"!target:example.com",
+			null,
+			{
+				msgtype: "m.image",
+				body: "photo.png",
+				filename: "photo.png",
+				url: "mxc://example.com/image",
+			},
+		);
+	});
+
+	it("keeps the raw media body when stripping the fallback empties it", async () => {
+		const targetRoom = createMockRoom("!target:example.com");
+		targetRoom.hasEncryptionStateEvent = () => false;
+		const rooms = new Map([["!target:example.com", targetRoom]]);
+		const client = createMockClient(rooms as never);
+		// Malformed source: fallback + blank line and nothing after, so the
+		// spec-shaped strip empties the body. A media body doubles as the
+		// caption, so an empty result falls back to the raw (trimmed) body.
+		const source = makeSourceEvent({
+			msgtype: "m.file",
+			body: "> <@bob:example.com> only the quote\n\n",
+			url: "mxc://example.com/file",
+		});
+		await forwardMessage(client as never, source, "!target:example.com");
+		expect(client.sendMessage).toHaveBeenCalledWith(
+			"!target:example.com",
+			null,
+			expect.objectContaining({
+				body: "> <@bob:example.com> only the quote",
+			}),
+		);
+	});
+
 	it("re-uploads when the target room is encrypted", async () => {
 		const targetRoom = createMockRoom("!target:example.com");
 		targetRoom.hasEncryptionStateEvent = () => true;
