@@ -547,4 +547,46 @@ describe("ExploreDialog", () => {
 		expect(button).toBeTruthy();
 		expect((button as HTMLButtonElement).disabled).toBe(false);
 	});
+
+	it("clears a superseded join's row state on a new search", async () => {
+		let resolveJoin!: (v: { roomId: string }) => void;
+		const { client } = setup(true, (c) => {
+			c.publicRooms.mockResolvedValue({
+				chunk: [makeChunk("!a:example.com", "alpha")],
+			});
+			c.joinRoom.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveJoin = resolve;
+					}),
+			);
+		});
+		await waitFor(() => expect(screen.getByText("alpha")).toBeTruthy());
+		fireEvent.click(screen.getByRole("button", { name: "Join alpha" }));
+		// The aria-label is constant; the join state shows in the label text.
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Join alpha" }).textContent,
+			).toBe("Joining…"),
+		);
+
+		// Supersede the in-flight join with a fresh search returning the
+		// same room: the stale "Joining…" state must not leak across.
+		fireEvent.input(screen.getByPlaceholderText("Search rooms"), {
+			target: { value: "alpha" },
+		});
+		fireEvent.submit(searchForm());
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Join alpha" }).textContent,
+			).toBe("Join"),
+		);
+
+		// The late join continuation bails on the generation bump: no stub,
+		// no navigation.
+		resolveJoin({ roomId: "!a:example.com" });
+		await client.joinRoom.mock.results[0].value;
+		expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
+		expect(navigateMock).not.toHaveBeenCalled();
+	});
 });

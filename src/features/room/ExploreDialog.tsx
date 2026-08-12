@@ -150,6 +150,10 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 		setError(null);
 		setResults([]);
 		setNextBatch(null);
+		// The results replacement also abandons any in-flight row join: its
+		// continuation bails on the generation bump, so without this the
+		// row's "Joining…" state would leak into the fresh result set.
+		setJoinStates({});
 		try {
 			const res = await client.publicRooms(directoryOptions());
 			if (!mounted || myGeneration !== requestGeneration) return;
