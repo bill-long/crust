@@ -23,6 +23,7 @@ export const STORAGE_KEYS = {
 	paneWidths: "crust:pane-widths",
 	membersWidth: "crust:members-width",
 	threadWidth: "crust:thread-width",
+	oidcClientRegistrations: "crust:oidc-client-registrations",
 } as const;
 
 /**

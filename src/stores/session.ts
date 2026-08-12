@@ -6,9 +6,24 @@ const LEGACY_SESSION_KEY = LEGACY_STORAGE_KEYS.session;
 
 export interface Session {
 	accessToken: string;
+	/** OAuth 2.0 refresh token. Present only on OIDC (MSC3861) sessions. */
+	refreshToken?: string;
 	userId: string;
 	deviceId: string;
 	homeserverUrl: string;
+	/**
+	 * OIDC session metadata needed to refresh tokens across a reload:
+	 * the OP issuer, this install's dynamically registered client_id, and
+	 * the raw ID token from the authorization grant (its claims validate
+	 * refreshed ID tokens per OIDC Core). Absent on password sessions.
+	 */
+	oidc?: SessionOidc;
+}
+
+export interface SessionOidc {
+	issuer: string;
+	clientId: string;
+	idToken: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -24,17 +39,33 @@ function isValidUrl(value: string): boolean {
 	}
 }
 
+function isSessionOidc(value: unknown): value is SessionOidc {
+	if (!isRecord(value)) return false;
+	return (
+		typeof value.issuer === "string" &&
+		value.issuer.length > 0 &&
+		typeof value.clientId === "string" &&
+		value.clientId.length > 0 &&
+		typeof value.idToken === "string" &&
+		value.idToken.length > 0
+	);
+}
+
 function isSession(value: unknown): value is Session {
 	if (!isRecord(value)) return false;
 	return (
 		typeof value.accessToken === "string" &&
 		value.accessToken.length > 0 &&
+		(value.refreshToken === undefined ||
+			(typeof value.refreshToken === "string" &&
+				value.refreshToken.length > 0)) &&
 		typeof value.userId === "string" &&
 		value.userId.length > 0 &&
 		typeof value.deviceId === "string" &&
 		value.deviceId.length > 0 &&
 		typeof value.homeserverUrl === "string" &&
-		isValidUrl(value.homeserverUrl)
+		isValidUrl(value.homeserverUrl) &&
+		(value.oidc === undefined || isSessionOidc(value.oidc))
 	);
 }
 

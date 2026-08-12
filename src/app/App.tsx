@@ -48,6 +48,11 @@ import("../features/auth/LoginPage").catch(() => {});
 const LoginPage = lazy(() =>
 	import("../features/auth/LoginPage").then((m) => ({ default: m.LoginPage })),
 );
+const LoginCallback = lazy(() =>
+	import("../features/auth/LoginCallback").then((m) => ({
+		default: m.LoginCallback,
+	})),
+);
 const OverlayRoute = lazy(() =>
 	import("../features/room/call/rtc/OverlayRoute").then((m) => ({
 		default: m.OverlayRoute,
@@ -230,6 +235,16 @@ const App: Component = () => {
 						// swaps to the form with no visible shift.
 						<Suspense fallback={<div class="h-full bg-surface-0" />}>
 							<LoginPage />
+						</Suspense>
+					)}
+				/>
+				{/* OIDC redirect landing (MSC3861). Outside the auth guard - the
+				    whole point of the route is to CREATE the session. */}
+				<Route
+					path="/login/callback"
+					component={() => (
+						<Suspense fallback={<div class="h-full bg-surface-0" />}>
+							<LoginCallback />
 						</Suspense>
 					)}
 				/>
