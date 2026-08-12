@@ -236,9 +236,15 @@ async function homeserverSupportsAuthedMedia(
 	const response = await fetch(`${origin}/_matrix/client/versions`, {
 		headers: { Authorization: `Bearer ${auth.accessToken}` },
 	});
-	const supported = supportsAuthedMedia(
-		await response.json().catch(() => null),
-	);
+	// Only a well-formed /versions response earns a cache entry. Caching a
+	// transient failure (bad gateway, proxy blip, unparseable body) as
+	// supported=false would suppress authenticated upgrades for the whole
+	// cache window on servers that require MSC3916; returning false
+	// uncached fails this request open and lets the next one retry.
+	if (!response.ok) return false;
+	const body: unknown = await response.json().catch(() => null);
+	if (body === null) return false;
+	const supported = supportsAuthedMedia(body);
 	authedMediaSupport.set(origin, {
 		supported,
 		expiresAt: Date.now() + AUTHED_MEDIA_SUPPORT_CACHE_MS,
@@ -260,9 +266,15 @@ async function handleMediaRequest(
 		if (!(await homeserverSupportsAuthedMedia(mediaAuth))) {
 			return fetch(event.request);
 		}
-		return await fetch(target, {
-			headers: { Authorization: `Bearer ${mediaAuth.accessToken}` },
-		});
+		// Preserve the original request's headers (Accept, and Range -
+		// video/audio elements issue Range requests whose 206 handling
+		// would break if the header were dropped) and add the token on
+		// top. A fresh Headers object is required: the original request's
+		// headers may be immutable (no-cors image requests), and
+		// Authorization is not a CORS-safelisted header.
+		const headers = new Headers(event.request.headers);
+		headers.set("Authorization", `Bearer ${mediaAuth.accessToken}`);
+		return await fetch(target, { headers });
 	} catch {
 		// Fail open: a worker restart, a /versions network error, or a page
 		// that never answers must not break image loading.
