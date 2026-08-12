@@ -39,6 +39,9 @@ vi.mock("matrix-js-sdk", () => {
 	return {
 		decodeIdToken: decodeIdTokenMock,
 		OidcTokenRefresher: FakeOidcTokenRefresher,
+		// The direct refresh path throws this on invalid_grant; a plain Error
+		// subclass preserves the instanceof semantics under test.
+		TokenRefreshLogoutError: class TokenRefreshLogoutError extends Error {},
 	};
 });
 
@@ -65,6 +68,18 @@ const OIDC_SESSION: Session = {
 		issuer: "https://auth.example.com/",
 		clientId: "client-xyz",
 		idToken: "header.payload.signature",
+		tokenEndpoint: "https://auth.example.com/token",
+	},
+};
+
+/** OIDC session for an OP that issues no ID tokens (Continuwuity shape). */
+const NO_ID_TOKEN_SESSION: Session = {
+	...PASSWORD_SESSION,
+	refreshToken: "refresh-old",
+	oidc: {
+		issuer: "https://auth.example.com/",
+		clientId: "client-xyz",
+		tokenEndpoint: "https://auth.example.com/token",
 	},
 };
 
@@ -76,6 +91,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.unstubAllGlobals();
 	localStorage.clear();
 });
 
@@ -183,5 +199,132 @@ describe("createOidcTokenRefreshFn", () => {
 		expect(stored.accessToken).toBe("access-old");
 		expect(stored.refreshToken).toBe("refresh-old");
 		expect(stored.userId).toBe("@bob:example.com");
+	});
+});
+
+describe("direct refresh path (OP issues no ID tokens)", () => {
+	function stubRefreshEndpoint(
+		handler: () => Promise<{
+			status: number;
+			body: unknown;
+		}>,
+	): ReturnType<typeof vi.fn> {
+		const fetchMock = vi.fn(async () => {
+			const { status, body } = await handler();
+			return {
+				ok: status >= 200 && status < 300,
+				status,
+				json: async () => body,
+			} as Response;
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		return fetchMock;
+	}
+
+	it("takes the direct path (not the SDK refresher) without an idToken", () => {
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		expect(fn).toBeTypeOf("function");
+		expect(fake.instances).toHaveLength(0);
+	});
+
+	it("refreshes via the persisted token endpoint and persists rotated tokens", async () => {
+		saveSession(NO_ID_TOKEN_SESSION);
+		const fetchMock = stubRefreshEndpoint(async () => ({
+			status: 200,
+			body: {
+				access_token: "new-access",
+				refresh_token: "new-refresh",
+				expires_in: 3600,
+			},
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		const tokens = await fn("refresh-old");
+
+		const [url, init] = fetchMock.mock.calls[0];
+		expect(url).toBe("https://auth.example.com/token");
+		const body = (init as RequestInit).body as URLSearchParams;
+		expect(body.get("grant_type")).toBe("refresh_token");
+		expect(body.get("refresh_token")).toBe("refresh-old");
+		expect(body.get("client_id")).toBe("client-xyz");
+
+		expect(tokens.accessToken).toBe("new-access");
+		expect(tokens.refreshToken).toBe("new-refresh");
+		expect(tokens.expiry).toBeInstanceOf(Date);
+		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+		expect(stored.accessToken).toBe("new-access");
+		expect(stored.refreshToken).toBe("new-refresh");
+	});
+
+	it("carries the old refresh token forward when the OP doesn't rotate", async () => {
+		saveSession(NO_ID_TOKEN_SESSION);
+		stubRefreshEndpoint(async () => ({
+			status: 200,
+			body: { access_token: "new-access" },
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		const tokens = await fn("refresh-old");
+
+		// Returned to the SDK (which would otherwise unset it) AND persisted.
+		expect(tokens.refreshToken).toBe("refresh-old");
+		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+		expect(stored.accessToken).toBe("new-access");
+		expect(stored.refreshToken).toBe("refresh-old");
+	});
+
+	it("throws TokenRefreshLogoutError on invalid_grant so the SDK ends the session", async () => {
+		stubRefreshEndpoint(async () => ({
+			status: 400,
+			body: { error: "invalid_grant" },
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await expect(fn("refresh-old")).rejects.toThrow(
+			"OIDC refresh token was rejected by the server",
+		);
+	});
+
+	it("treats a 5xx as transient (plain error, SDK retries)", async () => {
+		stubRefreshEndpoint(async () => ({ status: 503, body: {} }));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await expect(fn("refresh-old")).rejects.toThrow(
+			"Token refresh failed with status 503",
+		);
+	});
+
+	it("throws on a malformed refresh response", async () => {
+		stubRefreshEndpoint(async () => ({
+			status: 200,
+			body: { token_type: "Bearer" }, // no access_token
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await expect(fn("refresh-old")).rejects.toThrow(
+			"Token refresh response was malformed",
+		);
+	});
+
+	it("does not persist into a password session that replaced the OIDC one", async () => {
+		saveSession(PASSWORD_SESSION);
+		stubRefreshEndpoint(async () => ({
+			status: 200,
+			body: { access_token: "new-access", refresh_token: "new-refresh" },
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		// The refresh itself succeeds (in-memory client keeps working)...
+		await fn("refresh-old");
+		// ...but the replacement session in storage is untouched.
+		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+		expect(stored.accessToken).toBe("access-old");
+		expect(stored.refreshToken).toBeUndefined();
 	});
 });

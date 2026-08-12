@@ -44,6 +44,7 @@ const GRANT_RESULT = {
 		issuer: "https://strange.pizza/",
 		clientId: "client-xyz",
 		idToken: "header.payload.signature",
+		tokenEndpoint: "https://strange.pizza/token",
 	},
 };
 

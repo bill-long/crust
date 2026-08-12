@@ -83,6 +83,18 @@ const OIDC_SESSION: Session = {
 		issuer: "https://auth.example.com/",
 		clientId: "client-xyz",
 		idToken: fakeIdToken({ sub: "@alice:example.com", nonce: "n" }),
+		tokenEndpoint: "https://auth.example.com/token",
+	},
+};
+
+/** OIDC session from an OP that issues no ID tokens (Continuwuity shape). */
+const NO_ID_TOKEN_SESSION: Session = {
+	...PASSWORD_SESSION,
+	refreshToken: "refresh-abc",
+	oidc: {
+		issuer: "https://auth.example.com/",
+		clientId: "client-xyz",
+		tokenEndpoint: "https://auth.example.com/token",
 	},
 };
 
@@ -125,6 +137,15 @@ describe("ClientProvider session wiring (#460)", () => {
 		const opts = createClientMock.mock.calls[0][0];
 		expect(opts.refreshToken).toBeUndefined();
 		expect(opts.tokenRefreshFunction).toBeUndefined();
+	});
+
+	it("passes a tokenRefreshFunction for an OIDC session without an idToken", async () => {
+		setup(NO_ID_TOKEN_SESSION);
+
+		await screen.findByText("provider-child");
+		const opts = createClientMock.mock.calls[0][0];
+		expect(opts.refreshToken).toBe("refresh-abc");
+		expect(opts.tokenRefreshFunction).toBeTypeOf("function");
 	});
 
 	it("starts the client once crypto init resolves", async () => {

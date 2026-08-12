@@ -6,18 +6,25 @@
  *
  *  1. {@link probeDelegatedAuth} - does this homeserver delegate auth?
  *  2. {@link startOidcLogin} - dynamic client registration (cached per
- *     issuer) + authorization URL generation; the caller navigates to it.
- *  3. {@link completeOidcLogin} - code exchange on the callback route +
- *     whoami to learn the user/device IDs the session store needs.
+ *     issuer), then build the authorization URL with our own signin state
+ *     (state + PKCE verifier + nonce in sessionStorage); the caller
+ *     navigates to it.
+ *  3. {@link completeOidcLogin} - verify the returned state, exchange the
+ *     code at the token endpoint, then whoami for the user/device IDs.
  *
- * The PKCE state the SDK stashes (via oidc-client-ts) lives in
- * sessionStorage, as does our `returnTo` stash - both survive the
- * full-page round trip to the OP in the same tab.
+ * The authorization-code legs (URL generation, signin state, token
+ * exchange) are owned here rather than delegated to the SDK's
+ * generateOidcAuthorizationUrl / completeAuthorizationCodeGrant, because
+ * those hard-require an `id_token` in the token response - and real-world
+ * OPs exist that don't issue one (Continuwuity's built-in OAuth server,
+ * verified v26.7.x). When the OP does issue an id_token it is validated
+ * (iss/aud/nonce/exp); when it doesn't, identity is proven by the whoami
+ * call with the freshly exchanged access token.
  */
 import {
-	completeAuthorizationCodeGrant,
 	createClient,
-	generateOidcAuthorizationUrl,
+	decodeIdToken,
+	generateScope,
 	type OidcClientConfig,
 	registerOidcClient,
 } from "matrix-js-sdk";
@@ -125,10 +132,92 @@ export function takeOidcReturnTo(): string | null {
 	}
 }
 
-/** 128 bits of entropy, base64url-encoded, for the OIDC nonce. */
-function generateNonce(): string {
-	const bytes = new Uint8Array(16);
+// --- Signin state (sessionStorage; survives the OP round trip) ---
+//
+// One shared key means only one OAuth login can be in flight per tab
+// session: starting a second login overwrites the first's state (the
+// first tab's callback then fails closed with "started elsewhere"), and a
+// mismatched callback clears the state before failing. That is a
+// deliberate fail-closed tradeoff, not a race worth defending further.
+
+const SIGNIN_STATE_KEY = "crust:oidc-signin-state";
+
+/** Everything the callback needs to complete the flow we started. */
+interface OidcSigninState {
+	state: string;
+	codeVerifier: string;
+	nonce: string;
+	homeserverUrl: string;
+	issuer: string;
+	clientId: string;
+	tokenEndpoint: string;
+}
+
+function storeSigninState(signin: OidcSigninState): void {
+	try {
+		sessionStorage.setItem(SIGNIN_STATE_KEY, JSON.stringify(signin));
+	} catch {
+		// Storage denied: the callback will report "login session expired".
+	}
+}
+
+/**
+ * Read and clear the stored signin state. Single-use by design: a replayed
+ * callback finds nothing and fails closed. Null when absent or malformed.
+ */
+function takeSigninState(): OidcSigninState | null {
+	let raw: string | null = null;
+	try {
+		raw = sessionStorage.getItem(SIGNIN_STATE_KEY);
+		sessionStorage.removeItem(SIGNIN_STATE_KEY);
+	} catch {
+		return null;
+	}
+	if (raw === null) return null;
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (typeof parsed !== "object" || parsed === null) return null;
+		const s = parsed as Record<string, unknown>;
+		for (const field of [
+			"state",
+			"codeVerifier",
+			"nonce",
+			"homeserverUrl",
+			"issuer",
+			"clientId",
+			"tokenEndpoint",
+		] as const) {
+			if (typeof s[field] !== "string" || (s[field] as string).length === 0) {
+				return null;
+			}
+		}
+		return parsed as OidcSigninState;
+	} catch {
+		return null;
+	}
+}
+
+// --- Random / PKCE helpers ---
+
+/** Cryptographically random base64url string from `n` bytes of entropy. */
+function secureRandomBase64Url(n: number): string {
+	const bytes = new Uint8Array(n);
 	crypto.getRandomValues(bytes);
+	let binary = "";
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary)
+		.replace(/\+/g, "-")
+		.replace(/\//g, "_")
+		.replace(/=+$/, "");
+}
+
+/** S256 PKCE challenge for a verifier (RFC 7636). */
+async function pkceChallengeS256(verifier: string): Promise<string> {
+	const digest = await crypto.subtle.digest(
+		"SHA-256",
+		new TextEncoder().encode(verifier),
+	);
+	const bytes = new Uint8Array(digest);
 	let binary = "";
 	for (const byte of bytes) binary += String.fromCharCode(byte);
 	return btoa(binary)
@@ -139,11 +228,12 @@ function generateNonce(): string {
 
 /**
  * Begin the authorization code flow: register this install with the OP
- * (reusing the cached registration when present) and build the
- * authorization URL. The caller navigates the full page to it.
+ * (reusing the cached registration when present), store the signin state,
+ * and build the authorization URL. The caller navigates the full page to
+ * the returned URL.
  *
  * @throws when dynamic registration fails, the OP rejects the metadata, or
- *         the generated URL is not a web URL.
+ *         the metadata's authorization endpoint is not a web URL.
  */
 export async function startOidcLogin(
 	metadata: OidcClientConfig,
@@ -165,27 +255,51 @@ export async function startOidcLogin(
 		});
 		cacheClientId(metadata.issuer, clientId);
 	}
-	const authorizationUrl = await generateOidcAuthorizationUrl({
-		metadata,
-		clientId,
+
+	const signin: OidcSigninState = {
+		state: secureRandomBase64Url(16),
+		codeVerifier: secureRandomBase64Url(64),
+		nonce: secureRandomBase64Url(16),
 		homeserverUrl,
-		redirectUri,
-		nonce: generateNonce(),
-	});
-	// The authorization endpoint comes from homeserver-supplied metadata and
-	// the SDK emits it verbatim (validateAuthMetadata only checks the field
-	// is a string). A javascript: URL handed to window.location.assign would
-	// execute in Crust's origin, so the scheme is pinned to web protocols.
-	let parsed: URL;
+		issuer: metadata.issuer,
+		clientId,
+		tokenEndpoint: metadata.token_endpoint,
+	};
+
+	// The authorization endpoint comes from homeserver-supplied metadata. A
+	// javascript: URL handed to window.location.assign would execute in
+	// Crust's origin, so the scheme is pinned to web protocols before the
+	// URL is built.
+	let authorizationUrl: URL;
 	try {
-		parsed = new URL(authorizationUrl);
+		authorizationUrl = new URL(metadata.authorization_endpoint);
 	} catch {
 		throw new Error("The homeserver returned an invalid login URL.");
 	}
-	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+	if (
+		authorizationUrl.protocol !== "https:" &&
+		authorizationUrl.protocol !== "http:"
+	) {
 		throw new Error("The homeserver returned an invalid login URL.");
 	}
-	return authorizationUrl;
+
+	authorizationUrl.searchParams.set("response_type", "code");
+	authorizationUrl.searchParams.set("client_id", clientId);
+	authorizationUrl.searchParams.set("redirect_uri", redirectUri);
+	// generateScope() covers everything needed: the Matrix API scope, a
+	// fresh device ID for this login, and "openid" (what makes OIDC-pure
+	// OPs issue an id_token; Continuwuity parses and ignores it).
+	authorizationUrl.searchParams.set("scope", generateScope());
+	authorizationUrl.searchParams.set("state", signin.state);
+	authorizationUrl.searchParams.set("nonce", signin.nonce);
+	authorizationUrl.searchParams.set(
+		"code_challenge",
+		await pkceChallengeS256(signin.codeVerifier),
+	);
+	authorizationUrl.searchParams.set("code_challenge_method", "S256");
+
+	storeSigninState(signin);
+	return authorizationUrl.toString();
 }
 
 /** Everything the session store needs after a successful OAuth login. */
@@ -198,17 +312,87 @@ export interface OidcLoginResult {
 	oidc: {
 		issuer: string;
 		clientId: string;
-		idToken: string;
+		/** Present only when the OP issues OIDC ID tokens. */
+		idToken?: string;
+		/** Token endpoint for the refresh path. */
+		tokenEndpoint: string;
 	};
 }
 
+/** Shape of a successful token-endpoint response we rely on. */
+interface TokenEndpointResponse {
+	access_token: string;
+	token_type: string;
+	refresh_token?: string;
+	expires_in?: number;
+	id_token?: string;
+}
+
+function isTokenEndpointResponse(
+	value: unknown,
+): value is TokenEndpointResponse {
+	if (typeof value !== "object" || value === null) return false;
+	const r = value as Record<string, unknown>;
+	if (typeof r.access_token !== "string" || r.access_token.length === 0) {
+		return false;
+	}
+	// RFC 6750: only bearer tokens are usable against the C-S API.
+	if (
+		typeof r.token_type !== "string" ||
+		r.token_type.toLowerCase() !== "bearer"
+	) {
+		return false;
+	}
+	for (const opt of ["refresh_token", "id_token"] as const) {
+		if (r[opt] !== undefined && typeof r[opt] !== "string") return false;
+	}
+	return true;
+}
+
 /**
- * Complete the authorization code flow on the callback route: exchange the
- * code for tokens, then whoami to learn the user/device IDs.
+ * Validate an OP-issued id_token's claims. The signature is intentionally
+ * NOT verified: the token arrived over a direct TLS back-channel POST to
+ * the token endpoint, which OIDC Core accepts as sufficient ("if the ID
+ * Token is received via direct communication between the Client and the
+ * Token Endpoint, TLS server validation may be used"). iss/aud/nonce/exp
+ * are still checked.
+ *
+ * @throws an Error with a user-presentable message on any mismatch.
+ */
+function validateIdTokenClaims(
+	idToken: string,
+	expected: { issuer: string; clientId: string; nonce: string },
+): void {
+	const invalid =
+		"The homeserver's login response failed validation. Try logging in again.";
+	let claims: ReturnType<typeof decodeIdToken>;
+	try {
+		claims = decodeIdToken(idToken);
+	} catch {
+		throw new Error(invalid);
+	}
+	if (claims.iss !== expected.issuer) throw new Error(invalid);
+	const aud = claims.aud;
+	const audMatch = Array.isArray(aud)
+		? aud.includes(expected.clientId)
+		: aud === expected.clientId;
+	if (!audMatch) throw new Error(invalid);
+	if (claims.nonce !== expected.nonce) throw new Error(invalid);
+	// exp is REQUIRED (OIDC Core): absent or elapsed both fail closed.
+	if (typeof claims.exp !== "number" || claims.exp * 1000 <= Date.now()) {
+		throw new Error(invalid);
+	}
+}
+
+/**
+ * Complete the authorization code flow on the callback route: verify the
+ * returned state against the stored signin state (login-CSRF protection),
+ * exchange the code for tokens, then whoami to learn the user/device IDs.
  *
  * @param search - the callback URL's query string (`location.search`).
  * @throws an Error with a user-presentable message on OP-reported errors,
- *         a malformed callback, a failed exchange, or a missing device ID.
+ *         a malformed or replayed callback, a failed exchange, failed
+ *         id_token validation, or a missing device ID.
  */
 export async function completeOidcLogin(
 	search: string,
@@ -229,32 +413,99 @@ export async function completeOidcLogin(
 	}
 
 	const code = params.get("code");
-	const state = params.get("state");
-	if (!code || !state) {
+	const stateParam = params.get("state");
+	if (!code || !stateParam) {
 		throw new Error(
 			"This login link is incomplete. Go back and start the login again.",
 		);
 	}
 
-	let grant: Awaited<ReturnType<typeof completeAuthorizationCodeGrant>>;
-	try {
-		grant = await completeAuthorizationCodeGrant(code, state);
-	} catch (e) {
+	// Single-use: cleared on read, so a replayed callback fails closed here.
+	const signin = takeSigninState();
+	if (!signin || signin.state !== stateParam) {
 		throw new Error(
-			userFacingErrorMessage(
-				e,
-				"Could not complete the login with the homeserver. Try again.",
-			),
+			"This login session has expired or was started elsewhere. Go back and start the login again.",
 		);
 	}
-	const { oidcClientSettings, tokenResponse, homeserverUrl } = grant;
+
+	// Exchange the authorization code at the token endpoint (PKCE).
+	const tokenResponse = await (async (): Promise<TokenEndpointResponse> => {
+		let res: Response;
+		try {
+			res = await fetch(signin.tokenEndpoint, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+					Accept: "application/json",
+				},
+				body: new URLSearchParams({
+					grant_type: "authorization_code",
+					code,
+					redirect_uri: oidcRedirectUri(),
+					client_id: signin.clientId,
+					code_verifier: signin.codeVerifier,
+				}),
+			});
+		} catch (e) {
+			throw new Error(
+				userFacingErrorMessage(
+					e,
+					"Could not complete the login with the homeserver. Try again.",
+				),
+			);
+		}
+		if (!res.ok) {
+			// RFC 6749 error bodies carry human-readable descriptions.
+			let message = `The homeserver rejected the login (${res.status}). Try again.`;
+			try {
+				const errBody: unknown = await res.json();
+				if (
+					typeof errBody === "object" &&
+					errBody !== null &&
+					typeof (errBody as { error_description?: unknown })
+						.error_description === "string"
+				) {
+					message = `Login failed: ${(errBody as { error_description: string }).error_description}`;
+				}
+			} catch {
+				// Non-JSON error body - keep the status-based message.
+			}
+			throw new Error(message);
+		}
+		const body: unknown = await (async () => {
+			try {
+				return await res.json();
+			} catch {
+				throw new Error(
+					"The homeserver's login response was malformed. Try logging in again.",
+				);
+			}
+		})();
+		if (!isTokenEndpointResponse(body)) {
+			throw new Error(
+				"The homeserver's login response was malformed. Try logging in again.",
+			);
+		}
+		return body;
+	})();
+
+	// When the OP issues an id_token, validate its claims. Its absence is
+	// tolerated (Continuwuity issues none): the whoami below with the fresh
+	// access token proves the same identity for login purposes.
+	if (tokenResponse.id_token) {
+		validateIdTokenClaims(tokenResponse.id_token, {
+			issuer: signin.issuer,
+			clientId: signin.clientId,
+			nonce: signin.nonce,
+		});
+	}
 
 	// The token response carries no Matrix user/device IDs; whoami with the
 	// fresh access token is the canonical way to learn them.
 	let whoami: { user_id: string; device_id?: string };
 	try {
 		whoami = await createClient({
-			baseUrl: homeserverUrl,
+			baseUrl: signin.homeserverUrl,
 			accessToken: tokenResponse.access_token,
 		}).whoami();
 	} catch (e) {
@@ -276,11 +527,12 @@ export async function completeOidcLogin(
 		refreshToken: tokenResponse.refresh_token,
 		userId: whoami.user_id,
 		deviceId: whoami.device_id,
-		homeserverUrl: homeserverUrl.replace(/\/+$/, ""),
+		homeserverUrl: signin.homeserverUrl.replace(/\/+$/, ""),
 		oidc: {
-			issuer: oidcClientSettings.issuer,
-			clientId: oidcClientSettings.clientId,
+			issuer: signin.issuer,
+			clientId: signin.clientId,
 			idToken: tokenResponse.id_token,
+			tokenEndpoint: signin.tokenEndpoint,
 		},
 	};
 }

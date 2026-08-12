@@ -137,6 +137,21 @@ describe("loadSession", () => {
 				issuer: "https://auth.example.com/",
 				clientId: "client-123",
 				idToken: "header.payload.signature",
+				tokenEndpoint: "https://auth.example.com/token",
+			},
+		};
+		saveSession(oidcSession);
+		expect(loadSession()).toEqual(oidcSession);
+	});
+
+	it("round-trips an OIDC session without an idToken (no-ID-token OP)", () => {
+		const oidcSession: Session = {
+			...VALID,
+			refreshToken: "refresh-abc",
+			oidc: {
+				issuer: "https://auth.example.com/",
+				clientId: "client-123",
+				tokenEndpoint: "https://auth.example.com/token",
 			},
 		};
 		saveSession(oidcSession);
@@ -163,10 +178,12 @@ describe("loadSession", () => {
 		// Each missing/empty sub-field must invalidate the session: a partial
 		// oidc block would break token refresh in confusing ways later.
 		for (const oidc of [
-			{ clientId: "c", idToken: "t" }, // issuer missing
-			{ issuer: "", clientId: "c", idToken: "t" },
-			{ issuer: "i", clientId: 7, idToken: "t" },
-			{ issuer: "i", clientId: "c", idToken: "" },
+			{ clientId: "c", tokenEndpoint: "e" }, // issuer missing
+			{ issuer: "", clientId: "c", tokenEndpoint: "e" },
+			{ issuer: "i", clientId: 7, tokenEndpoint: "e" },
+			{ issuer: "i", clientId: "c", tokenEndpoint: "" },
+			{ issuer: "i", clientId: "c" }, // tokenEndpoint missing
+			{ issuer: "i", clientId: "c", idToken: "", tokenEndpoint: "e" },
 			"not-an-object",
 			[],
 		]) {
