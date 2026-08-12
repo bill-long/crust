@@ -183,6 +183,10 @@ describe("loadSession", () => {
 			{ issuer: "i", clientId: 7, tokenEndpoint: "e" },
 			{ issuer: "i", clientId: "c", tokenEndpoint: "" },
 			{ issuer: "i", clientId: "c" }, // tokenEndpoint missing
+			// tokenEndpoint must be a web URL (it feeds fetch() during refresh)
+			{ issuer: "i", clientId: "c", tokenEndpoint: "notaurl" },
+			{ issuer: "i", clientId: "c", tokenEndpoint: "javascript:alert(1)" },
+			{ issuer: "i", clientId: "c", tokenEndpoint: "ftp://evil.example" },
 			{ issuer: "i", clientId: "c", idToken: "", tokenEndpoint: "e" },
 			"not-an-object",
 			[],

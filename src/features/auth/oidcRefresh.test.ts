@@ -284,7 +284,50 @@ describe("direct refresh path (OP issues no ID tokens)", () => {
 		if (!fn) throw new Error("expected a refresh function");
 
 		await expect(fn("refresh-old")).rejects.toThrow(
-			"OIDC refresh token was rejected by the server",
+			"OIDC refresh was rejected by the server (invalid_grant)",
+		);
+	});
+
+	it("throws TokenRefreshLogoutError on invalid_client (registration revoked)", async () => {
+		stubRefreshEndpoint(async () => ({
+			status: 401,
+			body: { error: "invalid_client" },
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await expect(fn("refresh-old")).rejects.toThrow(
+			"OIDC refresh was rejected by the server (invalid_client)",
+		);
+	});
+
+	it("treats other 4xx OAuth errors as transient, not logout", async () => {
+		// invalid_request / temporarily_unavailable must not end the session.
+		stubRefreshEndpoint(async () => ({
+			status: 400,
+			body: { error: "invalid_request" },
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await expect(fn("refresh-old")).rejects.toThrow(
+			"Token refresh failed with status 400 (invalid_request)",
+		);
+	});
+
+	it("treats an unparseable 400 body as transient, not logout", async () => {
+		vi.stubGlobal("fetch", async () => ({
+			ok: false,
+			status: 400,
+			json: async () => {
+				throw new SyntaxError("not json");
+			},
+		}));
+		const fn = createOidcTokenRefreshFn(NO_ID_TOKEN_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await expect(fn("refresh-old")).rejects.toThrow(
+			"Token refresh failed with status 400",
 		);
 	});
 

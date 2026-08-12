@@ -545,6 +545,22 @@ describe("completeOidcLogin", () => {
 		).rejects.toThrow("The homeserver's login response was malformed.");
 	});
 
+	it("rejects present-but-empty optional token fields", async () => {
+		// An empty refresh_token would persist and silently disable refresh.
+		for (const body of [
+			{ access_token: "a", token_type: "Bearer", refresh_token: "" },
+			{ access_token: "a", token_type: "Bearer", refresh_token: "  " },
+			{ access_token: "a", token_type: "Bearer", id_token: "" },
+			{ access_token: "a", token_type: "Bearer", expires_in: "3600" },
+		]) {
+			seedSigninState();
+			stubTokenEndpoint(async () => ({ status: 200, body }));
+			await expect(
+				completeOidcLogin("?code=abc&state=state-123"),
+			).rejects.toThrow("The homeserver's login response was malformed.");
+		}
+	});
+
 	it("accepts a case-insensitive bearer token_type", async () => {
 		seedSigninState();
 		stubTokenEndpoint(async () => ({

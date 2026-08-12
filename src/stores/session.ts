@@ -53,8 +53,11 @@ function isSessionOidc(value: unknown): value is SessionOidc {
 		value.clientId.length > 0 &&
 		(value.idToken === undefined ||
 			(typeof value.idToken === "string" && value.idToken.length > 0)) &&
+		// Reused for fetch() during refresh - must be a web URL, same rule as
+		// homeserverUrl, so a poisoned block fails the session up front
+		// rather than at first refresh.
 		typeof value.tokenEndpoint === "string" &&
-		value.tokenEndpoint.length > 0
+		isValidUrl(value.tokenEndpoint)
 	);
 }
 

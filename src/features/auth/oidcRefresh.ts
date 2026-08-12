@@ -142,7 +142,8 @@ function isRefreshGrantResponse(value: unknown): value is RefreshGrantResponse {
 
 /**
  * Direct refresh-token grant for OPs that issue no ID tokens. On
- * invalid_grant the session is genuinely dead - TokenRefreshLogoutError
+ * invalid_grant (refresh token dead) or invalid_client (registration
+ * revoked) the session is genuinely unrecoverable - TokenRefreshLogoutError
  * tells the SDK's http-api to take the SessionLoggedOut path; any other
  * failure reads as transient and is retried.
  */
@@ -171,8 +172,30 @@ function createDirectRefreshFn(
 			throw e instanceof Error ? e : new Error("Token refresh request failed");
 		}
 		if (res.status === 400 || res.status === 401) {
-			throw new TokenRefreshLogoutError(
-				new Error("OIDC refresh token was rejected by the server"),
+			// Only invalid_grant (refresh token dead) and invalid_client
+			// (registration revoked) are terminal; other 4xx codes
+			// (invalid_request, temporarily_unavailable, unparseable bodies)
+			// read as transient and the SDK retries.
+			let oauthError: string | undefined;
+			try {
+				const errBody: unknown = await res.json();
+				if (
+					typeof errBody === "object" &&
+					errBody !== null &&
+					typeof (errBody as { error?: unknown }).error === "string"
+				) {
+					oauthError = (errBody as { error: string }).error;
+				}
+			} catch {
+				// Unparseable body - treat as transient below.
+			}
+			if (oauthError === "invalid_grant" || oauthError === "invalid_client") {
+				throw new TokenRefreshLogoutError(
+					new Error(`OIDC refresh was rejected by the server (${oauthError})`),
+				);
+			}
+			throw new Error(
+				`Token refresh failed with status ${res.status}${oauthError ? ` (${oauthError})` : ""}`,
 			);
 		}
 		if (!res.ok) {

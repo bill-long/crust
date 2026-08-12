@@ -344,7 +344,18 @@ function isTokenEndpointResponse(
 		return false;
 	}
 	for (const opt of ["refresh_token", "id_token"] as const) {
-		if (r[opt] !== undefined && typeof r[opt] !== "string") return false;
+		// Present-but-empty (or whitespace-only) would persist an unusable
+		// credential: an empty refresh_token silently disables refresh
+		// (falsy !session.refreshToken).
+		if (
+			r[opt] !== undefined &&
+			(typeof r[opt] !== "string" || (r[opt] as string).trim().length === 0)
+		) {
+			return false;
+		}
+	}
+	if (r.expires_in !== undefined && typeof r.expires_in !== "number") {
+		return false;
 	}
 	return true;
 }
