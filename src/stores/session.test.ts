@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pushMediaAuthToSw } from "../lib/authedMedia";
 import {
 	clearSession,
 	loadSession,
 	type Session,
 	saveSession,
 } from "./session";
+
+// Keep the media-auth push observable without a service worker in jsdom.
+vi.mock("../lib/authedMedia", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../lib/authedMedia")>();
+	return { ...actual, pushMediaAuthToSw: vi.fn() };
+});
 
 // The persisted key is module-private; the tests that poke localStorage
 // directly reference it by its literal value.
@@ -18,10 +25,37 @@ const VALID: Session = {
 	homeserverUrl: "https://matrix.example.com",
 };
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+	localStorage.clear();
+	vi.mocked(pushMediaAuthToSw).mockClear();
+});
 afterEach(() => {
 	localStorage.clear();
 	vi.restoreAllMocks();
+});
+
+describe("service-worker media auth push", () => {
+	it("pushes the access token and homeserver on save", () => {
+		saveSession(VALID);
+		expect(pushMediaAuthToSw).toHaveBeenCalledWith({
+			accessToken: VALID.accessToken,
+			homeserverUrl: VALID.homeserverUrl,
+		});
+	});
+
+	it("clears the worker's media auth on clear", () => {
+		saveSession(VALID);
+		vi.mocked(pushMediaAuthToSw).mockClear();
+		clearSession();
+		expect(pushMediaAuthToSw).toHaveBeenCalledWith(null);
+	});
+
+	it("does not push when the session fails validation", () => {
+		// The token must never reach the worker for a session we refused to
+		// persist; the throw happens before the push.
+		expect(() => saveSession({ ...VALID, accessToken: "" })).toThrow();
+		expect(pushMediaAuthToSw).not.toHaveBeenCalled();
+	});
 });
 
 describe("saveSession / loadSession round-trip", () => {
