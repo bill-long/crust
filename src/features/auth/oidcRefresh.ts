@@ -78,13 +78,13 @@ function persistRefreshedTokens(
 	try {
 		saveSession(session);
 	} catch (e) {
-		console.warn("Failed to persist refreshed OIDC tokens:", e);
+		console.warn("Failed to persist refreshed OAuth2 tokens:", e);
 	}
 }
 
 /**
  * Build the SDK `tokenRefreshFunction` for a session, or undefined when the
- * session has nothing to refresh with (password sessions, or OIDC sessions
+ * session has nothing to refresh with (password sessions, or OAuth2 sessions
  * whose OP issued no refresh token). The SDK TokenRefresher is constructed
  * lazily because it needs the OP's auth metadata (a network fetch); the
  * refresh mapping is the SDK's: 4xx -> TokenRefreshLogoutError (session

@@ -6,13 +6,13 @@ const LEGACY_SESSION_KEY = LEGACY_STORAGE_KEYS.session;
 
 export interface Session {
 	accessToken: string;
-	/** OAuth 2.0 refresh token. Present only on OIDC (MSC3861) sessions. */
+	/** OAuth 2.0 refresh token. Present only on OAuth2 (MSC3861) sessions. */
 	refreshToken?: string;
 	userId: string;
 	deviceId: string;
 	homeserverUrl: string;
 	/**
-	 * OIDC session metadata needed to refresh tokens across a reload:
+	 * OAuth2 session metadata needed to refresh tokens across a reload:
 	 * the OP issuer and this install's dynamically registered client_id.
 	 * Absent on password sessions.
 	 */

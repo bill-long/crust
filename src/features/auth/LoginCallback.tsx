@@ -6,7 +6,7 @@ import { completeOidcLogin, takeOidcReturnTo } from "./oidc";
 import { sanitizeReturnTo } from "./returnTo";
 
 /**
- * Landing route for the OIDC redirect (`/login/callback`). Exchanges the
+ * Landing route for the OAuth2 redirect (`/login/callback`). Exchanges the
  * authorization code, persists the session, and hands off to the auth
  * guard, which boots the real client from the stored session.
  */
