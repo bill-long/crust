@@ -1,0 +1,127 @@
+name: Sign Windows artifacts
+description: >-
+  Authenticode-sign Windows files in place with the Crust code signing
+  certificate, which lives in SSL.com's eSigner cloud HSM.
+
+# Signing is done with Jsign (https://ebourg.github.io/jsign/), which speaks the
+# Cloud Signature Consortium API that eSigner exposes. Two reasons to prefer it
+# over SSL.com's own CodeSignTool / esigner-codesign action here:
+#
+#   1. Supply chain. The jar is pulled from Maven Central at a pinned version and
+#      checked against a pinned SHA-256 before it is executed. The official
+#      GitHub Action is only published as a mutable `@develop` ref, which is a
+#      poor thing to run in a job that holds the signing credentials.
+#   2. One session, many files. eSigner derives a one-time password from the TOTP
+#      secret per authentication; signing several files through separate
+#      invocations inside the same 30s window can be rejected for OTP reuse.
+#      Jsign takes all the files in a single invocation, so one OTP covers them.
+#
+# Credentials are passed by `env:` indirection rather than on the command line,
+# so they never appear in the process arguments on the runner.
+
+inputs:
+  paths:
+    description: >-
+      Newline-separated file paths or globs to sign. Every pattern must match at
+      least one file; the files are signed in place.
+    required: true
+  username:
+    description: SSL.com account username (eSigner).
+    required: true
+  password:
+    description: SSL.com account password (eSigner).
+    required: true
+  credential-id:
+    description: eSigner credential ID (UUID) identifying the signing certificate.
+    required: true
+  totp-secret:
+    description: Base64-encoded eSigner TOTP secret used to derive the one-time password.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - name: Download and verify Jsign
+      shell: pwsh
+      env:
+        JSIGN_VERSION: "7.5"
+        JSIGN_SHA256: "602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c"
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $url = "https://repo1.maven.org/maven2/net/jsign/jsign/$env:JSIGN_VERSION/jsign-$env:JSIGN_VERSION.jar"
+        $jar = Join-Path $env:RUNNER_TEMP "jsign-$env:JSIGN_VERSION.jar"
+        Invoke-WebRequest -Uri $url -OutFile $jar
+        $actual = (Get-FileHash -Algorithm SHA256 -Path $jar).Hash.ToLower()
+        if ($actual -ne $env:JSIGN_SHA256.ToLower()) {
+          throw "Jsign checksum mismatch: expected $($env:JSIGN_SHA256), got $actual"
+        }
+        Write-Host "Jsign $env:JSIGN_VERSION verified."
+        "JSIGN_JAR=$jar" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+    # Patterns are read from the environment, never spliced into the script body,
+    # so a pattern can't break out into PowerShell.
+    - name: Sign
+      shell: pwsh
+      env:
+        SIGN_PATHS: ${{ inputs.paths }}
+        JSIGN_STOREPASS: ${{ inputs.username }}|${{ inputs.password }}
+        JSIGN_KEYPASS: ${{ inputs.totp-secret }}
+        ESIGNER_CREDENTIAL_ID: ${{ inputs.credential-id }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $patterns = $env:SIGN_PATHS -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+        if (-not $patterns) { throw "No paths given to sign." }
+
+        $files = @()
+        foreach ($pattern in $patterns) {
+          $matched = @(Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue)
+          if ($matched.Count -eq 0) { throw "No files matched '$pattern'." }
+          $files += $matched.FullName
+        }
+
+        Write-Host "Signing $($files.Count) file(s):"
+        $files | ForEach-Object { Write-Host "  $_" }
+
+        # All files in one invocation: one eSigner session, one one-time password.
+        & java -jar $env:JSIGN_JAR `
+          --storetype ESIGNER `
+          --storepass env:JSIGN_STOREPASS `
+          --keypass env:JSIGN_KEYPASS `
+          --alias $env:ESIGNER_CREDENTIAL_ID `
+          --alg SHA-256 `
+          --tsaurl http://ts.ssl.com `
+          --tsmode RFC3161 `
+          --tsretries 5 `
+          --tsretrywait 10 `
+          --name Crust `
+          --url https://github.com/bill-long/crust `
+          --replace `
+          @files
+        if ($LASTEXITCODE -ne 0) { throw "Jsign failed with exit code $LASTEXITCODE." }
+
+        ($files -join "`n") | Out-File -FilePath (Join-Path $env:RUNNER_TEMP 'signed-files.txt') -Encoding utf8
+
+    # Verify against the Windows trust store — the store that actually decides
+    # whether a user sees a publisher name or an "unknown publisher" warning.
+    - name: Verify signatures
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $files = Get-Content (Join-Path $env:RUNNER_TEMP 'signed-files.txt') | Where-Object { $_ }
+
+        $signtool = Get-ChildItem -Path 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' `
+          -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1
+        if (-not $signtool) {
+          Write-Warning "signtool.exe not found on this runner; skipping trust-store verification."
+          exit 0
+        }
+
+        # /pa = Authenticode policy, /tw = warn (fail) if the signature is not timestamped.
+        & $signtool.FullName verify /pa /tw /v @files
+        if ($LASTEXITCODE -ne 0) { throw "signtool verification failed with exit code $LASTEXITCODE." }

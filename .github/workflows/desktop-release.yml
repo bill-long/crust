@@ -1,20 +1,40 @@
 name: Desktop release
 
-# Builds the Tauri desktop shell (Windows) and, on a `desktop-v*` tag, publishes
-# the installers (.msi + NSIS .exe) to a draft GitHub Release. A manual
-# `workflow_dispatch` run builds the same artifacts and uploads them as workflow
-# artifacts (no release) so the pipeline can be exercised without cutting a tag.
+# Builds the Tauri desktop shell (Windows), Authenticode-signs it, and, on a
+# `desktop-v*` tag, publishes the installers (.msi + NSIS .exe) to a draft GitHub
+# Release. A manual `workflow_dispatch` run builds and signs the same artifacts
+# and uploads them as workflow artifacts (no release) so the pipeline can be
+# exercised without cutting a tag.
 #
-# Least privilege: the `build` job runs all third-party install/build steps with
-# a READ-ONLY token and uploads the installers as an artifact. The separate
-# `release` job (tag pushes only) runs no untrusted code — it just downloads the
-# artifact and creates the draft release with a write-scoped token. This keeps
-# the write-capable token away from dependency/build scripts.
+# Least privilege. Two things must never meet: the third-party code we execute
+# (cargo build scripts, pnpm lifecycle scripts) and the credentials that can
+# write to this repo or sign code as us. So the pipeline is split so that no
+# single job holds both:
+#
+#   preflight        — are the signing secrets configured? (no build, no secrets)
+#   build            — compiles crust.exe with `--no-bundle`. Runs untrusted
+#                      dependency code; read-only token, no signing secrets.
+#   sign-binary      — signs crust.exe. Holds signing secrets; runs no code
+#                      beyond checkout + the pinned Jsign jar.
+#   bundle           — wraps the *signed* crust.exe into the .msi and NSIS .exe.
+#                      Runs the Tauri CLI (and the NSIS/WiX toolchains it
+#                      fetches); read-only token, no signing secrets.
+#   sign-installers  — signs both installers. Holds signing secrets; no
+#                      untrusted code.
+#   release          — creates the draft release. Holds the write-scoped token;
+#                      no untrusted code, no signing secrets.
+#
+# This is why the build is split across `tauri build --no-bundle` and a separate
+# `tauri bundle`: the main executable has to be signed *before* it is packaged,
+# and packaging is the step that pulls in the NSIS/WiX toolchains.
+#
+# Signing is optional. If the ESIGNER_* secrets are absent (a fork, or this repo
+# before the certificate was provisioned) the two signing jobs are skipped and
+# the pipeline still produces working, unsigned installers.
 #
 # Tag scheme: desktop releases use `desktop-v*` tags, kept separate from the
 # `v*` tags the CI workflow (ci.yml) uses to publish the web container, so the
-# two never cross-trigger. The installers produced here are UNSIGNED (code signing and
-# auto-update are added in later Phase 3 steps).
+# two never cross-trigger.
 
 on:
   push:
@@ -30,13 +50,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Secrets can't be used in a job-level `if`, so resolve "is signing configured"
+  # once here and let the downstream jobs branch on the output. Only the presence
+  # of a secret is exposed, never its value.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      signing: ${{ steps.check.outputs.signing }}
+    steps:
+      - name: Check for signing secrets
+        id: check
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+        run: |
+          if [ -n "$ESIGNER_USERNAME" ] && [ -n "$ESIGNER_PASSWORD" ] \
+            && [ -n "$ESIGNER_CREDENTIAL_ID" ] && [ -n "$ESIGNER_TOTP_SECRET" ]; then
+            echo "signing=true" >> "$GITHUB_OUTPUT"
+            echo "Signing secrets present: artifacts will be Authenticode-signed."
+          else
+            echo "signing=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ESIGNER_* secrets not configured; producing UNSIGNED installers."
+          fi
+
   build:
     runs-on: windows-latest
-    # Read-only repo access; no write scopes — the write-capable token lives
-    # only in the separate `release` job. `actions: read` is granted defensively
-    # for the dependency caches: in practice the cache/artifact services use the
-    # Actions runtime token (not GITHUB_TOKEN), but this matches GitHub's
-    # documented default permissions and is harmless.
+    # Read-only repo access; no write scopes and no signing secrets — this is the
+    # job that executes third-party build code. `actions: read` is granted
+    # defensively for the dependency caches: in practice the cache/artifact
+    # services use the Actions runtime token (not GITHUB_TOKEN), but this matches
+    # GitHub's documented default permissions and is harmless.
     permissions:
       contents: read
       actions: read
@@ -80,7 +125,7 @@ jobs:
         run: pnpm build
 
       # The Tauri project (desktop/) is a separate pnpm package; install its
-      # @tauri-apps/cli so tauri-action can run `pnpm tauri build`.
+      # @tauri-apps/cli so we can drive the build.
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
         working-directory: desktop
@@ -91,14 +136,133 @@ jobs:
         with:
           workspaces: desktop/src-tauri
 
-      # Build only (no tagName) — publishing is the separate, write-scoped job.
-      - uses: tauri-apps/tauri-action@v0
+      # Compile only. Bundling happens in the `bundle` job, after the executable
+      # has been signed.
+      - name: Build executable
+        run: pnpm tauri build --no-bundle
+        working-directory: desktop
+
+      # dist/ is carried forward rather than rebuilt so the `bundle` job doesn't
+      # have to re-run the web toolchain. (The assets are already compiled into
+      # crust.exe; the Tauri CLI just wants frontendDist to exist.)
+      - name: Upload frontend
+        uses: actions/upload-artifact@v4
         with:
-          projectPath: desktop
+          name: crust-desktop-frontend
+          path: dist
+          if-no-files-found: error
+
+      # Globbed rather than hard-coded: the binary name follows the Cargo package
+      # name (crust.exe) unless mainBinaryName is set. Cargo's own intermediates
+      # live in target/release/{deps,build}/, so the top level holds just the app.
+      - name: Upload unsigned executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: crust-desktop-binary-unsigned
+          path: desktop/src-tauri/target/release/*.exe
+          if-no-files-found: error
+
+  sign-binary:
+    needs: [preflight, build]
+    if: needs.preflight.outputs.signing == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      # Only the workflow's own composite action is needed from the repo; no
+      # dependencies are installed and no project code runs in this job.
+      - uses: actions/checkout@v5
+
+      - name: Download unsigned executable
+        uses: actions/download-artifact@v4
+        with:
+          name: crust-desktop-binary-unsigned
+          path: binary
+
+      - uses: ./.github/actions/sign-windows
+        with:
+          paths: binary/*.exe
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          credential-id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          totp-secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+
+      - name: Upload signed executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: crust-desktop-binary-signed
+          path: binary/*.exe
+          if-no-files-found: error
+
+  bundle:
+    needs: [preflight, build, sign-binary]
+    # Runs whether or not signing happened, but never after a signing failure.
+    if: >-
+      ${{ !cancelled()
+      && needs.build.result == 'success'
+      && (needs.sign-binary.result == 'success' || needs.sign-binary.result == 'skipped') }}
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+
+      - name: Install desktop dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: desktop
+
+      # `tauri bundle` does not compile, but the CLI still shells out to
+      # `cargo metadata` to locate the target directory and the binary.
+      # No rust-cache here on purpose: restoring a target directory could leave a
+      # stale executable next to the signed one we are about to drop in.
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Download frontend
+        uses: actions/download-artifact@v4
+        with:
+          name: crust-desktop-frontend
+          path: dist
+
+      - name: Download executable
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.preflight.outputs.signing == 'true' && 'crust-desktop-binary-signed' || 'crust-desktop-binary-unsigned' }}
+          path: binary
+
+      # Put the executable back where `tauri bundle` expects to find it.
+      - name: Restore executable into target directory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $target = 'desktop/src-tauri/target/release'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Remove-Item "$target/*.exe" -Force -ErrorAction SilentlyContinue
+          Copy-Item binary/*.exe $target -Force
+
+          # Exactly one executable must end up here, and it must be the one we
+          # just downloaded — this is the binary the installers will wrap.
+          $exes = @(Get-ChildItem "$target/*.exe")
+          if ($exes.Count -ne 1) {
+            throw "Expected exactly one executable in $target, found $($exes.Count)."
+          }
+          Write-Host "Restored $($exes[0].Name) ($($exes[0].Length) bytes)"
+
+      - name: Bundle installers
+        run: pnpm tauri bundle
+        working-directory: desktop
 
       # Stage both installers into one flat directory so the uploaded artifact
       # has a predictable, flat layout (independent of upload-artifact's
-      # least-common-ancestor path handling) for the release job to consume.
+      # least-common-ancestor path handling) for the downstream jobs to consume.
       - name: Stage installers
         shell: pwsh
         run: |
@@ -106,7 +270,42 @@ jobs:
           Copy-Item desktop/src-tauri/target/release/bundle/msi/*.msi dist-installers/
           Copy-Item desktop/src-tauri/target/release/bundle/nsis/*-setup.exe dist-installers/
 
-      - name: Upload installers
+      - name: Upload unsigned installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: crust-desktop-installers-unsigned
+          path: dist-installers
+          if-no-files-found: error
+
+  sign-installers:
+    needs: [preflight, bundle]
+    if: needs.preflight.outputs.signing == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download unsigned installers
+        uses: actions/download-artifact@v4
+        with:
+          name: crust-desktop-installers-unsigned
+          path: dist-installers
+
+      # Both installers go through one Jsign invocation: eSigner derives a
+      # one-time password per authentication, and two authentications inside the
+      # same 30s TOTP window would reuse the same code.
+      - uses: ./.github/actions/sign-windows
+        with:
+          paths: |
+            dist-installers/*.msi
+            dist-installers/*-setup.exe
+          username: ${{ secrets.ESIGNER_USERNAME }}
+          password: ${{ secrets.ESIGNER_PASSWORD }}
+          credential-id: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          totp-secret: ${{ secrets.ESIGNER_TOTP_SECRET }}
+
+      - name: Upload signed installers
         uses: actions/upload-artifact@v4
         with:
           name: crust-desktop-installers
@@ -116,8 +315,13 @@ jobs:
   release:
     # Only tag pushes publish a release. This job runs no untrusted build code,
     # so it can safely hold the write-scoped token.
-    needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: [preflight, bundle, sign-installers]
+    if: >-
+      ${{ !cancelled()
+      && needs.bundle.result == 'success'
+      && (needs.sign-installers.result == 'success' || needs.sign-installers.result == 'skipped')
+      && github.event_name == 'push'
+      && startsWith(github.ref, 'refs/tags/desktop-v') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -125,15 +329,21 @@ jobs:
       - name: Download installers
         uses: actions/download-artifact@v4
         with:
-          name: crust-desktop-installers
+          name: ${{ needs.preflight.outputs.signing == 'true' && 'crust-desktop-installers' || 'crust-desktop-installers-unsigned' }}
           path: installers
 
       - name: Create or update draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
+          SIGNED: ${{ needs.preflight.outputs.signing }}
         run: |
           assets=(installers/*.msi installers/*-setup.exe)
+          if [ "$SIGNED" = "true" ]; then
+            notes="Automated desktop build. The application and both installers are Authenticode-signed."
+          else
+            notes="Automated desktop build. Installers are UNSIGNED (signing secrets were not configured for this run)."
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets with --clobber."
             gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
@@ -143,6 +353,6 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --draft \
               --title "Crust Desktop $TAG" \
-              --notes "Automated desktop build. Installers are currently UNSIGNED; code signing and auto-update arrive in later Phase 3 steps." \
+              --notes "$notes" \
               "${assets[@]}"
           fi
