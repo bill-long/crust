@@ -1,4 +1,5 @@
 import {
+	type Accessor,
 	type Component,
 	createEffect,
 	For,
@@ -30,8 +31,8 @@ interface SettingsOverlayProps {
 	onLogout: () => void;
 	/** True while the logout is in flight — surfaces a pending state on the
 	 * button so a slow logout (it awaits the call teardown) doesn't look
-	 * like nothing happened. Re-entry is prevented by `onLogout` itself. */
-	loggingOut?: () => boolean;
+	 * like nothing happened, and makes it non-operable while it does. */
+	loggingOut?: Accessor<boolean>;
 }
 
 const CloseIcon: Component = () => (
@@ -180,11 +181,16 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 						    this button, so disabling it blurs it onto <body>, which
 						    drops focus out of the overlay's focus trap AND past its
 						    delegated keydown handler — Escape would stop closing the
-						    modal for the whole logout. The click stays harmless
-						    because `onLogout` is single-flighted at the source. */}
+						    modal for the whole logout. It stays focusable, so the
+						    click handler has to honour the disabled state itself
+						    rather than leave it to the caller: a control that
+						    advertises `aria-disabled` must actually be inert. */}
 						<button
 							type="button"
-							onClick={props.onLogout}
+							onClick={() => {
+								if (props.loggingOut?.()) return;
+								props.onLogout();
+							}}
 							aria-disabled={props.loggingOut?.() ?? false}
 							class={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm text-danger-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
 								props.loggingOut?.()

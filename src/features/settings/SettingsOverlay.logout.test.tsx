@@ -128,6 +128,17 @@ describe("SettingsOverlay logout button", () => {
 		expect(btn.textContent).toContain("Logging out");
 	});
 
+	it("is inert while pending, as its aria-disabled advertises", () => {
+		// The button stays focusable (see below), so it has to honour the
+		// disabled state itself rather than rely on the caller's guard.
+		const [loggingOut] = createSignal(true);
+		const onLogout = vi.fn();
+		renderOverlay({ onLogout, loggingOut });
+
+		logoutButton().click();
+		expect(onLogout).not.toHaveBeenCalled();
+	});
+
 	it("stays focusable while pending so the modal keeps its focus trap", () => {
 		// Using `disabled` here would blur the just-clicked button onto
 		// <body>, dropping focus out of the overlay's trap and past its
