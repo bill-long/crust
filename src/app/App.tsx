@@ -129,10 +129,16 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 
 	const handleForceLogout = async (): Promise<void> => {
 		// Drop the active-call signal BEFORE stopping the client so the
-		// mini-widget / overlay never points at a stopped session. As in
-		// `Layout.handleLogout`, this does not wait for the MatrixRTC
-		// withdrawal — the unmount only schedules it, so it may be
-		// dispatched after `stopClient()`. See #474.
+		// mini-widget / overlay never points at a stopped session.
+		//
+		// Deliberately does NOT await the MatrixRTC withdrawal the way
+		// `Layout.handleLogout` does (#474): this is the escape hatch offered
+		// on a sync error, so the connection is already broken — that is why
+		// the user is reaching for it — and waiting on a write that cannot
+		// land would only wedge the way out. The membership expires on its
+		// own. Nothing is revoked here either; this stops the client rather
+		// than logging out, so the unmount's best-effort withdrawal may still
+		// get through if the network recovers.
 		setActiveCallRoomId(null);
 		closeNotificationSound();
 		client.stopClient();

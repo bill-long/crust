@@ -30,7 +30,10 @@ import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
-import { endCallForRoomLeave } from "../features/room/call/rtc/endCallForRoomLeave";
+import {
+	endActiveCallForLogout,
+	endCallForRoomLeave,
+} from "../features/room/call/rtc/endCall";
 import { ExploreDialog } from "../features/room/ExploreDialog";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { InvitePane } from "../features/room/invites/InvitePane";
@@ -150,6 +153,16 @@ function loadThreadWidth(): number {
 function saveThreadWidth(w: number): void {
 	savePersisted(STORAGE_KEYS.threadWidth, w);
 }
+
+/**
+ * True while a logout is running. MODULE scope, deliberately: `Layout` is
+ * re-created whenever the app crosses a route-definition boundary, and
+ * `/settings/*` is its own `Route`, so a component-local signal is reset by
+ * merely closing the settings overlay — which is exactly what a user does when
+ * a slow logout looks like nothing happened. The guard has to outlive the
+ * component for the same reason `activeCallRoomId` does.
+ */
+const [loggingOut, setLoggingOut] = createSignal(false);
 
 const Layout: Component = () => {
 	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
@@ -292,14 +305,41 @@ const Layout: Component = () => {
 	});
 
 	const handleLogout = async (): Promise<void> => {
-		// Drop the active-call signal BEFORE logging out so no chrome
-		// outlives the session. Note this does NOT guarantee the MatrixRTC
-		// withdrawal reaches the server: the unmount only *schedules* it
-		// fire-and-forget, so it can be dispatched after `client.logout()`
-		// has invalidated the token. Unlike the room-leave paths (which use
-		// `endCallForRoomLeave`) logout deliberately does not wait — see #474.
-		setActiveCallRoomId(null);
+		// Single-flight. The call teardown below makes logout a multi-second
+		// operation (bounded, but not instant), so without this a second
+		// click would run this whole body concurrently: two `client.logout`
+		// calls (the loser 401s) and — the real hazard — two overlapping
+		// `clearCryptoStores`, whose `deleteDatabase` can be blocked by the
+		// other's open connection. That await has no timeout, so the user
+		// would be stranded on the app UI holding an invalidated token.
+		if (loggingOut()) return;
+		setLoggingOut(true);
+		try {
+			await runLogout();
+		} finally {
+			setLoggingOut(false);
+		}
+	};
+
+	const runLogout = async (): Promise<void> => {
+		// Stop the chime first, as this did before the teardown await was
+		// introduced. It is not a mute: `playNotificationSound` builds a fresh
+		// AudioContext on demand, so a message arriving during the teardown
+		// still chimes. Restoring the old ordering is the point.
 		closeNotificationSound();
+		// End a call hosted anywhere BEFORE logging out, and await it: the
+		// MatrixRTC withdrawal has to reach the server while our token is
+		// still valid, exactly as for a room leave (#474). Dropping the
+		// signal alone only *schedules* the withdrawal, which then races
+		// `client.logout()` and 401s whenever it loses.
+		await endActiveCallForLogout();
+		// Restore the unconditional guarantee the plain `setActiveCallRoomId`
+		// used to give: `endActiveCallForLogout` clears the signal only for
+		// the room it tore down, so a call started (or switched to) during
+		// the teardown would otherwise survive into the logged-out state and
+		// be picked up by the NEXT account to log in on this tab —
+		// `activeCallRoomId` is module-global and never reset on login.
+		setActiveCallRoomId(null);
 		// Best-effort: remove this account's Web Push pusher and unsubscribe
 		// before the session is invalidated, so a logged-out (or switched)
 		// account doesn't keep receiving background notifications.
@@ -1048,6 +1088,7 @@ const Layout: Component = () => {
 						}
 						onClose={handleSettingsClose}
 						onLogout={handleLogout}
+						loggingOut={loggingOut}
 					/>
 				</Suspense>
 			</Show>

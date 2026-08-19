@@ -28,6 +28,10 @@ interface SettingsOverlayProps {
 	onTabChange: (tab: SettingsTab) => void;
 	onClose: () => void;
 	onLogout: () => void;
+	/** True while the logout is in flight — surfaces a pending state on the
+	 * button so a slow logout (it awaits the call teardown) doesn't look
+	 * like nothing happened. Re-entry is prevented by `onLogout` itself. */
+	loggingOut?: () => boolean;
 }
 
 const CloseIcon: Component = () => (
@@ -172,13 +176,24 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 					{/* Logout */}
 					<div class="px-2 pb-4">
 						<div class="mb-2 h-px bg-border-subtle" />
+						{/* `aria-disabled`, not `disabled`: the user has just clicked
+						    this button, so disabling it blurs it onto <body>, which
+						    drops focus out of the overlay's focus trap AND past its
+						    delegated keydown handler — Escape would stop closing the
+						    modal for the whole logout. The click stays harmless
+						    because `onLogout` is single-flighted at the source. */}
 						<button
 							type="button"
 							onClick={props.onLogout}
-							class="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							aria-disabled={props.loggingOut?.() ?? false}
+							class={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm text-danger-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+								props.loggingOut?.()
+									? "cursor-not-allowed opacity-60"
+									: "hover:bg-danger-bg"
+							}`}
 						>
 							<LogoutIcon />
-							Log Out
+							{props.loggingOut?.() ? "Logging out…" : "Log Out"}
 						</button>
 					</div>
 				</nav>
