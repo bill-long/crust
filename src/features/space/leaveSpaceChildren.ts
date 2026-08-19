@@ -20,21 +20,38 @@ export interface ChildLeaveOutcome {
  * single failure doesn't abort the batch, and reports which rooms were left so
  * the caller can apply navigation / aggregate feedback.
  *
+ * `onBeforeRoomLeave` is **awaited** for each room before its `client.leave`
+ * is issued. It is the hook for teardown that must reach the server while we
+ * are still joined — notably ending a call hosted in that room, whose
+ * MatrixRTC withdrawal is rejected once the leave lands (see
+ * `endCallForRoomLeave`). A rejection from it is logged and that room's leave
+ * proceeds anyway. It must also be **time-bounded by the caller**: this
+ * function awaits it indefinitely, so a hook that never settles hangs that
+ * room's leave and, with it, the whole batch. `endCallForRoomLeave` caps
+ * itself for exactly this reason.
+ *
  * `onRoomLeft` is invoked for each room **immediately** after its own
- * `client.leave` resolves — before the rest of the batch settles. The caller
- * uses it to apply per-room side effects (optimistic mark-left, tearing down an
- * active call hosted in that room) the moment that room is actually left, so a
- * call controller never outlives its room during the batch and a room whose
- * leave *failed* is never affected. Throwing inside `onRoomLeft` does not mark
- * the leave as failed.
+ * `client.leave` resolves — before the rest of the batch settles. It is the
+ * hook for side effects that are only correct once the room really is left
+ * (optimistic mark-left), so a room whose leave *failed* is never affected.
+ * Throwing inside `onRoomLeft` does not mark the leave as failed.
  */
 export async function leaveChildRooms(
 	client: Pick<MatrixClient, "leave">,
 	children: readonly LeavableChild[],
-	opts: { currentRoomId?: string; onRoomLeft?: (roomId: string) => void },
+	opts: {
+		currentRoomId?: string;
+		onBeforeRoomLeave?: (roomId: string) => Promise<void>;
+		onRoomLeft?: (roomId: string) => void;
+	},
 ): Promise<ChildLeaveOutcome> {
 	const results = await Promise.allSettled(
 		children.map(async (c) => {
+			try {
+				await opts.onBeforeRoomLeave?.(c.roomId);
+			} catch (err) {
+				console.error("onBeforeRoomLeave callback failed:", c.roomId, err);
+			}
 			await client.leave(c.roomId);
 			try {
 				opts.onRoomLeft?.(c.roomId);

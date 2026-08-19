@@ -325,6 +325,14 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 			// is torn down only after every awaited teardown has settled.
 			// The `<Show ... keyed>` in Layout drops us synchronously on
 			// the next tick, triggering our onCleanup.
+			//
+			// Guarded on `unmounted` because a caller can stop awaiting this
+			// leave and tear us down anyway — `endCallForRoomLeave` does
+			// exactly that when the teardown outruns its timeout. By the time
+			// a stale `runLeave` resumes, the signal may already point at a
+			// NEWER call the user has since started, and clearing it here
+			// would silently drop them from it.
+			if (unmounted) return;
 			setActiveCallRoomId(null);
 		} finally {
 			setLeaving(false);

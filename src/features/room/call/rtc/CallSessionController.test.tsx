@@ -353,6 +353,47 @@ describe("CallSessionController", () => {
 		expect(activeCallRoomId()).toBeNull();
 	});
 
+	it("an abandoned leave that completes after unmount never clears a newer activeCallRoomId", async () => {
+		// `endCallForRoomLeave` stops awaiting a teardown that outruns its
+		// timeout and tears the controller down anyway. The abandoned
+		// `runLeave` keeps running; by the time it resumes the user may have
+		// started a DIFFERENT call, and its trailing clear would silently
+		// drop them from it.
+		setActiveCallRoomId("!room:example.com");
+		const { unmount } = renderController();
+		const s = currentCallSession();
+		hooksState.setRtcStatus("joined");
+		await flush();
+
+		let releaseDisconnect!: () => void;
+		hooksState.livekitDisconnect.mockImplementationOnce(
+			() =>
+				new Promise<void>((res) => {
+					releaseDisconnect = res;
+				}),
+		);
+		hooksState.rtcLeave.mockImplementationOnce(async () => {
+			hooksState.setRtcStatus("idle");
+		});
+
+		// Leave is started but never awaited to completion by the caller.
+		const abandoned = s?.requestLeave();
+		await flush();
+
+		// Caller gives up, drops the signal, and the controller unmounts.
+		setActiveCallRoomId(null);
+		unmount();
+		// The user starts a new call elsewhere.
+		setActiveCallRoomId("!other:example.com");
+
+		// The wedged disconnect finally resolves and the stale leave finishes.
+		releaseDisconnect();
+		await abandoned;
+		await flush();
+
+		expect(activeCallRoomId()).toBe("!other:example.com");
+	});
+
 	it("requestLeave rejects and preserves activeCallRoomId when rtc.status stays joined after leave", async () => {
 		setActiveCallRoomId("!room:example.com");
 		renderController();
