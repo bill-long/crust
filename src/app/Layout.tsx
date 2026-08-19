@@ -30,6 +30,7 @@ import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
+import { endCallForRoomLeave } from "../features/room/call/rtc/endCallForRoomLeave";
 import { ExploreDialog } from "../features/room/ExploreDialog";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { InvitePane } from "../features/room/invites/InvitePane";
@@ -291,10 +292,12 @@ const Layout: Component = () => {
 	});
 
 	const handleLogout = async (): Promise<void> => {
-		// Tear down any active call BEFORE logging out so the controller's
-		// onCleanup runs against a still-authenticated client (rather than
-		// firing leave/disconnect after `client.logout()` has invalidated
-		// the session). Per rubber-duck #2 on Phase 7B.
+		// Drop the active-call signal BEFORE logging out so no chrome
+		// outlives the session. Note this does NOT guarantee the MatrixRTC
+		// withdrawal reaches the server: the unmount only *schedules* it
+		// fire-and-forget, so it can be dispatched after `client.logout()`
+		// has invalidated the token. Unlike the room-leave paths (which use
+		// `endCallForRoomLeave`) logout deliberately does not wait — see #474.
 		setActiveCallRoomId(null);
 		closeNotificationSound();
 		// Best-effort: remove this account's Web Push pusher and unsubscribe
@@ -536,20 +539,17 @@ const Layout: Component = () => {
 
 	const performLeave = async (rid: string): Promise<void> => {
 		if (isLeaving(rid)) return;
-		// If the user is leaving the room that hosts the active call, tear
-		// the call down first so the controller doesn't outlive its room
-		// (otherwise the mini-widget / overlay would point at a room the
-		// client no longer participates in). Per rubber-duck #3 on Phase 7B.
-		if (activeCallRoomId() === rid) {
-			setActiveCallRoomId(null);
-		}
-		// Snapshot route params BEFORE the async leave call so a router
-		// update during the await (e.g., the SDK forcing us out of the
+		// Snapshot route params BEFORE the async work below so a router
+		// update during an await (e.g., the SDK forcing us out of the
 		// room first) doesn't push the post-leave navigation into the
 		// wrong space.
 		const spaceId = params.spaceId;
 		markLeaving(rid, true);
 		try {
+			// End a call hosted here BEFORE leaving, and await it: the
+			// MatrixRTC withdrawal has to reach the server while we are
+			// still joined. See endCallForRoomLeave for the full rule.
+			await endCallForRoomLeave(rid);
 			await client.leave(rid);
 			// Hide the room from all lists now; `client.leave()` has resolved
 			// so the server processed the leave, but the local MyMembership
@@ -608,30 +608,28 @@ const Layout: Component = () => {
 			// skips straight to re-leaving the remaining children instead of
 			// re-issuing a leave on a space we're no longer in.
 			if (summaries[sid]?.membership === "join") {
+				// Same teardown-before-leave rule as performLeave, applied to
+				// the space itself; the child rooms below get it via
+				// leaveChildRooms' onBeforeRoomLeave hook.
+				await endCallForRoomLeave(sid);
 				await client.leave(sid);
 				// Remove the space avatar from the sidebar immediately rather than
 				// waiting for the leave-membership sync event (see #180).
 				optimisticallyMarkLeft(sid);
-				// Tear down the active call only AFTER the leave succeeded, so a
-				// failed leave doesn't needlessly end a call in a room we're still
-				// in. The same success-gated rule is applied to child rooms below.
-				if (activeCallRoomId() === sid) {
-					setActiveCallRoomId(null);
-				}
 			}
 
 			if (childRooms.length > 0) {
 				const outcome = await leaveChildRooms(client, childRooms, {
 					currentRoomId,
-					// Apply per-room side effects the moment each child's leave
-					// resolves: hide it from the sidebar and, if it hosts the
-					// active call, tear the call down immediately so the
-					// controller never outlives its room during the batch. A
+					// End a call hosted in a child before that child's leave is
+					// issued, so the RTC withdrawal is accepted (see
+					// endCallForRoomLeave). At most one child can host the
+					// active call, so this is a no-op for all the others.
+					onBeforeRoomLeave: endCallForRoomLeave,
+					// Hide each child from the sidebar the moment its own leave
+					// resolves, rather than waiting for the whole batch. A
 					// child whose leave failed never reaches this callback.
-					onRoomLeft: (id) => {
-						optimisticallyMarkLeft(id);
-						if (activeCallRoomId() === id) setActiveCallRoomId(null);
-					},
+					onRoomLeft: optimisticallyMarkLeft,
 				});
 				leftCount = outcome.leftRoomIds.length;
 				failedNames = outcome.failedNames;

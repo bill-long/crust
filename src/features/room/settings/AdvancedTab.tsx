@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createSignal, Show } from "solid-js";
+import { endCallForRoomLeave } from "../call/rtc/endCallForRoomLeave";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HistoryVisibilitySection } from "./HistoryVisibilitySection";
 import { JoinRuleSection } from "./JoinRuleSection";
@@ -17,6 +18,10 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	const [showLeave, setShowLeave] = createSignal(false);
 
 	const handleLeave = async (): Promise<void> => {
+		// Same teardown-before-leave rule the sidebar leave paths use: end a
+		// call hosted in this room, awaited, so its MatrixRTC withdrawal is
+		// still accepted (see endCallForRoomLeave).
+		await endCallForRoomLeave(props.roomId);
 		await props.client.leave(props.roomId);
 		props.onLeft?.(props.roomId);
 	};

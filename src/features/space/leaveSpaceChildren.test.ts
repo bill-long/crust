@@ -113,6 +113,57 @@ describe("leaveChildRooms", () => {
 		expect(out.failedNames).toEqual(["Beta"]);
 	});
 
+	it("awaits onBeforeRoomLeave before that room's leave is issued", async () => {
+		const order: string[] = [];
+		let releaseTeardown!: () => void;
+		const teardown = new Promise<void>((res) => {
+			releaseTeardown = res;
+		});
+		const client = {
+			leave: vi.fn((roomId: string) => {
+				order.push(`leave:${roomId}`);
+				return Promise.resolve({});
+			}),
+		} as unknown as Pick<MatrixClient, "leave">;
+
+		const pending = leaveChildRooms(
+			client,
+			[{ roomId: "!a:x", name: "Alpha" }],
+			{
+				currentRoomId: undefined,
+				onBeforeRoomLeave: async (id) => {
+					order.push(`before:${id}`);
+					await teardown;
+					order.push(`teardownDone:${id}`);
+				},
+			},
+		);
+
+		await Promise.resolve();
+		expect(client.leave).not.toHaveBeenCalled();
+		releaseTeardown();
+		const out = await pending;
+
+		expect(order).toEqual(["before:!a:x", "teardownDone:!a:x", "leave:!a:x"]);
+		expect(out.leftRoomIds).toEqual(["!a:x"]);
+	});
+
+	it("still leaves the room when onBeforeRoomLeave rejects", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const client = makeClient({ "!a:x": "resolve" });
+		const out = await leaveChildRooms(
+			client,
+			[{ roomId: "!a:x", name: "Alpha" }],
+			{
+				currentRoomId: undefined,
+				onBeforeRoomLeave: () => Promise.reject(new Error("boom")),
+			},
+		);
+		expect(client.leave).toHaveBeenCalledWith("!a:x");
+		expect(out.leftRoomIds).toEqual(["!a:x"]);
+		expect(out.failedNames).toEqual([]);
+	});
+
 	it("does not mark a leave as failed when onRoomLeft throws", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const client = makeClient({ "!a:x": "resolve" });

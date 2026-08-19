@@ -12,7 +12,17 @@ import {
 	type MatrixClient,
 } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	_resetActiveCallForTests,
+	activeCallRoomId,
+	setActiveCallRoomId,
+} from "../../../stores/activeCall";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import {
+	_resetCallSessionForTests,
+	publishCallSession,
+} from "../call/rtc/callSessionStore";
+import { makeFakeCallSession } from "../call/rtc/fakeCallSession.test-utils";
 import { AdvancedTab } from "./AdvancedTab";
 
 vi.mock("solid-refresh", () => ({
@@ -68,7 +78,23 @@ function button(name: string): HTMLButtonElement {
 	return screen.getByRole("button", { name }) as HTMLButtonElement;
 }
 
-afterEach(cleanup);
+/** Fake-call-session roots to dispose after each test. */
+const sessionDisposers: Array<() => void> = [];
+
+function publishFakeCall(roomId: string) {
+	const fake = makeFakeCallSession({ roomId });
+	sessionDisposers.push(fake.dispose);
+	publishCallSession(fake.api);
+	setActiveCallRoomId(roomId);
+	return fake;
+}
+
+afterEach(() => {
+	cleanup();
+	for (const dispose of sessionDisposers.splice(0)) dispose();
+	_resetActiveCallForTests();
+	_resetCallSessionForTests();
+});
 
 describe("AdvancedTab", () => {
 	it("renders join rule and history visibility segments with current values selected", () => {
@@ -140,6 +166,38 @@ describe("AdvancedTab", () => {
 			expect(client.leave).toHaveBeenCalledWith("!room:example.com"),
 		);
 		expect(onLeft).toHaveBeenCalledWith("!room:example.com");
+	});
+
+	it("ends a call hosted in this room before leaving it (#436)", async () => {
+		const fake = publishFakeCall("!room:example.com");
+		const order: string[] = [];
+		fake.requestLeave.mockImplementationOnce(async () => {
+			order.push("endCall");
+			setActiveCallRoomId(null);
+		});
+		const { client } = setup();
+		client.leave.mockImplementationOnce(async () => {
+			order.push("leave");
+		});
+
+		fireEvent.click(button("Leave room"));
+		fireEvent.click(button("Leave"));
+
+		await waitFor(() => expect(client.leave).toHaveBeenCalled());
+		expect(order).toEqual(["endCall", "leave"]);
+		expect(activeCallRoomId()).toBeNull();
+	});
+
+	it("does not touch a call hosted in a different room", async () => {
+		const fake = publishFakeCall("!other:example.com");
+		const { client } = setup();
+
+		fireEvent.click(button("Leave room"));
+		fireEvent.click(button("Leave"));
+
+		await waitFor(() => expect(client.leave).toHaveBeenCalled());
+		expect(fake.requestLeave).not.toHaveBeenCalled();
+		expect(activeCallRoomId()).toBe("!other:example.com");
 	});
 
 	it("Leave failure stays in the dialog and does not call onLeft", async () => {

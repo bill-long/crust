@@ -128,11 +128,11 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	});
 
 	const handleForceLogout = async (): Promise<void> => {
-		// Tear down any active call BEFORE stopping the client so the
-		// controller's onCleanup runs against a still-alive client (the
-		// same ordering `Layout.handleLogout` uses — see rubber-duck #2
-		// on Phase 7B). Without this the mini-widget / overlay could
-		// briefly point at a session whose underlying client is stopped.
+		// Drop the active-call signal BEFORE stopping the client so the
+		// mini-widget / overlay never points at a stopped session. As in
+		// `Layout.handleLogout`, this does not wait for the MatrixRTC
+		// withdrawal — the unmount only schedules it, so it may be
+		// dispatched after `stopClient()`. See #474.
 		setActiveCallRoomId(null);
 		closeNotificationSound();
 		client.stopClient();
