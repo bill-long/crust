@@ -675,3 +675,50 @@ describe("SpacesSidebar tile avatar fallback (#443)", () => {
 		expect(within(tile).getByText("A")).toBeTruthy();
 	});
 });
+
+describe("SpacesSidebar tile avatar fallback (#457)", () => {
+	function renderTile(membership: string): void {
+		const space = makeSpaceSummary("!pending:example.com", "Pending");
+		space.membership = membership;
+		space.avatarUrl = "https://example.com/broken.png";
+		render(() => (
+			<Wrapper client={createMockClient()} seed={[space]}>
+				<SpacesSidebar />
+			</Wrapper>
+		));
+	}
+
+	it("falls back to the space initial when a joined tile's avatar errors", () => {
+		renderTile("join");
+		const tile = screen.getByRole("button", { name: "Pending" });
+		const img = tile.querySelector("img");
+		expect(img).not.toBeNull();
+
+		fireEvent.error(img as HTMLImageElement);
+
+		expect(tile.querySelector("img")).toBeNull();
+		expect(within(tile).getByText("P")).toBeTruthy();
+	});
+
+	it("falls back to the space initial when an invited tile's avatar errors", () => {
+		renderTile("invite");
+		const tile = screen.getByRole("button", {
+			name: "Pending (invitation pending)",
+		});
+		fireEvent.error(tile.querySelector("img") as HTMLImageElement);
+
+		expect(tile.querySelector("img")).toBeNull();
+		expect(within(tile).getByText("P")).toBeTruthy();
+	});
+
+	it("falls back to the space initial when a knocked tile's avatar errors", () => {
+		renderTile("knock");
+		const tile = screen.getByRole("button", {
+			name: "Pending (join request pending)",
+		});
+		fireEvent.error(tile.querySelector("img") as HTMLImageElement);
+
+		expect(tile.querySelector("img")).toBeNull();
+		expect(within(tile).getByText("P")).toBeTruthy();
+	});
+});

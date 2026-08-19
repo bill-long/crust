@@ -14,6 +14,7 @@ import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { trapTabKey } from "../../lib/focusTrap";
+import { createFailedImageUrls } from "../../lib/imageFallback";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { requestJoinDialog } from "../../stores/joinDialog";
 import { trackAppModalOpen } from "../../stores/modalStack";
@@ -60,6 +61,9 @@ interface ExploreDialogProps {
  */
 const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 	const { client, summaries, optimisticallyMarkJoined } = useClient();
+	// Fail-closed avatars, keyed by URL at the dialog level: virtua recycles
+	// the result rows, so per-row error state would be lost on scroll (#457).
+	const brokenAvatars = createFailedImageUrls();
 	const navigate = useNavigate();
 	trackAppModalOpen(props.open);
 
@@ -406,6 +410,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 														.charAt(0)
 														.toUpperCase()}
 													loading="lazy"
+													broken={brokenAvatars}
 												/>
 												<div class="min-w-0 flex-1">
 													<div class="flex items-center gap-1">

@@ -1,4 +1,10 @@
-import { cleanup, render, screen, within } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { updateSetting } from "../../../../stores/settings";
 import {
@@ -163,5 +169,60 @@ describe("CallOverlayPanel", () => {
 		screen.getByLabelText("Disconnect from call").click();
 		expect(fake.requestLeave).toHaveBeenCalledTimes(1);
 		expect(fake.requestClose).not.toHaveBeenCalled();
+	});
+});
+
+describe("CallOverlayPanel avatar fallback (#457)", () => {
+	const fakes: Array<{ dispose: () => void }> = [];
+
+	afterEach(() => {
+		cleanup();
+		for (const f of fakes.splice(0)) f.dispose();
+		_resetCallSessionForTests();
+		_resetVoiceForTests();
+	});
+
+	function setupBroken(isSpeaking: boolean) {
+		const fake = makeFakeCallSession({ roomName: "General" });
+		fakes.push(fake);
+		fake.setLivekitParticipants([
+			participant({
+				identity: "a",
+				displayName: "Alice",
+				avatarUrl: "https://example.com/broken.png",
+				isSpeaking,
+			}),
+		]);
+		publishCallSession(fake.api);
+		return fake;
+	}
+
+	it("falls back to the participant initial when the avatar errors", () => {
+		setupBroken(false);
+		render(() => <CallOverlayPanel />);
+		fireEvent.error(rowFor("Alice").querySelector("img") as HTMLImageElement);
+
+		expect(rowFor("Alice").querySelector("img")).toBeNull();
+		expect(within(rowFor("Alice")).getByText("A")).toBeTruthy();
+	});
+
+	it("keeps the fallback when a speaking change re-mints the participant", () => {
+		const fake = setupBroken(false);
+		render(() => <CallOverlayPanel />);
+		fireEvent.error(rowFor("Alice").querySelector("img") as HTMLImageElement);
+
+		// useLivekitRoom re-mints the participant on any speaking/mute flip, so
+		// <For> rebuilds the row - the failed URL must still be remembered.
+		fake.setLivekitParticipants([
+			participant({
+				identity: "a",
+				displayName: "Alice",
+				avatarUrl: "https://example.com/broken.png",
+				isSpeaking: true,
+			}),
+		]);
+
+		expect(rowFor("Alice").querySelector("img")).toBeNull();
+		expect(within(rowFor("Alice")).getByText("A")).toBeTruthy();
 	});
 });

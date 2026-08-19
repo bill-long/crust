@@ -1,4 +1,11 @@
-import { cleanup, render, screen, within } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CallOverlayView } from "./CallOverlayView";
 import type {
@@ -161,5 +168,45 @@ describe("CallOverlayView", () => {
 			/>
 		));
 		expect(screen.queryByLabelText("Disconnect from call")).toBeNull();
+	});
+});
+
+describe("CallOverlayView avatar fallback (#457)", () => {
+	afterEach(cleanup);
+
+	const broken = (isSpeaking: boolean): CallOverlaySnapshot =>
+		snapshot({
+			participants: [
+				participant({
+					identity: "a",
+					displayName: "Alice",
+					avatarUrl: "https://example.com/broken.png",
+					isSpeaking,
+				}),
+			],
+		});
+
+	it("falls back to the participant initial when the avatar errors", () => {
+		render(() => <CallOverlayView snapshot={broken(false)} />);
+		const row = rowFor("Alice");
+		expect(row.querySelector("img")).not.toBeNull();
+
+		fireEvent.error(row.querySelector("img") as HTMLImageElement);
+
+		expect(rowFor("Alice").querySelector("img")).toBeNull();
+		expect(within(rowFor("Alice")).getByText("A")).toBeTruthy();
+	});
+
+	it("keeps the fallback when a republished snapshot replaces the row", () => {
+		const [snap, setSnap] = createSignal(broken(false));
+		render(() => <CallOverlayView snapshot={snap()} />);
+		fireEvent.error(rowFor("Alice").querySelector("img") as HTMLImageElement);
+
+		// Snapshots cross the bridge structurally cloned, so every republish
+		// brings new participant objects and rebuilds the row (#457).
+		setSnap(broken(true));
+
+		expect(rowFor("Alice").querySelector("img")).toBeNull();
+		expect(within(rowFor("Alice")).getByText("A")).toBeTruthy();
 	});
 });

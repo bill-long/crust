@@ -1,4 +1,8 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import {
+	createFailedImageUrls,
+	createImageFallback,
+} from "../../../../lib/imageFallback";
 import type {
 	CallOverlayParticipant,
 	CallOverlaySnapshot,
@@ -28,6 +32,10 @@ interface CallOverlayViewProps {
  */
 export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 	const active = createMemo(() => props.snapshot.active);
+	// Fail-closed avatars, keyed by URL at the view level: each snapshot is
+	// structurally cloned across the bridge, so participant identities are new
+	// on every republish and per-row error state would never survive one (#457).
+	const brokenAvatars = createFailedImageUrls();
 	const participants = createMemo<readonly CallOverlayParticipant[]>(
 		() => props.snapshot.participants,
 	);
@@ -106,11 +114,15 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 						<For each={participants()}>
 							{(p) => {
 								const speaking = createMemo(() => p.isSpeaking && !p.isMuted);
+								const avatar = createImageFallback(
+									() => p.avatarUrl,
+									brokenAvatars,
+								);
 								return (
 									<li class="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-1">
 										<span class="relative shrink-0">
 											<Show
-												when={p.avatarUrl}
+												when={!avatar.failed() && p.avatarUrl}
 												fallback={
 													<span
 														aria-hidden="true"
@@ -122,10 +134,13 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 											>
 												{(url) => (
 													<img
+														ref={avatar.ref}
 														src={url()}
 														alt=""
 														aria-hidden="true"
 														class="h-8 w-8 rounded-full object-cover"
+														onError={avatar.onError}
+														onLoad={avatar.onLoad}
 													/>
 												)}
 											</Show>

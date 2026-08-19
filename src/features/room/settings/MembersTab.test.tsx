@@ -4,6 +4,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@solidjs/testing-library";
 import { EventType, type MatrixClient, RoomStateEvent } from "matrix-js-sdk";
 import type { Accessor, JSX } from "solid-js";
@@ -55,6 +56,7 @@ function setup(options?: {
 	includeInvite?: boolean;
 	includeKnock?: boolean;
 	knockReason?: string;
+	aliceAvatarMxc?: string;
 }) {
 	const myPower = options?.myPower ?? 100;
 	const members: {
@@ -62,11 +64,17 @@ function setup(options?: {
 		name: string;
 		powerLevel: number;
 		membership?: string;
+		avatarUrl?: string;
 	}[] = [
 		{ userId: "@test:example.com", name: "Me", powerLevel: myPower },
 		{ userId: "@admin:example.com", name: "Admin", powerLevel: 100 },
 		{ userId: "@mod:example.com", name: "Mod", powerLevel: 50 },
-		{ userId: "@alice:example.com", name: "Alice", powerLevel: 0 },
+		{
+			userId: "@alice:example.com",
+			name: "Alice",
+			powerLevel: 0,
+			avatarUrl: options?.aliceAvatarMxc,
+		},
 	];
 	if (options?.includeInvite) {
 		members.push({
@@ -447,5 +455,51 @@ describe("MembersTab pending join requests", () => {
 			(screen.getByRole("button", { name: "Decline" }) as HTMLButtonElement)
 				.disabled,
 		).toBe(true);
+	});
+});
+
+describe("MembersTab avatar fallback (#457)", () => {
+	function aliceRow(): HTMLElement {
+		return screen
+			.getByText("Alice")
+			.closest('[role="listitem"]') as HTMLElement;
+	}
+
+	it("falls back to the member initial when the avatar image errors", () => {
+		setup({ aliceAvatarMxc: "mxc://example.com/broken" });
+		const img = aliceRow().querySelector("img");
+		expect(img).not.toBeNull();
+
+		fireEvent.error(img as HTMLImageElement);
+
+		expect(aliceRow().querySelector("img")).toBeNull();
+		expect(within(aliceRow()).getByText("A")).toBeTruthy();
+	});
+
+	it("keeps the fallback when a member refresh remounts the row", async () => {
+		const { client, room } = setup({
+			aliceAvatarMxc: "mxc://example.com/broken",
+		});
+		fireEvent.error(aliceRow().querySelector("img") as HTMLImageElement);
+
+		// useMemberList rebuilds every entry on any member event, so <For>
+		// discards and re-creates the row. The failed URL is tracked at the tab
+		// level, so the broken image must not come back (#457). A new member
+		// joining makes the completed rebuild observable.
+		room.__addMember({
+			userId: "@dave:example.com",
+			name: "Dave",
+			powerLevel: 0,
+		});
+		client.__emit(
+			RoomStateEvent.Members,
+			{},
+			{},
+			{ roomId: "!room:example.com" },
+		);
+		await waitFor(() => expect(screen.getByText("Dave")).toBeTruthy());
+
+		expect(aliceRow().querySelector("img")).toBeNull();
+		expect(within(aliceRow()).getByText("A")).toBeTruthy();
 	});
 });

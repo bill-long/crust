@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { useClient } from "../../../client/client";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { ignoredUsers } from "../../../stores/ignoredUsers";
 import type { ImagePack } from "../../emoji/types";
 import {
@@ -111,6 +112,10 @@ const TimelineView: Component<{
 	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
+	// Fail-closed avatars for the grouped membership notices, owned here so the
+	// state outlives the timeline virtualizer recycling a notice row and is
+	// shared across notices rendering the same avatar (#457).
+	const brokenAvatars = createFailedImageUrls();
 	// Memoized: useTimeline reads source() in hot per-event paths, so the
 	// source object must be stable per thread change, not per call.
 	const timelineSource = createMemo(() =>
@@ -1030,6 +1035,7 @@ const TimelineView: Component<{
 														const g = group();
 														if (g) expandGroup(g);
 													}}
+													brokenAvatars={brokenAvatars}
 												/>
 											</Match>
 											{/* Collapsed non-leader member: a zero-height anchor

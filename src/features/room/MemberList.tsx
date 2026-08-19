@@ -12,6 +12,10 @@ import {
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
+import {
+	createFailedImageUrls,
+	type FailedImageUrls,
+} from "../../lib/imageFallback";
 import { reportError } from "../../lib/reportError";
 import { isUserIgnored, setUserIgnored } from "../../stores/ignoredUsers";
 import { startDm } from "./startDm";
@@ -27,13 +31,17 @@ function avatarInitial(name: string): string {
 }
 
 /** Shared visual content for a member row (avatar + name + typing state). */
-const MemberRowContent: Component<{ member: MemberEntry }> = (props) => {
+const MemberRowContent: Component<{
+	member: MemberEntry;
+	broken: FailedImageUrls;
+}> = (props) => {
 	return (
 		<>
 			<Avatar
 				url={props.member.avatarUrl ?? null}
 				initial={avatarInitial(props.member.displayName)}
 				loading="lazy"
+				broken={props.broken}
 			/>
 			<div class="min-w-0 flex-1 text-left">
 				<div class="truncate text-sm">{props.member.displayName}</div>
@@ -48,6 +56,9 @@ const MemberRowContent: Component<{ member: MemberEntry }> = (props) => {
 const MemberRow: Component<{
 	member: MemberEntry;
 	isSelf: boolean;
+	/** Fail-closed avatar state, owned by the list - a typing notification
+	 *  re-mints this member's entry, which remounts the row. */
+	broken: FailedImageUrls;
 	onMessage: (member: MemberEntry) => void;
 	onToggleIgnore: (member: MemberEntry) => void;
 }> = (props) => {
@@ -60,7 +71,7 @@ const MemberRow: Component<{
 			when={!props.isSelf}
 			fallback={
 				<div class={rowClass}>
-					<MemberRowContent member={props.member} />
+					<MemberRowContent member={props.member} broken={props.broken} />
 				</div>
 			}
 		>
@@ -69,7 +80,7 @@ const MemberRow: Component<{
 					class={`${rowClass} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover`}
 					aria-label={`Actions for ${props.member.displayName}`}
 				>
-					<MemberRowContent member={props.member} />
+					<MemberRowContent member={props.member} broken={props.broken} />
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Portal>
 					<DropdownMenu.Content class="z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
@@ -94,6 +105,10 @@ const MemberRow: Component<{
 
 const MemberList: Component<{ roomId: string }> = (props) => {
 	const { client, optimisticallyMarkJoined } = useClient();
+	// Fail-closed avatars, keyed by URL at the list level: a typing
+	// notification re-mints that member's entry, so the row remounts and
+	// per-row error state would re-paint the broken image (#457).
+	const brokenAvatars = createFailedImageUrls();
 	const navigate = useNavigate();
 	const { groups, memberCount, loading } = useMemberList(
 		client,
@@ -259,6 +274,7 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 										{(m) => (
 											<MemberRow
 												member={m().member}
+												broken={brokenAvatars}
 												isSelf={m().member.userId === selfId()}
 												onMessage={(member) => void handleMessage(member)}
 												onToggleIgnore={(member) =>

@@ -2,7 +2,9 @@ import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { EventType, type MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { Virtualizer } from "virtua/solid";
+import { RowAvatar } from "../../../components/RowAvatar";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { useMemberList } from "../useMemberList";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteByUserIdForm } from "./InviteByUserIdForm";
@@ -29,6 +31,10 @@ interface MemberAction {
 
 const MembersTab: Component<MembersTabProps> = (props) => {
 	const roomId = () => props.roomId;
+	// Shared across the three lists below: useMemberList and the pending-invite
+	// hooks rebuild their entries on any member event, so <For> remounts the
+	// rows and per-row error state would re-paint the broken image (#457).
+	const brokenAvatars = createFailedImageUrls();
 	const perms = useRoomPermissions(props.client, roomId);
 	const memberList = useMemberList(props.client, roomId);
 	const invites = usePendingInvites(props.client, roomId);
@@ -256,18 +262,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 							{(inv) => (
 								<li class="flex items-center justify-between gap-3 rounded bg-surface-1 px-3 py-2">
 									<div class="flex min-w-0 items-center gap-3">
-										<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2 text-xs font-semibold text-text-secondary">
-											<Show
-												when={inv.avatarUrl}
-												fallback={<span>{initial(inv.displayName)}</span>}
-											>
-												<img
-													src={inv.avatarUrl ?? ""}
-													alt=""
-													class="h-full w-full object-cover"
-												/>
-											</Show>
-										</div>
+										<RowAvatar
+											url={inv.avatarUrl}
+											initial={initial(inv.displayName)}
+											broken={brokenAvatars}
+										/>
 										<div class="min-w-0">
 											<div class="truncate text-sm text-text-primary">
 												{inv.displayName}
@@ -318,18 +317,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 							{(k) => (
 								<li class="flex items-center justify-between gap-3 rounded bg-surface-1 px-3 py-2">
 									<div class="flex min-w-0 items-center gap-3">
-										<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2 text-xs font-semibold text-text-secondary">
-											<Show
-												when={k.avatarUrl}
-												fallback={<span>{initial(k.displayName)}</span>}
-											>
-												<img
-													src={k.avatarUrl ?? ""}
-													alt=""
-													class="h-full w-full object-cover"
-												/>
-											</Show>
-										</div>
+										<RowAvatar
+											url={k.avatarUrl}
+											initial={initial(k.displayName)}
+											broken={brokenAvatars}
+										/>
 										<div class="min-w-0">
 											<div class="truncate text-sm text-text-primary">
 												{k.displayName}
@@ -439,18 +431,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 									class="flex items-center justify-between gap-3 px-2 py-1.5 hover:bg-surface-1"
 								>
 									<div class="flex min-w-0 items-center gap-3">
-										<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-2 text-xs font-semibold text-text-secondary">
-											<Show
-												when={m.avatarUrl}
-												fallback={<span>{initial(m.displayName)}</span>}
-											>
-												<img
-													src={m.avatarUrl ?? ""}
-													alt=""
-													class="h-full w-full object-cover"
-												/>
-											</Show>
-										</div>
+										<RowAvatar
+											url={m.avatarUrl}
+											initial={initial(m.displayName)}
+											broken={brokenAvatars}
+										/>
 										<div class="min-w-0">
 											<div class="truncate text-sm text-text-primary">
 												{m.displayName}

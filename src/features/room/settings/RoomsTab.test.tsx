@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal, type ParentComponent } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -82,6 +88,7 @@ function setup(opts?: {
 	canManage?: boolean;
 	registerCandidateRoom?: boolean;
 	registerChildRoom?: boolean;
+	childAvatarUrl?: string;
 }) {
 	const space = createMockRoom("!space:x", [], [], { name: "My Space" });
 	space.__setStateEvent("m.room.create", "", { type: "m.space" });
@@ -113,7 +120,11 @@ function setup(opts?: {
 	);
 	store.setSummaries(
 		"!child:x",
-		makeSummary({ roomId: "!child:x", name: "Child Room" }),
+		makeSummary({
+			roomId: "!child:x",
+			name: "Child Room",
+			avatarUrl: opts?.childAvatarUrl ?? null,
+		}),
 	);
 	store.setSummaries(
 		"!cand:x",
@@ -319,5 +330,46 @@ describe("RoomsTab", () => {
 				name: "Remove Candidate Room from this space",
 			}),
 		).toBeNull();
+	});
+});
+
+describe("RoomsTab avatar fallback (#457)", () => {
+	function childRow(name = "Child Room"): HTMLElement {
+		return screen.getByText(name).closest("li") as HTMLElement;
+	}
+
+	it("falls back to the room initial when the avatar image errors", () => {
+		setup({ childAvatarUrl: "https://example.com/broken.png" });
+		const img = childRow().querySelector("img");
+		expect(img).not.toBeNull();
+
+		fireEvent.error(img as HTMLImageElement);
+
+		expect(childRow().querySelector("img")).toBeNull();
+		expect(within(childRow()).getByText("C")).toBeTruthy();
+	});
+
+	it("keeps the fallback when a summaries change rebuilds the row", async () => {
+		const { store } = setup({
+			childAvatarUrl: "https://example.com/broken.png",
+		});
+		fireEvent.error(childRow().querySelector("img") as HTMLImageElement);
+
+		// The row list is a memo over the summaries store, so a rename re-mints
+		// the display objects and <For> rebuilds the row. The failed URL is
+		// tracked at the tab level, so the fallback must stick (#457).
+		store.setSummaries(
+			"!child:x",
+			makeSummary({
+				roomId: "!child:x",
+				name: "Child Room Renamed",
+				avatarUrl: "https://example.com/broken.png",
+			}),
+		);
+		await flush();
+
+		const row = childRow("Child Room Renamed");
+		expect(row.querySelector("img")).toBeNull();
+		expect(within(row).getByText("C")).toBeTruthy();
 	});
 });
