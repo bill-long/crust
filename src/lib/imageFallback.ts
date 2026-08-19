@@ -4,12 +4,15 @@ import { type Accessor, createSignal, onCleanup } from "solid-js";
 type ImageEvent = Event & { currentTarget: HTMLImageElement };
 
 /**
- * The URL the element itself is bound to, which is what a load/error event is
- * really about. An event can arrive after the component moved on to another
- * URL - a detached `<img>` still completes its request - and attributing it to
- * whatever is bound now would fail the wrong URL closed. The raw attribute is
- * used rather than `src`/`currentSrc` so the key matches the string the
- * registry was given, character for character.
+ * The URL the reporting element is bound to, which is what its load/error
+ * event is about. A row can report long after the component that owns the
+ * registry moved on - a detached `<img>` still completes its request - so the
+ * event is attributed to that element rather than to whatever the accessor
+ * returns now. (An element re-bound to a new URL is not covered: the attribute
+ * already reads the new one. Browsers abort the old request without firing
+ * `error`, so that case does not arise in practice.) The raw attribute is used
+ * rather than `src`/`currentSrc` so the key matches the string the registry was
+ * given, character for character.
  */
 function sourceOf(event: ImageEvent | undefined): string | null | undefined {
 	return event?.currentTarget?.getAttribute("src");
@@ -55,9 +58,18 @@ export interface ImageFallback {
  *
  * A block is not permanent, but nothing retries on a timer either: a
  * re-uploaded avatar arrives under a new URL, which no block covers, and any
- * image that does load clears its URL. That matches how the single-image
- * fallbacks in this app have always behaved - the block lasts as long as the
- * component that owns the registry.
+ * image that does load clears its URL. Otherwise the block lasts as long as
+ * the component that owns the registry, which matches how the single-image
+ * fallbacks in this app have always behaved.
+ *
+ * Known limit: because the state is keyed by URL rather than by row, it also
+ * outlives the row remounts that used to clear it by accident. A failure that
+ * was really transient - media requests made before the service worker
+ * controls the page cannot carry the auth an MSC3916 server wants, see
+ * `lib/authedMedia.ts` - therefore sticks until the owning component is
+ * mounted afresh. If that proves to matter, the fix belongs at the media
+ * layer: have it signal "media auth changed" and clear the registries, rather
+ * than having every avatar retry on a timer.
  */
 export function createFailedImageUrls(): FailedImageUrls {
 	const [urls, setUrls] = createSignal<ReadonlySet<string>>(new Set());
@@ -119,19 +131,31 @@ export function createImageFallback(
 			// cost the caller its subscription, or a row holding a painted image
 			// could never learn that the URL was blocked after all.
 			const blocked = registry.failed(current);
-			const shown = painted();
-			// Bound to a different URL than the one that painted: whatever this
-			// element showed before says nothing about the current URL.
-			if (shown !== null && shown !== current) setPainted(null);
-			else if (shown === current) return false;
+			// The grace applies only while this element is still bound to the
+			// URL it painted. A stale value is inert rather than cleared here -
+			// an accessor that writes the signal it reads forces a second
+			// evaluation pass, and every path that matters (this element's own
+			// error, a later load, the ref cleanup on unmount) already clears
+			// it. If the element is re-bound back to a URL it painted earlier,
+			// it is also still displaying that image, so honouring the grace is
+			// what the user sees anyway.
+			if (painted() === current) return false;
 			return blocked;
 		},
 		onError: (event) => {
+			// A detached element's failure still counts: it is evidence about
+			// the URL, and recording it errs closed.
 			const src = sourceOf(event) ?? url();
 			if (painted() === src) setPainted(null);
 			registry.markFailed(src);
 		},
 		onLoad: (event) => {
+			// Removing an <img> neither aborts its request nor detaches this
+			// handler, so a load can arrive for an element that is already gone.
+			// Acting on it would un-block the URL for every row and re-create
+			// the images an error had just retired - with intermittently failing
+			// media, a thrash loop. Nothing off-screen may clear a block.
+			if (event && !event.currentTarget?.isConnected) return;
 			const src = sourceOf(event) ?? url();
 			setPainted(src ?? null);
 			registry.markLoaded(src);

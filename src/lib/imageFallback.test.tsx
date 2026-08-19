@@ -134,21 +134,17 @@ describe("createImageFallback painted-image grace", () => {
 		});
 	});
 
-	it("drops the grace once the element is re-bound", () => {
+	it("keeps the grace only while bound to the url it painted", () => {
 		createRoot((dispose) => {
 			const [url, setUrl] = createSignal("https://example.com/a.png");
 			const broken = createFailedImageUrls();
 			const row = createImageFallback(url, broken);
 
 			row.onLoad();
-			// Re-bound to a url that never resolves (an off-screen lazy row),
-			// then back to the first one, which a sibling blocked meanwhile.
+			// Re-bound to a url this element never painted: the grace does not
+			// carry over, so the registry decides.
 			setUrl("https://example.com/b.png");
-			row.failed();
-			broken.markFailed("https://example.com/a.png");
-			setUrl("https://example.com/a.png");
-
-			// The stale paint must not wave the blocked url through.
+			broken.markFailed("https://example.com/b.png");
 			expect(row.failed()).toBe(true);
 			dispose();
 		});
@@ -214,6 +210,37 @@ describe("Avatar rows sharing a registry", () => {
 		// knows the url is broken, so nothing changes there - this row still
 		// has to give up its image.
 		fireEvent.error(images()[0]);
+		expect(images()).toHaveLength(0);
+	});
+});
+
+describe("detached elements", () => {
+	afterEach(cleanup);
+
+	it("ignores a load reported by an <img> that is no longer mounted", () => {
+		const url = "https://example.com/a.png";
+		const broken = createRoot(() => createFailedImageUrls());
+		const { container } = render(() => (
+			<>
+				<Avatar url={url} initial="A" broken={broken} />
+				<Avatar url={url} initial="B" broken={broken} />
+			</>
+		));
+		const images = (): HTMLImageElement[] =>
+			Array.from(container.querySelectorAll("img"));
+		const stale = images()[1];
+
+		// One row errors, which retires the image on both rows.
+		fireEvent.error(images()[0]);
+		expect(images()).toHaveLength(0);
+
+		// The other row's request completes afterwards. Removing an <img>
+		// neither aborts it nor detaches the handler, so the event still
+		// arrives - but acting on it would un-block the url and re-create every
+		// image the error just retired.
+		fireEvent.load(stale);
+
+		expect(broken.failed(url)).toBe(true);
 		expect(images()).toHaveLength(0);
 	});
 });

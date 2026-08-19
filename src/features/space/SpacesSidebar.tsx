@@ -121,9 +121,9 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				: "rounded-2xl hover:rounded-xl";
 
 	// Fail-closed avatar: a 404/decode failure falls back to the initial
-	// instead of the browser's broken-image icon. Reset when the avatar
-	// URL changes so a synced-in avatar retries. Shares the rail's registry,
-	// so one broken URL is recorded once for the whole sidebar.
+	// instead of the browser's broken-image icon. Shares the rail's registry,
+	// so one broken URL is recorded once for the whole sidebar; a synced-in
+	// avatar arrives under a new URL, which no block covers.
 	const avatar = createImageFallback(
 		() => props.space.avatarUrl,
 		props.brokenAvatars,
