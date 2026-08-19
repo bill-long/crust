@@ -24,8 +24,11 @@ export interface ChildLeaveOutcome {
  * is issued. It is the hook for teardown that must reach the server while we
  * are still joined — notably ending a call hosted in that room, whose
  * MatrixRTC withdrawal is rejected once the leave lands (see
- * `endCallForRoomLeave`). A rejection from it is logged and the leave proceeds
- * anyway, so a stuck teardown can't strand the batch.
+ * `endCallForRoomLeave`). A rejection from it is logged and that room's leave
+ * proceeds anyway. It must also be **time-bounded by the caller**: this
+ * function awaits it indefinitely, so a hook that never settles hangs that
+ * room's leave and, with it, the whole batch. `endCallForRoomLeave` caps
+ * itself for exactly this reason.
  *
  * `onRoomLeft` is invoked for each room **immediately** after its own
  * `client.leave` resolves — before the rest of the batch settles. It is the
