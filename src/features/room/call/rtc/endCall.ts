@@ -5,35 +5,44 @@ import {
 import { currentCallSession } from "./callSessionStore";
 
 /**
- * Upper bound on how long a room leave waits for its call teardown.
+ * Upper bound on how long a caller waits for the call teardown before giving up
+ * and proceeding.
  *
  * `requestLeave()` is NOT self-bounding: only its `rtc.leave()` step carries a
  * timeout (5s, via `leaveRoomSession`); the `livekit.disconnect()` step ahead of
  * it ends in a bare `await room.disconnect()`, which can stall indefinitely on a
- * wedged socket. Leaving that unbounded would let a flaky network block the room
- * leave itself — and, in `Layout.performLeave`, its `finally` too, pinning the
- * room in the "leaving" state until a reload. So the wait is capped here and the
- * leave proceeds regardless.
+ * wedged socket.
+ *
+ * Both callers need the cap, for different reasons. Unbounded, a flaky network
+ * would block the room leave itself — and, in `Layout.performLeave`, its
+ * `finally` too, pinning the room in the "leaving" state until a reload. On the
+ * logout path it would instead leave the user unable to sign out; that button is
+ * gated on a pending state, so the cap is also what bounds how long it stays
+ * disabled. Typical real cost is ~300ms; this only bites when media is wedged.
  */
 const TEARDOWN_TIMEOUT_MS = 10_000;
 
 /**
- * Single call-teardown rule for every "leave this room" path (#435/#436/#437).
+ * Single call-teardown rule for every path that ends the user's access to the
+ * room hosting a live call — leaving it (#435/#436/#437) or logging out (#474).
  *
- * Callers MUST await this before `client.leave(roomId)`.
+ * Callers MUST await this before the request that revokes that access
+ * (`client.leave(roomId)`, `client.logout()`).
  *
  * ## Why teardown-before-leave, and why awaited
  *
  * Withdrawing our MatrixRTC membership is a `m.call.member` state-event write,
- * so the server rejects it with `M_FORBIDDEN` once we are no longer joined to
- * the room. Leaving first therefore strands the membership and every other
- * participant keeps seeing us in the call until it expires.
+ * so the server rejects it once we can no longer write to that room —
+ * `M_FORBIDDEN` after a leave, `M_UNKNOWN_TOKEN` after a logout. Revoking
+ * access first therefore strands the membership and every other participant
+ * keeps seeing us in the call until it expires.
  *
  * Merely clearing `activeCallRoomId` before the leave is not enough: that only
  * unmounts `CallSessionController`, whose `onCleanup` fires the withdrawal
  * without awaiting it, and `MembershipManager.leave()` does not write the state
- * event synchronously — it wakes an async scheduler. `client.leave()`, issued
- * in the current tick, wins that race. Awaiting `requestLeave()` is what makes
+ * event synchronously — it wakes an async scheduler. The revoking request —
+ * `client.leave()` or `client.logout()` — is issued in the current tick and wins
+ * that race. Awaiting `requestLeave()` is what makes
  * the ordering real, because it awaits `leaveRoomSession()` all the way down.
  *
  * ## Accepted trade-off
@@ -43,6 +52,14 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  * recoverable (rejoin the call), whereas the alternative ordering strands the
  * membership on **every** leave-while-in-a-call. Do not reintroduce a
  * success-gated variant of this rule without revisiting #435.
+ *
+ * The logout caller pays the same price in a different currency: a
+ * `client.logout()` that throws is caught by `Layout.handleLogout`, which signs
+ * the user out locally anyway — so a failed logout has also ended their call for
+ * nothing. And logging out while in a call now waits for the teardown (typically
+ * ~300ms, capped as above) instead of being instant. Both are worth it, because
+ * the cost of getting it wrong is borne by *other* people: they keep seeing a
+ * tile that will never speak.
  *
  * ## Residual, on the failure and timeout paths only
  *
@@ -59,7 +76,29 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  */
 export async function endCallForRoomLeave(roomId: string): Promise<void> {
 	if (activeCallRoomId() !== roomId) return;
+	await endCall(roomId);
+}
 
+/**
+ * Teardown for logout: ends whichever call is active, if any.
+ *
+ * Same rule and same bound as `endCallForRoomLeave` — only the trigger differs,
+ * so the caller does not need to know which room hosts the call. Await this
+ * before `client.logout()`; see the module rationale above for why the wait is
+ * what makes the withdrawal land.
+ *
+ * NOT for the forced-logout escape hatch on a sync error: there the connection
+ * is already broken (which is why the user is reaching for it) and the client is
+ * stopped rather than logged out, so waiting would only wedge the way out.
+ */
+export async function endActiveCallForLogout(): Promise<void> {
+	const roomId = activeCallRoomId();
+	if (roomId === null) return;
+	await endCall(roomId);
+}
+
+/** Shared teardown: `roomId` is known to be the active call's room. */
+async function endCall(roomId: string): Promise<void> {
 	const session = currentCallSession();
 	if (!session || session.roomId !== roomId) {
 		// The signal points at this room but no controller is published for
@@ -94,7 +133,7 @@ export async function endCallForRoomLeave(roomId: string): Promise<void> {
 		// but "Stay" is not a meaningful choice when the user is leaving the
 		// room outright — clear the signal so the controller and its dialog
 		// unmount, and let the leave proceed. See "Residual" above.
-		console.error("Call teardown before room leave failed:", roomId, err);
+		console.error("Call teardown failed:", roomId, err);
 		if (activeCallRoomId() === roomId) setActiveCallRoomId(null);
 	} finally {
 		clearTimeout(timer);

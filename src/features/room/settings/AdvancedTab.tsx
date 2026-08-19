@@ -1,6 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createSignal, Show } from "solid-js";
-import { endCallForRoomLeave } from "../call/rtc/endCallForRoomLeave";
+import { endCallForRoomLeave } from "../call/rtc/endCall";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HistoryVisibilitySection } from "./HistoryVisibilitySection";
 import { JoinRuleSection } from "./JoinRuleSection";

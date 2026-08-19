@@ -8,7 +8,7 @@ import {
 	_resetCallSessionForTests,
 	publishCallSession,
 } from "./callSessionStore";
-import { endCallForRoomLeave } from "./endCallForRoomLeave";
+import { endActiveCallForLogout, endCallForRoomLeave } from "./endCall";
 import { makeFakeCallSession } from "./fakeCallSession.test-utils";
 
 const ROOM = "!room:example.com";
@@ -122,6 +122,74 @@ describe("endCallForRoomLeave", () => {
 		const fake = publishFake("!stale:example.com");
 		await endCallForRoomLeave(ROOM);
 		expect(fake.requestLeave).not.toHaveBeenCalled();
+		expect(activeCallRoomId()).toBeNull();
+	});
+});
+
+describe("endActiveCallForLogout", () => {
+	const disposers: Array<() => void> = [];
+
+	afterEach(() => {
+		for (const d of disposers.splice(0)) d();
+		_resetActiveCallForTests();
+		_resetCallSessionForTests();
+		vi.restoreAllMocks();
+		vi.useRealTimers();
+	});
+
+	function publishFake(roomId = ROOM) {
+		const fake = makeFakeCallSession({ roomId });
+		disposers.push(fake.dispose);
+		publishCallSession(fake.api);
+		return fake;
+	}
+
+	it("does nothing when no call is active", async () => {
+		const fake = publishFake();
+		await endActiveCallForLogout();
+		expect(fake.requestLeave).not.toHaveBeenCalled();
+	});
+
+	it("tears down whichever room hosts the call, without being told which", async () => {
+		setActiveCallRoomId("!elsewhere:example.com");
+		const fake = publishFake("!elsewhere:example.com");
+		fake.requestLeave.mockImplementationOnce(async () => {
+			setActiveCallRoomId(null);
+		});
+
+		await endActiveCallForLogout();
+
+		expect(fake.requestLeave).toHaveBeenCalledTimes(1);
+		expect(activeCallRoomId()).toBeNull();
+	});
+
+	it("resolves so logout proceeds even when the teardown rejects", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		setActiveCallRoomId(ROOM);
+		const fake = publishFake();
+		fake.requestLeave.mockRejectedValueOnce(new Error("leave failed"));
+
+		await expect(endActiveCallForLogout()).resolves.toBeUndefined();
+		expect(activeCallRoomId()).toBeNull();
+	});
+
+	it("gives up on a teardown that never settles so logout is not blocked", async () => {
+		vi.useFakeTimers();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		setActiveCallRoomId(ROOM);
+		const fake = publishFake();
+		fake.requestLeave.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+		let settled = false;
+		const pending = endActiveCallForLogout().then(() => {
+			settled = true;
+		});
+		await vi.advanceTimersByTimeAsync(9_999);
+		expect(settled).toBe(false);
+		await vi.advanceTimersByTimeAsync(2);
+		await pending;
+
+		expect(settled).toBe(true);
 		expect(activeCallRoomId()).toBeNull();
 	});
 });
