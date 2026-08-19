@@ -13,6 +13,7 @@ import {
 	activeCallRoomId,
 	setActiveCallRoomId,
 } from "../../../../stores/activeCall";
+import { clearNotices, notices } from "../../../../stores/notices";
 import {
 	_resetCallSessionForTests,
 	currentCallSession,
@@ -202,6 +203,14 @@ describe("CallSessionController", () => {
 
 	afterEach(() => {
 		cleanup();
+		// `restoreAllMocks` does not undo `useFakeTimers`; a test that fails
+		// mid-body would otherwise leak them into the rest of the file.
+		vi.useRealTimers();
+		// Spies must be restored too: `spyOn` on an already-spied method hands
+		// back the SAME mock, so an unrestored console spy leaks its call
+		// history into the next test's `toHaveBeenCalled` assertions.
+		vi.restoreAllMocks();
+		clearNotices();
 		if (disposeHooksRoot) {
 			disposeHooksRoot();
 			disposeHooksRoot = null;
@@ -351,6 +360,248 @@ describe("CallSessionController", () => {
 		expect(hooksState.livekitDisconnect).toHaveBeenCalledTimes(1);
 		expect(hooksState.rtcLeave).toHaveBeenCalledTimes(1);
 		expect(activeCallRoomId()).toBeNull();
+	});
+
+	describe("media-death watchdog (#434)", () => {
+		/** Joined on both layers, media connected — the healthy steady state. */
+		async function joinedAndConnected() {
+			setActiveCallRoomId("!room:example.com");
+			const rendered = renderController();
+			hooksState.setRtcStatus("joined");
+			hooksState.setLivekitStatus("connected");
+			await flush();
+			return rendered;
+		}
+
+		it("ends the call when media stays down while MatrixRTC still reports joined", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+			hooksState.rtcLeave.mockImplementationOnce(async () => {
+				hooksState.setRtcStatus("idle");
+			});
+
+			// livekit-client gave up (SFU unreachable / duplicate identity).
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+
+			await vi.advanceTimersByTimeAsync(20_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).toHaveBeenCalledTimes(1);
+			expect(activeCallRoomId()).toBeNull();
+		});
+
+		it("does not end the call when media recovers within the grace period", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			await vi.advanceTimersByTimeAsync(19_000);
+			hooksState.setLivekitStatus("connecting");
+			await flush();
+			hooksState.setLivekitStatus("connected");
+			await flush();
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+			expect(activeCallRoomId()).toBe("!room:example.com");
+		});
+
+		it("does not fire during the pre-connect window of a normal join", async () => {
+			vi.useFakeTimers();
+			setActiveCallRoomId("!room:example.com");
+			renderController();
+			// RTC joined, LiveKit not connected YET — "idle" here is the
+			// ordinary pre-connect state, not a death.
+			hooksState.setRtcStatus("joined");
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+			expect(activeCallRoomId()).toBe("!room:example.com");
+		});
+
+		it("stands down once MatrixRTC is no longer joined", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			// The RTC layer terminates on its own — the existing watcher owns
+			// this case, and it already cleared the signal.
+			hooksState.setRtcStatus("idle");
+			await flush();
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+		});
+
+		it("does not fire while the user's own leave is in flight", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+			const s = currentCallSession();
+
+			let releaseDisconnect!: () => void;
+			hooksState.livekitDisconnect.mockImplementationOnce(
+				() =>
+					new Promise<void>((res) => {
+						releaseDisconnect = res;
+					}),
+			);
+			hooksState.rtcLeave.mockImplementationOnce(async () => {
+				hooksState.setRtcStatus("idle");
+			});
+
+			const leave = s?.requestLeave();
+			await flush();
+			// The user's leave disconnects media; that must not look like a death.
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+
+			releaseDisconnect();
+			await leave;
+			await flush();
+			// Exactly one leave — the user's, not a second from the watchdog.
+			expect(hooksState.rtcLeave).toHaveBeenCalledTimes(1);
+		});
+
+		it("stays out of the way after a FAILED user leave, and re-arms on Stay", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+			const s = currentCallSession();
+			hooksState.setRtcError(new Error("server rejected leave"));
+			// rtc.leave resolves but status stays "joined" → runLeave throws.
+			hooksState.rtcLeave.mockImplementationOnce(async () => {});
+
+			await expect(s?.requestLeave()).rejects.toThrow("server rejected leave");
+			// The resting state after a failed leave: media parked at "idle"
+			// by our own teardown, `leaveRequested` sticky, RTC still joined.
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+
+			// Exactly the one leave the user asked for — no watchdog retry, and
+			// the confirm dialog (with its error) is still on screen.
+			expect(hooksState.rtcLeave).toHaveBeenCalledTimes(1);
+			expect(activeCallRoomId()).toBe("!room:example.com");
+			expect(screen.queryByText("Leave call?")).toBeTruthy();
+
+			// "Stay" clears the sticky suppressor; media is still dead, so the
+			// watchdog takes over from there.
+			hooksState.rtcLeave.mockImplementationOnce(async () => {
+				hooksState.setRtcStatus("idle");
+			});
+			hooksState.setRtcError(null);
+			screen.getByRole("button", { name: "Stay" }).click();
+			await flush();
+			await vi.advanceTimersByTimeAsync(20_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).toHaveBeenCalledTimes(2);
+			expect(activeCallRoomId()).toBeNull();
+		});
+
+		it("announces the ended call rather than letting it vanish silently", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+			hooksState.rtcLeave.mockImplementationOnce(async () => {
+				hooksState.setRtcStatus("idle");
+			});
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			expect(notices()).toHaveLength(0);
+			await vi.advanceTimersByTimeAsync(20_000);
+			await flush();
+
+			expect(notices().map((n) => n.message)).toEqual([
+				"Call ended — lost connection to the voice server.",
+			]);
+		});
+
+		it("still tears the call down when the leave itself fails", async () => {
+			vi.useFakeTimers();
+			const consoleErrorSpy = vi
+				.spyOn(console, "error")
+				.mockImplementation(() => {});
+			await joinedAndConnected();
+			// rtc.leave resolves but status stays "joined" → runLeave throws.
+			hooksState.setRtcError(new Error("server rejected leave"));
+			hooksState.rtcLeave.mockImplementationOnce(async () => {});
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			await vi.advanceTimersByTimeAsync(20_000);
+			// The watchdog's leave is fire-and-forget; drain its rejection
+			// here so `reportError` cannot land in a later test's console spy.
+			await flush();
+			await flush();
+			await flush();
+
+			expect(hooksState.rtcLeave).toHaveBeenCalledTimes(1);
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Failed to end call after media loss:",
+				expect.anything(),
+			);
+			// The media is gone; the call must not keep presenting itself as
+			// live even though the withdrawal failed.
+			expect(activeCallRoomId()).toBeNull();
+		});
+
+		it("holds off while a reconnect is still in flight", async () => {
+			vi.useFakeTimers();
+			await joinedAndConnected();
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			// A reconnect starts before the countdown elapses and is still
+			// dialling well past it — in flight is not dead.
+			await vi.advanceTimersByTimeAsync(5_000);
+			hooksState.setLivekitStatus("connecting");
+			await flush();
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+			expect(activeCallRoomId()).toBe("!room:example.com");
+		});
+
+		it("cancels the pending countdown on unmount rather than only no-oping", async () => {
+			vi.useFakeTimers();
+			const { unmount } = await joinedAndConnected();
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			const armed = vi.getTimerCount();
+			unmount();
+			// The timer must be gone, not merely harmless when it fires.
+			expect(vi.getTimerCount()).toBeLessThan(armed);
+		});
+
+		it("does not end a newer call when the controller unmounts mid-countdown", async () => {
+			vi.useFakeTimers();
+			const { unmount } = await joinedAndConnected();
+
+			hooksState.setLivekitStatus("idle");
+			await flush();
+			unmount();
+			setActiveCallRoomId("!other:example.com");
+			await vi.advanceTimersByTimeAsync(60_000);
+			await flush();
+
+			expect(hooksState.rtcLeave).not.toHaveBeenCalled();
+			expect(activeCallRoomId()).toBe("!other:example.com");
+		});
 	});
 
 	it("an abandoned leave that completes after unmount never clears a newer activeCallRoomId", async () => {

@@ -8,7 +8,9 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../../client/client";
+import { reportError } from "../../../../lib/reportError";
 import { setActiveCallRoomId } from "../../../../stores/activeCall";
+import { pushNotice } from "../../../../stores/notices";
 import { userSettings } from "../../../../stores/settings";
 import { micEnabled as voiceMicEnabled } from "../../../../stores/voice";
 import { ConfirmDialog } from "../../settings/ConfirmDialog";
@@ -21,6 +23,35 @@ import {
 import { createRtcE2EEContext, type RtcE2EEContext } from "./rtcE2EEBridge";
 import { useLivekitRoom } from "./useLivekitRoom";
 import { useRtcSession } from "./useRtcSession";
+
+/**
+ * How long the media session may stay down, after having been connected,
+ * before the call is ended outright (#434).
+ *
+ * "Down" is `livekit.status()` at "idle" or "error", which `useLivekitRoom`
+ * reaches from several places — livekit-client giving up after exhausting its
+ * own reconnect policy, a failed connect attempt (including a `LivekitJwtError`
+ * token fetch), and its own teardown branches when `enabled` goes false or the
+ * focus changes. Only the first is a genuine media death, so it is the GUARDS
+ * below (`everMediaConnected`, `rtc.status() === "joined"`, `leaving()`,
+ * `leaveRequested()`) rather than the status alone that decide whether the
+ * countdown may run; this constant only decides how long to wait once they all
+ * agree.
+ *
+ * What the wait is for: livekit-client is finished retrying by this point, so
+ * the only thing that can still recover the call is Crust's own re-entry into
+ * `doConnect` — which is incidental rather than designed, since it re-runs only
+ * when the `activeFocus` memo yields a different value and its value-based
+ * `equals` suppresses ticks for the same SFU. In practice that happens only
+ * when unrelated membership churn perturbs the focus, so waiting longer mostly
+ * buys a longer-lying UI rather than a better chance of recovery.
+ *
+ * 20s is comfortably past the point where any such re-entry would already have
+ * moved the status to "connecting" (which cancels the countdown), and ending
+ * the call is cheap to undo — Join is one click — whereas a call that silently
+ * stopped carrying audio is not discoverable at all.
+ */
+const MEDIA_DOWN_GRACE_MS = 20_000;
 
 interface CallSessionControllerProps {
 	/**
@@ -406,6 +437,82 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 		if (s === "idle" || s === "error") {
 			setActiveCallRoomId(null);
 		}
+	});
+
+	// Media-death watchdog (#434). The watcher above only reads
+	// `rtc.status()`, but the two layers fail independently: when
+	// livekit-client gives up (SFU unreachable, duplicate identity, kicked)
+	// it tears the media session down while MatrixRTC still reports
+	// "joined". Nothing then ends the call, so the overlay keeps offering
+	// Mute/Share controls over dead audio and our `m.call.member` stays
+	// live — every other participant keeps seeing a tile that will never
+	// speak.
+	//
+	// Ending it runs the real leave rather than just dropping the signal,
+	// so the membership is withdrawn (awaited) instead of being left to the
+	// unmount's fire-and-forget path.
+	let everMediaConnected = false;
+	let mediaDownTimer: ReturnType<typeof setTimeout> | undefined;
+	const clearMediaDownTimer = (): void => {
+		if (mediaDownTimer !== undefined) {
+			clearTimeout(mediaDownTimer);
+			mediaDownTimer = undefined;
+		}
+	};
+	onCleanup(clearMediaDownTimer);
+
+	createEffect(() => {
+		const lk = livekit.status();
+		if (lk === "connected") {
+			// Latch: before the first successful connect, "idle" is just the
+			// pre-connect state of a normal join, not a death.
+			everMediaConnected = true;
+			clearMediaDownTimer();
+			return;
+		}
+		// "connecting"/"disconnecting" are in flight — give them their chance.
+		const down = lk === "idle" || lk === "error";
+		if (
+			!down ||
+			!everMediaConnected ||
+			rtc.status() !== "joined" ||
+			// Our own teardown already owns the lifecycle. `leaveRequested()`
+			// is the right guard rather than `leaving()`: `runLeave` sets both
+			// synchronously, but only this one OUTLIVES a leave that failed —
+			// and that aftermath is the dangerous state. There the user sits in
+			// the confirm dialog with Retry/Stay while `enabled` is
+			// deliberately false, so LiveKit is parked at "idle" and can never
+			// reach "connecting" to cancel us. Guarding on `leaving()` alone
+			// would let the watchdog read Crust's own intentional media
+			// suppression as a death, fire a second leave 20s later, and on its
+			// likely failure unmount the controller — destroying the dialog the
+			// user was reading and stranding the very membership this watchdog
+			// exists to withdraw. "Stay" clears it, which re-arms us if the
+			// media is still gone.
+			leaveRequested()
+		) {
+			clearMediaDownTimer();
+			return;
+		}
+		if (mediaDownTimer !== undefined) return; // already counting down
+		mediaDownTimer = setTimeout(() => {
+			mediaDownTimer = undefined;
+			if (unmounted) return;
+			// Say so: unlike the RTC-driven watcher above (where the session
+			// ended server-side and the user's own client agrees), here the
+			// call disappears while the app still believed it was live, so a
+			// silent vanish reads as a bug.
+			pushNotice("Call ended — lost connection to the voice server.");
+			void confirmLeave().catch((err: unknown) => {
+				// No `userMessage`: the notice above already told the user the
+				// call ended, and #318's rule is not to double-signal.
+				reportError(err, { logLabel: "Failed to end call after media loss" });
+				// The media is gone either way; a call the user cannot hear
+				// must not keep presenting itself as live.
+				if (unmounted) return;
+				setActiveCallRoomId(null);
+			});
+		}, MEDIA_DOWN_GRACE_MS);
 	});
 
 	const instanceId = allocCallSessionInstanceId();
