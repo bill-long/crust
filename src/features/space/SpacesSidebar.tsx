@@ -3,12 +3,10 @@ import { useNavigate } from "@solidjs/router";
 import {
 	type Accessor,
 	type Component,
-	createEffect,
 	createMemo,
 	createSignal,
 	For,
 	type JSX,
-	on,
 	Show,
 } from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
@@ -23,6 +21,11 @@ import {
 	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import {
+	createFailedImageUrls,
+	createImageFallback,
+	type FailedImageUrls,
+} from "../../lib/imageFallback";
 import { spaceLandingPath } from "../../lib/spaceLanding";
 import { CreateSpaceDialog } from "./CreateSpaceDialog";
 
@@ -66,6 +69,8 @@ interface SpaceTileProps {
 	onOpenSpaceSettings?: (spaceId: string) => void;
 	onLeaveSpace?: (spaceId: string) => void;
 	onInviteSpace?: (spaceId: string) => void;
+	/** Fail-closed avatar state, shared with the rest of the rail. */
+	brokenAvatars: FailedImageUrls;
 }
 
 /**
@@ -117,13 +122,11 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 
 	// Fail-closed avatar: a 404/decode failure falls back to the initial
 	// instead of the browser's broken-image icon. Reset when the avatar
-	// URL changes so a synced-in avatar retries (mirrors components/Avatar).
-	const [imgFailed, setImgFailed] = createSignal(false);
-	createEffect(
-		on(
-			() => props.space.avatarUrl,
-			() => setImgFailed(false),
-		),
+	// URL changes so a synced-in avatar retries. Shares the rail's registry,
+	// so one broken URL is recorded once for the whole sidebar.
+	const avatar = createImageFallback(
+		() => props.space.avatarUrl,
+		props.brokenAvatars,
 	);
 
 	const triggerInner = (
@@ -141,7 +144,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				aria-current={isSelected() ? "page" : undefined}
 			>
 				<Show
-					when={!imgFailed() && props.space.avatarUrl}
+					when={!avatar.failed() && props.space.avatarUrl}
 					fallback={
 						<span class={`font-semibold ${nested() ? "text-xs" : "text-sm"}`}>
 							{(props.space.name.trim() || "?").charAt(0).toUpperCase()}
@@ -150,10 +153,12 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				>
 					{(url) => (
 						<img
+							ref={avatar.ref}
 							src={url()}
 							alt={props.space.name.trim() || "Space"}
 							class={`${sizeClass()} rounded-[inherit] object-cover transition-[border-radius]`}
-							onError={() => setImgFailed(true)}
+							onError={avatar.onError}
+							onLoad={avatar.onLoad}
 						/>
 					)}
 				</Show>
@@ -249,6 +254,10 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	const params = useDecodedParams<{ spaceId?: string }>();
 	const navigate = useNavigate();
 	const [createOpen, setCreateOpen] = createSignal(false);
+	// Fail-closed avatars for the whole rail, keyed by URL so the state
+	// survives a <For> row remount if a selector re-mints its summaries (#457),
+	// and so one broken URL is recorded once rather than per tile.
+	const brokenAvatars = createFailedImageUrls();
 
 	// Joined spaces as a nested tree (#443): subspaces render indented
 	// under their parent instead of as flat top-level tiles. The flattened
@@ -342,6 +351,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 					{(space) => (
 						<SpaceTile
 							space={space}
+							brokenAvatars={brokenAvatars}
 							depth={() => spaceTree().depths.get(space.roomId) ?? 0}
 							onOpenSpaceSettings={props.onOpenSpaceSettings}
 							onLeaveSpace={props.onLeaveSpace}
@@ -357,6 +367,12 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 				<For each={invitedSpaces()}>
 					{(space) => {
 						const isSelected = () => params.spaceId === space.roomId;
+						// Fail-closed avatar: a 404/decode failure falls back to the
+						// initial instead of the browser's broken-image icon (#457).
+						const avatar = createImageFallback(
+							() => space.avatarUrl,
+							brokenAvatars,
+						);
 						return (
 							<SidebarItem selected={isSelected}>
 								<button
@@ -374,18 +390,23 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									aria-current={isSelected() ? "page" : undefined}
 								>
 									<Show
-										when={space.avatarUrl}
+										when={!avatar.failed() && space.avatarUrl}
 										fallback={
 											<span class="text-sm font-semibold">
 												{(space.name.trim() || "?").charAt(0).toUpperCase()}
 											</span>
 										}
 									>
-										<img
-											src={space.avatarUrl ?? ""}
-											alt={space.name.trim() || "Space"}
-											class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
-										/>
+										{(url) => (
+											<img
+												ref={avatar.ref}
+												src={url()}
+												alt={space.name.trim() || "Space"}
+												class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
+												onError={avatar.onError}
+												onLoad={avatar.onLoad}
+											/>
+										)}
 									</Show>
 									<span
 										aria-hidden="true"
@@ -405,6 +426,12 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 				<For each={knockedSpaces()}>
 					{(space) => {
 						const isSelected = () => params.spaceId === space.roomId;
+						// Fail-closed avatar: a 404/decode failure falls back to the
+						// initial instead of the browser's broken-image icon (#457).
+						const avatar = createImageFallback(
+							() => space.avatarUrl,
+							brokenAvatars,
+						);
 						return (
 							<SidebarItem selected={isSelected}>
 								<button
@@ -422,18 +449,23 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									aria-current={isSelected() ? "page" : undefined}
 								>
 									<Show
-										when={space.avatarUrl}
+										when={!avatar.failed() && space.avatarUrl}
 										fallback={
 											<span class="text-sm font-semibold">
 												{(space.name.trim() || "?").charAt(0).toUpperCase()}
 											</span>
 										}
 									>
-										<img
-											src={space.avatarUrl ?? ""}
-											alt={space.name.trim() || "Space"}
-											class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
-										/>
+										{(url) => (
+											<img
+												ref={avatar.ref}
+												src={url()}
+												alt={space.name.trim() || "Space"}
+												class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
+												onError={avatar.onError}
+												onLoad={avatar.onLoad}
+											/>
+										)}
 									</Show>
 									<span
 										aria-hidden="true"

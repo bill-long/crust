@@ -186,3 +186,26 @@ describe("RoomGeneralTab", () => {
 		).toBe("true");
 	});
 });
+
+describe("RoomGeneralTab avatar fallback (#457)", () => {
+	it("falls back to the room initial when the avatar image errors", () => {
+		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
+		room.__setStateEvent("m.room.name", "", { name: "Alpha" });
+		room.__setStateEvent("m.room.avatar", "", {
+			url: "mxc://example.com/broken",
+		});
+		const client = createMockClient(new Map([["!room:example.com", room]]));
+		const { container } = render(() => (
+			<RoomGeneralTab
+				client={client as unknown as MatrixClient}
+				roomId="!room:example.com"
+			/>
+		));
+		expect(container.querySelector("img")).not.toBeNull();
+
+		fireEvent.error(container.querySelector("img") as HTMLImageElement);
+
+		expect(container.querySelector("img")).toBeNull();
+		expect(screen.getByText("A")).toBeTruthy();
+	});
+});

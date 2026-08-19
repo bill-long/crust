@@ -2,13 +2,16 @@ import {
 	type Component,
 	createEffect,
 	createMemo,
-	createSignal,
 	For,
-	on,
 	onCleanup,
 	onMount,
 	Show,
 } from "solid-js";
+import {
+	createFailedImageUrls,
+	createImageFallback,
+	type FailedImageUrls,
+} from "../../../../lib/imageFallback";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
 import { appModalOpen } from "../../../../stores/modalStack";
 import {
@@ -57,6 +60,9 @@ const FOCUSABLE_SELECTOR =
  */
 export const FullCallOverlay: Component = () => {
 	const session = createMemo(() => currentCallSession());
+	// Fail-closed avatars, keyed by URL at the overlay level so the state
+	// outlives the participant tiles - see ParticipantTileProps (#457).
+	const brokenAvatars = createFailedImageUrls();
 
 	// Active remote screen shares, one labelled tile each. Intentionally depends
 	// ONLY on `screenShareTracks()` (not `participants()`): the sharer's display
@@ -508,7 +514,11 @@ export const FullCallOverlay: Component = () => {
 								>
 									<For each={s().livekit.participants()}>
 										{(p) => (
-											<ParticipantTile participant={p} livekit={s().livekit} />
+											<ParticipantTile
+												participant={p}
+												livekit={s().livekit}
+												brokenAvatars={brokenAvatars}
+											/>
 										)}
 									</For>
 									<For each={screenShares()}>
@@ -533,6 +543,9 @@ export const FullCallOverlay: Component = () => {
 interface ParticipantTileProps {
 	participant: RtcParticipant;
 	livekit: LivekitRoomApi;
+	/** Fail-closed avatar state, owned by the overlay - useLivekitRoom re-mints
+	 *  a participant on every speaking/mute flip, which remounts this tile. */
+	brokenAvatars: FailedImageUrls;
 }
 
 /**
@@ -555,12 +568,9 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 		props.livekit.videoTracks().get(props.participant.identity),
 	);
 
-	const [avatarFailed, setAvatarFailed] = createSignal(false);
-	createEffect(
-		on(
-			() => props.participant.avatarUrlLarge,
-			() => setAvatarFailed(false),
-		),
+	const avatar = createImageFallback(
+		() => props.participant.avatarUrlLarge,
+		props.brokenAvatars,
 	);
 
 	createEffect(() => {
@@ -599,7 +609,7 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 			/>
 			<Show when={!entry()}>
 				<Show
-					when={!avatarFailed() && props.participant.avatarUrlLarge}
+					when={!avatar.failed() && props.participant.avatarUrlLarge}
 					fallback={
 						<div
 							aria-hidden="true"
@@ -611,11 +621,13 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 				>
 					{(url) => (
 						<img
+							ref={avatar.ref}
 							src={url()}
 							alt=""
 							aria-hidden="true"
 							class="aspect-square w-[clamp(3rem,45cqmin,14rem)] rounded-full object-cover"
-							onError={() => setAvatarFailed(true)}
+							onError={avatar.onError}
+							onLoad={avatar.onLoad}
 						/>
 					)}
 				</Show>

@@ -1,4 +1,8 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import {
+	createFailedImageUrls,
+	createImageFallback,
+} from "../../../../lib/imageFallback";
 import { micEnabled as voiceMicEnabled } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
 import type { RtcParticipant } from "./useLivekitRoom";
@@ -27,6 +31,10 @@ import type { RtcParticipant } from "./useLivekitRoom";
  */
 export const CallOverlayPanel: Component = () => {
 	const session = createMemo(() => currentCallSession());
+	// Fail-closed avatars, keyed by URL at the panel level: useLivekitRoom
+	// re-mints a participant on every speaking/mute flip, so per-row error
+	// state would be dropped several times a second during a call (#457).
+	const brokenAvatars = createFailedImageUrls();
 	const participants = createMemo<readonly RtcParticipant[]>(
 		() => session()?.livekit.participants() ?? [],
 	);
@@ -97,11 +105,15 @@ export const CallOverlayPanel: Component = () => {
 						{(p) => {
 							const muted = createMemo(() => isMuted(p));
 							const speaking = createMemo(() => p.isSpeaking && !muted());
+							const avatar = createImageFallback(
+								() => p.avatarUrl,
+								brokenAvatars,
+							);
 							return (
 								<li class="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-1">
 									<span class="relative shrink-0">
 										<Show
-											when={p.avatarUrl}
+											when={!avatar.failed() && p.avatarUrl}
 											fallback={
 												<span
 													aria-hidden="true"
@@ -113,10 +125,13 @@ export const CallOverlayPanel: Component = () => {
 										>
 											{(url) => (
 												<img
+													ref={avatar.ref}
 													src={url()}
 													alt=""
 													aria-hidden="true"
 													class="h-8 w-8 rounded-full object-cover"
+													onError={avatar.onError}
+													onLoad={avatar.onLoad}
 												/>
 											)}
 										</Show>

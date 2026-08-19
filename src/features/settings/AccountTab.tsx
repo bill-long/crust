@@ -1,14 +1,7 @@
 import { UserEvent } from "matrix-js-sdk";
-import {
-	type Component,
-	createEffect,
-	createSignal,
-	For,
-	on,
-	onCleanup,
-	Show,
-} from "solid-js";
+import { type Component, createSignal, For, onCleanup, Show } from "solid-js";
 import { useClient } from "../../client/client";
+import { createImageFallback } from "../../lib/imageFallback";
 import { SectionHeading } from "./SettingsControls";
 
 const AccountTab: Component = () => {
@@ -100,8 +93,7 @@ const AccountTab: Component = () => {
 	// --- Avatar upload ---
 	const [avatarUploading, setAvatarUploading] = createSignal(false);
 	const [avatarError, setAvatarError] = createSignal("");
-	const [avatarImgFailed, setAvatarImgFailed] = createSignal(false);
-	createEffect(on(currentAvatarUrl, () => setAvatarImgFailed(false)));
+	const avatarImg = createImageFallback(currentAvatarUrl);
 	let fileInputRef!: HTMLInputElement;
 
 	const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -214,15 +206,17 @@ const AccountTab: Component = () => {
 							aria-describedby={avatarError() ? "avatar-error" : undefined}
 						>
 							<Show
-								when={!avatarImgFailed() && currentAvatarUrl()}
+								when={!avatarImg.failed() && currentAvatarUrl()}
 								fallback={<span>{initial()}</span>}
 							>
 								{(url) => (
 									<img
+										ref={avatarImg.ref}
 										src={url()}
 										alt="Avatar"
 										class="h-full w-full object-cover"
-										onError={() => setAvatarImgFailed(true)}
+										onError={avatarImg.onError}
+										onLoad={avatarImg.onLoad}
 									/>
 								)}
 							</Show>

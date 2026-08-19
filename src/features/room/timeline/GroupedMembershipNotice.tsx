@@ -1,4 +1,8 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import {
+	createImageFallback,
+	type FailedImageUrls,
+} from "../../../lib/imageFallback";
 import { userSettings } from "../../../stores/settings";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { summarizeMembershipGroup } from "./membershipGrouping";
@@ -24,6 +28,10 @@ interface GroupedMembershipNoticeProps {
 	timestamp: number;
 	/** Expand the group to show each individual notice. */
 	onExpand: () => void;
+	/** Fail-closed avatar state, owned by the timeline: this notice lives in
+	 *  the timeline's virtualizer, so per-notice state would die on scroll-away
+	 *  and would not de-duplicate a broken URL across notices. */
+	brokenAvatars: FailedImageUrls;
 }
 
 const MAX_STACK = 3;
@@ -84,24 +92,33 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 			>
 				<span class="flex shrink-0 -space-x-1.5" aria-hidden="true">
 					<For each={stack()}>
-						{(m) => (
-							<Show
-								when={m.avatarUrl}
-								fallback={
-									<span class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-secondary ring-2 ring-surface-0">
-										{initialOf(m.name)}
-									</span>
-								}
-							>
-								{(url) => (
-									<img
-										src={url()}
-										alt=""
-										class="h-4 w-4 rounded-full object-cover ring-2 ring-surface-0"
-									/>
-								)}
-							</Show>
-						)}
+						{(m) => {
+							const avatar = createImageFallback(
+								() => m.avatarUrl,
+								props.brokenAvatars,
+							);
+							return (
+								<Show
+									when={!avatar.failed() && m.avatarUrl}
+									fallback={
+										<span class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-secondary ring-2 ring-surface-0">
+											{initialOf(m.name)}
+										</span>
+									}
+								>
+									{(url) => (
+										<img
+											ref={avatar.ref}
+											src={url()}
+											alt=""
+											class="h-4 w-4 rounded-full object-cover ring-2 ring-surface-0"
+											onError={avatar.onError}
+											onLoad={avatar.onLoad}
+										/>
+									)}
+								</Show>
+							);
+						}}
 					</For>
 				</span>
 				<span class="min-w-0 truncate">{summary()}</span>

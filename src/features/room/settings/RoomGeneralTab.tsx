@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { Tooltip } from "../../../components/Tooltip";
+import { createImageFallback } from "../../../lib/imageFallback";
 import { FieldStatus } from "./FieldStatus";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
@@ -166,6 +167,10 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 		return props.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null;
 	});
 
+	// Fail-closed preview: a 404/decode failure falls back to the room's
+	// initial instead of the browser's broken-image icon (#457).
+	const avatarImg = createImageFallback(avatarHttp);
+
 	const uploadAvatar = async (file: File): Promise<void> => {
 		if (!file.type.startsWith("image/")) {
 			setAvatarError("File must be an image");
@@ -247,7 +252,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 				<div class="flex items-center gap-4">
 					<div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg bg-surface-2">
 						<Show
-							when={avatarHttp()}
+							when={!avatarImg.failed() && avatarHttp()}
 							fallback={
 								<span class="text-2xl font-semibold text-text-muted">
 									{(props.client.getRoom(props.roomId)?.name ?? "?")
@@ -257,11 +262,16 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 								</span>
 							}
 						>
-							<img
-								src={avatarHttp() ?? ""}
-								alt=""
-								class="h-full w-full object-cover"
-							/>
+							{(url) => (
+								<img
+									ref={avatarImg.ref}
+									src={url()}
+									alt=""
+									class="h-full w-full object-cover"
+									onError={avatarImg.onError}
+									onLoad={avatarImg.onLoad}
+								/>
+							)}
 						</Show>
 					</div>
 					<div class="flex-1">

@@ -10,6 +10,8 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { RowAvatar } from "../../../components/RowAvatar";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import {
 	linkRoomToSpace,
 	unlinkRoomFromSpace,
@@ -38,6 +40,9 @@ interface ChildDisplay {
 
 const RoomsTab: Component<RoomsTabProps> = (props) => {
 	const { summaries } = useClient();
+	// Shared across both row lists below: they are memos that re-mint their
+	// display objects on any summaries change, remounting the rows (#457).
+	const brokenAvatars = createFailedImageUrls();
 	const perms = useRoomPermissions(props.client, () => props.roomId);
 
 	const filterId = createUniqueId();
@@ -217,18 +222,12 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 							{(child) => (
 								<li class="flex items-center justify-between gap-3 rounded bg-surface-1 px-3 py-2">
 									<div class="flex min-w-0 items-center gap-3">
-										<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-2 text-xs font-semibold text-text-secondary">
-											<Show
-												when={child.avatarUrl}
-												fallback={<span>{initial(child.name)}</span>}
-											>
-												<img
-													src={child.avatarUrl ?? ""}
-													alt=""
-													class="h-full w-full object-cover"
-												/>
-											</Show>
-										</div>
+										<RowAvatar
+											shape="square"
+											url={child.avatarUrl}
+											initial={initial(child.name)}
+											broken={brokenAvatars}
+										/>
 										<div class="min-w-0">
 											<div class="truncate text-sm text-text-primary">
 												{child.name}
@@ -299,18 +298,12 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 								{(room) => (
 									<li class="flex items-center justify-between gap-3 rounded bg-surface-1 px-3 py-2">
 										<div class="flex min-w-0 items-center gap-3">
-											<div class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-surface-2 text-xs font-semibold text-text-secondary">
-												<Show
-													when={room.avatarUrl}
-													fallback={<span>{initial(room.name)}</span>}
-												>
-													<img
-														src={room.avatarUrl ?? ""}
-														alt=""
-														class="h-full w-full object-cover"
-													/>
-												</Show>
-											</div>
+											<RowAvatar
+												shape="square"
+												url={room.avatarUrl}
+												initial={initial(room.name)}
+												broken={brokenAvatars}
+											/>
 											<div class="min-w-0">
 												<div class="truncate text-sm text-text-primary">
 													{room.name}
