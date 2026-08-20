@@ -8,7 +8,7 @@
 // `bundle > windows > signCommand` in tauri.conf.json, passing the artifact
 // path in place of "%1". It offers 11 files per release build; see SKIP_RULES
 // below for the ones this declines to sign and why. The five that are signed
-// are the main binary (twice — the bundler re-patches and re-signs it for each
+// are the main binary (twice - the bundler re-patches and re-signs it for each
 // package type), the .msi, the NSIS -setup.exe, and the uninstaller makensis
 // builds in a temp file.
 //
@@ -64,11 +64,18 @@ const CREDENTIAL_VARS = [
 	"ESIGNER_TOTP_SECRET",
 ];
 
-/** Signing attempts. eSigner rejects an OTP if the runner clock has drifted
- * near a window boundary, and the TSA can be briefly unavailable; both clear
- * on a retry in the next 30-second TOTP window. */
+/** Signing attempts. Only a failed eSigner authorization is retried: that step
+ * runs before the hash is submitted, so a rejected OTP (a runner clock sitting
+ * near a window boundary) costs no metered signature and clears in the next
+ * 30-second window. A later failure - a timestamping timeout, say - has already
+ * spent one, and jsign retries the TSA itself (--tsretries below), so retrying
+ * the whole invocation would only burn the monthly allowance. */
 const ATTEMPTS = 3;
 const RETRY_DELAY_MS = 31_000;
+
+/** jsign's wording for the authorization failures, all raised pre-signature. */
+const RETRYABLE =
+	/invalid otp|authentication failed with ssl\.com|signing authorization/i;
 
 const fail = (message) => {
 	console.error(`[sign] ${message}`);
@@ -148,21 +155,27 @@ if (process.env.ESIGNER_ENDPOINT) args.push("--keystore", process.env.ESIGNER_EN
 args.push(target);
 
 for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-	// stdio inherit: jsign's own diagnostics go straight to the build log. The
-	// command itself is never echoed -- the credentials are in argv.
-	const result = spawnSync(java, args, { stdio: "inherit" });
+	// Captured rather than inherited so the retry decision can read it, then
+	// echoed to stdout where the bundler looks. The command itself is never
+	// echoed -- the credentials are in argv.
+	const result = spawnSync(java, args, { encoding: "utf8" });
 
 	if (result.error) fail(`could not run ${java}: ${result.error.message}`);
+	const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+	if (output.trim()) console.log(output.trim());
+
 	if (result.status === 0) {
 		console.log(`[sign] signed ${target}`);
 		process.exit(0);
 	}
 
-	if (attempt === ATTEMPTS) {
-		fail(`jsign failed with exit code ${result.status} after ${ATTEMPTS} attempts: ${target}`);
+	if (attempt === ATTEMPTS || !RETRYABLE.test(output)) {
+		fail(
+			`jsign failed with exit code ${result.status} on attempt ${attempt}/${ATTEMPTS}: ${target}`,
+		);
 	}
 	console.log(
-		`[sign] attempt ${attempt}/${ATTEMPTS} failed (exit ${result.status}); retrying in ${RETRY_DELAY_MS / 1000}s.`,
+		`[sign] eSigner rejected the authorization (attempt ${attempt}/${ATTEMPTS}); retrying in ${RETRY_DELAY_MS / 1000}s.`,
 	);
 	// Block the loop: this process exists only to produce one signature, and
 	// the bundler is waiting on its exit code.

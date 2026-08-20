@@ -20,9 +20,10 @@ name: Desktop release
 # sign-windows.mjs against the SSL.com eSigner cloud HSM. It needs four repo
 # secrets (ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_CREDENTIAL_ID,
 # ESIGNER_TOTP_SECRET). Without them the build still runs and produces UNSIGNED
-# installers, so PRs and forks keep working; a `desktop-v*` tag is refused
-# up front instead, and the signatures are verified before upload. The
-# credentials are scoped to the build step alone, not the whole job.
+# installers, so a fork or a manual dispatch can still exercise the pipeline; a
+# `desktop-v*` tag is refused up front instead, and the signatures are verified
+# before upload. The credentials are scoped to the build step alone, not the
+# whole job.
 # Auto-update arrives in a later Phase 3 step (#261).
 
 on:
@@ -185,21 +186,34 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $msi = Get-Item dist-installers/*.msi
-          $setup = Get-Item dist-installers/*-setup.exe
+          # Every match is verified rather than the first: adding a second WiX
+          # language would otherwise quietly leave an installer unchecked.
+          $msis = @(Get-ChildItem dist-installers/*.msi -File)
+          $setups = @(Get-ChildItem dist-installers/*-setup.exe -File)
+          if ($msis.Count -eq 0) { throw "no .msi found in dist-installers." }
+          if ($setups.Count -eq 0) { throw "no -setup.exe found in dist-installers." }
 
-          $extract = Join-Path $env:RUNNER_TEMP 'msi-payload'
-          New-Item -ItemType Directory -Force -Path $extract | Out-Null
-          $msiexec = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
-            '/a', "`"$($msi.FullName)`"", '/qn', "TARGETDIR=`"$extract`""
-          )
-          if ($msiexec.ExitCode -ne 0) {
-            throw "msiexec administrative install failed with exit code $($msiexec.ExitCode)."
+          $files = [System.Collections.Generic.List[string]]::new()
+          $msis + $setups | ForEach-Object { $files.Add($_.FullName) }
+
+          for ($i = 0; $i -lt $msis.Count; $i++) {
+            $msi = $msis[$i]
+            $extract = Join-Path $env:RUNNER_TEMP "msi-payload-$i"
+            New-Item -ItemType Directory -Force -Path $extract | Out-Null
+            $msiexec = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+              '/a', "`"$($msi.FullName)`"", '/qn', "TARGETDIR=`"$extract`""
+            )
+            if ($msiexec.ExitCode -ne 0) {
+              throw "msiexec administrative install of $($msi.Name) failed with exit code $($msiexec.ExitCode)."
+            }
+            $exes = @(Get-ChildItem $extract -Recurse -Filter 'crust.exe' -File)
+            if ($exes.Count -eq 0) {
+              throw "crust.exe was not found in the payload of $($msi.Name)."
+            }
+            $exes | ForEach-Object { $files.Add($_.FullName) }
           }
-          $exe = Get-ChildItem $extract -Recurse -Filter 'Crust.exe' | Select-Object -First 1
-          if (-not $exe) { throw "Crust.exe was not found in the extracted MSI payload." }
 
-          foreach ($file in @($msi.FullName, $setup.FullName, $exe.FullName)) {
+          foreach ($file in $files) {
             $name = Split-Path $file -Leaf
             $sig = Get-AuthenticodeSignature -FilePath $file
             if ($sig.Status -ne 'Valid') {
