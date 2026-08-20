@@ -49,8 +49,9 @@ hash leaves the machine, and the file is signed and RFC 3161 timestamped in
 place.
 
 Signing needs five environment variables; `.github/workflows/desktop-release.yml`
-supplies them from repository secrets of the same name (plus `JSIGN_JAR`, which
-it downloads and checksums per run):
+supplies the four credentials from secrets of the same name held in the
+**`windows-signing`** GitHub environment, and downloads and checksums
+`JSIGN_JAR` per run:
 
 | Variable                | Where it comes from                                                  |
 | ----------------------- | -------------------------------------------------------------------- |
@@ -60,9 +61,24 @@ it downloads and checksums per run):
 | `ESIGNER_TOTP_SECRET`   | base64 TOTP secret saved when eSigner automation was enabled          |
 | `JSIGN_JAR`             | path to a `jsign-<version>.jar`                                       |
 
+eSigner authenticates with the SSL.com **account login**, not a signing-scoped
+token - that is how every eSigner client works (CodeSignTool, eSigner CKA,
+jsign), and an IV/OV certificate cannot be shared with a separate CI user. Three
+controls narrow what those secrets are worth, and a release should keep all
+three:
+
+1. They live in the `windows-signing` environment, which requires a reviewer to
+   approve each run and only permits `main` and `desktop-v*` tags. A job blocked
+   by that ref policy fails outright, so this workflow no longer builds from
+   arbitrary branches - build locally to test those.
+2. The signing credential has an enable/disable toggle on SSL.com's **Signing
+   Credentials** page. Leave it disabled between releases; it stops signing
+   without revoking the certificate or rotating the account password.
+3. Keep 2FA on the SSL.com account, so the password alone cannot reach the
+   portal.
+
 **Local builds are unsigned by design.** With none of the four credentials set
-the script logs a skip and exits 0, so contributors, forks, and any manual
-`workflow_dispatch` run without the secrets can still build installers. Setting only some of them is treated as a misconfiguration and
+the script logs a skip and exits 0, so contributors can still build installers. Setting only some of them is treated as a misconfiguration and
 fails the build. A `desktop-v*` tag is refused outright when the secrets are
 absent, and CI re-verifies the finished artifacts - including the `crust.exe`
 extracted back out of the MSI - before anything is uploaded.

@@ -17,10 +17,15 @@ name: Desktop release
 #
 # Code signing: the bundler signs the main binary and both installers through
 # `bundle > windows > signCommand`, which runs desktop/src-tauri/scripts/
-# sign-windows.mjs against the SSL.com eSigner cloud HSM. It needs four repo
-# secrets (ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_CREDENTIAL_ID,
-# ESIGNER_TOTP_SECRET). Without them the build still runs and produces UNSIGNED
-# installers, so a fork or a manual dispatch can still exercise the pipeline; a
+# sign-windows.mjs against the SSL.com eSigner cloud HSM. It needs four secrets
+# (ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_CREDENTIAL_ID,
+# ESIGNER_TOTP_SECRET) held in the `windows-signing` environment, which gates
+# them behind a required reviewer and a ref policy - see the build job. eSigner
+# authenticates with the SSL.com account login itself, so those secrets are
+# worth more than a scoped signing token would be; the credential also has an
+# independent kill switch in SSL.com's Signing Credentials page.
+#
+# Without the secrets the build still runs and produces UNSIGNED installers; a
 # `desktop-v*` tag is refused up front instead, and the signatures are verified
 # before upload. The credentials are scoped to the build step alone, not the
 # whole job.
@@ -42,6 +47,14 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    # The eSigner credentials are environment secrets, not repo-wide ones: only
+    # a job that declares this environment can read them, every run waits for a
+    # required reviewer, and the environment's ref policy allows `main` and
+    # `desktop-v*` tags only. The consequence is deliberate - this workflow no
+    # longer builds from arbitrary branches, because a job blocked by the ref
+    # policy fails rather than falling back to an unsigned build. Test desktop
+    # build changes with a local `pnpm tauri build` (see desktop/README.md).
+    environment: windows-signing
     # Read-only repo access; no write scopes — the write-capable token lives
     # only in the separate `release` job. `actions: read` is granted defensively
     # for the dependency caches: in practice the cache/artifact services use the
