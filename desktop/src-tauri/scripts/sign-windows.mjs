@@ -95,7 +95,12 @@ if (skip) {
 	process.exit(0);
 }
 
-const present = CREDENTIAL_VARS.filter((name) => process.env[name]);
+// Trimmed, so a secret pasted with a stray newline reads as absent here and
+// trips the guard below rather than surfacing as an eSigner auth failure much
+// later. This matches the workflow's own IsNullOrWhiteSpace check. The values
+// themselves are passed to jsign untouched.
+const isSet = (name) => Boolean(process.env[name]?.trim());
+const present = CREDENTIAL_VARS.filter(isSet);
 if (present.length === 0) {
 	console.log(
 		`[sign] SKIPPED (no eSigner credentials in the environment): ${target}`,
@@ -103,7 +108,7 @@ if (present.length === 0) {
 	process.exit(0);
 }
 if (present.length !== CREDENTIAL_VARS.length) {
-	const missing = CREDENTIAL_VARS.filter((name) => !process.env[name]);
+	const missing = CREDENTIAL_VARS.filter((name) => !isSet(name));
 	// Half-configured credentials are a mistake, not a request for an unsigned
 	// build -- silently skipping here would ship an unsigned release.
 	fail(`eSigner credentials are partially set; missing: ${missing.join(", ")}`);
