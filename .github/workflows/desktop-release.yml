@@ -66,18 +66,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Whether this repo has the eSigner secrets, as a plain boolean the `if:`
-      # expressions below can read. Only the username is exposed here (and only
-      # to this step) so the credential set stays scoped to the build step.
+      # Whether *every* eSigner secret is present, as a plain boolean for the
+      # `if:` expressions below. Checking only one of them would let a release
+      # tag past the guard below on a half-configured set, then fail deep into
+      # the build - exactly what that guard exists to prevent. The comparisons
+      # happen inside the expression, so this step sees the boolean result and
+      # never a credential. A whitespace-only secret still reads as present
+      # here; sign-windows.mjs rejects it at the first artifact.
       - name: Detect signing configuration
         id: signing
         shell: pwsh
         env:
-          ES_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ES_CONFIGURED: ${{ secrets.ESIGNER_USERNAME != '' && secrets.ESIGNER_PASSWORD != '' && secrets.ESIGNER_CREDENTIAL_ID != '' && secrets.ESIGNER_TOTP_SECRET != '' }}
         run: |
-          $configured = -not [string]::IsNullOrWhiteSpace($env:ES_USERNAME)
-          "configured=$($configured.ToString().ToLower())" >> $env:GITHUB_OUTPUT
-          Write-Host "Signing configured: $configured"
+          "configured=$($env:ES_CONFIGURED.ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Signing configured: $env:ES_CONFIGURED"
 
       # A release must never be published unsigned. Fail before the (long)
       # build rather than after it.
@@ -167,13 +170,15 @@ jobs:
       # Build only (no tagName) — publishing is the separate, write-scoped job.
       # The eSigner credentials are scoped to this step: the bundler passes them
       # through to desktop/src-tauri/scripts/sign-windows.mjs for each artifact.
-      # --verbose on signed builds: the bundler pipes the sign command's output
-      # and echoes it only when the command succeeds, so without verbose a
-      # signing failure surfaces as a bare "failed to run node".
+      # Always --verbose: the bundler pipes the sign command's output and echoes
+      # it only when the command succeeds, so without it any signing failure -
+      # including the deliberate one on a half-configured credential set, which
+      # by definition happens when signing is *not* detected as configured -
+      # surfaces as a bare "failed to run node".
       - uses: tauri-apps/tauri-action@v0
         with:
           projectPath: desktop
-          args: ${{ steps.signing.outputs.configured == 'true' && '--verbose' || '' }}
+          args: --verbose
         env:
           ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
           ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
