@@ -85,13 +85,16 @@ extracted back out of the MSI - before anything is uploaded.
 
 Notes:
 
-- eSigner subscriptions meter signatures (entry tiers allow 20/month). The
-  bundler offers 11 files per build; the script declines the WiX build-time
+- The bundler offers 11 files per build; the script declines the WiX build-time
   extensions and the NSIS plugins, leaving **5 signatures per release build**.
-- One of those five is the NSIS uninstaller, which makensis builds under a
-  temporary name (`nst*.tmp`) and signs through its `!uninstfinalize` hook. It
-  looks like a stray temp file in the build log; it is not, and adding a skip
-  rule for it would ship an unsigned `uninstall.exe`.
+  Neither declined category is verified by Windows, so signing them buys
+  nothing - and eSigner subscriptions are sold in metered tiers, so a signature
+  is not always free. Which tier (or trial) an account is on is a billing
+  question, not something this repo should assume.
+- One of those five is the NSIS uninstaller, which `makensis` (the NSIS
+  compiler) builds under a temporary name (`nst*.tmp`) and signs through its
+  `!uninstfinalize` hook. It looks like a stray temp file in the build log; it
+  is not, and adding a skip rule for it would ship an unsigned `uninstall.exe`.
 - No certificate buys an instant SmartScreen pass any more. The warning fades
   as the signature accrues reputation across downloads.
 - If signing fails, rerun the build with `--verbose`: the bundler pipes the sign
@@ -100,6 +103,55 @@ Notes:
   wrong encoding - jsign base64-decodes it, so a base32 key (only `A`-`Z` and
   `2`-`7`) has to be converted first. A repeated `invalid otp` instead points at
   clock drift on the signing machine.
+
+## Auto-update
+
+On launch the shell checks
+`https://github.com/bill-long/crust/releases/latest/download/latest.json`,
+downloads any newer version, and verifies it against the public key in
+`tauri.conf.json`. It then holds the update until the app exits, so a session is
+never interrupted: `src/app/UpdatePrompt.tsx` offers Restart, and quitting by any
+route applies it. The whole mechanism lives in Rust (`stage_update` /
+`install_staged_update` in `src-tauri/src/lib.rs`) so the web bundle stays free
+of Tauri imports; the app only listens for `crust://update-ready`.
+
+**A quit that applies an update relaunches the app.** That is not a choice this
+code makes: the plugin passes the install mode's NSIS arguments, and every mode
+that installs unattended includes `/R` (`passive` is `["/P", "/R"]`, `quiet` is
+`["/S", "/R"]`), with no per-call way to drop it. The only mode without it,
+`basicUi`, passes no arguments and shows the full installer UI instead. So the
+choice is a brief progress window followed by a relaunch, or an installer the
+user has to click through; this app takes the former.
+
+The update artifact is signed by an Ed25519 keypair that has **nothing to do
+with Authenticode** - it answers "can this app trust this update", not "does
+Windows trust this app". Both are required for a release:
+
+| Secret | Purpose |
+| ------ | ------- |
+| `TAURI_SIGNING_PRIVATE_KEY` | signs the `-setup.exe.sig` the installed app verifies |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for that key |
+
+Regenerate the pair with `pnpm tauri signer generate -w <path>`. **Back the
+private key up.** Its public half is compiled into every build shipped; losing
+it means already-installed copies can never accept another update, and every
+user would need a manual reinstall.
+
+Notes:
+
+- Updates are delivered through the **NSIS** `-setup.exe`, not the `.msi`. That
+  matches where the ecosystem landed; pointing the manifest at the MSI is
+  tauri-action's legacy default and updates an NSIS-installed app with an MSI,
+  leaving two uninstall entries
+  ([tauri-action#1027](https://github.com/tauri-apps/tauri-action/issues/1027)).
+  Someone who installs the `.msi` by hand hits that same seam on first update.
+- `createUpdaterArtifacts` is **not** in `tauri.conf.json`; it lives in
+  `src-tauri/tauri.updater.conf.json`, which CI merges in with `--config`. With
+  it enabled the bundler refuses to finish without the private key, which would
+  break `pnpm tauri build` for every contributor.
+- The endpoint follows `releases/latest`, so **publishing the draft release is
+  what makes an update live**. A draft is invisible to the updater, which is
+  what lets the artifacts be checked first.
 
 ## Rust checks
 
