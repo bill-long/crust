@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { clearNotices, notices } from "../stores/notices";
 import {
 	_resetNativeUpdateForTests,
 	dismissNativeUpdate,
@@ -164,5 +165,19 @@ describe("nativeUpdate", () => {
 			"plugin:event|unlisten",
 			expect.objectContaining({ event: "crust://update-ready" }),
 		);
+	});
+	it("surfaces a failed restart to the user", async () => {
+		// Nothing else signals it: the card stays put and looks unresponsive.
+		(window as { isTauri?: boolean }).isTauri = true;
+		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: vi.fn().mockRejectedValue(new Error("exit refused")),
+			transformCallback: () => 1,
+		};
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		clearNotices();
+
+		await restartForUpdate();
+
+		expect(notices().map((n) => n.tone)).toEqual(["error"]);
 	});
 });

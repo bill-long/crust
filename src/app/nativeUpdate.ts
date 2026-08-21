@@ -1,4 +1,5 @@
 import { createSignal } from "solid-js";
+import { reportError } from "../lib/reportError";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import { invokeTauri, listenTauri, type UnlistenTauri } from "./tauri";
 
@@ -67,7 +68,13 @@ export async function restartForUpdate(): Promise<void> {
 	try {
 		await invokeTauri("restart_for_update");
 	} catch (err) {
-		console.error("restartForUpdate failed", err);
+		// User-initiated, and nothing else signals the failure: the card just
+		// sits there looking unresponsive. The staging failures above stay
+		// console-only by contrast — nobody asked for those.
+		reportError(err, {
+			userMessage: "Couldn't restart to finish updating.",
+			logLabel: "restartForUpdate",
+		});
 	}
 }
 
