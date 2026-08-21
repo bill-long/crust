@@ -95,11 +95,14 @@ if (skip) {
 	process.exit(0);
 }
 
-// Trimmed, so a secret pasted with a stray newline reads as absent here and
-// trips the guard below rather than surfacing as an eSigner auth failure much
-// later. This matches the workflow's own IsNullOrWhiteSpace check. The values
-// themselves are passed to jsign untouched.
-const isSet = (name) => Boolean(process.env[name]?.trim());
+// Every credential is read trimmed, here and where jsign is invoked. A value
+// pasted into a secret store with a trailing newline is far likelier than one
+// whose real value ends in whitespace, and an untrimmed newline reaches jsign
+// as an undecodable base64 TOTP secret or a failed login - both of which
+// surface only as an opaque authorization error. Whitespace-only values read
+// as absent, matching the workflow's own IsNullOrWhiteSpace check.
+const cred = (name) => process.env[name]?.trim() ?? "";
+const isSet = (name) => cred(name) !== "";
 const present = CREDENTIAL_VARS.filter(isSet);
 if (present.length === 0) {
 	console.log(
@@ -130,11 +133,11 @@ const args = [
 	"ESIGNER",
 	// jsign takes the eSigner account as a single "user|password" credential.
 	"--storepass",
-	`${process.env.ESIGNER_USERNAME}|${process.env.ESIGNER_PASSWORD}`,
+	`${cred("ESIGNER_USERNAME")}|${cred("ESIGNER_PASSWORD")}`,
 	"--alias",
-	process.env.ESIGNER_CREDENTIAL_ID,
+	cred("ESIGNER_CREDENTIAL_ID"),
 	"--keypass",
-	process.env.ESIGNER_TOTP_SECRET,
+	cred("ESIGNER_TOTP_SECRET"),
 	"--alg",
 	"SHA-256",
 	// Timestamp so signatures stay valid after the certificate expires.
