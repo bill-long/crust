@@ -87,9 +87,22 @@ jobs:
           ES_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
           ES_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
         run: |
-          $values = @($env:ES_USERNAME, $env:ES_PASSWORD, $env:ES_CREDENTIAL_ID, $env:ES_TOTP_SECRET)
-          $blank = @($values | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count
-          $configured = ($blank -eq 0)
+          $required = [ordered]@{
+            ESIGNER_USERNAME      = $env:ES_USERNAME
+            ESIGNER_PASSWORD      = $env:ES_PASSWORD
+            ESIGNER_CREDENTIAL_ID = $env:ES_CREDENTIAL_ID
+            ESIGNER_TOTP_SECRET   = $env:ES_TOTP_SECRET
+          }
+          $blank = @($required.Keys | Where-Object { [string]::IsNullOrWhiteSpace($required[$_]) })
+          # All four or none. A partial set is a misconfiguration on any
+          # trigger, not a request for an unsigned build, and catching it here
+          # costs seconds instead of failing deep in the bundle step. This
+          # mirrors sign-windows.mjs, which refuses the same way per artifact.
+          if ($blank.Count -gt 0 -and $blank.Count -lt $required.Count) {
+            Write-Host "::error::eSigner secrets are partially configured; blank: $($blank -join ', '). Set all four in the windows-signing environment, or none to build unsigned."
+            exit 1
+          }
+          $configured = ($blank.Count -eq 0)
           "configured=$($configured.ToString().ToLower())" >> $env:GITHUB_OUTPUT
           Write-Host "Signing configured: $configured"
 
