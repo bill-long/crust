@@ -12,18 +12,31 @@
 //   Ctrl+Shift+Q  quit
 
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::ShortcutState;
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 mod mic_hotkey;
 pub use mic_hotkey::run_helper;
 
 const OVERLAY_LABEL: &str = "overlay";
 
+/// Emitted once an update has been downloaded and is waiting to be applied.
+/// The payload is the new version string; the app toasts it (see
+/// `src/app/nativeUpdate.ts`). Namespaced like the app's other shell events.
+const UPDATE_READY_EVENT: &str = "crust://update-ready";
+
 #[derive(Default)]
 struct OverlayState {
     click_through: Mutex<bool>,
 }
+
+/// An update already downloaded and verified against the public key in
+/// `tauri.conf.json`, held until the app exits. Downloading eagerly but
+/// installing at exit means the user is never interrupted mid-session: the
+/// installer runs when they quit, and the next launch is the new version.
+#[derive(Default)]
+struct StagedUpdate(Mutex<Option<(Update, Vec<u8>)>>);
 
 /// The overlay URL: the main window's current origin + `/overlay`. Using the
 /// main window's origin keeps the overlay same-origin (so the BroadcastChannel
@@ -89,9 +102,52 @@ fn overlay_is_open(app: AppHandle) -> bool {
     app.get_webview_window(OVERLAY_LABEL).is_some()
 }
 
+/// Quit so a staged update can be applied. Exiting is the whole mechanism: the
+/// exit hook runs the installer, and Tauri's NSIS updater relaunches the app
+/// afterwards. A no-op beyond a normal quit when nothing is staged.
+#[tauri::command]
+fn restart_for_update(app: AppHandle) {
+    app.exit(0);
+}
+
 fn apply_click_through(app: &AppHandle, on: bool) {
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = win.set_ignore_cursor_events(on);
+    }
+}
+
+/// Check for an update and, if there is one, download it into `StagedUpdate`.
+/// Runs once at startup, off the main thread. Every failure here is non-fatal
+/// and silent to the user: an unreachable endpoint, an offline machine or a
+/// signature that does not verify must never stop the app from launching, and
+/// the next launch simply tries again.
+async fn stage_update(app: AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Ok(());
+    };
+    let version = update.version.clone();
+    let bytes = update
+        .download(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    *app.state::<StagedUpdate>().0.lock().unwrap() = Some((update, bytes));
+    // Best-effort: if the window has gone away there is nobody to toast, but
+    // the update stays staged and still installs on exit.
+    let _ = app.emit(UPDATE_READY_EVENT, version);
+    Ok(())
+}
+
+/// Run the installer for a staged update, if any. Called as the app exits, so
+/// the installer takes over an app that is already going away rather than
+/// killing a live session.
+fn install_staged_update(app: &AppHandle) {
+    let staged = app.state::<StagedUpdate>().0.lock().unwrap().take();
+    let Some((update, bytes)) = staged else {
+        return;
+    };
+    if let Err(e) = update.install(bytes) {
+        eprintln!("[crust] failed to install the staged update: {e}");
     }
 }
 
@@ -99,6 +155,8 @@ fn apply_click_through(app: &AppHandle, on: bool) {
 pub fn run() {
     tauri::Builder::default()
         .manage(OverlayState::default())
+        .manage(StagedUpdate::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -125,6 +183,7 @@ pub fn run() {
             open_overlay,
             close_overlay,
             overlay_is_open,
+            restart_for_update,
             mic_hotkey::set_mic_hotkey
         ])
         .setup(|app| {
@@ -137,8 +196,23 @@ pub fn run() {
                     eprintln!("[crust] failed to register {accel}: {e}");
                 }
             }
+            // Check and download in the background: startup must not wait on
+            // the network, and a failure must not abort it.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = stage_update(handle).await {
+                    eprintln!("[crust] update check failed: {e}");
+                }
+            });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // `build` + `run` rather than `run(context)`: the exit hook is where a
+        // staged update gets applied.
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                install_staged_update(app);
+            }
+        });
 }

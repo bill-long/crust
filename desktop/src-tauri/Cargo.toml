@@ -22,6 +22,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
+# Required by tauri::generate_context! now that tauri.conf.json carries a
+# "plugins" section: the generated context embeds that config as JSON values.
+serde_json = "1"
 rdev = "0.5"
 

@@ -101,6 +101,47 @@ Notes:
   `2`-`7`) has to be converted first. A repeated `invalid otp` instead points at
   clock drift on the signing machine.
 
+## Auto-update
+
+On launch the shell checks
+`https://github.com/bill-long/crust/releases/latest/download/latest.json`,
+downloads any newer version, and verifies it against the public key in
+`tauri.conf.json`. It then holds the update until the app exits, so a session is
+never interrupted: `src/app/UpdatePrompt.tsx` offers Restart, and quitting by any
+route applies it. The whole mechanism lives in Rust (`stage_update` /
+`install_staged_update` in `src-tauri/src/lib.rs`) so the web bundle stays free
+of Tauri imports; the app only listens for `crust://update-ready`.
+
+The update artifact is signed by an Ed25519 keypair that has **nothing to do
+with Authenticode** - it answers "can this app trust this update", not "does
+Windows trust this app". Both are required for a release:
+
+| Secret | Purpose |
+| ------ | ------- |
+| `TAURI_SIGNING_PRIVATE_KEY` | signs the `-setup.exe.sig` the installed app verifies |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for that key |
+
+Regenerate the pair with `pnpm tauri signer generate -w <path>`. **Back the
+private key up.** Its public half is compiled into every build shipped; losing
+it means already-installed copies can never accept another update, and every
+user would need a manual reinstall.
+
+Notes:
+
+- Updates are delivered through the **NSIS** `-setup.exe`, not the `.msi`. That
+  matches where the ecosystem landed; pointing the manifest at the MSI is
+  tauri-action's legacy default and updates an NSIS-installed app with an MSI,
+  leaving two uninstall entries
+  ([tauri-action#1027](https://github.com/tauri-apps/tauri-action/issues/1027)).
+  Someone who installs the `.msi` by hand hits that same seam on first update.
+- `createUpdaterArtifacts` is **not** in `tauri.conf.json`; it lives in
+  `src-tauri/tauri.updater.conf.json`, which CI merges in with `--config`. With
+  it enabled the bundler refuses to finish without the private key, which would
+  break `pnpm tauri build` for every contributor.
+- The endpoint follows `releases/latest`, so **publishing the draft release is
+  what makes an update live**. A draft is invisible to the updater, which is
+  what lets the artifacts be checked first.
+
 ## Rust checks
 
 ```sh
