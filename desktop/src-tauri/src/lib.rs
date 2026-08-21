@@ -11,6 +11,7 @@
 //   Ctrl+Shift+L  close the overlay window
 //   Ctrl+Shift+Q  quit
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::ShortcutState;
@@ -32,11 +33,22 @@ struct OverlayState {
 }
 
 /// An update already downloaded and verified against the public key in
-/// `tauri.conf.json`, held until the app exits. Downloading eagerly but
-/// installing at exit means the user is never interrupted mid-session: the
-/// installer runs when they quit, and the next launch is the new version.
+/// `tauri.conf.json`, held until the user asks to restart. Downloading eagerly
+/// but installing at exit means the session is never interrupted: the installer
+/// takes over an app that is already going away.
+///
+/// `restart_requested` is what makes this safe to apply on exit. Every NSIS
+/// install mode that runs unattended also passes `/R` (restart) — Passive is
+/// `["/P", "/R"]`, Quiet is `["/S", "/R"]` — and the plugin offers no way to
+/// drop it per call. Installing on *any* exit would therefore turn "quit for
+/// the day" into "watch an installer, then have the app come back". So the
+/// update is applied only when the user explicitly chose Restart; a plain quit
+/// stays a quit, and the next launch re-checks and offers it again.
 #[derive(Default)]
-struct StagedUpdate(Mutex<Option<(Update, Vec<u8>)>>);
+struct StagedUpdate {
+    ready: Mutex<Option<(Update, Vec<u8>)>>,
+    restart_requested: AtomicBool,
+}
 
 /// The overlay URL: the main window's current origin + `/overlay`. Using the
 /// main window's origin keeps the overlay same-origin (so the BroadcastChannel
@@ -103,11 +115,29 @@ fn overlay_is_open(app: AppHandle) -> bool {
 }
 
 /// Quit so a staged update can be applied. Exiting is the whole mechanism: the
-/// exit hook runs the installer, and Tauri's NSIS updater relaunches the app
-/// afterwards. A no-op beyond a normal quit when nothing is staged.
+/// exit hook runs the installer, which relaunches the app when it finishes.
+/// Flagging the exit as update-requested is what distinguishes this from a
+/// normal quit (see StagedUpdate). A no-op beyond a quit when nothing is
+/// staged.
 #[tauri::command]
 fn restart_for_update(app: AppHandle) {
+    app.state::<StagedUpdate>()
+        .restart_requested
+        .store(true, Ordering::SeqCst);
     app.exit(0);
+}
+
+/// The version waiting to be applied, if any. The webview asks once on mount:
+/// the check runs during setup, so it can finish before any listener is
+/// registered, and Tauri drops an event that nobody is listening for.
+#[tauri::command]
+fn pending_update_version(app: AppHandle) -> Option<String> {
+    app.state::<StagedUpdate>()
+        .ready
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|(update, _)| update.version.clone())
 }
 
 fn apply_click_through(app: &AppHandle, on: bool) {
@@ -131,18 +161,21 @@ async fn stage_update(app: AppHandle) -> Result<(), String> {
         .download(|_chunk, _total| {}, || {})
         .await
         .map_err(|e| e.to_string())?;
-    *app.state::<StagedUpdate>().0.lock().unwrap() = Some((update, bytes));
-    // Best-effort: if the window has gone away there is nobody to toast, but
-    // the update stays staged and still installs on exit.
+    *app.state::<StagedUpdate>().ready.lock().unwrap() = Some((update, bytes));
+    // Best-effort: a webview that has not booted yet (or has gone away) misses
+    // this, which is what `pending_update_version` is for.
     let _ = app.emit(UPDATE_READY_EVENT, version);
     Ok(())
 }
 
-/// Run the installer for a staged update, if any. Called as the app exits, so
-/// the installer takes over an app that is already going away rather than
-/// killing a live session.
+/// Run the installer for a staged update, but only for an exit the user asked
+/// for with Restart. See StagedUpdate for why a plain quit must not install.
 fn install_staged_update(app: &AppHandle) {
-    let staged = app.state::<StagedUpdate>().0.lock().unwrap().take();
+    let state = app.state::<StagedUpdate>();
+    if !state.restart_requested.load(Ordering::SeqCst) {
+        return;
+    }
+    let staged = state.ready.lock().unwrap().take();
     let Some((update, bytes)) = staged else {
         return;
     };
@@ -184,6 +217,7 @@ pub fn run() {
             close_overlay,
             overlay_is_open,
             restart_for_update,
+            pending_update_version,
             mic_hotkey::set_mic_hotkey
         ])
         .setup(|app| {
@@ -198,12 +232,22 @@ pub fn run() {
             }
             // Check and download in the background: startup must not wait on
             // the network, and a failure must not abort it.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = stage_update(handle).await {
-                    eprintln!("[crust] update check failed: {e}");
-                }
-            });
+            //
+            // Release builds only. A `tauri dev` session reports the version in
+            // Cargo.toml, so once a newer release exists every dev run would
+            // download it and — on a Restart — install over the dev session
+            // with the released build.
+            // cfg!() rather than #[cfg]: the gate reads as one condition here
+            // instead of spreading attributes over the imports, the event
+            // constant and stage_update to keep a debug build warning-free.
+            if !cfg!(debug_assertions) {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = stage_update(handle).await {
+                        eprintln!("[crust] update check failed: {e}");
+                    }
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

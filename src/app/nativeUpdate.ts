@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js";
-import { isNativeShell } from "./nativeShell";
+import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import { invokeTauri, listenTauri, type UnlistenTauri } from "./tauri";
 
 /**
@@ -25,14 +25,36 @@ export function pendingUpdateVersion(): string | null {
 }
 
 /**
- * Start listening for a staged desktop update. Returns an unsubscribe function;
- * resolves to a no-op outside the native shell, so callers need no guard.
+ * Start watching for a staged desktop update. Returns an unsubscribe function;
+ * resolves to a no-op where there is nothing to watch, so callers need no
+ * guard.
+ *
+ * Both the event and the one-off query are needed. The shell checks during
+ * startup, so the download can finish before this webview has booted, and Tauri
+ * drops an event nobody is listening for yet; the query catches that case (and
+ * a webview reload). The event catches the ordinary case where the download
+ * lands mid-session.
  */
 export async function watchNativeUpdates(): Promise<UnlistenTauri> {
-	if (!isNativeShell()) return () => {};
-	return listenTauri<string>(UPDATE_READY_EVENT, (version) => {
-		setPendingVersion(version);
-	});
+	// The overlay window mounts the same App root. See isOverlayWindow.
+	if (!isNativeShell() || isOverlayWindow()) return () => {};
+	try {
+		const unlisten = await listenTauri<string>(
+			UPDATE_READY_EVENT,
+			(version) => {
+				setPendingVersion(version);
+			},
+		);
+		// After subscribing, so an update staged between the two is not missed.
+		const staged = await invokeTauri<string | null>("pending_update_version");
+		if (staged) setPendingVersion(staged);
+		return unlisten;
+	} catch (err) {
+		// A failed subscription must not take the app down with an unhandled
+		// rejection; the update is still staged and offered next launch.
+		console.error("watchNativeUpdates failed", err);
+		return () => {};
+	}
 }
 
 /**

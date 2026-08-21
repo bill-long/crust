@@ -13,7 +13,7 @@ type Handler = (payload: unknown) => void;
  * Stand in for the Tauri internals `listenTauri`/`invokeTauri` reach for, and
  * capture the handler registered for an event so a test can fire it.
  */
-function installTauri(): {
+function installTauri(staged: string | null = null): {
 	invoke: ReturnType<typeof vi.fn>;
 	fire: (event: string, payload: unknown) => void;
 } {
@@ -28,6 +28,7 @@ function installTauri(): {
 			if (cb) handlers.set(event, cb);
 			return 1;
 		}
+		if (cmd === "pending_update_version") return staged;
 		return undefined;
 	});
 
@@ -95,6 +96,50 @@ describe("nativeUpdate", () => {
 		// No isTauri, no internals: a plain browser tab.
 		const unlisten = await watchNativeUpdates();
 		await restartForUpdate();
+		expect(pendingUpdateVersion()).toBeNull();
+		expect(() => unlisten()).not.toThrow();
+	});
+	it("picks up an update staged before the webview mounted", async () => {
+		// The shell checks during startup, so the download can finish before any
+		// listener exists and the event is dropped; the mount-time query is the
+		// only thing that surfaces it.
+		installTauri("0.2.0");
+		await watchNativeUpdates();
+		expect(pendingUpdateVersion()).toBe("0.2.0");
+	});
+
+	it("stays silent in the overlay window", async () => {
+		const { fire, invoke } = installTauri("0.2.0");
+		const pathname = window.location.pathname;
+		Object.defineProperty(window, "location", {
+			value: { ...window.location, pathname: "/overlay" },
+			writable: true,
+			configurable: true,
+		});
+		try {
+			await watchNativeUpdates();
+			fire("crust://update-ready", "0.2.0");
+			// The overlay is a transparent click-through window over a game; a
+			// card there would be undismissable at best.
+			expect(pendingUpdateVersion()).toBeNull();
+			expect(invoke).not.toHaveBeenCalled();
+		} finally {
+			Object.defineProperty(window, "location", {
+				value: { ...window.location, pathname },
+				writable: true,
+				configurable: true,
+			});
+		}
+	});
+
+	it("survives a failed subscription without an unhandled rejection", async () => {
+		(window as { isTauri?: boolean }).isTauri = true;
+		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: vi.fn().mockRejectedValue(new Error("ipc denied")),
+			transformCallback: () => 1,
+		};
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const unlisten = await watchNativeUpdates();
 		expect(pendingUpdateVersion()).toBeNull();
 		expect(() => unlisten()).not.toThrow();
 	});
