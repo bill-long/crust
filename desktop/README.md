@@ -85,13 +85,16 @@ extracted back out of the MSI - before anything is uploaded.
 
 Notes:
 
-- eSigner subscriptions meter signatures (entry tiers allow 20/month). The
-  bundler offers 11 files per build; the script declines the WiX build-time
+- The bundler offers 11 files per build; the script declines the WiX build-time
   extensions and the NSIS plugins, leaving **5 signatures per release build**.
-- One of those five is the NSIS uninstaller, which makensis builds under a
-  temporary name (`nst*.tmp`) and signs through its `!uninstfinalize` hook. It
-  looks like a stray temp file in the build log; it is not, and adding a skip
-  rule for it would ship an unsigned `uninstall.exe`.
+  Neither declined category is verified by Windows, so signing them buys
+  nothing - and eSigner subscriptions are sold in metered tiers, so a signature
+  is not always free. Which tier (or trial) an account is on is a billing
+  question, not something this repo should assume.
+- One of those five is the NSIS uninstaller, which `makensis` (the NSIS
+  compiler) builds under a temporary name (`nst*.tmp`) and signs through its
+  `!uninstfinalize` hook. It looks like a stray temp file in the build log; it
+  is not, and adding a skip rule for it would ship an unsigned `uninstall.exe`.
 - No certificate buys an instant SmartScreen pass any more. The warning fades
   as the signature accrues reputation across downloads.
 - If signing fails, rerun the build with `--verbose`: the bundler pipes the sign

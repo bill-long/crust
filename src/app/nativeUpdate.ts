@@ -38,20 +38,21 @@ export function pendingUpdateVersion(): string | null {
 export async function watchNativeUpdates(): Promise<UnlistenTauri> {
 	// The overlay window mounts the same App root. See isOverlayWindow.
 	if (!isNativeShell() || isOverlayWindow()) return () => {};
+	let unlisten: UnlistenTauri | null = null;
 	try {
-		const unlisten = await listenTauri<string>(
-			UPDATE_READY_EVENT,
-			(version) => {
-				setPendingVersion(version);
-			},
-		);
+		unlisten = await listenTauri<string>(UPDATE_READY_EVENT, (version) => {
+			setPendingVersion(version);
+		});
 		// After subscribing, so an update staged between the two is not missed.
 		const staged = await invokeTauri<string | null>("pending_update_version");
 		if (staged) setPendingVersion(staged);
 		return unlisten;
 	} catch (err) {
-		// A failed subscription must not take the app down with an unhandled
-		// rejection; the update is still staged and offered next launch.
+		// A failure must not take the app down with an unhandled rejection; the
+		// update is still staged and offered next launch. Unsubscribe first —
+		// the query runs after the listener is live, so failing there would
+		// otherwise leak it for the lifetime of the webview.
+		unlisten?.();
 		console.error("watchNativeUpdates failed", err);
 		return () => {};
 	}

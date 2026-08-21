@@ -143,4 +143,26 @@ describe("nativeUpdate", () => {
 		expect(pendingUpdateVersion()).toBeNull();
 		expect(() => unlisten()).not.toThrow();
 	});
+	it("unsubscribes when the staged-version query fails", async () => {
+		// The query runs after the listener is live, so a failure there must not
+		// leave the subscription behind for the life of the webview.
+		(window as { isTauri?: boolean }).isTauri = true;
+		const invoke = vi.fn(async (cmd: string) => {
+			if (cmd === "plugin:event|listen") return 1;
+			if (cmd === "pending_update_version") throw new Error("boom");
+			return undefined;
+		});
+		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke,
+			transformCallback: () => 1,
+		};
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await watchNativeUpdates();
+
+		expect(invoke).toHaveBeenCalledWith(
+			"plugin:event|unlisten",
+			expect.objectContaining({ event: "crust://update-ready" }),
+		);
+	});
 });

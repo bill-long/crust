@@ -363,8 +363,22 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          setup=$(ls installers/*-setup.exe)
-          sig_file=$(ls installers/*-setup.exe.sig)
+          # Exactly one of each, asserted rather than assumed: a second
+          # architecture or language would otherwise make these globs expand to
+          # several paths and silently produce a malformed manifest. (The
+          # Windows-side staging and verify steps assert the same thing.)
+          setups=(installers/*-setup.exe)
+          sigs=(installers/*-setup.exe.sig)
+          if [ ${#setups[@]} -ne 1 ] || [ ! -f "${setups[0]}" ]; then
+            echo "::error::expected exactly one -setup.exe in installers/, found ${#setups[@]}"
+            exit 1
+          fi
+          if [ ${#sigs[@]} -ne 1 ] || [ ! -f "${sigs[0]}" ]; then
+            echo "::error::expected exactly one -setup.exe.sig in installers/, found ${#sigs[@]}"
+            exit 1
+          fi
+          setup="${setups[0]}"
+          sig_file="${sigs[0]}"
           version="${TAG#desktop-v}"
           cat > installers/latest.json <<JSON
           {
