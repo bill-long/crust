@@ -20,10 +20,10 @@
 //   JSIGN_JAR              path to jsign-<version>.jar
 //   ESIGNER_ENDPOINT       optional; https://cs-try.ssl.com for the sandbox
 //
-// With none of the four credentials set, this skips signing and exits 0 so
-// local builds and PR/fork CI still produce (unsigned) installers. Release
-// builds are protected the other way round: the workflow refuses to build a
-// desktop-v* tag without the secrets, and verifies the signatures afterwards.
+// With none of the four credentials set, this skips signing and exits 0, so a
+// local `pnpm tauri build` still produces (unsigned) installers. CI is
+// protected the other way round: the workflow refuses to build a desktop-v*
+// tag without the secrets, and verifies the signatures afterwards.
 // See .github/workflows/desktop-release.yml and desktop/README.md.
 
 import { existsSync } from "node:fs";

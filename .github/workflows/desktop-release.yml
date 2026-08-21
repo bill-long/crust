@@ -69,18 +69,29 @@ jobs:
       # Whether *every* eSigner secret is present, as a plain boolean for the
       # `if:` expressions below. Checking only one of them would let a release
       # tag past the guard below on a half-configured set, then fail deep into
-      # the build - exactly what that guard exists to prevent. The comparisons
-      # happen inside the expression, so this step sees the boolean result and
-      # never a credential. A whitespace-only secret still reads as present
-      # here; sign-windows.mjs rejects it at the first artifact.
+      # the build - exactly what that guard exists to prevent.
+      #
+      # Blank means blank-after-trimming, the same test sign-windows.mjs
+      # applies, so the workflow's conditionals and the script's own guard can
+      # never disagree about whether signing is configured. That needs the
+      # values themselves, which is why they are in this step's env - it is our
+      # own inline script, and the point of scoping credentials to named steps
+      # is to keep them out of the third-party actions in between, not out of
+      # our own.
       - name: Detect signing configuration
         id: signing
         shell: pwsh
         env:
-          ES_CONFIGURED: ${{ secrets.ESIGNER_USERNAME != '' && secrets.ESIGNER_PASSWORD != '' && secrets.ESIGNER_CREDENTIAL_ID != '' && secrets.ESIGNER_TOTP_SECRET != '' }}
+          ES_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
         run: |
-          "configured=$($env:ES_CONFIGURED.ToLower())" >> $env:GITHUB_OUTPUT
-          Write-Host "Signing configured: $env:ES_CONFIGURED"
+          $values = @($env:ES_USERNAME, $env:ES_PASSWORD, $env:ES_CREDENTIAL_ID, $env:ES_TOTP_SECRET)
+          $blank = @($values | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count
+          $configured = ($blank -eq 0)
+          "configured=$($configured.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Signing configured: $configured"
 
       # A release must never be published unsigned. Fail before the (long)
       # build rather than after it.
