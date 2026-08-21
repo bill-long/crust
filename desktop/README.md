@@ -39,6 +39,68 @@ pnpm tauri dev        # or: pnpm tauri build  -> installers under src-tauri/targ
 (`Crust_<version>_x64_en-US.msi` and `Crust_<version>_x64-setup.exe`) under
 `src-tauri/target/release/bundle/`.
 
+## Code signing
+
+Release builds are Authenticode-signed with an SSL.com certificate held in the
+**eSigner** cloud HSM. The bundler runs `src-tauri/scripts/sign-windows.mjs` for
+every artifact (`bundle > windows > signCommand`), and the script drives
+[jsign](https://ebourg.github.io/jsign/) against eSigner's API - only the file
+hash leaves the machine, and the file is signed and RFC 3161 timestamped in
+place.
+
+Signing needs five environment variables; `.github/workflows/desktop-release.yml`
+supplies the four credentials from secrets of the same name held in the
+**`windows-signing`** GitHub environment, and downloads and checksums
+`JSIGN_JAR` per run:
+
+| Variable                | Where it comes from                                                  |
+| ----------------------- | -------------------------------------------------------------------- |
+| `ESIGNER_USERNAME`      | SSL.com account username                                              |
+| `ESIGNER_PASSWORD`      | SSL.com account password                                              |
+| `ESIGNER_CREDENTIAL_ID` | eSigner signing credential (certificate) UUID, from the SSL.com portal |
+| `ESIGNER_TOTP_SECRET`   | base64 TOTP secret saved when eSigner automation was enabled          |
+| `JSIGN_JAR`             | path to a `jsign-<version>.jar`                                       |
+
+eSigner authenticates with the SSL.com **account login**, not a signing-scoped
+token - that is how every eSigner client works (CodeSignTool, eSigner CKA,
+jsign), and an IV/OV certificate cannot be shared with a separate CI user. Three
+controls narrow what those secrets are worth, and a release should keep all
+three:
+
+1. They live in the `windows-signing` environment, which requires a reviewer to
+   approve each run and only permits `main` and `desktop-v*` tags. A job blocked
+   by that ref policy fails outright, so this workflow no longer builds from
+   arbitrary branches - build locally to test those.
+2. The signing credential has an enable/disable toggle on SSL.com's **Signing
+   Credentials** page. Leave it disabled between releases; it stops signing
+   without revoking the certificate or rotating the account password.
+3. Keep 2FA on the SSL.com account, so the password alone cannot reach the
+   portal.
+
+**Local builds are unsigned by design.** With none of the four credentials set
+the script logs a skip and exits 0, so contributors can still build installers. Setting only some of them is treated as a misconfiguration and
+fails the build. A `desktop-v*` tag is refused outright when the secrets are
+absent, and CI re-verifies the finished artifacts - including the `crust.exe`
+extracted back out of the MSI - before anything is uploaded.
+
+Notes:
+
+- eSigner subscriptions meter signatures (entry tiers allow 20/month). The
+  bundler offers 11 files per build; the script declines the WiX build-time
+  extensions and the NSIS plugins, leaving **5 signatures per release build**.
+- One of those five is the NSIS uninstaller, which makensis builds under a
+  temporary name (`nst*.tmp`) and signs through its `!uninstfinalize` hook. It
+  looks like a stray temp file in the build log; it is not, and adding a skip
+  rule for it would ship an unsigned `uninstall.exe`.
+- No certificate buys an instant SmartScreen pass any more. The warning fades
+  as the signature accrues reputation across downloads.
+- If signing fails, rerun the build with `--verbose`: the bundler pipes the sign
+  command's output and prints it only on success. CI already passes it.
+- `Authentication failed with SSL.com` usually means the TOTP secret is in the
+  wrong encoding - jsign base64-decodes it, so a base32 key (only `A`-`Z` and
+  `2`-`7`) has to be converted first. A repeated `invalid otp` instead points at
+  clock drift on the signing machine.
+
 ## Rust checks
 
 ```sh

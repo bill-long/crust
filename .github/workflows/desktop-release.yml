@@ -13,8 +13,23 @@ name: Desktop release
 #
 # Tag scheme: desktop releases use `desktop-v*` tags, kept separate from the
 # `v*` tags the CI workflow (ci.yml) uses to publish the web container, so the
-# two never cross-trigger. The installers produced here are UNSIGNED (code signing and
-# auto-update are added in later Phase 3 steps).
+# two never cross-trigger.
+#
+# Code signing: the bundler signs the main binary and both installers through
+# `bundle > windows > signCommand`, which runs desktop/src-tauri/scripts/
+# sign-windows.mjs against the SSL.com eSigner cloud HSM. It needs four secrets
+# (ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_CREDENTIAL_ID,
+# ESIGNER_TOTP_SECRET) held in the `windows-signing` environment, which gates
+# them behind a required reviewer and a ref policy - see the build job. eSigner
+# authenticates with the SSL.com account login itself, so those secrets are
+# worth more than a scoped signing token would be; the credential also has an
+# independent kill switch in SSL.com's Signing Credentials page.
+#
+# Without the secrets the build still runs and produces UNSIGNED installers; a
+# `desktop-v*` tag is refused up front instead, and the signatures are verified
+# before upload. The credentials are scoped to the build step alone, not the
+# whole job.
+# Auto-update arrives in a later Phase 3 step (#261).
 
 on:
   push:
@@ -32,6 +47,14 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    # The eSigner credentials are environment secrets, not repo-wide ones: only
+    # a job that declares this environment can read them, every run waits for a
+    # required reviewer, and the environment's ref policy allows `main` and
+    # `desktop-v*` tags only. The consequence is deliberate - this workflow no
+    # longer builds from arbitrary branches, because a job blocked by the ref
+    # policy fails rather than falling back to an unsigned build. Test desktop
+    # build changes with a local `pnpm tauri build` (see desktop/README.md).
+    environment: windows-signing
     # Read-only repo access; no write scopes — the write-capable token lives
     # only in the separate `release` job. `actions: read` is granted defensively
     # for the dependency caches: in practice the cache/artifact services use the
@@ -42,6 +65,55 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v5
+
+      # Whether *every* eSigner secret is present, as a plain boolean for the
+      # `if:` expressions below. Checking only one of them would let a release
+      # tag past the guard below on a half-configured set, then fail deep into
+      # the build - exactly what that guard exists to prevent.
+      #
+      # Blank means blank-after-trimming, the same test sign-windows.mjs
+      # applies, so the workflow's conditionals and the script's own guard can
+      # never disagree about whether signing is configured. That needs the
+      # values themselves, which is why they are in this step's env - it is our
+      # own inline script, and the point of scoping credentials to named steps
+      # is to keep them out of the third-party actions in between, not out of
+      # our own.
+      - name: Detect signing configuration
+        id: signing
+        shell: pwsh
+        env:
+          ES_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+        run: |
+          $required = [ordered]@{
+            ESIGNER_USERNAME      = $env:ES_USERNAME
+            ESIGNER_PASSWORD      = $env:ES_PASSWORD
+            ESIGNER_CREDENTIAL_ID = $env:ES_CREDENTIAL_ID
+            ESIGNER_TOTP_SECRET   = $env:ES_TOTP_SECRET
+          }
+          $blank = @($required.Keys | Where-Object { [string]::IsNullOrWhiteSpace($required[$_]) })
+          # All four or none. A partial set is a misconfiguration on any
+          # trigger, not a request for an unsigned build, and catching it here
+          # costs seconds instead of failing deep in the bundle step. This
+          # mirrors sign-windows.mjs, which refuses the same way per artifact.
+          if ($blank.Count -gt 0 -and $blank.Count -lt $required.Count) {
+            Write-Host "::error::eSigner secrets are partially configured; blank: $($blank -join ', '). Set all four in the windows-signing environment, or none to build unsigned."
+            exit 1
+          }
+          $configured = ($blank.Count -eq 0)
+          "configured=$($configured.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Signing configured: $configured"
+
+      # A release must never be published unsigned. Fail before the (long)
+      # build rather than after it.
+      - name: Require signing for a release build
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v') && steps.signing.outputs.configured != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "::error::A desktop-v* tag must produce signed installers, but the eSigner secrets are not configured on this repository. See desktop/README.md."
+          exit 1
 
       - uses: pnpm/action-setup@v5
 
@@ -91,10 +163,51 @@ jobs:
         with:
           workspaces: desktop/src-tauri
 
+      # jsign (a JVM tool) is what talks to the eSigner CSC API; only the file
+      # hash leaves the runner. Skipped entirely on unsigned builds.
+      - name: Set up JDK for jsign
+        if: steps.signing.outputs.configured == 'true'
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Fetch jsign
+        if: steps.signing.outputs.configured == 'true'
+        shell: pwsh
+        env:
+          JSIGN_VERSION: "7.5"
+          JSIGN_SHA256: 602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $jar = Join-Path $env:RUNNER_TEMP "jsign-$env:JSIGN_VERSION.jar"
+          $url = "https://repo1.maven.org/maven2/net/jsign/jsign/$env:JSIGN_VERSION/jsign-$env:JSIGN_VERSION.jar"
+          Invoke-WebRequest -Uri $url -OutFile $jar
+          # Pinned digest: this jar is handed the signing credentials, so a
+          # swapped artifact upstream must fail the build, not sign with it.
+          $actual = (Get-FileHash $jar -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $env:JSIGN_SHA256) {
+            throw "jsign checksum mismatch: expected $env:JSIGN_SHA256, got $actual"
+          }
+          "JSIGN_JAR=$jar" >> $env:GITHUB_ENV
+
       # Build only (no tagName) — publishing is the separate, write-scoped job.
+      # The eSigner credentials are scoped to this step: the bundler passes them
+      # through to desktop/src-tauri/scripts/sign-windows.mjs for each artifact.
+      # Always --verbose: the bundler pipes the sign command's output and echoes
+      # it only when the command succeeds, so without it any signing failure -
+      # including the deliberate one on a half-configured credential set, which
+      # by definition happens when signing is *not* detected as configured -
+      # surfaces as a bare "failed to run node".
       - uses: tauri-apps/tauri-action@v0
         with:
           projectPath: desktop
+          args: --verbose
+        env:
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
 
       # Stage both installers into one flat directory so the uploaded artifact
       # has a predictable, flat layout (independent of upload-artifact's
@@ -105,6 +218,56 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist-installers | Out-Null
           Copy-Item desktop/src-tauri/target/release/bundle/msi/*.msi dist-installers/
           Copy-Item desktop/src-tauri/target/release/bundle/nsis/*-setup.exe dist-installers/
+
+      # Prove the artifacts are actually signed before they can reach a release.
+      # The bundler restores an unsigned copy of the main binary in
+      # target/release once bundling is done, so the only way to check the exe
+      # users will run is to pull it back out of the MSI payload.
+      - name: Verify signatures
+        if: steps.signing.outputs.configured == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Every match is verified rather than the first: adding a second WiX
+          # language would otherwise quietly leave an installer unchecked.
+          $msis = @(Get-ChildItem dist-installers/*.msi -File)
+          $setups = @(Get-ChildItem dist-installers/*-setup.exe -File)
+          if ($msis.Count -eq 0) { throw "no .msi found in dist-installers." }
+          if ($setups.Count -eq 0) { throw "no -setup.exe found in dist-installers." }
+
+          $files = [System.Collections.Generic.List[string]]::new()
+          $msis + $setups | ForEach-Object { $files.Add($_.FullName) }
+
+          for ($i = 0; $i -lt $msis.Count; $i++) {
+            $msi = $msis[$i]
+            $extract = Join-Path $env:RUNNER_TEMP "msi-payload-$i"
+            New-Item -ItemType Directory -Force -Path $extract | Out-Null
+            $msiexec = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
+              '/a', "`"$($msi.FullName)`"", '/qn', "TARGETDIR=`"$extract`""
+            )
+            if ($msiexec.ExitCode -ne 0) {
+              throw "msiexec administrative install of $($msi.Name) failed with exit code $($msiexec.ExitCode)."
+            }
+            $exes = @(Get-ChildItem $extract -Recurse -Filter 'crust.exe' -File)
+            if ($exes.Count -eq 0) {
+              throw "crust.exe was not found in the payload of $($msi.Name)."
+            }
+            $exes | ForEach-Object { $files.Add($_.FullName) }
+          }
+
+          foreach ($file in $files) {
+            $name = Split-Path $file -Leaf
+            $sig = Get-AuthenticodeSignature -FilePath $file
+            if ($sig.Status -ne 'Valid') {
+              throw "$name is not validly signed (status: $($sig.Status) - $($sig.StatusMessage))"
+            }
+            # Without a timestamp every signature would expire with the
+            # certificate, breaking installers that are already in the wild.
+            if (-not $sig.TimeStamperCertificate) {
+              throw "$name is signed but carries no timestamp."
+            }
+            Write-Host "$name -- signed by $($sig.SignerCertificate.Subject)"
+          }
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
@@ -143,6 +306,6 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --draft \
               --title "Crust Desktop $TAG" \
-              --notes "Automated desktop build. Installers are currently UNSIGNED; code signing and auto-update arrive in later Phase 3 steps." \
+              --notes "Automated desktop build. The app and both installers are Authenticode-signed and timestamped; SmartScreen may still warn until the signature accrues reputation. Auto-update arrives in a later Phase 3 step." \
               "${assets[@]}"
           fi
