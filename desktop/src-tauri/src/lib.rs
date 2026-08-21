@@ -11,7 +11,6 @@
 //   Ctrl+Shift+L  close the overlay window
 //   Ctrl+Shift+Q  quit
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::ShortcutState;
@@ -33,21 +32,20 @@ struct OverlayState {
 }
 
 /// An update already downloaded and verified against the public key in
-/// `tauri.conf.json`, held until the user asks to restart. Downloading eagerly
-/// but installing at exit means the session is never interrupted: the installer
+/// `tauri.conf.json`, held until the app exits. Downloading eagerly but
+/// installing at exit means the session is never interrupted: the installer
 /// takes over an app that is already going away.
 ///
-/// `restart_requested` is what makes this safe to apply on exit. Every NSIS
-/// install mode that runs unattended also passes `/R` (restart) — Passive is
-/// `["/P", "/R"]`, Quiet is `["/S", "/R"]` — and the plugin offers no way to
-/// drop it per call. Installing on *any* exit would therefore turn "quit for
-/// the day" into "watch an installer, then have the app come back". So the
-/// update is applied only when the user explicitly chose Restart; a plain quit
-/// stays a quit, and the next launch re-checks and offers it again.
+/// Every quit applies it, however the app was closed - so an update is never
+/// downloaded twice. Note what that implies on Windows: the plugin passes the
+/// install mode's NSIS args, and every unattended mode includes `/R` (Passive
+/// is `["/P", "/R"]`, Quiet is `["/S", "/R"]`), with no way to drop it per
+/// call. So a quit that applies an update relaunches the app afterwards. The
+/// alternative, `basicUi`, passes no args and skips the relaunch but shows the
+/// full installer UI instead.
 #[derive(Default)]
 struct StagedUpdate {
     ready: Mutex<Option<(Update, Vec<u8>)>>,
-    restart_requested: AtomicBool,
 }
 
 /// The overlay URL: the main window's current origin + `/overlay`. Using the
@@ -114,16 +112,12 @@ fn overlay_is_open(app: AppHandle) -> bool {
     app.get_webview_window(OVERLAY_LABEL).is_some()
 }
 
-/// Quit so a staged update can be applied. Exiting is the whole mechanism: the
-/// exit hook runs the installer, which relaunches the app when it finishes.
-/// Flagging the exit as update-requested is what distinguishes this from a
-/// normal quit (see StagedUpdate). A no-op beyond a quit when nothing is
-/// staged.
+/// Quit so a staged update can be applied now rather than whenever the app
+/// next closes. Exiting is the whole mechanism: the exit hook runs the
+/// installer, which relaunches the app when it finishes. A no-op beyond a quit
+/// when nothing is staged.
 #[tauri::command]
 fn restart_for_update(app: AppHandle) {
-    app.state::<StagedUpdate>()
-        .restart_requested
-        .store(true, Ordering::SeqCst);
     app.exit(0);
 }
 
@@ -168,14 +162,11 @@ async fn stage_update(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Run the installer for a staged update, but only for an exit the user asked
-/// for with Restart. See StagedUpdate for why a plain quit must not install.
+/// Run the installer for a staged update, if any. Called as the app exits, so
+/// the installer takes over an app that is already going away rather than
+/// interrupting a live session.
 fn install_staged_update(app: &AppHandle) {
-    let state = app.state::<StagedUpdate>();
-    if !state.restart_requested.load(Ordering::SeqCst) {
-        return;
-    }
-    let staged = state.ready.lock().unwrap().take();
+    let staged = app.state::<StagedUpdate>().ready.lock().unwrap().take();
     let Some((update, bytes)) = staged else {
         return;
     };

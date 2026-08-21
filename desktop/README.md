@@ -112,6 +112,14 @@ route applies it. The whole mechanism lives in Rust (`stage_update` /
 `install_staged_update` in `src-tauri/src/lib.rs`) so the web bundle stays free
 of Tauri imports; the app only listens for `crust://update-ready`.
 
+**A quit that applies an update relaunches the app.** That is not a choice this
+code makes: the plugin passes the install mode's NSIS arguments, and every mode
+that installs unattended includes `/R` (`passive` is `["/P", "/R"]`, `quiet` is
+`["/S", "/R"]`), with no per-call way to drop it. The only mode without it,
+`basicUi`, passes no arguments and shows the full installer UI instead. So the
+choice is a brief progress window followed by a relaunch, or an installer the
+user has to click through; this app takes the former.
+
 The update artifact is signed by an Ed25519 keypair that has **nothing to do
 with Authenticode** - it answers "can this app trust this update", not "does
 Windows trust this app". Both are required for a release:
