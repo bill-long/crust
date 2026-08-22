@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isNativeShell } from "./nativeShell";
+import { withPathname } from "../test/withPathname";
+import { isNativeShell, isOverlayWindow } from "./nativeShell";
 
 describe("isNativeShell", () => {
 	afterEach(() => {
@@ -18,5 +19,31 @@ describe("isNativeShell", () => {
 	it("treats a non-true value as not the native shell", () => {
 		(window as unknown as { isTauri?: unknown }).isTauri = "yes";
 		expect(isNativeShell()).toBe(false);
+	});
+});
+
+describe("isOverlayWindow", () => {
+	const withPath = (pathname: string): boolean => {
+		let result = false;
+		withPathname(pathname, () => {
+			result = isOverlayWindow();
+		});
+		return result;
+	};
+
+	it("is true only for the overlay route itself", () => {
+		expect(withPath("/overlay")).toBe(true);
+		expect(withPath("/overlay/")).toBe(true);
+	});
+
+	it("is false for a route that merely ends in /overlay", () => {
+		// `/settings/*` is a splat route, so this is reachable - and a suffix
+		// match here made the MAIN window hide both update cards for good.
+		expect(withPath("/settings/overlay")).toBe(false);
+	});
+
+	it("is false for ordinary routes", () => {
+		expect(withPath("/")).toBe(false);
+		expect(withPath("/home/!room:example.org")).toBe(false);
 	});
 });

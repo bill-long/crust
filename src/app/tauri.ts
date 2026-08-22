@@ -46,6 +46,17 @@ function getInvoke(): InvokeFn | null {
 	return typeof core === "function" ? core : null;
 }
 
+/**
+ * Whether the Tauri IPC is actually reachable.
+ *
+ * `invokeTauri` resolves `undefined` when it is not, which a caller cannot tell
+ * apart from a command that simply returns nothing. Callers whose next step
+ * depends on the command having really run must ask this first.
+ */
+export function tauriIpcAvailable(): boolean {
+	return getInvoke() !== null;
+}
+
 /** Invoke a Tauri command, or resolve `undefined` when not in the native shell. */
 export async function invokeTauri<T = unknown>(
 	cmd: string,

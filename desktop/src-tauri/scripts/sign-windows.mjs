@@ -2,15 +2,14 @@
 // Authenticode-signs one Windows artifact in place, using the SSL.com eSigner
 // cloud HSM. The private key never leaves SSL.com: jsign sends only the file's
 // hash to the eSigner CSC API and writes the returned signature back into the
-// file (PE .exe and .msi alike).
+// file.
 //
 // The Tauri bundler invokes this once per artifact via
 // `bundle > windows > signCommand` in tauri.conf.json, passing the artifact
-// path in place of "%1". It offers 11 files per release build; see SKIP_RULES
-// below for the ones this declines to sign and why. The five that are signed
-// are the main binary (twice - the bundler re-patches and re-signs it for each
-// package type), the .msi, the NSIS -setup.exe, and the uninstaller makensis
-// builds in a temp file.
+// path in place of "%1". It offers 7 files per release build; see SKIP_RULES
+// below for the ones this declines to sign and why. The three that are signed
+// are the main binary, the NSIS -setup.exe, and the uninstaller makensis builds
+// under a temporary name.
 //
 // Credentials come from the environment, never from the config file:
 //   ESIGNER_USERNAME       SSL.com account username
@@ -37,14 +36,16 @@ const JSIGN_HINT =
 /** SSL.com's RFC 3161 timestamp authority. */
 const TIMESTAMP_URL = "http://ts.ssl.com";
 
-// eSigner subscriptions meter signatures (the entry tiers are 20/month), so
-// the bundler's default "sign every PE it touches" is too expensive. These two
-// categories are declined; anything else the bundler offers is signed, so a
-// new shipped artifact is signed by default rather than silently skipped.
+// Windows verifies neither category below, so the bundler's default "sign
+// every PE it touches" buys nothing for them - and eSigner subscriptions are
+// sold in metered tiers, so a signature is not always free. Anything else the
+// bundler offers is signed, so a new shipped artifact is signed by default
+// rather than silently skipped.
 const SKIP_RULES = [
 	{
 		// WiX toolset extensions: inputs to candle/light on the build machine,
-		// never part of the installed app.
+		// never part of the installed app. Inert while only NSIS is built; kept so
+		// re-adding an MSI target cannot silently start signing build tooling.
 		test: (path) => /[\\/]target[\\/]release[\\/]wix[\\/]/i.test(path),
 		reason: "WiX build-time toolset, not shipped",
 	},

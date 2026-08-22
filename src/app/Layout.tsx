@@ -31,7 +31,7 @@ import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
 import {
-	endActiveCallForLogout,
+	endActiveCall,
 	endCallForRoomLeave,
 } from "../features/room/call/rtc/endCall";
 import { ExploreDialog } from "../features/room/ExploreDialog";
@@ -332,9 +332,9 @@ const Layout: Component = () => {
 		// still valid, exactly as for a room leave (#474). Dropping the
 		// signal alone only *schedules* the withdrawal, which then races
 		// `client.logout()` and 401s whenever it loses.
-		await endActiveCallForLogout();
+		await endActiveCall();
 		// Restore the unconditional guarantee the plain `setActiveCallRoomId`
-		// used to give: `endActiveCallForLogout` clears the signal only for
+		// used to give: `endActiveCall` clears the signal only for
 		// the room it tore down, so a call started (or switched to) during
 		// the teardown would otherwise survive into the logged-out state and
 		// be picked up by the NEXT account to log in on this tab —

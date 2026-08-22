@@ -80,18 +80,19 @@ export async function endCallForRoomLeave(roomId: string): Promise<void> {
 }
 
 /**
- * Teardown for logout: ends whichever call is active, if any.
+ * Teardown before the session ends: ends whichever call is active, if any.
  *
  * Same rule and same bound as `endCallForRoomLeave` — only the trigger differs,
  * so the caller does not need to know which room hosts the call. Await this
- * before `client.logout()`; see the module rationale above for why the wait is
- * what makes the withdrawal land.
+ * before anything that ends the session: `client.logout()`, or the desktop
+ * shell quitting to apply an update. See the module rationale above for why the
+ * wait is what makes the withdrawal land.
  *
  * NOT for the forced-logout escape hatch on a sync error: there the connection
  * is already broken (which is why the user is reaching for it) and the client is
  * stopped rather than logged out, so waiting would only wedge the way out.
  */
-export async function endActiveCallForLogout(): Promise<void> {
+export async function endActiveCall(): Promise<void> {
 	const roomId = activeCallRoomId();
 	if (roomId === null) return;
 	await endCall(roomId);
