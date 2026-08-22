@@ -199,4 +199,8 @@ export function _resetNativeUpdateForTests(): void {
 	setPendingVersion(null);
 	setRestarting(false);
 	setRestartError(null);
+	// The signals are not all of it: a case that asserts the stale-attempt branch
+	// would otherwise inherit this counter from an earlier one and pass or fail
+	// for the wrong reason.
+	restartAttempt = 0;
 }

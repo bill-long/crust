@@ -33,12 +33,13 @@ const UpdateCard: Component<{
 		    buttons give a screen-reader user no way to tell them apart. */}
 		<h3 class="mb-1 text-sm font-semibold text-text-primary">{props.title}</h3>
 		<p class="mb-3 text-xs text-text-muted">{props.body}</p>
+		{/* No role="alert" of its own. The card above is already a live region,
+		    and an assertive alert nested inside a polite status region is
+		    announced once by some screen readers and twice by others - inserting
+		    this paragraph is simultaneously the alert AND a mutation of the
+		    enclosing region. Letting the card carry it keeps one announcement. */}
 		<Show when={props.error}>
-			{(message) => (
-				<p class="mb-3 text-xs text-danger-text" role="alert">
-					{message()}
-				</p>
-			)}
+			{(message) => <p class="mb-3 text-xs text-danger-text">{message()}</p>}
 		</Show>
 		<div class="flex justify-end gap-2">
 			<button
@@ -48,7 +49,7 @@ const UpdateCard: Component<{
 					props.onDismiss();
 				}}
 				aria-disabled={props.pending ?? false}
-				class={`rounded px-3 py-1.5 text-xs transition-colors ${
+				class={`rounded px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
 					props.pending
 						? "cursor-default text-text-disabled"
 						: "text-text-muted hover:bg-surface-2 hover:text-text-primary"
@@ -63,8 +64,14 @@ const UpdateCard: Component<{
 					props.onAction();
 				}}
 				aria-disabled={props.pending ?? false}
-				class={`rounded bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors ${
-					props.pending ? "cursor-default opacity-60" : "hover:bg-accent/90"
+				// Dimmed via the background, not `opacity-*`: element opacity also
+				// fades the box-shadow the focus ring is drawn with, and this button
+				// stays tab-focusable while pending (that is the point of
+				// aria-disabled), so the indicator has to keep its full contrast.
+				class={`rounded px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+					props.pending
+						? "cursor-default bg-accent/60"
+						: "bg-accent hover:bg-accent/90"
 				}`}
 			>
 				{props.actionLabel}
