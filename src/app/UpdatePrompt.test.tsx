@@ -30,6 +30,7 @@ vi.mock("virtual:pwa-register/solid", async () => {
 	};
 });
 
+import { withPathname } from "../test/withPathname";
 import { UpdatePrompt } from "./UpdatePrompt";
 
 afterEach(() => {
@@ -41,13 +42,13 @@ afterEach(() => {
 describe("UpdatePrompt", () => {
 	it("renders nothing until a new worker is waiting", () => {
 		render(() => <UpdatePrompt />);
-		expect(screen.queryByText("Update available")).toBeNull();
+		expect(screen.queryByText("App update")).toBeNull();
 	});
 
 	it("shows the toast when needRefresh becomes true", () => {
 		render(() => <UpdatePrompt />);
 		pwa.setNeedRefresh?.(true);
-		expect(screen.getByText("Update available")).toBeTruthy();
+		expect(screen.getByText("App update")).toBeTruthy();
 		expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
 	});
 
@@ -58,11 +59,21 @@ describe("UpdatePrompt", () => {
 		expect(pwa.updateServiceWorker).toHaveBeenCalledWith(true);
 	});
 
+	it("renders nothing in the overlay window", () => {
+		// The overlay mounts this same App root: 320x420, transparent, over a
+		// game, and click-through leaves any card visible with dead buttons.
+		withPathname("/overlay", () => {
+			render(() => <UpdatePrompt />);
+			pwa.setNeedRefresh?.(true);
+			expect(screen.queryByText("App update")).toBeNull();
+		});
+	});
+
 	it("dismiss hides the toast without updating", () => {
 		render(() => <UpdatePrompt />);
 		pwa.setNeedRefresh?.(true);
 		fireEvent.click(screen.getByRole("button", { name: "Later" }));
-		expect(screen.queryByText("Update available")).toBeNull();
+		expect(screen.queryByText("App update")).toBeNull();
 		expect(pwa.updateServiceWorker).not.toHaveBeenCalled();
 	});
 });

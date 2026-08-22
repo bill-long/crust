@@ -203,21 +203,43 @@ pnpm test            # Vitest (run once); pnpm test:watch to watch
 
 CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, and `pnpm build` (with the `*.browser.test.tsx` suite in a separate `browser-tests` job). Run all four before declaring any task complete (add `pnpm test:browser` when you've touched layout/browser-dependent code).
 
-### Local code review is required before every push
+### Local code review is required before every agent push
 
-Pushing is gated on a local code review. Run the review, then stamp it and push:
+Run the code-review skill, address its findings, then push. Every push means
+every push - fix commits answering a review comment are the ones most often
+skipped, and they are how findings leak through to the (paid) PR bot that a
+local pass would have caught for free.
 
-```bash
-pnpm review:stamp   # records the reviewed HEAD; unlocks push for this commit
-```
+This is a convention, not a mechanism. Two attempts at enforcing it were
+removed, and the reasons are worth keeping:
 
-- The gate is a git **`pre-push` hook** (`.githooks/pre-push` → `scripts/pre-push-gate.mjs`), enabled automatically by the `prepare` script (`core.hooksPath=.githooks`) on `pnpm install`; re-enable manually with `pnpm hooks:enable`. git runs it for **every** push - agent or human, however `git push` is invoked - and it checks the actual refs being pushed (read from stdin), not the command string.
-- A push is allowed only when every pushed commit equals the stamped SHA. Any new/amended commit changes the tip and invalidates the stamp, so the review can't be silently skipped. The stamp lives in `<git-dir>/local-review-passed` (never committed). `pnpm review:check` reports the current state.
-- Fail-closed: if the gate can't determine review state it blocks. The only bypass is git's own `git push --no-verify`, a deliberate override - don't use it to skip review.
+- A git `pre-push` hook checking a marker file written by `pnpm review:stamp`.
+  The agent both performed the action and wrote the evidence, so "review before
+  push" collapsed into "type the stamp command" - and the review was skipped
+  twice anyway. An attestation you can forge is not a gate.
+- A Claude Code `PreToolUse` hook that read the session transcript (which the
+  harness writes and the agent cannot) for a completed review postdating HEAD.
+  The evidence was sound; the trigger was not. A `PreToolUse` hook sees only a
+  command *string*, so deciding "is this a push?" meant approximating git's and
+  the shell's grammar - quoted spans, env-var prefixes, `-C`, `--git-dir`,
+  subshells, line continuations in two shells. Every round of review found the
+  next spelling it had missed. Tools that gate on command strings for real
+  (claude-code-auto-approve, the aihero guardrails) parse a bash AST; tools that
+  gate pushes for real (`pre-commit`, `husky`, `lefthook`) hook where git hands
+  them the refs on stdin. This did neither, and the parser was more code, and
+  more bug, than the feature it guarded.
 
-Caveats: the stamp records one commit, so push a single reviewed branch at a time (an annotated tag on the reviewed tip is fine - OIDs are dereferenced to their commit). Activation is per-clone: `pnpm install` runs `prepare` -> `enable-hooks.mjs`, which sets `core.hooksPath=.githooks` (skipping CI and any pre-existing hooksPath, warning loudly if it can't). That setting then persists across pulls, but a brand-new clone isn't gated until it installs once (or runs `pnpm hooks:enable`). The hook needs `node` on `PATH` and, on Windows, real `git.exe` (a `.cmd`/`.bat` git shim makes the hook fail-closed and block every push). The hook gates the review only; `lint`/`typecheck`/`test` are covered by CI and by the review flow before you stamp.
+So: remember to run the review. The failure being prevented is an accidental
+skip, and nothing here defends against a determined bypass by an agent with
+shell access anyway.
 
-Only stamp after an actual clean local review - the stamp is an attestation, not a formality.
+This covers the review only; `lint`/`typecheck`/`test` are covered by CI and by
+the review flow.
+
+**On a clone that predates this change**, run `git config --unset
+core.hooksPath` once. The deleted `prepare` script pointed git at `.githooks/`,
+which no longer exists, and git silently ignores `.git/hooks` while that
+setting survives - so any hook added later would never run, with no error.
 
 ---
 

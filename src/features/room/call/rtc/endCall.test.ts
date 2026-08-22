@@ -8,7 +8,7 @@ import {
 	_resetCallSessionForTests,
 	publishCallSession,
 } from "./callSessionStore";
-import { endActiveCallForLogout, endCallForRoomLeave } from "./endCall";
+import { endActiveCall, endCallForRoomLeave } from "./endCall";
 import { makeFakeCallSession } from "./fakeCallSession.test-utils";
 
 const ROOM = "!room:example.com";
@@ -126,7 +126,7 @@ describe("endCallForRoomLeave", () => {
 	});
 });
 
-describe("endActiveCallForLogout", () => {
+describe("endActiveCall", () => {
 	const disposers: Array<() => void> = [];
 
 	afterEach(() => {
@@ -146,7 +146,7 @@ describe("endActiveCallForLogout", () => {
 
 	it("does nothing when no call is active", async () => {
 		const fake = publishFake();
-		await endActiveCallForLogout();
+		await endActiveCall();
 		expect(fake.requestLeave).not.toHaveBeenCalled();
 	});
 
@@ -157,7 +157,7 @@ describe("endActiveCallForLogout", () => {
 			setActiveCallRoomId(null);
 		});
 
-		await endActiveCallForLogout();
+		await endActiveCall();
 
 		expect(fake.requestLeave).toHaveBeenCalledTimes(1);
 		expect(activeCallRoomId()).toBeNull();
@@ -169,7 +169,7 @@ describe("endActiveCallForLogout", () => {
 		const fake = publishFake();
 		fake.requestLeave.mockRejectedValueOnce(new Error("leave failed"));
 
-		await expect(endActiveCallForLogout()).resolves.toBeUndefined();
+		await expect(endActiveCall()).resolves.toBeUndefined();
 		expect(activeCallRoomId()).toBeNull();
 	});
 
@@ -181,7 +181,7 @@ describe("endActiveCallForLogout", () => {
 		fake.requestLeave.mockImplementationOnce(() => new Promise<void>(() => {}));
 
 		let settled = false;
-		const pending = endActiveCallForLogout().then(() => {
+		const pending = endActiveCall().then(() => {
 			settled = true;
 		});
 		await vi.advanceTimersByTimeAsync(9_999);

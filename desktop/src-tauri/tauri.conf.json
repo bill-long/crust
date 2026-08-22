@@ -28,9 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "publisher": "Bill Long",
-    "copyright": "Copyright © 2026 Bill Long",
+    "targets": ["nsis"],
+    "publisher": "William Long",
+    "copyright": "Copyright © 2026 William Long",
     "license": "Apache-2.0",
     "shortDescription": "Crust desktop",
     "longDescription": "Crust — a Matrix client with a native call overlay and global push-to-talk hotkey.",
@@ -47,5 +47,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM4OTI4RDBGQ0U1NTc1N0EKUldSNmRWWE9ENDJTeU9GT3JlOE8xREZLYmVtVnkzTEpFV1lBVlF6QmJYTmR1RUxqS3RRR040di8K",
+      "endpoints": [
+        "https://github.com/bill-long/crust/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
