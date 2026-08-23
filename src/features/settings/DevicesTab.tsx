@@ -94,6 +94,13 @@ const DevicesTab: Component = () => {
 
 	const actionLabel = createMemo(() => cryptoActionLabel(cryptoAction()));
 
+	// The account has a cross-signing identity, but this session isn't
+	// trusted with it yet (a fresh login, or one whose trust was lost when
+	// the identity was rotated elsewhere).
+	const identityUnavailableHere = (): boolean =>
+		cryptoStatus.crossSigningReady() === false &&
+		cryptoStatus.crossSigningStatus()?.publicKeysOnDevice === true;
+
 	const needsAttention = () => {
 		const a = cryptoAction();
 		return (
@@ -140,7 +147,13 @@ const DevicesTab: Component = () => {
 								Cross-signing
 							</div>
 							<div class="text-xs text-text-muted">
-								Verify your identity across devices
+								<Show
+									when={identityUnavailableHere()}
+									fallback="Verify your identity across devices"
+								>
+									Set up on your account but not available to this session —
+									verify it or enter your recovery key.
+								</Show>
 							</div>
 						</div>
 						<Show
@@ -150,10 +163,19 @@ const DevicesTab: Component = () => {
 							}
 						>
 							<div class="flex items-center gap-2">
+								{/* Three states, not two: an identity that exists on the
+								    account but that this session can't use is "unavailable",
+								    the same distinction the Key backup card draws — calling it
+								    "not set up" points the user at setup instead of
+								    verification (issue #480). */}
 								<StatusBadge
 									ok={cryptoStatus.crossSigningReady() === true}
 									label={
-										cryptoStatus.crossSigningReady() ? "Ready" : "Not set up"
+										cryptoStatus.crossSigningReady()
+											? "Ready"
+											: identityUnavailableHere()
+												? "Unavailable"
+												: "Not set up"
 									}
 								/>
 								{/* An identity that exists but is unreachable from every
@@ -201,12 +223,11 @@ const DevicesTab: Component = () => {
 											: "Unverified"
 									}
 								/>
-								<Show
-									when={
-										cryptoStatus.crossSigningReady() === true &&
-										cryptoStatus.thisDeviceVerified() === false
-									}
-								>
+								{/* Offered whenever verifying is the derived action — which
+								    includes a session that can't use the account's identity
+								    yet, not only one where cross-signing is already ready
+								    (issue #480). */}
+								<Show when={cryptoAction() === "verify-session"}>
 									<ActionButton
 										label="Verify"
 										onClick={() => triggerCryptoAction("verify-session")}
@@ -339,7 +360,11 @@ const DevicesTab: Component = () => {
 
 			{/* Devices */}
 			<section>
-				<DeviceList />
+				<DeviceList
+					onVerifyDevice={(deviceId) =>
+						triggerCryptoAction({ action: "verify-device", deviceId })
+					}
+				/>
 			</section>
 
 			<Show when={showExportKeys()}>

@@ -37,12 +37,18 @@ export function deriveCryptoAction(input: CryptoActionInput): CryptoAction {
 		if (crossSigningStatus === undefined) return "loading";
 		const identityExists = crossSigningStatus.publicKeysOnDevice;
 		const cached = crossSigningStatus.privateKeysCachedLocally;
+		const inSecretStorage = crossSigningStatus.privateKeysInSecretStorage;
 		const recoverable =
-			crossSigningStatus.privateKeysInSecretStorage ||
+			inSecretStorage ||
 			(cached.masterKey && cached.selfSigningKey && cached.userSigningKey);
-		return identityExists && !recoverable
-			? "reset-encryption"
-			: "setup-cross-signing";
+		if (identityExists && !recoverable) return "reset-encryption";
+		// The account already has an identity and its private keys are in
+		// secret storage: nothing needs setting up, this session just isn't
+		// trusted yet. The way forward is to verify it - from another session
+		// or with the recovery key - and offering "set up" here sends the
+		// user at the wrong affordance (issue #480).
+		if (identityExists && inSecretStorage) return "verify-session";
+		return "setup-cross-signing";
 	}
 	if (thisDeviceVerified === false) return "verify-session";
 	if (backupVersion === null) {

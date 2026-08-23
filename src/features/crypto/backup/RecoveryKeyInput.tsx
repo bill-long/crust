@@ -175,7 +175,8 @@ const RecoveryKeyInput: Component = () => {
 						Enter recovery key
 					</h2>
 					<p class="mb-4 text-sm text-text-muted">
-						Enter your recovery key to unlock your encrypted message history.
+						Enter your recovery key to unlock your encryption secrets - your
+						message history and cross-signing identity.
 					</p>
 
 					<input

@@ -1,7 +1,7 @@
 import { createSignal } from "solid-js";
-import type { CryptoAction } from "../types/crypto";
+import type { CryptoActionRequest } from "../types/crypto";
 
-type CryptoActionHandler = (action: CryptoAction) => void;
+type CryptoActionHandler = (request: CryptoActionRequest) => void;
 
 const [handler, setHandler] = createSignal<CryptoActionHandler | null>(null);
 
@@ -41,10 +41,10 @@ export function registerCryptoHandler(h: CryptoActionHandler): () => void {
 	};
 }
 
-/** Trigger a crypto setup flow from anywhere (called by user panel). */
-export function triggerCryptoAction(action: CryptoAction): void {
+/** Trigger a crypto setup flow from anywhere (user panel, Devices tab). */
+export function triggerCryptoAction(request: CryptoActionRequest): void {
 	setCryptoTriggerElement(document.activeElement);
-	handler()?.(action);
+	handler()?.(request);
 }
 
 /**

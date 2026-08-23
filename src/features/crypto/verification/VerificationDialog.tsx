@@ -1,18 +1,70 @@
-import { type Component, Match, Show, Switch } from "solid-js";
+import {
+	type Component,
+	createSignal,
+	Match,
+	onCleanup,
+	Show,
+	Switch,
+} from "solid-js";
+import { isRecoveryKeyCancelled } from "../../../client/recoveryKeyCancelled";
 import { EmojiDisplay } from "./EmojiDisplay";
 import type { VerificationHandle } from "./useVerification";
 
 interface VerificationDialogProps {
 	verification: VerificationHandle;
 	onClose: () => void;
+	/**
+	 * Verify this session with the recovery key instead of from another
+	 * session. When given, the dialog opens on a choice between the two
+	 * whenever the handle is idle (nothing started yet); the caller decides
+	 * whether the option applies - it only makes sense for self-verification
+	 * on an account whose cross-signing keys are in secret storage.
+	 */
+	verifyWithRecoveryKey?: () => Promise<void>;
 }
+
+type RecoveryStep = "idle" | "working" | "done" | "error";
 
 /**
  * Modal dialog for SAS emoji verification. Shows the appropriate UI
  * for each verification state: waiting, emoji comparison, done, or error.
+ * For self-verification it can also run the recovery-key route, which
+ * lives outside the SAS handle: its own small step machine below.
  */
 const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	const v = props.verification;
+	const [recoveryStep, setRecoveryStep] = createSignal<RecoveryStep>("idle");
+	const [recoveryError, setRecoveryError] = createSignal("");
+	let disposed = false;
+	onCleanup(() => {
+		disposed = true;
+	});
+
+	const verifyWithRecoveryKey = async (): Promise<void> => {
+		const run = props.verifyWithRecoveryKey;
+		if (!run) return;
+		setRecoveryStep("working");
+		setRecoveryError("");
+		try {
+			await run();
+			if (disposed) return;
+			setRecoveryStep("done");
+		} catch (e) {
+			if (disposed) return;
+			// Dismissing the key prompt is a change of mind, not a failure:
+			// back to the choice.
+			if (isRecoveryKeyCancelled(e)) {
+				setRecoveryStep("idle");
+				return;
+			}
+			console.error("Recovery-key verification failed:", e);
+			setRecoveryError(
+				e instanceof Error ? e.message : "Verification failed. Try again.",
+			);
+			setRecoveryStep("error");
+		}
+	};
+
 	const canClose = (): boolean =>
 		v.state() === "done" ||
 		v.state() === "cancelled" ||
@@ -20,6 +72,11 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 		v.state() === "idle";
 
 	const handleClose = (): void => {
+		// The recovery route can't be cancelled mid-way (the SDK is inside
+		// bootstrap), so its "working" step pins the dialog open the way the
+		// SAS waits do - and must not fall through to v.cancel(), which would
+		// mark the untouched SAS handle cancelled.
+		if (recoveryStep() === "working") return;
 		if (canClose()) {
 			v.reset();
 			props.onClose();
@@ -45,6 +102,111 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 		>
 			<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 				<Switch>
+					{/* Recovery-key route: in flight */}
+					<Match when={recoveryStep() === "working"}>
+						<div class="flex flex-col items-center gap-4">
+							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+							<h2 class="text-lg font-semibold text-text-primary">
+								Verifying with your recovery key
+							</h2>
+							<p class="text-center text-sm text-text-muted">
+								Enter your recovery key when prompted.
+							</p>
+						</div>
+					</Match>
+
+					{/* Recovery-key route: done */}
+					<Match when={recoveryStep() === "done"}>
+						<div class="flex flex-col items-center gap-4">
+							<span class="text-4xl" role="img" aria-label="Verified">
+								✅
+							</span>
+							<h2 class="text-lg font-semibold text-text-primary">
+								Verification complete
+							</h2>
+							<p class="text-center text-sm text-text-muted">
+								This session is now verified. Your devices trust each other.
+							</p>
+							<button
+								type="button"
+								onClick={handleClose}
+								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+							>
+								Done
+							</button>
+						</div>
+					</Match>
+
+					{/* Recovery-key route: failed (wrong key, cancelled prompt) */}
+					<Match when={recoveryStep() === "error"}>
+						<div class="flex flex-col items-center gap-4">
+							<span class="text-4xl" role="img" aria-label="Error">
+								⚠️
+							</span>
+							<h2 class="text-lg font-semibold text-text-primary">
+								Verification failed
+							</h2>
+							<p class="text-center text-sm text-danger-text-bright">
+								{recoveryError()}
+							</p>
+							<div class="flex gap-3">
+								<button
+									type="button"
+									onClick={handleClose}
+									class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
+								>
+									Close
+								</button>
+								<button
+									type="button"
+									onClick={() => setRecoveryStep("idle")}
+									class="mt-2 rounded bg-accent px-3 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								>
+									Try again
+								</button>
+							</div>
+						</div>
+					</Match>
+
+					{/* Nothing started yet: choose how to verify this session. The
+					    caller opens here when the recovery key can verify; without
+					    that route it starts the SAS request before opening, so the
+					    handle is never idle at mount. */}
+					<Match when={v.state() === "idle"}>
+						<h2 class="mb-2 text-lg font-semibold text-text-primary">
+							Verify this session
+						</h2>
+						<p class="mb-6 text-sm text-text-muted">
+							Confirm from another session that's already verified by comparing
+							emoji, or enter your recovery key.
+						</p>
+						<div class="flex flex-col gap-2">
+							<button
+								type="button"
+								onClick={() => v.requestSelfVerification()}
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+							>
+								Verify with another session
+							</button>
+							<Show when={props.verifyWithRecoveryKey}>
+								<button
+									type="button"
+									onClick={verifyWithRecoveryKey}
+									class="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-4"
+								>
+									Use recovery key
+								</button>
+							</Show>
+							<button
+								type="button"
+								onClick={handleClose}
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+							>
+								Cancel
+							</button>
+						</div>
+					</Match>
+
 					{/* Waiting for other side */}
 					<Match when={v.state() === "requested" || v.state() === "ready"}>
 						<div class="flex flex-col items-center gap-4">

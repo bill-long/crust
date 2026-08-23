@@ -36,6 +36,7 @@ import {
 	recoveryIdentity,
 	runCryptoInit,
 } from "./cryptoRecovery";
+import { RecoveryKeyCancelledError } from "./recoveryKeyCancelled";
 import {
 	canReuseCachedSecretStorageKey,
 	resolveSecretStorageKey,
@@ -256,7 +257,10 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 					if (ok) validatedChoice = choice;
 					return ok;
 				});
-				if (!key) return null;
+				// Typed so the operation's dialog can tell a dismissed prompt from
+				// a real failure (the SDK would otherwise report a null here as
+				// "callback returned falsey").
+				if (!key) throw new RecoveryKeyCancelledError();
 
 				const keyId = validatedChoice?.keyId ?? Object.keys(opts.keys)[0];
 
