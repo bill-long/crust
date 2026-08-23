@@ -94,13 +94,16 @@ fn build_overlay(app: &AppHandle) -> Result<(), String> {
     // interceptor registers under the http origin while the URL above
     // (derived from the main window) is https, and the overlay loads
     // nothing - in packaged builds only, since dev serves the devUrl.
-    // Derived from the config so the two schemes cannot drift.
+    // Read from the same window overlay_url() reads ("main"), not merely
+    // the first configured one, so the two cannot drift; the fallback
+    // matches the shipped config, whose gate keeps it https.
     let https_scheme = app
         .config()
         .app
         .windows
-        .first()
-        .is_some_and(|w| w.use_https_scheme);
+        .iter()
+        .find(|w| w.label == "main")
+        .map_or(true, |w| w.use_https_scheme);
     WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
         .use_https_scheme(https_scheme)
         .title("Crust — Voice")

@@ -22,7 +22,9 @@ The packaged app serves the bundle over `https://tauri.localhost`
 `http://tauri.localhost`. OAuth dynamic registration sends
 `window.location.origin` as the client_uri, and the OP refuses non-HTTPS
 ("Client URI must be HTTPS."), which made OAuth login unusable in the shell
-(#486). `src/features/auth/desktopOauthOrigin.test.ts` locks the setting.
+(#486). `checkDesktopOriginScheme` in `scripts/csp-lib.mjs` locks the
+setting - enforced by `scripts/check-csp-sync.mjs` at build time (which the
+release workflow runs) and unit-tested in `scripts/csp-lib.test.mjs`.
 
 **The scheme is the origin**, so flipping it is a storage migration event:
 everything per-origin - the session in localStorage, the IndexedDB crypto

@@ -77,7 +77,8 @@ function stubRegistration(
 	body?: unknown,
 ): ReturnType<typeof vi.fn> {
 	const fetchMock = vi.fn(async () => ({
-		ok: status < 400,
+		// Real Response.ok is 2xx only - a 3xx must read as not-ok here too.
+		ok: status >= 200 && status < 300,
 		status,
 		json: async () => {
 			if (body === undefined) {
