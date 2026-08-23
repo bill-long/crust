@@ -31,6 +31,7 @@ function makeHandle(initial: VerificationState = "idle") {
 		rejectSas: vi.fn(),
 		cancel: vi.fn(),
 		reset: vi.fn(),
+		setState,
 	};
 	return handle as unknown as VerificationHandle & typeof handle;
 }
@@ -145,6 +146,25 @@ describe("VerificationDialog self-verification entry", () => {
 			screen.getByRole("button", { name: "Use recovery key" }),
 		).toBeTruthy();
 		consoleError.mockRestore();
+	});
+
+	it("lets an incoming SAS accepted mid-recovery take over the view", () => {
+		// The other session can start verifying this one while the recovery
+		// prompt is open; the toast binds the handle, and the emoji must show
+		// rather than stay hidden behind the recovery spinner.
+		const handle = makeHandle();
+		render(() => (
+			<VerificationDialog
+				verification={handle}
+				onClose={() => {}}
+				verifyWithRecoveryKey={() => new Promise(() => {})}
+			/>
+		));
+		fireEvent.click(screen.getByRole("button", { name: "Use recovery key" }));
+		expect(screen.getByText("Verifying with your recovery key")).toBeTruthy();
+		handle.setState("sas-showing");
+		expect(screen.getByText("Compare emoji")).toBeTruthy();
+		expect(screen.queryByText("Verifying with your recovery key")).toBeNull();
 	});
 
 	it("does not close, nor cancel the SAS handle, while the recovery route is in flight", () => {
