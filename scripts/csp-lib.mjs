@@ -10,7 +10,8 @@
 //     so the Tauri copies may only ADD sources (devCsp: the DEV_EXTRA_SOURCES
 //     below) - anything the baseline allows but a Tauri copy omits would be
 //     silently blocked in the desktop shell. That is why the Tauri-only IPC
-//     sources (`ipc:`, `http://ipc.localhost`) live in the baseline itself:
+//     sources (`ipc:`, `http://ipc.localhost`, `https://ipc.localhost`) live
+//     in the baseline itself:
 //     effectively inert on the web (see the index.html comment), but dropping
 //     them from the meta tag would break desktop IPC via the intersection.
 //
@@ -184,4 +185,27 @@ export function appendDevCspSources(html) {
 	// content attribute - extractHtmlCsp guarantees the tag is unique); a
 	// replacer function sidesteps `$`-pattern expansion in the replacement.
 	return html.replace(policy, () => patched);
+}
+
+/** Check that every config-declared desktop window serves over the https
+ *  scheme (issue #486). OAuth dynamic registration sends the window origin
+ *  as client_uri and the OP refuses non-HTTPS, so an http origin makes
+ *  OAuth login unusable in the shell - and because the scheme IS the
+ *  origin, flipping it orphans every installed client's per-origin storage
+ *  (session, crypto store), which must never happen casually. Lives in the
+ *  build-time check (not only a unit test) because the desktop release
+ *  workflow runs `pnpm build` but not the test suite.
+ *  Returns human-readable problems (empty = ok). */
+export function checkDesktopOriginScheme(tauriConf) {
+	const windows = tauriConf?.app?.windows;
+	if (!Array.isArray(windows) || windows.length === 0) {
+		return ["no windows declared in tauri.conf.json app.windows"];
+	}
+	return windows
+		.filter((win) => win.useHttpsScheme !== true)
+		.map(
+			(win) =>
+				`window "${win.label ?? "?"}" must set useHttpsScheme: true ` +
+				"(https origin: OAuth client_uri + storage identity, issue #486)",
+		);
 }

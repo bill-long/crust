@@ -69,15 +69,22 @@ function seedSigninState(overrides?: Partial<typeof STORED_SIGNIN>): void {
 	);
 }
 
-/** Stub global fetch for the registration endpoint. */
+/** Stub global fetch for the registration endpoint. `body: undefined`
+ *  models a non-JSON body: `json()` rejects the way a real Response's
+ *  would for an HTML error page. */
 function stubRegistration(
 	status: number,
-	body: unknown,
+	body?: unknown,
 ): ReturnType<typeof vi.fn> {
 	const fetchMock = vi.fn(async () => ({
 		ok: status < 400,
 		status,
-		json: async () => body,
+		json: async () => {
+			if (body === undefined) {
+				throw new SyntaxError("Unexpected token '<'");
+			}
+			return body;
+		},
 	}));
 	vi.stubGlobal("fetch", fetchMock);
 	return fetchMock;
@@ -239,12 +246,32 @@ describe("startOidcLogin", () => {
 		expect(sessionStorage.getItem(SIGNIN_STATE_KEY)).toBeNull();
 	});
 
-	it("falls back to a generic message when the OP gives no reason", async () => {
-		stubRegistration(500, "not json");
+	it("falls back to a generic message when the error body is not JSON", async () => {
+		// A reverse proxy answering with an HTML 502 page must not surface
+		// as a raw SyntaxError - the opaque-error class #486 exists to kill.
+		stubRegistration(502);
+
+		await expect(
+			startOidcLogin(METADATA, "https://matrix.example.com"),
+		).rejects.toThrow("Dynamic registration failed (HTTP 502).");
+	});
+
+	it("falls back to a generic message when the error body has no description", async () => {
+		stubRegistration(500, { error: "server_error" });
 
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
 		).rejects.toThrow("Dynamic registration failed (HTTP 500).");
+	});
+
+	it("rejects a non-JSON success body as an invalid response", async () => {
+		stubRegistration(201);
+
+		await expect(
+			startOidcLogin(METADATA, "https://matrix.example.com"),
+		).rejects.toThrow(
+			"The homeserver returned an invalid registration response.",
+		);
 	});
 
 	it("rejects a success response without a client_id", async () => {

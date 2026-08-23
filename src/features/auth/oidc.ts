@@ -364,7 +364,9 @@ export async function completeOidcLogin(
 	// "missing code" error below.
 	const oidcError = params.get("error");
 	if (oidcError) {
-		const description = params.get("error_description");
+		// Same cap as the registration path: OP-controlled text, rendered in
+		// the error banner - and reachable by anyone crafting a callback URL.
+		const description = params.get("error_description")?.slice(0, 200);
 		throw new Error(
 			description
 				? `Login failed: ${description} (${oidcError}).`
