@@ -39,15 +39,16 @@
  * for a different account logged in later in the same tab.
  *
  * Before any of that, the crypto WASM module itself is loaded (`loadModule`),
- * OUTSIDE the staged recovery: a module that cannot be fetched or compiled (a
- * stale app shell referencing an asset the server no longer has, a blocked
- * download) has nothing to do with the store, and neither a reload nor a wipe
- * can supply it. That failure surfaces the error banner directly and never
- * costs the device its keys - #481 reached the wipe exactly this way. The load
- * is also not subject to the timeout: a large module on a slow first visit is
- * a download in progress, not a hang, and the app keeps showing "Initializing
- * encryption…" until it lands (the worker precaches it for every later load,
- * and the desktop exe serves it locally).
+ * with its own, gentler ladder: a module that cannot be fetched or compiled
+ * has nothing to do with the store, so its failure gets the one plain reload
+ * (a transient network error is cured by a fresh document - the package
+ * memoizes even a rejected load for the life of the page) and then the error
+ * banner, but never the wipe, which cannot supply a missing module. #481
+ * reached the wipe exactly that way: a stale app shell asking for a wasm the
+ * server no longer had. The load has a separate, much longer timeout
+ * (CRYPTO_MODULE_LOAD_TIMEOUT_MS): a large module on a slow first visit is a
+ * download in progress, not a hang, yet a fetch that never settles must not
+ * leave the app on "Initializing encryption…" forever either.
  */
 
 import type { MatrixClient } from "matrix-js-sdk";
@@ -104,10 +105,17 @@ export async function clearCryptoStores(
  * before treating it as hung. Both are local IndexedDB + WASM operations that
  * complete in well under this even for large stores, so the timeout only trips
  * on a real hang (e.g. a `deleteDatabase` blocked by another open connection).
- * The module load that precedes them is deliberately NOT bounded by it (see the
- * module comment).
  */
 export const CRYPTO_INIT_TIMEOUT_MS = 30_000;
+
+/**
+ * Maximum time to wait for the crypto WASM module to load. Deliberately far
+ * longer than CRYPTO_INIT_TIMEOUT_MS: the ~8 MB module is a network download on
+ * a browser's first visit (local afterwards, and always in the desktop shell),
+ * and a slow link is not a hang. It only exists so a fetch that never settles
+ * cannot leave the app on "Initializing encryption…" forever.
+ */
+export const CRYPTO_MODULE_LOAD_TIMEOUT_MS = 5 * 60_000;
 
 interface PersistedRecovery {
 	stage: "reload" | "clear";
@@ -239,8 +247,10 @@ export interface CryptoInitDeps {
 	isAborted: () => boolean;
 	/** Trigger a full page reload. */
 	reload: () => void;
-	/** Timeout for clearStores and initCrypto (loadModule is not bounded). */
+	/** Timeout for clearStores and initCrypto. */
 	timeoutMs: number;
+	/** Timeout for loadModule (CRYPTO_MODULE_LOAD_TIMEOUT_MS; far longer). */
+	moduleTimeoutMs: number;
 	logger?: Pick<Console, "warn" | "error">;
 }
 
@@ -265,14 +275,24 @@ export async function runCryptoInit(
 	let reloading = false;
 	try {
 		try {
-			// Unbounded on purpose: a slow download is not a hang (see the module
-			// comment), and the fetch settles on its own - success or rejection.
-			await deps.loadModule();
+			await withTimeout(
+				deps.loadModule(),
+				deps.moduleTimeoutMs,
+				"Crypto module load",
+			);
 		} catch (e) {
 			if (deps.isAborted()) return "aborted";
-			// No store was touched, and nothing in the staged recovery below can
-			// produce a missing module - so give up here, before a persisted
-			// "clear" stage could wipe the store over a failure it cannot fix.
+			// The module's own ladder (see the module comment): one plain reload
+			// from a fresh start, then the banner. Never the store wipe - no store
+			// was touched, and a wipe cannot produce a missing module - so a
+			// persisted "clear" stage is dropped here (by the finally) rather than
+			// honored.
+			if (stage === null && deps.persistStage("reload", deps.identity)) {
+				reloading = true;
+				logger.warn("Crypto module failed to load; reloading to retry", e);
+				deps.reload();
+				return "reloading";
+			}
 			logger.error("Crypto module failed to load; encryption unavailable.", e);
 			return "error";
 		}

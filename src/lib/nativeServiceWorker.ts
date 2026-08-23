@@ -20,14 +20,21 @@
  *     ever be equal or stale. The worker keeps only the duties the page cannot
  *     do without one (authenticated media, see src/sw.ts).
  *   - `build`: the worker is registered under a URL that carries a digest of
- *     its own script. A new script URL on the same scope is a NEW registration
- *     to the browser, which WebView2 does fetch, so the shell's worker tracks
- *     the installed build even though an update of a fixed URL never would.
- *     Deriving the id from the script's content (rather than baking a build
- *     stamp into the bundle) keeps the web build reproducible - identical
- *     sources still produce identical chunk hashes, so browser users are not
- *     offered an "update" for a rebuild of the same commit - and re-registers
- *     exactly when the worker actually changed.
+ *     its own script. Registering a DIFFERENT script URL on the same scope
+ *     makes the browser fetch that script (it runs the update algorithm with
+ *     the new URL), and that fetch does complete in WebView2 - verified across
+ *     successive builds replacing each other's worker; it is only the
+ *     same-URL update check that never does. So the shell's worker tracks the
+ *     installed build. Deriving the id from the script's content (rather than
+ *     baking a build stamp into the bundle) keeps the web build reproducible -
+ *     identical sources still produce identical chunk hashes, so browser users
+ *     are not offered an "update" for a rebuild of the same commit - and
+ *     re-registers exactly when the worker actually changed.
+ *
+ * `desktop/src-tauri/src/evict_legacy_sw.js` (the shell's initialization
+ * script) tells the current worker apart from a leftover browser-build one by
+ * the `native` parameter; nativeServiceWorker.test.ts locks that file to the
+ * parameter name defined here.
  */
 
 /** Query parameter marking a worker registered by the desktop shell. */
@@ -36,17 +43,26 @@ export const NATIVE_SW_MODE_PARAM = "native";
 export const NATIVE_SW_BUILD_PARAM = "build";
 
 /**
+ * The worker script as served, `<base>sw.js` - what the shell fetches to
+ * digest, and what {@link nativeServiceWorkerUrl} registers (with its query).
+ * `base` is the app's base path (`import.meta.env.BASE_URL`, "/" or e.g.
+ * "/crust/"), so the registration gets the same default scope as the browser
+ * build's worker.
+ */
+export function nativeServiceWorkerScriptUrl(base: string): string {
+	return `${base}sw.js`;
+}
+
+/**
  * The script URL the desktop shell registers:
- * `<base>sw.js?native=1&build=<digest>`. `base` is the app's base path
- * (`import.meta.env.BASE_URL`, "/" or e.g. "/crust/"), so the registration gets
- * the same default scope as the browser build's worker.
+ * `<base>sw.js?native=1&build=<digest>`.
  */
 export function nativeServiceWorkerUrl(base: string, digest: string): string {
 	const params = new URLSearchParams({
 		[NATIVE_SW_MODE_PARAM]: "1",
 		[NATIVE_SW_BUILD_PARAM]: digest,
 	});
-	return `${base}sw.js?${params}`;
+	return `${nativeServiceWorkerScriptUrl(base)}?${params}`;
 }
 
 /**

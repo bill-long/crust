@@ -1,11 +1,33 @@
 import { describe, expect, it } from "vitest";
+import evictLegacySwScript from "../../desktop/src-tauri/src/evict_legacy_sw.js?raw";
 import {
 	digestServiceWorkerScript,
 	isNativeServiceWorkerUrl,
 	NATIVE_SW_BUILD_PARAM,
 	NATIVE_SW_MODE_PARAM,
+	nativeServiceWorkerScriptUrl,
 	nativeServiceWorkerUrl,
 } from "./nativeServiceWorker";
+
+describe("nativeServiceWorkerScriptUrl", () => {
+	it("is the worker script at the base path, and what the registered URL extends", () => {
+		expect(nativeServiceWorkerScriptUrl("/crust/")).toBe("/crust/sw.js");
+		expect(nativeServiceWorkerUrl("/crust/", "d")).toMatch(
+			new RegExp(`^${nativeServiceWorkerScriptUrl("/crust/")}\\?`),
+		);
+	});
+});
+
+describe("the shell's eviction script", () => {
+	it("tells the current worker apart by the same parameter name", () => {
+		// desktop/src-tauri/src/evict_legacy_sw.js cannot import this module, so
+		// it spells the parameter out; a rename here without one there would make
+		// it evict the current build's worker on every launch.
+		expect(evictLegacySwScript).toContain(
+			`searchParams.has("${NATIVE_SW_MODE_PARAM}")`,
+		);
+	});
+});
 
 describe("digestServiceWorkerScript", () => {
 	it("is stable for the same script and differs for a changed one", async () => {

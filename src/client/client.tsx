@@ -27,6 +27,7 @@ import { loadSession, type Session } from "../stores/session";
 import { updateAppBadge } from "./appBadge";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
+	CRYPTO_MODULE_LOAD_TIMEOUT_MS,
 	clearCryptoStores,
 	clearRecoveryStage,
 	initCryptoStore,
@@ -390,6 +391,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			isAborted: () => disposed || syncState() === "logged-out",
 			reload: () => window.location.reload(),
 			timeoutMs: CRYPTO_INIT_TIMEOUT_MS,
+			moduleTimeoutMs: CRYPTO_MODULE_LOAD_TIMEOUT_MS,
 		});
 		if (result === "reloading" || result === "aborted") return;
 		setCryptoState(result === "ready" ? "ready" : "error");

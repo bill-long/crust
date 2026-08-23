@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	digestServiceWorkerScript,
+	nativeServiceWorkerScriptUrl,
 	nativeServiceWorkerUrl,
 } from "../lib/nativeServiceWorker";
 import { registerNativeServiceWorker } from "./registerNativeServiceWorker";
@@ -36,9 +37,10 @@ describe("registerNativeServiceWorker", () => {
 
 	it("registers the worker under a digest of the script the exe serves", async () => {
 		await registerNativeServiceWorker();
-		expect(fetchMock).toHaveBeenCalledWith(`${import.meta.env.BASE_URL}sw.js`, {
-			cache: "no-store",
-		});
+		expect(fetchMock).toHaveBeenCalledWith(
+			nativeServiceWorkerScriptUrl(import.meta.env.BASE_URL),
+			{ cache: "no-store" },
+		);
 		expect(register).toHaveBeenCalledOnce();
 		expect(register.mock.calls[0]?.[0]).toBe(
 			nativeServiceWorkerUrl(

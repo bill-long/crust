@@ -134,17 +134,15 @@ export default defineConfig({
 				icons: [...manifestIcons],
 			},
 			injectManifest: {
-				// The crypto wasm is part of the shell: a precached index.html + JS
-				// that have to fetch the wasm live break the moment the server (or
-				// the desktop exe) stops carrying that hash - an older worker's
-				// shell then gets index.html back for it and Rust crypto never
-				// initializes (#481). Precaching it keeps a stale shell coherent
-				// until the new worker takes over. The cost is accepted knowingly:
-				// the ~8 MB is fetched at worker install even for a visitor who never
-				// logs in, and the precache is the only place a stale shell can get
-				// it from (a runtime cache would miss on the uncontrolled first load).
-				// The manifestTransform below asserts it made it into the manifest.
-				globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2,wasm}"],
+				// The ~8 MB crypto wasm is deliberately NOT precached: that would
+				// cost every visitor the download at worker install. A shell served
+				// from an older worker's precache after a deploy still finds its wasm
+				// in the browser's HTTP cache (hashed assets ship with a year-long
+				// max-age); if it does not, crypto recovery reloads once and then
+				// shows the banner next to the "App update" card - never a wipe (see
+				// src/client/cryptoRecovery.ts). The desktop shell's worker precaches
+				// nothing at all (#481).
+				globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
 				globIgnores: [
 					// Runtime operator config must never be served stale from cache.
 					"**/config.json",
@@ -159,28 +157,7 @@ export default defineConfig({
 					// these exact names. See issue #252.
 					...ICON_FILENAMES.map((name) => `**/${name}`),
 				],
-				// Above the ~8 MB crypto wasm with headroom. The plugin only WARNS
-				// and drops a file over this, so the transform below turns a missing
-				// wasm into a build failure.
-				maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
-				// Assert the wasm made it into the manifest, at the point of truth:
-				// workbox applies the size cap before user transforms, so a wasm that
-				// outgrew the cap (or a glob that lost `wasm`) is simply absent here.
-				// Throwing fails `vite build`.
-				manifestTransforms: [
-					(entries) => {
-						if (!entries.some((entry) => entry.url.endsWith(".wasm"))) {
-							throw new Error(
-								"Service-worker precache manifest has no .wasm entry: the Rust " +
-									"crypto module was dropped (over maximumFileSizeToCacheInBytes, " +
-									"or globPatterns no longer includes wasm). A shell served from an " +
-									"older worker's precache would then fetch a wasm hash the server " +
-									"no longer has and crypto would never initialize (#481).",
-							);
-						}
-						return { manifest: entries };
-					},
-				],
+				maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
 			},
 			// Keep the dev server free of a registered service worker; the PWA is
 			// only active in production builds.

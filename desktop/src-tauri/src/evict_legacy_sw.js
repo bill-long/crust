@@ -8,34 +8,46 @@
 // - and that shell is the one that does not know to unregister it, so nothing
 // in the web bundle can reach such a page. This script can.
 //
-// The worker the current build registers runs in "native" mode and opens no
-// cache at all (src/sw.ts keeps every cache-backed route in one browser-only
-// block), so a workbox precache on this origin is a reliable legacy marker:
-// unregister everything, drop the caches, and reload so this load comes from
-// the exe. Every later launch sees no precache and does nothing. The marker is
-// deliberately the cache rather than the worker URL: it needs no knowledge of
-// how the current build names its worker, and it is the precache itself that
-// does the damage.
+// The worker the current build registers carries `native=1` in its script URL
+// (src/lib/nativeServiceWorker.ts - the parameter name is locked to this file
+// by a test there), so any registration on this origin whose script URL lacks
+// it is a worker of the browser build: the legacy one, or one the legacy page's
+// own bundle manages to register before the reload below lands. Unregister
+// those, drop every cache (the stale precache is what served the old shell;
+// the current worker opens none), and reload so this load comes from the exe.
+// The current build's worker is never touched. A launch that finds only it and
+// no caches does nothing; one that finds only it plus caches (a precache that
+// worker left behind in the race above) just deletes the caches, no reload.
 //
 // Only on the app's own origin. An initialization script runs in every
 // document this webview loads, and the webview does leave the app origin - the
 // OIDC login navigates it to the identity provider - so without this guard a
-// third-party site that happens to use Workbox would lose its workers and
-// caches and be reloaded mid-flow. Tauri serves the app from `tauri://localhost`
-// (macOS/Linux) or `http(s)://tauri.localhost` (Windows/Android).
+// third-party site's workers and caches would be wiped and the page reloaded
+// mid-flow. Tauri serves the app from `tauri://localhost` (macOS/Linux) or
+// `http(s)://tauri.localhost` (Windows/Android).
 (async () => {
-  const appOrigin =
-    location.protocol === "tauri:" || location.hostname === "tauri.localhost";
-  if (!appOrigin) return;
-  if (!("serviceWorker" in navigator) || typeof caches === "undefined") return;
-  try {
-    const keys = await caches.keys();
-    if (!keys.some((key) => key.startsWith("workbox-precache"))) return;
-    const registrations = await navigator.serviceWorker.getRegistrations();
-    await Promise.all(registrations.map((registration) => registration.unregister()));
-    await Promise.all(keys.map((key) => caches.delete(key)));
-    location.reload();
-  } catch (e) {
-    console.warn("[crust] legacy service worker eviction failed", e);
-  }
+	const appOrigin =
+		location.protocol === "tauri:" || location.hostname === "tauri.localhost";
+	if (!appOrigin) return;
+	if (!("serviceWorker" in navigator) || typeof caches === "undefined") return;
+	try {
+		const isNativeWorker = (worker) =>
+			!!worker && new URL(worker.scriptURL).searchParams.has("native");
+		const legacy = (await navigator.serviceWorker.getRegistrations()).filter(
+			(registration) =>
+				!isNativeWorker(
+					registration.active ?? registration.waiting ?? registration.installing,
+				),
+		);
+		const cacheKeys = await caches.keys();
+		if (legacy.length === 0) {
+			await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+			return;
+		}
+		await Promise.all(legacy.map((registration) => registration.unregister()));
+		await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+		location.reload();
+	} catch (e) {
+		console.warn("[crust] legacy service worker eviction failed", e);
+	}
 })();

@@ -225,6 +225,7 @@ describe("runCryptoInit", () => {
 			isAborted: () => false,
 			reload,
 			timeoutMs: 1000,
+			moduleTimeoutMs: 10_000,
 			logger: { warn: vi.fn(), error: vi.fn() },
 			...overrides,
 		};
@@ -400,17 +401,28 @@ describe("runCryptoInit", () => {
 		expect(order).toEqual(["module", "store"]);
 	});
 
-	it("gives up with 'error' and never reloads when the module cannot load", async () => {
-		// The #481 failure: a stale shell's wasm URL answered with index.html.
-		const h = harness({
-			loadModule: vi.fn(() =>
-				Promise.reject(
-					new TypeError(
-						"Failed to execute 'compile' on 'WebAssembly': Incorrect response MIME type. Expected 'application/wasm'.",
-					),
-				),
+	// The #481 failure: a stale shell's wasm URL answered with index.html.
+	const moduleFailure = (): Promise<void> =>
+		Promise.reject(
+			new TypeError(
+				"Failed to execute 'compile' on 'WebAssembly': Incorrect response MIME type. Expected 'application/wasm'.",
 			),
-		});
+		);
+
+	it("reloads once, without touching the store, when the module cannot load", async () => {
+		// A fresh document cures a transient fetch failure (the package memoizes
+		// even a rejected load for the life of the page).
+		const h = harness({ loadModule: vi.fn(moduleFailure) });
+		await expect(runCryptoInit(h.deps)).resolves.toBe("reloading");
+		expect(h.reload).toHaveBeenCalledOnce();
+		expect(readRecoveryStage(ID_A)).toBe("reload");
+		expect(h.initCrypto).not.toHaveBeenCalled();
+		expect(h.clearStores).not.toHaveBeenCalled();
+	});
+
+	it("gives up with 'error' after the reload when the module still cannot load", async () => {
+		persistRecoveryStage("reload", ID_A);
+		const h = harness({ loadModule: vi.fn(moduleFailure) });
 		await expect(runCryptoInit(h.deps)).resolves.toBe("error");
 		expect(h.reload).not.toHaveBeenCalled();
 		expect(h.initCrypto).not.toHaveBeenCalled();
@@ -422,7 +434,7 @@ describe("runCryptoInit", () => {
 		);
 	});
 
-	it("does not wipe the store at the 'clear' stage when the module cannot load", async () => {
+	it("never wipes the store over a module failure, even at the 'clear' stage", async () => {
 		persistRecoveryStage("clear", ID_A);
 		const h = harness({
 			loadModule: vi.fn(() => Promise.reject(new Error("fetch failed"))),
@@ -436,32 +448,26 @@ describe("runCryptoInit", () => {
 		expect(readRecoveryStage(ID_A)).toBeNull();
 	});
 
-	it("waits for a slow module load instead of timing out", async () => {
+	it("bounds the module load by its own, longer timeout", async () => {
 		// A large module on a slow first visit is a download in progress, not a
-		// hang: the timeout that guards the store steps must not turn it into a
-		// terminal error (the old ladder's reload stage used to recover this).
+		// hang: the store timeout must not cut it short, but a fetch that never
+		// settles still ends in the module ladder (here: the one reload).
 		vi.useFakeTimers();
 		try {
-			let finishLoad: () => void = () => {};
 			const h = harness({
-				loadModule: vi.fn(
-					() =>
-						new Promise<void>((resolve) => {
-							finishLoad = resolve;
-						}),
-				),
+				loadModule: vi.fn(() => new Promise<void>(() => {})),
 			});
 			let settled = false;
 			const result = runCryptoInit(h.deps).then((r) => {
 				settled = true;
 				return r;
 			});
-			await vi.advanceTimersByTimeAsync(5000);
+			await vi.advanceTimersByTimeAsync(h.deps.timeoutMs * 5);
 			expect(settled).toBe(false);
+			await vi.advanceTimersByTimeAsync(h.deps.moduleTimeoutMs);
+			await expect(result).resolves.toBe("reloading");
 			expect(h.initCrypto).not.toHaveBeenCalled();
-			finishLoad();
-			await expect(result).resolves.toBe("ready");
-			expect(h.reload).not.toHaveBeenCalled();
+			expect(h.clearStores).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}

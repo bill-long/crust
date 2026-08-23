@@ -26,6 +26,7 @@ vi.mock("matrix-js-sdk", async (importOriginal) => {
 // ClientProvider's crypto boot is out of scope here; resolve it instantly.
 vi.mock("./cryptoRecovery", () => ({
 	CRYPTO_INIT_TIMEOUT_MS: 1,
+	CRYPTO_MODULE_LOAD_TIMEOUT_MS: 1,
 	clearCryptoStores: vi.fn(),
 	clearRecoveryStage: vi.fn(),
 	initCryptoStore: vi.fn(),

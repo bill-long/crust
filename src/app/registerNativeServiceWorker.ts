@@ -1,5 +1,6 @@
 import {
 	digestServiceWorkerScript,
+	nativeServiceWorkerScriptUrl,
 	nativeServiceWorkerUrl,
 } from "../lib/nativeServiceWorker";
 import { reportError } from "../lib/reportError";
@@ -27,7 +28,9 @@ export async function registerNativeServiceWorker(): Promise<void> {
 	if (!("serviceWorker" in navigator)) return;
 	const base = import.meta.env.BASE_URL;
 	try {
-		const response = await fetch(`${base}sw.js`, { cache: "no-store" });
+		const response = await fetch(nativeServiceWorkerScriptUrl(base), {
+			cache: "no-store",
+		});
 		if (!response.ok) {
 			throw new Error(`sw.js responded ${response.status}`);
 		}
