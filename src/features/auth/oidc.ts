@@ -61,6 +61,77 @@ function oidcClientUri(): string {
 	return `${window.location.origin}${basePrefix}/`;
 }
 
+/**
+ * Register this install with the OP (RFC 7591 dynamic registration).
+ * Hand-rolled rather than the SDK's OAuth2.registerClient, which maps every
+ * failure to the opaque "Dynamic registration failed" and discards the OP's
+ * error_description - exactly the text that diagnoses a rejected
+ * client_uri ("Client URI must be HTTPS.", issue #486).
+ */
+async function registerOidcClient(
+	metadata: ValidatedAuthMetadata,
+	redirectUri: string,
+): Promise<string> {
+	if (!metadata.registration_endpoint) {
+		throw new Error(
+			"This homeserver does not support automatic app registration.",
+		);
+	}
+	let response: Response;
+	try {
+		response = await fetch(metadata.registration_endpoint, {
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				client_name: "Crust",
+				client_uri: oidcClientUri(),
+				application_type: "web",
+				redirect_uris: [redirectUri],
+				// Only what the flow below actually uses; defaults the SDK
+				// would have negotiated (e.g. the device grant) are not ours.
+				response_types: ["code"],
+				grant_types: ["authorization_code", "refresh_token"],
+				token_endpoint_auth_method: "none",
+			}),
+		});
+	} catch {
+		throw new Error("Could not reach the homeserver's registration endpoint.");
+	}
+	if (!response.ok) {
+		// Surface the OP's reason when it gives one. Server-controlled text:
+		// rendered as plain text by the error banner, and capped so a
+		// misbehaving server can't flood the UI.
+		let description = "";
+		try {
+			const body: unknown = await response.json();
+			const d = (body as { error_description?: unknown }).error_description;
+			if (typeof d === "string") description = d.slice(0, 200);
+		} catch {
+			// Non-JSON error body - fall through to the generic message.
+		}
+		throw new Error(
+			description
+				? `The homeserver rejected this app's registration: ${description}`
+				: `Dynamic registration failed (HTTP ${response.status}).`,
+		);
+	}
+	let clientId: unknown;
+	try {
+		clientId = ((await response.json()) as { client_id?: unknown }).client_id;
+	} catch {
+		// Handled below: a non-JSON success body has no client_id.
+	}
+	if (typeof clientId !== "string" || clientId.length === 0) {
+		throw new Error(
+			"The homeserver returned an invalid registration response.",
+		);
+	}
+	return clientId;
+}
+
 // --- Dynamic client registration cache (localStorage, keyed by issuer) ---
 
 function readRegistrationCache(): Record<string, string> {
@@ -217,12 +288,7 @@ export async function startOidcLogin(
 	const redirectUri = oidcRedirectUri();
 	let clientId = getCachedClientId(metadata.issuer);
 	if (!clientId) {
-		clientId = await OAuth2.registerClient(metadata, {
-			client_name: "Crust",
-			client_uri: oidcClientUri(),
-			application_type: "web",
-			redirect_uris: [redirectUri],
-		});
+		clientId = await registerOidcClient(metadata, redirectUri);
 		cacheClientId(metadata.issuer, clientId);
 	}
 

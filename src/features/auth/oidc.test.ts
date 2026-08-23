@@ -2,11 +2,12 @@ import type { ValidatedAuthMetadata } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The module under test talks to matrix-js-sdk at two places: createClient
-// (probe + metadata refetch + whoami) and the OAuth2 class (registration +
-// URL generation + code exchange). Mock that boundary; everything else
-// (signin state, URL guards, error curation, result mapping) runs for real.
+// (probe + metadata refetch + whoami) and the OAuth2 class (URL generation +
+// code exchange); dynamic registration is the module's own fetch (so the
+// OP's error_description survives, issue #486) and is stubbed at the fetch
+// boundary. Everything else (signin state, URL guards, error curation,
+// result mapping) runs for real.
 const createClientMock = vi.hoisted(() => vi.fn());
-const registerClientMock = vi.hoisted(() => vi.fn());
 const generateUrlMock = vi.hoisted(() => vi.fn());
 const completeGrantMock = vi.hoisted(() => vi.fn());
 const oauth2Instances = vi.hoisted(() => ({
@@ -15,7 +16,6 @@ const oauth2Instances = vi.hoisted(() => ({
 vi.mock("matrix-js-sdk", () => ({
 	createClient: (...args: unknown[]) => createClientMock(...args),
 	OAuth2: class FakeOAuth2 {
-		static registerClient = registerClientMock;
 		readonly context: Record<string, unknown>;
 		constructor(
 			public metadata: unknown,
@@ -67,6 +67,20 @@ function seedSigninState(overrides?: Partial<typeof STORED_SIGNIN>): void {
 		SIGNIN_STATE_KEY,
 		JSON.stringify({ ...STORED_SIGNIN, ...overrides }),
 	);
+}
+
+/** Stub global fetch for the registration endpoint. */
+function stubRegistration(
+	status: number,
+	body: unknown,
+): ReturnType<typeof vi.fn> {
+	const fetchMock = vi.fn(async () => ({
+		ok: status < 400,
+		status,
+		json: async () => body,
+	}));
+	vi.stubGlobal("fetch", fetchMock);
+	return fetchMock;
 }
 
 beforeEach(() => {
@@ -141,18 +155,22 @@ describe("client registration cache", () => {
 
 describe("startOidcLogin", () => {
 	it("registers on first login, caches the client_id, and returns the authorization URL", async () => {
-		registerClientMock.mockResolvedValue("client-xyz");
+		const fetchMock = stubRegistration(201, { client_id: "client-xyz" });
 
 		const url = await startOidcLogin(METADATA, "https://matrix.example.com");
 
-		expect(registerClientMock).toHaveBeenCalledTimes(1);
-		const [metadataArg, registrationArg] = registerClientMock.mock.calls[0];
-		expect(metadataArg).toBe(METADATA);
-		expect(registrationArg).toMatchObject({
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		const [endpoint, init] = fetchMock.mock.calls[0] as unknown as [
+			string,
+			{ body: string },
+		];
+		expect(endpoint).toBe("https://auth.example.com/register");
+		expect(JSON.parse(init.body)).toMatchObject({
 			client_name: "Crust",
 			client_uri: `${window.location.origin}/`,
 			application_type: "web",
 			redirect_uris: [`${window.location.origin}/login/callback`],
+			token_endpoint_auth_method: "none",
 		});
 		expect(getCachedClientId("https://auth.example.com/")).toBe("client-xyz");
 
@@ -183,9 +201,10 @@ describe("startOidcLogin", () => {
 			JSON.stringify({ "https://auth.example.com/": "cached-client" }),
 		);
 
+		const fetchMock = stubRegistration(201, { client_id: "unused" });
 		await startOidcLogin(METADATA, "https://matrix.example.com");
 
-		expect(registerClientMock).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
 		expect(oauth2Instances.contexts[0].clientId).toBe("cached-client");
 	});
 
@@ -203,16 +222,40 @@ describe("startOidcLogin", () => {
 		expect(first).not.toBe(second);
 	});
 
-	it("propagates a registration failure without caching or storing state", async () => {
-		registerClientMock.mockRejectedValue(
-			new Error("Dynamic registration failed"),
-		);
+	it("surfaces the OP's rejection reason without caching or storing state", async () => {
+		// The generic "Dynamic registration failed" hid "Client URI must be
+		// HTTPS." for days (issue #486); the OP's reason must reach the user.
+		stubRegistration(400, {
+			error: "invalid_client_metadata",
+			error_description: "Client URI must be HTTPS.",
+		});
 
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
-		).rejects.toThrow("Dynamic registration failed");
+		).rejects.toThrow(
+			"The homeserver rejected this app's registration: Client URI must be HTTPS.",
+		);
 		expect(getCachedClientId("https://auth.example.com/")).toBeNull();
 		expect(sessionStorage.getItem(SIGNIN_STATE_KEY)).toBeNull();
+	});
+
+	it("falls back to a generic message when the OP gives no reason", async () => {
+		stubRegistration(500, "not json");
+
+		await expect(
+			startOidcLogin(METADATA, "https://matrix.example.com"),
+		).rejects.toThrow("Dynamic registration failed (HTTP 500).");
+	});
+
+	it("rejects a success response without a client_id", async () => {
+		stubRegistration(201, { unexpected: true });
+
+		await expect(
+			startOidcLogin(METADATA, "https://matrix.example.com"),
+		).rejects.toThrow(
+			"The homeserver returned an invalid registration response.",
+		);
+		expect(getCachedClientId("https://auth.example.com/")).toBeNull();
 	});
 
 	it("rejects a non-web authorization URL (javascript: would execute in our origin)", async () => {
