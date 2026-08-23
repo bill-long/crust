@@ -11,6 +11,9 @@ importers:
       '@kobalte/core':
         specifier: ^0.13.11
         version: 0.13.11(solid-js@1.9.12)
+      '@matrix-org/matrix-sdk-crypto-wasm':
+        specifier: ^18.5.0
+        version: 18.5.0
       '@solidjs/router':
         specifier: ^0.16.1
         version: 0.16.1(solid-js@1.9.12)

@@ -77,12 +77,15 @@ export default defineConfig({
 				// on dependency bumps, so returning users re-download a small app
 				// chunk instead of the whole bundle. Groups are evaluated in
 				// priority order; matrix-js-sdk must win over the catch-all
-				// node_modules group for its own packages.
+				// node_modules group for its own packages. The crypto wasm bindings
+				// belong with the SDK: it is what loads them, and the app's own
+				// import (src/client/client.tsx, the module-load step of crypto
+				// recovery) must not pull them into the app chunk.
 				advancedChunks: {
 					groups: [
 						{
 							name: "matrix-js-sdk",
-							test: /node_modules[\\/]matrix-js-sdk/,
+							test: /node_modules[\\/](matrix-js-sdk|@matrix-org[\\/]matrix-sdk-crypto-wasm)/,
 							priority: 20,
 						},
 						{
@@ -131,7 +134,14 @@ export default defineConfig({
 				icons: [...manifestIcons],
 			},
 			injectManifest: {
-				globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+				// The crypto wasm is part of the shell: a precached index.html + JS
+				// that have to fetch the wasm live break the moment the server (or
+				// the desktop exe) stops carrying that hash - an older worker's
+				// shell then gets index.html back for it and Rust crypto never
+				// initializes (#481). Precaching it keeps a stale shell coherent
+				// until the new worker takes over. scripts/check-sw-precache.mjs
+				// asserts the wasm made it into the manifest.
+				globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2,wasm}"],
 				globIgnores: [
 					// Runtime operator config must never be served stale from cache.
 					"**/config.json",
@@ -146,7 +156,10 @@ export default defineConfig({
 					// these exact names. See issue #252.
 					...ICON_FILENAMES.map((name) => `**/${name}`),
 				],
-				maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+				// Above the ~8 MB crypto wasm with headroom; the plugin only WARNS
+				// and skips a file over this, which check-sw-precache.mjs turns into
+				// a build failure.
+				maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
 			},
 			// Keep the dev server free of a registered service worker; the PWA is
 			// only active in production builds.

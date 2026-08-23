@@ -6,7 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "node scripts/check-csp-sync.mjs && vite build && node scripts/check-vendor-chunks.mjs",
+		"build": "node scripts/check-csp-sync.mjs && vite build && node scripts/check-vendor-chunks.mjs && node scripts/check-sw-precache.mjs",
 		"build:vite": "vite build",
 		"preview": "vite preview",
 		"lint": "biome check .",
@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"@kobalte/core": "^0.13.11",
+		"@matrix-org/matrix-sdk-crypto-wasm": "^18.5.0",
 		"@solidjs/router": "^0.16.1",
 		"dompurify": "^3.4.2",
 		"emojibase-data": "^17.0.0",

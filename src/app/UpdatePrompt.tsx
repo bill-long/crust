@@ -1,5 +1,9 @@
 import { useRegisterSW } from "virtual:pwa-register/solid";
 import { type Component, type JSX, onCleanup, onMount, Show } from "solid-js";
+import {
+	digestServiceWorkerScript,
+	nativeServiceWorkerUrl,
+} from "../lib/nativeServiceWorker";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import {
 	dismissNativeUpdate,
@@ -94,38 +98,75 @@ const UpdateCard: Component<{
  * src/sw.ts). Dismissing keeps the current session untouched; the update still
  * applies on the next cold start.
  *
- * In the desktop shell there is ALSO the Tauri updater (#261), already
+ * In the desktop shell there is instead the Tauri updater (#261), already
  * downloaded and signature-verified by the shell before its card appears; there
  * "Restart" quits, which is what lets the installer run.
  *
- * Both can show in the shell, and suppressing the service worker one there was
- * a mistake worth not repeating: the worker still registers (tauri.localhost is
- * a secure context) and precaches, so after a native update replaces `dist/` the
- * old worker can still serve the previous build's assets on the next launch.
- * Hiding its prompt removed the only way out of that, for a webview stuck on
- * stale assets inside an app that had already updated itself.
+ * The shell shows only that card. Its service worker is not the browser one:
+ * WebView2 never updates a registered worker in place, so the shell registers
+ * a per-build worker that serves nothing from a cache (see
+ * registerNativeServiceWorker and src/lib/nativeServiceWorker.ts). There is
+ * never a waiting worker to refresh into, and the stale-shell trap of #481 - an
+ * old worker's precache serving the previous build's assets on the launch after
+ * an app update - cannot form. (An earlier attempt to merely hide the
+ * service-worker card in the shell, while still registering the precaching
+ * browser worker, removed the only way out of exactly that trap.)
  */
+
+/**
+ * Register the desktop shell's service worker under a URL that carries a
+ * digest of the script itself (see src/lib/nativeServiceWorker.ts for why the
+ * URL must change per build). The script is read from the exe: the browser
+ * build's worker has no route for `sw.js`, so even a leftover legacy worker
+ * cannot answer this fetch from a cache. Best-effort like the browser
+ * registration: a failure only costs authenticated media in the shell.
+ */
+async function registerNativeServiceWorker(): Promise<void> {
+	// The worker only exists in production builds (devOptions.enabled is false
+	// in vite.config.ts), so a `tauri dev` session against the Vite dev server
+	// has nothing to register.
+	if (import.meta.env.DEV) return;
+	if (!("serviceWorker" in navigator)) return;
+	const base = import.meta.env.BASE_URL;
+	try {
+		const response = await fetch(`${base}sw.js`, { cache: "no-store" });
+		if (!response.ok) {
+			throw new Error(`sw.js responded ${response.status}`);
+		}
+		const digest = await digestServiceWorkerScript(await response.text());
+		await navigator.serviceWorker.register(
+			nativeServiceWorkerUrl(base, digest),
+		);
+	} catch (err: unknown) {
+		console.warn("Desktop service worker registration failed", err);
+	}
+}
+
 const UpdatePrompt: Component = () => {
 	// Registration happens in every window, including the overlay: this is the
-	// app's only useRegisterSW caller, so skipping it here would leave a browser
+	// app's only registration site, so skipping it here would leave a browser
 	// cold-load of /overlay with no service worker at all. Only the CARDS are
 	// suppressed there - see the guard on the returned JSX.
-	const {
-		needRefresh: [needRefresh, setNeedRefresh],
-		updateServiceWorker,
-	} = useRegisterSW();
+	//
+	// The shell does not go through useRegisterSW: that registers the browser
+	// build's fixed worker URL, which WebView2 can never update in place (see
+	// registerNativeServiceWorker). Nothing is ever "waiting" for the shell's
+	// worker - it takes over as soon as it installs - so it has no refresh card.
+	const pwa = isNativeShell() ? null : useRegisterSW();
+	const needRefresh = (): boolean => pwa?.needRefresh[0]() ?? false;
 
 	onMount(() => {
+		if (!pwa) void registerNativeServiceWorker();
 		const unlisten = watchNativeUpdates();
 		onCleanup(() => void unlisten.then((off) => off()));
 	});
 
 	const refresh = (): void => {
-		void updateServiceWorker(true);
+		void pwa?.updateServiceWorker(true);
 	};
 
 	const dismiss = (): void => {
-		setNeedRefresh(false);
+		pwa?.needRefresh[1](false);
 	};
 
 	const restart = (): void => {

@@ -12,6 +12,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Crust",
         "width": 1200,
         "height": 820,

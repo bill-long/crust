@@ -37,6 +37,13 @@
  * The persisted stage is scoped to the logged-in identity so that a stale
  * stage left by a previous account can never trigger a destructive store wipe
  * for a different account logged in later in the same tab.
+ *
+ * Before any of that, the crypto WASM module itself is loaded (`loadModule`),
+ * OUTSIDE the staged recovery: a module that cannot be fetched or compiled (a
+ * stale app shell referencing an asset the server no longer has, a blocked
+ * download) has nothing to do with the store, and neither a reload nor a wipe
+ * can supply it. That failure surfaces the error banner directly and never
+ * costs the device its keys - #481 reached the wipe exactly this way.
  */
 
 import type { MatrixClient } from "matrix-js-sdk";
@@ -89,10 +96,13 @@ export async function clearCryptoStores(
 }
 
 /**
- * Maximum time to wait for `initRustCrypto` (or the recovery `clearStores`)
- * before treating it as hung. Both are local IndexedDB + WASM operations that
- * complete in well under this even for large stores, so the timeout only trips
- * on a real hang (e.g. a `deleteDatabase` blocked by another open connection).
+ * Maximum time to wait for `initRustCrypto` (or the recovery `clearStores`, or
+ * the module load that precedes both) before treating it as hung. The store
+ * operations are local IndexedDB + WASM work that completes in well under this
+ * even for large stores, so the timeout only trips on a real hang (e.g. a
+ * `deleteDatabase` blocked by another open connection); the module load is
+ * local too once the worker has precached the wasm (and always in the desktop
+ * shell, where the exe serves it).
  */
 export const CRYPTO_INIT_TIMEOUT_MS = 30_000;
 
@@ -212,6 +222,12 @@ export interface CryptoInitDeps {
 	persistStage: (stage: "reload" | "clear", identity: string) => boolean;
 	/** Remove the persisted recovery stage. */
 	clearStage: () => void;
+	/**
+	 * Load the crypto WASM module (matrix-sdk-crypto-wasm's `initAsync`). The
+	 * package memoizes the load, so the SDK's own call inside initCrypto reuses
+	 * it rather than fetching the module twice.
+	 */
+	loadModule: () => Promise<void>;
 	/** Wipe the Matrix SDK + Rust crypto stores (used on the "clear" stage). */
 	clearStores: () => Promise<void>;
 	/** Initialize Rust crypto. */
@@ -220,7 +236,7 @@ export interface CryptoInitDeps {
 	isAborted: () => boolean;
 	/** Trigger a full page reload. */
 	reload: () => void;
-	/** Timeout for both clearStores and initCrypto. */
+	/** Timeout for each of loadModule, clearStores and initCrypto. */
 	timeoutMs: number;
 	logger?: Pick<Console, "warn" | "error">;
 }
@@ -245,6 +261,21 @@ export async function runCryptoInit(
 	const stage = deps.readStage(deps.identity);
 	let reloading = false;
 	try {
+		try {
+			await withTimeout(
+				deps.loadModule(),
+				deps.timeoutMs,
+				"Crypto module load",
+			);
+		} catch (e) {
+			if (deps.isAborted()) return "aborted";
+			// No store was touched, and nothing in the staged recovery below can
+			// produce a missing module - so give up here, before a persisted
+			// "clear" stage could wipe the store over a failure it cannot fix.
+			logger.error("Crypto module failed to load; encryption unavailable.", e);
+			return "error";
+		}
+		if (deps.isAborted()) return "aborted";
 		if (shouldClearStoreBeforeInit(stage)) {
 			// Two prior attempts failed; the persisted store is likely corrupt.
 			// Wipe the Matrix SDK + Rust crypto stores before re-initializing.

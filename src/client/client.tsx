@@ -1,3 +1,4 @@
+import { initAsync as loadCryptoModule } from "@matrix-org/matrix-sdk-crypto-wasm";
 import {
 	ClientEvent,
 	ClientPrefix,
@@ -381,6 +382,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			readStage: readRecoveryStage,
 			persistStage: persistRecoveryStage,
 			clearStage: clearRecoveryStage,
+			// No URL argument: the package's own default is the bundled wasm, the
+			// same one the SDK's internal initAsync call resolves to.
+			loadModule: () => loadCryptoModule(),
 			clearStores: () => clearCryptoStores(matrixClient),
 			initCrypto: () => initCryptoStore(matrixClient),
 			isAborted: () => disposed || syncState() === "logged-out",
