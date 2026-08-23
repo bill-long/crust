@@ -351,7 +351,12 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 						<div class="flex flex-col gap-2">
 							<button
 								type="button"
-								onClick={() => v.requestSelfVerification()}
+								onClick={() => {
+									// Starting the request swaps this button out of the view;
+									// keep keyboard focus inside the dialog.
+									v.requestSelfVerification();
+									reclaimFocus();
+								}}
 								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Verify with another session

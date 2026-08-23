@@ -105,8 +105,9 @@ const CryptoStatusBanner: Component = () => {
 
 	const verifyWithRecoveryKey = async (): Promise<void> => {
 		const crypto = client.getCrypto();
+		const userId = client.getUserId();
 		const deviceId = client.getDeviceId();
-		if (!crypto || !deviceId) {
+		if (!crypto || !userId || !deviceId) {
 			throw new Error("Encryption is not available.");
 		}
 		try {
@@ -119,7 +120,7 @@ const CryptoStatusBanner: Component = () => {
 		// The new signature becomes visible locally with the next /keys/query;
 		// give it a sync cycle so "complete" is not followed by a card that
 		// still reads Unverified.
-		await waitForDevicesUpdated(client, 5000);
+		await waitForDevicesUpdated(client, userId, 5000);
 		await cryptoStatus.refresh();
 	};
 

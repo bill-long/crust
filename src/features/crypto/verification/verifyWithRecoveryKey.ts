@@ -62,27 +62,33 @@ export async function verifySessionWithRecoveryKey(
 }
 
 /**
- * Wait for the next device-list refresh, bounded.
+ * Wait for the next device-list refresh of `userId`'s devices, bounded.
  *
  * The SDK only updates a device's own signature list from `/keys/query`, so
  * right after the signature upload above this device still reads as
  * unsigned. The upload marks the device list changed, so a query follows
  * with the next sync; waiting for it (up to `timeoutMs`) lets the caller
  * refresh to the verified state before reporting success, instead of closing
- * onto a card that still says Unverified. Resolves on timeout too: the status
- * hook re-runs on the same event, so the card heals on its own either way.
+ * onto a card that still says Unverified. Updates for other users are
+ * ignored - they would release the wait before our signature is visible.
+ * Resolves on timeout too: the status hook re-runs on the same event, so the
+ * card heals on its own either way.
  */
 export function waitForDevicesUpdated(
-	client: Pick<MatrixClient, "once" | "removeListener">,
+	client: Pick<MatrixClient, "on" | "removeListener">,
+	userId: string,
 	timeoutMs: number,
 ): Promise<void> {
 	return new Promise((resolve) => {
 		const done = (): void => {
 			clearTimeout(timer);
-			client.removeListener(CryptoEvent.DevicesUpdated, done);
+			client.removeListener(CryptoEvent.DevicesUpdated, onUpdated);
 			resolve();
 		};
+		const onUpdated = (users: string[]): void => {
+			if (users.includes(userId)) done();
+		};
 		const timer = setTimeout(done, timeoutMs);
-		client.once(CryptoEvent.DevicesUpdated, done);
+		client.on(CryptoEvent.DevicesUpdated, onUpdated);
 	});
 }

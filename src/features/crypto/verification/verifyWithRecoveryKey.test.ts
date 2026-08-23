@@ -89,35 +89,55 @@ describe("waitForDevicesUpdated", () => {
 		vi.useRealTimers();
 	});
 
+	type Listener = (users: string[]) => void;
 	function makeEmitter() {
-		const listeners = new Map<string, Set<() => void>>();
+		const listeners = new Map<string, Set<Listener>>();
 		return {
-			once: vi.fn((event: string, fn: () => void) => {
+			on: vi.fn((event: string, fn: Listener) => {
 				if (!listeners.has(event)) listeners.set(event, new Set());
 				listeners.get(event)?.add(fn);
 			}),
-			removeListener: vi.fn((event: string, fn: () => void) => {
+			removeListener: vi.fn((event: string, fn: Listener) => {
 				listeners.get(event)?.delete(fn);
 			}),
-			emit(event: string) {
-				for (const fn of [...(listeners.get(event) ?? [])]) fn();
+			emit(event: string, users: string[]) {
+				for (const fn of [...(listeners.get(event) ?? [])]) fn(users);
 			},
 			count(event: string) {
 				return listeners.get(event)?.size ?? 0;
 			},
 		};
 	}
+	const asClient = (c: ReturnType<typeof makeEmitter>) =>
+		c as unknown as Parameters<typeof waitForDevicesUpdated>[0];
 
-	it("resolves on the next DevicesUpdated and detaches", async () => {
+	it("resolves on a DevicesUpdated for our user and detaches", async () => {
 		vi.useFakeTimers();
 		const client = makeEmitter();
-		const p = waitForDevicesUpdated(
-			client as unknown as Parameters<typeof waitForDevicesUpdated>[0],
-			5000,
-		);
-		client.emit("crypto.devicesUpdated");
+		const p = waitForDevicesUpdated(asClient(client), "@me:hs", 5000);
+		client.emit("crypto.devicesUpdated", ["@me:hs"]);
 		await p;
 		expect(client.count("crypto.devicesUpdated")).toBe(0);
+	});
+
+	it("ignores updates for other users", async () => {
+		// Another user's query must not release the wait before our own
+		// signature is visible.
+		vi.useFakeTimers();
+		const client = makeEmitter();
+		let settled = false;
+		const p = waitForDevicesUpdated(asClient(client), "@me:hs", 5000).then(
+			() => {
+				settled = true;
+			},
+		);
+		client.emit("crypto.devicesUpdated", ["@other:hs"]);
+		await Promise.resolve();
+		expect(settled).toBe(false);
+		expect(client.count("crypto.devicesUpdated")).toBe(1);
+		client.emit("crypto.devicesUpdated", ["@other:hs", "@me:hs"]);
+		await p;
+		expect(settled).toBe(true);
 	});
 
 	it("resolves on timeout and detaches, so the caller never hangs", async () => {
@@ -125,10 +145,7 @@ describe("waitForDevicesUpdated", () => {
 		// heals the card; the wait only exists to avoid a premature "done".
 		vi.useFakeTimers();
 		const client = makeEmitter();
-		const p = waitForDevicesUpdated(
-			client as unknown as Parameters<typeof waitForDevicesUpdated>[0],
-			5000,
-		);
+		const p = waitForDevicesUpdated(asClient(client), "@me:hs", 5000);
 		vi.advanceTimersByTime(5000);
 		await p;
 		expect(client.count("crypto.devicesUpdated")).toBe(0);

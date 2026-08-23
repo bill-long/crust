@@ -31,7 +31,7 @@ export function deriveCryptoAction(input: CryptoActionInput): CryptoAction {
 		// server but no private keys are reachable (not local, not in secret
 		// storage), plain bootstrap fails against the existing identity — the
 		// only way forward from this device is a full reset. When the private
-		// keys ARE reachable nothing destructive is needed: the in-4S case is
+		// keys ARE reachable, nothing destructive is needed: the in-4S case is
 		// a verification (below), and locally cached keys let the ordinary
 		// setup flow reuse them. Fail toward the non-destructive flows
 		// whenever any private key source exists.

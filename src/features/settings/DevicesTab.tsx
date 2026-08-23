@@ -177,8 +177,8 @@ const DevicesTab: Component = () => {
 											cryptoAction() === "reset-encryption"
 										}
 									>
-										Set up on your account but its keys can't be reached from
-										any session — it can only be reset.
+										Set up on your account, but this session can't reach its
+										keys — from here it can only be reset.
 									</Match>
 								</Switch>
 							</div>
@@ -254,7 +254,12 @@ const DevicesTab: Component = () => {
 								    includes a session that can't use the account's identity
 								    yet, not only one where cross-signing is already ready
 								    (issue #480). */}
-								<Show when={cryptoAction() === "verify-session"}>
+								<Show
+									when={
+										cryptoAction() === "verify-session" &&
+										cryptoStatus.thisDeviceVerified() === false
+									}
+								>
 									<ActionButton
 										label="Verify"
 										onClick={() => triggerCryptoAction("verify-session")}
