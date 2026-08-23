@@ -7,6 +7,7 @@ import {
 	Switch,
 } from "solid-js";
 import { isRecoveryKeyCancelled } from "../../../client/recoveryKeyCancelled";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { EmojiDisplay } from "./EmojiDisplay";
 import type { VerificationHandle } from "./useVerification";
 
@@ -59,7 +60,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 			}
 			console.error("Recovery-key verification failed:", e);
 			setRecoveryError(
-				e instanceof Error ? e.message : "Verification failed. Try again.",
+				userFacingErrorMessage(e, "Verification failed. Try again."),
 			);
 			setRecoveryStep("error");
 		}

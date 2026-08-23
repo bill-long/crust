@@ -35,8 +35,14 @@ vi.mock("../../stores/cryptoActions", () => ({
 vi.mock("../crypto/backup/BackupStatus", () => ({
 	BackupStatus: () => <span>backup-status-ok</span>,
 }));
+// The stub exposes the row callback so the tab's wiring of it is under test
+// (a prop-less stub would pass with the prop missing or the payload wrong).
 vi.mock("../crypto/DeviceList", () => ({
-	DeviceList: () => <span>device-list</span>,
+	DeviceList: (props: { onVerifyDevice?: (deviceId: string) => void }) => (
+		<button type="button" onClick={() => props.onVerifyDevice?.("OTHERDEV")}>
+			device-list-verify
+		</button>
+	),
 }));
 
 interface StatusOverrides {
@@ -111,6 +117,40 @@ afterEach(() => {
 });
 
 describe("DevicesTab", () => {
+	it("starts verification of another session from its device-list row", () => {
+		render(() => <DevicesTab />);
+		fireEvent.click(screen.getByRole("button", { name: "device-list-verify" }));
+		expect(triggerCryptoAction).toHaveBeenCalledWith({
+			action: "verify-device",
+			deviceId: "OTHERDEV",
+		});
+	});
+
+	it("offers Verify, not Set up, to an untrusted session whose account has cross-signing in 4S", () => {
+		// The desktop/new-login case from issue #480: identity exists, keys
+		// recoverable from secret storage, this session not yet trusted.
+		statusOverrides = {
+			crossSigningReady: false,
+			thisDeviceVerified: false,
+			crossSigningStatus: {
+				publicKeysOnDevice: true,
+				privateKeysInSecretStorage: true,
+				privateKeysCachedLocally: {
+					masterKey: false,
+					selfSigningKey: false,
+					userSigningKey: false,
+				},
+			},
+		};
+		render(() => <DevicesTab />);
+
+		expect(screen.getByText("Unavailable")).toBeTruthy();
+		expect(screen.queryByText("Not set up")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Set up" })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+		expect(triggerCryptoAction).toHaveBeenCalledWith("verify-session");
+	});
+
 	it("offers a danger Reset… action when the server identity is unreachable", () => {
 		statusOverrides = {
 			crossSigningReady: false,

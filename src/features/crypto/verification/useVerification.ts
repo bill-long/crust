@@ -11,6 +11,7 @@ import type {
 	Verifier,
 } from "matrix-js-sdk/lib/crypto-api/verification";
 import { type Accessor, createSignal, onCleanup } from "solid-js";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 
 export type VerificationState =
 	| "idle"
@@ -125,14 +126,14 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 					s !== "sas-confirmed" &&
 					s !== "error"
 				) {
-					setError(e instanceof Error ? e.message : "Verification failed");
+					setError(userFacingErrorMessage(e, "Verification failed"));
 					setState("error");
 					cleanupRequest();
 				}
 			});
 		} catch (e) {
 			if (gen !== requestGeneration) return;
-			setError(e instanceof Error ? e.message : "Failed to start verification");
+			setError(userFacingErrorMessage(e, "Failed to start verification"));
 			setState("error");
 			cleanupRequest();
 		}
@@ -197,9 +198,7 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			bindRequest(request);
 		} catch (e) {
 			if (gen !== requestGeneration) return;
-			setError(
-				e instanceof Error ? e.message : "Failed to request verification",
-			);
+			setError(userFacingErrorMessage(e, "Failed to request verification"));
 			setState("error");
 		}
 	};
@@ -231,9 +230,7 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			bindRequest(request);
 		} catch (e) {
 			if (gen !== requestGeneration) return;
-			setError(
-				e instanceof Error ? e.message : "Failed to request verification",
-			);
+			setError(userFacingErrorMessage(e, "Failed to request verification"));
 			setState("error");
 		}
 	};
@@ -245,9 +242,7 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			if (gen !== requestGeneration) return;
 			const s = state();
 			if (s === "cancelled" || s === "done" || s === "error") return;
-			setError(
-				e instanceof Error ? e.message : "Failed to accept verification",
-			);
+			setError(userFacingErrorMessage(e, "Failed to accept verification"));
 			setState("error");
 			cleanupRequest();
 		});
@@ -261,9 +256,7 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			await sasCallbacks.confirm();
 		} catch (e) {
 			if (gen !== requestGeneration) return;
-			setError(
-				e instanceof Error ? e.message : "Failed to confirm verification",
-			);
+			setError(userFacingErrorMessage(e, "Failed to confirm verification"));
 			setState("error");
 			cleanupRequest();
 		}
