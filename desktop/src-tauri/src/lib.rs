@@ -21,6 +21,19 @@ pub use mic_hotkey::run_helper;
 
 const OVERLAY_LABEL: &str = "overlay";
 
+/// Injected into every webview this shell creates (as a plugin initialization
+/// script, see `run`), to run before the page's own scripts whatever served the
+/// page. It evicts the precaching service worker that builds before the fix for
+/// #481 registered on this origin: WebView2 never completes an update check for
+/// a worker on the asset-protocol origin, so that worker kept serving its own
+/// build's app shell on every launch - against an exe whose hashed assets had
+/// moved on - and the shell it served was the one that did not know to
+/// unregister it. An initialization script is the one hook that reaches such a
+/// page from outside. The script holds the detection rule;
+/// src/lib/nativeServiceWorker.ts describes the worker the current build
+/// registers instead.
+const EVICT_LEGACY_SW_SCRIPT: &str = include_str!("evict_legacy_sw.js");
+
 /// Emitted once an update has been downloaded and is waiting to be applied.
 /// The payload is the new version string; the app toasts it (see
 /// `src/app/nativeUpdate.ts`). Namespaced like the app's other shell events.
@@ -269,6 +282,15 @@ pub fn run() {
             pending_update_version,
             mic_hotkey::set_mic_hotkey
         ])
+        // A plugin init script reaches every webview the shell creates (the
+        // config-defined main window and the overlay alike), before the page's
+        // own scripts run; a per-window `initialization_script` would have to
+        // be remembered at each window builder.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("evict-legacy-sw")
+                .js_init_script(EVICT_LEGACY_SW_SCRIPT)
+                .build(),
+        )
         .setup(|app| {
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             let gs = app.global_shortcut();

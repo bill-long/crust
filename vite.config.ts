@@ -77,12 +77,15 @@ export default defineConfig({
 				// on dependency bumps, so returning users re-download a small app
 				// chunk instead of the whole bundle. Groups are evaluated in
 				// priority order; matrix-js-sdk must win over the catch-all
-				// node_modules group for its own packages.
+				// node_modules group for its own packages. The crypto wasm bindings
+				// belong with the SDK: it is what loads them, and the app's own
+				// import (src/client/client.tsx, the module-load step of crypto
+				// recovery) must not pull them into the app chunk.
 				advancedChunks: {
 					groups: [
 						{
 							name: "matrix-js-sdk",
-							test: /node_modules[\\/]matrix-js-sdk/,
+							test: /node_modules[\\/](matrix-js-sdk|@matrix-org[\\/]matrix-sdk-crypto-wasm)/,
 							priority: 20,
 						},
 						{
@@ -131,6 +134,14 @@ export default defineConfig({
 				icons: [...manifestIcons],
 			},
 			injectManifest: {
+				// The ~8 MB crypto wasm is deliberately NOT precached: that would
+				// cost every visitor the download at worker install. A shell served
+				// from an older worker's precache after a deploy still finds its wasm
+				// in the browser's HTTP cache (hashed assets ship with a year-long
+				// max-age); if it does not, crypto recovery reloads once and then
+				// shows the banner next to the "App update" card - never a wipe (see
+				// src/client/cryptoRecovery.ts). The desktop shell's worker precaches
+				// nothing at all (#481).
 				globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
 				globIgnores: [
 					// Runtime operator config must never be served stale from cache.

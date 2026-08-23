@@ -1,5 +1,12 @@
 import { useRegisterSW } from "virtual:pwa-register/solid";
-import { type Component, type JSX, onCleanup, onMount, Show } from "solid-js";
+import {
+	type Component,
+	createSignal,
+	type JSX,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import {
 	dismissNativeUpdate,
@@ -94,26 +101,48 @@ const UpdateCard: Component<{
  * src/sw.ts). Dismissing keeps the current session untouched; the update still
  * applies on the next cold start.
  *
- * In the desktop shell there is ALSO the Tauri updater (#261), already
+ * In the desktop shell there is instead the Tauri updater (#261), already
  * downloaded and signature-verified by the shell before its card appears; there
  * "Restart" quits, which is what lets the installer run.
  *
- * Both can show in the shell, and suppressing the service worker one there was
- * a mistake worth not repeating: the worker still registers (tauri.localhost is
- * a secure context) and precaches, so after a native update replaces `dist/` the
- * old worker can still serve the previous build's assets on the next launch.
- * Hiding its prompt removed the only way out of that, for a webview stuck on
- * stale assets inside an app that had already updated itself.
+ * The shell shows only that card. Its service worker is not the browser one:
+ * WebView2 never updates a registered worker in place, so the shell registers,
+ * at bootstrap, a worker keyed by its own content that serves nothing from a
+ * cache (src/app/registerNativeServiceWorker.ts, src/lib/nativeServiceWorker.ts).
+ * There is never a waiting worker to refresh into, and the stale-shell trap of
+ * #481 - an old worker's precache serving the previous build's assets on the
+ * launch after an app update - cannot form. (An earlier attempt to merely hide
+ * the service-worker card in the shell, while still registering the precaching
+ * browser worker, removed the only way out of exactly that trap.)
  */
+/**
+ * What the shell gets in place of useRegisterSW: a worker that is never
+ * waiting and an update that is a no-op. Typed as the hook's return so the
+ * component cannot tell the two apart.
+ */
+function noBrowserServiceWorker(): ReturnType<typeof useRegisterSW> {
+	return {
+		needRefresh: createSignal(false),
+		offlineReady: createSignal(false),
+		updateServiceWorker: () => Promise.resolve(),
+	};
+}
+
 const UpdatePrompt: Component = () => {
 	// Registration happens in every window, including the overlay: this is the
 	// app's only useRegisterSW caller, so skipping it here would leave a browser
 	// cold-load of /overlay with no service worker at all. Only the CARDS are
 	// suppressed there - see the guard on the returned JSX.
+	//
+	// Not in the shell: useRegisterSW registers the browser build's fixed worker
+	// URL, which WebView2 can never update in place. The shell's worker is
+	// registered at bootstrap instead (see the doc comment above), and nothing is
+	// ever "waiting" for it, so it has no refresh card - an inert stand-in keeps
+	// the rest of the component identical.
 	const {
 		needRefresh: [needRefresh, setNeedRefresh],
 		updateServiceWorker,
-	} = useRegisterSW();
+	} = isNativeShell() ? noBrowserServiceWorker() : useRegisterSW();
 
 	onMount(() => {
 		const unlisten = watchNativeUpdates();

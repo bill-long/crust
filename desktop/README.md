@@ -39,6 +39,56 @@ pnpm tauri dev        # or: pnpm tauri build  -> installer under src-tauri/targe
 (`Crust_<version>_x64-setup.exe`) under `src-tauri/target/release/bundle/nsis/`.
 NSIS is the only bundle target: see the auto-update section for why.
 
+### Debugging an installed build
+
+Release builds have no devtools (`windows_subsystem = "windows"`), but WebView2
+honours the Chromium remote-debugging switch, so an installed build can be
+inspected from a browser or over the DevTools protocol:
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
+& "$env:LOCALAPPDATA\Crust\crust.exe"
+# then open http://127.0.0.1:9222/json (or edge://inspect) for the page target
+```
+
+The variable must be set in the environment the app is launched from, and an
+already-running instance has to be closed first - WebView2 refuses to share a
+user-data folder between processes started with different switches.
+
+## Service worker
+
+The shell registers the same `sw.js` as the browser build, but not the same
+way, because **WebView2 never completes a service-worker update check** for the
+origin Tauri's asset protocol serves (`registration.update()` fails with
+"An unknown error occurred when fetching the script"; a fresh registration
+installs fine). Whatever worker is registered first would control the origin
+forever - and a precaching one would keep serving the app shell of the build
+that registered it on every launch, against an exe whose hashed assets have
+moved on. That is how #481 happened: the stale shell asked for a crypto wasm
+the new exe no longer had, got `index.html` back, and Rust crypto never
+initialized.
+
+So, in the shell (all in `src/lib/nativeServiceWorker.ts` and `src/sw.ts`):
+
+- the page registers `sw.js?native=1&build=<sha-256 of sw.js>`: a new script
+  URL whenever the worker changes, which the browser treats as a new
+  registration and does fetch (the digest is computed at runtime from the
+  script the exe serves, so nothing build-specific is baked into the web
+  bundle and a rebuild of the same sources stays byte-identical);
+- in that mode the worker never precaches or serves app assets (the exe does),
+  takes over immediately, and keeps only what a page cannot do without a
+  worker - authenticated media (MSC3916);
+- `src-tauri/src/evict_legacy_sw.js`, injected into every webview the shell
+  creates as a plugin initialization script (`lib.rs`), unregisters any worker
+  on the app origin whose script URL lacks the `native` parameter (a test locks
+  that name to the TS constant), drops every cache, and reloads once; when only
+  the current worker is left it merely deletes a stray `workbox-precache`
+  cache. Nothing in the web bundle could do this: under the old worker the
+  page IS the old build.
+
+There is consequently no "App update / Refresh" card in the shell; the Tauri
+updater's "Restart" card is the only update UI there.
+
 ## Code signing
 
 Release builds are Authenticode-signed with an SSL.com certificate held in the

@@ -20,6 +20,7 @@ import {
 	toAuthedMediaUrl,
 } from "./lib/authedMedia";
 import { iconCacheUrls, isIconRequest } from "./lib/iconRuntimeCache";
+import { isNativeServiceWorkerUrl } from "./lib/nativeServiceWorker";
 import { NOTIFY_CHANNEL_NAME, type NotifyPong } from "./lib/notifyChannel";
 import { staleWhileRevalidate } from "./lib/swrCache";
 
@@ -27,101 +28,143 @@ import { staleWhileRevalidate } from "./lib/swrCache";
 // it to the service-worker scope so registration/clients are typed.
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-// ─── Precache the build output ───
+const base = import.meta.env.BASE_URL;
+
 // vite-plugin-pwa replaces `self.__WB_MANIFEST` with the list of hashed build
-// assets at build time. config.json is excluded (see injectManifest.globIgnores
+// assets at build time (the placeholder must appear exactly once, so it is read
+// here, unconditionally). config.json is excluded (see injectManifest.globIgnores
 // in vite.config.ts) so runtime configuration is always fetched fresh.
 const manifest = (
 	self as unknown as { __WB_MANIFEST: (string | PrecacheEntry)[] }
 ).__WB_MANIFEST;
-precacheAndRoute(manifest);
-cleanupOutdatedCaches();
 
-// SPA navigation fallback: serve the precached app shell for in-scope
-// *navigation* requests (instant load, offline-capable). The SW's own scope
-// (the base path, e.g. "/crust/") already limits which navigations the browser
-// dispatches here, but we additionally constrain the fallback to an explicit
-// base-path allowlist (defense-in-depth on a shared origin) and deny
-// `config.json` (always fetched fresh) and `/_matrix/` (homeserver API).
-const base = import.meta.env.BASE_URL;
-const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const navigationHandler = createHandlerBoundToURL(`${base}index.html`);
-registerRoute(
-	new NavigationRoute(navigationHandler, {
-		allowlist: [new RegExp(`^${escapedBase}`)],
-		denylist: [/\/config\.json$/, /^\/_matrix\//],
-	}),
-);
-
-// ─── Runtime cache for the stable-named PWA icons ───
-// The app icons/favicon (pwa-*.png, apple-touch-icon.png, favicon.svg) are
-// excluded from the precache (injectManifest.globIgnores in vite.config.ts) and
-// served here instead. Because this SW never auto-skipWaiting()s (above), a
-// *precached* icon would stay stale until the new worker fully took over. See
-// issue #252.
-const ICON_CACHE = "crust-icons";
-
-// Warm the icon cache at install so the icons are available offline - roughly
-// the availability the precache used to give (best-effort, see below).
-// `{ cache: "reload" }` bypasses the HTTP cache so we store the freshly-deployed
-// bytes. Warming also overwrites the shared ICON_CACHE eagerly, so once this
-// feature is live a later icon-only deploy is picked up by the *currently active*
-// worker's SWR route on the next load. (On the very first deploy that introduces
-// this route the previous worker is the old precache-only SW with no icon route,
-// so for that one transition a changed icon still waits for this worker to take
-// over.) Best-effort: allSettled + try/catch means a transient offline install
-// never fails the SW install (which would also block app-shell updates); the
-// route below repopulates on the next successful fetch.
-async function warmIconCache(): Promise<void> {
-	try {
-		const cache = await caches.open(ICON_CACHE);
-		await Promise.allSettled(
-			iconCacheUrls(base).map(async (url) => {
-				const res = await fetch(url, { cache: "reload" });
-				if (res.ok) await cache.put(url, res.clone());
-			}),
-		);
-	} catch {
-		// best-effort; nothing actionable if opening the cache throws
-	}
+// ─── Desktop shell mode ───
+// The desktop shell registers this same script under a `?native=1&build=` URL
+// (src/lib/nativeServiceWorker.ts explains why). In that mode the worker must
+// not precache or serve the app shell - the exe serves every asset itself,
+// always current, and WebView2 cannot update a worker in place, so a precaching
+// one would keep serving the build that registered it across app updates
+// (#481). Everything cache-backed lives in registerBrowserCaches() below, which
+// native mode simply never calls - so the native worker opens no cache at all
+// (desktop/src-tauri/src/evict_legacy_sw.js relies on that). What remains is
+// what the page cannot do without a worker (authenticated media) plus push,
+// which has no cache. Keep it that way: a new cache-backed route belongs inside
+// registerBrowserCaches(), never at top level.
+const nativeShell = isNativeServiceWorkerUrl(sw.location.href);
+if (nativeShell) {
+	// Take over immediately. Nothing here is served from a cache, so the browser
+	// build's reason to wait (keep serving its own matching hashed chunks, see
+	// the SKIP_WAITING comment below) does not apply, and the first launch after
+	// an app update gets authenticated media without a second launch.
+	sw.addEventListener("install", (event) => {
+		event.waitUntil(sw.skipWaiting());
+	});
+	sw.addEventListener("activate", (event) => {
+		event.waitUntil(sw.clients.claim());
+	});
+} else {
+	registerBrowserCaches();
 }
-sw.addEventListener("install", (event) => {
-	event.waitUntil(warmIconCache());
-});
 
-// Serve the icons stale-while-revalidate: return the cached copy instantly (like
-// the precache did) and refresh it in the background so a changed icon lands on
-// the next load. `event.waitUntil` keeps the worker alive until the background
-// refresh's cache write finishes (else an idle-worker termination would drop it
-// and the icon would stay stale). Keyed by pathname (query dropped) so variant
-// query strings can't grow the cache past one entry per icon.
-//
-// The revalidation fetch uses `{ cache: "reload" }` (like the install warm): the
-// icons ship with a year-long max-age, so a default fetch would revalidate
-// against the browser's HTTP cache and keep seeing the OLD bytes - never picking
-// up a redeployed icon. reload bypasses the HTTP cache to hit the network.
-//
-// If CacheStorage itself is unavailable (restricted storage contexts), fall back
-// to serving the icon directly rather than failing the request - still with
-// `{ cache: "reload" }` so a redeployed icon stays visible in that degraded path
-// (a default fetch would return the browser's year-old HTTP-cached bytes).
-registerRoute(
-	({ url }) => isIconRequest(url, base, sw.location.origin),
-	async ({ request, event }) => {
-		let cache: Cache;
+/**
+ * The browser build's caches: the precached app shell, its navigation
+ * fallback, and the runtime icon cache. The only place in this worker that
+ * opens a cache - see the desktop shell note above.
+ */
+function registerBrowserCaches(): void {
+	// ─── Precache the build output ───
+	precacheAndRoute(manifest);
+	cleanupOutdatedCaches();
+
+	// SPA navigation fallback: serve the precached app shell for in-scope
+	// *navigation* requests (instant load, offline-capable). The SW's own scope
+	// (the base path, e.g. "/crust/") already limits which navigations the
+	// browser dispatches here, but we additionally constrain the fallback to an
+	// explicit base-path allowlist (defense-in-depth on a shared origin) and deny
+	// `config.json` (always fetched fresh) and `/_matrix/` (homeserver API).
+	const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const navigationHandler = createHandlerBoundToURL(`${base}index.html`);
+	registerRoute(
+		new NavigationRoute(navigationHandler, {
+			allowlist: [new RegExp(`^${escapedBase}`)],
+			denylist: [/\/config\.json$/, /^\/_matrix\//],
+		}),
+	);
+
+	// ─── Runtime cache for the stable-named PWA icons ───
+	// The app icons/favicon (pwa-*.png, apple-touch-icon.png, favicon.svg) are
+	// excluded from the precache (injectManifest.globIgnores in vite.config.ts)
+	// and served here instead. Because this SW never auto-skipWaiting()s (see
+	// the SKIP_WAITING comment below), a *precached* icon would stay stale until
+	// the new worker fully took over. See issue #252.
+	const ICON_CACHE = "crust-icons";
+
+	// Warm the icon cache at install so the icons are available offline -
+	// roughly the availability the precache used to give (best-effort, see
+	// below). `{ cache: "reload" }` bypasses the HTTP cache so we store the
+	// freshly-deployed bytes. Warming also overwrites the shared ICON_CACHE
+	// eagerly, so once this feature is live a later icon-only deploy is picked
+	// up by the *currently active* worker's SWR route on the next load. (On the
+	// very first deploy that introduces this route the previous worker is the
+	// old precache-only SW with no icon route, so for that one transition a
+	// changed icon still waits for this worker to take over.) Best-effort:
+	// allSettled + try/catch means a transient offline install never fails the
+	// SW install (which would also block app-shell updates); the route below
+	// repopulates on the next successful fetch.
+	async function warmIconCache(): Promise<void> {
 		try {
-			cache = await caches.open(ICON_CACHE);
+			const cache = await caches.open(ICON_CACHE);
+			await Promise.allSettled(
+				iconCacheUrls(base).map(async (url) => {
+					const res = await fetch(url, { cache: "reload" });
+					if (res.ok) await cache.put(url, res.clone());
+				}),
+			);
 		} catch {
-			return fetch(request, { cache: "reload" });
+			// best-effort; nothing actionable if opening the cache throws
 		}
-		return staleWhileRevalidate(
-			cache,
-			new URL(request.url).pathname,
-			() => fetch(request, { cache: "reload" }),
-			(background) => event.waitUntil(background),
-		);
-	},
-);
+	}
+	sw.addEventListener("install", (event) => {
+		event.waitUntil(warmIconCache());
+	});
+
+	// Serve the icons stale-while-revalidate: return the cached copy instantly
+	// (like the precache did) and refresh it in the background so a changed icon
+	// lands on the next load. `event.waitUntil` keeps the worker alive until the
+	// background refresh's cache write finishes (else an idle-worker termination
+	// would drop it and the icon would stay stale). Keyed by pathname (query
+	// dropped) so variant query strings can't grow the cache past one entry per
+	// icon.
+	//
+	// The revalidation fetch uses `{ cache: "reload" }` (like the install warm):
+	// the icons ship with a year-long max-age, so a default fetch would
+	// revalidate against the browser's HTTP cache and keep seeing the OLD bytes -
+	// never picking up a redeployed icon. reload bypasses the HTTP cache to hit
+	// the network.
+	//
+	// If CacheStorage itself is unavailable (restricted storage contexts), fall
+	// back to serving the icon directly rather than failing the request - still
+	// with `{ cache: "reload" }` so a redeployed icon stays visible in that
+	// degraded path (a default fetch would return the browser's year-old
+	// HTTP-cached bytes).
+	registerRoute(
+		({ url }) => isIconRequest(url, base, sw.location.origin),
+		async ({ request, event }) => {
+			let cache: Cache;
+			try {
+				cache = await caches.open(ICON_CACHE);
+			} catch {
+				return fetch(request, { cache: "reload" });
+			}
+			return staleWhileRevalidate(
+				cache,
+				new URL(request.url).pathname,
+				() => fetch(request, { cache: "reload" }),
+				(background) => event.waitUntil(background),
+			);
+		},
+	);
+}
 
 // ─── Authenticated media (MSC3916) ───
 // Homeservers that enforce authenticated media (e.g. matrix.org for media
@@ -294,11 +337,13 @@ sw.addEventListener("fetch", (event) => {
 	event.respondWith(handleMediaRequest(event, requestUrl));
 });
 
-// Deliberately do NOT skipWaiting()/clientsClaim() automatically: a new worker
-// stays in "waiting" until every tab is closed, so deploys never force-reload a
-// live session (e.g. mid-call) and a running client keeps serving its matching
-// hashed chunks from the still-active precache. Updates apply on the next cold
-// start. Push delivery and subscription work without claiming the page.
+// Deliberately do NOT skipWaiting()/clientsClaim() automatically in the browser
+// build: a new worker stays in "waiting" until every tab is closed, so deploys
+// never force-reload a live session (e.g. mid-call) and a running client keeps
+// serving its matching hashed chunks from the still-active precache. Updates
+// apply on the next cold start. Push delivery and subscription work without
+// claiming the page. (The desktop shell's native-mode worker does both at the
+// top of this file: it has no precache, so there is nothing to keep serving.)
 //
 // The one exception is a strictly user-initiated update: the in-app
 // "Update available" prompt (src/app/UpdatePrompt.tsx) messages the waiting

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -15,19 +15,21 @@ vi.mock("solid-refresh", () => ({
 const pwa = vi.hoisted(() => ({
 	setNeedRefresh: undefined as undefined | ((v: boolean) => void),
 	updateServiceWorker: vi.fn(() => Promise.resolve()),
+	// A spy, so the desktop-shell tests can assert the browser registration is
+	// NOT what runs there.
+	useRegisterSW: vi.fn(),
 }));
 
 vi.mock("virtual:pwa-register/solid", async () => {
 	const { createSignal } = await import("solid-js");
 	const [needRefresh, setNeedRefresh] = createSignal(false);
 	pwa.setNeedRefresh = setNeedRefresh;
-	return {
-		useRegisterSW: () => ({
-			needRefresh: [needRefresh, setNeedRefresh],
-			offlineReady: [() => false, () => {}],
-			updateServiceWorker: pwa.updateServiceWorker,
-		}),
-	};
+	pwa.useRegisterSW.mockImplementation(() => ({
+		needRefresh: [needRefresh, setNeedRefresh],
+		offlineReady: [() => false, () => {}],
+		updateServiceWorker: pwa.updateServiceWorker,
+	}));
+	return { useRegisterSW: pwa.useRegisterSW };
 });
 
 import { withPathname } from "../test/withPathname";
@@ -37,6 +39,7 @@ afterEach(() => {
 	cleanup();
 	pwa.setNeedRefresh?.(false);
 	pwa.updateServiceWorker.mockClear();
+	pwa.useRegisterSW.mockClear();
 });
 
 describe("UpdatePrompt", () => {
@@ -75,5 +78,24 @@ describe("UpdatePrompt", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Later" }));
 		expect(screen.queryByText("App update")).toBeNull();
 		expect(pwa.updateServiceWorker).not.toHaveBeenCalled();
+	});
+});
+
+describe("UpdatePrompt in the desktop shell", () => {
+	// Tauri marks its webviews with `window.isTauri` (see isNativeShell).
+	beforeEach(() => {
+		(window as { isTauri?: boolean }).isTauri = true;
+	});
+	afterEach(() => {
+		Reflect.deleteProperty(window, "isTauri");
+	});
+
+	it("does not register the browser worker and shows no refresh card", () => {
+		// The shell's worker is registered at bootstrap
+		// (registerNativeServiceWorker), under a URL WebView2 can re-fetch;
+		// useRegisterSW would register the fixed browser URL it never updates.
+		render(() => <UpdatePrompt />);
+		expect(pwa.useRegisterSW).not.toHaveBeenCalled();
+		expect(screen.queryByText("App update")).toBeNull();
 	});
 });

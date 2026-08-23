@@ -49,7 +49,7 @@ if (files) {
 	if (!matrixChunk) {
 		failures.push(
 			`No matrix-js-sdk-*.js chunk in dist/assets. The advancedChunks ` +
-				`group in vite.config.ts (test: /node_modules[\\\\/]matrix-js-sdk/) ` +
+				`group in vite.config.ts (the matrix-js-sdk group's test regex) ` +
 				`no longer matches — the SDK has folded back into the app chunk. ` +
 				`Fix the regex or the group config.`,
 		);
