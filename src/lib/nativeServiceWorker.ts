@@ -1,7 +1,8 @@
 /**
  * The desktop shell's service-worker registration, shared by the page (which
- * registers the worker, see src/app/UpdatePrompt.tsx) and the worker itself
- * (which reads its mode back out of its own script URL, see src/sw.ts).
+ * registers the worker at bootstrap, see src/app/registerNativeServiceWorker.ts)
+ * and the worker itself (which reads its mode back out of its own script URL,
+ * see src/sw.ts).
  *
  * Why the shell registers a different worker URL than the browser build does
  * (issue #481): WebView2 never completes a service-worker UPDATE check for an
@@ -29,7 +30,9 @@
  *     baking a build stamp into the bundle) keeps the web build reproducible -
  *     identical sources still produce identical chunk hashes, so browser users
  *     are not offered an "update" for a rebuild of the same commit - and
- *     re-registers exactly when the worker actually changed.
+ *     re-registers whenever the emitted worker script changes (in practice
+ *     every app build, since the script embeds the precache manifest of every
+ *     hashed asset; the point is no phantom change, not a minimal one).
  *
  * `desktop/src-tauri/src/evict_legacy_sw.js` (the shell's initialization
  * script) tells the current worker apart from a leftover browser-build one by

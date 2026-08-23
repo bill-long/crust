@@ -23,6 +23,9 @@
  *             On failure: give up and surface the error banner.
  *
  * Staging is bounded (null → reload → clear → error), so it can never loop.
+ * The module load (below) adds one rung of its own in front, "module-reload",
+ * which the store ladder treats as a fresh start - so the whole sequence is
+ * null → module-reload → reload → clear → error, still bounded.
  *
  * Tradeoff: the "clear" stage is reached after any two consecutive init
  * failures, including repeated timeouts — we deliberately do NOT gate it on a
@@ -53,7 +56,11 @@
 
 import type { MatrixClient } from "matrix-js-sdk";
 
-export type CryptoRecoveryStage = "reload" | "clear" | null;
+/**
+ * The persisted recovery position. "module-reload" is the module load's own
+ * rung (see the module comment): the store ladder treats it as a fresh start.
+ */
+export type CryptoRecoveryStage = "module-reload" | "reload" | "clear" | null;
 
 export const CRYPTO_RECOVERY_KEY = "crust:crypto-init-recovery";
 
@@ -118,7 +125,7 @@ export const CRYPTO_INIT_TIMEOUT_MS = 30_000;
 export const CRYPTO_MODULE_LOAD_TIMEOUT_MS = 5 * 60_000;
 
 interface PersistedRecovery {
-	stage: "reload" | "clear";
+	stage: Exclude<CryptoRecoveryStage, null>;
 	id: string;
 }
 
@@ -135,11 +142,15 @@ export function recoveryIdentity(session: {
 	return `${session.homeserverUrl}|${session.userId}|${session.deviceId}`;
 }
 
-/** Decide the next recovery stage after a failed crypto init attempt. */
+/**
+ * Decide the next recovery stage after a failed store init attempt. A module
+ * reload does not count as a store attempt, so "module-reload" starts the
+ * store ladder like null does.
+ */
 export function nextCryptoRecoveryStage(
 	current: CryptoRecoveryStage,
 ): "reload" | "clear" | "give-up" {
-	if (current === null) return "reload";
+	if (current === null || current === "module-reload") return "reload";
 	if (current === "reload") return "clear";
 	return "give-up";
 }
@@ -161,7 +172,9 @@ export function readRecoveryStage(identity: string): CryptoRecoveryStage {
 		if (!raw) return null;
 		const parsed = JSON.parse(raw) as Partial<PersistedRecovery>;
 		if (parsed.id !== identity) return null;
-		return parsed.stage === "reload" || parsed.stage === "clear"
+		return parsed.stage === "module-reload" ||
+			parsed.stage === "reload" ||
+			parsed.stage === "clear"
 			? parsed.stage
 			: null;
 	} catch {
@@ -175,7 +188,7 @@ export function readRecoveryStage(identity: string): CryptoRecoveryStage {
  * an untracked stage would loop.
  */
 export function persistRecoveryStage(
-	stage: "reload" | "clear",
+	stage: Exclude<CryptoRecoveryStage, null>,
 	identity: string,
 ): boolean {
 	try {
@@ -230,7 +243,10 @@ export interface CryptoInitDeps {
 	/** Read the persisted recovery stage for the identity. */
 	readStage: (identity: string) => CryptoRecoveryStage;
 	/** Persist the next recovery stage; returns false if storage is unavailable. */
-	persistStage: (stage: "reload" | "clear", identity: string) => boolean;
+	persistStage: (
+		stage: Exclude<CryptoRecoveryStage, null>,
+		identity: string,
+	) => boolean;
 	/** Remove the persisted recovery stage. */
 	clearStage: () => void;
 	/**
@@ -273,6 +289,21 @@ export async function runCryptoInit(
 	const logger = deps.logger ?? console;
 	const stage = deps.readStage(deps.identity);
 	let reloading = false;
+	/**
+	 * Persist `next` and reload. False when storage is unavailable, in which
+	 * case the caller must NOT reload: an untracked stage would loop.
+	 */
+	const reloadInto = (
+		next: Exclude<CryptoRecoveryStage, null>,
+		message: string,
+		cause: unknown,
+	): boolean => {
+		if (!deps.persistStage(next, deps.identity)) return false;
+		reloading = true;
+		logger.warn(message, cause);
+		deps.reload();
+		return true;
+	};
 	try {
 		try {
 			await withTimeout(
@@ -282,15 +313,19 @@ export async function runCryptoInit(
 			);
 		} catch (e) {
 			if (deps.isAborted()) return "aborted";
-			// The module's own ladder (see the module comment): one plain reload
-			// from a fresh start, then the banner. Never the store wipe - no store
-			// was touched, and a wipe cannot produce a missing module - so a
-			// persisted "clear" stage is dropped here (by the finally) rather than
-			// honored.
-			if (stage === null && deps.persistStage("reload", deps.identity)) {
-				reloading = true;
-				logger.warn("Crypto module failed to load; reloading to retry", e);
-				deps.reload();
+			// The module's own rung (see the module comment): one plain reload from
+			// a fresh start, under its own stage so it never advances the store
+			// ladder, then the banner. Never the store wipe - no store was touched,
+			// and a wipe cannot produce a missing module - so a persisted store
+			// stage is dropped here (by the finally) rather than honored.
+			if (
+				stage === null &&
+				reloadInto(
+					"module-reload",
+					"Crypto module failed to load; reloading to retry",
+					e,
+				)
+			) {
 				return "reloading";
 			}
 			logger.error("Crypto module failed to load; encryption unavailable.", e);
@@ -326,13 +361,14 @@ export async function runCryptoInit(
 		// Stage the next recovery step. A plain reload first (handles transient
 		// hangs without destroying keys), then a store wipe.
 		const next = nextCryptoRecoveryStage(stage);
-		if (next !== "give-up" && deps.persistStage(next, deps.identity)) {
-			reloading = true;
-			logger.warn(
+		if (
+			next !== "give-up" &&
+			reloadInto(
+				next,
 				`Crypto init failed; reloading to recover (stage: ${next})`,
 				e,
-			);
-			deps.reload();
+			)
+		) {
 			return "reloading";
 		}
 		logger.error("Crypto init failed; encryption unavailable.", e);

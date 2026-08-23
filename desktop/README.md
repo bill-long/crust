@@ -79,10 +79,12 @@ So, in the shell (all in `src/lib/nativeServiceWorker.ts` and `src/sw.ts`):
   takes over immediately, and keeps only what a page cannot do without a
   worker - authenticated media (MSC3916);
 - `src-tauri/src/evict_legacy_sw.js`, injected into every webview the shell
-  creates as a plugin initialization script (`lib.rs`), unregisters a leftover
-  precaching worker on the app origin (the `workbox-precache` cache is the
-  marker) and reloads once. Nothing in the web bundle could do this: under the
-  old worker the page IS the old build.
+  creates as a plugin initialization script (`lib.rs`), unregisters any worker
+  on the app origin whose script URL lacks the `native` parameter (a test locks
+  that name to the TS constant), drops every cache, and reloads once; when only
+  the current worker is left it merely deletes a stray `workbox-precache`
+  cache. Nothing in the web bundle could do this: under the old worker the
+  page IS the old build.
 
 There is consequently no "App update / Refresh" card in the shell; the Tauri
 updater's "Restart" card is the only update UI there.

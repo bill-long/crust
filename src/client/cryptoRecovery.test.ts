@@ -71,6 +71,10 @@ describe("nextCryptoRecoveryStage", () => {
 		expect(nextCryptoRecoveryStage("reload")).toBe("clear");
 		expect(nextCryptoRecoveryStage("clear")).toBe("give-up");
 	});
+
+	it("treats the module load's own rung as a fresh start for the store", () => {
+		expect(nextCryptoRecoveryStage("module-reload")).toBe("reload");
+	});
 });
 
 describe("shouldClearStoreBeforeInit", () => {
@@ -409,19 +413,19 @@ describe("runCryptoInit", () => {
 			),
 		);
 
-	it("reloads once, without touching the store, when the module cannot load", async () => {
+	it("reloads once, under its own stage, when the module cannot load", async () => {
 		// A fresh document cures a transient fetch failure (the package memoizes
 		// even a rejected load for the life of the page).
 		const h = harness({ loadModule: vi.fn(moduleFailure) });
 		await expect(runCryptoInit(h.deps)).resolves.toBe("reloading");
 		expect(h.reload).toHaveBeenCalledOnce();
-		expect(readRecoveryStage(ID_A)).toBe("reload");
+		expect(readRecoveryStage(ID_A)).toBe("module-reload");
 		expect(h.initCrypto).not.toHaveBeenCalled();
 		expect(h.clearStores).not.toHaveBeenCalled();
 	});
 
 	it("gives up with 'error' after the reload when the module still cannot load", async () => {
-		persistRecoveryStage("reload", ID_A);
+		persistRecoveryStage("module-reload", ID_A);
 		const h = harness({ loadModule: vi.fn(moduleFailure) });
 		await expect(runCryptoInit(h.deps)).resolves.toBe("error");
 		expect(h.reload).not.toHaveBeenCalled();
@@ -432,6 +436,29 @@ describe("runCryptoInit", () => {
 			"Crypto module failed to load; encryption unavailable.",
 			expect.any(TypeError),
 		);
+	});
+
+	it("does not let a module reload advance the store ladder", async () => {
+		// Module blip, reload, module loads, then ONE store failure: that must be
+		// the store's first rung (a plain reload), never the wipe.
+		persistRecoveryStage("module-reload", ID_A);
+		const h = harness({
+			initCrypto: vi.fn(() => Promise.reject(new Error("store failed"))),
+		});
+		await expect(runCryptoInit(h.deps)).resolves.toBe("reloading");
+		expect(readRecoveryStage(ID_A)).toBe("reload");
+		expect(h.clearStores).not.toHaveBeenCalled();
+	});
+
+	it("does not reload for a module failure mid-way through the store ladder", async () => {
+		// Bounded by construction: the module rung exists only from a fresh
+		// start, so module and store failures cannot alternate forever.
+		persistRecoveryStage("reload", ID_A);
+		const h = harness({ loadModule: vi.fn(moduleFailure) });
+		await expect(runCryptoInit(h.deps)).resolves.toBe("error");
+		expect(h.reload).not.toHaveBeenCalled();
+		expect(h.clearStores).not.toHaveBeenCalled();
+		expect(readRecoveryStage(ID_A)).toBeNull();
 	});
 
 	it("never wipes the store over a module failure, even at the 'clear' stage", async () => {

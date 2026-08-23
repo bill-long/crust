@@ -1,5 +1,12 @@
 import { useRegisterSW } from "virtual:pwa-register/solid";
-import { type Component, type JSX, onCleanup, onMount, Show } from "solid-js";
+import {
+	type Component,
+	createSignal,
+	type JSX,
+	onCleanup,
+	onMount,
+	Show,
+} from "solid-js";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import {
 	dismissNativeUpdate,
@@ -108,6 +115,19 @@ const UpdateCard: Component<{
  * the service-worker card in the shell, while still registering the precaching
  * browser worker, removed the only way out of exactly that trap.)
  */
+/**
+ * What the shell gets in place of useRegisterSW: a worker that is never
+ * waiting and an update that is a no-op. Typed as the hook's return so the
+ * component cannot tell the two apart.
+ */
+function noBrowserServiceWorker(): ReturnType<typeof useRegisterSW> {
+	return {
+		needRefresh: createSignal(false),
+		offlineReady: createSignal(false),
+		updateServiceWorker: () => Promise.resolve(),
+	};
+}
+
 const UpdatePrompt: Component = () => {
 	// Registration happens in every window, including the overlay: this is the
 	// app's only useRegisterSW caller, so skipping it here would leave a browser
@@ -117,9 +137,12 @@ const UpdatePrompt: Component = () => {
 	// Not in the shell: useRegisterSW registers the browser build's fixed worker
 	// URL, which WebView2 can never update in place. The shell's worker is
 	// registered at bootstrap instead (see the doc comment above), and nothing is
-	// ever "waiting" for it, so it has no refresh card.
-	const pwa = isNativeShell() ? null : useRegisterSW();
-	const needRefresh = (): boolean => pwa?.needRefresh[0]() ?? false;
+	// ever "waiting" for it, so it has no refresh card - an inert stand-in keeps
+	// the rest of the component identical.
+	const {
+		needRefresh: [needRefresh, setNeedRefresh],
+		updateServiceWorker,
+	} = isNativeShell() ? noBrowserServiceWorker() : useRegisterSW();
 
 	onMount(() => {
 		const unlisten = watchNativeUpdates();
@@ -127,11 +150,11 @@ const UpdatePrompt: Component = () => {
 	});
 
 	const refresh = (): void => {
-		void pwa?.updateServiceWorker(true);
+		void updateServiceWorker(true);
 	};
 
 	const dismiss = (): void => {
-		pwa?.needRefresh[1](false);
+		setNeedRefresh(false);
 	};
 
 	const restart = (): void => {
