@@ -43,7 +43,11 @@
  * stale app shell referencing an asset the server no longer has, a blocked
  * download) has nothing to do with the store, and neither a reload nor a wipe
  * can supply it. That failure surfaces the error banner directly and never
- * costs the device its keys - #481 reached the wipe exactly this way.
+ * costs the device its keys - #481 reached the wipe exactly this way. The load
+ * is also not subject to the timeout: a large module on a slow first visit is
+ * a download in progress, not a hang, and the app keeps showing "Initializing
+ * encryption…" until it lands (the worker precaches it for every later load,
+ * and the desktop exe serves it locally).
  */
 
 import type { MatrixClient } from "matrix-js-sdk";
@@ -96,13 +100,12 @@ export async function clearCryptoStores(
 }
 
 /**
- * Maximum time to wait for `initRustCrypto` (or the recovery `clearStores`, or
- * the module load that precedes both) before treating it as hung. The store
- * operations are local IndexedDB + WASM work that completes in well under this
- * even for large stores, so the timeout only trips on a real hang (e.g. a
- * `deleteDatabase` blocked by another open connection); the module load is
- * local too once the worker has precached the wasm (and always in the desktop
- * shell, where the exe serves it).
+ * Maximum time to wait for `initRustCrypto` (or the recovery `clearStores`)
+ * before treating it as hung. Both are local IndexedDB + WASM operations that
+ * complete in well under this even for large stores, so the timeout only trips
+ * on a real hang (e.g. a `deleteDatabase` blocked by another open connection).
+ * The module load that precedes them is deliberately NOT bounded by it (see the
+ * module comment).
  */
 export const CRYPTO_INIT_TIMEOUT_MS = 30_000;
 
@@ -236,7 +239,7 @@ export interface CryptoInitDeps {
 	isAborted: () => boolean;
 	/** Trigger a full page reload. */
 	reload: () => void;
-	/** Timeout for each of loadModule, clearStores and initCrypto. */
+	/** Timeout for clearStores and initCrypto (loadModule is not bounded). */
 	timeoutMs: number;
 	logger?: Pick<Console, "warn" | "error">;
 }
@@ -262,11 +265,9 @@ export async function runCryptoInit(
 	let reloading = false;
 	try {
 		try {
-			await withTimeout(
-				deps.loadModule(),
-				deps.timeoutMs,
-				"Crypto module load",
-			);
+			// Unbounded on purpose: a slow download is not a hang (see the module
+			// comment), and the fetch settles on its own - success or rejection.
+			await deps.loadModule();
 		} catch (e) {
 			if (deps.isAborted()) return "aborted";
 			// No store was touched, and nothing in the staged recovery below can

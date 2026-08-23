@@ -436,17 +436,32 @@ describe("runCryptoInit", () => {
 		expect(readRecoveryStage(ID_A)).toBeNull();
 	});
 
-	it("treats a hung module load as a failure without reloading", async () => {
+	it("waits for a slow module load instead of timing out", async () => {
+		// A large module on a slow first visit is a download in progress, not a
+		// hang: the timeout that guards the store steps must not turn it into a
+		// terminal error (the old ladder's reload stage used to recover this).
 		vi.useFakeTimers();
 		try {
+			let finishLoad: () => void = () => {};
 			const h = harness({
-				loadModule: vi.fn(() => new Promise<void>(() => {})),
+				loadModule: vi.fn(
+					() =>
+						new Promise<void>((resolve) => {
+							finishLoad = resolve;
+						}),
+				),
 			});
-			const result = runCryptoInit(h.deps);
-			await vi.advanceTimersByTimeAsync(1000);
-			await expect(result).resolves.toBe("error");
-			expect(h.reload).not.toHaveBeenCalled();
+			let settled = false;
+			const result = runCryptoInit(h.deps).then((r) => {
+				settled = true;
+				return r;
+			});
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(settled).toBe(false);
 			expect(h.initCrypto).not.toHaveBeenCalled();
+			finishLoad();
+			await expect(result).resolves.toBe("ready");
+			expect(h.reload).not.toHaveBeenCalled();
 		} finally {
 			vi.useRealTimers();
 		}

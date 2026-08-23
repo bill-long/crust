@@ -21,14 +21,15 @@ pub use mic_hotkey::run_helper;
 
 const OVERLAY_LABEL: &str = "overlay";
 
-/// Attached to every Crust webview, to run before the page's own scripts
-/// whatever served the page. It evicts the precaching service worker that
-/// builds before the fix for #481 registered on this origin: WebView2 never
-/// completes an update check for a worker on the asset-protocol origin, so that
-/// worker kept serving its own build's app shell on every launch - against an
-/// exe whose hashed assets had moved on - and the shell it served was the one
-/// that did not know to unregister it. An initialization script is the one hook
-/// that reaches such a page from outside. The script holds the detection rule;
+/// Injected into every webview this shell creates (as a plugin initialization
+/// script, see `run`), to run before the page's own scripts whatever served the
+/// page. It evicts the precaching service worker that builds before the fix for
+/// #481 registered on this origin: WebView2 never completes an update check for
+/// a worker on the asset-protocol origin, so that worker kept serving its own
+/// build's app shell on every launch - against an exe whose hashed assets had
+/// moved on - and the shell it served was the one that did not know to
+/// unregister it. An initialization script is the one hook that reaches such a
+/// page from outside. The script holds the detection rule;
 /// src/lib/nativeServiceWorker.ts describes the worker the current build
 /// registers instead.
 const EVICT_LEGACY_SW_SCRIPT: &str = include_str!("evict_legacy_sw.js");
@@ -89,7 +90,6 @@ fn overlay_url(app: &AppHandle) -> Result<WebviewUrl, String> {
 fn build_overlay(app: &AppHandle) -> Result<(), String> {
     let url = overlay_url(app)?;
     WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
-        .initialization_script(EVICT_LEGACY_SW_SCRIPT)
         .title("Crust — Voice")
         .inner_size(320.0, 420.0)
         .min_inner_size(240.0, 200.0)
@@ -282,24 +282,16 @@ pub fn run() {
             pending_update_version,
             mic_hotkey::set_mic_hotkey
         ])
+        // A plugin init script reaches every webview the shell creates (the
+        // config-defined main window and the overlay alike), before the page's
+        // own scripts run; a per-window `initialization_script` would have to
+        // be remembered at each window builder.
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry>::new("evict-legacy-sw")
+                .js_init_script(EVICT_LEGACY_SW_SCRIPT)
+                .build(),
+        )
         .setup(|app| {
-            // The main window is built here rather than by the config (its
-            // entry carries `create: false`) so the legacy-worker eviction
-            // script can be attached: there is no config key for
-            // initialization scripts. The rest of its definition stays in
-            // tauri.conf.json.
-            let main_window = app
-                .config()
-                .app
-                .windows
-                .iter()
-                .find(|w| w.label == "main")
-                .cloned()
-                .ok_or("tauri.conf.json has no \"main\" window")?;
-            WebviewWindowBuilder::from_config(app.handle(), &main_window)?
-                .initialization_script(EVICT_LEGACY_SW_SCRIPT)
-                .build()?;
-
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             let gs = app.global_shortcut();
             // Best-effort: a shortcut already held by another process must not

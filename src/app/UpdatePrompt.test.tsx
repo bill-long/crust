@@ -32,10 +32,6 @@ vi.mock("virtual:pwa-register/solid", async () => {
 	return { useRegisterSW: pwa.useRegisterSW };
 });
 
-import {
-	digestServiceWorkerScript,
-	nativeServiceWorkerUrl,
-} from "../lib/nativeServiceWorker";
 import { withPathname } from "../test/withPathname";
 import { UpdatePrompt } from "./UpdatePrompt";
 
@@ -86,68 +82,20 @@ describe("UpdatePrompt", () => {
 });
 
 describe("UpdatePrompt in the desktop shell", () => {
-	// Tauri marks its webviews with `window.isTauri` (see isNativeShell); jsdom
-	// has no serviceWorker container, so stand one in with a register spy, and
-	// answer the worker-script fetch the registration digests.
-	const SW_SCRIPT = "self.addEventListener('fetch', () => {});";
-	let register: ReturnType<typeof vi.fn>;
-	let fetchMock: ReturnType<typeof vi.fn>;
+	// Tauri marks its webviews with `window.isTauri` (see isNativeShell).
 	beforeEach(() => {
 		(window as { isTauri?: boolean }).isTauri = true;
-		register = vi.fn(() => Promise.resolve());
-		Object.defineProperty(navigator, "serviceWorker", {
-			value: { register },
-			configurable: true,
-		});
-		fetchMock = vi.fn(() => Promise.resolve(new Response(SW_SCRIPT)));
-		vi.stubGlobal("fetch", fetchMock);
-		// The worker only exists in production builds; registration is gated on
-		// that and vitest runs with DEV on.
-		vi.stubEnv("DEV", false);
 	});
 	afterEach(() => {
-		vi.unstubAllEnvs();
-		vi.unstubAllGlobals();
-		Reflect.deleteProperty(navigator, "serviceWorker");
 		Reflect.deleteProperty(window, "isTauri");
 	});
 
-	const registered = async (): Promise<string> => {
-		await vi.waitFor(() => expect(register).toHaveBeenCalledOnce());
-		return register.mock.calls[0]?.[0] as string;
-	};
-
-	it("registers the native worker under its script digest, not the browser one", async () => {
+	it("does not register the browser worker and shows no refresh card", () => {
+		// The shell's worker is registered at bootstrap
+		// (registerNativeServiceWorker), under a URL WebView2 can re-fetch;
+		// useRegisterSW would register the fixed browser URL it never updates.
 		render(() => <UpdatePrompt />);
 		expect(pwa.useRegisterSW).not.toHaveBeenCalled();
-		const url = await registered();
-		expect(fetchMock).toHaveBeenCalledWith(`${import.meta.env.BASE_URL}sw.js`, {
-			cache: "no-store",
-		});
-		expect(url).toBe(
-			nativeServiceWorkerUrl(
-				import.meta.env.BASE_URL,
-				await digestServiceWorkerScript(SW_SCRIPT),
-			),
-		);
 		expect(screen.queryByText("App update")).toBeNull();
-	});
-
-	it("registers nothing when the worker script cannot be read", async () => {
-		fetchMock.mockResolvedValue(new Response("nope", { status: 404 }));
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-		render(() => <UpdatePrompt />);
-		await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
-		expect(register).not.toHaveBeenCalled();
-		warn.mockRestore();
-	});
-
-	it("registers nothing in dev, where no worker is built", async () => {
-		vi.stubEnv("DEV", true);
-		render(() => <UpdatePrompt />);
-		await Promise.resolve();
-		expect(fetchMock).not.toHaveBeenCalled();
-		expect(register).not.toHaveBeenCalled();
-		expect(pwa.useRegisterSW).not.toHaveBeenCalled();
 	});
 });

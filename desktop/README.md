@@ -78,10 +78,11 @@ So, in the shell (all in `src/lib/nativeServiceWorker.ts` and `src/sw.ts`):
 - in that mode the worker never precaches or serves app assets (the exe does),
   takes over immediately, and keeps only what a page cannot do without a
   worker - authenticated media (MSC3916);
-- `src-tauri/src/evict_legacy_sw.js`, attached to every Crust webview as an
-  initialization script, unregisters a leftover precaching worker (the
-  `workbox-precache` cache is the marker) and reloads once. Nothing in the web
-  bundle could do this: under the old worker the page IS the old build.
+- `src-tauri/src/evict_legacy_sw.js`, injected into every webview the shell
+  creates as a plugin initialization script (`lib.rs`), unregisters a leftover
+  precaching worker on the app origin (the `workbox-precache` cache is the
+  marker) and reloads once. Nothing in the web bundle could do this: under the
+  old worker the page IS the old build.
 
 There is consequently no "App update / Refresh" card in the shell; the Tauri
 updater's "Restart" card is the only update UI there.
