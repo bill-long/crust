@@ -31,18 +31,25 @@ export function deriveCryptoAction(input: CryptoActionInput): CryptoAction {
 		// server but no private keys are reachable (not local, not in secret
 		// storage), plain bootstrap fails against the existing identity — the
 		// only way forward from this device is a full reset. When the private
-		// keys ARE reachable, bootstrap can reuse them instead of creating
-		// new ones, so the ordinary setup flow is safe. Fail toward the
-		// non-destructive flow whenever any private key source exists.
+		// keys ARE reachable, nothing destructive is needed: the in-4S case is
+		// a verification (below), and locally cached keys let the ordinary
+		// setup flow reuse them. Fail toward the non-destructive flows
+		// whenever any private key source exists.
 		if (crossSigningStatus === undefined) return "loading";
 		const identityExists = crossSigningStatus.publicKeysOnDevice;
 		const cached = crossSigningStatus.privateKeysCachedLocally;
+		const inSecretStorage = crossSigningStatus.privateKeysInSecretStorage;
 		const recoverable =
-			crossSigningStatus.privateKeysInSecretStorage ||
+			inSecretStorage ||
 			(cached.masterKey && cached.selfSigningKey && cached.userSigningKey);
-		return identityExists && !recoverable
-			? "reset-encryption"
-			: "setup-cross-signing";
+		if (identityExists && !recoverable) return "reset-encryption";
+		// The account already has an identity and its private keys are in
+		// secret storage: nothing needs setting up, this session just isn't
+		// trusted yet. The way forward is to verify it - from another session
+		// or with the recovery key - and offering "set up" here sends the
+		// user at the wrong affordance (issue #480).
+		if (identityExists && inSecretStorage) return "verify-session";
+		return "setup-cross-signing";
 	}
 	if (thisDeviceVerified === false) return "verify-session";
 	if (backupVersion === null) {

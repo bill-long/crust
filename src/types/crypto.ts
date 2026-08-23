@@ -8,3 +8,12 @@ export type CryptoAction =
 	| "reset-recovery-key"
 	| "reset-encryption"
 	| "hidden";
+
+/**
+ * What triggerCryptoAction accepts: a bare CryptoAction, or a flow that
+ * needs a target — verifying one of the user's OTHER sessions from its row
+ * in the device list, which has to say which one.
+ */
+export type CryptoActionRequest =
+	| CryptoAction
+	| { action: "verify-device"; deviceId: string };

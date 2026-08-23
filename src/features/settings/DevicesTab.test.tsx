@@ -35,8 +35,14 @@ vi.mock("../../stores/cryptoActions", () => ({
 vi.mock("../crypto/backup/BackupStatus", () => ({
 	BackupStatus: () => <span>backup-status-ok</span>,
 }));
+// The stub exposes the row callback so the tab's wiring of it is under test
+// (a prop-less stub would pass with the prop missing or the payload wrong).
 vi.mock("../crypto/DeviceList", () => ({
-	DeviceList: () => <span>device-list</span>,
+	DeviceList: (props: { onVerifyDevice?: (deviceId: string) => void }) => (
+		<button type="button" onClick={() => props.onVerifyDevice?.("OTHERDEV")}>
+			device-list-verify
+		</button>
+	),
 }));
 
 interface StatusOverrides {
@@ -111,6 +117,54 @@ afterEach(() => {
 });
 
 describe("DevicesTab", () => {
+	it("starts verification of another session from its device-list row", () => {
+		render(() => <DevicesTab />);
+		fireEvent.click(screen.getByRole("button", { name: "device-list-verify" }));
+		expect(triggerCryptoAction).toHaveBeenCalledWith({
+			action: "verify-device",
+			deviceId: "OTHERDEV",
+		});
+	});
+
+	it("offers Verify, not Set up, to an untrusted session whose account has cross-signing in 4S", () => {
+		// The desktop/new-login case from issue #480: identity exists, keys
+		// recoverable from secret storage, this session not yet trusted.
+		statusOverrides = {
+			crossSigningReady: false,
+			thisDeviceVerified: false,
+			crossSigningStatus: {
+				publicKeysOnDevice: true,
+				privateKeysInSecretStorage: true,
+				privateKeysCachedLocally: {
+					masterKey: false,
+					selfSigningKey: false,
+					userSigningKey: false,
+				},
+			},
+		};
+		render(() => <DevicesTab />);
+
+		expect(screen.getByText("Unavailable")).toBeTruthy();
+		expect(screen.queryByText("Not set up")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Set up" })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+		expect(triggerCryptoAction).toHaveBeenCalledWith("verify-session");
+	});
+
+	it("shows Loading rather than Not set up while the cross-signing detail is unknown", () => {
+		// Not ready with no detail could equally be an identity this session
+		// can't see yet; deriveCryptoAction calls that loading and so must
+		// the badge (issue #480).
+		statusOverrides = {
+			crossSigningReady: false,
+			thisDeviceVerified: false,
+			crossSigningStatus: undefined,
+		};
+		render(() => <DevicesTab />);
+		expect(screen.queryByText("Not set up")).toBeNull();
+		expect(screen.getAllByText("Loading…").length).toBeGreaterThan(0);
+	});
+
 	it("offers a danger Reset… action when the server identity is unreachable", () => {
 		statusOverrides = {
 			crossSigningReady: false,
@@ -132,6 +186,10 @@ describe("DevicesTab", () => {
 		expect(triggerCryptoAction).toHaveBeenCalledWith("reset-encryption");
 		// The misleading plain "Set up" must not be offered in this state.
 		expect(screen.queryByRole("button", { name: "Set up" })).toBeNull();
+		// Nor a subtitle pointing at verification or the recovery key, which
+		// cannot work here.
+		expect(screen.getByText(/it can only be reset/)).toBeTruthy();
+		expect(screen.queryByText(/enter your recovery key/)).toBeNull();
 	});
 
 	it("offers Set up when cross-signing is simply missing", () => {

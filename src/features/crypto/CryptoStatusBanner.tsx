@@ -13,10 +13,14 @@ import {
 	registerCryptoHandler,
 	restoreCryptoTriggerFocus,
 } from "../../stores/cryptoActions";
-import type { CryptoAction } from "../../types/crypto";
+import type { CryptoActionRequest } from "../../types/crypto";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
 import { IncomingVerificationToast } from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
+import {
+	verifySessionWithRecoveryKey,
+	waitForDevicesUpdated,
+} from "./verification/verifyWithRecoveryKey";
 
 // Code splitting (#307): the crypto setup/verification/backup dialogs are
 // opened only from the crypto banner or the Devices settings tab, so they
@@ -63,7 +67,7 @@ const CryptoDialogFallback: Component = () => (
  * crypto setup flows via registerCryptoHandler / triggerCryptoAction.
  */
 const CryptoStatusBanner: Component = () => {
-	const { client, cryptoStatus } = useClient();
+	const { client, cryptoStatus, clearSecretStorageCache } = useClient();
 	const [showSetup, setShowSetup] = createSignal(false);
 	const [showVerification, setShowVerification] = createSignal(false);
 	const [showBackupSetup, setShowBackupSetup] = createSignal(false);
@@ -93,18 +97,54 @@ const CryptoStatusBanner: Component = () => {
 		restoreCryptoTriggerFocus();
 	};
 
+	// Whether the recovery key can verify this session: the account's
+	// cross-signing private keys have to be in secret storage for there to be
+	// anything to import. Otherwise the only route is another session.
+	const recoveryKeyCanVerify = (): boolean =>
+		cryptoStatus.crossSigningStatus()?.privateKeysInSecretStorage === true;
+
+	const verifyWithRecoveryKey = async (): Promise<void> => {
+		const crypto = client.getCrypto();
+		const userId = client.getUserId();
+		const deviceId = client.getDeviceId();
+		if (!crypto || !userId || !deviceId) {
+			throw new Error("Encryption is not available.");
+		}
+		try {
+			await verifySessionWithRecoveryKey(crypto, deviceId);
+		} catch (e) {
+			// A wrong or cancelled key must not stay cached for the retry.
+			clearSecretStorageCache();
+			throw e;
+		}
+		// The new signature becomes visible locally with the next /keys/query;
+		// give it a sync cycle so "complete" is not followed by a card that
+		// still reads Unverified.
+		await waitForDevicesUpdated(client, userId, 5000);
+		await cryptoStatus.refresh();
+	};
+
 	// Register handler so the user panel can trigger crypto flows.
 	onCleanup(() => {
 		restoreCryptoTriggerFocus();
 	});
 
-	const unregister = registerCryptoHandler((a: CryptoAction) => {
-		switch (a) {
+	const unregister = registerCryptoHandler((request: CryptoActionRequest) => {
+		if (typeof request !== "string") {
+			// Verify one of the user's other sessions from its device-list row.
+			verification.requestDeviceVerification(request.deviceId);
+			setShowVerification(true);
+			return;
+		}
+		switch (request) {
 			case "setup-cross-signing":
 				setShowSetup(true);
 				break;
 			case "verify-session":
-				verification.requestSelfVerification();
+				// With the keys in secret storage the dialog opens on a choice
+				// (another session, or the recovery key); without them there is
+				// only the SAS route, so start it straight away as before.
+				if (!recoveryKeyCanVerify()) verification.requestSelfVerification();
 				setShowVerification(true);
 				break;
 			case "setup-backup":
@@ -141,6 +181,9 @@ const CryptoStatusBanner: Component = () => {
 					<VerificationDialog
 						verification={verification}
 						onClose={handleVerificationClose}
+						verifyWithRecoveryKey={
+							recoveryKeyCanVerify() ? verifyWithRecoveryKey : undefined
+						}
 					/>
 				</Suspense>
 			</Show>

@@ -50,10 +50,12 @@ describe("deriveCryptoAction", () => {
 		).toBe("setup-cross-signing");
 	});
 
-	it("routes a recoverable identity (private keys in 4S) to bootstrap, not reset", () => {
-		// Another client rotated the identity but stored the private keys in
-		// secret storage: bootstrap imports them, so a destructive reset is
-		// not needed (issue #420).
+	it("routes an untrusted session on an account with an identity in 4S to verify, not setup or reset", () => {
+		// A fresh session on an account that already has cross-signing, with
+		// the private keys in secret storage (the common "new login" case):
+		// nothing needs setting up and nothing needs resetting - the session
+		// has to be verified, from another session or with the recovery key
+		// (issues #420, #480).
 		expect(
 			deriveCryptoAction({
 				...HEALTHY,
@@ -69,7 +71,7 @@ describe("deriveCryptoAction", () => {
 					},
 				},
 			}),
-		).toBe("setup-cross-signing");
+		).toBe("verify-session");
 	});
 
 	it("routes a locally-cached identity (all private keys on device) to bootstrap, not reset", () => {

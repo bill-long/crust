@@ -9,6 +9,9 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
+// Per-test overrides for the crypto status snapshot the banner reads.
+let crossSigningStatus: unknown;
+
 vi.mock("../../client/client", () => ({
 	useClient: () => ({
 		client: {},
@@ -19,7 +22,7 @@ vi.mock("../../client/client", () => ({
 			backupOnServer: () => true,
 			backupTrusted: () => true,
 			secretStorageReady: () => true,
-			crossSigningStatus: () => undefined,
+			crossSigningStatus: () => crossSigningStatus,
 			refresh: async () => {},
 		},
 		setRecoveryKeyResolver: () => {},
@@ -35,6 +38,8 @@ vi.mock("./backup/RecoveryKeyInput", () => ({
 vi.mock("./verification/IncomingVerificationToast", () => ({
 	IncomingVerificationToast: () => null,
 }));
+const requestSelfVerification = vi.fn(async () => {});
+const requestDeviceVerification = vi.fn(async (_deviceId: string) => {});
 vi.mock("./verification/useVerification", () => ({
 	useVerification: () => ({
 		state: () => "idle",
@@ -42,8 +47,8 @@ vi.mock("./verification/useVerification", () => ({
 		error: () => "",
 		isSelfVerification: () => true,
 		otherUserId: () => "",
-		requestSelfVerification: async () => {},
-		requestDeviceVerification: async () => {},
+		requestSelfVerification: (...a: []) => requestSelfVerification(...a),
+		requestDeviceVerification: (id: string) => requestDeviceVerification(id),
 		acceptIncoming: () => {},
 		confirmSas: async () => {},
 		rejectSas: () => {},
@@ -58,6 +63,7 @@ import { CryptoStatusBanner } from "./CryptoStatusBanner";
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
+	crossSigningStatus = undefined;
 });
 
 describe("CryptoStatusBanner action wiring", () => {
@@ -79,5 +85,74 @@ describe("CryptoStatusBanner action wiring", () => {
 				{ timeout: 15000 },
 			),
 		).toBeTruthy();
+	}, 20000);
+
+	it("starts verification of the named device for a verify-device request", async () => {
+		render(() => <CryptoStatusBanner />);
+
+		triggerCryptoAction({ action: "verify-device", deviceId: "OTHERDEV" });
+
+		expect(requestDeviceVerification).toHaveBeenCalledWith("OTHERDEV");
+		expect(requestSelfVerification).not.toHaveBeenCalled();
+		expect(
+			await screen.findByRole(
+				"dialog",
+				{ name: "Device verification" },
+				{ timeout: 15000 },
+			),
+		).toBeTruthy();
+	}, 20000);
+
+	it("opens verify-session on the choice when the recovery key can verify", async () => {
+		// Keys in secret storage: the dialog must open idle (on the choice),
+		// not jump straight into the SAS wait.
+		crossSigningStatus = {
+			publicKeysOnDevice: true,
+			privateKeysInSecretStorage: true,
+			privateKeysCachedLocally: {
+				masterKey: false,
+				selfSigningKey: false,
+				userSigningKey: false,
+			},
+		};
+		render(() => <CryptoStatusBanner />);
+
+		triggerCryptoAction("verify-session");
+
+		expect(requestSelfVerification).not.toHaveBeenCalled();
+		expect(
+			await screen.findByRole(
+				"button",
+				{ name: "Use recovery key" },
+				{ timeout: 15000 },
+			),
+		).toBeTruthy();
+	}, 20000);
+
+	it("starts the SAS request straight away for verify-session without keys in 4S", async () => {
+		crossSigningStatus = {
+			publicKeysOnDevice: true,
+			privateKeysInSecretStorage: false,
+			privateKeysCachedLocally: {
+				masterKey: true,
+				selfSigningKey: true,
+				userSigningKey: true,
+			},
+		};
+		render(() => <CryptoStatusBanner />);
+
+		triggerCryptoAction("verify-session");
+
+		expect(requestSelfVerification).toHaveBeenCalledTimes(1);
+		expect(
+			await screen.findByRole(
+				"dialog",
+				{ name: "Device verification" },
+				{ timeout: 15000 },
+			),
+		).toBeTruthy();
+		expect(
+			screen.queryByRole("button", { name: "Use recovery key" }),
+		).toBeNull();
 	}, 20000);
 });
