@@ -102,13 +102,12 @@ const CryptoStatusBanner: Component = () => {
 
 	const verifyWithRecoveryKey = async (): Promise<void> => {
 		const crypto = client.getCrypto();
-		const userId = client.getUserId();
 		const deviceId = client.getDeviceId();
-		if (!crypto || !userId || !deviceId) {
+		if (!crypto || !deviceId) {
 			throw new Error("Encryption is not available.");
 		}
 		try {
-			await verifySessionWithRecoveryKey(crypto, userId, deviceId);
+			await verifySessionWithRecoveryKey(crypto, deviceId);
 		} catch (e) {
 			// A wrong or cancelled key must not stay cached for the retry.
 			clearSecretStorageCache();

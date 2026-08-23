@@ -2,10 +2,7 @@ import type { CryptoApi } from "matrix-js-sdk/lib/crypto-api";
 
 type VerifyWithRecoveryKeyCrypto = Pick<
 	CryptoApi,
-	| "getCrossSigningStatus"
-	| "bootstrapCrossSigning"
-	| "getDeviceVerificationStatus"
-	| "crossSignDevice"
+	"getCrossSigningStatus" | "bootstrapCrossSigning" | "crossSignDevice"
 >;
 
 /**
@@ -29,7 +26,6 @@ type VerifyWithRecoveryKeyCrypto = Pick<
  */
 export async function verifySessionWithRecoveryKey(
 	crypto: VerifyWithRecoveryKeyCrypto,
-	userId: string,
 	deviceId: string,
 ): Promise<void> {
 	const status = await crypto.getCrossSigningStatus();
@@ -38,6 +34,9 @@ export async function verifySessionWithRecoveryKey(
 			"The cross-signing keys are not in secret storage, so the recovery key can't verify this session. Verify from another session instead.",
 		);
 	}
+	const cached = status.privateKeysCachedLocally;
+	const keysAlreadyCached =
+		cached.masterKey && cached.selfSigningKey && cached.userSigningKey;
 
 	await crypto.bootstrapCrossSigning({
 		// Only reachable on bootstrap's reset branch, which the check above
@@ -50,14 +49,13 @@ export async function verifySessionWithRecoveryKey(
 	});
 
 	// Bootstrap signs this device only on its import-from-secret-storage
-	// path; if the keys were already cached locally it leaves the device as
+	// path; when the keys were already cached locally it leaves the device as
 	// it found it, so sign explicitly rather than report a verification that
-	// did not happen.
-	const verification = await crypto.getDeviceVerificationStatus(
-		userId,
-		deviceId,
-	);
-	if (!verification?.crossSigningVerified) {
+	// did not happen. Decided from the status read above, not by asking the
+	// SDK afterwards: the device's own signature list is only refreshed by
+	// the next /keys/query, so right after bootstrap it still reads as
+	// unsigned either way.
+	if (keysAlreadyCached) {
 		await crypto.crossSignDevice(deviceId);
 	}
 }
