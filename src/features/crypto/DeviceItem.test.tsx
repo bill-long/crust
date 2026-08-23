@@ -15,7 +15,7 @@ function makeDevice(overrides: Partial<DeviceInfo> = {}): DeviceInfo {
 		deviceId: "DEVICEID",
 		displayName: "Test device",
 		lastSeenTs: undefined,
-		isVerified: false,
+		verification: "unverified" as const,
 		isCurrentDevice: false,
 		...overrides,
 	};
@@ -25,7 +25,9 @@ afterEach(cleanup);
 
 describe("DeviceItem", () => {
 	it("shows a visible 'Verified' label for verified devices", () => {
-		render(() => <DeviceItem device={makeDevice({ isVerified: true })} />);
+		render(() => (
+			<DeviceItem device={makeDevice({ verification: "verified" })} />
+		));
 		expect(screen.getByText("Verified")).toBeTruthy();
 		expect(screen.queryByText("Unverified")).toBeNull();
 	});
@@ -35,6 +37,22 @@ describe("DeviceItem", () => {
 		expect(screen.getByText("Unverified")).toBeTruthy();
 		// The bare warning glyph must not be exposed as a labelled image.
 		expect(screen.queryByRole("img", { name: "Unverified" })).toBeNull();
+	});
+
+	it("shows Unknown, with no Verify affordance, when the status is unavailable", () => {
+		// No crypto / failed lookup / no keys for the device: no claim either
+		// way, and nothing a Verify button could do (issue #480).
+		const onVerify = vi.fn();
+		render(() => (
+			<DeviceItem
+				device={makeDevice({ verification: "unknown" })}
+				onVerify={onVerify}
+			/>
+		));
+		expect(screen.getByText("Status unknown")).toBeTruthy();
+		expect(screen.queryByText("Unverified")).toBeNull();
+		expect(screen.queryByText("Verified")).toBeNull();
+		expect(screen.queryByRole("button", { name: "Verify" })).toBeNull();
 	});
 
 	it("offers a Verify button for an unverified non-current device", () => {

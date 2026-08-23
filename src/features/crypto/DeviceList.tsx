@@ -1,4 +1,7 @@
-import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
+import {
+	CryptoEvent,
+	type DeviceVerificationStatus,
+} from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Component,
 	createResource,
@@ -9,6 +12,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { deviceVerification } from "../../lib/deviceVerification";
 import { type DeviceInfo, DeviceItem } from "./DeviceItem";
 
 interface DeviceListProps {
@@ -34,19 +38,21 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 			const response = await client.getDevices();
 			if (!response?.devices) return [];
 
-			// Get verification status for all devices in parallel
+			// Get verification status for all devices in parallel. The badge is
+			// derived through the one shared rule (src/lib/deviceVerification.ts):
+			// no crypto, a failed lookup, or a device the SDK holds no keys for
+			// renders as unknown, not as a confident "unverified" (issue #480).
 			const results = await Promise.all(
 				response.devices.map(async (device): Promise<DeviceInfo> => {
-					let isVerified = false;
+					let status: DeviceVerificationStatus | null | undefined;
 					if (crypto && device.device_id) {
 						try {
-							const status = await crypto.getDeviceVerificationStatus(
+							status = await crypto.getDeviceVerificationStatus(
 								userId,
 								device.device_id,
 							);
-							isVerified = status?.isVerified() ?? false;
 						} catch {
-							// Device may not have keys uploaded yet
+							status = undefined;
 						}
 					}
 
@@ -54,7 +60,7 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 						deviceId: device.device_id,
 						displayName: device.display_name ?? "",
 						lastSeenTs: device.last_seen_ts,
-						isVerified,
+						verification: deviceVerification(status),
 						isCurrentDevice: device.device_id === currentDeviceId,
 					};
 				}),

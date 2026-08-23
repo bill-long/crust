@@ -132,6 +132,17 @@ describe("useCryptoStatus", () => {
 		expect(status.crossSigningReady()).toBe(true);
 	});
 
+	it("keeps thisDeviceVerified unknown when the SDK has no status for the device", async () => {
+		// null means the SDK holds no keys for the device - per the shared
+		// rule (src/lib/deviceVerification.ts) that is unknown, not a
+		// confident "unverified" (issue #480).
+		const crypto = makeCrypto({
+			getDeviceVerificationStatus: vi.fn(async () => null),
+		});
+		const status = await createStatus(crypto);
+		expect(status.thisDeviceVerified()).toBeUndefined();
+	});
+
 	it("probes the server backup once, re-probing only after a backup event", async () => {
 		// refresh() runs on several CryptoEvents; without caching, a sync
 		// burst would re-probe /room_keys/version on every one.

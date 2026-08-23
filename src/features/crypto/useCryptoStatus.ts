@@ -11,6 +11,7 @@ import {
 	createSignal,
 	onCleanup,
 } from "solid-js";
+import { deviceVerification } from "../../lib/deviceVerification";
 import { fetchServerKeyBackup } from "./backup/keyBackupSetup";
 
 export interface CryptoStatus {
@@ -125,11 +126,14 @@ export function useCryptoStatus(
 					const status: DeviceVerificationStatus | null =
 						await crypto.getDeviceVerificationStatus(userId, deviceId);
 					if (refreshVersion !== thisVersion) return;
-					// Own device is always locally trusted, so isVerified() would
-					// stay true even after the identity was rotated elsewhere.
-					// crossSigningVerified only passes when the device is signed by
-					// the current self-signing key (issue #420).
-					deviceVerified = status?.crossSigningVerified ?? false;
+					// The one shared rule (src/lib/deviceVerification.ts, issue
+					// #480): cross-signed by the current identity or nothing, and
+					// no answer stays unknown rather than becoming "false".
+					const verification = deviceVerification(status);
+					deviceVerified =
+						verification === "unknown"
+							? undefined
+							: verification === "verified";
 				} catch {
 					if (refreshVersion !== thisVersion) return;
 					deviceVerified = undefined;

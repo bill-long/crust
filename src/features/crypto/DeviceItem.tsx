@@ -1,12 +1,13 @@
-import { type Component, Show } from "solid-js";
+import { type Component, Match, Show, Switch } from "solid-js";
 import { Tooltip } from "../../components/Tooltip";
+import type { DeviceVerification } from "../../lib/deviceVerification";
 import { formatRelativeTime } from "../../lib/relativeTime";
 
 export interface DeviceInfo {
 	deviceId: string;
 	displayName: string;
 	lastSeenTs: number | undefined;
-	isVerified: boolean;
+	verification: DeviceVerification;
 	isCurrentDevice: boolean;
 }
 
@@ -49,42 +50,58 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 			</div>
 
 			<div class="ml-3 flex shrink-0 items-center gap-2">
-				<Show
-					when={props.device.isVerified}
-					fallback={
-						<>
-							<Tooltip content={unverifiedExplanation()} triggerTabIndex={0}>
-								<span class="flex items-center gap-1 text-warning-text">
-									<span aria-hidden="true">⚠</span>
-									<span class="text-xs">Unverified</span>
-								</span>
-							</Tooltip>
-							<Show
-								when={!props.device.isCurrentDevice && props.onVerify}
-								fallback={
-									<Show when={props.device.isCurrentDevice}>
-										<span class="text-xs text-text-secondary">
-											Verify from another session
-										</span>
-									</Show>
-								}
+				<Switch>
+					<Match when={props.device.verification === "verified"}>
+						<span class="text-success-text" aria-hidden="true">
+							✓
+						</span>
+						<span class="text-xs text-success-text">Verified</span>
+					</Match>
+					{/* No claim either way: crypto is unavailable, the lookup
+					    failed, or the SDK holds no keys for this device. Rendering
+					    this as "Unverified" was issue #480 - and with no working
+					    crypto there is nothing a Verify button could do. */}
+					<Match when={props.device.verification === "unknown"}>
+						<Tooltip
+							content="Verification status unavailable — encryption isn't working in this session, or this device has no encryption keys."
+							triggerTabIndex={0}
+						>
+							<span class="flex items-center gap-1 text-text-disabled">
+								<span aria-hidden="true">?</span>
+								{/* Not plain "Unknown": the last-seen column already renders
+								    that for a missing timestamp, and two bare Unknowns in one
+								    row read as noise. */}
+								<span class="text-xs">Status unknown</span>
+							</span>
+						</Tooltip>
+					</Match>
+					<Match when={props.device.verification === "unverified"}>
+						<Tooltip content={unverifiedExplanation()} triggerTabIndex={0}>
+							<span class="flex items-center gap-1 text-warning-text">
+								<span aria-hidden="true">⚠</span>
+								<span class="text-xs">Unverified</span>
+							</span>
+						</Tooltip>
+						<Show
+							when={!props.device.isCurrentDevice && props.onVerify}
+							fallback={
+								<Show when={props.device.isCurrentDevice}>
+									<span class="text-xs text-text-secondary">
+										Verify from another session
+									</span>
+								</Show>
+							}
+						>
+							<button
+								type="button"
+								onClick={() => props.onVerify?.(props.device.deviceId)}
+								class="rounded bg-surface-3 px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
-								<button
-									type="button"
-									onClick={() => props.onVerify?.(props.device.deviceId)}
-									class="rounded bg-surface-3 px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
-								>
-									Verify
-								</button>
-							</Show>
-						</>
-					}
-				>
-					<span class="text-success-text" aria-hidden="true">
-						✓
-					</span>
-					<span class="text-xs text-success-text">Verified</span>
-				</Show>
+								Verify
+							</button>
+						</Show>
+					</Match>
+				</Switch>
 			</div>
 		</div>
 	);
