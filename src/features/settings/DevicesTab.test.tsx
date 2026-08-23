@@ -79,9 +79,12 @@ const HEALTHY: Required<StatusOverrides> = {
 
 let statusOverrides: StatusOverrides = {};
 
+let cryptoStateOverride: "loading" | "ready" | "error" = "ready";
+
 vi.mock("../../client/client", () => ({
 	useClient: () => ({
 		client: {},
+		cryptoState: () => cryptoStateOverride,
 		cryptoStatus: {
 			crossSigningReady: () =>
 				"crossSigningReady" in statusOverrides
@@ -114,9 +117,31 @@ afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
 	statusOverrides = {};
+	cryptoStateOverride = "ready";
 });
 
 describe("DevicesTab", () => {
+	it("explains a failed crypto init instead of loading forever", () => {
+		// The app-level banner sends the user here when crypto init fails;
+		// every status signal stays undefined in that state, so without this
+		// the cards would say "Loading…" permanently (issue #480).
+		cryptoStateOverride = "error";
+		statusOverrides = {
+			crossSigningReady: undefined,
+			thisDeviceVerified: undefined,
+			backupVersion: undefined,
+			crossSigningStatus: undefined,
+		};
+		render(() => <DevicesTab />);
+
+		expect(
+			screen.getByText(/Encryption failed to initialize in this session/),
+		).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+		expect(screen.queryByText("Loading…")).toBeNull();
+		expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
+	});
+
 	it("starts verification of another session from its device-list row", () => {
 		render(() => <DevicesTab />);
 		fireEvent.click(screen.getByRole("button", { name: "device-list-verify" }));

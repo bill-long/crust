@@ -2,7 +2,6 @@ import type { MatrixClient } from "matrix-js-sdk";
 import {
 	type CrossSigningStatus,
 	CryptoEvent,
-	type DeviceVerificationStatus,
 } from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Accessor,
@@ -11,6 +10,7 @@ import {
 	createSignal,
 	onCleanup,
 } from "solid-js";
+import { fetchDeviceVerification } from "../../lib/deviceVerification";
 import { fetchServerKeyBackup } from "./backup/keyBackupSetup";
 
 export interface CryptoStatus {
@@ -121,19 +121,21 @@ export function useCryptoStatus(
 			const userId = client.getUserId();
 			const deviceId = client.getDeviceId();
 			if (userId && deviceId) {
-				try {
-					const status: DeviceVerificationStatus | null =
-						await crypto.getDeviceVerificationStatus(userId, deviceId);
-					if (refreshVersion !== thisVersion) return;
-					// Own device is always locally trusted, so isVerified() would
-					// stay true even after the identity was rotated elsewhere.
-					// crossSigningVerified only passes when the device is signed by
-					// the current self-signing key (issue #420).
-					deviceVerified = status?.crossSigningVerified ?? false;
-				} catch {
-					if (refreshVersion !== thisVersion) return;
-					deviceVerified = undefined;
-				}
+				// The one shared rule (src/lib/deviceVerification.ts, issue #480):
+				// cross-signed by the current identity or nothing, and no answer
+				// stays unknown - kept undefined here rather than becoming
+				// "false". For the OWN device unknown is a can't-happen while
+				// crypto is up (the olm machine always holds its own device), so
+				// collapsing it into the not-yet-fetched undefined is safe; if it
+				// ever did occur, the CryptoEvent-driven refreshes re-resolve it.
+				const verification = await fetchDeviceVerification(
+					crypto,
+					userId,
+					deviceId,
+				);
+				if (refreshVersion !== thisVersion) return;
+				deviceVerified =
+					verification === "unknown" ? undefined : verification === "verified";
 			}
 
 			// Whether a backup exists on the server at all (distinct from this

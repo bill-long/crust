@@ -70,8 +70,21 @@ const DialogFallback: Component = () => (
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" />
 );
 
+/**
+ * Card fallback while a status signal is undefined. With crypto in the
+ * error state the signals are guaranteed never to resolve, so "Loading…"
+ * would spin forever (issue #480) - say what is actually the case instead.
+ * (A transient refresh failure with crypto up can also pass through here as
+ * "Loading…"; those re-resolve on the next CryptoEvent-driven refresh.)
+ */
+const StatusPending: Component<{ cryptoFailed: boolean }> = (props) => (
+	<span class="text-xs text-text-disabled">
+		{props.cryptoFailed ? "Unavailable" : "Loading…"}
+	</span>
+);
+
 const DevicesTab: Component = () => {
-	const { client, cryptoStatus } = useClient();
+	const { client, cryptoState, cryptoStatus } = useClient();
 
 	const [showExportKeys, setShowExportKeys] = createSignal(false);
 	const [showImportKeys, setShowImportKeys] = createSignal(false);
@@ -135,6 +148,20 @@ const DevicesTab: Component = () => {
 			<section>
 				<SectionHeading>Encryption</SectionHeading>
 
+				{/* The app-level warning banner sends the user here when crypto
+				    init fails, so this panel must say so rather than sit on
+				    "Loading…" forever with no action (issue #480). */}
+				<Show when={cryptoState() === "error"}>
+					<div class="mb-4 flex items-center justify-between gap-3 rounded-lg border border-warning-border bg-warning-bg/50 px-4 py-3">
+						<div class="text-sm text-warning-text">
+							Encryption failed to initialize in this session, so its status
+							can't be checked and verification isn't available. Reload the app
+							to retry; if it keeps failing, log out and back in.
+						</div>
+						<ActionButton label="Reload" onClick={() => location.reload()} />
+					</div>
+				</Show>
+
 				{/* Action banner */}
 				<Show when={needsAttention()}>
 					<button
@@ -186,7 +213,7 @@ const DevicesTab: Component = () => {
 						<Show
 							when={crossSigningResolved()}
 							fallback={
-								<span class="text-xs text-text-disabled">Loading…</span>
+								<StatusPending cryptoFailed={cryptoState() === "error"} />
 							}
 						>
 							<div class="flex items-center gap-2">
@@ -238,7 +265,7 @@ const DevicesTab: Component = () => {
 						<Show
 							when={cryptoStatus.thisDeviceVerified() !== undefined}
 							fallback={
-								<span class="text-xs text-text-disabled">Loading…</span>
+								<StatusPending cryptoFailed={cryptoState() === "error"} />
 							}
 						>
 							<div class="flex items-center gap-2">
@@ -291,7 +318,7 @@ const DevicesTab: Component = () => {
 						<Show
 							when={cryptoStatus.backupVersion() !== undefined}
 							fallback={
-								<span class="text-xs text-text-disabled">Loading…</span>
+								<StatusPending cryptoFailed={cryptoState() === "error"} />
 							}
 						>
 							<div class="flex items-center gap-2">
