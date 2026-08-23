@@ -72,8 +72,10 @@ const DialogFallback: Component = () => (
 
 /**
  * Card fallback while a status signal is undefined. With crypto in the
- * error state the signals never resolve, so "Loading…" would spin forever
- * (issue #480) - say what is actually the case instead.
+ * error state the signals are guaranteed never to resolve, so "Loading…"
+ * would spin forever (issue #480) - say what is actually the case instead.
+ * (A transient refresh failure with crypto up can also pass through here as
+ * "Loading…"; those re-resolve on the next CryptoEvent-driven refresh.)
  */
 const StatusPending: Component<{ cryptoFailed: boolean }> = (props) => (
 	<span class="text-xs text-text-disabled">

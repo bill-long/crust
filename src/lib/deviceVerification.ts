@@ -1,4 +1,7 @@
-import type { DeviceVerificationStatus } from "matrix-js-sdk/lib/crypto-api";
+import type {
+	CryptoApi,
+	DeviceVerificationStatus,
+} from "matrix-js-sdk/lib/crypto-api";
 
 export type DeviceVerification = "verified" | "unverified" | "unknown";
 
@@ -24,4 +27,25 @@ export function deviceVerification(
 ): DeviceVerification {
 	if (!status) return "unknown";
 	return status.crossSigningVerified ? "verified" : "unverified";
+}
+
+/**
+ * The fetch half of the rule, never rejecting: missing crypto and a failed
+ * lookup are "unknown" like a null status is. Badge surfaces call this so
+ * the throw-means-unknown half of the invariant cannot be forgotten at a
+ * call site (issue #480).
+ */
+export async function fetchDeviceVerification(
+	crypto: Pick<CryptoApi, "getDeviceVerificationStatus"> | undefined | null,
+	userId: string,
+	deviceId: string,
+): Promise<DeviceVerification> {
+	if (!crypto) return "unknown";
+	try {
+		return deviceVerification(
+			await crypto.getDeviceVerificationStatus(userId, deviceId),
+		);
+	} catch {
+		return "unknown";
+	}
 }

@@ -1,7 +1,4 @@
-import {
-	CryptoEvent,
-	type DeviceVerificationStatus,
-} from "matrix-js-sdk/lib/crypto-api";
+import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Component,
 	createResource,
@@ -12,7 +9,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import { deviceVerification } from "../../lib/deviceVerification";
+import { fetchDeviceVerification } from "../../lib/deviceVerification";
 import { type DeviceInfo, DeviceItem } from "./DeviceItem";
 
 interface DeviceListProps {
@@ -43,27 +40,19 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 			// no crypto, a failed lookup, or a device the SDK holds no keys for
 			// renders as unknown, not as a confident "unverified" (issue #480).
 			const results = await Promise.all(
-				response.devices.map(async (device): Promise<DeviceInfo> => {
-					let status: DeviceVerificationStatus | null | undefined;
-					if (crypto && device.device_id) {
-						try {
-							status = await crypto.getDeviceVerificationStatus(
-								userId,
-								device.device_id,
-							);
-						} catch {
-							status = undefined;
-						}
-					}
-
-					return {
+				response.devices.map(
+					async (device): Promise<DeviceInfo> => ({
 						deviceId: device.device_id,
 						displayName: device.display_name ?? "",
 						lastSeenTs: device.last_seen_ts,
-						verification: deviceVerification(status),
+						verification: await fetchDeviceVerification(
+							crypto,
+							userId,
+							device.device_id,
+						),
 						isCurrentDevice: device.device_id === currentDeviceId,
-					};
-				}),
+					}),
+				),
 			);
 
 			// Sort: current device first, then by last seen (most recent first)
