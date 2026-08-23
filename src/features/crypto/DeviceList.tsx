@@ -45,11 +45,11 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 						deviceId: device.device_id,
 						displayName: device.display_name ?? "",
 						lastSeenTs: device.last_seen_ts,
-						verification: await fetchDeviceVerification(
-							crypto,
-							userId,
-							device.device_id,
-						),
+						// A device the server reports without an id can't be looked
+						// up - that is an unknown, stated rather than thrown into.
+						verification: device.device_id
+							? await fetchDeviceVerification(crypto, userId, device.device_id)
+							: "unknown",
 						isCurrentDevice: device.device_id === currentDeviceId,
 					}),
 				),
