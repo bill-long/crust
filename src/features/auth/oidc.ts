@@ -6,9 +6,11 @@
  *
  *  1. {@link probeDelegatedAuth} - does this homeserver delegate auth?
  *  2. {@link startOidcLogin} - dynamic client registration (cached per
- *     issuer) via the SDK's OAuth2 class, then the authorization URL with
- *     PKCE (the SDK generates the verifier; we persist it, keyed by state,
- *     in our own sessionStorage entry); the caller navigates to the URL.
+ *     issuer) via our own fetch (the SDK's registerClient discards the
+ *     OP's error_description, issue #486), then the authorization URL with
+ *     PKCE via the SDK's OAuth2 class (it generates the verifier; we
+ *     persist it, keyed by state, in our own sessionStorage entry); the
+ *     caller navigates to the URL.
  *  3. {@link completeOidcLogin} - verify the returned state, exchange the
  *     code (SDK OAuth2.completeAuthorizationCodeGrant), then whoami for
  *     the user/device IDs.
