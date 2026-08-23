@@ -37,9 +37,19 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	const [recoveryStep, setRecoveryStep] = createSignal<RecoveryStep>("idle");
 	const [recoveryError, setRecoveryError] = createSignal("");
 	let disposed = false;
+	let dialogEl: HTMLDivElement | undefined;
 	onCleanup(() => {
 		disposed = true;
 	});
+
+	// The recovery route hands focus to the recovery-key prompt (a separate
+	// overlay); when that unmounts, focus falls to the body unless something
+	// takes it back. Only reclaim it when it was actually lost, so a user who
+	// moved elsewhere meanwhile is not yanked back.
+	const reclaimFocus = (): void => {
+		const active = document.activeElement;
+		if (!active || active === document.body) dialogEl?.focus();
+	};
 
 	const verifyWithRecoveryKey = async (): Promise<void> => {
 		const run = props.verifyWithRecoveryKey;
@@ -63,8 +73,17 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 				userFacingErrorMessage(e, "Verification failed. Try again."),
 			);
 			setRecoveryStep("error");
+		} finally {
+			if (!disposed) reclaimFocus();
 		}
 	};
+
+	// The recovery route can't be cancelled mid-way (the SDK is inside
+	// bootstrap), so while its view is up the dialog stays open. Scoped to
+	// the handle being idle: once an incoming SAS has taken the view over,
+	// its own Done/Close must work regardless of the background import.
+	const recoveryViewBusy = (): boolean =>
+		recoveryStep() === "working" && v.state() === "idle";
 
 	const canClose = (): boolean =>
 		v.state() === "done" ||
@@ -73,11 +92,9 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 		v.state() === "idle";
 
 	const handleClose = (): void => {
-		// The recovery route can't be cancelled mid-way (the SDK is inside
-		// bootstrap), so its "working" step pins the dialog open the way the
-		// SAS waits do - and must not fall through to v.cancel(), which would
-		// mark the untouched SAS handle cancelled.
-		if (recoveryStep() === "working") return;
+		// Must not fall through to v.cancel() either, which would mark the
+		// untouched SAS handle cancelled.
+		if (recoveryViewBusy()) return;
 		if (canClose()) {
 			v.reset();
 			props.onClose();
@@ -93,7 +110,10 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 			aria-modal="true"
 			aria-label="Device verification"
 			tabIndex={-1}
-			ref={(el) => el.focus()}
+			ref={(el) => {
+				dialogEl = el;
+				el.focus();
+			}}
 			onClick={(e) => {
 				if (e.target === e.currentTarget) handleClose();
 			}}
@@ -121,7 +141,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.cancel()}
-								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Cancel
 							</button>
@@ -150,14 +170,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.rejectSas()}
-								class="rounded bg-danger-bg/50 px-4 py-2 text-sm font-medium text-danger-text-bright transition-colors hover:bg-danger-bg/70"
+								class="rounded bg-danger-bg/50 px-4 py-2 text-sm font-medium text-danger-text-bright transition-colors hover:bg-danger-bg/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								They don't match
 							</button>
 							<button
 								type="button"
 								onClick={() => v.confirmSas()}
-								class="rounded bg-success px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-success-hover"
+								class="rounded bg-success px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-success-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								They match
 							</button>
@@ -197,7 +217,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Done
 							</button>
@@ -219,7 +239,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
+								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Close
 							</button>
@@ -239,7 +259,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
+								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Close
 							</button>
@@ -278,7 +298,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Done
 							</button>
@@ -301,14 +321,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 								<button
 									type="button"
 									onClick={handleClose}
-									class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4"
+									class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Close
 								</button>
 								<button
 									type="button"
 									onClick={() => setRecoveryStep("idle")}
-									class="mt-2 rounded bg-accent px-3 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+									class="mt-2 rounded bg-accent px-3 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Try again
 								</button>
@@ -332,7 +352,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.requestSelfVerification()}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Verify with another session
 							</button>
@@ -340,7 +360,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 								<button
 									type="button"
 									onClick={verifyWithRecoveryKey}
-									class="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-4"
+									class="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Use recovery key
 								</button>
@@ -348,7 +368,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Cancel
 							</button>

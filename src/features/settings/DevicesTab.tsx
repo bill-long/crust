@@ -4,9 +4,11 @@ import {
 	createMemo,
 	createSignal,
 	lazy,
+	Match,
 	onCleanup,
 	Show,
 	Suspense,
+	Switch,
 } from "solid-js";
 import { useClient } from "../../client/client";
 import { cryptoActionLabel, deriveCryptoAction } from "../../lib/cryptoAction";
@@ -101,6 +103,14 @@ const DevicesTab: Component = () => {
 		cryptoStatus.crossSigningReady() === false &&
 		cryptoStatus.crossSigningStatus()?.publicKeysOnDevice === true;
 
+	// "Not set up" is a definitive claim that needs the cross-signing detail:
+	// without it, not-ready could equally be an identity this session can't
+	// see yet, and deriveCryptoAction treats that snapshot as loading.
+	const crossSigningResolved = (): boolean =>
+		cryptoStatus.crossSigningReady() === true ||
+		(cryptoStatus.crossSigningReady() === false &&
+			cryptoStatus.crossSigningStatus() !== undefined);
+
 	const needsAttention = () => {
 		const a = cryptoAction();
 		return (
@@ -151,20 +161,30 @@ const DevicesTab: Component = () => {
 								    no reachable keys is also "unavailable" but needs a reset,
 								    and telling that user to enter a recovery key would be
 								    wrong. */}
-								<Show
-									when={
-										identityUnavailableHere() &&
-										cryptoAction() === "verify-session"
-									}
-									fallback="Verify your identity across devices"
-								>
-									Set up on your account but not available to this session —
-									verify it or enter your recovery key.
-								</Show>
+								<Switch fallback="Verify your identity across devices">
+									<Match
+										when={
+											identityUnavailableHere() &&
+											cryptoAction() === "verify-session"
+										}
+									>
+										Set up on your account but not available to this session —
+										verify it or enter your recovery key.
+									</Match>
+									<Match
+										when={
+											identityUnavailableHere() &&
+											cryptoAction() === "reset-encryption"
+										}
+									>
+										Set up on your account but its keys can't be reached from
+										any session — it can only be reset.
+									</Match>
+								</Switch>
 							</div>
 						</div>
 						<Show
-							when={cryptoStatus.crossSigningReady() !== undefined}
+							when={crossSigningResolved()}
 							fallback={
 								<span class="text-xs text-text-disabled">Loading…</span>
 							}

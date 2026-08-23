@@ -1,6 +1,9 @@
 import type { CrossSigningStatus } from "matrix-js-sdk/lib/crypto-api";
-import { describe, expect, it, vi } from "vitest";
-import { verifySessionWithRecoveryKey } from "./verifyWithRecoveryKey";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+	verifySessionWithRecoveryKey,
+	waitForDevicesUpdated,
+} from "./verifyWithRecoveryKey";
 
 type Crypto = Parameters<typeof verifySessionWithRecoveryKey>[0];
 
@@ -78,5 +81,56 @@ describe("verifySessionWithRecoveryKey", () => {
 			/falsey/,
 		);
 		expect(crypto.crossSignDevice).not.toHaveBeenCalled();
+	});
+});
+
+describe("waitForDevicesUpdated", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function makeEmitter() {
+		const listeners = new Map<string, Set<() => void>>();
+		return {
+			once: vi.fn((event: string, fn: () => void) => {
+				if (!listeners.has(event)) listeners.set(event, new Set());
+				listeners.get(event)?.add(fn);
+			}),
+			removeListener: vi.fn((event: string, fn: () => void) => {
+				listeners.get(event)?.delete(fn);
+			}),
+			emit(event: string) {
+				for (const fn of [...(listeners.get(event) ?? [])]) fn();
+			},
+			count(event: string) {
+				return listeners.get(event)?.size ?? 0;
+			},
+		};
+	}
+
+	it("resolves on the next DevicesUpdated and detaches", async () => {
+		vi.useFakeTimers();
+		const client = makeEmitter();
+		const p = waitForDevicesUpdated(
+			client as unknown as Parameters<typeof waitForDevicesUpdated>[0],
+			5000,
+		);
+		client.emit("crypto.devicesUpdated");
+		await p;
+		expect(client.count("crypto.devicesUpdated")).toBe(0);
+	});
+
+	it("resolves on timeout and detaches, so the caller never hangs", async () => {
+		// The status hook re-runs on the same event, so a late query still
+		// heals the card; the wait only exists to avoid a premature "done".
+		vi.useFakeTimers();
+		const client = makeEmitter();
+		const p = waitForDevicesUpdated(
+			client as unknown as Parameters<typeof waitForDevicesUpdated>[0],
+			5000,
+		);
+		vi.advanceTimersByTime(5000);
+		await p;
+		expect(client.count("crypto.devicesUpdated")).toBe(0);
 	});
 });

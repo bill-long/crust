@@ -167,6 +167,25 @@ describe("VerificationDialog self-verification entry", () => {
 		expect(screen.queryByText("Verifying with your recovery key")).toBeNull();
 	});
 
+	it("still closes a finished SAS that took over mid-recovery", () => {
+		// The recovery import may be stuck behind an unanswered prompt; the
+		// SAS that completed in the meantime must not be held hostage by it.
+		const handle = makeHandle();
+		const onClose = vi.fn();
+		render(() => (
+			<VerificationDialog
+				verification={handle}
+				onClose={onClose}
+				verifyWithRecoveryKey={() => new Promise(() => {})}
+			/>
+		));
+		fireEvent.click(screen.getByRole("button", { name: "Use recovery key" }));
+		handle.setState("done");
+		fireEvent.click(screen.getByRole("button", { name: "Done" }));
+		expect(handle.reset).toHaveBeenCalledTimes(1);
+		expect(onClose).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not close, nor cancel the SAS handle, while the recovery route is in flight", () => {
 		const handle = makeHandle();
 		const onClose = vi.fn();

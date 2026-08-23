@@ -151,6 +151,20 @@ describe("DevicesTab", () => {
 		expect(triggerCryptoAction).toHaveBeenCalledWith("verify-session");
 	});
 
+	it("shows Loading rather than Not set up while the cross-signing detail is unknown", () => {
+		// Not ready with no detail could equally be an identity this session
+		// can't see yet; deriveCryptoAction calls that loading and so must
+		// the badge (issue #480).
+		statusOverrides = {
+			crossSigningReady: false,
+			thisDeviceVerified: false,
+			crossSigningStatus: undefined,
+		};
+		render(() => <DevicesTab />);
+		expect(screen.queryByText("Not set up")).toBeNull();
+		expect(screen.getAllByText("Loading…").length).toBeGreaterThan(0);
+	});
+
 	it("offers a danger Reset… action when the server identity is unreachable", () => {
 		statusOverrides = {
 			crossSigningReady: false,
@@ -172,6 +186,10 @@ describe("DevicesTab", () => {
 		expect(triggerCryptoAction).toHaveBeenCalledWith("reset-encryption");
 		// The misleading plain "Set up" must not be offered in this state.
 		expect(screen.queryByRole("button", { name: "Set up" })).toBeNull();
+		// Nor a subtitle pointing at verification or the recovery key, which
+		// cannot work here.
+		expect(screen.getByText(/it can only be reset/)).toBeTruthy();
+		expect(screen.queryByText(/enter your recovery key/)).toBeNull();
 	});
 
 	it("offers Set up when cross-signing is simply missing", () => {

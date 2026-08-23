@@ -1,4 +1,5 @@
-import type { CryptoApi } from "matrix-js-sdk/lib/crypto-api";
+import type { MatrixClient } from "matrix-js-sdk";
+import { type CryptoApi, CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
 
 type VerifyWithRecoveryKeyCrypto = Pick<
 	CryptoApi,
@@ -58,4 +59,30 @@ export async function verifySessionWithRecoveryKey(
 	if (keysAlreadyCached) {
 		await crypto.crossSignDevice(deviceId);
 	}
+}
+
+/**
+ * Wait for the next device-list refresh, bounded.
+ *
+ * The SDK only updates a device's own signature list from `/keys/query`, so
+ * right after the signature upload above this device still reads as
+ * unsigned. The upload marks the device list changed, so a query follows
+ * with the next sync; waiting for it (up to `timeoutMs`) lets the caller
+ * refresh to the verified state before reporting success, instead of closing
+ * onto a card that still says Unverified. Resolves on timeout too: the status
+ * hook re-runs on the same event, so the card heals on its own either way.
+ */
+export function waitForDevicesUpdated(
+	client: Pick<MatrixClient, "once" | "removeListener">,
+	timeoutMs: number,
+): Promise<void> {
+	return new Promise((resolve) => {
+		const done = (): void => {
+			clearTimeout(timer);
+			client.removeListener(CryptoEvent.DevicesUpdated, done);
+			resolve();
+		};
+		const timer = setTimeout(done, timeoutMs);
+		client.once(CryptoEvent.DevicesUpdated, done);
+	});
 }

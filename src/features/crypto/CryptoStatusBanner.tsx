@@ -17,7 +17,10 @@ import type { CryptoActionRequest } from "../../types/crypto";
 import { RecoveryKeyInput } from "./backup/RecoveryKeyInput";
 import { IncomingVerificationToast } from "./verification/IncomingVerificationToast";
 import { useVerification } from "./verification/useVerification";
-import { verifySessionWithRecoveryKey } from "./verification/verifyWithRecoveryKey";
+import {
+	verifySessionWithRecoveryKey,
+	waitForDevicesUpdated,
+} from "./verification/verifyWithRecoveryKey";
 
 // Code splitting (#307): the crypto setup/verification/backup dialogs are
 // opened only from the crypto banner or the Devices settings tab, so they
@@ -113,6 +116,10 @@ const CryptoStatusBanner: Component = () => {
 			clearSecretStorageCache();
 			throw e;
 		}
+		// The new signature becomes visible locally with the next /keys/query;
+		// give it a sync cycle so "complete" is not followed by a card that
+		// still reads Unverified.
+		await waitForDevicesUpdated(client, 5000);
 		await cryptoStatus.refresh();
 	};
 
