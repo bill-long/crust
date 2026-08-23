@@ -147,8 +147,15 @@ const DevicesTab: Component = () => {
 								Cross-signing
 							</div>
 							<div class="text-xs text-text-muted">
+								{/* Only when verifying is the way forward: an identity with
+								    no reachable keys is also "unavailable" but needs a reset,
+								    and telling that user to enter a recovery key would be
+								    wrong. */}
 								<Show
-									when={identityUnavailableHere()}
+									when={
+										identityUnavailableHere() &&
+										cryptoAction() === "verify-session"
+									}
 									fallback="Verify your identity across devices"
 								>
 									Set up on your account but not available to this session —
