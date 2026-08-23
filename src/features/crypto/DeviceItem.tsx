@@ -63,7 +63,7 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 					    crypto there is nothing a Verify button could do. */}
 					<Match when={props.device.verification === "unknown"}>
 						<Tooltip
-							content="Verification status unavailable: encryption isn't working in this session, or this device has no encryption keys."
+							content="Verification status unavailable: encryption isn't working in this session, the check failed, or this device has no encryption keys."
 							triggerTabIndex={0}
 						>
 							<span class="flex items-center gap-1 text-text-disabled">
