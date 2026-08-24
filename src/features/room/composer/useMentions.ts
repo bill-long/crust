@@ -33,23 +33,39 @@ export function useMentions(deps: UseMentionsDeps) {
 		listboxId,
 	} = createPicker<RoomMember>();
 
+	// Joined members with their search keys lowercased once per member-list
+	// change, not once per keystroke - the filter below runs in the input
+	// handler's synchronous path for every character typed.
 	const roomMembers = createMemo(() => {
 		const room = deps.client.getRoom(deps.roomId());
-		return room ? room.getJoinedMembers() : [];
+		if (!room) return [];
+		return room.getJoinedMembers().map((member) => ({
+			member,
+			searchName: (member.name ?? "").toLowerCase(),
+			searchId: member.userId.toLowerCase(),
+		}));
 	});
 
 	// Shared filtered member list - used by both picker and ARIA state.
 	// Unbounded: the picker windows its rows (VirtualList), so a large match
-	// set costs a filter pass here, not DOM nodes - every member stays
-	// reachable by scrolling/arrowing instead of being cut at a cap.
+	// set costs this one filter pass, not DOM nodes - every member stays
+	// reachable by scrolling/arrowing instead of being cut at a cap. (The
+	// picker itself gets no filterFn, so this is the only per-keystroke
+	// pass over the member list.)
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
 		const lowerQ = q.toLowerCase();
-		return roomMembers().filter((m) => {
-			const name = (m.name ?? "").toLowerCase();
-			return name.includes(lowerQ) || m.userId.toLowerCase().includes(lowerQ);
-		});
+		const out: RoomMember[] = [];
+		for (const entry of roomMembers()) {
+			if (
+				entry.searchName.includes(lowerQ) ||
+				entry.searchId.includes(lowerQ)
+			) {
+				out.push(entry.member);
+			}
+		}
+		return out;
 	});
 
 	const pickerRendered = () => filteredMembers().length > 0;

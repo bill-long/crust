@@ -9,6 +9,7 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
+import { stubViewport } from "../test/stubViewport";
 import {
 	computeRowOffsets,
 	VirtualList,
@@ -109,42 +110,15 @@ describe("<VirtualList>", () => {
 });
 
 describe("<VirtualList> windowing with a stubbed viewport", () => {
-	// jsdom has no layout engine (clientHeight is always 0 and ResizeObserver
-	// is absent), so stub a fixed 50px viewport to exercise the scroll window.
-	const restore: Array<() => void> = [];
 	// Stable object refs so <For> keys by reference, mirroring the real usage
 	// (rows of emoji) rather than the primitive-dedupe fast path.
 	const items = Array.from({ length: 100 }, (_, i) => ({ n: i }));
 
+	let restoreViewport: () => void;
 	beforeEach(() => {
-		const desc = Object.getOwnPropertyDescriptor(
-			HTMLElement.prototype,
-			"clientHeight",
-		);
-		Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-			configurable: true,
-			get: () => 50,
-		});
-		restore.push(() => {
-			if (desc)
-				Object.defineProperty(HTMLElement.prototype, "clientHeight", desc);
-		});
-		const g = globalThis as { ResizeObserver?: unknown };
-		if (typeof g.ResizeObserver === "undefined") {
-			g.ResizeObserver = class {
-				observe(): void {}
-				unobserve(): void {}
-				disconnect(): void {}
-			};
-			restore.push(() => {
-				g.ResizeObserver = undefined;
-			});
-		}
+		restoreViewport = stubViewport(50);
 	});
-
-	afterEach(() => {
-		for (const f of restore.splice(0)) f();
-	});
+	afterEach(() => restoreViewport());
 
 	function renderList() {
 		return render(() => (

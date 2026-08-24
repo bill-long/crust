@@ -16,7 +16,9 @@ export interface PickerProps<T> {
 	onSelect: (item: T) => void;
 	onClose: () => void;
 	renderItem: (item: T, isHighlighted: boolean) => JSX.Element;
-	filterFn: (item: T, query: string) => boolean;
+	/** Omit when `items` is already filtered - the list is used as-is,
+	    instead of paying a second full pass with a constant-true filter. */
+	filterFn?: (item: T, query: string) => boolean;
 	visible: boolean;
 	position: { bottom: string; left: string };
 }
@@ -39,13 +41,17 @@ export function createPicker<T>() {
 
 	const Picker: Component<PickerProps<T>> = (props) => {
 		const [highlightIndex, setHighlightIndex] = createSignal(0);
-		// Imperative handle onto the windowed list; reassigned on each mount
-		// of the <VirtualList> (it unmounts whenever the popover hides).
-		let listController: VirtualListController | undefined;
+		// Imperative handle onto the windowed list. A signal (not a plain
+		// let): consumers below re-evaluate when the <VirtualList> remounts
+		// (it unmounts whenever the popover hides) and hands out a fresh api.
+		const [listController, setListController] =
+			createSignal<VirtualListController>();
 
-		const filtered = createMemo(() =>
-			props.items.filter((item) => props.filterFn(item, props.query)),
-		);
+		const filtered = createMemo(() => {
+			const fn = props.filterFn;
+			if (!fn) return props.items;
+			return props.items.filter((item) => fn(item, props.query));
+		});
 
 		// A fresh open starts back at the top - a highlight retained from the
 		// previous session would point at an arbitrary (and, windowed, likely
@@ -78,17 +84,23 @@ export function createPicker<T>() {
 		createEffect(() => {
 			const idx = highlightIndex();
 			if (!props.visible || idx < 0 || idx >= filtered().length) return;
-			listController?.scrollToIndex(idx);
+			listController()?.scrollToIndex(idx);
 		});
 
 		const activeDescendant = () => {
 			if (!props.visible) return undefined;
 			const items = filtered();
 			const idx = highlightIndex();
-			if (idx >= 0 && idx < items.length) {
-				return `${listboxId}-item-${idx}`;
-			}
-			return undefined;
+			if (idx < 0 || idx >= items.length) return undefined;
+			// Only reference a row that is actually mounted: the user can
+			// wheel-scroll the highlighted row out of the virtualized window
+			// (unmounting it), and ARIA forbids referencing absent elements
+			// (SearchPanel's activeDescendantId idiom). Reading mountedRange
+			// here is deliberate tracking - the id comes back when the row
+			// scrolls back into the window.
+			const range = listController()?.mountedRange();
+			if (range && (idx < range[0] || idx >= range[1])) return undefined;
+			return `${listboxId}-item-${idx}`;
 		};
 
 		activeDescendantRef = activeDescendant;
@@ -139,9 +151,7 @@ export function createPicker<T>() {
 					id={listboxId}
 					each={filtered()}
 					rowHeight={ITEM_HEIGHT}
-					controller={(api) => {
-						listController = api;
-					}}
+					controller={(api) => setListController(() => api)}
 					class="absolute z-20 max-h-[216px] w-64 overflow-y-auto rounded-lg border border-border-default bg-surface-2 py-1 shadow-lg"
 					style={{
 						bottom: props.position.bottom,
@@ -158,6 +168,12 @@ export function createPicker<T>() {
 								id={`${listboxId}-item-${index()}`}
 								role="option"
 								aria-selected={isHighlighted()}
+								// Windowing keeps only ~a dozen options in the DOM;
+								// setsize/posinset tell assistive tech the real set
+								// ("n of 500"), which ARIA requires exactly when not
+								// all set members are present.
+								aria-setsize={filtered().length}
+								aria-posinset={index() + 1}
 								tabIndex={-1}
 								class={`cursor-pointer px-3 py-1.5 text-sm ${
 									isHighlighted()

@@ -10,44 +10,18 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
+import { stubViewport } from "../../test/stubViewport";
 import { createPicker } from "./Picker";
 
 afterEach(cleanup);
 
-// jsdom has no layout engine, so stub a 216px viewport (the popover's
-// max-h, 6 rows of 36px) to exercise the windowed list - mirrors the
-// VirtualList test's approach.
-const restore: Array<() => void> = [];
-
+// Stub a 216px viewport (the popover's max-h, 6 rows of 36px) to
+// exercise the windowed list.
+let restoreViewport: () => void;
 beforeEach(() => {
-	const desc = Object.getOwnPropertyDescriptor(
-		HTMLElement.prototype,
-		"clientHeight",
-	);
-	Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-		configurable: true,
-		get: () => 216,
-	});
-	restore.push(() => {
-		if (desc)
-			Object.defineProperty(HTMLElement.prototype, "clientHeight", desc);
-	});
-	const g = globalThis as { ResizeObserver?: unknown };
-	if (typeof g.ResizeObserver === "undefined") {
-		g.ResizeObserver = class {
-			observe(): void {}
-			unobserve(): void {}
-			disconnect(): void {}
-		};
-		restore.push(() => {
-			g.ResizeObserver = undefined;
-		});
-	}
+	restoreViewport = stubViewport(216);
 });
-
-afterEach(() => {
-	for (const f of restore.splice(0)) f();
-});
+afterEach(() => restoreViewport());
 
 const ITEMS = Array.from({ length: 100 }, (_, i) => `item-${i}`);
 
@@ -113,6 +87,28 @@ describe("createPicker windowing", () => {
 		expect(listbox.scrollTop).toBe(100 * 36 - 216);
 	});
 
+	it("reports the full set size on windowed options via aria-setsize/posinset", () => {
+		const { getByText } = setup();
+		const row = getByText("item-3").closest('[role="option"]');
+		expect(row?.getAttribute("aria-setsize")).toBe("100");
+		expect(row?.getAttribute("aria-posinset")).toBe("4");
+	});
+
+	it("drops aria-activedescendant while the highlighted row is scrolled out of the window", () => {
+		const { picker, container } = setup();
+		expect(picker.getActiveDescendant()).toBe(`${picker.listboxId}-item-0`);
+		const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+		// Wheel-scroll the highlighted row 0 far out of the window: its DOM
+		// node unmounts, and ARIA forbids referencing an absent element.
+		listbox.scrollTop = 50 * 36;
+		listbox.dispatchEvent(new Event("scroll"));
+		expect(picker.getActiveDescendant()).toBeUndefined();
+		// Scrolling back remounts it and restores the reference.
+		listbox.scrollTop = 0;
+		listbox.dispatchEvent(new Event("scroll"));
+		expect(picker.getActiveDescendant()).toBe(`${picker.listboxId}-item-0`);
+	});
+
 	it("does not re-assert the highlight scroll when the user scrolls away", () => {
 		const { key, container } = setup();
 		key("ArrowUp"); // highlight item-99, scrolled to the bottom
@@ -154,6 +150,24 @@ describe("createPicker windowing", () => {
 		setVisible(true);
 		expect(picker.getActiveDescendant()).toBe(`${picker.listboxId}-item-0`);
 		expect(queryByText("item-0")).toBeTruthy();
+	});
+
+	it("renders items as-is when filterFn is omitted (pre-filtered consumers)", () => {
+		const picker = createPicker<string>();
+		const { queryByText } = render(() => (
+			<picker.Picker
+				items={["alpha", "beta"]}
+				query="zzz"
+				visible={true}
+				position={{ bottom: "auto", left: "0" }}
+				onSelect={() => {}}
+				onClose={() => {}}
+				renderItem={(item) => <span>{item}</span>}
+			/>
+		));
+		// The query is the consumer's concern (it already filtered items).
+		expect(queryByText("alpha")).toBeTruthy();
+		expect(queryByText("beta")).toBeTruthy();
 	});
 
 	it("keeps Escape close behavior with no matches", () => {

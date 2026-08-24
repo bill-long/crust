@@ -91,6 +91,14 @@ export interface VirtualListController {
 	 * tracking need the target row mounted before the next DOM read.
 	 */
 	scrollToIndex(index: number): void;
+	/**
+	 * The currently mounted `[first, last)` row range (overscan included).
+	 * A reactive read: calling it inside a computation subscribes to window
+	 * shifts - intended for consumers that must know whether a given row is
+	 * mounted (e.g. an aria-activedescendant that may not reference an
+	 * unmounted element).
+	 */
+	mountedRange(): [number, number];
 }
 
 interface VirtualListProps<T>
@@ -187,7 +195,7 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			ro.observe(el);
 			onCleanup(() => ro.disconnect());
 		}
-		local.controller?.({ scrollToIndex });
+		local.controller?.({ scrollToIndex, mountedRange: range });
 	});
 
 	// untrack: an imperative API must not subscribe its caller - a consumer
@@ -206,10 +214,16 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			const i = Math.max(0, Math.min(index, count - 1));
 			const top = padTop() + offs[i];
 			const bottom = padTop() + offs[i + 1];
-			let target = scrollTop();
+			// Baseline on the DOM, not the internal signal: the browser clamps
+			// scrollTop when the list shrinks under the current offset, and the
+			// signal only learns that from the (async) scroll event.
+			let target = el.scrollTop;
 			if (top < target) target = top;
 			else if (bottom > target + vh) target = bottom - vh;
-			if (target === scrollTop()) return;
+			// Clamp to the known geometry (bottom padding excluded - no target
+			// above needs it), so a stale baseline can't park the window past
+			// the real maximum scroll.
+			target = Math.max(0, Math.min(target, padTop() + offs[count] - vh));
 			el.scrollTop = target;
 			setScrollTop(target);
 		});

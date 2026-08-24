@@ -7,7 +7,7 @@ import {
 } from "@solidjs/testing-library";
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import { createSignal, type ParentComponent } from "solid-js";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppSyncState, CryptoState } from "../../../client/client";
 import { ClientContext } from "../../../client/client";
 import {
@@ -164,12 +164,6 @@ function setup(
 afterEach(() => {
 	cleanup();
 	clearNotices();
-});
-
-beforeEach(() => {
-	// jsdom doesn't implement scrollIntoView (the Picker scrolls the
-	// highlighted option into view on mount/filter changes).
-	Element.prototype.scrollIntoView = vi.fn();
 });
 
 describe("ForwardDialog", () => {
