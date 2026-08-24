@@ -276,6 +276,30 @@ describe("<VirtualList> windowing with a stubbed viewport", () => {
 		expect(queryByText("row-40")).toBeTruthy();
 	});
 
+	it("evaluates the rowHeight prop expression once, not per scroll tick", () => {
+		// The prop compiles to a getter re-invoking the caller's expression on
+		// every access; RoomList derives its pitch from getComputedStyle, so
+		// per-scroll re-evaluation would put a style read in the scroll path.
+		const heightSpy = vi.fn(() => 10);
+		const { container } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={heightSpy()}
+				overscan={2}
+				class="scroller"
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		const callsAfterMount = heightSpy.mock.calls.length;
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		for (let i = 1; i <= 5; i++) {
+			scroller.scrollTop = i * 50;
+			scroller.dispatchEvent(new Event("scroll"));
+		}
+		expect(heightSpy.mock.calls.length).toBe(callsAfterMount);
+	});
+
 	it("scrollToIndex is a no-op for a fully visible row", () => {
 		let api: VirtualListController | undefined;
 		const { container } = render(() => (

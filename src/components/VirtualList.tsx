@@ -221,6 +221,11 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	// per-row offsets memo deliberately keys on the array identity instead -
 	// see its comment.
 	const count = createMemo(() => local.each.length);
+	// The prop compiles to a getter that re-evaluates the caller's
+	// expression on every access; memoized so a caller computing the height
+	// (e.g. RoomList's getComputedStyle-derived rem pitch) pays once, not
+	// on every scroll tick through the range memo below.
+	const rowHeight = createMemo(() => local.rowHeight);
 	// Prefix sums for per-row heights; `null` for a uniform height, where
 	// offsets are `i * rowHeight` in O(1) and rebuilding an O(n) array as a
 	// filtered list changes length on each keystroke would be pure waste.
@@ -228,14 +233,17 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	// a height callback may derive from item metadata, so a same-length
 	// `each` swap must still rebuild the sums.
 	const offsets = createMemo(() =>
-		typeof local.rowHeight === "number"
+		typeof rowHeight() === "number"
 			? null
-			: computeRowOffsets(local.each.length, local.rowHeight),
+			: computeRowOffsets(
+					local.each.length,
+					rowHeight() as (i: number) => number,
+				),
 	);
 	/** Top edge of row `i` (`i === count` gives the total content height). */
 	const rowTop = (i: number): number => {
 		const offs = offsets();
-		return offs ? offs[i] : i * (local.rowHeight as number);
+		return offs ? offs[i] : i * (rowHeight() as number);
 	};
 	const totalHeight = (): number => rowTop(count());
 
@@ -297,7 +305,10 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			target = Math.max(0, Math.min(target, padTop() + rowTop(n) - vh));
 			if (target === el.scrollTop) return;
 			el.scrollTop = target;
-			setScrollTop(target);
+			// Read back rather than trusting the request: the browser clamps
+			// writes computed from stale viewport measurements, and a clamped
+			// write fires no scroll event to resync the signal.
+			setScrollTop(el.scrollTop);
 		});
 
 	createEffect(() => {
@@ -333,7 +344,7 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 				? visibleRowRange(offs, st, viewportH(), overscan())
 				: uniformVisibleRowRange(
 						count(),
-						local.rowHeight as number,
+						rowHeight() as number,
 						st,
 						viewportH(),
 						overscan(),

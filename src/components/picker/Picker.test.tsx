@@ -31,9 +31,10 @@ function setup(options?: { items?: string[]; query?: string }) {
 	const onClose = vi.fn();
 	const [visible, setVisible] = createSignal(true);
 	const [query, setQuery] = createSignal(options?.query ?? "");
+	const [items, setItems] = createSignal(options?.items ?? ITEMS);
 	const utils = render(() => (
 		<picker.Picker
-			items={options?.items ?? ITEMS}
+			items={items()}
 			query={query()}
 			visible={visible()}
 			position={{ bottom: "auto", left: "0" }}
@@ -45,7 +46,16 @@ function setup(options?: { items?: string[]; query?: string }) {
 	));
 	const key = (k: string): boolean =>
 		picker.handlePickerKey(new KeyboardEvent("keydown", { key: k }));
-	return { picker, onSelect, onClose, setVisible, setQuery, key, ...utils };
+	return {
+		picker,
+		onSelect,
+		onClose,
+		setVisible,
+		setQuery,
+		setItems,
+		key,
+		...utils,
+	};
 }
 
 describe("createPicker windowing", () => {
@@ -107,6 +117,19 @@ describe("createPicker windowing", () => {
 		listbox.scrollTop = 0;
 		listbox.dispatchEvent(new Event("scroll"));
 		expect(picker.getActiveDescendant()).toBe(`${picker.listboxId}-item-0`);
+	});
+
+	it("does not yank the scroll back when items churn identity while scrolled away", () => {
+		const { key, container, setItems } = setup();
+		key("ArrowUp"); // highlight item-99, scrolled to the bottom
+		const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+		listbox.scrollTop = 0;
+		listbox.dispatchEvent(new Event("scroll"));
+		// A fresh array identity with the same content (the shape every
+		// keystroke / member-list change produces) must not re-run the
+		// scroll-into-view effect.
+		setItems([...ITEMS]);
+		expect(listbox.scrollTop).toBe(0);
 	});
 
 	it("does not re-assert the highlight scroll when the user scrolls away", () => {

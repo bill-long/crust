@@ -7,6 +7,7 @@ import {
 	type JSX,
 	on,
 	Show,
+	untrack,
 } from "solid-js";
 import { VirtualList, type VirtualListController } from "../VirtualList";
 
@@ -87,12 +88,20 @@ export function createPicker<T>() {
 		// Keep the highlighted item scrolled into view. Synchronous through
 		// the controller, so the row is mounted (and its aria-activedescendant
 		// id resolvable) immediately after a keyboard move across the
-		// windowed boundary.
-		createEffect(() => {
-			const idx = highlightIndex();
-			if (!props.visible || idx < 0 || idx >= filtered().length) return;
-			listController()?.scrollToIndex(idx);
-		});
+		// windowed boundary. Keyed to the highlight, the controller (fresh on
+		// each list mount), and visibility - deliberately NOT to filtered()'s
+		// identity: items churn (keystrokes, member join/leave) must not yank
+		// the viewport back to the highlight after the user scrolled away.
+		createEffect(
+			on(
+				[highlightIndex, listController, () => props.visible] as const,
+				([idx, controller, visible]) => {
+					if (!visible || idx < 0) return;
+					if (idx >= untrack(() => filtered().length)) return;
+					controller?.scrollToIndex(idx);
+				},
+			),
+		);
 
 		const activeDescendant = () => {
 			if (!props.visible) return undefined;
