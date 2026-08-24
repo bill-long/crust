@@ -368,7 +368,7 @@ jobs:
           }
 
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: crust-desktop-installers
           path: dist-installers
@@ -384,7 +384,7 @@ jobs:
       contents: write
     steps:
       - name: Download installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: crust-desktop-installers
           path: installers
