@@ -753,8 +753,13 @@ describe("useLivekitRoom", () => {
 
 	it("flags a participant whose membership publishes to a different SFU", async () => {
 		// Legacy `multi_sfu` (or MSC4143 multi-transport) peer: publishes to
-		// its own SFU, joins ours subscriber-only. No tracks arrive here, so
-		// the UI must show "different server", not a bogus mute state (#488).
+		// its own SFU, joins ours subscriber-only. With the receive-only
+		// connection to their SFU FAILING (second token fetch rejects), no
+		// tracks can arrive, so the UI must show "different server", not a
+		// bogus mute state (#488/#495).
+		jwtMock
+			.mockResolvedValueOnce({ url: "wss://sfu", jwt: "JWT" })
+			.mockRejectedValueOnce(new Error("foreign jwt blocked"));
 		const fakeRoom = createFakeRoom();
 		fakeRoom.remoteParticipants.set("remote-foreign", {
 			identity: "remote-foreign",
@@ -936,6 +941,226 @@ describe("useLivekitRoom", () => {
 		expect(remote?.isUnresolved).toBe(true);
 		expect(remote?.micUnavailable).toBe(false);
 		expect(remote?.isMuted).toBe(true);
+	});
+
+	describe("multi-SFU receive (#495)", () => {
+		const foreignTransport = {
+			type: "livekit",
+			livekit_service_url: "https://livekit-jwt.call.matrix.org",
+			livekit_alias: "!room:example.com",
+		} as const;
+
+		/** Queue distinct fake rooms: first construction = primary, second =
+		 *  the foreign subscriber room. */
+		const queueRooms = (
+			primary: ReturnType<typeof createFakeRoom>,
+			foreignRoom: ReturnType<typeof createFakeRoom>,
+		): void => {
+			const queue = [primary, foreignRoom];
+			roomFactory.current = () => {
+				const next = queue.shift();
+				if (!next) throw new Error("unexpected extra Room construction");
+				return next;
+			};
+		};
+
+		const renderWithForeignPeer = (opts?: {
+			memberships?: CallMembership[];
+		}): {
+			primary: ReturnType<typeof createFakeRoom>;
+			foreignRoom: ReturnType<typeof createFakeRoom>;
+			result: ReturnType<typeof useLivekitRoom>;
+		} => {
+			const primary = createFakeRoom();
+			const foreignRoom = createFakeRoom();
+			queueRooms(primary, foreignRoom);
+			const { client } = createClient();
+			client.getUser.mockImplementation((userId: string) =>
+				userId === "@trea:matrix.org" ? { displayName: "Trea" } : null,
+			);
+			const memberships = opts?.memberships ?? [
+				makeMembership({
+					rtcBackendIdentity: "hashed-peer",
+					userId: "@trea:matrix.org",
+					transport: foreignTransport,
+				}),
+			];
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => memberships,
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			return { primary, foreignRoom, result };
+		};
+
+		it("opens a subscriber-only connection to the foreign SFU and merges its publishing peer", async () => {
+			const { primary, foreignRoom, result } = renderWithForeignPeer();
+			// The peer joins OUR room subscriber-only (no publications)...
+			primary.remoteParticipants.set("hashed-peer", {
+				identity: "hashed-peer",
+				audioTrackPublications: new Map(),
+				videoTrackPublications: new Map(),
+			});
+			// ...and publishes an unmuted mic in THEIR room.
+			foreignRoom.remoteParticipants.set("hashed-peer", {
+				identity: "hashed-peer",
+				audioTrackPublications: new Map([
+					[
+						"sid-mic-f",
+						{ trackSid: "sid-mic-f", source: "microphone", isMuted: false },
+					],
+				]),
+				videoTrackPublications: new Map(),
+			});
+			await waitFor(() => result.status() === "connected");
+			await waitFor(() => jwtMock.mock.calls.length === 2);
+			// The foreign token was requested against the peer's transport.
+			expect((jwtMock.mock.calls[1] as unknown[])[0]).toEqual(foreignTransport);
+			await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+			// Never a publish call on the foreign room.
+			expect(
+				foreignRoom.localParticipant.setMicrophoneEnabled,
+			).not.toHaveBeenCalled();
+			// Merged roster: ONE row for the peer, real mute state, no badge.
+			await waitFor(() => {
+				const rows = result
+					.participants()
+					.filter((p) => p.identity === "hashed-peer");
+				return rows.length === 1 && rows[0].isMuted === false;
+			});
+			const peer = result
+				.participants()
+				.find((p) => p.identity === "hashed-peer");
+			expect(peer?.displayName).toBe("Trea");
+			expect(peer?.isMuted).toBe(false);
+			expect(peer?.micUnavailable).toBe(false);
+			expect(peer?.isForeignSfu).toBe(true);
+		});
+
+		it("merges a foreign camera track into videoTracks via the shared map", async () => {
+			const { foreignRoom, result } = renderWithForeignPeer();
+			await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+			const remoteTrack = { kind: "video", attach: vi.fn(), detach: vi.fn() };
+			foreignRoom.emit(
+				"trackSubscribed",
+				remoteTrack,
+				{ trackSid: "sid-cam-f", source: "camera", isMuted: false },
+				{ identity: "hashed-peer" },
+			);
+			expect(result.videoTracks().get("hashed-peer")?.sid).toBe("sid-cam-f");
+		});
+
+		it("keeps the different-server badge while the foreign connection is failed", async () => {
+			jwtMock
+				.mockResolvedValueOnce({ url: "wss://sfu", jwt: "JWT" })
+				.mockRejectedValueOnce(new Error("foreign blocked"));
+			const { primary, result } = renderWithForeignPeer();
+			primary.remoteParticipants.set("hashed-peer", {
+				identity: "hashed-peer",
+				audioTrackPublications: new Map(),
+				videoTrackPublications: new Map(),
+			});
+			await waitFor(() => result.status() === "connected");
+			await waitFor(() => jwtMock.mock.calls.length === 2);
+			await waitFor(
+				() =>
+					result.participants().find((p) => p.identity === "hashed-peer") !==
+					undefined,
+			);
+			const peer = result
+				.participants()
+				.find((p) => p.identity === "hashed-peer");
+			expect(peer?.micUnavailable).toBe(true);
+			expect(peer?.isForeignSfu).toBe(true);
+		});
+
+		it("deduplicates an identity present in both rooms, preferring the publishing room", async () => {
+			const { primary, foreignRoom, result } = renderWithForeignPeer();
+			primary.remoteParticipants.set("hashed-peer", {
+				identity: "hashed-peer",
+				audioTrackPublications: new Map(),
+				videoTrackPublications: new Map(),
+			});
+			foreignRoom.remoteParticipants.set("hashed-peer", {
+				identity: "hashed-peer",
+				audioTrackPublications: new Map([
+					[
+						"sid-mic-f",
+						{ trackSid: "sid-mic-f", source: "microphone", isMuted: true },
+					],
+				]),
+				videoTrackPublications: new Map(),
+			});
+			// Our own identity in the foreign room must NOT become a remote row.
+			foreignRoom.remoteParticipants.set("local-id", {
+				identity: "local-id",
+				audioTrackPublications: new Map(),
+				videoTrackPublications: new Map(),
+			});
+			await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+			await waitFor(() => {
+				const rows = result
+					.participants()
+					.filter((p) => p.identity === "hashed-peer");
+				return rows.length === 1 && rows[0].isMuted === true;
+			});
+			const rows = result.participants();
+			expect(rows.filter((p) => p.identity === "hashed-peer")).toHaveLength(1);
+			// The muted-mic publication from their room is the real state.
+			const peer = rows.find((p) => p.identity === "hashed-peer");
+			expect(peer?.isMuted).toBe(true);
+			expect(peer?.micUnavailable).toBe(false);
+			// Exactly one local row - our foreign-room echo was skipped.
+			expect(rows.filter((p) => p.isLocal)).toHaveLength(1);
+			expect(rows.filter((p) => p.identity === "local-id")).toHaveLength(1);
+		});
+
+		it("disconnect tears the foreign room down and releases before teardownComplete resolves", async () => {
+			const { foreignRoom, result } = renderWithForeignPeer();
+			await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+			await result.disconnect();
+			expect(foreignRoom.disconnect).toHaveBeenCalledTimes(1);
+		});
+
+		it("collapses the foreign set when the membership stops publishing elsewhere", async () => {
+			const [membershipsSig, setMembershipsSig] = createSignal<
+				CallMembership[]
+			>([
+				makeMembership({
+					rtcBackendIdentity: "hashed-peer",
+					userId: "@trea:matrix.org",
+					transport: foreignTransport,
+				}),
+			]);
+			const primary = createFakeRoom();
+			const foreignRoom = createFakeRoom();
+			queueRooms(primary, foreignRoom);
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: membershipsSig,
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+			// The peer leaves (membership gone) - the foreign room must go too.
+			setMembershipsSig([]);
+			await waitFor(() => foreignRoom.disconnect.mock.calls.length === 1);
+		});
 	});
 
 	it("surfaces JWT fetch errors as error status", async () => {
