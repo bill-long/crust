@@ -231,13 +231,31 @@ const PinnedMessageRow: Component<{
 	// arrives as MatrixEventEvent.Decrypted on the event itself. Watch the
 	// resolved event while it is pending and re-derive when keys land.
 	createEffect(() => {
+		// Track the tick directly: `resolved()` is equals-suppressed, so a
+		// FAILED retry (projection unchanged) would never re-run this effect
+		// through the memo alone - and re-arming below depends on it.
+		decryptTick();
 		const ev = resolved()?.event;
 		if (!ev) return;
-		if (!ev.isBeingDecrypted() && !ev.shouldAttemptDecryption()) return;
+		// Watch while decryption is pending OR has FAILED: a failed attempt
+		// sets clearEvent, which makes shouldAttemptDecryption() false, but
+		// rust-crypto retries when the megolm key arrives and emits
+		// Decrypted again - without the isDecryptionFailure() arm the row
+		// would keep the undecryptable fallback until close/reopen.
+		if (
+			!ev.isBeingDecrypted() &&
+			!ev.shouldAttemptDecryption() &&
+			!ev.isDecryptionFailure()
+		) {
+			return;
+		}
 		void props.client.decryptEventIfNeeded(ev);
 		const onDecrypted = (): void => {
 			// Cached projections hold the encrypted-era fields; drop before
-			// re-deriving.
+			// re-deriving. The tick re-runs this effect, which RE-ARMS the
+			// watcher if this fire was itself a failed attempt (the guard
+			// above stays true via isDecryptionFailure) and detaches for
+			// good once the event is clear.
 			props.resolveCache.delete(props.eventId);
 			setDecryptTick((t) => t + 1);
 		};

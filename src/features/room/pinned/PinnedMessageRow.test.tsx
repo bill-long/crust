@@ -71,6 +71,7 @@ function cachedEvent(body: string): MatrixEvent {
 		isRelation: () => false,
 		isBeingDecrypted: () => false,
 		shouldAttemptDecryption: () => false,
+		isDecryptionFailure: () => false,
 	} as unknown as MatrixEvent;
 }
 
@@ -200,6 +201,49 @@ describe("PinnedMessageRow", () => {
 		expect(await screen.findByText("from the cache")).toBeTruthy();
 		expect(client.getEventTimeline).not.toHaveBeenCalled();
 		expect(client.fetchRoomEvent).not.toHaveBeenCalled();
+	});
+
+	it("re-arms after a failed decryption and updates once the key arrives (#485)", async () => {
+		// A UISI pin has clearEvent set, so shouldAttemptDecryption() is
+		// false - the watcher must still attach via isDecryptionFailure()
+		// and survive an intermediate failed retry, or the row keeps the
+		// undecryptable fallback until close/reopen.
+		let failed = true;
+		const handlers = new Set<() => void>();
+		const onceSpy = vi.fn((_e: unknown, cb: () => void) => {
+			handlers.add(cb);
+		});
+		const ev = {
+			getId: () => "$pinned:hs",
+			getSender: () => "@alice:hs",
+			getContent: () =>
+				failed
+					? { msgtype: "m.bad.encrypted", body: "" }
+					: { msgtype: "m.text", body: "decrypted at last" },
+			getTs: () => 1000,
+			isRelation: () => false,
+			isBeingDecrypted: () => false,
+			shouldAttemptDecryption: () => false,
+			isDecryptionFailure: () => failed,
+			once: onceSpy,
+			off: vi.fn((_e: unknown, cb: () => void) => {
+				handlers.delete(cb);
+			}),
+		} as unknown as MatrixEvent;
+		renderRow(makeClient(), makeRoom({ findEventById: () => ev }));
+		await screen.findByRole("article");
+		expect(onceSpy).toHaveBeenCalledTimes(1);
+		// A retry fires Decrypted but STILL fails: the watcher re-arms.
+		for (const cb of [...handlers]) {
+			handlers.delete(cb);
+			cb();
+		}
+		await new Promise((r) => setTimeout(r, 0));
+		expect(onceSpy).toHaveBeenCalledTimes(2);
+		// The key arrives; the successful retry fires Decrypted again.
+		failed = false;
+		for (const cb of [...handlers]) cb();
+		expect(await screen.findByText("decrypted at last")).toBeTruthy();
 	});
 
 	it("jumps without a root for a cached main-timeline event", async () => {

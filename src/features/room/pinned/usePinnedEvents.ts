@@ -264,11 +264,18 @@ export function usePinnedEvents(
 	const resolveCache = new Map<string, PinnedResolution>();
 	const onTimeline = (event: MatrixEvent, eventRoom?: Room): void => {
 		if (!eventRoom || eventRoom.roomId !== roomId()) return;
+		const ids = pinnedIds();
 		const id = event.getId?.();
-		if (!id || !pinnedIds().includes(id)) return;
-		// The event just landed in the room's own cache - a row's stale
-		// projection (if any) must be re-derived from it.
-		resolveCache.delete(id);
+		// Match the event itself AND events that TARGET a pin: an edit
+		// (m.replace), redaction, or annotation arrives under its own id
+		// but changes what a pinned row should render.
+		const assoc = event.getAssociatedId?.();
+		const hit =
+			id && ids.includes(id) ? id : assoc && ids.includes(assoc) ? assoc : null;
+		if (!hit) return;
+		// The pin's content just changed in the room's own cache - a row's
+		// stale projection (if any) must be re-derived from it.
+		resolveCache.delete(hit);
 		setTimelineTick((n) => n + 1);
 	};
 	client.on(RoomEvent.Timeline, onTimeline);

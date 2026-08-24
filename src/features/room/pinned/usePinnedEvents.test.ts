@@ -1,4 +1,11 @@
-import { EventType, type MatrixClient, RoomStateEvent } from "matrix-js-sdk";
+import {
+	EventType,
+	type MatrixClient,
+	type MatrixEvent,
+	type Room,
+	RoomEvent,
+	RoomStateEvent,
+} from "matrix-js-sdk";
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
@@ -294,6 +301,67 @@ describe("usePinnedEvents", () => {
 
 			expect(pins.canPin()).toBe(true);
 			expect(pins.pinnedIds()).toEqual(["$a"]);
+		});
+	});
+});
+
+describe("usePinnedEvents timeline tick (#485)", () => {
+	function timelineEvent(over: {
+		id: string;
+		associatedId?: string;
+	}): MatrixEvent {
+		return {
+			getId: () => over.id,
+			getAssociatedId: () => over.associatedId,
+		} as unknown as MatrixEvent;
+	}
+
+	it("ticks and drops the cache entry when a pinned event (or an edit targeting one) arrives", async () => {
+		const room = createMockRoom("!r:x");
+		room.__setStateEvent(PINNED_TYPE, "", { pinned: ["$pin:x"] });
+		const client = createMockClient(new Map([["!r:x", room]]));
+		await withRoot(async () => {
+			const pins = usePinnedEvents(
+				client as unknown as MatrixClient,
+				() => "!r:x",
+			);
+			await flushPromises();
+			expect(pins.pinnedIds()).toEqual(["$pin:x"]);
+			pins.resolveCache.set("$pin:x", {
+				body: "stale",
+			} as unknown as ReturnType<typeof pins.resolveCache.get> & object);
+			const before = pins.timelineTick();
+
+			// Unrelated chatter must NOT tick (the whole point of filtering).
+			client.__emit(
+				RoomEvent.Timeline,
+				timelineEvent({ id: "$chatter:x" }),
+				room as unknown as Room,
+			);
+			expect(pins.timelineTick()).toBe(before);
+			expect(pins.resolveCache.has("$pin:x")).toBe(true);
+
+			// The pinned event itself arriving ticks + clears its cache entry.
+			client.__emit(
+				RoomEvent.Timeline,
+				timelineEvent({ id: "$pin:x" }),
+				room as unknown as Room,
+			);
+			expect(pins.timelineTick()).toBe(before + 1);
+			expect(pins.resolveCache.has("$pin:x")).toBe(false);
+
+			// An EDIT (m.replace under its own id, targeting the pin) ticks
+			// too - a per-id-only filter regressed live edits of open rows.
+			pins.resolveCache.set("$pin:x", {
+				body: "pre-edit",
+			} as unknown as ReturnType<typeof pins.resolveCache.get> & object);
+			client.__emit(
+				RoomEvent.Timeline,
+				timelineEvent({ id: "$edit:x", associatedId: "$pin:x" }),
+				room as unknown as Room,
+			);
+			expect(pins.timelineTick()).toBe(before + 2);
+			expect(pins.resolveCache.has("$pin:x")).toBe(false);
 		});
 	});
 });
