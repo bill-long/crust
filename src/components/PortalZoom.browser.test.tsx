@@ -6,33 +6,43 @@
  * in logical pixels - popovers landed far from their triggers (pinned panel in
  * the "white bar", #485) or clean off-screen (UserBar chevron drop-up, #487).
  *
- * The arrangement under test: zoom lives on #root (global.css), portaled
- * content re-scales itself via `.portal-scale`. Needs a real browser - jsdom
- * does no layout, which is exactly why the original bug never failed CI.
+ * The arrangement under test: `updateSetting("zoomLevel", ...)` drives
+ * applyZoom, which writes ONLY `--app-zoom`; global.css zooms `#root` from
+ * the variable and portaled content re-scales itself via `.portal-scale`.
+ * Driving the real settings path (not hand-set styles) means a regression in
+ * applyZoom itself - e.g. re-zooming <html>, the exact #487 bug - fails here.
+ * Needs a real browser: jsdom does no layout, which is exactly why the
+ * original bug never failed CI.
  */
 
 import { Popover } from "@kobalte/core/popover";
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import "../styles/global.css";
+import { updateSetting } from "../stores/settings";
 
 const ZOOM = 1.3;
 
 beforeEach(() => {
-	document.documentElement.style.setProperty("--app-zoom", `${ZOOM}`);
+	// #root must exist before applyZoom runs (production order: index.html
+	// provides it before app bootstrap).
+	const root = document.createElement("div");
+	root.id = "root"; // picks up global.css's `#root { zoom: var(--app-zoom) }`
+	document.body.appendChild(root);
+	updateSetting("zoomLevel", ZOOM * 100);
 });
 
 afterEach(() => {
 	cleanup();
-	document.documentElement.style.removeProperty("--app-zoom");
+	updateSetting("zoomLevel", 100);
+	localStorage.removeItem("crust:settings");
 	document.getElementById("root")?.remove();
 });
 
-/** Mount UI inside a zoomed #root container, mirroring the app shell. */
-function renderInZoomedRoot(ui: () => import("solid-js").JSX.Element): void {
-	const root = document.createElement("div");
-	root.id = "root"; // picks up global.css's `#root { zoom: var(--app-zoom) }`
-	document.body.appendChild(root);
+/** Mount UI inside the zoomed #root container, mirroring the app shell. */
+function renderInRoot(ui: () => import("solid-js").JSX.Element): void {
+	const root = document.getElementById("root");
+	if (!root) throw new Error("#root missing");
 	render(ui, { container: root });
 }
 
@@ -66,34 +76,22 @@ function popoverFixture(): import("solid-js").JSX.Element {
 	);
 }
 
+async function openPopover(): Promise<{
+	trigger: HTMLElement;
+	content: HTMLElement;
+}> {
+	const trigger = await screen.findByTestId("zoom-trigger");
+	trigger.click();
+	const content = await screen.findByTestId("zoom-content");
+	// Give floating-ui a frame to settle its position.
+	await new Promise((r) => requestAnimationFrame(() => r(null)));
+	return { trigger, content };
+}
+
 describe("portal positioning under UI zoom (#487/#485)", () => {
 	it("positions a bottom-anchored drop-up above its trigger, fully on-screen", async () => {
-		renderInZoomedRoot(popoverFixture);
-		const trigger = document.querySelector<HTMLElement>(
-			'[data-testid="zoom-trigger"]',
-		);
-		if (!trigger) throw new Error("trigger missing");
-		trigger.click();
-		const content = await new Promise<HTMLElement>((resolve, reject) => {
-			const t0 = performance.now();
-			const poll = (): void => {
-				const el = document.querySelector<HTMLElement>(
-					'[data-testid="zoom-content"]',
-				);
-				if (el) {
-					resolve(el);
-					return;
-				}
-				if (performance.now() - t0 > 3000) {
-					reject(new Error("no content"));
-					return;
-				}
-				requestAnimationFrame(poll);
-			};
-			poll();
-		});
-		// Give floating-ui a frame to settle its position.
-		await new Promise((r) => requestAnimationFrame(() => r(null)));
+		renderInRoot(popoverFixture);
+		const { trigger, content } = await openPopover();
 
 		const t = trigger.getBoundingClientRect();
 		const c = content.getBoundingClientRect();
@@ -109,14 +107,25 @@ describe("portal positioning under UI zoom (#487/#485)", () => {
 		expect(getComputedStyle(content).zoom).toBe(`${ZOOM}`);
 	});
 
-	it("keeps the portal container outside the zoom context", () => {
-		renderInZoomedRoot(popoverFixture);
-		// body children other than #root (Kobalte portals) must not inherit
-		// a zoom from an ancestor - #root is the only zoomed element.
+	it("keeps the portaled content outside every zoom context except its own", async () => {
+		renderInRoot(popoverFixture);
+		const { content } = await openPopover();
+
+		// The app root carries the scale; document chrome does not - a
+		// regression that re-zooms <html> (the original #487 bug) fails here
+		// because updateSetting drove the REAL applyZoom above.
 		const root = document.getElementById("root");
 		if (!root) throw new Error("root missing");
 		expect(getComputedStyle(root).zoom).toBe(`${ZOOM}`);
 		expect(getComputedStyle(document.documentElement).zoom).toBe("1");
 		expect(getComputedStyle(document.body).zoom).toBe("1");
+		// Every ANCESTOR of the really-opened portal content (its positioner
+		// wrapper, the portal container, body, html) is unzoomed - only the
+		// content itself opts back into the scale via .portal-scale.
+		let node: HTMLElement | null = content.parentElement;
+		while (node) {
+			expect(getComputedStyle(node).zoom).toBe("1");
+			node = node.parentElement;
+		}
 	});
 });

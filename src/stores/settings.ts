@@ -257,16 +257,17 @@ function applyZoom(level: number): void {
 		CSS.supports?.("zoom", "1")
 	) {
 		const z = level / 100;
-		// The zoom itself goes on #root, NOT on <html> (#487/#485): content
-		// portaled into document.body (Kobalte popovers/tooltips/menus) must
-		// stay OUTSIDE the zoom context, or floating-ui measures trigger
-		// rects in visual pixels and applies coordinates in zoomed pixels -
-		// re-multiplying them and (with the clipping viewport read in
-		// logical pixels) mis-flipping placements clean off-screen. The
-		// `--app-zoom` custom property stays on <html> so both the app and
-		// portaled surfaces (`.portal-scale`) can read it.
-		const root = document.getElementById("root");
-		if (root) root.style.zoom = `${z}`;
+		// Only the custom property is written here; the zoom itself is the
+		// stylesheet's job (`#root { zoom: var(--app-zoom, 1) }` plus
+		// `.portal-scale` in global.css). One mechanism on purpose - an
+		// inline `style.zoom` copy would outrank the stylesheet and let the
+		// two silently diverge. The zoom lives on #root, NOT on <html>
+		// (#487/#485): content portaled into document.body (Kobalte
+		// popovers/tooltips/menus) must stay OUTSIDE the zoom context, or
+		// floating-ui measures trigger rects in visual pixels, applies
+		// coordinates in zoomed pixels, and reads the clipping viewport in
+		// logical pixels - re-multiplying offsets and mis-flipping
+		// placements clean off-screen.
 		document.documentElement.style.setProperty("--app-zoom", `${z}`);
 	}
 }

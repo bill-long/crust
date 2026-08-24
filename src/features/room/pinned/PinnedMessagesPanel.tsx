@@ -201,6 +201,9 @@ const PinnedMessagesPanel: Component<{
 				client={props.client}
 				room={r}
 				eventId={eventId}
+				timelineTick={props.pins.timelineTick}
+				resolveCache={props.pins.resolveCache}
+				contextTimelineSet={props.pins.contextTimelineSet()}
 				canPin={props.pins.canPin()}
 				shortcodeLookup={props.shortcodeLookup}
 				tabIndex={focusedId() === eventId ? 0 : -1}

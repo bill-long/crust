@@ -59,7 +59,7 @@ export const CallOverlayPanel: Component = () => {
 	};
 
 	return (
-		<div class="flex h-screen w-screen flex-col bg-surface-0 text-text-primary">
+		<div class="flex h-full w-full flex-col bg-surface-0 text-text-primary">
 			<header class="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border-subtle bg-surface-1 px-2">
 				<span class="flex min-w-0 items-center gap-1.5">
 					<span

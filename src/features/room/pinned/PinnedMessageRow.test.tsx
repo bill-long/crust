@@ -1,7 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
+import type {
+	EventTimelineSet,
+	MatrixClient,
+	MatrixEvent,
+	Room,
+} from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PinnedMessageRow } from "./PinnedMessageRow";
+import { PinnedMessageRow, type ResolvedPinnedEvent } from "./PinnedMessageRow";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -51,12 +57,21 @@ function makeRoom(overrides?: Partial<Room>): Room {
 		findEventById: () => undefined,
 		getMember: () => ({ name: "Alice" }),
 		getUnfilteredTimelineSet: () => ({}),
-		// The row subscribes to RoomEvent.Timeline to re-resolve when the
-		// event arrives later (#485).
-		on: vi.fn(),
-		off: vi.fn(),
 		...overrides,
 	} as unknown as Room;
+}
+
+/** Cached-event mock with the decryption-watcher surface the row reads. */
+function cachedEvent(body: string): MatrixEvent {
+	return {
+		getId: () => "$pinned:hs",
+		getSender: () => "@alice:hs",
+		getContent: () => ({ msgtype: "m.text", body }),
+		getTs: () => 1000,
+		isRelation: () => false,
+		isBeingDecrypted: () => false,
+		shouldAttemptDecryption: () => false,
+	} as unknown as MatrixEvent;
 }
 
 function makeClient(overrides?: Partial<MatrixClient>): MatrixClient {
@@ -70,12 +85,24 @@ function makeClient(overrides?: Partial<MatrixClient>): MatrixClient {
 	} as unknown as MatrixClient;
 }
 
-function renderRow(client: MatrixClient, room: Room, onJump = vi.fn()) {
+function renderRow(
+	client: MatrixClient,
+	room: Room,
+	onJump = vi.fn(),
+	over?: {
+		timelineTick?: () => number;
+		resolveCache?: Map<string, ResolvedPinnedEvent>;
+		contextTimelineSet?: EventTimelineSet | null;
+	},
+) {
 	render(() => (
 		<PinnedMessageRow
 			client={client}
 			room={room}
 			eventId="$pinned:hs"
+			timelineTick={over?.timelineTick ?? (() => 0)}
+			resolveCache={over?.resolveCache ?? new Map()}
+			contextTimelineSet={over?.contextTimelineSet ?? null}
 			canPin={false}
 			shortcodeLookup={new Map()}
 			tabIndex={0}
@@ -112,12 +139,11 @@ describe("PinnedMessageRow", () => {
 		// The real SDK throws synchronously when timelineSupport is off (the
 		// #485 misconfiguration) - and can reject for other reasons too. The
 		// row must not let that swallow the standalone fallback.
+		const getEventTimeline = vi
+			.fn()
+			.mockRejectedValue(new Error("timeline support is disabled."));
 		const client = makeClient({
-			getEventTimeline: vi
-				.fn()
-				.mockRejectedValue(
-					new Error("timeline support is disabled."),
-				) as MatrixClient["getEventTimeline"],
+			getEventTimeline: getEventTimeline as MatrixClient["getEventTimeline"],
 			fetchRoomEvent: vi.fn().mockResolvedValue(
 				rawMessage("$pinned:hs", {
 					msgtype: "m.text",
@@ -125,45 +151,59 @@ describe("PinnedMessageRow", () => {
 				}),
 			) as MatrixClient["fetchRoomEvent"],
 		});
-		renderRow(client, makeRoom());
+		const privateSet = {
+			findEventById: () => undefined,
+		} as unknown as EventTimelineSet;
+		renderRow(client, makeRoom(), undefined, {
+			contextTimelineSet: privateSet,
+		});
 		expect(await screen.findByText("resolved despite the throw")).toBeTruthy();
+		// The /context fetch targets the panel's PRIVATE set, never the
+		// room's own unfiltered set (whose emissions would reach
+		// useTimeline's backfill-reload guard and grow the set forever).
+		expect(getEventTimeline).toHaveBeenCalledWith(privateSet, "$pinned:hs");
 	});
 
-	it("re-resolves an open row when the event later arrives in the timeline (#485)", async () => {
+	it("re-resolves an open row when the panel's timeline tick fires (#485)", async () => {
 		// Back-pagination while the panel is open used to leave the row on
 		// "(message unavailable)" until close/reopen - the sync resolve was a
-		// memo over non-reactive SDK state.
-		const listeners = new Set<() => void>();
-		let cached: unknown;
+		// memo over non-reactive SDK state. The tick is panel-owned (one
+		// filtered room subscription in usePinnedEvents, not one unfiltered
+		// listener per row).
+		const [tick, setTick] = createSignal(0);
+		let cached: MatrixEvent | undefined;
 		const room = makeRoom({
 			findEventById: (() => cached) as Room["findEventById"],
-			on: vi.fn((_ev: unknown, cb: () => void) => {
-				listeners.add(cb);
-			}) as unknown as Room["on"],
-			off: vi.fn() as unknown as Room["off"],
 		});
-		renderRow(makeClient(), room);
+		renderRow(makeClient(), room, undefined, { timelineTick: tick });
 		expect(await screen.findByText("(message unavailable)")).toBeTruthy();
-		// The event lands via back-pagination; the room emits Timeline.
-		cached = {
-			getSender: () => "@alice:hs",
-			getContent: () => ({ msgtype: "m.text", body: "arrived late" }),
-			getTs: () => 1000,
-			getId: () => "$pinned:hs",
-			isRelation: () => false,
-		};
-		for (const cb of listeners) cb();
+		// The event lands via back-pagination; usePinnedEvents bumps the tick.
+		cached = cachedEvent("arrived late");
+		setTick(1);
 		expect(await screen.findByText("arrived late")).toBeTruthy();
 	});
 
+	it("serves a cached resolution without any network calls on reopen", async () => {
+		const client = makeClient();
+		const cache = new Map<string, ResolvedPinnedEvent>();
+		cache.set("$pinned:hs", {
+			event: cachedEvent("from the cache"),
+			sender: "@alice:hs",
+			senderName: "Alice",
+			timestamp: 1000,
+			body: "from the cache",
+			format: null,
+			formattedBody: null,
+			msgtype: "m.text",
+		});
+		renderRow(client, makeRoom(), undefined, { resolveCache: cache });
+		expect(await screen.findByText("from the cache")).toBeTruthy();
+		expect(client.getEventTimeline).not.toHaveBeenCalled();
+		expect(client.fetchRoomEvent).not.toHaveBeenCalled();
+	});
+
 	it("jumps without a root for a cached main-timeline event", async () => {
-		const cached = {
-			getId: () => "$pinned:hs",
-			getSender: () => "@alice:hs",
-			getContent: () => ({ msgtype: "m.text", body: "plain pin" }),
-			getTs: () => 1000,
-			isRelation: () => false,
-		} as unknown as MatrixEvent;
+		const cached = cachedEvent("plain pin");
 		const onJump = renderRow(
 			makeClient(),
 			makeRoom({ findEventById: () => cached }),

@@ -1,9 +1,11 @@
 import {
 	ClientEvent,
+	EventTimelineSet,
 	EventType,
 	type MatrixClient,
 	type MatrixEvent,
 	type Room,
+	RoomEvent,
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import {
@@ -67,7 +69,31 @@ export interface UsePinnedEvents {
 	pending: Accessor<boolean>;
 	lastError: Accessor<string | null>;
 	clearError: () => void;
+	/** Bumped when a PINNED event arrives on the room's live timeline
+	 *  (back-pagination or live insert), so open rows re-resolve without a
+	 *  close/reopen (#485). Filtered to pinned ids - a busy room does not
+	 *  tick this, and rows never subscribe to the room themselves (a
+	 *  per-row unfiltered listener tripped max-listeners at 11+ pins and
+	 *  cost O(rows x events) per emission). */
+	timelineTick: Accessor<number>;
+	/** Room-scoped cache of the rows' resolved projections. Survives panel
+	 *  close/reopen (Kobalte unmounts portal content), cleared on room
+	 *  switch. Owned here so reopening a panel with N off-cache pins does
+	 *  not re-issue N /context + /event round-trips for identical data. */
+	resolveCache: Map<string, PinnedResolution>;
+	/** Private timeline set for the rows' /context fetches. Keeps pin
+	 *  loads out of the room's OWN timeline sets: no RoomEvent.Timeline
+	 *  emissions into useTimeline's one-shot backfill-reload guard (the
+	 *  #441 failure family - a pin fetch landing during an initial room
+	 *  load would cancel it and spend the one-shot budget), and no
+	 *  permanent growth of the unfiltered set / findEventById scans.
+	 *  Null until the Room object is available. */
+	contextTimelineSet: Accessor<EventTimelineSet | null>;
 }
+
+/** Shape of a row's resolved projection; defined by PinnedMessageRow. The
+ *  hook only stores it - `unknown`-ish on purpose, keyed and cleared here. */
+export type PinnedResolution = import("./PinnedMessageRow").ResolvedPinnedEvent;
 
 const PINNED_TYPE = EventType.RoomPinnedEvents;
 
@@ -232,6 +258,34 @@ export function usePinnedEvents(
 		client.off(ClientEvent.Room, onClientRoom);
 	});
 
+	// One room-level timeline subscription for every pinned row, filtered
+	// to pinned event ids so active-room chatter never ticks it.
+	const [timelineTick, setTimelineTick] = createSignal(0);
+	const resolveCache = new Map<string, PinnedResolution>();
+	const onTimeline = (event: MatrixEvent, eventRoom?: Room): void => {
+		if (!eventRoom || eventRoom.roomId !== roomId()) return;
+		const id = event.getId?.();
+		if (!id || !pinnedIds().includes(id)) return;
+		// The event just landed in the room's own cache - a row's stale
+		// projection (if any) must be re-derived from it.
+		resolveCache.delete(id);
+		setTimelineTick((n) => n + 1);
+	};
+	client.on(RoomEvent.Timeline, onTimeline);
+	onCleanup(() => {
+		client.off(RoomEvent.Timeline, onTimeline);
+	});
+
+	// Private timeline set per room for the rows' /context fetches (see
+	// the interface doc). timelineSupport on the SET enables its
+	// findEventById mapping; the CLIENT-level flag gates the fetch itself.
+	const contextTimelineSet = createMemo<EventTimelineSet | null>(() => {
+		roomAvailableTick();
+		const rid = roomId();
+		const room = rid ? client.getRoom(rid) : null;
+		return room ? new EventTimelineSet(room, { timelineSupport: true }) : null;
+	});
+
 	// Reset overlay + error on room change so cross-room state doesn't
 	// leak. The hook itself is re-created per per-room subtree (Layout
 	// uses <Show keyed>), but defend in depth. Bumping opGen also
@@ -244,6 +298,7 @@ export function usePinnedEvents(
 			setOverlay(null);
 			setLastError(null);
 			setPending(false);
+			resolveCache.clear();
 		}
 		return rid;
 	}, undefined);
@@ -309,5 +364,8 @@ export function usePinnedEvents(
 		pending,
 		lastError,
 		clearError: () => setLastError(null),
+		timelineTick,
+		resolveCache,
+		contextTimelineSet,
 	};
 }

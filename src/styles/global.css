@@ -2,7 +2,7 @@
 
 /* Viewport containment. Uses dvh (dynamic viewport height) so the layout
    tracks mobile browser chrome and the on-screen keyboard (paired with
-   interactive-widget=resizes-content in the viewport meta) — otherwise the
+   interactive-widget=resizes-content in the viewport meta) - otherwise the
    bottom composer is pushed under the keyboard. */
 html {
 	/* 100vh fallback first: browsers without dvh support discard the dvh line
