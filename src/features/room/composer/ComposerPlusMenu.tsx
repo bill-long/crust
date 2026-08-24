@@ -130,7 +130,7 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 							e.preventDefault();
 							triggerRef?.focus();
 						}}
-						class="z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg"
+						class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg"
 					>
 						<DropdownMenu.Item
 							class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"

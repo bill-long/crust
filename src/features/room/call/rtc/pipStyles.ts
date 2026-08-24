@@ -62,12 +62,17 @@ export function copyStylesIntoPipDocument(
 		}
 	}
 
-	// Mirror the root element's inline style (zoom is applied there) and class
+	// Mirror the root element's inline style (carries `--app-zoom`) and class
 	// list so rem-based sizing and any theme class carry into the PiP document.
 	const srcRoot = source.documentElement;
 	const dstRoot = target.documentElement;
 	const inlineStyle = srcRoot.getAttribute("style");
 	if (inlineStyle) dstRoot.setAttribute("style", inlineStyle);
+	// The app's zoom lives on #root (never on <html> - see global.css #487),
+	// but the PiP panel renders straight into this document's body and hosts
+	// no floating-ui portals, so scaling its <html> by the mirrored variable
+	// is safe and keeps the panel matching the app's UI scale.
+	dstRoot.style.zoom = "var(--app-zoom, 1)";
 	if (srcRoot.className) dstRoot.className = srcRoot.className;
 	const lang = srcRoot.getAttribute("lang");
 	if (lang) dstRoot.setAttribute("lang", lang);

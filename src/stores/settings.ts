@@ -257,7 +257,16 @@ function applyZoom(level: number): void {
 		CSS.supports?.("zoom", "1")
 	) {
 		const z = level / 100;
-		document.documentElement.style.zoom = `${z}`;
+		// The zoom itself goes on #root, NOT on <html> (#487/#485): content
+		// portaled into document.body (Kobalte popovers/tooltips/menus) must
+		// stay OUTSIDE the zoom context, or floating-ui measures trigger
+		// rects in visual pixels and applies coordinates in zoomed pixels -
+		// re-multiplying them and (with the clipping viewport read in
+		// logical pixels) mis-flipping placements clean off-screen. The
+		// `--app-zoom` custom property stays on <html> so both the app and
+		// portaled surfaces (`.portal-scale`) can read it.
+		const root = document.getElementById("root");
+		if (root) root.style.zoom = `${z}`;
 		document.documentElement.style.setProperty("--app-zoom", `${z}`);
 	}
 }

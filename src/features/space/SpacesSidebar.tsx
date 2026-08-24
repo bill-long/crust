@@ -195,7 +195,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 					</ContextMenu.Trigger>
 
 					<ContextMenu.Portal>
-						<ContextMenu.Content class="z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-none">
+						<ContextMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-none">
 							<Show when={props.onOpenSpaceSettings}>
 								<ContextMenu.Item
 									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"

@@ -257,7 +257,7 @@ const PinnedMessagesPanel: Component<{
 			<Popover.Portal>
 				<Popover.Content
 					id={panelId}
-					class="z-50 w-[360px] max-w-[90vw] rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
+					class="portal-scale z-50 w-[360px] max-w-[90vw] rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
 					role="dialog"
 					aria-label="Pinned messages"
 					onKeyDown={onKeyDown}

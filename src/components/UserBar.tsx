@@ -143,7 +143,7 @@ const SplitAudioButton: Component<{
 
 			{/* Drop-up menu */}
 			<Popover.Portal>
-				<Popover.Content class="z-50 min-w-48 rounded-lg bg-surface-3 p-3 shadow-xl focus:outline-none">
+				<Popover.Content class="portal-scale z-50 min-w-48 rounded-lg bg-surface-3 p-3 shadow-xl focus:outline-none">
 					{props.menuContent}
 				</Popover.Content>
 			</Popover.Portal>

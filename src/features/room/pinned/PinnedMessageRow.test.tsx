@@ -51,6 +51,10 @@ function makeRoom(overrides?: Partial<Room>): Room {
 		findEventById: () => undefined,
 		getMember: () => ({ name: "Alice" }),
 		getUnfilteredTimelineSet: () => ({}),
+		// The row subscribes to RoomEvent.Timeline to re-resolve when the
+		// event arrives later (#485).
+		on: vi.fn(),
+		off: vi.fn(),
 		...overrides,
 	} as unknown as Room;
 }
@@ -102,6 +106,54 @@ describe("PinnedMessageRow", () => {
 		expect(await screen.findByText("reply in a thread")).toBeTruthy();
 		fireEvent.click(screen.getByText("Jump to"));
 		expect(onJump).toHaveBeenCalledWith("$root:hs");
+	});
+
+	it("still reaches the standalone fetch when getEventTimeline throws (#485)", async () => {
+		// The real SDK throws synchronously when timelineSupport is off (the
+		// #485 misconfiguration) - and can reject for other reasons too. The
+		// row must not let that swallow the standalone fallback.
+		const client = makeClient({
+			getEventTimeline: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("timeline support is disabled."),
+				) as MatrixClient["getEventTimeline"],
+			fetchRoomEvent: vi.fn().mockResolvedValue(
+				rawMessage("$pinned:hs", {
+					msgtype: "m.text",
+					body: "resolved despite the throw",
+				}),
+			) as MatrixClient["fetchRoomEvent"],
+		});
+		renderRow(client, makeRoom());
+		expect(await screen.findByText("resolved despite the throw")).toBeTruthy();
+	});
+
+	it("re-resolves an open row when the event later arrives in the timeline (#485)", async () => {
+		// Back-pagination while the panel is open used to leave the row on
+		// "(message unavailable)" until close/reopen - the sync resolve was a
+		// memo over non-reactive SDK state.
+		const listeners = new Set<() => void>();
+		let cached: unknown;
+		const room = makeRoom({
+			findEventById: (() => cached) as Room["findEventById"],
+			on: vi.fn((_ev: unknown, cb: () => void) => {
+				listeners.add(cb);
+			}) as unknown as Room["on"],
+			off: vi.fn() as unknown as Room["off"],
+		});
+		renderRow(makeClient(), room);
+		expect(await screen.findByText("(message unavailable)")).toBeTruthy();
+		// The event lands via back-pagination; the room emits Timeline.
+		cached = {
+			getSender: () => "@alice:hs",
+			getContent: () => ({ msgtype: "m.text", body: "arrived late" }),
+			getTs: () => 1000,
+			getId: () => "$pinned:hs",
+			isRelation: () => false,
+		};
+		for (const cb of listeners) cb();
+		expect(await screen.findByText("arrived late")).toBeTruthy();
 	});
 
 	it("jumps without a root for a cached main-timeline event", async () => {

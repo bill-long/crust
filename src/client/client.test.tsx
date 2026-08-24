@@ -104,6 +104,12 @@ describe("ClientProvider session wiring (#460)", () => {
 			userId: "@alice:example.com",
 			deviceId: "DEVICE42",
 			refreshToken: "refresh-abc",
+			// #485: getEventTimeline / TimelineWindow.load(eventId) throw
+			// without this - every off-cache pinned message rendered
+			// "(message unavailable)" and jump-to-event outside the window
+			// failed. Locked here because the row tests mock the client and
+			// can never catch the flag regressing.
+			timelineSupport: true,
 		});
 		expect(opts.tokenRefreshFunction).toBeTypeOf("function");
 	});

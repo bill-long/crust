@@ -1,18 +1,17 @@
 @import "tailwindcss";
 
-/* Zoom-aware viewport containment: html height compensates for CSS zoom
-   so that children using h-full fill exactly the visible viewport. Uses dvh
-   (dynamic viewport height) so the layout tracks mobile browser chrome and the
-   on-screen keyboard (paired with interactive-widget=resizes-content in the
-   viewport meta) — otherwise the bottom composer is pushed under the keyboard. */
+/* Viewport containment. Uses dvh (dynamic viewport height) so the layout
+   tracks mobile browser chrome and the on-screen keyboard (paired with
+   interactive-widget=resizes-content in the viewport meta) — otherwise the
+   bottom composer is pushed under the keyboard. */
 html {
 	/* 100vh fallback first: browsers without dvh support discard the dvh line
 	   and keep this one, rather than dropping the whole declaration (which,
 	   with overflow:hidden, would collapse the layout). */
-	height: calc(100vh / var(--app-zoom, 1));
+	height: 100vh;
 	/* biome-ignore lint/suspicious/noDuplicateProperties: intentional dvh
 	   progressive-enhancement over the 100vh fallback above */
-	height: calc(100dvh / var(--app-zoom, 1));
+	height: 100dvh;
 	overflow: hidden;
 }
 
@@ -22,8 +21,29 @@ body {
 	overflow: hidden;
 }
 
+/* UI scale (#487/#485): the user zoom lives HERE, not on <html>, so content
+   portaled into document.body (Kobalte popovers / tooltips / menus) stays
+   outside the zoom context and floating-ui's coordinate math holds. The
+   height divides the zoom back out (an element's own zoom multiplies its
+   specified lengths) so the scaled root still fills exactly the visible
+   viewport. `--app-zoom` is set on <html> by applyZoom (settings.ts). */
 #root {
-	height: 100%;
+	zoom: var(--app-zoom, 1);
+	height: calc(100vh / var(--app-zoom, 1));
+	/* biome-ignore lint/suspicious/noDuplicateProperties: intentional dvh
+	   progressive-enhancement over the 100vh fallback above */
+	height: calc(100dvh / var(--app-zoom, 1));
+}
+
+/* Re-applies the user's UI scale to a body-portaled surface. Safe directly on
+   Kobalte's *.Content elements: Kobalte positions a separate wrapper div (a
+   transform on the Content's PARENT), so the Content's own zoom scales only
+   its box and Kobalte re-measures and re-anchors it correctly. Do NOT put
+   zoom on an element that floating-ui positions via its own left/top insets -
+   zoom multiplies an element's own inset lengths. A portal that forgets the
+   class renders at 100% scale (benign) instead of mispositioned. */
+.portal-scale {
+	zoom: var(--app-zoom, 1);
 }
 
 /* ─── Design Tokens ─── */

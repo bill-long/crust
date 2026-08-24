@@ -64,7 +64,7 @@ const RoomOverflowMenu: Component<{
 				</svg>
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Portal>
-				<DropdownMenu.Content class="z-50 min-w-[200px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
+				<DropdownMenu.Content class="portal-scale z-50 min-w-[200px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
 					<Show when={props.canInvite()}>
 						<DropdownMenu.Item
 							class={itemClass}
@@ -560,7 +560,7 @@ const RoomPane: Component<{
 			>
 				<Dialog.Portal>
 					<Dialog.Overlay class="fixed inset-0 z-30 bg-black/60" />
-					<Dialog.Content class="fixed inset-y-0 right-0 z-30 flex w-96 max-w-[92%] flex-col overflow-hidden border-l border-border-subtle bg-surface-1 shadow-xl">
+					<Dialog.Content class="portal-scale fixed inset-y-0 right-0 z-30 flex w-96 max-w-[92%] flex-col overflow-hidden border-l border-border-subtle bg-surface-1 shadow-xl">
 						<Dialog.Title class="sr-only">Thread</Dialog.Title>
 						{/* Keyed for the same per-thread remount as the desktop
 							column (fresh focus capture per thread switch). */}
@@ -606,7 +606,7 @@ const RoomPane: Component<{
 			>
 				<Dialog.Portal>
 					<Dialog.Overlay class="fixed inset-0 z-30 bg-black/60" />
-					<Dialog.Content class="fixed inset-y-0 right-0 z-30 flex w-72 max-w-[85%] flex-col overflow-hidden border-l border-border-subtle bg-surface-1 shadow-xl">
+					<Dialog.Content class="portal-scale fixed inset-y-0 right-0 z-30 flex w-72 max-w-[85%] flex-col overflow-hidden border-l border-border-subtle bg-surface-1 shadow-xl">
 						<Dialog.Title class="sr-only">Member list</Dialog.Title>
 						<MemberList roomId={props.rid} />
 					</Dialog.Content>

@@ -459,7 +459,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 												⋯
 											</DropdownMenu.Trigger>
 											<DropdownMenu.Portal>
-												<DropdownMenu.Content class="z-50 min-w-[200px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
+												<DropdownMenu.Content class="portal-scale z-50 min-w-[200px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
 													<Show when={canPromoteMod()}>
 														<DropdownMenu.Item
 															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2"

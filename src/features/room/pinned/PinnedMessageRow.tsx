@@ -1,11 +1,18 @@
-import { type MatrixClient, MatrixEvent, type Room } from "matrix-js-sdk";
+import {
+	type MatrixClient,
+	MatrixEvent,
+	type Room,
+	RoomEvent,
+} from "matrix-js-sdk";
 import {
 	type Component,
 	createMemo,
 	createResource,
+	createSignal,
 	onCleanup,
 	Show,
 } from "solid-js";
+import { reportError } from "../../../lib/reportError";
 import { threadJumpTarget } from "../../../lib/threadEvents";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
@@ -102,9 +109,20 @@ const PinnedMessageRow: Component<{
 	onUnpin: () => void;
 	onFocus?: () => void;
 }> = (props) => {
-	const initial = createMemo<ResolvedPinnedEvent | null>(() =>
-		resolveSync(props.room, props.eventId),
-	);
+	// Re-evaluated when the room's timeline gains events (back-pagination
+	// while the panel is open, live decryption), so an already-open row
+	// resolves without a close/reopen once the event arrives (#485).
+	const [timelineTick, setTimelineTick] = createSignal(0);
+	const onTimeline = (): void => {
+		setTimelineTick((t) => t + 1);
+	};
+	props.room.on(RoomEvent.Timeline, onTimeline);
+	onCleanup(() => props.room.off(RoomEvent.Timeline, onTimeline));
+
+	const initial = createMemo<ResolvedPinnedEvent | null>(() => {
+		timelineTick();
+		return resolveSync(props.room, props.eventId);
+	});
 
 	// If the event isn't in the SDK's in-memory cache, ask the SDK to
 	// load it through getEventTimeline — that fetches /context, runs the
@@ -119,17 +137,25 @@ const PinnedMessageRow: Component<{
 					props.room.getUnfilteredTimelineSet(),
 					id,
 				);
-				const resolved = resolveSync(props.room, id);
-				if (resolved) return resolved;
-				// A pinned THREAD reply never lands in a room timeline set
-				// (the SDK's context path refuses thread events), so fetch it
-				// standalone: enough to render the row and carry the thread
-				// root for the jump, without materializing the whole thread
-				// up front — the thread panel does that when the user jumps.
-				return await fetchStandalone(props.client, props.room, id);
-			} catch {
-				return null;
+			} catch (e) {
+				// Console-only: the row's "(message unavailable)" state is the
+				// inline failure surface. Swallowing silently is what hid the
+				// missing-timelineSupport misconfiguration behind every pin
+				// rendering unavailable (#485) - and the standalone fallback
+				// below must still get its chance.
+				reportError(e, {
+					logLabel: `pinned: getEventTimeline failed for ${id}`,
+				});
 			}
+			const resolved = resolveSync(props.room, id);
+			if (resolved) return resolved;
+			// A pinned THREAD reply never lands in a room timeline set
+			// (the SDK's context path refuses thread events), so fetch it
+			// standalone: enough to render the row and carry the thread
+			// root for the jump, without materializing the whole thread
+			// up front — the thread panel does that when the user jumps.
+			// Also the last resort when getEventTimeline itself failed.
+			return await fetchStandalone(props.client, props.room, id);
 		},
 	);
 
