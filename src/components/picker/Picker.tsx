@@ -10,19 +10,26 @@ import {
 } from "solid-js";
 import { VirtualList, type VirtualListController } from "../VirtualList";
 
-export interface PickerProps<T> {
+/**
+ * `query` exists only to feed `filterFn`, so the pair is all-or-nothing at
+ * the type level: omit both when `items` is already filtered (the list is
+ * used as-is, instead of paying a second full pass with a constant-true
+ * filter), or provide both to let the picker filter. Passing one without
+ * the other doesn't type-check - a lone `filterFn` would silently run
+ * against "" and a lone `query` would silently be ignored.
+ */
+type PickerFilterProps<T> =
+	| { query: string; filterFn: (item: T, query: string) => boolean }
+	| { query?: undefined; filterFn?: undefined };
+
+export type PickerProps<T> = {
 	items: T[];
 	onSelect: (item: T) => void;
 	onClose: () => void;
 	renderItem: (item: T, isHighlighted: boolean) => JSX.Element;
 	visible: boolean;
 	position: { bottom: string; left: string };
-	/** Omit both when `items` is already filtered - the list is used as-is,
-	    instead of paying a second full pass with a constant-true filter.
-	    `query` only exists to feed `filterFn`, so they travel together. */
-	query?: string;
-	filterFn?: (item: T, query: string) => boolean;
-}
+} & PickerFilterProps<T>;
 
 const ITEM_HEIGHT = 36;
 
