@@ -38,23 +38,27 @@ export function useMentions(deps: UseMentionsDeps) {
 		return room ? room.getJoinedMembers() : [];
 	});
 
-	const MAX_PICKER_RESULTS = 50;
-
-	// Shared filtered member list - used by both picker and ARIA state
+	// Shared filtered member list - used by both picker and ARIA state.
+	// Unbounded: the picker windows its rows (VirtualList), so a large match
+	// set costs this one filter pass, not DOM nodes - every member stays
+	// reachable by scrolling/arrowing instead of being cut at a cap. (The
+	// picker itself gets no filterFn, so this is the only per-keystroke pass
+	// over the member list.) Names are read live on purpose: the SDK mutates
+	// RoomMember.name in place on rename, so any search index cached against
+	// the (per-room stable) member-array identity would go stale.
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
 		const lowerQ = q.toLowerCase();
-		const results: RoomMember[] = [];
-		for (const m of roomMembers()) {
-			const name = (m.name ?? "").toLowerCase();
-			const uid = m.userId.toLowerCase();
-			if (name.includes(lowerQ) || uid.includes(lowerQ)) {
-				results.push(m);
-				if (results.length >= MAX_PICKER_RESULTS) break;
-			}
-		}
-		return results;
+		// Bare '@' matches everyone - skip the per-member lowercasing pass
+		// entirely rather than string-matching 2x per member for a foregone
+		// conclusion.
+		if (lowerQ === "") return roomMembers();
+		return roomMembers().filter(
+			(m) =>
+				(m.name ?? "").toLowerCase().includes(lowerQ) ||
+				m.userId.toLowerCase().includes(lowerQ),
+		);
 	});
 
 	const pickerRendered = () => filteredMembers().length > 0;

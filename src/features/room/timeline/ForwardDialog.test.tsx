@@ -17,6 +17,7 @@ import {
 } from "../../../client/summaries";
 import { clearNotices, notices } from "../../../stores/notices";
 import { createMockClient } from "../../../test/mockClient";
+import { stubViewport } from "../../../test/stubViewport";
 import { ForwardDialog } from "./ForwardDialog";
 import type { TimelineEvent } from "./timelineTypes";
 
@@ -161,15 +162,17 @@ function setup(
 	return { client, onClose };
 }
 
-afterEach(() => {
-	cleanup();
-	clearNotices();
+// The room list is windowed (VirtualList); without a stubbed viewport the
+// picker renders at clientHeight 0 and mounts only the first few rows.
+let restoreViewport: () => void;
+beforeEach(() => {
+	restoreViewport = stubViewport(216);
 });
 
-beforeEach(() => {
-	// jsdom doesn't implement scrollIntoView (the Picker scrolls the
-	// highlighted option into view on mount/filter changes).
-	Element.prototype.scrollIntoView = vi.fn();
+afterEach(() => {
+	restoreViewport();
+	cleanup();
+	clearNotices();
 });
 
 describe("ForwardDialog", () => {

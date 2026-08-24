@@ -852,11 +852,9 @@ const Composer: Component<{
 			<div class="relative">
 				<MentionPicker
 					items={filteredMembers()}
-					query={mentionQuery() ?? ""}
 					visible={mentionQuery() !== null}
 					onSelect={onMentionSelect}
 					onClose={() => setMentionQuery(null)}
-					filterFn={(_item, _q) => true}
 					renderItem={(member, highlighted) => (
 						<div class="flex items-center gap-2">
 							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">

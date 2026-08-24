@@ -9,7 +9,14 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
-import { computeRowOffsets, VirtualList, visibleRowRange } from "./VirtualList";
+import { stubViewport, triggerStubbedResize } from "../test/stubViewport";
+import {
+	computeRowOffsets,
+	uniformVisibleRowRange,
+	VirtualList,
+	type VirtualListController,
+	visibleRowRange,
+} from "./VirtualList";
 
 afterEach(cleanup);
 
@@ -69,6 +76,27 @@ describe("visibleRowRange", () => {
 	});
 });
 
+describe("uniformVisibleRowRange", () => {
+	it("matches visibleRowRange over the equivalent prefix sums (single-place invariant)", () => {
+		// The O(1) uniform path must stay boundary-identical to the array
+		// path - sweep counts, scroll offsets, viewports, and overscans.
+		const h = 10;
+		for (const count of [0, 1, 5, 100]) {
+			const offs = computeRowOffsets(count, h);
+			for (const st of [0, 4, 10, 45, 50, 95, 990, 2000]) {
+				for (const vh of [0, 36, 50]) {
+					for (const overscan of [0, 3]) {
+						expect(
+							uniformVisibleRowRange(count, h, st, vh, overscan),
+							`count=${count} st=${st} vh=${vh} overscan=${overscan}`,
+						).toEqual(visibleRowRange(offs, st, vh, overscan));
+					}
+				}
+			}
+		}
+	});
+});
+
 describe("<VirtualList>", () => {
 	it("renders the fallback when empty and forwards attributes", () => {
 		const { container, getByText } = render(() => (
@@ -104,42 +132,15 @@ describe("<VirtualList>", () => {
 });
 
 describe("<VirtualList> windowing with a stubbed viewport", () => {
-	// jsdom has no layout engine (clientHeight is always 0 and ResizeObserver
-	// is absent), so stub a fixed 50px viewport to exercise the scroll window.
-	const restore: Array<() => void> = [];
 	// Stable object refs so <For> keys by reference, mirroring the real usage
 	// (rows of emoji) rather than the primitive-dedupe fast path.
 	const items = Array.from({ length: 100 }, (_, i) => ({ n: i }));
 
+	let restoreViewport: () => void;
 	beforeEach(() => {
-		const desc = Object.getOwnPropertyDescriptor(
-			HTMLElement.prototype,
-			"clientHeight",
-		);
-		Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-			configurable: true,
-			get: () => 50,
-		});
-		restore.push(() => {
-			if (desc)
-				Object.defineProperty(HTMLElement.prototype, "clientHeight", desc);
-		});
-		const g = globalThis as { ResizeObserver?: unknown };
-		if (typeof g.ResizeObserver === "undefined") {
-			g.ResizeObserver = class {
-				observe(): void {}
-				unobserve(): void {}
-				disconnect(): void {}
-			};
-			restore.push(() => {
-				g.ResizeObserver = undefined;
-			});
-		}
+		restoreViewport = stubViewport(50);
 	});
-
-	afterEach(() => {
-		for (const f of restore.splice(0)) f();
-	});
+	afterEach(() => restoreViewport());
 
 	function renderList() {
 		return render(() => (
@@ -196,6 +197,175 @@ describe("<VirtualList> windowing with a stubbed viewport", () => {
 		expect(onScroll).toHaveBeenCalledTimes(1); // caller's handler still runs
 		expect(queryByText("row-0")).toBeNull(); // and the window still shifted
 		expect(queryByText("row-12")).toBeTruthy();
+	});
+
+	it("scrollToIndex scrolls a below-viewport row into view and mounts it synchronously", () => {
+		let api: VirtualListController | undefined;
+		const { container, queryByText } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		expect(queryByText("row-40")).toBeNull();
+		api?.scrollToIndex(40);
+		// No scroll event dispatched - the window must update synchronously.
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		// Bottom-aligned: row 40 ends at 410, viewport 50 => scrollTop 360.
+		expect(scroller.scrollTop).toBe(360);
+		expect(queryByText("row-40")).toBeTruthy();
+	});
+
+	it("scrollToIndex scrolls an above-viewport row into view (top-aligned)", () => {
+		let api: VirtualListController | undefined;
+		const { container, queryByText } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		scroller.scrollTop = 500;
+		scroller.dispatchEvent(new Event("scroll"));
+		expect(queryByText("row-3")).toBeNull();
+		api?.scrollToIndex(3);
+		expect(scroller.scrollTop).toBe(30);
+		expect(queryByText("row-3")).toBeTruthy();
+	});
+
+	it("defers a scrollToIndex issued while the viewport is unmeasured", () => {
+		// The popover case: the list mounts at 0 height and grows a frame
+		// later. A scroll requested in that window must not be dropped.
+		restoreViewport();
+		let height = 0;
+		restoreViewport = stubViewport(() => height);
+		let api: VirtualListController | undefined;
+		const { container, queryByText } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		api?.scrollToIndex(40);
+		expect(queryByText("row-40")).toBeNull();
+		height = 50;
+		triggerStubbedResize();
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		expect(scroller.scrollTop).toBe(360);
+		expect(queryByText("row-40")).toBeTruthy();
+	});
+
+	it("evaluates the rowHeight prop expression once, not per scroll tick", () => {
+		// The prop compiles to a getter re-invoking the caller's expression on
+		// every access; RoomList derives its pitch from getComputedStyle, so
+		// per-scroll re-evaluation would put a style read in the scroll path.
+		const heightSpy = vi.fn(() => 10);
+		const { container } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={heightSpy()}
+				overscan={2}
+				class="scroller"
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		const callsAfterMount = heightSpy.mock.calls.length;
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		for (let i = 1; i <= 5; i++) {
+			scroller.scrollTop = i * 50;
+			scroller.dispatchEvent(new Event("scroll"));
+		}
+		expect(heightSpy.mock.calls.length).toBe(callsAfterMount);
+	});
+
+	it("resyncs the window from the DOM even when scrollToIndex needs no scroll", () => {
+		// Models the browser clamping scrollTop synchronously on a list
+		// shrink before the async scroll event resyncs the signal: the DOM
+		// offset and the internal signal disagree, and a no-move
+		// scrollToIndex must still window from the DOM's truth.
+		let api: VirtualListController | undefined;
+		const { container, queryByText } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		scroller.scrollTop = 100; // no scroll event dispatched - signal stale at 0
+		expect(queryByText("row-12")).toBeNull();
+		api?.scrollToIndex(12); // rows 10-14 are visible per the DOM: no scroll needed
+		expect(scroller.scrollTop).toBe(100); // still no movement...
+		expect(queryByText("row-12")).toBeTruthy(); // ...but the window resynced
+	});
+
+	it("scrollToIndex is a no-op for a fully visible row", () => {
+		let api: VirtualListController | undefined;
+		const { container } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		scroller.scrollTop = 100;
+		scroller.dispatchEvent(new Event("scroll"));
+		// Rows 10..14 are fully visible; scrolling to one must not move.
+		api?.scrollToIndex(12);
+		expect(scroller.scrollTop).toBe(100);
+	});
+
+	it("hands the controller undefined on unmount so holders drop the stale api", () => {
+		let api: VirtualListController | undefined | null = null;
+		const { unmount } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		expect(api).toBeTruthy();
+		unmount();
+		expect(api).toBeUndefined();
 	});
 
 	it("forwards a ref to the scroll container", () => {
