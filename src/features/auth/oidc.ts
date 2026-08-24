@@ -92,15 +92,26 @@ async function registerOidcClient(
 				client_uri: oidcClientUri(),
 				application_type: "web",
 				redirect_uris: [redirectUri],
-				// Only what the flow below actually uses; defaults the SDK
-				// would have negotiated (e.g. the device grant) are not ours.
+				// Sent explicitly although RFC 7591 makes them optional: the
+				// RFC's defaults when omitted are ["code"] and
+				// ["authorization_code"] alone - an OP applying them would
+				// register this app WITHOUT the refresh grant it later uses.
+				// This cannot over-restrict either: getAuthMetadata validation
+				// already refuses OPs whose grant_types_supported lacks
+				// refresh_token, so every OP that reaches this request
+				// advertises both. (The SDK's own default additionally asks
+				// for the device grant, which this app never uses.)
 				response_types: ["code"],
 				grant_types: ["authorization_code", "refresh_token"],
 				token_endpoint_auth_method: "none",
 			}),
 		});
 	} catch {
-		throw new Error("Could not reach the homeserver's registration endpoint.");
+		// "Login service", not "homeserver": the registration endpoint belongs
+		// to the OP from the auth metadata, which can be a different host.
+		throw new Error(
+			"Could not reach the login service to register this app. Check your connection and try again.",
+		);
 	}
 	if (!response.ok) {
 		// Surface the OP's reason when it gives one. Server-controlled text:
@@ -116,7 +127,7 @@ async function registerOidcClient(
 		}
 		throw new Error(
 			description
-				? `The homeserver rejected this app's registration: ${description}`
+				? `The login service rejected this app's registration: ${description}`
 				: `Dynamic registration failed (HTTP ${response.status}).`,
 		);
 	}
@@ -128,7 +139,7 @@ async function registerOidcClient(
 	}
 	if (typeof clientId !== "string" || clientId.length === 0) {
 		throw new Error(
-			"The homeserver returned an invalid registration response.",
+			"The login service returned an invalid registration response.",
 		);
 	}
 	return clientId;

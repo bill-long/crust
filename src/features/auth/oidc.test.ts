@@ -241,7 +241,7 @@ describe("startOidcLogin", () => {
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
 		).rejects.toThrow(
-			"The homeserver rejected this app's registration: Client URI must be HTTPS.",
+			"The login service rejected this app's registration: Client URI must be HTTPS.",
 		);
 		expect(getCachedClientId("https://auth.example.com/")).toBeNull();
 		expect(sessionStorage.getItem(SIGNIN_STATE_KEY)).toBeNull();
@@ -265,13 +265,31 @@ describe("startOidcLogin", () => {
 		).rejects.toThrow("Dynamic registration failed (HTTP 500).");
 	});
 
+	it("curates an outright network failure without caching or storing state", async () => {
+		// fetch rejecting (offline, DNS) must not leak a raw TypeError.
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new TypeError("Failed to fetch");
+			}),
+		);
+
+		await expect(
+			startOidcLogin(METADATA, "https://matrix.example.com"),
+		).rejects.toThrow(
+			"Could not reach the login service to register this app. Check your connection and try again.",
+		);
+		expect(getCachedClientId("https://auth.example.com/")).toBeNull();
+		expect(sessionStorage.getItem(SIGNIN_STATE_KEY)).toBeNull();
+	});
+
 	it("rejects a non-JSON success body as an invalid response", async () => {
 		stubRegistration(201);
 
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
 		).rejects.toThrow(
-			"The homeserver returned an invalid registration response.",
+			"The login service returned an invalid registration response.",
 		);
 	});
 
@@ -281,7 +299,7 @@ describe("startOidcLogin", () => {
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
 		).rejects.toThrow(
-			"The homeserver returned an invalid registration response.",
+			"The login service returned an invalid registration response.",
 		);
 		expect(getCachedClientId("https://auth.example.com/")).toBeNull();
 	});
