@@ -75,8 +75,10 @@ async function registerOidcClient(
 	redirectUri: string,
 ): Promise<string> {
 	if (!metadata.registration_endpoint) {
+		// "Login service" like the other registration errors: the metadata is
+		// the OP's, which can be a different host than the homeserver.
 		throw new Error(
-			"This homeserver does not support automatic app registration.",
+			"The login service does not support automatic app registration.",
 		);
 	}
 	let response: Response;

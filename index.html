@@ -17,10 +17,12 @@
 		       Tauri IPC. Required in the baseline: the desktop shell serves
 		       this same built index.html and enforces this meta policy
 		       alongside its own header CSP (browsers apply the
-		       intersection), so omitting them would break desktop IPC. Both
-		       schemes are listed because the shell serves over
-		       https://tauri.localhost (useHttpsScheme, #486) and ipc
-		       follows the window's scheme. On the web they add nothing
+		       intersection), so omitting them would break desktop IPC.
+		       ipc.localhost follows the window's scheme, and the shell
+		       serves over https://tauri.localhost (useHttpsScheme, #486);
+		       https://ipc.localhost is already covered by the https: source
+		       today but is listed explicitly so scheme parity survives any
+		       future tightening of https:. On the web they add nothing
 		       meaningful: ipc: is not a fetchable scheme in browsers, and
 		       the ipc.localhost origins are loopback-only while connect-src
 		       already allows any https: origin.
