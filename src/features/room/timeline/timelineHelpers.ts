@@ -171,3 +171,15 @@ export function mergeRowsByTimestamp(
 	}
 	return out;
 }
+
+/**
+ * Trim a user-typed moderation reason; `undefined` when effectively empty,
+ * so whitespace never goes on the wire as a reason. Delete and report
+ * share this rule, then diverge on the empty case as their APIs require:
+ * delete omits the reason field entirely, report sends "" (the endpoint's
+ * reason parameter is mandatory but may be blank).
+ */
+export function normalizeReason(raw: string | undefined): string | undefined {
+	const trimmed = raw?.trim();
+	return trimmed ? trimmed : undefined;
+}

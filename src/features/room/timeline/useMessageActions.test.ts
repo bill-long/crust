@@ -78,6 +78,43 @@ describe("useMessageActions reaction error surfacing", () => {
 		expect(notices()).toHaveLength(0);
 	});
 
+	it("threads a redaction reason through onDelete (and omits opts without one)", async () => {
+		const client = {
+			redactEvent: vi.fn().mockResolvedValue({ event_id: "$r1" }),
+			sendEvent: vi.fn(),
+			getRoom: vi.fn(),
+		} as unknown as MatrixClient;
+		const actions = useMessageActions(client, roomId, noThread, makeDeps([]));
+
+		await actions.onDelete("$m1", "  spam  ");
+		expect(client.redactEvent).toHaveBeenLastCalledWith(
+			"!room:server",
+			null,
+			"$m1",
+			undefined,
+			{ reason: "spam" },
+		);
+
+		// Blank / whitespace-only reasons must not put an empty reason on
+		// the wire.
+		await actions.onDelete("$m2", "   ");
+		expect(client.redactEvent).toHaveBeenLastCalledWith(
+			"!room:server",
+			null,
+			"$m2",
+			undefined,
+			undefined,
+		);
+		await actions.onDelete("$m3");
+		expect(client.redactEvent).toHaveBeenLastCalledWith(
+			"!room:server",
+			null,
+			"$m3",
+			undefined,
+			undefined,
+		);
+	});
+
 	it("does not toast when removing a reaction succeeds", async () => {
 		const client = {
 			redactEvent: vi.fn().mockResolvedValue({ event_id: "$r1" }),

@@ -25,6 +25,7 @@ import {
 	threadTimelineSource,
 } from "../threads/timelineSource";
 import { DateSeparator } from "./DateSeparator";
+import { DeleteMessageDialog } from "./DeleteMessageDialog";
 import { DragOverlay } from "./DragOverlay";
 import {
 	formatDateSeparatorLabel,
@@ -40,6 +41,7 @@ import { ImageLightbox } from "./ImageLightbox";
 import type { MembershipGroup } from "./membershipGrouping";
 import { NewerMessagesLoader } from "./NewerMessagesLoader";
 import { OlderMessagesLoader } from "./OlderMessagesLoader";
+import { ReportMessageDialog } from "./ReportMessageDialog";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
 import { useImageLightbox } from "./useImageLightbox";
@@ -47,6 +49,7 @@ import { useMembershipExpansion } from "./useMembershipExpansion";
 import { useMessageActions } from "./useMessageActions";
 import { useReadReceipts } from "./useReadReceipts";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
+import { ViewSourceDialog } from "./ViewSourceDialog";
 
 const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
 
@@ -201,6 +204,17 @@ const TimelineView: Component<{
 	const [forwardTarget, setForwardTarget] = createSignal<TimelineEvent | null>(
 		null,
 	);
+	/** Message pending delete confirmation; non-null opens the dialog (#447). */
+	const [deleteTarget, setDeleteTarget] = createSignal<TimelineEvent | null>(
+		null,
+	);
+	/** Message being reported; non-null opens the Report dialog (#447). */
+	const [reportTarget, setReportTarget] = createSignal<TimelineEvent | null>(
+		null,
+	);
+	/** Message whose raw source is shown; non-null opens the viewer (#447). */
+	const [viewSourceTarget, setViewSourceTarget] =
+		createSignal<TimelineEvent | null>(null);
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
 	);
@@ -1070,7 +1084,13 @@ const TimelineView: Component<{
 														void jumpToEvent(id);
 													}}
 													onEdit={() => onEdit(event)}
-													onDelete={() => onDelete(event.eventId)}
+													onDelete={() => setDeleteTarget(event)}
+													onViewSource={() => setViewSourceTarget(event)}
+													onReport={
+														event.senderId !== myUserId && event.status === null
+															? () => setReportTarget(event)
+															: undefined
+													}
 													isSenderIgnored={ignoredUsers().includes(
 														event.senderId,
 													)}
@@ -1246,6 +1266,25 @@ const TimelineView: Component<{
 				target={forwardTarget}
 				getSourceEvent={getSourceEvent}
 				onClose={() => setForwardTarget(null)}
+			/>
+
+			<DeleteMessageDialog
+				target={deleteTarget}
+				onClose={() => setDeleteTarget(null)}
+				onDelete={(eventId, reason) => void onDelete(eventId, reason)}
+			/>
+
+			<ReportMessageDialog
+				target={reportTarget}
+				roomId={() => props.roomId}
+				onClose={() => setReportTarget(null)}
+			/>
+
+			<ViewSourceDialog
+				target={viewSourceTarget}
+				roomId={() => props.roomId}
+				getSourceEvent={getSourceEvent}
+				onClose={() => setViewSourceTarget(null)}
 			/>
 		</main>
 	);

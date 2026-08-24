@@ -81,6 +81,7 @@ function renderItem(
 			onJumpToReply={() => {}}
 			onEdit={() => {}}
 			onDelete={() => {}}
+			onViewSource={() => {}}
 			client={client as unknown as MatrixClient}
 			shortcodeLookup={new Map()}
 			emoteLookup={new Map()}

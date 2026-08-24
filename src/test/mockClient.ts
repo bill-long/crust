@@ -477,6 +477,7 @@ export function createMockClient(
 		// tests override per-case.
 		getRoomHierarchy: vi.fn().mockResolvedValue({ rooms: [] }),
 		redactEvent: vi.fn().mockResolvedValue(undefined),
+		reportEvent: vi.fn().mockResolvedValue({}),
 		resendEvent: vi.fn().mockResolvedValue(undefined),
 		cancelPendingEvent: vi.fn(),
 		// Poll response fetching (SDK Poll.getResponses).

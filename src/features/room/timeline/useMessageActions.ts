@@ -3,6 +3,7 @@ import { EventStatus, EventType, RelationType } from "matrix-js-sdk";
 import type { Accessor } from "solid-js";
 import { reportError } from "../../../lib/reportError";
 import { composerTextareaSelector } from "../composer/composerTextarea";
+import { normalizeReason } from "./timelineHelpers";
 import type { TimelineEvent } from "./timelineTypes";
 import type { OptimisticActions } from "./useOptimisticActions";
 
@@ -85,9 +86,19 @@ export function useMessageActions(
 		}
 	};
 
-	const onDelete = async (eventId: string): Promise<void> => {
+	const onDelete = async (eventId: string, reason?: string): Promise<void> => {
+		// Failure surfaces inline on the row ("Delete failed" + Retry /
+		// Discard over the optimistic redaction echo), so the funnel stays
+		// console-only here.
+		const normalized = normalizeReason(reason);
 		try {
-			await client.redactEvent(roomId(), sendThreadId(), eventId);
+			await client.redactEvent(
+				roomId(),
+				sendThreadId(),
+				eventId,
+				undefined,
+				normalized ? { reason: normalized } : undefined,
+			);
 		} catch (e) {
 			reportError(e, { logLabel: "Delete failed" });
 		}
