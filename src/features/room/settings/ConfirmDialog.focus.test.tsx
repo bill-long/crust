@@ -70,6 +70,26 @@ describe("ConfirmDialog focus containment", () => {
 		}
 	});
 
+	it("does not confirm on Enter from a checkbox in the body", () => {
+		const onConfirm = vi.fn();
+		render(() => (
+			<ConfirmDialog
+				open={() => true}
+				onClose={() => {}}
+				title="Leave space"
+				body={
+					<label>
+						<input type="checkbox" /> also leave rooms
+					</label>
+				}
+				onConfirm={onConfirm}
+			/>
+		));
+		const checkbox = screen.getByRole("checkbox");
+		fireEvent.keyDown(checkbox, { key: "Enter" });
+		expect(onConfirm).not.toHaveBeenCalled();
+	});
+
 	it("leaves focus alone inside another aria-modal surface (stacked dialogs must not fight)", async () => {
 		const stacked = document.createElement("div");
 		stacked.setAttribute("aria-modal", "true");

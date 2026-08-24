@@ -12,6 +12,17 @@ import { containFocusWhileOpen } from "../../../lib/focusTrap";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 
+/** Input types where Enter means "submit what I typed". */
+const ENTER_CONFIRM_INPUT_TYPES = new Set([
+	"text",
+	"search",
+	"email",
+	"url",
+	"tel",
+	"password",
+	"number",
+]);
+
 const FOCUSABLE =
 	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -96,10 +107,16 @@ const ConfirmDialog: Component<ConfirmDialogProps> = (props) => {
 			tryClose();
 			return;
 		}
-		// Enter in a single-line field confirms (the type-then-Enter flow,
-		// e.g. the delete dialog's reason input). Buttons keep their native
-		// Enter activation, and textareas keep Enter for newlines.
-		if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+		// Enter in a text-like single-line field confirms (the
+		// type-then-Enter flow, e.g. the delete dialog's reason input).
+		// Allowlisted types only: Enter on a checkbox/radio (the leave-space
+		// dialog has one) must not confirm a destructive dialog, buttons
+		// keep native Enter activation, textareas keep Enter for newlines.
+		if (
+			e.key === "Enter" &&
+			e.target instanceof HTMLInputElement &&
+			ENTER_CONFIRM_INPUT_TYPES.has(e.target.type)
+		) {
 			e.preventDefault();
 			void handleConfirm();
 			return;
