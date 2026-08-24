@@ -62,7 +62,7 @@ export function copyStylesIntoPipDocument(
 		}
 	}
 
-	// Mirror the root element's inline style (zoom is applied there) and class
+	// Mirror the root element's inline style (carries `--app-zoom`) and class
 	// list so rem-based sizing and any theme class carry into the PiP document.
 	const srcRoot = source.documentElement;
 	const dstRoot = target.documentElement;
@@ -74,7 +74,16 @@ export function copyStylesIntoPipDocument(
 
 	// Reset the PiP body so the panel fills it edge-to-edge with no default
 	// margin and inherits the app surface color (avoids a white flash).
+	// The app's UI scale lives here (the app puts it on #root - see
+	// global.css #487 - but the PiP document has no #root and hosts no
+	// floating-ui portals, so zooming the body is safe). Height/width
+	// divide the zoom back out, exactly like #root in the main document:
+	// an element's own zoom multiplies its specified lengths, so the
+	// scaled body still fills the PiP window and the panel (h-full/w-full)
+	// never lays out zoom-times the window under overflow:hidden.
 	target.body.style.margin = "0";
-	target.body.style.height = "100vh";
+	target.body.style.zoom = "var(--app-zoom, 1)";
+	target.body.style.height = "calc(100vh / var(--app-zoom, 1))";
+	target.body.style.width = "calc(100vw / var(--app-zoom, 1))";
 	target.body.style.overflow = "hidden";
 }

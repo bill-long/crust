@@ -1,16 +1,25 @@
-import { type MatrixClient, MatrixEvent, type Room } from "matrix-js-sdk";
+import {
+	type EventTimelineSet,
+	type MatrixClient,
+	MatrixEvent,
+	MatrixEventEvent,
+	type Room,
+} from "matrix-js-sdk";
 import {
 	type Component,
+	createEffect,
 	createMemo,
 	createResource,
+	createSignal,
 	onCleanup,
 	Show,
 } from "solid-js";
+import { reportError } from "../../../lib/reportError";
 import { threadJumpTarget } from "../../../lib/threadEvents";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
 
-interface ResolvedPinnedEvent {
+export interface ResolvedPinnedEvent {
 	event: MatrixEvent;
 	sender: string;
 	senderName: string;
@@ -19,6 +28,27 @@ interface ResolvedPinnedEvent {
 	format: string | null;
 	formattedBody: string | null;
 	msgtype: string;
+}
+
+/** Identity-stable comparator for resolved projections: equal when every
+ *  projected field is unchanged. Lets the memos below return fresh objects
+ *  without remounting the row's keyed <Show> subtree on every tick (a
+ *  remount re-sanitizes the body and drops keyboard focus mid-burst). */
+function sameResolved(
+	a: ResolvedPinnedEvent | null,
+	b: ResolvedPinnedEvent | null,
+): boolean {
+	if (a === b) return true;
+	if (!a || !b) return false;
+	return (
+		a.event === b.event &&
+		a.body === b.body &&
+		a.msgtype === b.msgtype &&
+		a.format === b.format &&
+		a.formattedBody === b.formattedBody &&
+		a.senderName === b.senderName &&
+		a.timestamp === b.timestamp
+	);
 }
 
 function resolveSync(room: Room, eventId: string): ResolvedPinnedEvent | null {
@@ -91,6 +121,16 @@ const PinnedMessageRow: Component<{
 	client: MatrixClient;
 	room: Room;
 	eventId: string;
+	/** Panel-level tick: bumps when THIS room's timeline gains a pinned
+	 *  event (filtered in usePinnedEvents - one room subscription for all
+	 *  rows instead of an unfiltered listener per row). */
+	timelineTick: () => number;
+	/** Room-scoped cache of resolved projections (usePinnedEvents). */
+	resolveCache: Map<string, ResolvedPinnedEvent>;
+	/** Private timeline set for /context fetches - keeps pin loads out of
+	 *  the room's own sets (no emissions into useTimeline's backfill
+	 *  guard, no unfiltered-set growth). */
+	contextTimelineSet: EventTimelineSet | null;
 	canPin: boolean;
 	shortcodeLookup: Map<string, ResolvedEmote>;
 	tabIndex: number;
@@ -102,40 +142,126 @@ const PinnedMessageRow: Component<{
 	onUnpin: () => void;
 	onFocus?: () => void;
 }> = (props) => {
-	const initial = createMemo<ResolvedPinnedEvent | null>(() =>
-		resolveSync(props.room, props.eventId),
+	// Bumped when the resolved event finishes decrypting (see the watcher
+	// below) so the projection re-derives from its now-clear content.
+	const [decryptTick, setDecryptTick] = createSignal(0);
+
+	// Re-evaluated when the panel's filtered timeline tick fires (a pinned
+	// event arrived via back-pagination or live insert) or decryption
+	// completes, so an already-open row resolves without a close/reopen
+	// (#485). `sameResolved` keeps the returned identity stable when the
+	// projection is unchanged - the keyed <Show> below must not remount
+	// every row on every tick.
+	const initial = createMemo<ResolvedPinnedEvent | null>(
+		() => {
+			props.timelineTick();
+			decryptTick();
+			return resolveSync(props.room, props.eventId);
+		},
+		null,
+		{ equals: sameResolved },
 	);
 
-	// If the event isn't in the SDK's in-memory cache, ask the SDK to
-	// load it through getEventTimeline — that fetches /context, runs the
-	// event mapper (decryption + relations), and on success
-	// room.findEventById(id) returns the fully-decrypted event.
+	// If the event isn't in the SDK's in-memory cache, load its /context
+	// into the panel's PRIVATE timeline set - the event mapper runs
+	// (decryption + relations) but nothing leaks into the room's own sets.
+	// Cached per room in the panel hook so a close/reopen doesn't repeat
+	// the round-trips.
 	const [fetched] = createResource(
 		() => (initial() ? null : props.eventId),
 		async (id) => {
 			if (!id) return null;
+			const cached = props.resolveCache.get(id);
+			if (cached) return cached;
 			try {
-				await props.client.getEventTimeline(
-					props.room.getUnfilteredTimelineSet(),
-					id,
-				);
-				const resolved = resolveSync(props.room, id);
-				if (resolved) return resolved;
+				if (props.contextTimelineSet) {
+					await props.client.getEventTimeline(props.contextTimelineSet, id);
+				}
+			} catch (e) {
+				// Console-only: the row's "(message unavailable)" state is the
+				// inline failure surface. Swallowing silently is what hid the
+				// missing-timelineSupport misconfiguration behind every pin
+				// rendering unavailable (#485) - and the standalone fallback
+				// below must still get its chance.
+				reportError(e, {
+					logLabel: `pinned: getEventTimeline failed for ${id}`,
+				});
+			}
+			const ev =
+				props.contextTimelineSet?.findEventById(id) ??
+				props.room.findEventById(id);
+			let resolved: ResolvedPinnedEvent | null = null;
+			if (ev) {
+				// Events mapped into the private set aren't scheduled for
+				// decryption by the room's machinery - nudge explicitly (a
+				// no-op for unencrypted events).
+				await props.client.decryptEventIfNeeded(ev);
+				resolved = projectEvent(props.room, ev);
+			} else {
 				// A pinned THREAD reply never lands in a room timeline set
 				// (the SDK's context path refuses thread events), so fetch it
 				// standalone: enough to render the row and carry the thread
 				// root for the jump, without materializing the whole thread
-				// up front — the thread panel does that when the user jumps.
-				return await fetchStandalone(props.client, props.room, id);
-			} catch {
-				return null;
+				// up front - the thread panel does that when the user jumps.
+				// Also the last resort when getEventTimeline itself failed.
+				resolved = await fetchStandalone(props.client, props.room, id);
 			}
+			if (resolved) props.resolveCache.set(id, resolved);
+			return resolved;
 		},
 	);
 
 	const resolved = createMemo<ResolvedPinnedEvent | null>(
-		() => initial() ?? fetched() ?? null,
+		() => {
+			// Track decryption for the FETCHED path too: re-project from the
+			// (same) event object once its content is clear.
+			decryptTick();
+			const i = initial();
+			if (i) return i;
+			const f = fetched();
+			if (!f) return null;
+			return projectEvent(props.room, f.event);
+		},
+		null,
+		{ equals: sameResolved },
 	);
+
+	// E2EE: a cached-but-undecrypted pin renders the non-text fallback and
+	// RoomEvent.Timeline never re-fires for decryption completion - that
+	// arrives as MatrixEventEvent.Decrypted on the event itself. Watch the
+	// resolved event while it is pending and re-derive when keys land.
+	createEffect(() => {
+		// Track the tick directly: `resolved()` is equals-suppressed, so a
+		// FAILED retry (projection unchanged) would never re-run this effect
+		// through the memo alone - and re-arming below depends on it.
+		decryptTick();
+		const ev = resolved()?.event;
+		if (!ev) return;
+		// Watch while decryption is pending OR has FAILED: a failed attempt
+		// sets clearEvent, which makes shouldAttemptDecryption() false, but
+		// rust-crypto retries when the megolm key arrives and emits
+		// Decrypted again - without the isDecryptionFailure() arm the row
+		// would keep the undecryptable fallback until close/reopen.
+		if (
+			!ev.isBeingDecrypted() &&
+			!ev.shouldAttemptDecryption() &&
+			!ev.isDecryptionFailure()
+		) {
+			return;
+		}
+		void props.client.decryptEventIfNeeded(ev);
+		const onDecrypted = (): void => {
+			// Cached projections hold the encrypted-era fields; drop before
+			// re-deriving. The tick re-runs this effect, which RE-ARMS the
+			// watcher if this fire was itself a failed attempt (the guard
+			// above stays true via isDecryptionFailure) and detaches for
+			// good once the event is clear.
+			props.resolveCache.delete(props.eventId);
+			setDecryptTick((t) => t + 1);
+		};
+		ev.once(MatrixEventEvent.Decrypted, onDecrypted);
+		onCleanup(() => ev.off(MatrixEventEvent.Decrypted, onDecrypted));
+	});
 	const isUnavailable = createMemo(
 		() => !resolved() && !fetched.loading && initial() === null,
 	);

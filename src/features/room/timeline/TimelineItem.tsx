@@ -350,7 +350,7 @@ const HoverToolbar: Component<{
 					</svg>
 				</Popover.Trigger>
 				<Popover.Portal>
-					<Popover.Content class="z-50 focus:outline-none">
+					<Popover.Content class="portal-scale z-50 focus:outline-none">
 						<EmojiPicker
 							packs={props.packs}
 							onSelect={handlePick}

@@ -55,7 +55,7 @@ const Tooltip: Component<TooltipProps> = (props) => {
 					{props.children}
 				</KTooltip.Trigger>
 				<KTooltip.Portal>
-					<KTooltip.Content class="z-50 max-w-xs rounded bg-surface-3 px-2 py-1 text-xs text-text-primary shadow-lg">
+					<KTooltip.Content class="portal-scale z-50 max-w-xs rounded bg-surface-3 px-2 py-1 text-xs text-text-primary shadow-lg">
 						{props.content}
 					</KTooltip.Content>
 				</KTooltip.Portal>

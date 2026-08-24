@@ -170,6 +170,13 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// token), leaving their behavior unchanged (#460).
 		refreshToken: props.session.refreshToken,
 		tokenRefreshFunction: createOidcTokenRefreshFn(props.session),
+		// Required for MatrixClient.getEventTimeline and
+		// TimelineWindow.load(eventId) - both throw synchronously without it.
+		// Off-cache pinned messages (#485) and jump-to-event for messages
+		// outside the loaded window depend on those /context fetches; the SDK
+		// disables them by default only because old clients relied on
+		// timeline-set identity assumptions Crust does not make.
+		timelineSupport: true,
 		cryptoCallbacks: {
 			getSecretStorageKey: async (
 				opts: {

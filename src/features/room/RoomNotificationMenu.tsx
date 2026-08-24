@@ -169,7 +169,7 @@ const RoomNotificationMenu: Component<RoomNotificationMenuProps> = (props) => {
 			</DropdownMenu.Trigger>
 
 			<DropdownMenu.Portal>
-				<DropdownMenu.Content class="z-50 min-w-[220px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
+				<DropdownMenu.Content class="portal-scale z-50 min-w-[220px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
 					<For each={LEVELS}>
 						{(opt) => (
 							<DropdownMenu.Item

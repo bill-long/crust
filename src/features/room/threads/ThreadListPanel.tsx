@@ -273,7 +273,7 @@ const ThreadListPanel: Component<{
 			<Popover.Portal>
 				<Popover.Content
 					id={panelId}
-					class="z-50 flex w-[360px] max-w-[90vw] flex-col gap-2 rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
+					class="portal-scale z-50 flex w-[360px] max-w-[90vw] flex-col gap-2 rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
 					role="dialog"
 					aria-label="Threads"
 					onKeyDown={onKeyDown}
