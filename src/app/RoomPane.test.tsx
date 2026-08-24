@@ -1,6 +1,7 @@
-import { cleanup, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMockClient, createMockRoom } from "../test/mockClient";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -73,12 +74,21 @@ vi.mock("../stores/viewport", () => ({ isMobile: () => false }));
 
 import { RoomPane } from "./RoomPane";
 
-function setup(params: Record<string, string | undefined>) {
+const ROOM_ID = "!room:example.org";
+
+function setup(
+	params: Record<string, string | undefined>,
+	options: {
+		client?: ReturnType<typeof createMockClient>;
+		onOpenSettings?: () => void;
+	} = {},
+) {
 	paramsState = params;
+	const client = options.client ?? createMockClient();
 	render(() => (
 		<RoomPane
-			client={{} as unknown as MatrixClient}
-			rid="!room:example.org"
+			client={client as unknown as MatrixClient}
+			rid={ROOM_ID}
 			roomName="Room"
 			onBack={() => {}}
 			callActive={() => false}
@@ -88,7 +98,7 @@ function setup(params: Record<string, string | undefined>) {
 			onInvite={() => {}}
 			leaving={() => false}
 			onLeave={() => {}}
-			onOpenSettings={() => {}}
+			onOpenSettings={options.onOpenSettings ?? (() => {})}
 			membersVisible={() => false}
 			onToggleMembers={() => {}}
 			membersWidth={() => 240}
@@ -132,5 +142,52 @@ describe("RoomPane ?event= deep link", () => {
 			{ event: undefined },
 			{ replace: true },
 		);
+	});
+});
+
+describe("RoomPane header topic", () => {
+	function clientWithTopic(topic: unknown) {
+		const room = createMockRoom(ROOM_ID);
+		if (topic !== undefined) {
+			room.__setStateEvent("m.room.topic", "", { topic });
+		}
+		return createMockClient(new Map([[ROOM_ID, room]]));
+	}
+
+	it("renders the topic as a single truncated line with a tooltip", () => {
+		setup({}, { client: clientWithTopic("Weekly sync\nnotes   and links") });
+		const button = screen.getByTitle("Weekly sync notes and links");
+		expect(button.textContent).toContain("Weekly sync notes and links");
+	});
+
+	it("opens room settings when the topic is clicked", () => {
+		const onOpenSettings = vi.fn();
+		setup({}, { client: clientWithTopic("A topic"), onOpenSettings });
+		fireEvent.click(screen.getByTitle("A topic"));
+		expect(onOpenSettings).toHaveBeenCalledTimes(1);
+	});
+
+	it("renders no topic line when the room has no topic", () => {
+		setup({}, { client: clientWithTopic(undefined) });
+		expect(screen.queryByText(/Open room settings/)).toBeNull();
+	});
+
+	it("ignores a malformed (non-string) topic", () => {
+		setup({}, { client: clientWithTopic({ nested: "object" }) });
+		expect(screen.queryByText(/Open room settings/)).toBeNull();
+	});
+
+	it("updates when an m.room.topic state event arrives", () => {
+		const client = clientWithTopic("Before");
+		setup({}, { client });
+		const room = client.getRoom(ROOM_ID);
+		room?.__setStateEvent("m.room.topic", "", { topic: "After" });
+		client.__emit("RoomState.events", {
+			getType: () => "m.room.topic",
+			getRoomId: () => ROOM_ID,
+			getStateKey: () => "",
+		});
+		expect(screen.getByTitle("After")).toBeTruthy();
+		expect(screen.queryByTitle("Before")).toBeNull();
 	});
 });

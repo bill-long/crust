@@ -28,6 +28,7 @@ import { PinnedMessagesPanel } from "../features/room/pinned/PinnedMessagesPanel
 import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { SearchPanel } from "../features/room/search/SearchPanel";
+import { useRoomStateContent } from "../features/room/settings/useRoomStateContent";
 import { ThreadListPanel } from "../features/room/threads/ThreadListPanel";
 import { ThreadPanel } from "../features/room/threads/ThreadPanel";
 import { createThreadPanelState } from "../features/room/threads/threadPanelState";
@@ -179,6 +180,20 @@ const RoomPane: Component<{
 	const packs = useImagePacks(props.client, () => props.rid);
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
+	// Room topic for the header line under the room name (#446). Topics can
+	// contain newlines; the header shows a single truncated line and keeps
+	// the full text reachable via the tooltip.
+	const topicContent = useRoomStateContent<{ topic?: unknown }>(
+		props.client,
+		() => props.rid,
+		"m.room.topic",
+	);
+	const topicLine = createMemo(() => {
+		const t = topicContent()?.topic;
+		if (typeof t !== "string") return "";
+		return t.replace(/\s+/g, " ").trim();
+	});
+
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
 
 	// Thread shown in the right-hand panel (root event id) plus an optional
@@ -257,9 +272,22 @@ const RoomPane: Component<{
 						</svg>
 					</button>
 				</Show>
-				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
-					{props.roomName}
-				</span>
+				<div class="flex min-w-0 flex-col justify-center">
+					<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
+						{props.roomName}
+					</span>
+					<Show when={topicLine()}>
+						<button
+							type="button"
+							onClick={() => props.onOpenSettings()}
+							title={topicLine()}
+							class="min-w-0 truncate rounded text-left text-xs text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
+						>
+							{topicLine()}
+							<span class="sr-only">. Open room settings</span>
+						</button>
+					</Show>
+				</div>
 				<div class="flex min-w-0 items-center gap-1 overflow-x-auto [&>*]:shrink-0">
 					<CallButton
 						roomId={props.rid}

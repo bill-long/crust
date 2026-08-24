@@ -28,6 +28,7 @@ import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
 import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
+import { copyMessageText, isCopyableText } from "./copyMessageText";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
 import { MediaAudio } from "./MediaAudio";
@@ -313,6 +314,9 @@ const HoverToolbar: Component<{
 	onForward?: () => void;
 	/** Open the raw-event viewer for this message. */
 	onViewSource: () => void;
+	/** Copy the message text to the clipboard. Absent for events without a
+	    user-authored text body (media, polls, stickers). */
+	onCopyText?: () => void;
 	/** Report the message to the homeserver admins. Absent for the user's
 	    own messages. */
 	onReport?: () => void;
@@ -535,6 +539,14 @@ const HoverToolbar: Component<{
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Portal>
 					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+						<Show when={props.onCopyText}>
+							<DropdownMenu.Item
+								class={menuItemClass()}
+								onSelect={() => props.onCopyText?.()}
+							>
+								Copy text
+							</DropdownMenu.Item>
+						</Show>
 						<DropdownMenu.Item
 							class={menuItemClass()}
 							onSelect={afterMenuClose(props.onViewSource)}
@@ -841,6 +853,11 @@ const TimelineItem: Component<{
 						onTogglePin={() => props.onTogglePin?.()}
 						onForward={props.onForward}
 						onViewSource={props.onViewSource}
+						onCopyText={
+							isCopyableText(ev.msgtype, ev.body)
+								? () => void copyMessageText(ev.body)
+								: undefined
+						}
 						onReport={props.onReport}
 					/>
 				</Show>
