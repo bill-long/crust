@@ -79,17 +79,18 @@ export interface RtcE2EEContext {
 	/**
 	 * Create a fresh `{keyProvider, worker}` for a single LiveKit
 	 * `Room` instance. Caller MUST call `release()` when the Room is
-	 * torn down (focus-change reconnect, leave, dispose). Calling
-	 * `bindRoom()` again before releasing the previous binding is
-	 * allowed — the previous binding stays usable until released, but
-	 * NEW cached keys are only pumped into the most recently acquired
-	 * binding (mirrors the "one Room at a time" invariant of LiveKit's
-	 * E2EE manager).
+	 * torn down (focus-change reconnect, leave, dispose). Several
+	 * bindings may be acquired at once (#496: the primary publish room
+	 * plus one subscriber-only room per foreign SFU) — every key that
+	 * arrives while a binding is acquired is fanned out to ALL of them,
+	 * since each owns a private keyProvider+worker pair and shares no
+	 * state with its siblings.
 	 *
 	 * All keys cached by `attach` (and any received later) are replayed
 	 * synchronously-as-async into the new binding's keyProvider so a
-	 * focus-change reconnect doesn't drop frames that the relay already
-	 * has the key material for.
+	 * focus-change reconnect (or a late-joining foreign-SFU room)
+	 * doesn't drop frames that the relay already has the key material
+	 * for.
 	 */
 	bindRoom(): RtcE2EERoomBinding;
 	/**
@@ -201,34 +202,32 @@ export async function createRtcE2EEContext(
 		inner.set(idx, key);
 	};
 
-	// The most recently acquired binding. New cached keys are pumped
-	// only into this provider so two simultaneously-live bindings can't
-	// fight over the latest key (mirrors LiveKit's "one Room per
-	// E2EEManager" model). Older still-acquired bindings keep the keys
-	// they already received until their owner calls `release()`.
-	let activeBinding: {
-		keyProvider: MatrixRtcKeyProvider;
-		release(): void;
-	} | null = null;
-
-	// Tracks EVERY currently-acquired binding so `dispose()` can release
-	// any the consumer forgot. Without this, a binding that's still
-	// acquired but no longer the `activeBinding` (e.g. the consumer
-	// dropped its reference without calling release) would leak its
-	// worker on dispose.
+	// Tracks EVERY currently-acquired binding. Serves two purposes:
+	// `pumpKey` fans each new key out to all of them, and `dispose()`
+	// releases any the consumer forgot (a binding whose reference was
+	// dropped without release() would otherwise leak its worker).
+	//
+	// Multi-SFU (#496): several LiveKit Rooms are live at once — the
+	// primary publish room plus one subscriber-only room per foreign
+	// SFU — and every room's decoder needs every participant key. Each
+	// binding owns a private {keyProvider, worker} pair, so fanning the
+	// same key out to all of them shares no state and cannot conflict;
+	// a binding overlapping its own teardown (focus-change reconnect)
+	// merely receives keys its dying worker ignores.
 	const acquiredBindings = new Set<{
 		keyProvider: MatrixRtcKeyProvider;
 		release(): void;
 	}>();
 
 	const pumpKey = (id: string, idx: number, cryptoKey: CryptoKey): void => {
-		if (!activeBinding) return;
-		activeBinding.keyProvider.setMatrixKey(id, cryptoKey, idx).catch(() => {
-			// onSetEncryptionKey is synchronous; the wrapper above only
-			// returns a Promise for symmetry with the import path — it
-			// shouldn't throw, but swallow if it does so one bad key
-			// doesn't kill the queue.
-		});
+		for (const binding of acquiredBindings) {
+			binding.keyProvider.setMatrixKey(id, cryptoKey, idx).catch(() => {
+				// onSetEncryptionKey is synchronous; the wrapper above only
+				// returns a Promise for symmetry with the import path — it
+				// shouldn't throw, but swallow if it does so one bad key
+				// doesn't kill the queue (or starve a sibling binding).
+			});
+		}
 	};
 
 	const attach = (
@@ -334,7 +333,6 @@ export async function createRtcE2EEContext(
 				if (released) return;
 				released = true;
 				acquiredBindings.delete(binding);
-				if (activeBinding === binding) activeBinding = null;
 				try {
 					worker.terminate();
 				} catch {
@@ -343,11 +341,9 @@ export async function createRtcE2EEContext(
 				}
 			},
 		};
-		// Mark this binding as the one new cached keys go to. Older
-		// bindings (if any are still acquired during a focus-change
-		// teardown overlap) keep what they already received.
+		// From here on, new cached keys fan out to this binding too
+		// (alongside every other still-acquired one — see `pumpKey`).
 		acquiredBindings.add(binding);
-		activeBinding = binding;
 		return {
 			e2eeOptions: { keyProvider, worker },
 			release: binding.release,
@@ -365,7 +361,6 @@ export async function createRtcE2EEContext(
 		// worker.terminate() lands. Snapshot first because release()
 		// mutates the set.
 		for (const b of [...acquiredBindings]) b.release();
-		activeBinding = null;
 		keyCache.clear();
 	};
 

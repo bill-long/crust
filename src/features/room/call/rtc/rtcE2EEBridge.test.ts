@@ -394,7 +394,10 @@ describe("rtcE2EEBridge", () => {
 		expect(terminate1).toHaveBeenCalledTimes(1);
 	});
 
-	it("new cached keys only pump into the most recently acquired binding", async () => {
+	it("new cached keys fan out to every acquired binding (#496 multi-SFU)", async () => {
+		// Multi-SFU runs the primary publish room plus subscriber-only
+		// rooms for foreign SFUs at once; every room's decoder needs every
+		// participant key.
 		const ctx = await newCtx();
 		const session = createFakeSession();
 		ctx.attach(session as never, () => true);
@@ -410,8 +413,65 @@ describe("rtcE2EEBridge", () => {
 			"id",
 		);
 		await flush();
-		expect(kp1.calls).toHaveLength(0);
+		expect(kp1.calls.map((c) => c.keyIndex)).toEqual([1]);
 		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([1]);
+		b1.release();
+		b2.release();
+		ctx.dispose();
+	});
+
+	it("a released binding stops receiving new keys while its siblings continue", async () => {
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const b1 = ctx.bindRoom();
+		const kp1 = b1.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		const b2 = ctx.bindRoom();
+		const kp2 = b2.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		b1.release();
+		session.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([7]),
+			2,
+			{},
+			"id",
+		);
+		await flush();
+		expect(kp1.calls).toHaveLength(0);
+		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([2]);
+		b2.release();
+		ctx.dispose();
+	});
+
+	it("a late-acquired binding replays the cache AND receives subsequent keys", async () => {
+		// The foreign-SFU room typically binds well after the primary room
+		// (membership discovery lag): it must catch up via the cache replay
+		// and then stay subscribed to the live fan-out.
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const b1 = ctx.bindRoom();
+		session.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([1]),
+			0,
+			{},
+			"peer",
+		);
+		await flush();
+		const b2 = ctx.bindRoom();
+		const kp2 = b2.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		// Cache replay of key index 0.
+		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([0]);
+		session.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([2]),
+			1,
+			{},
+			"peer",
+		);
+		await flush();
+		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([0, 1]);
 		b1.release();
 		b2.release();
 		ctx.dispose();
