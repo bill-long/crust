@@ -81,9 +81,21 @@ async function registerOidcClient(
 			"The login service does not support automatic app registration.",
 		);
 	}
+	// Pinned to web schemes like the authorization URL below: the endpoint is
+	// homeserver-supplied, and in the desktop shell the CSP admits non-web
+	// schemes (ipc:) that a fetch must never be steered into.
+	let endpoint: URL;
+	try {
+		endpoint = new URL(metadata.registration_endpoint);
+	} catch {
+		throw new Error("The login service metadata is invalid.");
+	}
+	if (endpoint.protocol !== "https:" && endpoint.protocol !== "http:") {
+		throw new Error("The login service metadata is invalid.");
+	}
 	let response: Response;
 	try {
-		response = await fetch(metadata.registration_endpoint, {
+		response = await fetch(endpoint, {
 			method: "POST",
 			headers: {
 				Accept: "application/json",

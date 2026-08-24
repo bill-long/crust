@@ -169,10 +169,10 @@ describe("startOidcLogin", () => {
 
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		const [endpoint, init] = fetchMock.mock.calls[0] as unknown as [
-			string,
+			URL,
 			{ body: string },
 		];
-		expect(endpoint).toBe("https://auth.example.com/register");
+		expect(String(endpoint)).toBe("https://auth.example.com/register");
 		expect(JSON.parse(init.body)).toMatchObject({
 			client_name: "Crust",
 			client_uri: `${window.location.origin}/`,
@@ -263,6 +263,21 @@ describe("startOidcLogin", () => {
 		await expect(
 			startOidcLogin(METADATA, "https://matrix.example.com"),
 		).rejects.toThrow("Dynamic registration failed (HTTP 500).");
+	});
+
+	it("refuses a non-web registration endpoint before fetching", async () => {
+		// Homeserver-supplied metadata; in the desktop shell the CSP admits
+		// ipc:, so a malicious OP must not steer the registration POST there.
+		const fetchMock = stubRegistration(201, { client_id: "unused" });
+		const meta = {
+			...METADATA,
+			registration_endpoint: "ipc://localhost/register",
+		} as typeof METADATA;
+
+		await expect(
+			startOidcLogin(meta, "https://matrix.example.com"),
+		).rejects.toThrow("The login service metadata is invalid.");
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it("curates an outright network failure without caching or storing state", async () => {
