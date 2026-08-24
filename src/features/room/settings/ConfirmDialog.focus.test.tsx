@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("solid-refresh", () => ({
@@ -37,6 +37,34 @@ describe("ConfirmDialog focus containment", () => {
 			// strand the modal's keyboard handling outside the overlay.
 			outside.focus();
 			expect(document.activeElement).toBe(confirmBtn);
+		} finally {
+			outside.remove();
+		}
+	});
+
+	it("falls back to the overlay when the confirm button is disabled (pending)", async () => {
+		const outside = document.createElement("button");
+		outside.textContent = "outside";
+		document.body.appendChild(outside);
+		try {
+			render(() => (
+				<ConfirmDialog
+					open={() => true}
+					onClose={() => {}}
+					title="Confirm thing"
+					body="Sure?"
+					onConfirm={() => new Promise(() => {})}
+				/>
+			));
+			await Promise.resolve();
+			fireEvent.click(screen.getByText("Confirm"));
+			// While pending, the confirm button is disabled and can't take
+			// focus - containment must land on the overlay instead of
+			// silently failing.
+			expect(screen.getByText("Working…")).toBeTruthy();
+			outside.focus();
+			const overlay = screen.getByRole("dialog");
+			expect(overlay.contains(document.activeElement)).toBe(true);
 		} finally {
 			outside.remove();
 		}

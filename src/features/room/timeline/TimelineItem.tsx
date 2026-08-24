@@ -515,7 +515,7 @@ const HoverToolbar: Component<{
 					ref={(el: HTMLButtonElement) => {
 						menuTriggerEl = el;
 					}}
-					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					aria-label="More"
 					title="More"
 				>

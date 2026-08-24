@@ -66,6 +66,11 @@ export function containFocusWhileOpen(
 			if (overlay.contains(target)) return;
 			if (target.closest('[aria-modal="true"]') !== null) return;
 			getFocusTarget()?.focus();
+			// The preferred target may be unable to take focus (e.g. a
+			// confirm button disabled while its action is pending) - fall
+			// back to the overlay itself, which carries tabIndex={-1}, so
+			// containment never silently fails.
+			if (!overlay.contains(document.activeElement)) overlay.focus();
 		};
 		document.addEventListener("focusin", onFocusIn);
 		onCleanup(() => document.removeEventListener("focusin", onFocusIn));
