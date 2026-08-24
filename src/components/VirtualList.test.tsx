@@ -300,6 +300,33 @@ describe("<VirtualList> windowing with a stubbed viewport", () => {
 		expect(heightSpy.mock.calls.length).toBe(callsAfterMount);
 	});
 
+	it("resyncs the window from the DOM even when scrollToIndex needs no scroll", () => {
+		// Models the browser clamping scrollTop synchronously on a list
+		// shrink before the async scroll event resyncs the signal: the DOM
+		// offset and the internal signal disagree, and a no-move
+		// scrollToIndex must still window from the DOM's truth.
+		let api: VirtualListController | undefined;
+		const { container, queryByText } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		scroller.scrollTop = 100; // no scroll event dispatched - signal stale at 0
+		expect(queryByText("row-12")).toBeNull();
+		api?.scrollToIndex(12); // rows 10-14 are visible per the DOM: no scroll needed
+		expect(scroller.scrollTop).toBe(100); // still no movement...
+		expect(queryByText("row-12")).toBeTruthy(); // ...but the window resynced
+	});
+
 	it("scrollToIndex is a no-op for a fully visible row", () => {
 		let api: VirtualListController | undefined;
 		const { container } = render(() => (

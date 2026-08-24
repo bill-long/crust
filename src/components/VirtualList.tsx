@@ -293,21 +293,22 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			// signal only learns that from the (async) scroll event.
 			let target = el.scrollTop;
 			if (top < target) target = top;
-			// A fully visible row takes neither branch and never writes: the
-			// clamp below excludes the container's bottom padding, so writing
-			// an unchanged-in-intent target would nudge a list parked at its
-			// true bottom up by that padding.
 			else if (bottom > target + vh) target = bottom - vh;
-			else return;
-			// Clamp to the known geometry (bottom padding excluded - no target
-			// above needs it), so a stale baseline can't park the window past
-			// the real maximum scroll.
-			target = Math.max(0, Math.min(target, padTop() + rowTop(n) - vh));
-			if (target === el.scrollTop) return;
-			el.scrollTop = target;
-			// Read back rather than trusting the request: the browser clamps
-			// writes computed from stale viewport measurements, and a clamped
-			// write fires no scroll event to resync the signal.
+			// Only align-derived targets are written (and clamped): the clamp
+			// excludes the container's bottom padding, so writing an
+			// unchanged-in-intent target would nudge a list parked at its
+			// true bottom up by that padding.
+			if (target !== el.scrollTop) {
+				// Clamp to the known geometry so a stale baseline can't park
+				// the window past the real maximum scroll.
+				target = Math.max(0, Math.min(target, padTop() + rowTop(n) - vh));
+				el.scrollTop = target;
+			}
+			// Resync the signal from the DOM unconditionally - even on the
+			// fully-visible no-write path. The browser clamps scrollTop
+			// synchronously when the list shrinks, and until the (async)
+			// scroll event lands the signal would otherwise window rows for
+			// the stale offset (blank strip + wrong mountedRange).
 			setScrollTop(el.scrollTop);
 		});
 
