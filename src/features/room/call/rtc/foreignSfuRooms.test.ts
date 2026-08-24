@@ -109,6 +109,9 @@ const flush = async (): Promise<void> => {
 
 interface DepsFixture {
 	deps: ForeignSfuRoomsDeps;
+	getOpenIdToken: ReturnType<typeof vi.fn>;
+	/** Retry timers armed via the seam, in order; call fn() to fire. */
+	scheduled: Array<{ fn: () => void; ms: number; cleared: boolean }>;
 	attachAudioTrack: ReturnType<typeof vi.fn>;
 	detachAudioTrack: ReturnType<typeof vi.fn>;
 	upsertVideoTrack: ReturnType<typeof vi.fn>;
@@ -124,6 +127,8 @@ interface DepsFixture {
 function createDeps(over?: { e2ee?: boolean }): DepsFixture {
 	let nowMs = 1_000_000;
 	const bindings: Array<{ release: ReturnType<typeof vi.fn> }> = [];
+	const scheduled: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
+	const getOpenIdToken = vi.fn(async () => ({ access_token: "tok" }));
 	const fx = {
 		attachAudioTrack: vi.fn(),
 		detachAudioTrack: vi.fn(),
@@ -136,7 +141,7 @@ function createDeps(over?: { e2ee?: boolean }): DepsFixture {
 	};
 	const e2eeCtx = over?.e2ee
 		? {
-				bindRoom: vi.fn(() => {
+				bindRoom: vi.fn((_opts?: { localIdentity?: string }) => {
 					const binding = {
 						e2eeOptions: { keyProvider: {}, worker: {} },
 						release: vi.fn(),
@@ -148,17 +153,30 @@ function createDeps(over?: { e2ee?: boolean }): DepsFixture {
 		: null;
 	const deps: ForeignSfuRoomsDeps = {
 		client: {
-			getOpenIdToken: vi.fn(async () => ({ access_token: "tok" })),
+			getOpenIdToken,
 			getDeviceId: vi.fn(() => "DEVABC"),
+			getUserId: vi.fn(() => "@me:example.com"),
 		} as never,
 		loadLivekit: async () => lkMock,
 		e2ee: () => (e2eeCtx as never) ?? null,
 		...fx,
 		now: () => nowMs,
+		retryTimers: {
+			setTimer: (fn: () => void, ms: number): unknown => {
+				const handle = { fn, ms, cleared: false };
+				scheduled.push(handle);
+				return handle;
+			},
+			clearTimer: (handle: unknown): void => {
+				(handle as { cleared: boolean }).cleared = true;
+			},
+		},
 	};
 	return {
 		deps,
 		...fx,
+		getOpenIdToken,
+		scheduled,
 		setNow: (ms: number) => {
 			nowMs = ms;
 		},
@@ -504,6 +522,101 @@ describe("foreignSfuRooms", () => {
 		rooms.reconcile(desired("https://sfu-a.example.org"));
 		await flush();
 		expect(builtRooms).toHaveLength(2);
+	});
+
+	it("shares one OpenID token across a reconcile wave", async () => {
+		const fx = createDeps();
+		createForeignSfuRooms(fx.deps).reconcile(
+			desired("https://sfu-a.example.org", "https://sfu-b.example.org"),
+		);
+		await flush();
+		expect(jwtMock).toHaveBeenCalledTimes(2);
+		expect(fx.getOpenIdToken).toHaveBeenCalledTimes(1);
+	});
+
+	it("a timer retries a dropped origin without waiting for a membership tick", async () => {
+		const fx = createDeps();
+		const room = createFakeRoom();
+		roomQueue.push(room);
+		const rooms = createForeignSfuRooms(fx.deps);
+		rooms.reconcile(desired("https://sfu-a.example.org"));
+		await flush();
+		room.emit("disconnected");
+		await flush();
+		expect(rooms.rooms()[0].state).toBe("failed");
+		const armed = fx.scheduled.filter((t) => !t.cleared);
+		expect(armed).toHaveLength(1);
+		expect(armed[0].ms).toBe(FOREIGN_RETRY_MS);
+		// Fire the timer: the origin reconnects with NO reconcile call.
+		roomQueue.push(createFakeRoom());
+		armed[0].fn();
+		await flush();
+		expect(rooms.rooms()[0].state).toBe("connected");
+		expect(jwtMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("removing an origin cancels its armed retry timer", async () => {
+		const fx = createDeps();
+		jwtMock.mockRejectedValueOnce(new Error("boom"));
+		const rooms = createForeignSfuRooms(fx.deps);
+		rooms.reconcile(desired("https://sfu-a.example.org"));
+		await flush();
+		expect(fx.scheduled.filter((t) => !t.cleared)).toHaveLength(1);
+		rooms.reconcile(new Map());
+		await flush();
+		expect(fx.scheduled.filter((t) => !t.cleared)).toHaveLength(0);
+		// A stale-fired timer (defensive) must not resurrect the origin.
+		for (const t of fx.scheduled) t.fn();
+		await flush();
+		expect(rooms.rooms()).toHaveLength(0);
+	});
+
+	it("a sink throw during the post-connect scan reclaims the connected room", async () => {
+		// The already-subscribed scan runs before promotion; if a shared
+		// media sink throws, the catch must disconnect the room and release
+		// its binding rather than leaking them into the retry.
+		const fx = createDeps({ e2ee: true });
+		fx.attachAudioTrack.mockImplementationOnce(() => {
+			throw new Error("sink exploded");
+		});
+		const room = createFakeRoom();
+		room.remoteParticipants.set("peer", {
+			identity: "peer",
+			audioTrackPublications: new Map([
+				[
+					"sid-audio",
+					{
+						trackSid: "sid-audio",
+						isSubscribed: true,
+						audioTrack: { kind: "audio" },
+					},
+				],
+			]),
+			videoTrackPublications: new Map(),
+		});
+		roomQueue.push(room);
+		const rooms = createForeignSfuRooms(fx.deps);
+		rooms.reconcile(desired("https://sfu-a.example.org"));
+		await flush();
+		expect(rooms.rooms()[0].state).toBe("failed");
+		expect(rooms.rooms()[0].room).toBeNull();
+		expect(room.disconnect).toHaveBeenCalledTimes(1);
+		expect(fx.bindings[0].release).toHaveBeenCalledTimes(1);
+	});
+
+	it("passes the local userId:deviceId identity to bindRoom for replay ordering", async () => {
+		const fx = createDeps({ e2ee: true });
+		roomQueue.push(createFakeRoom());
+		createForeignSfuRooms(fx.deps).reconcile(
+			desired("https://sfu-a.example.org"),
+		);
+		await flush();
+		const e2eeCtx = fx.deps.e2ee() as unknown as {
+			bindRoom: ReturnType<typeof vi.fn>;
+		};
+		expect(e2eeCtx.bindRoom).toHaveBeenCalledWith({
+			localIdentity: "@me:example.com:DEVABC",
+		});
 	});
 
 	it("disposeAll() is terminal: a late reconcile cannot reconnect", async () => {
