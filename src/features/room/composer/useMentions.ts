@@ -33,18 +33,22 @@ export function useMentions(deps: UseMentionsDeps) {
 		listboxId,
 	} = createPicker<RoomMember>();
 
-	// Joined members with their search keys lowercased once per member-list
-	// change, not once per keystroke - the filter below runs in the input
-	// handler's synchronous path for every character typed.
 	const roomMembers = createMemo(() => {
 		const room = deps.client.getRoom(deps.roomId());
-		if (!room) return [];
-		return room.getJoinedMembers().map((member) => ({
-			member,
-			searchName: (member.name ?? "").toLowerCase(),
-			searchId: member.userId.toLowerCase(),
-		}));
+		return room ? room.getJoinedMembers() : [];
 	});
+
+	// Lowercased search index, built lazily on the first active mention query
+	// and cached per member-list identity: the lowercasing shouldn't run per
+	// keystroke (the filter below sits in the input handler's synchronous
+	// path), but most sessions never type '@' at all, so the composer also
+	// shouldn't pay a full-roster mapping on every mount / room switch.
+	let searchIndexSource: RoomMember[] | undefined;
+	let searchIndex: Array<{
+		member: RoomMember;
+		searchName: string;
+		searchId: string;
+	}> = [];
 
 	// Shared filtered member list - used by both picker and ARIA state.
 	// Unbounded: the picker windows its rows (VirtualList), so a large match
@@ -55,17 +59,21 @@ export function useMentions(deps: UseMentionsDeps) {
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
-		const lowerQ = q.toLowerCase();
-		const out: RoomMember[] = [];
-		for (const entry of roomMembers()) {
-			if (
-				entry.searchName.includes(lowerQ) ||
-				entry.searchId.includes(lowerQ)
-			) {
-				out.push(entry.member);
-			}
+		const members = roomMembers();
+		if (searchIndexSource !== members) {
+			searchIndexSource = members;
+			searchIndex = members.map((member) => ({
+				member,
+				searchName: (member.name ?? "").toLowerCase(),
+				searchId: member.userId.toLowerCase(),
+			}));
 		}
-		return out;
+		const lowerQ = q.toLowerCase();
+		return searchIndex
+			.filter(
+				(e) => e.searchName.includes(lowerQ) || e.searchId.includes(lowerQ),
+			)
+			.map((e) => e.member);
 	});
 
 	const pickerRendered = () => filteredMembers().length > 0;

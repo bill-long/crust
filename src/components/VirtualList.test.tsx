@@ -9,9 +9,10 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
-import { stubViewport } from "../test/stubViewport";
+import { stubViewport, triggerStubbedResize } from "../test/stubViewport";
 import {
 	computeRowOffsets,
+	uniformVisibleRowRange,
 	VirtualList,
 	type VirtualListController,
 	visibleRowRange,
@@ -72,6 +73,27 @@ describe("visibleRowRange", () => {
 		const offs = computeRowOffsets(4, (i) => [5, 10, 15, 20][i]); // [0,5,15,30,50]
 		// viewport [12,22] overlaps rows 1 (5-15) and 2 (15-30).
 		expect(visibleRowRange(offs, 12, 10, 0)).toEqual([1, 3]);
+	});
+});
+
+describe("uniformVisibleRowRange", () => {
+	it("matches visibleRowRange over the equivalent prefix sums (single-place invariant)", () => {
+		// The O(1) uniform path must stay boundary-identical to the array
+		// path - sweep counts, scroll offsets, viewports, and overscans.
+		const h = 10;
+		for (const count of [0, 1, 5, 100]) {
+			const offs = computeRowOffsets(count, h);
+			for (const st of [0, 4, 10, 45, 50, 95, 990, 2000]) {
+				for (const vh of [0, 36, 50]) {
+					for (const overscan of [0, 3]) {
+						expect(
+							uniformVisibleRowRange(count, h, st, vh, overscan),
+							`count=${count} st=${st} vh=${vh} overscan=${overscan}`,
+						).toEqual(visibleRowRange(offs, st, vh, overscan));
+					}
+				}
+			}
+		}
 	});
 });
 
@@ -225,6 +247,35 @@ describe("<VirtualList> windowing with a stubbed viewport", () => {
 		expect(queryByText("row-3")).toBeTruthy();
 	});
 
+	it("defers a scrollToIndex issued while the viewport is unmeasured", () => {
+		// The popover case: the list mounts at 0 height and grows a frame
+		// later. A scroll requested in that window must not be dropped.
+		restoreViewport();
+		let height = 0;
+		restoreViewport = stubViewport(() => height);
+		let api: VirtualListController | undefined;
+		const { container, queryByText } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				overscan={2}
+				class="scroller"
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		api?.scrollToIndex(40);
+		expect(queryByText("row-40")).toBeNull();
+		height = 50;
+		triggerStubbedResize();
+		const scroller = container.querySelector(".scroller") as HTMLElement;
+		expect(scroller.scrollTop).toBe(360);
+		expect(queryByText("row-40")).toBeTruthy();
+	});
+
 	it("scrollToIndex is a no-op for a fully visible row", () => {
 		let api: VirtualListController | undefined;
 		const { container } = render(() => (
@@ -246,6 +297,24 @@ describe("<VirtualList> windowing with a stubbed viewport", () => {
 		// Rows 10..14 are fully visible; scrolling to one must not move.
 		api?.scrollToIndex(12);
 		expect(scroller.scrollTop).toBe(100);
+	});
+
+	it("hands the controller undefined on unmount so holders drop the stale api", () => {
+		let api: VirtualListController | undefined | null = null;
+		const { unmount } = render(() => (
+			<VirtualList
+				each={items}
+				rowHeight={10}
+				controller={(a) => {
+					api = a;
+				}}
+			>
+				{(item: { n: number }) => <div>{`row-${item.n}`}</div>}
+			</VirtualList>
+		));
+		expect(api).toBeTruthy();
+		unmount();
+		expect(api).toBeUndefined();
 	});
 
 	it("forwards a ref to the scroll container", () => {

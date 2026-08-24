@@ -852,7 +852,6 @@ const Composer: Component<{
 			<div class="relative">
 				<MentionPicker
 					items={filteredMembers()}
-					query={mentionQuery() ?? ""}
 					visible={mentionQuery() !== null}
 					onSelect={onMentionSelect}
 					onClose={() => setMentionQuery(null)}

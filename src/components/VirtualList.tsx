@@ -80,6 +80,29 @@ export function visibleRowRange(
 	];
 }
 
+/**
+ * `visibleRowRange` for a uniform row height, in O(1) with no offsets
+ * array. Must stay boundary-identical to running `visibleRowRange` over
+ * `computeRowOffsets(count, rowHeight)` - a property test locks the two
+ * together.
+ */
+export function uniformVisibleRowRange(
+	count: number,
+	rowHeight: number,
+	scrollTop: number,
+	viewportH: number,
+	overscan: number,
+): [number, number] {
+	if (count <= 0 || rowHeight <= 0) return [0, 0];
+	// floor/ceil mirror lastAtOrBelow / firstAtOrAbove on the prefix sums.
+	const first = Math.min(count, Math.floor(scrollTop / rowHeight));
+	const last = Math.min(count, Math.ceil((scrollTop + viewportH) / rowHeight));
+	return [
+		Math.max(0, first - overscan),
+		Math.min(count, Math.max(last, first + 1) + overscan),
+	];
+}
+
 /** Imperative surface handed to the `controller` callback. */
 export interface VirtualListController {
 	/**
@@ -121,8 +144,13 @@ interface VirtualListProps<T>
 	resetKey?: unknown;
 	/** Rendered instead of the list when `each` is empty. */
 	fallback?: JSX.Element;
-	/** Called on mount with the imperative API (e.g. `scrollToIndex`). */
-	controller?: (api: VirtualListController) => void;
+	/**
+	 * Called on mount with the imperative API (e.g. `scrollToIndex`), and on
+	 * cleanup with `undefined` - holders must drop the reference rather than
+	 * keep calling into a disposed instance (whose reactive reads are frozen
+	 * and whose element is detached).
+	 */
+	controller?: (api: VirtualListController | undefined) => void;
 	children: (item: T, index: Accessor<number>) => JSX.Element;
 }
 
@@ -176,11 +204,25 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	const [padTop, setPadTop] = createSignal(0);
 	const overscan = (): number => local.overscan ?? 3;
 
-	// Recomputed only when the data or row sizing changes - not on scroll.
+	// Row count as its own memo, so the offsets rebuild below keys on the
+	// count rather than on every new array identity a filtering caller
+	// produces per keystroke.
+	const count = createMemo(() => local.each.length);
+	// Prefix sums for per-row heights; `null` for a uniform height, where
+	// offsets are `i * rowHeight` in O(1) and rebuilding an O(n) array as a
+	// filtered list changes length on each keystroke would be pure waste.
+	// Recomputed only when the count or row sizing changes - not on scroll.
 	const offsets = createMemo(() =>
-		computeRowOffsets(local.each.length, local.rowHeight),
+		typeof local.rowHeight === "number"
+			? null
+			: computeRowOffsets(count(), local.rowHeight),
 	);
-	const totalHeight = (): number => offsets()[local.each.length];
+	/** Top edge of row `i` (`i === count` gives the total content height). */
+	const rowTop = (i: number): number => {
+		const offs = offsets();
+		return offs ? offs[i] : i * (local.rowHeight as number);
+	};
+	const totalHeight = (): number => rowTop(count());
 
 	onMount(() => {
 		const el = scrollRef;
@@ -197,23 +239,29 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 		}
 		local.controller?.({ scrollToIndex, mountedRange: range });
 	});
+	onCleanup(() => local.controller?.(undefined));
 
 	// untrack: an imperative API must not subscribe its caller - a consumer
 	// calling this from a createEffect would otherwise start tracking the
 	// scroll position and re-assert the scroll on every user wheel/drag.
+	// A scroll requested while the viewport still measures 0 (a popover that
+	// lays out a frame after mounting - the case this component exists for)
+	// can't be positioned yet; park it and re-assert once a height lands.
+	let pendingScrollIndex = -1;
 	const scrollToIndex = (index: number): void =>
 		untrack(() => {
 			const el = scrollRef;
-			const count = local.each.length;
+			const n = count();
 			const vh = viewportH();
-			// A 0-height viewport (popover not laid out yet) has no meaningful
-			// "visible" region to scroll within; the ResizeObserver re-measure
-			// will land with scrollTop still at its current value.
-			if (!el || count === 0 || vh <= 0) return;
-			const offs = offsets();
-			const i = Math.max(0, Math.min(index, count - 1));
-			const top = padTop() + offs[i];
-			const bottom = padTop() + offs[i + 1];
+			if (!el || n === 0) return;
+			if (vh <= 0) {
+				pendingScrollIndex = index;
+				return;
+			}
+			pendingScrollIndex = -1;
+			const i = Math.max(0, Math.min(index, n - 1));
+			const top = padTop() + rowTop(i);
+			const bottom = padTop() + rowTop(i + 1);
 			// Baseline on the DOM, not the internal signal: the browser clamps
 			// scrollTop when the list shrinks under the current offset, and the
 			// signal only learns that from the (async) scroll event.
@@ -223,10 +271,18 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			// Clamp to the known geometry (bottom padding excluded - no target
 			// above needs it), so a stale baseline can't park the window past
 			// the real maximum scroll.
-			target = Math.max(0, Math.min(target, padTop() + offs[count] - vh));
+			target = Math.max(0, Math.min(target, padTop() + rowTop(n) - vh));
 			el.scrollTop = target;
 			setScrollTop(target);
 		});
+
+	createEffect(() => {
+		if (viewportH() > 0 && pendingScrollIndex >= 0) {
+			const i = pendingScrollIndex;
+			pendingScrollIndex = -1;
+			scrollToIndex(i);
+		}
+	});
 
 	createEffect(
 		on(
@@ -243,13 +299,19 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	// shifts (crosses a row boundary), not on every scroll pixel - otherwise the
 	// <For> below would tear down and rebuild every mounted row on each tick.
 	const range = createMemo(
-		(): [number, number] =>
-			visibleRowRange(
-				offsets(),
-				Math.max(0, scrollTop() - padTop()),
-				viewportH(),
-				overscan(),
-			),
+		(): [number, number] => {
+			const offs = offsets();
+			const st = Math.max(0, scrollTop() - padTop());
+			return offs
+				? visibleRowRange(offs, st, viewportH(), overscan())
+				: uniformVisibleRowRange(
+						count(),
+						local.rowHeight as number,
+						st,
+						viewportH(),
+						overscan(),
+					);
+		},
 		undefined,
 		{ equals: (a, b) => a[0] === b[0] && a[1] === b[1] },
 	);
@@ -276,8 +338,16 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			}}
 		>
 			<Show when={local.each.length > 0} fallback={local.fallback}>
-				<div style={{ height: `${totalHeight()}px` }}>
-					<div style={{ transform: `translateY(${offsets()[range()[0]]}px)` }}>
+				{/* role="presentation": when the scroll container carries a
+				    composite role (e.g. the Picker's listbox), these layout
+				    wrappers must not break the owned-children chain between
+				    it and the role="option" rows - AT that walks owned
+				    children would otherwise see a listbox of generic divs. */}
+				<div role="presentation" style={{ height: `${totalHeight()}px` }}>
+					<div
+						role="presentation"
+						style={{ transform: `translateY(${rowTop(range()[0])}px)` }}
+					>
 						<For each={visibleItems()}>
 							{(item, i) => local.children(item, () => range()[0] + i())}
 						</For>

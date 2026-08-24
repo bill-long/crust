@@ -12,15 +12,16 @@ import { VirtualList, type VirtualListController } from "../VirtualList";
 
 export interface PickerProps<T> {
 	items: T[];
-	query: string;
 	onSelect: (item: T) => void;
 	onClose: () => void;
 	renderItem: (item: T, isHighlighted: boolean) => JSX.Element;
-	/** Omit when `items` is already filtered - the list is used as-is,
-	    instead of paying a second full pass with a constant-true filter. */
-	filterFn?: (item: T, query: string) => boolean;
 	visible: boolean;
 	position: { bottom: string; left: string };
+	/** Omit both when `items` is already filtered - the list is used as-is,
+	    instead of paying a second full pass with a constant-true filter.
+	    `query` only exists to feed `filterFn`, so they travel together. */
+	query?: string;
+	filterFn?: (item: T, query: string) => boolean;
 }
 
 const ITEM_HEIGHT = 36;
@@ -50,7 +51,7 @@ export function createPicker<T>() {
 		const filtered = createMemo(() => {
 			const fn = props.filterFn;
 			if (!fn) return props.items;
-			return props.items.filter((item) => fn(item, props.query));
+			return props.items.filter((item) => fn(item, props.query ?? ""));
 		});
 
 		// A fresh open starts back at the top - a highlight retained from the

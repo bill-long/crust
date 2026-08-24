@@ -152,12 +152,11 @@ describe("createPicker windowing", () => {
 		expect(queryByText("item-0")).toBeTruthy();
 	});
 
-	it("renders items as-is when filterFn is omitted (pre-filtered consumers)", () => {
+	it("renders items as-is when filterFn/query are omitted (pre-filtered consumers)", () => {
 		const picker = createPicker<string>();
 		const { queryByText } = render(() => (
 			<picker.Picker
 				items={["alpha", "beta"]}
-				query="zzz"
 				visible={true}
 				position={{ bottom: "auto", left: "0" }}
 				onSelect={() => {}}
@@ -165,9 +164,26 @@ describe("createPicker windowing", () => {
 				renderItem={(item) => <span>{item}</span>}
 			/>
 		));
-		// The query is the consumer's concern (it already filtered items).
+		// Filtering is the consumer's concern (it already filtered items).
 		expect(queryByText("alpha")).toBeTruthy();
 		expect(queryByText("beta")).toBeTruthy();
+	});
+
+	it("marks the layout wrappers between listbox and options as presentational", () => {
+		const { container } = setup();
+		const listbox = container.querySelector('[role="listbox"]');
+		const option = listbox?.querySelector('[role="option"]');
+		expect(option).toBeTruthy();
+		// Every element between the listbox and its options must be
+		// role="presentation" or the listbox->option ownership chain breaks
+		// for AT that walks owned children.
+		for (
+			let el = option?.parentElement;
+			el && el !== listbox;
+			el = el.parentElement
+		) {
+			expect(el.getAttribute("role")).toBe("presentation");
+		}
 	});
 
 	it("keeps Escape close behavior with no matches", () => {

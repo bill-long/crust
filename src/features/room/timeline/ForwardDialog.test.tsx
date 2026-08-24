@@ -7,7 +7,7 @@ import {
 } from "@solidjs/testing-library";
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import { createSignal, type ParentComponent } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSyncState, CryptoState } from "../../../client/client";
 import { ClientContext } from "../../../client/client";
 import {
@@ -17,6 +17,7 @@ import {
 } from "../../../client/summaries";
 import { clearNotices, notices } from "../../../stores/notices";
 import { createMockClient } from "../../../test/mockClient";
+import { stubViewport } from "../../../test/stubViewport";
 import { ForwardDialog } from "./ForwardDialog";
 import type { TimelineEvent } from "./timelineTypes";
 
@@ -161,7 +162,15 @@ function setup(
 	return { client, onClose };
 }
 
+// The room list is windowed (VirtualList); without a stubbed viewport the
+// picker renders at clientHeight 0 and mounts only the first few rows.
+let restoreViewport: () => void;
+beforeEach(() => {
+	restoreViewport = stubViewport(216);
+});
+
 afterEach(() => {
+	restoreViewport();
 	cleanup();
 	clearNotices();
 });
