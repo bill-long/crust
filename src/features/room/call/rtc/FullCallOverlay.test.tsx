@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen, within } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acquireCryptoDialog } from "../../../../stores/cryptoActions";
 import {
@@ -352,6 +352,34 @@ describe("FullCallOverlay", () => {
 		expect(avatars[0].getAttribute("src")).toContain("amon");
 		// The avatar-less participant falls back to the uppercase initial.
 		expect(screen.getByText("B")).toBeTruthy();
+	});
+
+	it("shows the different-server state instead of the mute artifact on a foreign-SFU tile (#488)", () => {
+		const fake = track(makeFakeCallSession());
+		fake.setLivekitParticipants([
+			participant({
+				identity: "hashed-id",
+				displayName: "Unknown (Skmtra…)",
+				isMuted: true,
+				isUnresolved: true,
+				isForeignSfu: true,
+				micUnavailable: true,
+			}),
+		]);
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+
+		const grid = screen.getByTestId("participant-grid");
+		expect(
+			within(grid).getByLabelText(
+				"Connected via a different server - their audio and video are unavailable",
+			),
+		).toBeTruthy();
+		expect(within(grid).queryByLabelText("Microphone muted")).toBeNull();
+		// Unresolved identity: neutral label shown, raw identity kept as a
+		// debugging tooltip on the name.
+		const name = within(grid).getByText("Unknown (Skmtra…)");
+		expect(name.closest("[title]")?.getAttribute("title")).toBe("hashed-id");
 	});
 
 	it("renders a labelled screen-share tile that attaches the shared track", () => {

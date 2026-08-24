@@ -38,6 +38,9 @@ export const CallOverlayBroadcaster: Component = () => {
 			// Local mic: voice store is the responsive source of truth.
 			isMuted: p.isLocal ? !micOn : p.isMuted,
 			isSpeaking: p.isSpeaking,
+			isUnresolved: p.isUnresolved,
+			isForeignSfu: p.isForeignSfu,
+			micUnavailable: p.micUnavailable,
 		}));
 		return {
 			active: true,

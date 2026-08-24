@@ -7,6 +7,8 @@ import type {
 	CallOverlayParticipant,
 	CallOverlaySnapshot,
 } from "./callOverlayBridge";
+import { MicStatusIcon } from "./MicStatusIcon";
+import { ParticipantNameLabel } from "./ParticipantNameLabel";
 
 interface CallOverlayViewProps {
 	/** Latest call snapshot mirrored from the main window. */
@@ -155,34 +157,21 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 												}}
 											/>
 										</span>
-										<span class="min-w-0 flex-1 truncate text-xs text-text-primary">
-											{p.displayName}
-											<Show when={p.isLocal}>
-												<span class="ml-1 text-[10px] text-text-disabled">
-													(you)
-												</span>
-											</Show>
+										<ParticipantNameLabel
+											participant={p}
+											class="min-w-0 flex-1 truncate text-xs text-text-primary"
+											youClass="ml-1 text-[10px] text-text-disabled"
+										>
 											<Show when={speaking()}>
 												<span class="sr-only"> (speaking)</span>
 											</Show>
-										</span>
-										<Show when={p.isMuted}>
-											<svg
-												class="h-3.5 w-3.5 shrink-0 text-danger-text"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												role="img"
-												aria-label="Microphone muted"
-											>
-												<line x1="1" y1="1" x2="23" y2="23" />
-												<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-												<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
-											</svg>
-										</Show>
+										</ParticipantNameLabel>
+										<MicStatusIcon
+											muted={p.isMuted}
+											micUnavailable={p.micUnavailable}
+											isForeignSfu={p.isForeignSfu}
+											mutedClass="text-danger-text"
+										/>
 									</li>
 								);
 							}}

@@ -71,11 +71,13 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 	return { roomFactory, lkMock, jwtMock };
 });
 
-vi.mock("./fetchLivekitToken", () => ({
+// Keep the real module (notably the real `LivekitJwtError` class - the hook
+// constructs and instanceof-checks it, so a look-alike stub class would
+// break the JWT-error-status tests) and stub only the network-touching
+// token fetch.
+vi.mock("./fetchLivekitToken", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./fetchLivekitToken")>()),
 	fetchLivekitToken: jwtMock,
-	LivekitJwtError: class LivekitJwtError extends Error {
-		status: number | null = null;
-	},
 }));
 
 // The cue's own gating rules are covered in `callPresenceCue.test.ts`; here we
@@ -179,6 +181,7 @@ function createClient(): {
 	client: {
 		getOpenIdToken: ReturnType<typeof vi.fn>;
 		getUser: ReturnType<typeof vi.fn>;
+		getUserId: ReturnType<typeof vi.fn>;
 		getDeviceId: ReturnType<typeof vi.fn>;
 		mxcUrlToHttp: ReturnType<typeof vi.fn>;
 	};
@@ -192,6 +195,7 @@ function createClient(): {
 				expires_in: 3600,
 			})),
 			getUser: vi.fn(() => ({ displayName: "Alice" })),
+			getUserId: vi.fn(() => "@me:example.com"),
 			getDeviceId: vi.fn(() => "DEVABC123"),
 			mxcUrlToHttp: vi.fn(
 				(mxc: string, w?: number, h?: number) =>
@@ -206,6 +210,26 @@ const livekitFocus: LivekitTransport = {
 	livekit_service_url: "https://sfu.example.com/livekit/sfu/get",
 	livekit_alias: "!room:example.com",
 };
+
+/**
+ * CallMembership mock with the members `resolveIdentity` reads: the
+ * identity match fields plus the transport surface `publishesElsewhere`
+ * inspects (`createdTs`/`getTransport`). Defaults to
+ * publishing on the same SFU we dial (`livekitFocus`).
+ */
+function makeMembership(over?: {
+	rtcBackendIdentity?: string;
+	userId?: string;
+	transport?: LivekitTransport;
+}): CallMembership {
+	return {
+		rtcBackendIdentity: over?.rtcBackendIdentity ?? "remote-bid",
+		userId: over?.userId ?? "@bob:example.com",
+		deviceId: "BBB",
+		createdTs: () => 1,
+		getTransport: () => over?.transport ?? livekitFocus,
+	} as unknown as CallMembership;
+}
 
 beforeEach(() => {
 	roomFactory.current = null;
@@ -526,13 +550,7 @@ describe("useLivekitRoom", () => {
 		client.getUser.mockImplementation((userId: string) =>
 			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
 		);
-		const memberships: CallMembership[] = [
-			{
-				rtcBackendIdentity: "remote-bid",
-				userId: "@bob:example.com",
-				deviceId: "BBB",
-			} as unknown as CallMembership,
-		];
+		const memberships: CallMembership[] = [makeMembership()];
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -564,13 +582,7 @@ describe("useLivekitRoom", () => {
 				? { displayName: "Bob", avatarUrl: "mxc://example.com/bob" }
 				: null,
 		);
-		const memberships: CallMembership[] = [
-			{
-				rtcBackendIdentity: "remote-bid",
-				userId: "@bob:example.com",
-				deviceId: "BBB",
-			} as unknown as CallMembership,
-		];
+		const memberships: CallMembership[] = [makeMembership()];
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -616,13 +628,7 @@ describe("useLivekitRoom", () => {
 		client.getUser.mockImplementation((userId: string) =>
 			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
 		);
-		const memberships: CallMembership[] = [
-			{
-				rtcBackendIdentity: "remote-bid",
-				userId: "@bob:example.com",
-				deviceId: "BBB",
-			} as unknown as CallMembership,
-		];
+		const memberships: CallMembership[] = [makeMembership()];
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -639,6 +645,297 @@ describe("useLivekitRoom", () => {
 		const remote = result.participants().find((p) => !p.isLocal);
 		expect(remote?.avatarUrl).toBeNull();
 		expect(client.mxcUrlToHttp).not.toHaveBeenCalled();
+	});
+
+	it("resolves an MSC4195 hashed identity through the membership match path", async () => {
+		// A current Element Call peer joins with an opaque sha256 identity
+		// (MSC4195). Resolution is plain string equality against the
+		// membership's SDK-computed rtcBackendIdentity - lock that a hashed
+		// value flows through exactly like a legacy `user:device` one (#488).
+		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set(hashed, {
+			identity: hashed,
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@treamendous:matrix.org" ? { displayName: "Trea" } : null,
+		);
+		const memberships: CallMembership[] = [
+			makeMembership({
+				rtcBackendIdentity: hashed,
+				userId: "@treamendous:matrix.org",
+			}),
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.displayName).toBe("Trea");
+		expect(remote?.isUnresolved).toBe(false);
+	});
+
+	it("falls back to the neutral Unknown label when no membership matches, keeping the raw identity", async () => {
+		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set(hashed, {
+			identity: hashed,
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		// Never render the opaque hash as a name - it reads as an intruder.
+		// A short prefix keeps two unresolved peers distinguishable; the full
+		// identity stays available (row key / debugging tooltip).
+		expect(remote?.displayName).toBe(`Unknown (${hashed.slice(0, 6)}…)`);
+		expect(remote?.isUnresolved).toBe(true);
+		expect(remote?.identity).toBe(hashed);
+		// No mic publication + unmapped identity: the muted fallback is an
+		// artifact, so the mic must be reported unavailable, not muted.
+		expect(remote?.micUnavailable).toBe(true);
+	});
+
+	it("resolves the local participant to the client's own profile during the join race", async () => {
+		// Our own membership event round-trips through /sync after LiveKit
+		// connects; until it lands no membership matches our identity, but
+		// the local tile must never read as an unknown participant.
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@me:example.com" ? { displayName: "Me Myself" } : null,
+		);
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const local = result.participants().find((p) => p.isLocal);
+		expect(local?.displayName).toBe("Me Myself");
+		expect(local?.isUnresolved).toBe(false);
+	});
+
+	it("flags a participant whose membership publishes to a different SFU", async () => {
+		// Legacy `multi_sfu` (or MSC4143 multi-transport) peer: publishes to
+		// its own SFU, joins ours subscriber-only. No tracks arrive here, so
+		// the UI must show "different server", not a bogus mute state (#488).
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-foreign", {
+			identity: "remote-foreign",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const memberships: CallMembership[] = [
+			makeMembership(),
+			makeMembership({
+				rtcBackendIdentity: "remote-foreign",
+				userId: "@trea:matrix.org",
+				transport: {
+					type: "livekit",
+					livekit_service_url: "https://livekit-jwt.call.matrix.org",
+					livekit_alias: "!room:example.com",
+				},
+			}),
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const foreign = result
+			.participants()
+			.find((p) => p.identity === "remote-foreign");
+		const samesfu = result
+			.participants()
+			.find((p) => p.identity === "remote-bid");
+		expect(foreign?.isForeignSfu).toBe(true);
+		// No mic publication on our SFU: their `isMuted` is an artifact.
+		expect(foreign?.micUnavailable).toBe(true);
+		expect(samesfu?.isForeignSfu).toBe(false);
+		expect(samesfu?.micUnavailable).toBe(false);
+	});
+
+	it("does not flag a peer whose SFU is the same service spelled differently", async () => {
+		// Deployments publish the same lk-jwt-service as bare host, .../livekit,
+		// or .../sfu/get - so equality is by URL origin, not raw string (or
+		// even path-normalised) comparison. livekitFocus dials
+		// .../livekit/sfu/get; these peers' events spell it .../livekit and
+		// bare-host respectively.
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-prefixed", {
+			identity: "remote-prefixed",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		fakeRoom.remoteParticipants.set("remote-barehost", {
+			identity: "remote-barehost",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const memberships: CallMembership[] = [
+			makeMembership({
+				rtcBackendIdentity: "remote-prefixed",
+				transport: {
+					type: "livekit",
+					livekit_service_url: "https://sfu.example.com/livekit",
+					livekit_alias: "!room:example.com",
+				},
+			}),
+			makeMembership({
+				rtcBackendIdentity: "remote-barehost",
+				userId: "@carol:example.com",
+				transport: {
+					type: "livekit",
+					livekit_service_url: "https://sfu.example.com",
+					livekit_alias: "!room:example.com",
+				},
+			}),
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		for (const identity of ["remote-prefixed", "remote-barehost"]) {
+			const remote = result.participants().find((p) => p.identity === identity);
+			expect(remote?.isForeignSfu).toBe(false);
+			expect(remote?.micUnavailable).toBe(false);
+		}
+	});
+
+	it("treats a malformed membership (no transport data) as not-foreign instead of crashing", async () => {
+		// A legacy event may omit foci_preferred entirely; the SDK getters then
+		// return undefined or throw. That must classify as "can't tell", not
+		// take down the whole participant snapshot.
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
+		);
+		const broken = makeMembership();
+		Object.assign(broken, {
+			getTransport: () => {
+				throw new TypeError(
+					"Cannot read properties of undefined (reading '0')",
+				);
+			},
+		});
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [broken],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.displayName).toBe("Bob");
+		expect(remote?.isForeignSfu).toBe(false);
+	});
+
+	it("trusts a real mic publication even for an unresolved peer", async () => {
+		// micUnavailable covers only the no-publication artifact. A peer with
+		// an actual (muted) mic publication on our SFU has a trustworthy mute
+		// state regardless of membership resolution.
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("mystery", {
+			identity: "mystery",
+			audioTrackPublications: new Map([
+				["sid-mic", { source: "microphone", isMuted: true }],
+			]),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.isUnresolved).toBe(true);
+		expect(remote?.micUnavailable).toBe(false);
+		expect(remote?.isMuted).toBe(true);
 	});
 
 	it("surfaces JWT fetch errors as error status", async () => {

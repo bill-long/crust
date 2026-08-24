@@ -20,6 +20,8 @@ import {
 	micEnabled as voiceMicEnabled,
 } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
+import { MicOffGlyph, MicStatusIcon } from "./MicStatusIcon";
+import { ParticipantNameLabel } from "./ParticipantNameLabel";
 import { TrackStatsOverlay } from "./TrackStatsOverlay";
 import type {
 	LivekitRoomApi,
@@ -265,9 +267,7 @@ export const FullCallOverlay: Component = () => {
 														</>
 													}
 												>
-													<line x1="1" y1="1" x2="23" y2="23" />
-													<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-													<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+													<MicOffGlyph />
 													<line x1="12" y1="19" x2="12" y2="23" />
 													<line x1="8" y1="23" x2="16" y2="23" />
 												</Show>
@@ -641,29 +641,23 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 				)}
 			</Show>
 			<div class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-black/40 px-2 py-1 text-xs text-white">
-				<span class="min-w-0 truncate">
-					{props.participant.displayName}
-					<Show when={props.participant.isLocal}>
-						<span class="ml-1 text-[10px] opacity-75">(you)</span>
-					</Show>
-				</span>
-				<Show when={props.participant.isMuted}>
-					<svg
-						class="h-3.5 w-3.5 shrink-0"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						role="img"
-						aria-label="Microphone muted"
-					>
-						<line x1="1" y1="1" x2="23" y2="23" />
-						<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-						<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
-					</svg>
-				</Show>
+				<ParticipantNameLabel
+					participant={props.participant}
+					class="min-w-0 truncate"
+					youClass="ml-1 text-[10px] opacity-75"
+				/>
+				<MicStatusIcon
+					// Local row: the voice store is the responsive source of truth
+					// (reflects a mute click before LiveKit's round-trip settles),
+					// matching the mute toolbar button and the PiP panel.
+					muted={
+						props.participant.isLocal
+							? !voiceMicEnabled()
+							: props.participant.isMuted
+					}
+					micUnavailable={props.participant.micUnavailable}
+					isForeignSfu={props.participant.isForeignSfu}
+				/>
 			</div>
 		</div>
 	);
@@ -703,7 +697,10 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 	const label = createMemo(() => {
 		const p = sharer();
 		if (p?.isLocal) return "Your screen";
-		return `${p?.displayName ?? props.identity}’s screen`;
+		// Same #488 rule as ParticipantNameLabel: never render the opaque
+		// LiveKit identity as a name. The participant entry can be missing
+		// for a tick while a share arrives; fall back neutrally.
+		return `${p?.displayName ?? "Unknown"}’s screen`;
 	});
 
 	createEffect(() => {

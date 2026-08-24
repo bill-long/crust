@@ -162,6 +162,42 @@ describe("CallOverlayPanel", () => {
 		).toBeNull();
 	});
 
+	it("shows the different-server state instead of the mute artifact for a foreign-SFU peer (#488)", () => {
+		// A multi_sfu peer has no mic publication on our SFU, so isMuted reads
+		// true - that is an artifact, not a mute. The row must say "different
+		// server" and must NOT show the muted mic.
+		setup([
+			participant({
+				identity: "r1",
+				displayName: "Elsewhere",
+				isMuted: true,
+				isForeignSfu: true,
+				micUnavailable: true,
+			}),
+		]);
+		const row = rowFor("Elsewhere");
+		expect(
+			within(row).getByLabelText(
+				"Connected via a different server - their audio and video are unavailable",
+			),
+		).toBeTruthy();
+		expect(within(row).queryByLabelText("Microphone muted")).toBeNull();
+	});
+
+	it("labels an unresolved participant with the neutral fallback and the raw identity as tooltip (#488)", () => {
+		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
+		setup([
+			participant({
+				identity: hashed,
+				displayName: "Unknown (Skmtra…)",
+				isUnresolved: true,
+			}),
+		]);
+		const row = rowFor("Unknown (Skmtra…)");
+		const name = within(row).getByText("Unknown (Skmtra…)");
+		expect(name.closest("[title]")?.getAttribute("title")).toBe(hashed);
+	});
+
 	it("hangs up via the direct-leave path (no confirm dialog)", () => {
 		const fake = setup([
 			participant({ identity: "me", displayName: "Me", isLocal: true }),
