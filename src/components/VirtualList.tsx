@@ -10,6 +10,7 @@ import {
 	onMount,
 	Show,
 	splitProps,
+	untrack,
 } from "solid-js";
 
 /** A fixed pitch for every row, or a per-row height by index. */
@@ -189,25 +190,29 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 		local.controller?.({ scrollToIndex });
 	});
 
-	const scrollToIndex = (index: number): void => {
-		const el = scrollRef;
-		const count = local.each.length;
-		const vh = viewportH();
-		// A 0-height viewport (popover not laid out yet) has no meaningful
-		// "visible" region to scroll within; the ResizeObserver re-measure
-		// will land with scrollTop still at its current value.
-		if (!el || count === 0 || vh <= 0) return;
-		const offs = offsets();
-		const i = Math.max(0, Math.min(index, count - 1));
-		const top = padTop() + offs[i];
-		const bottom = padTop() + offs[i + 1];
-		let target = scrollTop();
-		if (top < target) target = top;
-		else if (bottom > target + vh) target = bottom - vh;
-		if (target === scrollTop()) return;
-		el.scrollTop = target;
-		setScrollTop(target);
-	};
+	// untrack: an imperative API must not subscribe its caller - a consumer
+	// calling this from a createEffect would otherwise start tracking the
+	// scroll position and re-assert the scroll on every user wheel/drag.
+	const scrollToIndex = (index: number): void =>
+		untrack(() => {
+			const el = scrollRef;
+			const count = local.each.length;
+			const vh = viewportH();
+			// A 0-height viewport (popover not laid out yet) has no meaningful
+			// "visible" region to scroll within; the ResizeObserver re-measure
+			// will land with scrollTop still at its current value.
+			if (!el || count === 0 || vh <= 0) return;
+			const offs = offsets();
+			const i = Math.max(0, Math.min(index, count - 1));
+			const top = padTop() + offs[i];
+			const bottom = padTop() + offs[i + 1];
+			let target = scrollTop();
+			if (top < target) target = top;
+			else if (bottom > target + vh) target = bottom - vh;
+			if (target === scrollTop()) return;
+			el.scrollTop = target;
+			setScrollTop(target);
+		});
 
 	createEffect(
 		on(

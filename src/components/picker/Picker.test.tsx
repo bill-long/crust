@@ -113,6 +113,18 @@ describe("createPicker windowing", () => {
 		expect(listbox.scrollTop).toBe(100 * 36 - 216);
 	});
 
+	it("does not re-assert the highlight scroll when the user scrolls away", () => {
+		const { key, container } = setup();
+		key("ArrowUp"); // highlight item-99, scrolled to the bottom
+		const listbox = container.querySelector('[role="listbox"]') as HTMLElement;
+		listbox.scrollTop = 0;
+		listbox.dispatchEvent(new Event("scroll"));
+		// If scrollToIndex leaked signal subscriptions into the picker's
+		// scroll-into-view effect, this wheel-style scroll would trigger it
+		// and yank the list straight back to the highlighted row.
+		expect(listbox.scrollTop).toBe(0);
+	});
+
 	it("Enter selects the highlighted item across the boundary", () => {
 		const { key, onSelect } = setup();
 		key("ArrowUp"); // wrap to item-99
