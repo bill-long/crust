@@ -186,7 +186,7 @@ const RoomEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
 					: "text-text-secondary hover:bg-surface-2"
@@ -247,7 +247,7 @@ const InviteEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
 					: "text-text-secondary hover:bg-surface-2"
@@ -286,7 +286,7 @@ const KnockEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
 					: "text-text-secondary hover:bg-surface-2"

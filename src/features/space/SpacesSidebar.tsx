@@ -290,7 +290,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 					<button
 						type="button"
 						onClick={() => navigate("/home")}
-						class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+						class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 							homeSelected()
 								? "rounded-xl bg-surface-2 text-text-primary"
 								: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -380,7 +380,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									onClick={() =>
 										navigate(`/space/${encodeURIComponent(space.roomId)}`)
 									}
-									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-accent transition-all focus-visible:outline-none focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 ${
+									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-accent transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text-primary ${
 										isSelected()
 											? "rounded-xl bg-surface-2 text-text-primary"
 											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -439,7 +439,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									onClick={() =>
 										navigate(`/space/${encodeURIComponent(space.roomId)}`)
 									}
-									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-border-strong transition-all focus-visible:outline-none focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 ${
+									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-border-strong transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text-primary ${
 										isSelected()
 											? "rounded-xl bg-surface-2 text-text-primary"
 											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -487,7 +487,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 					<button
 						type="button"
 						onClick={() => setCreateOpen(true)}
-						class="peer flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-3 text-success-text transition-all hover:rounded-xl hover:bg-success hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="peer flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-3 text-success-text transition-all hover:rounded-xl hover:bg-success hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						title="Create space"
 						aria-label="Create space"
 					>
