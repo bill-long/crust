@@ -59,6 +59,15 @@ describe("DeleteMessageDialog", () => {
 		expect(onDelete).toHaveBeenCalledWith("$other", "");
 	});
 
+	it("confirms on Enter from the reason input", () => {
+		const { onClose, onDelete } = setup();
+		const input = screen.getByPlaceholderText(/Visible to other clients/);
+		fireEvent.input(input, { target: { value: "typed reason" } });
+		fireEvent.keyDown(input, { key: "Enter" });
+		expect(onDelete).toHaveBeenCalledWith("$ev", "typed reason");
+		expect(onClose).toHaveBeenCalled();
+	});
+
 	it("falls back to 'Attachment' for a bodiless message", () => {
 		const [target] = createSignal<TimelineEvent | null>(makeEvent(""));
 		render(() => (

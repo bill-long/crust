@@ -1,5 +1,6 @@
 import { type Component, createEffect, createSignal, on, Show } from "solid-js";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
+import { MessagePreview } from "./MessagePreview";
 import type { TimelineEvent } from "./timelineTypes";
 
 interface DeleteMessageDialogProps {
@@ -50,11 +51,7 @@ const DeleteMessageDialog: Component<DeleteMessageDialogProps> = (props) => {
 						Are you sure you want to delete this message? This cannot be undone.
 					</p>
 					<Show when={props.target()}>
-						{(target) => (
-							<p class="truncate rounded bg-surface-2 px-3 py-2 text-text-muted">
-								{target().body.trim() || "Attachment"}
-							</p>
-						)}
+						{(target) => <MessagePreview body={target().body} />}
 					</Show>
 					<label class="flex flex-col gap-1">
 						<span class="text-xs font-medium text-text-secondary">

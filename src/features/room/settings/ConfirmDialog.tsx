@@ -8,6 +8,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { containFocusWhileOpen } from "../../../lib/focusTrap";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 
@@ -78,22 +79,11 @@ const ConfirmDialog: Component<ConfirmDialogProps> = (props) => {
 		previousFocus = null;
 	});
 
-	// Modal focus containment: while open, recapture focus that lands
-	// outside the overlay. An opener can asynchronously restore focus to
-	// itself after this dialog took its initial focus - e.g. Kobalte's
-	// dropdown menu refocuses its trigger on a timer after its deferred
-	// unmount - which would strand the overlay-scoped Escape/Tab handling.
-	// Skipped while a crypto dialog overlays us (this dialog is inert then
-	// and must not steal focus from it).
-	createEffect(() => {
-		if (!props.open()) return;
-		const onFocusIn = (e: FocusEvent) => {
-			if (cryptoDialogOpen()) return;
-			if (!overlayRef.contains(e.target as Node)) confirmRef?.focus();
-		};
-		document.addEventListener("focusin", onFocusIn);
-		onCleanup(() => document.removeEventListener("focusin", onFocusIn));
-	});
+	containFocusWhileOpen(
+		props.open,
+		() => overlayRef,
+		() => confirmRef,
+	);
 
 	const tryClose = (): void => {
 		if (pending()) return;
@@ -104,6 +94,14 @@ const ConfirmDialog: Component<ConfirmDialogProps> = (props) => {
 		if (e.key === "Escape") {
 			e.stopPropagation();
 			tryClose();
+			return;
+		}
+		// Enter in a single-line field confirms (the type-then-Enter flow,
+		// e.g. the delete dialog's reason input). Buttons keep their native
+		// Enter activation, and textareas keep Enter for newlines.
+		if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+			e.preventDefault();
+			void handleConfirm();
 			return;
 		}
 		if (e.key === "Tab") {

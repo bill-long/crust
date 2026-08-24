@@ -1,3 +1,5 @@
+import { createEffect, onCleanup } from "solid-js";
+
 /**
  * Shared pieces of the hand-rolled modal focus trap used by the app's
  * stay-mounted dialogs (see CreateRoomDialog for the originating pattern).
@@ -29,4 +31,43 @@ export function trapTabKey(container: HTMLElement, e: KeyboardEvent): void {
 		e.preventDefault();
 		first.focus();
 	}
+}
+
+/**
+ * Modal focus containment: while `open`, recapture focus that lands
+ * outside the modal's overlay. An opener can asynchronously restore focus
+ * to itself after the modal took its initial focus - e.g. Kobalte's
+ * dropdown menu refocuses its trigger on a timer after its
+ * presence-deferred unmount (unconditional in 0.13; onCloseAutoFocus
+ * can't prevent it) - which would strand the overlay-scoped Escape/Tab
+ * handling outside the dialog.
+ *
+ * A focusin whose target sits inside a DIFFERENT `aria-modal` surface is
+ * deliberately left alone: crypto dialogs legitimately stack on top of
+ * app modals, and two containment-enabled modals must never fight over
+ * focus - a mutual recapture would recurse through synchronous focusin
+ * dispatch to a stack overflow. With the gate, an outside-of-everything
+ * focus settles after at most one hop per open modal.
+ *
+ * Call from the component body (needs a reactive owner); the listener
+ * detaches when `open` flips false or the owner is disposed.
+ */
+export function containFocusWhileOpen(
+	open: () => boolean,
+	getOverlay: () => HTMLElement | undefined,
+	getFocusTarget: () => HTMLElement | undefined,
+): void {
+	createEffect(() => {
+		if (!open()) return;
+		const onFocusIn = (e: FocusEvent): void => {
+			const overlay = getOverlay();
+			const target = e.target;
+			if (!overlay || !(target instanceof Element)) return;
+			if (overlay.contains(target)) return;
+			if (target.closest('[aria-modal="true"]') !== null) return;
+			getFocusTarget()?.focus();
+		};
+		document.addEventListener("focusin", onFocusIn);
+		onCleanup(() => document.removeEventListener("focusin", onFocusIn));
+	});
 }

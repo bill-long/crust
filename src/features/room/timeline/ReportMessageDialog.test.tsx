@@ -66,6 +66,22 @@ describe("ReportMessageDialog", () => {
 		expect(notices().some((n) => n.message.includes("Report sent"))).toBe(true);
 	});
 
+	it("sends an empty reason (not whitespace) when only spaces were typed", async () => {
+		const { client } = setup();
+		fireEvent.input(screen.getByPlaceholderText(/What's wrong/), {
+			target: { value: "   " },
+		});
+		fireEvent.click(screen.getByText("Report"));
+		await waitFor(() =>
+			expect(client.reportEvent).toHaveBeenCalledWith(
+				"!room:server",
+				"$bad",
+				-100,
+				"",
+			),
+		);
+	});
+
 	it("surfaces a submit failure inline and keeps the dialog open", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const { client, onClose } = setup();

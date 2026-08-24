@@ -3,6 +3,8 @@ import { useClient } from "../../../client/client";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { pushNotice } from "../../../stores/notices";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
+import { MessagePreview } from "./MessagePreview";
+import { normalizeReason } from "./timelineHelpers";
 import type { TimelineEvent } from "./timelineTypes";
 
 interface ReportMessageDialogProps {
@@ -24,16 +26,13 @@ const ReportMessageDialog: Component<ReportMessageDialogProps> = (props) => {
 	const [reason, setReason] = createSignal("");
 	const open = () => props.target() !== null;
 
-	// A fresh open must not inherit the previous report's reason. The
-	// roomId is snapshotted at open so a room switch behind the modal
-	// can't retarget an in-flight report.
-	let reportRoomId = "";
+	// A fresh open must not inherit the previous report's reason. (No
+	// roomId snapshot: Layout's keyed <Show> remounts the whole room
+	// subtree - this dialog included - on every room switch, so the
+	// roomId cannot change while the dialog is open.)
 	createEffect(
 		on(open, (isOpen, wasOpen) => {
-			if (isOpen && !wasOpen) {
-				setReason("");
-				reportRoomId = props.roomId();
-			}
+			if (isOpen && !wasOpen) setReason("");
 		}),
 	);
 
@@ -50,10 +49,10 @@ const ReportMessageDialog: Component<ReportMessageDialogProps> = (props) => {
 				if (!target) return;
 				try {
 					await client.reportEvent(
-						reportRoomId,
+						props.roomId(),
 						target.eventId,
 						-100,
-						reason().trim(),
+						normalizeReason(reason()) ?? "",
 					);
 				} catch (err) {
 					console.error("Report message failed:", err);
@@ -73,11 +72,7 @@ const ReportMessageDialog: Component<ReportMessageDialogProps> = (props) => {
 						sender is not notified.
 					</p>
 					<Show when={props.target()}>
-						{(target) => (
-							<p class="truncate rounded bg-surface-2 px-3 py-2 text-text-muted">
-								{target().body.trim() || "Attachment"}
-							</p>
-						)}
+						{(target) => <MessagePreview body={target().body} />}
 					</Show>
 					<label class="flex flex-col gap-1">
 						<span class="text-xs font-medium text-text-secondary">

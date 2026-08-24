@@ -18,6 +18,7 @@ import { cryptoDialogOpen } from "../../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 import { pushNotice } from "../../../stores/notices";
 import { forwardMessage } from "./forwardMessage";
+import { messagePreviewText } from "./MessagePreview";
 import type { TimelineEvent } from "./timelineTypes";
 
 interface ForwardDialogProps {
@@ -168,7 +169,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 							Forward message
 						</h2>
 						<p class="mb-4 truncate text-sm text-text-muted">
-							{target().body.trim() || "Attachment"}
+							{messagePreviewText(target().body)}
 						</p>
 
 						<label

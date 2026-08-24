@@ -41,4 +41,68 @@ describe("ConfirmDialog focus containment", () => {
 			outside.remove();
 		}
 	});
+
+	it("leaves focus alone inside another aria-modal surface (stacked dialogs must not fight)", async () => {
+		const stacked = document.createElement("div");
+		stacked.setAttribute("aria-modal", "true");
+		const stackedBtn = document.createElement("button");
+		stackedBtn.textContent = "stacked";
+		stacked.appendChild(stackedBtn);
+		document.body.appendChild(stacked);
+		try {
+			render(() => (
+				<ConfirmDialog
+					open={() => true}
+					onClose={() => {}}
+					title="Confirm thing"
+					body="Sure?"
+					onConfirm={() => {}}
+				/>
+			));
+			await Promise.resolve();
+			// A dialog stacked on top (crypto dialog, or a second
+			// containment-enabled modal) owns its own focus; recapturing it
+			// would ping-pong two containment listeners into a synchronous
+			// focusin recursion.
+			stackedBtn.focus();
+			expect(document.activeElement).toBe(stackedBtn);
+		} finally {
+			stacked.remove();
+		}
+	});
+
+	it("two open containment dialogs settle focus without recursing", async () => {
+		const outside = document.createElement("button");
+		outside.textContent = "outside";
+		document.body.appendChild(outside);
+		try {
+			render(() => (
+				<>
+					<ConfirmDialog
+						open={() => true}
+						onClose={() => {}}
+						title="First"
+						body="a"
+						onConfirm={() => {}}
+					/>
+					<ConfirmDialog
+						open={() => true}
+						onClose={() => {}}
+						title="Second"
+						body="b"
+						onConfirm={() => {}}
+					/>
+				</>
+			));
+			await Promise.resolve();
+			// Focus fully outside both: each may take one recapture hop, but
+			// the other-modal gate stops the mutual yanking that would
+			// otherwise recurse to a stack overflow.
+			outside.focus();
+			const active = document.activeElement;
+			expect(active?.textContent).toBe("Confirm");
+		} finally {
+			outside.remove();
+		}
+	});
 });
