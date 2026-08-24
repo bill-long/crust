@@ -34,9 +34,13 @@ export interface LivekitJwtResponse {
  * misconfigured `elementCall.url`) would otherwise cause `fetch` to
  * POST the OpenID token to the app origin or a non-http(s) handler.
  *
+ * Exported for `useLivekitRoom`'s foreign-SFU detection, which must compare
+ * `livekit_service_url`s across the same spelling variants before deciding a
+ * peer publishes elsewhere.
+ *
  * @throws {LivekitJwtError} If the input isn't a valid absolute http(s) URL.
  */
-function normaliseJwtServiceUrl(input: string): string {
+export function normaliseJwtServiceUrl(input: string): string {
 	const trimmed = input.trim();
 	let parsed: URL;
 	try {

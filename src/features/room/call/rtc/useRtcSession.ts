@@ -82,6 +82,21 @@ export interface RtcSessionApi {
 }
 
 /**
+ * Elects the oldest membership in a call (by `created_ts`) - the member
+ * whose transport a legacy `oldest_membership` session follows. Single
+ * definition shared by `activeFocus` below and `useLivekitRoom`'s
+ * foreign-SFU detection so the election rule cannot drift between them.
+ */
+export function oldestMembership(
+	list: readonly CallMembership[],
+): CallMembership | null {
+	return list.reduce<CallMembership | null>((acc, m) => {
+		if (acc === null) return m;
+		return m.createdTs() < acc.createdTs() ? m : acc;
+	}, null);
+}
+
+/**
  * Native MatrixRTC client hook (issue #122).
  *
  * Wraps `client.matrixRTC.getRoomSession(room)` in a SolidJS hook that
@@ -170,10 +185,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			// Pull the oldest member's transport when joining an in-progress call;
 			// fall back to our offered focus if we are the first or the oldest
 			// member's transport isn't LiveKit.
-			const oldest = list.reduce<CallMembership | null>((acc, m) => {
-				if (acc === null) return m;
-				return m.createdTs() < acc.createdTs() ? m : acc;
-			}, null);
+			const oldest = oldestMembership(list);
 			if (oldest) {
 				const transport = oldest.getTransport(oldest);
 				if (transport && isLivekitTransport(transport)) {

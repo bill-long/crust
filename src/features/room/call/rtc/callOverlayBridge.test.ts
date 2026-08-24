@@ -32,6 +32,7 @@ const snapshot = (
 			isSpeaking: false,
 			isUnresolved: false,
 			isForeignSfu: false,
+			micUnavailable: false,
 		},
 	],
 	...over,
@@ -139,6 +140,42 @@ describe("callOverlayBridge", () => {
 
 		expect(consumer.snapshot().active).toBe(false);
 		expect(consumer.snapshot().participants).toHaveLength(0);
+	});
+
+	it("accepts a snapshot from a pre-#488 producer and defaults the additive fields (#488)", async () => {
+		// Version skew: a main tab bundled before isUnresolved/isForeignSfu/
+		// micUnavailable existed keeps publishing mid-call while the overlay
+		// window has fetched the new bundle. Requiring the fields would make
+		// the overlay silently drop every snapshot and show "no active call".
+		const consumer = createCallOverlayConsumer();
+		cleanups.push(consumer.dispose);
+		const oldProducer = new BroadcastChannel("crust:call-overlay");
+		cleanups.push(() => oldProducer.close());
+		oldProducer.postMessage({
+			kind: "snapshot",
+			producerId: "p-old",
+			snapshot: {
+				active: true,
+				roomName: "Skewed",
+				participants: [
+					{
+						identity: "a",
+						displayName: "OldBundle",
+						avatarUrl: null,
+						isLocal: false,
+						isMuted: true,
+						isSpeaking: false,
+					},
+				],
+			},
+		});
+		await until(() => consumer.snapshot().roomName === "Skewed");
+
+		const p = consumer.snapshot().participants[0];
+		expect(p?.displayName).toBe("OldBundle");
+		expect(p?.isUnresolved).toBe(false);
+		expect(p?.isForeignSfu).toBe(false);
+		expect(p?.micUnavailable).toBe(false);
 	});
 
 	it("does not let a payload __proto__ key pollute store prototypes", async () => {

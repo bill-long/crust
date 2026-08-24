@@ -71,11 +71,13 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 	return { roomFactory, lkMock, jwtMock };
 });
 
-vi.mock("./fetchLivekitToken", () => ({
+// Keep the real module (notably `normaliseJwtServiceUrl`, which foreign-SFU
+// detection uses for URL comparison) and stub only the network-touching
+// token fetch. A full-module factory would silently replace the normaliser
+// with undefined and fail the comparison open.
+vi.mock("./fetchLivekitToken", async (importOriginal) => ({
+	...(await importOriginal<typeof import("./fetchLivekitToken")>()),
 	fetchLivekitToken: jwtMock,
-	LivekitJwtError: class LivekitJwtError extends Error {
-		status: number | null = null;
-	},
 }));
 
 // The cue's own gating rules are covered in `callPresenceCue.test.ts`; here we
@@ -179,6 +181,7 @@ function createClient(): {
 	client: {
 		getOpenIdToken: ReturnType<typeof vi.fn>;
 		getUser: ReturnType<typeof vi.fn>;
+		getUserId: ReturnType<typeof vi.fn>;
 		getDeviceId: ReturnType<typeof vi.fn>;
 		mxcUrlToHttp: ReturnType<typeof vi.fn>;
 	};
@@ -192,6 +195,7 @@ function createClient(): {
 				expires_in: 3600,
 			})),
 			getUser: vi.fn(() => ({ displayName: "Alice" })),
+			getUserId: vi.fn(() => "@me:example.com"),
 			getDeviceId: vi.fn(() => "DEVABC123"),
 			mxcUrlToHttp: vi.fn(
 				(mxc: string, w?: number, h?: number) =>
@@ -710,10 +714,44 @@ describe("useLivekitRoom", () => {
 		await waitFor(() => result.status() === "connected");
 		const remote = result.participants().find((p) => !p.isLocal);
 		// Never render the opaque hash as a name - it reads as an intruder.
-		// The identity stays available (row key / debugging tooltip).
-		expect(remote?.displayName).toBe("Unknown participant");
+		// A short prefix keeps two unresolved peers distinguishable; the full
+		// identity stays available (row key / debugging tooltip).
+		expect(remote?.displayName).toBe(
+			`Unknown participant (${hashed.slice(0, 6)}…)`,
+		);
 		expect(remote?.isUnresolved).toBe(true);
 		expect(remote?.identity).toBe(hashed);
+		// No mic publication + unmapped identity: the muted fallback is an
+		// artifact, so the mic must be reported unavailable, not muted.
+		expect(remote?.micUnavailable).toBe(true);
+	});
+
+	it("resolves the local participant to the client's own profile during the join race", async () => {
+		// Our own membership event round-trips through /sync after LiveKit
+		// connects; until it lands no membership matches our identity, but
+		// the local tile must never read "Unknown participant (you)".
+		const fakeRoom = createFakeRoom();
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@me:example.com" ? { displayName: "Me Myself" } : null,
+		);
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const local = result.participants().find((p) => p.isLocal);
+		expect(local?.displayName).toBe("Me Myself");
+		expect(local?.isUnresolved).toBe(false);
 	});
 
 	it("flags a participant whose membership publishes to a different SFU", async () => {
@@ -765,7 +803,124 @@ describe("useLivekitRoom", () => {
 			.participants()
 			.find((p) => p.identity === "remote-bid");
 		expect(foreign?.isForeignSfu).toBe(true);
+		// No mic publication on our SFU: their `isMuted` is an artifact.
+		expect(foreign?.micUnavailable).toBe(true);
 		expect(samesfu?.isForeignSfu).toBe(false);
+		expect(samesfu?.micUnavailable).toBe(false);
+	});
+
+	it("does not flag a peer whose SFU is the same service spelled differently", async () => {
+		// Deployments publish the same lk-jwt-service as bare host, .../livekit,
+		// or .../sfu/get - equality must go through URL normalisation, not raw
+		// string comparison. livekitFocus dials .../livekit/sfu/get; this peer's
+		// event spells it .../livekit.
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const memberships: CallMembership[] = [
+			makeMembership({
+				transport: {
+					type: "livekit",
+					livekit_service_url: "https://sfu.example.com/livekit",
+					livekit_alias: "!room:example.com",
+				},
+			}),
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.isForeignSfu).toBe(false);
+	});
+
+	it("treats a malformed membership (no transport data) as not-foreign instead of crashing", async () => {
+		// A legacy event may omit foci_preferred entirely; the SDK getters then
+		// return undefined or throw. That must classify as "can't tell", not
+		// take down the whole participant snapshot.
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
+		);
+		const broken = makeMembership();
+		Object.assign(broken, {
+			transports: undefined,
+			getTransport: () => {
+				throw new TypeError(
+					"Cannot read properties of undefined (reading '0')",
+				);
+			},
+		});
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [broken],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.displayName).toBe("Bob");
+		expect(remote?.isForeignSfu).toBe(false);
+	});
+
+	it("trusts a real mic publication even for an unresolved peer", async () => {
+		// micUnavailable covers only the no-publication artifact. A peer with
+		// an actual (muted) mic publication on our SFU has a trustworthy mute
+		// state regardless of membership resolution.
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("mystery", {
+			identity: "mystery",
+			audioTrackPublications: new Map([
+				["sid-mic", { source: "microphone", isMuted: true }],
+			]),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.isUnresolved).toBe(true);
+		expect(remote?.micUnavailable).toBe(false);
+		expect(remote?.isMuted).toBe(true);
 	});
 
 	it("surfaces JWT fetch errors as error status", async () => {

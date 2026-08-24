@@ -40,6 +40,7 @@ export const CallOverlayBroadcaster: Component = () => {
 			isSpeaking: p.isSpeaking,
 			isUnresolved: p.isUnresolved,
 			isForeignSfu: p.isForeignSfu,
+			micUnavailable: p.micUnavailable,
 		}));
 		return {
 			active: true,

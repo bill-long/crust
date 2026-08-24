@@ -42,9 +42,12 @@ export interface CallOverlayParticipant {
 	 *  `identity` doubles as a debugging tooltip (#488). */
 	isUnresolved: boolean;
 	/** True when the participant publishes media to a different SFU than the
-	 *  one we joined - their mute state is an artifact and their audio is
-	 *  unavailable, so the view shows a "different server" cue instead (#488). */
+	 *  one we joined - used only to word the `micUnavailable` cue (#488). */
 	isForeignSfu: boolean;
+	/** True when `isMuted` is a no-publication artifact for a foreign or
+	 *  unresolved peer; the view shows "audio unavailable" instead of a
+	 *  muted mic (#488). */
+	micUnavailable: boolean;
 }
 
 /** A full snapshot of the call as seen by the overlay. */
@@ -99,8 +102,13 @@ function isValidParticipant(value: unknown): value is CallOverlayParticipant {
 		typeof p.isLocal === "boolean" &&
 		typeof p.isMuted === "boolean" &&
 		typeof p.isSpeaking === "boolean" &&
-		typeof p.isUnresolved === "boolean" &&
-		typeof p.isForeignSfu === "boolean"
+		// The #488 fields are additive: a snapshot from a producer bundled
+		// before they existed (main tab open across a deploy) must still
+		// validate, or the overlay would silently show "no active call" for
+		// the whole call. `sanitizeSnapshot` defaults them to false.
+		(p.isUnresolved === undefined || typeof p.isUnresolved === "boolean") &&
+		(p.isForeignSfu === undefined || typeof p.isForeignSfu === "boolean") &&
+		(p.micUnavailable === undefined || typeof p.micUnavailable === "boolean")
 	);
 }
 
@@ -146,8 +154,11 @@ function sanitizeSnapshot(s: CallOverlaySnapshot): CallOverlaySnapshot {
 			isLocal: p.isLocal,
 			isMuted: p.isMuted,
 			isSpeaking: p.isSpeaking,
-			isUnresolved: p.isUnresolved,
-			isForeignSfu: p.isForeignSfu,
+			// Default the additive #488 fields for old-producer snapshots
+			// (see isValidParticipant) - `=== true` also normalizes them.
+			isUnresolved: p.isUnresolved === true,
+			isForeignSfu: p.isForeignSfu === true,
+			micUnavailable: p.micUnavailable === true,
 		})),
 	};
 }

@@ -15,6 +15,7 @@ import { isLivekitTransport } from "matrix-js-sdk/lib/matrixrtc/LivekitTransport
 import {
 	type Accessor,
 	createEffect,
+	createMemo,
 	createSignal,
 	on,
 	onCleanup,
@@ -28,7 +29,12 @@ import {
 import { userSettings } from "../../../../stores/settings";
 import { playPresenceCue } from "../../notificationSound";
 import { createPresenceCue, type PresenceCueDeps } from "./callPresenceCue";
-import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
+import {
+	fetchLivekitToken,
+	LivekitJwtError,
+	normaliseJwtServiceUrl,
+} from "./fetchLivekitToken";
+import { oldestMembership } from "./useRtcSession";
 
 export type LivekitConnectionStatus =
 	| "idle"
@@ -67,10 +73,20 @@ export interface RtcParticipant {
 	 * different SFU than the one we joined (legacy `multi_sfu` / MSC4143
 	 * multi-transport peers). Such a peer connects to our SFU
 	 * subscriber-only: they receive us, but none of their tracks arrive
-	 * here — so `isMuted` is meaningless (it reads muted because there is
-	 * no mic publication) and their audio/video cannot be rendered (#488).
+	 * here (#488). Views use this only to word the `micUnavailable`
+	 * indicator ("different server" vs generic).
 	 */
 	isForeignSfu: boolean;
+	/**
+	 * True when the participant has no microphone publication on our SFU
+	 * AND we cannot vouch for them being an ordinary same-SFU member
+	 * (foreign-SFU or unresolved peers). `isMuted` reads true then purely
+	 * as a fallback artifact, so views must show an "audio unavailable"
+	 * indicator instead of a definite muted-mic claim (#488). False for a
+	 * peer with a real publication - their mute state is trustworthy
+	 * regardless of membership resolution.
+	 */
+	micUnavailable: boolean;
 }
 
 export interface UseLivekitRoomOptions {
@@ -81,7 +97,9 @@ export interface UseLivekitRoomOptions {
 	enabled: Accessor<boolean>;
 	/**
 	 * Memberships from `useRtcSession` — used to map LiveKit identity →
-	 * `rtcBackendIdentity` → Matrix userId for display-name resolution.
+	 * `rtcBackendIdentity` → Matrix userId for display-name resolution, and
+	 * to detect peers whose published transport is a different SFU than the
+	 * one we dialed (`isForeignSfu`).
 	 */
 	memberships: Accessor<readonly CallMembership[]>;
 	/** Microphone deviceId (empty string = system default). */
@@ -409,41 +427,87 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		return allOk;
 	};
 
+	// Non-throwing canonical form of an lk-jwt-service URL for equality
+	// comparison. Deployments spell the same service as bare host,
+	// `.../livekit`, `.../livekit/`, or `.../sfu/get` (see
+	// `normaliseJwtServiceUrl`), so raw string equality would falsely flag
+	// a peer on the same SFU as foreign. Null = missing/malformed, i.e.
+	// "can't tell".
+	const canonicalSfuUrl = (url: string | undefined): string | null => {
+		if (!url) return null;
+		try {
+			return normaliseJwtServiceUrl(url);
+		} catch {
+			return null;
+		}
+	};
+
 	// True when the membership's published transport(s) do not include the
 	// SFU we dialed. Such a peer (legacy `multi_sfu` / MSC4143
 	// multi-transport) joins our SFU subscriber-only: their media goes to an
-	// SFU we never connect to, so no tracks — and no real mute state —
+	// SFU we never connect to, so no tracks (and no real mute state)
 	// arrive here. Surfaced so the UI can say so instead of showing a
 	// misleading "muted" row (#488).
 	const publishesElsewhere = (
 		membership: CallMembership,
-		list: readonly CallMembership[],
+		oldest: CallMembership | null,
+		focusUrl: string | null,
 	): boolean => {
-		const focusUrl = opts.focus()?.livekit_service_url;
-		if (!focusUrl) return false;
-		// `getTransport` needs the oldest membership to resolve legacy
-		// `oldest_membership` transport election (same reduce as
-		// `useRtcSession`'s activeFocus).
-		const oldest = list.reduce<CallMembership | null>((acc, m) => {
-			if (acc === null) return m;
-			return m.createdTs() < acc.createdTs() ? m : acc;
-		}, null);
-		if (!oldest) return false;
+		if (!focusUrl || !oldest) return false;
 		// The elected/primary transport plus the full published list: an
 		// MSC4143 peer may publish to several SFUs at once, and reaching
 		// ours through ANY of them means we do receive their media.
-		const published = [
-			membership.getTransport(oldest),
-			...membership.transports,
-		].filter(
-			(t): t is LivekitTransport => t !== undefined && isLivekitTransport(t),
-		);
-		if (published.length === 0) return false;
-		return !published.some((t) => t.livekit_service_url === focusUrl);
+		// Both accessors read event-authored data - a legacy event may omit
+		// `foci_preferred` entirely (the SDK validator tolerates that, and
+		// its getters then return undefined or deref a hole) - so treat a
+		// throw or a missing list as "can't tell" rather than letting one
+		// malformed peer event crash the whole participant snapshot.
+		let published: ReturnType<CallMembership["getTransport"]>[];
+		try {
+			published = [
+				membership.getTransport(oldest),
+				...(membership.transports ?? []),
+			];
+		} catch {
+			return false;
+		}
+		const urls = published
+			.filter(
+				(t): t is LivekitTransport => t !== undefined && isLivekitTransport(t),
+			)
+			.map((t) => canonicalSfuUrl(t.livekit_service_url))
+			.filter((u): u is string => u !== null);
+		if (urls.length === 0) return false;
+		return !urls.some((u) => u === focusUrl);
 	};
+
+	// Membership lookup + foreign-SFU classification, keyed by
+	// `rtcBackendIdentity`. Memoized on [memberships, focus] because
+	// `snapshotParticipants` runs on every LiveKit event (several per second
+	// during active speech) while this classification only changes when the
+	// membership list or the dialed focus does - and `getTransport` on a
+	// legacy membership deep-compares event content, far too heavy for the
+	// active-speaker tick.
+	const membershipInfo = createMemo(() => {
+		const list = opts.memberships();
+		const focusUrl = canonicalSfuUrl(opts.focus()?.livekit_service_url);
+		const oldest = oldestMembership(list);
+		const map = new Map<
+			string,
+			{ membership: CallMembership; isForeignSfu: boolean }
+		>();
+		for (const membership of list) {
+			map.set(membership.rtcBackendIdentity, {
+				membership,
+				isForeignSfu: publishesElsewhere(membership, oldest, focusUrl),
+			});
+		}
+		return map;
+	});
 
 	const resolveIdentity = (
 		identity: string,
+		isLocal: boolean,
 	): {
 		displayName: string;
 		avatarUrl: string | null;
@@ -454,28 +518,36 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		// LiveKit identity is the MatrixRTC backend identity. Map back through
 		// the membership list to a userId, then resolve the member's display
 		// name and avatar from a single profile lookup.
-		const list = opts.memberships();
-		const membership = list.find((m) => m.rtcBackendIdentity === identity);
-		if (!membership) {
-			// No membership carries this identity — e.g. an MSC4195-hashed
+		const entry = membershipInfo().get(identity);
+		let userId = entry?.membership.userId ?? null;
+		if (userId === null && isLocal) {
+			// Join race: our own membership event round-trips through /sync
+			// after LiveKit connects, so briefly no membership matches our
+			// own identity - but we always know who we are.
+			userId = opts.client.getUserId();
+		}
+		if (userId === null) {
+			// No membership carries this identity - e.g. an MSC4195-hashed
 			// identity whose MSC4143 membership event we never received.
 			// Never show the opaque identity as the name: it reads as an
-			// intruder in the call. The raw value stays in `identity` for
-			// the row key and a debugging tooltip (#488).
+			// intruder in the call. A short prefix keeps two unresolved
+			// peers distinguishable (and reachable without a pointer); the
+			// full value stays in `identity` for the row key and a
+			// debugging tooltip (#488).
 			return {
-				displayName: "Unknown participant",
+				displayName: `Unknown participant (${identity.slice(0, 6)}…)`,
 				avatarUrl: null,
 				avatarUrlLarge: null,
 				isUnresolved: true,
 				isForeignSfu: false,
 			};
 		}
-		const user = opts.client.getUser(membership.userId);
+		const user = opts.client.getUser(userId);
 		const mxc = user?.avatarUrl;
 		return {
 			isUnresolved: false,
-			isForeignSfu: publishesElsewhere(membership, list),
-			displayName: user?.displayName ?? membership.userId,
+			isForeignSfu: entry?.isForeignSfu ?? false,
+			displayName: user?.displayName ?? userId,
 			// Small crop for compact surfaces (PiP panel rows at ~32px).
 			avatarUrl: mxc
 				? (opts.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null)
@@ -508,6 +580,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			isSpeaking: boolean,
 			isMuted: boolean,
 			isLocal: boolean,
+			micUnavailable: boolean,
 		): RtcParticipant => {
 			seen.add(identity);
 			const prev = participantCache.get(identity);
@@ -520,7 +593,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				prev.isMuted === isMuted &&
 				prev.isLocal === isLocal &&
 				prev.isUnresolved === info.isUnresolved &&
-				prev.isForeignSfu === info.isForeignSfu
+				prev.isForeignSfu === info.isForeignSfu &&
+				prev.micUnavailable === micUnavailable
 			) {
 				return prev;
 			}
@@ -534,12 +608,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				isLocal,
 				isUnresolved: info.isUnresolved,
 				isForeignSfu: info.isForeignSfu,
+				micUnavailable,
 			};
 			participantCache.set(identity, next);
 			return next;
 		};
 		const out: RtcParticipant[] = [];
-		const localInfo = resolveIdentity(r.localParticipant.identity);
+		const localInfo = resolveIdentity(r.localParticipant.identity, true);
 		out.push(
 			reuseOrBuild(
 				r.localParticipant.identity,
@@ -547,13 +622,14 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				speakingIds.has(r.localParticipant.identity),
 				r.localParticipant.isMicrophoneEnabled === false,
 				true,
+				false,
 			),
 		);
 		for (const p of r.remoteParticipants.values()) {
 			const micPub = Array.from(p.audioTrackPublications.values()).find(
 				(pub) => pub.source === "microphone",
 			);
-			const info = resolveIdentity(p.identity);
+			const info = resolveIdentity(p.identity, false);
 			out.push(
 				reuseOrBuild(
 					p.identity,
@@ -561,6 +637,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					speakingIds.has(p.identity),
 					micPub?.isMuted ?? true,
 					false,
+					// No mic publication on our SFU + a peer we can't vouch for
+					// (publishes elsewhere, or unmapped identity): the fallback
+					// `isMuted` above is an artifact, not a mute (#488).
+					micPub === undefined && (info.isForeignSfu || info.isUnresolved),
 				),
 			);
 		}

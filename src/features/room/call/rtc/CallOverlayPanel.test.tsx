@@ -172,6 +172,7 @@ describe("CallOverlayPanel", () => {
 				displayName: "Elsewhere",
 				isMuted: true,
 				isForeignSfu: true,
+				micUnavailable: true,
 			}),
 		]);
 		const row = rowFor("Elsewhere");

@@ -363,6 +363,7 @@ describe("FullCallOverlay", () => {
 				isMuted: true,
 				isUnresolved: true,
 				isForeignSfu: true,
+				micUnavailable: true,
 			}),
 		]);
 		publishCallSession(fake.api);

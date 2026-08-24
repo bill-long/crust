@@ -83,6 +83,7 @@ export function participant(over: Partial<RtcParticipant>): RtcParticipant {
 		isLocal: false,
 		isUnresolved: false,
 		isForeignSfu: false,
+		micUnavailable: false,
 		...over,
 	};
 }

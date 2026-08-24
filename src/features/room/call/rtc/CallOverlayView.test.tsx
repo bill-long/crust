@@ -34,6 +34,7 @@ function participant(
 		isSpeaking: false,
 		isUnresolved: false,
 		isForeignSfu: false,
+		micUnavailable: false,
 		...over,
 	};
 }
@@ -116,6 +117,7 @@ describe("CallOverlayView", () => {
 							isMuted: true,
 							isUnresolved: true,
 							isForeignSfu: true,
+							micUnavailable: true,
 						}),
 					],
 				})}

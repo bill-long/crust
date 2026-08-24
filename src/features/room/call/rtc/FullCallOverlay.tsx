@@ -20,6 +20,7 @@ import {
 	micEnabled as voiceMicEnabled,
 } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
+import { MicStatusIcon } from "./MicStatusIcon";
 import { TrackStatsOverlay } from "./TrackStatsOverlay";
 import type {
 	LivekitRoomApi,
@@ -654,50 +655,12 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 						<span class="ml-1 text-[10px] opacity-75">(you)</span>
 					</Show>
 				</span>
-				{/* A foreign-SFU peer has no publications on our SFU, so
-				    `isMuted` would read true. That is an artifact, not a mute -
-				    show the "different server" state instead. */}
-				<Show
-					when={props.participant.isForeignSfu}
-					fallback={
-						<Show when={props.participant.isMuted}>
-							<svg
-								class="h-3.5 w-3.5 shrink-0"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								role="img"
-								aria-label="Microphone muted"
-							>
-								<line x1="1" y1="1" x2="23" y2="23" />
-								<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-								<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
-							</svg>
-						</Show>
-					}
-				>
-					<svg
-						class="h-3.5 w-3.5 shrink-0 text-warning-text"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						role="img"
-						aria-label="Connected via a different server - their audio and video are unavailable"
-					>
-						<title>
-							Connected via a different server - their audio and video are
-							unavailable
-						</title>
-						<path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3" />
-						<line x1="1" y1="1" x2="23" y2="23" />
-					</svg>
-				</Show>
+				<MicStatusIcon
+					muted={props.participant.isMuted}
+					micUnavailable={props.participant.micUnavailable}
+					isForeignSfu={props.participant.isForeignSfu}
+					scope="audio-video"
+				/>
 			</div>
 		</div>
 	);
