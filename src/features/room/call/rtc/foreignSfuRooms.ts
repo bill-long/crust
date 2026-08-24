@@ -280,9 +280,12 @@ export function createForeignSfuRooms(
 			const e2eeCtx = deps.e2ee();
 			// localIdentity: same `userId:deviceId` lk-jwt-service assigns us,
 			// so the key-cache replay ends on OUR latest key (see bindRoom).
+			// Guard a null userId (mirrors the primary connect path): omit
+			// rather than build a bogus "null:DEV" identity.
+			const localUserId = deps.client.getUserId();
 			const binding =
 				e2eeCtx?.bindRoom({
-					localIdentity: `${deps.client.getUserId()}:${deviceId}`,
+					localIdentity: localUserId ? `${localUserId}:${deviceId}` : undefined,
 				}) ?? null;
 			pendingBinding = binding;
 			const r = new lk.Room({
