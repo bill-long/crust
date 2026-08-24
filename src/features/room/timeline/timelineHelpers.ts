@@ -174,8 +174,10 @@ export function mergeRowsByTimestamp(
 
 /**
  * Trim a user-typed moderation reason; `undefined` when effectively empty,
- * so a whitespace-only reason never goes on the wire. Delete (redaction
- * reason) and report share this one rule.
+ * so whitespace never goes on the wire as a reason. Delete and report
+ * share this rule, then diverge on the empty case as their APIs require:
+ * delete omits the reason field entirely, report sends "" (the endpoint's
+ * reason parameter is mandatory but may be blank).
  */
 export function normalizeReason(raw: string | undefined): string | undefined {
 	const trimmed = raw?.trim();

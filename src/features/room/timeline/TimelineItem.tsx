@@ -8,6 +8,7 @@ import {
 	createSignal,
 	For,
 	Match,
+	onCleanup,
 	Show,
 	Switch,
 } from "solid-js";
@@ -336,8 +337,10 @@ const HoverToolbar: Component<{
 	    the menu's (presence-deferred) unmount - unpreventable via
 	    onCloseAutoFocus - which the dialogs survive via their focus
 	    recapture (see ConfirmDialog / ViewSourceDialog). */
+	let menuActionTimer: ReturnType<typeof setTimeout> | undefined;
+	onCleanup(() => clearTimeout(menuActionTimer));
 	const afterMenuClose = (action: () => void) => (): void => {
-		setTimeout(() => {
+		menuActionTimer = setTimeout(() => {
 			menuTriggerEl?.focus();
 			action();
 		}, 0);
