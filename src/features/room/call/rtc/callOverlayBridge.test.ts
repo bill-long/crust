@@ -30,6 +30,8 @@ const snapshot = (
 			isLocal: false,
 			isMuted: false,
 			isSpeaking: false,
+			isUnresolved: false,
+			isForeignSfu: false,
 		},
 	],
 	...over,

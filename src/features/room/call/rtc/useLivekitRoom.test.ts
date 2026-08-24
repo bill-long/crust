@@ -207,6 +207,27 @@ const livekitFocus: LivekitTransport = {
 	livekit_alias: "!room:example.com",
 };
 
+/**
+ * CallMembership mock with the members `resolveIdentity` reads: the
+ * identity match fields plus the transport surface `publishesElsewhere`
+ * inspects (`createdTs`/`getTransport`/`transports`). Defaults to
+ * publishing on the same SFU we dial (`livekitFocus`).
+ */
+function makeMembership(over?: {
+	rtcBackendIdentity?: string;
+	userId?: string;
+	transport?: LivekitTransport;
+}): CallMembership {
+	return {
+		rtcBackendIdentity: over?.rtcBackendIdentity ?? "remote-bid",
+		userId: over?.userId ?? "@bob:example.com",
+		deviceId: "BBB",
+		createdTs: () => 1,
+		getTransport: () => over?.transport ?? livekitFocus,
+		transports: [],
+	} as unknown as CallMembership;
+}
+
 beforeEach(() => {
 	roomFactory.current = null;
 	roomFactory.callCount = 0;
@@ -526,13 +547,7 @@ describe("useLivekitRoom", () => {
 		client.getUser.mockImplementation((userId: string) =>
 			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
 		);
-		const memberships: CallMembership[] = [
-			{
-				rtcBackendIdentity: "remote-bid",
-				userId: "@bob:example.com",
-				deviceId: "BBB",
-			} as unknown as CallMembership,
-		];
+		const memberships: CallMembership[] = [makeMembership()];
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -564,13 +579,7 @@ describe("useLivekitRoom", () => {
 				? { displayName: "Bob", avatarUrl: "mxc://example.com/bob" }
 				: null,
 		);
-		const memberships: CallMembership[] = [
-			{
-				rtcBackendIdentity: "remote-bid",
-				userId: "@bob:example.com",
-				deviceId: "BBB",
-			} as unknown as CallMembership,
-		];
+		const memberships: CallMembership[] = [makeMembership()];
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -616,13 +625,7 @@ describe("useLivekitRoom", () => {
 		client.getUser.mockImplementation((userId: string) =>
 			userId === "@bob:example.com" ? { displayName: "Bob" } : null,
 		);
-		const memberships: CallMembership[] = [
-			{
-				rtcBackendIdentity: "remote-bid",
-				userId: "@bob:example.com",
-				deviceId: "BBB",
-			} as unknown as CallMembership,
-		];
+		const memberships: CallMembership[] = [makeMembership()];
 		const { result } = renderHook(() =>
 			useLivekitRoom({
 				client: client as never,
@@ -639,6 +642,130 @@ describe("useLivekitRoom", () => {
 		const remote = result.participants().find((p) => !p.isLocal);
 		expect(remote?.avatarUrl).toBeNull();
 		expect(client.mxcUrlToHttp).not.toHaveBeenCalled();
+	});
+
+	it("resolves an MSC4195 hashed identity through the membership match path", async () => {
+		// A current Element Call peer joins with an opaque sha256 identity
+		// (MSC4195). Resolution is plain string equality against the
+		// membership's SDK-computed rtcBackendIdentity - lock that a hashed
+		// value flows through exactly like a legacy `user:device` one (#488).
+		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set(hashed, {
+			identity: hashed,
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		client.getUser.mockImplementation((userId: string) =>
+			userId === "@treamendous:matrix.org" ? { displayName: "Trea" } : null,
+		);
+		const memberships: CallMembership[] = [
+			makeMembership({
+				rtcBackendIdentity: hashed,
+				userId: "@treamendous:matrix.org",
+			}),
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		expect(remote?.displayName).toBe("Trea");
+		expect(remote?.isUnresolved).toBe(false);
+	});
+
+	it("falls back to Unknown participant when no membership matches, keeping the raw identity", async () => {
+		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set(hashed, {
+			identity: hashed,
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => [],
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const remote = result.participants().find((p) => !p.isLocal);
+		// Never render the opaque hash as a name - it reads as an intruder.
+		// The identity stays available (row key / debugging tooltip).
+		expect(remote?.displayName).toBe("Unknown participant");
+		expect(remote?.isUnresolved).toBe(true);
+		expect(remote?.identity).toBe(hashed);
+	});
+
+	it("flags a participant whose membership publishes to a different SFU", async () => {
+		// Legacy `multi_sfu` (or MSC4143 multi-transport) peer: publishes to
+		// its own SFU, joins ours subscriber-only. No tracks arrive here, so
+		// the UI must show "different server", not a bogus mute state (#488).
+		const fakeRoom = createFakeRoom();
+		fakeRoom.remoteParticipants.set("remote-foreign", {
+			identity: "remote-foreign",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		fakeRoom.remoteParticipants.set("remote-bid", {
+			identity: "remote-bid",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		roomFactory.current = () => fakeRoom;
+		const { client } = createClient();
+		const memberships: CallMembership[] = [
+			makeMembership(),
+			makeMembership({
+				rtcBackendIdentity: "remote-foreign",
+				userId: "@trea:matrix.org",
+				transport: {
+					type: "livekit",
+					livekit_service_url: "https://livekit-jwt.call.matrix.org",
+					livekit_alias: "!room:example.com",
+				},
+			}),
+		];
+		const { result } = renderHook(() =>
+			useLivekitRoom({
+				client: client as never,
+				focus: () => livekitFocus,
+				enabled: () => true,
+				memberships: () => memberships,
+				audioDeviceId: () => "",
+				videoDeviceId: () => "",
+				micEnabled: () => true,
+				loadLivekit,
+			}),
+		);
+		await waitFor(() => result.status() === "connected");
+		const foreign = result
+			.participants()
+			.find((p) => p.identity === "remote-foreign");
+		const samesfu = result
+			.participants()
+			.find((p) => p.identity === "remote-bid");
+		expect(foreign?.isForeignSfu).toBe(true);
+		expect(samesfu?.isForeignSfu).toBe(false);
 	});
 
 	it("surfaces JWT fetch errors as error status", async () => {

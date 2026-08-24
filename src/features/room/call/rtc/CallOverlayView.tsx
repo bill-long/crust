@@ -155,7 +155,10 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 												}}
 											/>
 										</span>
-										<span class="min-w-0 flex-1 truncate text-xs text-text-primary">
+										<span
+											class="min-w-0 flex-1 truncate text-xs text-text-primary"
+											title={p.isUnresolved ? p.identity : undefined}
+										>
 											{p.displayName}
 											<Show when={p.isLocal}>
 												<span class="ml-1 text-[10px] text-text-disabled">
@@ -166,9 +169,33 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 												<span class="sr-only"> (speaking)</span>
 											</Show>
 										</span>
-										<Show when={p.isMuted}>
+										{/* A foreign-SFU peer has no mic publication on our SFU,
+										    so `isMuted` would read true. That is an artifact, not
+										    a mute - show the "different server" state instead. */}
+										<Show
+											when={p.isForeignSfu}
+											fallback={
+												<Show when={p.isMuted}>
+													<svg
+														class="h-3.5 w-3.5 shrink-0 text-danger-text"
+														viewBox="0 0 24 24"
+														fill="none"
+														stroke="currentColor"
+														stroke-width="2"
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														role="img"
+														aria-label="Microphone muted"
+													>
+														<line x1="1" y1="1" x2="23" y2="23" />
+														<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+														<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+													</svg>
+												</Show>
+											}
+										>
 											<svg
-												class="h-3.5 w-3.5 shrink-0 text-danger-text"
+												class="h-3.5 w-3.5 shrink-0 text-warning-text"
 												viewBox="0 0 24 24"
 												fill="none"
 												stroke="currentColor"
@@ -176,11 +203,14 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 												stroke-linecap="round"
 												stroke-linejoin="round"
 												role="img"
-												aria-label="Microphone muted"
+												aria-label="Connected via a different server - their audio is unavailable"
 											>
+												<title>
+													Connected via a different server - their audio is
+													unavailable
+												</title>
+												<path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3" />
 												<line x1="1" y1="1" x2="23" y2="23" />
-												<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-												<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
 											</svg>
 										</Show>
 									</li>

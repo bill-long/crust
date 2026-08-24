@@ -37,6 +37,14 @@ export interface CallOverlayParticipant {
 	/** Raw active-speaker flag as reported by LiveKit. The view derives the
 	 *  visible "speaking" cue as `isSpeaking && !isMuted`, matching the PiP panel. */
 	isSpeaking: boolean;
+	/** True when no call membership matched the LiveKit identity, so
+	 *  `displayName` is the neutral "Unknown participant" fallback and
+	 *  `identity` doubles as a debugging tooltip (#488). */
+	isUnresolved: boolean;
+	/** True when the participant publishes media to a different SFU than the
+	 *  one we joined - their mute state is an artifact and their audio is
+	 *  unavailable, so the view shows a "different server" cue instead (#488). */
+	isForeignSfu: boolean;
 }
 
 /** A full snapshot of the call as seen by the overlay. */
@@ -90,7 +98,9 @@ function isValidParticipant(value: unknown): value is CallOverlayParticipant {
 		(p.avatarUrl === null || typeof p.avatarUrl === "string") &&
 		typeof p.isLocal === "boolean" &&
 		typeof p.isMuted === "boolean" &&
-		typeof p.isSpeaking === "boolean"
+		typeof p.isSpeaking === "boolean" &&
+		typeof p.isUnresolved === "boolean" &&
+		typeof p.isForeignSfu === "boolean"
 	);
 }
 
@@ -136,6 +146,8 @@ function sanitizeSnapshot(s: CallOverlaySnapshot): CallOverlaySnapshot {
 			isLocal: p.isLocal,
 			isMuted: p.isMuted,
 			isSpeaking: p.isSpeaking,
+			isUnresolved: p.isUnresolved,
+			isForeignSfu: p.isForeignSfu,
 		})),
 	};
 }

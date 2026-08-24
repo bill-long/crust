@@ -32,6 +32,8 @@ function participant(
 		isLocal: false,
 		isMuted: false,
 		isSpeaking: false,
+		isUnresolved: false,
+		isForeignSfu: false,
 		...over,
 	};
 }
@@ -101,6 +103,34 @@ describe("CallOverlayView", () => {
 		expect(
 			within(rowFor("Live")).queryByLabelText("Microphone muted"),
 		).toBeNull();
+	});
+
+	it("shows the different-server state instead of the mute artifact for a foreign-SFU peer (#488)", () => {
+		render(() => (
+			<CallOverlayView
+				snapshot={snapshot({
+					participants: [
+						participant({
+							identity: "hashed-id",
+							displayName: "Unknown participant",
+							isMuted: true,
+							isUnresolved: true,
+							isForeignSfu: true,
+						}),
+					],
+				})}
+			/>
+		));
+		const row = rowFor("Unknown participant");
+		expect(
+			within(row).getByLabelText(
+				"Connected via a different server - their audio is unavailable",
+			),
+		).toBeTruthy();
+		expect(within(row).queryByLabelText("Microphone muted")).toBeNull();
+		// Unresolved identity keeps the raw value as a debugging tooltip.
+		const name = within(row).getByText("Unknown participant");
+		expect(name.closest("[title]")?.getAttribute("title")).toBe("hashed-id");
 	});
 
 	it("only shows the speaking cue for unmuted active speakers", () => {
