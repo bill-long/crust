@@ -458,9 +458,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// transport). Deliberately NOT unioned with `membership.transports`:
 	// for legacy oldest_membership peers that list is an election OFFER,
 	// not a publish set, and matching our SFU against an unused offer would
-	// reintroduce the false "muted" row #488 removes. (An MSC4143 peer
-	// multi-publishing to us as a secondary transport reads foreign here;
-	// we then also dial its primary, which is harmless.)
+	// reintroduce the false "muted" row #488 removes. KNOWN LIMITATION: an
+	// MSC4143 peer multi-publishing to us as a secondary transport reads
+	// foreign here, so we would ALSO dial its primary and - with no
+	// cross-room media dedupe - attach its audio twice (echo). No shipping
+	// client multi-publishes today; if one appears, dedupe media per
+	// identity across rooms (or skip origins of peers already publishing
+	// to us) before flagging them foreign.
 	// `getTransport` reads event-authored data - a legacy event may omit
 	// `foci_preferred` entirely (the SDK validator tolerates that, and the
 	// getter then derefs a hole) - so treat a throw as "can't tell" rather
@@ -832,17 +836,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		client: opts.client,
 		loadLivekit: opts.loadLivekit ?? (() => import("livekit-client")),
 		e2ee: () => opts.e2ee?.() ?? null,
-		attachAudioTrack: (track, publication) =>
-			attachAudioTrack(track, publication),
-		detachAudioTrack: (sid) => detachAudioTrack(sid),
-		upsertVideoTrack: (identity, track, sid) =>
-			upsertVideoTrack(identity, track, sid),
-		removeVideoTrackIfMatches: (identity, sid) =>
-			removeVideoTrackIfMatches(identity, sid),
-		upsertScreenShareTrack: (identity, track, sid) =>
-			upsertScreenShareTrack(identity, track, sid),
-		removeScreenShareTrackIfMatches: (identity, sid) =>
-			removeScreenShareTrackIfMatches(identity, sid),
+		attachAudioTrack,
+		detachAudioTrack,
+		upsertVideoTrack,
+		removeVideoTrackIfMatches,
+		upsertScreenShareTrack,
+		removeScreenShareTrackIfMatches,
 		onChanged: () => {
 			if (room) snapshotParticipants(room);
 		},
