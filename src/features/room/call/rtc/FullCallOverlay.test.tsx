@@ -372,7 +372,7 @@ describe("FullCallOverlay", () => {
 		const grid = screen.getByTestId("participant-grid");
 		expect(
 			within(grid).getByLabelText(
-				"Connected via a different server - their audio and video are unavailable",
+				"Connected via a different server - their audio is unavailable",
 			),
 		).toBeTruthy();
 		expect(within(grid).queryByLabelText("Microphone muted")).toBeNull();

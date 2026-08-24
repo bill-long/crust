@@ -1,5 +1,19 @@
 import { type Component, Match, Switch } from "solid-js";
 
+/**
+ * Path set for the crossed-out microphone glyph (feather mic-off, minus the
+ * mic stand). Shared between {@link MicStatusIcon} and `FullCallOverlay`'s
+ * mute toggle (which adds the stand lines) so a glyph tweak cannot leave one
+ * surface a revision behind.
+ */
+export const MicOffGlyph: Component = () => (
+	<>
+		<line x1="1" y1="1" x2="23" y2="23" />
+		<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+		<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+	</>
+);
+
 interface MicStatusIconProps {
 	/** Effective muted state. Callers fold in any local override first (the
 	 *  PiP panel derives the local row from the voice store, not LiveKit). */
@@ -9,12 +23,11 @@ interface MicStatusIconProps {
 	micUnavailable: boolean;
 	/** Words the unavailable label: true names the cause ("different server"). */
 	isForeignSfu: boolean;
-	/** Which media the surface renders - the full call tile also shows video,
-	 *  so its unavailable label covers both. Defaults to audio-only. */
-	scope?: "audio" | "audio-video";
 	/** Extra classes for the muted-mic icon (surfaces differ: danger red in
 	 *  the panel rows, inherited white on the tile's name bar). */
 	mutedClass?: string;
+	/** Extra classes for the unavailable icon; defaults to the warning token. */
+	unavailableClass?: string;
 }
 
 /**
@@ -25,24 +38,23 @@ interface MicStatusIconProps {
  * no mic publication here, so "muted" would be a false claim), and a copy
  * per surface is how that gate gets lost.
  *
+ * The unavailable label speaks only about audio: `micUnavailable` derives
+ * from the absence of a mic publication, and a video track can still be
+ * playing for such a peer.
+ *
  * Renders nothing when the mic is live. No event handlers, so it is safe in
  * the cross-window PiP document (`CallOverlayPanel`).
  */
 export const MicStatusIcon: Component<MicStatusIconProps> = (props) => {
-	const unavailableLabel = (): string => {
-		const media =
-			(props.scope ?? "audio") === "audio-video"
-				? "audio and video are"
-				: "audio is";
-		return props.isForeignSfu
-			? `Connected via a different server - their ${media} unavailable`
-			: `Their ${media} unavailable`;
-	};
+	const unavailableLabel = (): string =>
+		props.isForeignSfu
+			? "Connected via a different server - their audio is unavailable"
+			: "Their audio is unavailable";
 	return (
 		<Switch>
 			<Match when={props.micUnavailable}>
 				<svg
-					class="h-3.5 w-3.5 shrink-0 text-warning-text"
+					class={`h-3.5 w-3.5 shrink-0 ${props.unavailableClass ?? "text-warning-text"}`}
 					viewBox="0 0 24 24"
 					fill="none"
 					stroke="currentColor"
@@ -70,9 +82,7 @@ export const MicStatusIcon: Component<MicStatusIconProps> = (props) => {
 					role="img"
 					aria-label="Microphone muted"
 				>
-					<line x1="1" y1="1" x2="23" y2="23" />
-					<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-					<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+					<MicOffGlyph />
 				</svg>
 			</Match>
 		</Switch>

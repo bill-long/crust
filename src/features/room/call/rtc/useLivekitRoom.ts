@@ -20,6 +20,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { reportError } from "../../../../lib/reportError";
 import {
 	SCREEN_SHARE_CONTENT_HINT,
 	SCREEN_SHARE_PUBLISH_OPTIONS,
@@ -29,11 +30,7 @@ import {
 import { userSettings } from "../../../../stores/settings";
 import { playPresenceCue } from "../../notificationSound";
 import { createPresenceCue, type PresenceCueDeps } from "./callPresenceCue";
-import {
-	fetchLivekitToken,
-	LivekitJwtError,
-	normaliseJwtServiceUrl,
-} from "./fetchLivekitToken";
+import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
 import { oldestMembership } from "./useRtcSession";
 
 export type LivekitConnectionStatus =
@@ -46,7 +43,9 @@ export type LivekitConnectionStatus =
 export interface RtcParticipant {
 	/** LiveKit participant.identity — opaque RTC backend id. */
 	identity: string;
-	/** Resolved Matrix display name (or userId, or identity as fallback). */
+	/** Resolved Matrix display name (or userId; or, when no membership
+	 *  matches the identity, the neutral "Unknown (prefix…)" fallback -
+	 *  check `isUnresolved` to detect that case, never the string). */
 	displayName: string;
 	/** Small (96px) avatar URL for compact surfaces (e.g. the PiP panel rows). */
 	avatarUrl: string | null;
@@ -428,15 +427,23 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	};
 
 	// Non-throwing canonical form of an lk-jwt-service URL for equality
-	// comparison. Deployments spell the same service as bare host,
-	// `.../livekit`, `.../livekit/`, or `.../sfu/get` (see
-	// `normaliseJwtServiceUrl`), so raw string equality would falsely flag
-	// a peer on the same SFU as foreign. Null = missing/malformed, i.e.
-	// "can't tell".
+	// comparison: the URL origin. Deployments spell the same service as a
+	// bare host, `.../livekit`, `.../livekit/`, or `.../sfu/get` (see
+	// `normaliseJwtServiceUrl` in fetchLivekitToken.ts), so raw string
+	// equality - or even path-normalised equality - falsely flags a peer on
+	// our own SFU as foreign. Origin comparison is deliberately coarse: a
+	// false "foreign" shows scary wrong messaging, while a false "same
+	// server" merely falls back to the pre-#488 rendering, so we err toward
+	// "same". (Path-based multi-tenant SFUs sharing one origin merge under
+	// this rule; accepted.) Null = missing/malformed, i.e. "can't tell".
 	const canonicalSfuUrl = (url: string | undefined): string | null => {
 		if (!url) return null;
 		try {
-			return normaliseJwtServiceUrl(url);
+			const parsed = new URL(url.trim());
+			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+				return null;
+			}
+			return parsed.origin;
 		} catch {
 			return null;
 		}
@@ -468,7 +475,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				membership.getTransport(oldest),
 				...(membership.transports ?? []),
 			];
-		} catch {
+		} catch (e) {
+			// Console-only: expected for event-authored holes, but an SDK
+			// upgrade changing getTransport's contract would otherwise
+			// silently classify every peer "not foreign" with no trace.
+			reportError(e, {
+				logLabel: `rtc: getTransport failed for membership of ${membership.userId}`,
+			});
 			return false;
 		}
 		const urls = published
@@ -531,11 +544,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// identity whose MSC4143 membership event we never received.
 			// Never show the opaque identity as the name: it reads as an
 			// intruder in the call. A short prefix keeps two unresolved
-			// peers distinguishable (and reachable without a pointer); the
-			// full value stays in `identity` for the row key and a
-			// debugging tooltip (#488).
+			// peers distinguishable (and reachable without a pointer), and
+			// the label is deliberately terse so the prefix survives the
+			// name spans' `truncate`; the full value stays in `identity`
+			// for the row key and a debugging tooltip (#488).
 			return {
-				displayName: `Unknown participant (${identity.slice(0, 6)}…)`,
+				displayName: `Unknown (${identity.slice(0, 6)}…)`,
 				avatarUrl: null,
 				avatarUrlLarge: null,
 				isUnresolved: true,

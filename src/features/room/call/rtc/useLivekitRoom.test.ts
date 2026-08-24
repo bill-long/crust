@@ -716,9 +716,7 @@ describe("useLivekitRoom", () => {
 		// Never render the opaque hash as a name - it reads as an intruder.
 		// A short prefix keeps two unresolved peers distinguishable; the full
 		// identity stays available (row key / debugging tooltip).
-		expect(remote?.displayName).toBe(
-			`Unknown participant (${hashed.slice(0, 6)}…)`,
-		);
+		expect(remote?.displayName).toBe(`Unknown (${hashed.slice(0, 6)}…)`);
 		expect(remote?.isUnresolved).toBe(true);
 		expect(remote?.identity).toBe(hashed);
 		// No mic publication + unmapped identity: the muted fallback is an
@@ -811,12 +809,18 @@ describe("useLivekitRoom", () => {
 
 	it("does not flag a peer whose SFU is the same service spelled differently", async () => {
 		// Deployments publish the same lk-jwt-service as bare host, .../livekit,
-		// or .../sfu/get - equality must go through URL normalisation, not raw
-		// string comparison. livekitFocus dials .../livekit/sfu/get; this peer's
-		// event spells it .../livekit.
+		// or .../sfu/get - so equality is by URL origin, not raw string (or
+		// even path-normalised) comparison. livekitFocus dials
+		// .../livekit/sfu/get; these peers' events spell it .../livekit and
+		// bare-host respectively.
 		const fakeRoom = createFakeRoom();
-		fakeRoom.remoteParticipants.set("remote-bid", {
-			identity: "remote-bid",
+		fakeRoom.remoteParticipants.set("remote-prefixed", {
+			identity: "remote-prefixed",
+			audioTrackPublications: new Map(),
+			videoTrackPublications: new Map(),
+		});
+		fakeRoom.remoteParticipants.set("remote-barehost", {
+			identity: "remote-barehost",
 			audioTrackPublications: new Map(),
 			videoTrackPublications: new Map(),
 		});
@@ -824,9 +828,19 @@ describe("useLivekitRoom", () => {
 		const { client } = createClient();
 		const memberships: CallMembership[] = [
 			makeMembership({
+				rtcBackendIdentity: "remote-prefixed",
 				transport: {
 					type: "livekit",
 					livekit_service_url: "https://sfu.example.com/livekit",
+					livekit_alias: "!room:example.com",
+				},
+			}),
+			makeMembership({
+				rtcBackendIdentity: "remote-barehost",
+				userId: "@carol:example.com",
+				transport: {
+					type: "livekit",
+					livekit_service_url: "https://sfu.example.com",
 					livekit_alias: "!room:example.com",
 				},
 			}),
@@ -844,8 +858,11 @@ describe("useLivekitRoom", () => {
 			}),
 		);
 		await waitFor(() => result.status() === "connected");
-		const remote = result.participants().find((p) => !p.isLocal);
-		expect(remote?.isForeignSfu).toBe(false);
+		for (const identity of ["remote-prefixed", "remote-barehost"]) {
+			const remote = result.participants().find((p) => p.identity === identity);
+			expect(remote?.isForeignSfu).toBe(false);
+			expect(remote?.micUnavailable).toBe(false);
+		}
 	});
 
 	it("treats a malformed membership (no transport data) as not-foreign instead of crashing", async () => {

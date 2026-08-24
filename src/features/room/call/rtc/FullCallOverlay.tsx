@@ -20,7 +20,8 @@ import {
 	micEnabled as voiceMicEnabled,
 } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
-import { MicStatusIcon } from "./MicStatusIcon";
+import { MicOffGlyph, MicStatusIcon } from "./MicStatusIcon";
+import { ParticipantNameLabel } from "./ParticipantNameLabel";
 import { TrackStatsOverlay } from "./TrackStatsOverlay";
 import type {
 	LivekitRoomApi,
@@ -266,9 +267,7 @@ export const FullCallOverlay: Component = () => {
 														</>
 													}
 												>
-													<line x1="1" y1="1" x2="23" y2="23" />
-													<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-													<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+													<MicOffGlyph />
 													<line x1="12" y1="19" x2="12" y2="23" />
 													<line x1="8" y1="23" x2="16" y2="23" />
 												</Show>
@@ -642,24 +641,15 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 				)}
 			</Show>
 			<div class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-black/40 px-2 py-1 text-xs text-white">
-				<span
+				<ParticipantNameLabel
+					participant={props.participant}
 					class="min-w-0 truncate"
-					title={
-						props.participant.isUnresolved
-							? props.participant.identity
-							: undefined
-					}
-				>
-					{props.participant.displayName}
-					<Show when={props.participant.isLocal}>
-						<span class="ml-1 text-[10px] opacity-75">(you)</span>
-					</Show>
-				</span>
+					youClass="ml-1 text-[10px] opacity-75"
+				/>
 				<MicStatusIcon
 					muted={props.participant.isMuted}
 					micUnavailable={props.participant.micUnavailable}
 					isForeignSfu={props.participant.isForeignSfu}
-					scope="audio-video"
 				/>
 			</div>
 		</div>

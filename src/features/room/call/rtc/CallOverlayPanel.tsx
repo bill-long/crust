@@ -6,6 +6,7 @@ import {
 import { micEnabled as voiceMicEnabled } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
 import { MicStatusIcon } from "./MicStatusIcon";
+import { ParticipantNameLabel } from "./ParticipantNameLabel";
 import type { RtcParticipant } from "./useLivekitRoom";
 
 /**
@@ -147,22 +148,17 @@ export const CallOverlayPanel: Component = () => {
 											}}
 										/>
 									</span>
-									<span
+									<ParticipantNameLabel
+										participant={p}
 										class="min-w-0 flex-1 truncate text-xs text-text-primary"
-										title={p.isUnresolved ? p.identity : undefined}
+										youClass="ml-1 text-[10px] text-text-disabled"
 									>
-										{p.displayName}
-										<Show when={p.isLocal}>
-											<span class="ml-1 text-[10px] text-text-disabled">
-												(you)
-											</span>
-										</Show>
 										{/* Non-color cue for speaking state (the ring is
 										    aria-hidden) so it isn't conveyed by color alone. */}
 										<Show when={speaking()}>
 											<span class="sr-only"> (speaking)</span>
 										</Show>
-									</span>
+									</ParticipantNameLabel>
 									<MicStatusIcon
 										muted={muted()}
 										micUnavailable={p.micUnavailable}

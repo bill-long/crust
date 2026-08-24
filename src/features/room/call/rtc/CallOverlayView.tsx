@@ -8,6 +8,7 @@ import type {
 	CallOverlaySnapshot,
 } from "./callOverlayBridge";
 import { MicStatusIcon } from "./MicStatusIcon";
+import { ParticipantNameLabel } from "./ParticipantNameLabel";
 
 interface CallOverlayViewProps {
 	/** Latest call snapshot mirrored from the main window. */
@@ -156,24 +157,19 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 												}}
 											/>
 										</span>
-										<span
+										<ParticipantNameLabel
+											participant={p}
 											class="min-w-0 flex-1 truncate text-xs text-text-primary"
-											title={p.isUnresolved ? p.identity : undefined}
+											youClass="ml-1 text-[10px] text-text-disabled"
 										>
-											{p.displayName}
-											<Show when={p.isLocal}>
-												<span class="ml-1 text-[10px] text-text-disabled">
-													(you)
-												</span>
-											</Show>
 											<Show when={speaking()}>
 												<span class="sr-only"> (speaking)</span>
 											</Show>
-										</span>
+										</ParticipantNameLabel>
 										<MicStatusIcon
 											muted={p.isMuted}
-											micUnavailable={p.micUnavailable}
-											isForeignSfu={p.isForeignSfu}
+											micUnavailable={p.micUnavailable === true}
+											isForeignSfu={p.isForeignSfu === true}
 											mutedClass="text-danger-text"
 										/>
 									</li>

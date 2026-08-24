@@ -38,16 +38,23 @@ export interface CallOverlayParticipant {
 	 *  visible "speaking" cue as `isSpeaking && !isMuted`, matching the PiP panel. */
 	isSpeaking: boolean;
 	/** True when no call membership matched the LiveKit identity, so
-	 *  `displayName` is the neutral "Unknown participant" fallback and
-	 *  `identity` doubles as a debugging tooltip (#488). */
-	isUnresolved: boolean;
+	 *  `displayName` is the neutral "Unknown (prefix…)" fallback and
+	 *  `identity` doubles as a debugging tooltip (#488).
+	 *
+	 *  Optional on the wire, like the two fields below: these are additive
+	 *  (#488), and a producer bundled before them (a main tab open across a
+	 *  deploy) publishes snapshots without them. `sanitizeSnapshot` defaults
+	 *  absent values to false, so consumers of a sanitized snapshot can
+	 *  treat undefined as false. */
+	isUnresolved?: boolean;
 	/** True when the participant publishes media to a different SFU than the
-	 *  one we joined - used only to word the `micUnavailable` cue (#488). */
-	isForeignSfu: boolean;
+	 *  one we joined - used only to word the `micUnavailable` cue (#488).
+	 *  Optional on the wire; see `isUnresolved`. */
+	isForeignSfu?: boolean;
 	/** True when `isMuted` is a no-publication artifact for a foreign or
 	 *  unresolved peer; the view shows "audio unavailable" instead of a
-	 *  muted mic (#488). */
-	micUnavailable: boolean;
+	 *  muted mic (#488). Optional on the wire; see `isUnresolved`. */
+	micUnavailable?: boolean;
 }
 
 /** A full snapshot of the call as seen by the overlay. */
