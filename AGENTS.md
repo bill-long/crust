@@ -80,12 +80,7 @@ This repo uses **Tailwind CSS 4** with the CSS-native config (`@import "tailwind
 <div class="bg-zinc-900 text-gray-200 border-zinc-700">
 ```
 
-Token namespace (defined via `@theme` in `src/styles/global.css` as `--color-*` variables; the actual file is the source of truth):
-- **Surfaces:** `surface-0` (app bg) through `surface-4` (raised/popover)
-- **Text:** `text-primary`, `text-emphasis`, `text-secondary`, `text-muted`, `text-disabled`, `text-faint`
-- **Borders:** `border-subtle`, `border-default`, `border-strong`, `border-focus`
-- **Semantic:** `accent` (pink), `success`, `warning`, `danger`, `info`. The variant set differs per color - most have a base plus a subset of `-text`/`-bg`/`-foreground`/`-hover`/`-border`/`-bright`, but `info` is `-text`/`-border` only (no base, no `-bg`/`-foreground`). Check `global.css` for the exact token before using one.
-- **Mention/highlight:** `mention-bg`; badge/dot color is `indicator`
+The token namespace (surfaces, text, borders, semantic colors, mention/indicator) is defined via `@theme` in `src/styles/global.css` as `--color-*` variables - that file is the source of truth. Variant sets differ per color, so check `global.css` for the exact token before using one.
 
 ### Spacing & layout
 
@@ -146,30 +141,7 @@ One convention for a caught error, by where the failure is visible:
 
 ## File / folder layout
 
-```
-src/
-  index.tsx                 # Entry point (mounts #root)
-  sw.ts                     # Service worker
-  app/                      # App shell, routing, config
-    App.tsx                 # Root component
-    Layout.tsx              # Three-pane layout
-    ConfigProvider.tsx      # Runtime config
-  client/                   # matrix-js-sdk wrapper layer
-    client.tsx              # ClientProvider + useClient()
-  components/               # Shared presentational primitives (Avatar, Tooltip, UserBar, ResizableLayout)
-  features/                 # Feature-scoped: components + hooks together
-    auth/  crypto/  emoji/  gif/  notifications/  settings/  space/  voice/
-    room/                   # Largest feature: RoomList, MemberList, dialogs, plus subfolders:
-      timeline/  composer/  call/  search/  pinned/  settings/  urlPreviews/
-  stores/                   # Cross-cutting Solid stores (activeCall, layout, lastRoom, ...)
-  lib/                      # Small cross-cutting helpers (formatBytes, htmlEscape)
-  types/                    # Shared type helpers
-  test/                     # Test setup/utilities
-  styles/
-    global.css              # Tailwind import + @theme tokens + base layer
-```
-
-Rules:
+Explore `src/` for the current tree (top-level: `app/` shell, `client/` SDK wrapper, `components/` shared primitives, `features/` feature-scoped code, `stores/`, `lib/`, `styles/`, `types/`, `test/` shared test utils, plus the `index.tsx`/`sw.ts` entries). Rules:
 - A component in `components/` knows nothing about Matrix.
 - Matrix SDK access is centralized in `client/`; features consume it via `useClient()`.
 - A component in `features/` may use `client/`, `components/`, `stores/`, and `lib/`. It may also compose another feature's **public component** (e.g. `RoomList` renders `space/SpaceDiscoverList`) - that is normal cross-feature composition. What it must NOT do is reach into another feature's *internals*: its hooks, or non-component modules. Share that kind of logic via `stores`/events, or promote it to `lib/`/`client/`.
@@ -189,17 +161,7 @@ Rules:
 
 ## Commands
 
-This repo uses **pnpm** (see `packageManager` in `package.json`).
-
-```bash
-pnpm dev             # Vite dev server
-pnpm build           # Production build (Vite) - does NOT type-check
-pnpm preview         # Preview prod build
-pnpm lint            # Biome check (lint + format)
-pnpm lint:fix        # Biome check --write
-pnpm typecheck       # tsc --noEmit (app + service-worker tsconfig)
-pnpm test            # Vitest (run once); pnpm test:watch to watch
-```
+This repo uses **pnpm**; the scripts live in `package.json` (the source of truth - don't trust any doc's enumeration of them). Gotchas: `pnpm build` does NOT type-check (run `pnpm typecheck` separately), and it wraps the CSP-sync and vendor-chunk check scripts around Vite - `build:vite` is the bare Vite build.
 
 CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, and `pnpm build` (with the `*.browser.test.tsx` suite in a separate `browser-tests` job). Run all four before declaring any task complete (add `pnpm test:browser` when you've touched layout/browser-dependent code).
 
@@ -210,28 +172,11 @@ every push - fix commits answering a review comment are the ones most often
 skipped, and they are how findings leak through to the (paid) PR bot that a
 local pass would have caught for free.
 
-This is a convention, not a mechanism. Two attempts at enforcing it were
-removed, and the reasons are worth keeping:
-
-- A git `pre-push` hook checking a marker file written by `pnpm review:stamp`.
-  The agent both performed the action and wrote the evidence, so "review before
-  push" collapsed into "type the stamp command" - and the review was skipped
-  twice anyway. An attestation you can forge is not a gate.
-- A Claude Code `PreToolUse` hook that read the session transcript (which the
-  harness writes and the agent cannot) for a completed review postdating HEAD.
-  The evidence was sound; the trigger was not. A `PreToolUse` hook sees only a
-  command *string*, so deciding "is this a push?" meant approximating git's and
-  the shell's grammar - quoted spans, env-var prefixes, `-C`, `--git-dir`,
-  subshells, line continuations in two shells. Every round of review found the
-  next spelling it had missed. Tools that gate on command strings for real
-  (claude-code-auto-approve, the aihero guardrails) parse a bash AST; tools that
-  gate pushes for real (`pre-commit`, `husky`, `lefthook`) hook where git hands
-  them the refs on stdin. This did neither, and the parser was more code, and
-  more bug, than the feature it guarded.
-
-So: remember to run the review. The failure being prevented is an accidental
-skip, and nothing here defends against a determined bypass by an agent with
-shell access anyway.
+This is a convention, not a mechanism - two enforcement attempts (a stamp-file
+`pre-push` hook and a transcript-reading `PreToolUse` hook) were removed
+deliberately. Read `docs/review-gate-history.md` for why before proposing a new
+gate. The failure being prevented is an accidental skip, so: remember to run
+the review.
 
 This covers the review only; `lint`/`typecheck`/`test` are covered by CI and by
 the review flow.
@@ -259,6 +204,7 @@ setting survives - so any hook added later would never run, with no error.
 - Use design tokens for color, spacing, radii, shadows.
 - Provide a `focus-visible` ring on every focusable element.
 - Use `<Show when={}>` rather than `&&` in JSX (better reactivity, no falsy-render footguns).
+- Give every Kobalte `*.Portal`'s Content the `portal-scale` class. The UI zoom lives on `#root` (never `<html>` - it breaks floating-ui portal positioning, #487/#485); body-portaled surfaces re-apply the user's scale via that class, and forgetting it renders the surface at 100% scale.
 - Surface a failed user action outside a dialog with `reportError(err, { userMessage })` (see "Error handling").
 
 ## Never do
