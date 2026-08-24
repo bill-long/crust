@@ -79,6 +79,19 @@ export function visibleRowRange(
 	];
 }
 
+/** Imperative surface handed to the `controller` callback. */
+export interface VirtualListController {
+	/**
+	 * Scroll the given row into view (`scrollIntoView({block: "nearest"})`
+	 * semantics: no-op when fully visible, otherwise the minimal scroll).
+	 * Unlike setting `scrollTop` directly, this also updates the row window
+	 * synchronously - programmatic scrolls fire the `scroll` event a frame
+	 * late (never in jsdom), and callers like a listbox's active-descendant
+	 * tracking need the target row mounted before the next DOM read.
+	 */
+	scrollToIndex(index: number): void;
+}
+
 interface VirtualListProps<T>
 	extends Omit<JSX.HTMLAttributes<HTMLDivElement>, "children"> {
 	/** The rows to render. */
@@ -99,6 +112,8 @@ interface VirtualListProps<T>
 	resetKey?: unknown;
 	/** Rendered instead of the list when `each` is empty. */
 	fallback?: JSX.Element;
+	/** Called on mount with the imperative API (e.g. `scrollToIndex`). */
+	controller?: (api: VirtualListController) => void;
 	children: (item: T, index: Accessor<number>) => JSX.Element;
 }
 
@@ -137,6 +152,7 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 		"overscan",
 		"resetKey",
 		"fallback",
+		"controller",
 		"children",
 		"onScroll",
 		"ref",
@@ -170,7 +186,28 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			ro.observe(el);
 			onCleanup(() => ro.disconnect());
 		}
+		local.controller?.({ scrollToIndex });
 	});
+
+	const scrollToIndex = (index: number): void => {
+		const el = scrollRef;
+		const count = local.each.length;
+		const vh = viewportH();
+		// A 0-height viewport (popover not laid out yet) has no meaningful
+		// "visible" region to scroll within; the ResizeObserver re-measure
+		// will land with scrollTop still at its current value.
+		if (!el || count === 0 || vh <= 0) return;
+		const offs = offsets();
+		const i = Math.max(0, Math.min(index, count - 1));
+		const top = padTop() + offs[i];
+		const bottom = padTop() + offs[i + 1];
+		let target = scrollTop();
+		if (top < target) target = top;
+		else if (bottom > target + vh) target = bottom - vh;
+		if (target === scrollTop()) return;
+		el.scrollTop = target;
+		setScrollTop(target);
+	};
 
 	createEffect(
 		on(

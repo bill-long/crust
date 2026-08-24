@@ -4,11 +4,11 @@ import {
 	createMemo,
 	createSignal,
 	createUniqueId,
-	For,
 	type JSX,
 	on,
 	Show,
 } from "solid-js";
+import { VirtualList, type VirtualListController } from "../VirtualList";
 
 export interface PickerProps<T> {
 	items: T[];
@@ -26,6 +26,9 @@ const ITEM_HEIGHT = 36;
 /**
  * Generic filtered-list picker popover. Keyboard events must be forwarded
  * from the parent's onKeyDown via the returned `handlePickerKey` function.
+ * The option list is windowed (VirtualList), so item sets well past the
+ * visible ~6 rows stay cheap; the highlighted option is kept scrolled into
+ * view (and therefore mounted) across keyboard moves and wrap-around.
  */
 export function createPicker<T>() {
 	let handleKey: ((e: KeyboardEvent) => boolean) | undefined;
@@ -36,15 +39,31 @@ export function createPicker<T>() {
 
 	const Picker: Component<PickerProps<T>> = (props) => {
 		const [highlightIndex, setHighlightIndex] = createSignal(0);
+		// Imperative handle onto the windowed list; reassigned on each mount
+		// of the <VirtualList> (it unmounts whenever the popover hides).
+		let listController: VirtualListController | undefined;
 
 		const filtered = createMemo(() =>
 			props.items.filter((item) => props.filterFn(item, props.query)),
 		);
 
-		// Clamp highlight index when filtered list shrinks or picker reopens
+		// A fresh open starts back at the top - a highlight retained from the
+		// previous session would point at an arbitrary (and, windowed, likely
+		// unmounted) row.
 		createEffect(
 			on(
-				() => [props.query, props.visible, filtered().length] as const,
+				() => props.visible,
+				(visible, wasVisible) => {
+					if (visible && !wasVisible) setHighlightIndex(0);
+				},
+				{ defer: true },
+			),
+		);
+
+		// Clamp highlight index when the filtered list shrinks
+		createEffect(
+			on(
+				() => [props.query, filtered().length] as const,
 				() =>
 					setHighlightIndex((i) =>
 						Math.min(i, Math.max(0, filtered().length - 1)),
@@ -52,13 +71,14 @@ export function createPicker<T>() {
 			),
 		);
 
-		// Scroll highlighted item into view
+		// Keep the highlighted item scrolled into view. Synchronous through
+		// the controller, so the row is mounted (and its aria-activedescendant
+		// id resolvable) immediately after a keyboard move across the
+		// windowed boundary.
 		createEffect(() => {
 			const idx = highlightIndex();
-			const items = filtered();
-			if (!props.visible || idx < 0 || idx >= items.length) return;
-			const el = document.getElementById(`${listboxId}-item-${idx}`);
-			el?.scrollIntoView({ block: "nearest" });
+			if (!props.visible || idx < 0 || idx >= filtered().length) return;
+			listController?.scrollToIndex(idx);
 		});
 
 		const activeDescendant = () => {
@@ -115,8 +135,13 @@ export function createPicker<T>() {
 
 		return (
 			<Show when={props.visible && filtered().length > 0}>
-				<div
+				<VirtualList
 					id={listboxId}
+					each={filtered()}
+					rowHeight={ITEM_HEIGHT}
+					controller={(api) => {
+						listController = api;
+					}}
 					class="absolute z-20 max-h-[216px] w-64 overflow-y-auto rounded-lg border border-border-default bg-surface-2 py-1 shadow-lg"
 					style={{
 						bottom: props.position.bottom,
@@ -126,33 +151,31 @@ export function createPicker<T>() {
 					aria-label="Suggestions"
 					tabIndex={-1}
 				>
-					<For each={filtered()}>
-						{(item, index) => {
-							const isHighlighted = () => index() === highlightIndex();
-							return (
-								<div
-									id={`${listboxId}-item-${index()}`}
-									role="option"
-									aria-selected={isHighlighted()}
-									tabIndex={-1}
-									class={`cursor-pointer px-3 py-1.5 text-sm ${
-										isHighlighted()
-											? "bg-mention-bg/40 text-text-primary"
-											: "text-text-secondary hover:bg-surface-3"
-									}`}
-									style={{ height: `${ITEM_HEIGHT}px` }}
-									onMouseDown={(e) => {
-										e.preventDefault();
-										props.onSelect(item);
-									}}
-									onMouseEnter={() => setHighlightIndex(index())}
-								>
-									{props.renderItem(item, isHighlighted())}
-								</div>
-							);
-						}}
-					</For>
-				</div>
+					{(item, index) => {
+						const isHighlighted = () => index() === highlightIndex();
+						return (
+							<div
+								id={`${listboxId}-item-${index()}`}
+								role="option"
+								aria-selected={isHighlighted()}
+								tabIndex={-1}
+								class={`cursor-pointer px-3 py-1.5 text-sm ${
+									isHighlighted()
+										? "bg-mention-bg/40 text-text-primary"
+										: "text-text-secondary hover:bg-surface-3"
+								}`}
+								style={{ height: `${ITEM_HEIGHT}px` }}
+								onMouseDown={(e) => {
+									e.preventDefault();
+									props.onSelect(item);
+								}}
+								onMouseEnter={() => setHighlightIndex(index())}
+							>
+								{props.renderItem(item, isHighlighted())}
+							</div>
+						);
+					}}
+				</VirtualList>
 			</Show>
 		);
 	};

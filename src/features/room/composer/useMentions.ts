@@ -38,23 +38,18 @@ export function useMentions(deps: UseMentionsDeps) {
 		return room ? room.getJoinedMembers() : [];
 	});
 
-	const MAX_PICKER_RESULTS = 50;
-
-	// Shared filtered member list - used by both picker and ARIA state
+	// Shared filtered member list - used by both picker and ARIA state.
+	// Unbounded: the picker windows its rows (VirtualList), so a large match
+	// set costs a filter pass here, not DOM nodes - every member stays
+	// reachable by scrolling/arrowing instead of being cut at a cap.
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
 		const lowerQ = q.toLowerCase();
-		const results: RoomMember[] = [];
-		for (const m of roomMembers()) {
+		return roomMembers().filter((m) => {
 			const name = (m.name ?? "").toLowerCase();
-			const uid = m.userId.toLowerCase();
-			if (name.includes(lowerQ) || uid.includes(lowerQ)) {
-				results.push(m);
-				if (results.length >= MAX_PICKER_RESULTS) break;
-			}
-		}
-		return results;
+			return name.includes(lowerQ) || m.userId.toLowerCase().includes(lowerQ);
+		});
 	});
 
 	const pickerRendered = () => filteredMembers().length > 0;
