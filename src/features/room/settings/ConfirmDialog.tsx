@@ -78,6 +78,23 @@ const ConfirmDialog: Component<ConfirmDialogProps> = (props) => {
 		previousFocus = null;
 	});
 
+	// Modal focus containment: while open, recapture focus that lands
+	// outside the overlay. An opener can asynchronously restore focus to
+	// itself after this dialog took its initial focus - e.g. Kobalte's
+	// dropdown menu refocuses its trigger on a timer after its deferred
+	// unmount - which would strand the overlay-scoped Escape/Tab handling.
+	// Skipped while a crypto dialog overlays us (this dialog is inert then
+	// and must not steal focus from it).
+	createEffect(() => {
+		if (!props.open()) return;
+		const onFocusIn = (e: FocusEvent) => {
+			if (cryptoDialogOpen()) return;
+			if (!overlayRef.contains(e.target as Node)) confirmRef?.focus();
+		};
+		document.addEventListener("focusin", onFocusIn);
+		onCleanup(() => document.removeEventListener("focusin", onFocusIn));
+	});
+
 	const tryClose = (): void => {
 		if (pending()) return;
 		props.onClose();

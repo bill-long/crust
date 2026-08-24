@@ -72,6 +72,24 @@ describe("ViewSourceDialog", () => {
 		).toBeTruthy();
 	});
 
+	it("recaptures focus stolen by an outside element while open", async () => {
+		const outside = document.createElement("button");
+		outside.textContent = "outside";
+		document.body.appendChild(outside);
+		try {
+			setup();
+			await Promise.resolve();
+			const closeBtn = screen.getByText("Close");
+			expect(document.activeElement).toBe(closeBtn);
+			// The opener (e.g. Kobalte's menu) restoring focus to itself after
+			// the dialog took focus must not strand keyboard handling outside.
+			outside.focus();
+			expect(document.activeElement).toBe(closeBtn);
+		} finally {
+			outside.remove();
+		}
+	});
+
 	it("closes on Escape", () => {
 		const { onClose } = setup();
 		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });

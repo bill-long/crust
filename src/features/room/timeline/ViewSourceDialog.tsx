@@ -66,6 +66,21 @@ const ViewSourceDialog: Component<ViewSourceDialogProps> = (props) => {
 		previousFocus = null;
 	});
 
+	// Modal focus containment: while open, recapture focus that lands
+	// outside the overlay (an opener like Kobalte's dropdown menu restores
+	// focus to its trigger on a timer after its deferred unmount, which
+	// would strand the overlay-scoped Escape/Tab handling). Skipped while a
+	// crypto dialog overlays us (this dialog is inert then).
+	createEffect(() => {
+		if (!open()) return;
+		const onFocusIn = (e: FocusEvent) => {
+			if (cryptoDialogOpen()) return;
+			if (!overlayRef.contains(e.target as Node)) closeRef?.focus();
+		};
+		document.addEventListener("focusin", onFocusIn);
+		onCleanup(() => document.removeEventListener("focusin", onFocusIn));
+	});
+
 	const handleKeyDown = (e: KeyboardEvent): void => {
 		if (e.key === "Escape") {
 			e.stopPropagation();

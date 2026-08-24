@@ -323,8 +323,25 @@ const HoverToolbar: Component<{
 		props.onReactPick(key);
 		setPickerOpen(false);
 	};
-	const menuItemClass =
-		"flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-left text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden";
+	const menuItemClass = (tone: "default" | "danger" = "default") =>
+		`flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-left text-sm transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden ${
+			tone === "danger" ? "text-danger-text" : "text-text-primary"
+		}`;
+	let menuTriggerEl: HTMLButtonElement | undefined;
+	/** Run a dialog-opening menu action after the dropdown has closed.
+	    Opening a dialog synchronously from onSelect would capture the
+	    about-to-unmount menu item as the dialog's previousFocus; grounding
+	    focus on the trigger first makes close-restore land somewhere real.
+	    Kobalte additionally refocuses the trigger on its own timer after
+	    the menu's (presence-deferred) unmount - unpreventable via
+	    onCloseAutoFocus - which the dialogs survive via their focus
+	    recapture (see ConfirmDialog / ViewSourceDialog). */
+	const afterMenuClose = (action: () => void) => (): void => {
+		setTimeout(() => {
+			menuTriggerEl?.focus();
+			action();
+		}, 0);
+	};
 	return (
 		<div
 			class="pointer-events-none absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-md bg-surface-2 px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
@@ -495,6 +512,9 @@ const HoverToolbar: Component<{
 			</Show>
 			<DropdownMenu open={menuOpen()} onOpenChange={setMenuOpen} gutter={6}>
 				<DropdownMenu.Trigger
+					ref={(el: HTMLButtonElement) => {
+						menuTriggerEl = el;
+					}}
 					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
 					aria-label="More"
 					title="More"
@@ -513,15 +533,15 @@ const HoverToolbar: Component<{
 				<DropdownMenu.Portal>
 					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
 						<DropdownMenu.Item
-							class={menuItemClass}
-							onSelect={props.onViewSource}
+							class={menuItemClass()}
+							onSelect={afterMenuClose(props.onViewSource)}
 						>
 							View source
 						</DropdownMenu.Item>
 						<Show when={props.onReport}>
 							<DropdownMenu.Item
-								class="flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-left text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
-								onSelect={() => props.onReport?.()}
+								class={menuItemClass("danger")}
+								onSelect={afterMenuClose(() => props.onReport?.())}
 							>
 								Report message
 							</DropdownMenu.Item>
