@@ -577,6 +577,12 @@ export function createForeignSfuRooms(
 		// Connect new origins; retry failed ones after the backoff.
 		for (const [origin, transport] of desired) {
 			const existing = entries.get(origin);
+			if (existing) {
+				// Keep the dial target fresh even while failed-in-backoff or
+				// connecting: a timer-driven retry must use the latest
+				// published endpoint, not the spelling that failed.
+				existing.transport = transport;
+			}
 			if (!existing) {
 				const entry: OriginEntry = {
 					origin,
@@ -600,7 +606,6 @@ export function createForeignSfuRooms(
 				now() - existing.failedAt >= FOREIGN_RETRY_MS
 			) {
 				cancelRetry(existing);
-				existing.transport = transport;
 				existing.state = "connecting";
 				existing.epoch++;
 				void connectOrigin(existing, getToken);

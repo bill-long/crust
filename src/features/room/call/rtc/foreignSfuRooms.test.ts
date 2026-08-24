@@ -555,6 +555,33 @@ describe("foreignSfuRooms", () => {
 		expect(jwtMock).toHaveBeenCalledTimes(2);
 	});
 
+	it("a timer retry dials the latest transport, not the one that failed", async () => {
+		// The transport for an origin can be re-published with a different
+		// spelling/path while the origin sits in backoff; a reconcile inside
+		// the backoff must still refresh the dial target so the timer retry
+		// does not reconnect via the stale endpoint.
+		const fx = createDeps();
+		jwtMock.mockRejectedValueOnce(new Error("boom"));
+		const rooms = createForeignSfuRooms(fx.deps);
+		rooms.reconcile(desired("https://sfu-a.example.org"));
+		await flush();
+		expect(rooms.rooms()[0].state).toBe("failed");
+		// Same origin, updated path - arrives within the backoff window.
+		const updated = transport("https://sfu-a.example.org/livekit");
+		rooms.reconcile(
+			new Map([[new URL("https://sfu-a.example.org").origin, updated]]),
+		);
+		await flush();
+		expect(jwtMock).toHaveBeenCalledTimes(1);
+		roomQueue.push(createFakeRoom());
+		const armed = fx.scheduled.filter((t) => !t.cleared);
+		armed[armed.length - 1].fn();
+		await flush();
+		expect(jwtMock).toHaveBeenCalledTimes(2);
+		expect((jwtMock.mock.calls[1] as unknown[])[0]).toEqual(updated);
+		expect(rooms.rooms()[0].state).toBe("connected");
+	});
+
 	it("removing an origin cancels its armed retry timer", async () => {
 		const fx = createDeps();
 		jwtMock.mockRejectedValueOnce(new Error("boom"));
