@@ -26,8 +26,6 @@ interface MicStatusIconProps {
 	/** Extra classes for the muted-mic icon (surfaces differ: danger red in
 	 *  the panel rows, inherited white on the tile's name bar). */
 	mutedClass?: string;
-	/** Extra classes for the unavailable icon; defaults to the warning token. */
-	unavailableClass?: string;
 }
 
 /**
@@ -38,9 +36,11 @@ interface MicStatusIconProps {
  * no mic publication here, so "muted" would be a false claim), and a copy
  * per surface is how that gate gets lost.
  *
- * The unavailable label speaks only about audio: `micUnavailable` derives
- * from the absence of a mic publication, and a video track can still be
- * playing for such a peer.
+ * Label wording: the foreign branch names both media - a membership that
+ * publishes to another SFU sends us no tracks at all, video included. The
+ * generic (unresolved-peer) branch claims only audio: `micUnavailable`
+ * derives from the absence of a mic publication, and an unresolved same-SFU
+ * peer's video track can still be playing.
  *
  * Renders nothing when the mic is live. No event handlers, so it is safe in
  * the cross-window PiP document (`CallOverlayPanel`).
@@ -48,13 +48,13 @@ interface MicStatusIconProps {
 export const MicStatusIcon: Component<MicStatusIconProps> = (props) => {
 	const unavailableLabel = (): string =>
 		props.isForeignSfu
-			? "Connected via a different server - their audio is unavailable"
+			? "Connected via a different server - their audio and video are unavailable"
 			: "Their audio is unavailable";
 	return (
 		<Switch>
 			<Match when={props.micUnavailable}>
 				<svg
-					class={`h-3.5 w-3.5 shrink-0 ${props.unavailableClass ?? "text-warning-text"}`}
+					class="h-3.5 w-3.5 shrink-0 text-warning-text"
 					viewBox="0 0 24 24"
 					fill="none"
 					stroke="currentColor"

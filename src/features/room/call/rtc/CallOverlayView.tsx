@@ -168,8 +168,8 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 										</ParticipantNameLabel>
 										<MicStatusIcon
 											muted={p.isMuted}
-											micUnavailable={p.micUnavailable === true}
-											isForeignSfu={p.isForeignSfu === true}
+											micUnavailable={p.micUnavailable}
+											isForeignSfu={p.isForeignSfu}
 											mutedClass="text-danger-text"
 										/>
 									</li>

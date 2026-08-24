@@ -178,23 +178,23 @@ describe("CallOverlayPanel", () => {
 		const row = rowFor("Elsewhere");
 		expect(
 			within(row).getByLabelText(
-				"Connected via a different server - their audio is unavailable",
+				"Connected via a different server - their audio and video are unavailable",
 			),
 		).toBeTruthy();
 		expect(within(row).queryByLabelText("Microphone muted")).toBeNull();
 	});
 
-	it("labels an unresolved participant Unknown participant with the raw identity as tooltip (#488)", () => {
+	it("labels an unresolved participant with the neutral fallback and the raw identity as tooltip (#488)", () => {
 		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
 		setup([
 			participant({
 				identity: hashed,
-				displayName: "Unknown participant",
+				displayName: "Unknown (Skmtra…)",
 				isUnresolved: true,
 			}),
 		]);
-		const row = rowFor("Unknown participant");
-		const name = within(row).getByText("Unknown participant");
+		const row = rowFor("Unknown (Skmtra…)");
+		const name = within(row).getByText("Unknown (Skmtra…)");
 		expect(name.closest("[title]")?.getAttribute("title")).toBe(hashed);
 	});
 

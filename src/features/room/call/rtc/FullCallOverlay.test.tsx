@@ -359,7 +359,7 @@ describe("FullCallOverlay", () => {
 		fake.setLivekitParticipants([
 			participant({
 				identity: "hashed-id",
-				displayName: "Unknown participant",
+				displayName: "Unknown (Skmtra…)",
 				isMuted: true,
 				isUnresolved: true,
 				isForeignSfu: true,
@@ -372,13 +372,13 @@ describe("FullCallOverlay", () => {
 		const grid = screen.getByTestId("participant-grid");
 		expect(
 			within(grid).getByLabelText(
-				"Connected via a different server - their audio is unavailable",
+				"Connected via a different server - their audio and video are unavailable",
 			),
 		).toBeTruthy();
 		expect(within(grid).queryByLabelText("Microphone muted")).toBeNull();
 		// Unresolved identity: neutral label shown, raw identity kept as a
 		// debugging tooltip on the name.
-		const name = within(grid).getByText("Unknown participant");
+		const name = within(grid).getByText("Unknown (Skmtra…)");
 		expect(name.closest("[title]")?.getAttribute("title")).toBe("hashed-id");
 	});
 

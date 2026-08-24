@@ -113,7 +113,7 @@ describe("CallOverlayView", () => {
 					participants: [
 						participant({
 							identity: "hashed-id",
-							displayName: "Unknown participant",
+							displayName: "Unknown (Skmtra…)",
 							isMuted: true,
 							isUnresolved: true,
 							isForeignSfu: true,
@@ -123,15 +123,15 @@ describe("CallOverlayView", () => {
 				})}
 			/>
 		));
-		const row = rowFor("Unknown participant");
+		const row = rowFor("Unknown (Skmtra…)");
 		expect(
 			within(row).getByLabelText(
-				"Connected via a different server - their audio is unavailable",
+				"Connected via a different server - their audio and video are unavailable",
 			),
 		).toBeTruthy();
 		expect(within(row).queryByLabelText("Microphone muted")).toBeNull();
 		// Unresolved identity keeps the raw value as a debugging tooltip.
-		const name = within(row).getByText("Unknown participant");
+		const name = within(row).getByText("Unknown (Skmtra…)");
 		expect(name.closest("[title]")?.getAttribute("title")).toBe("hashed-id");
 	});
 

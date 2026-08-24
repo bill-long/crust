@@ -39,23 +39,34 @@ export interface CallOverlayParticipant {
 	isSpeaking: boolean;
 	/** True when no call membership matched the LiveKit identity, so
 	 *  `displayName` is the neutral "Unknown (prefix…)" fallback and
-	 *  `identity` doubles as a debugging tooltip (#488).
-	 *
-	 *  Optional on the wire, like the two fields below: these are additive
-	 *  (#488), and a producer bundled before them (a main tab open across a
-	 *  deploy) publishes snapshots without them. `sanitizeSnapshot` defaults
-	 *  absent values to false, so consumers of a sanitized snapshot can
-	 *  treat undefined as false. */
-	isUnresolved?: boolean;
+	 *  `identity` doubles as a debugging tooltip (#488). */
+	isUnresolved: boolean;
 	/** True when the participant publishes media to a different SFU than the
-	 *  one we joined - used only to word the `micUnavailable` cue (#488).
-	 *  Optional on the wire; see `isUnresolved`. */
-	isForeignSfu?: boolean;
+	 *  one we joined - used only to word the `micUnavailable` cue (#488). */
+	isForeignSfu: boolean;
 	/** True when `isMuted` is a no-publication artifact for a foreign or
 	 *  unresolved peer; the view shows "audio unavailable" instead of a
-	 *  muted mic (#488). Optional on the wire; see `isUnresolved`. */
-	micUnavailable?: boolean;
+	 *  muted mic (#488). */
+	micUnavailable: boolean;
 }
+
+/** The additive #488 fields: absent from producers bundled before them (a
+ *  main tab open across a deploy). Optional only in the WIRE shape below;
+ *  `sanitizeSnapshot` defaults them to false so every consumer downstream
+ *  of validation sees concrete booleans and never re-coerces. */
+type AdditiveParticipantField =
+	| "isUnresolved"
+	| "isForeignSfu"
+	| "micUnavailable";
+
+/** What may arrive over the channel: the current participant shape with the
+ *  additive fields possibly missing. Internal - consumers only ever see the
+ *  sanitized `CallOverlayParticipant`. */
+type WireCallOverlayParticipant = Omit<
+	CallOverlayParticipant,
+	AdditiveParticipantField
+> &
+	Partial<Pick<CallOverlayParticipant, AdditiveParticipantField>>;
 
 /** A full snapshot of the call as seen by the overlay. */
 export interface CallOverlaySnapshot {
@@ -64,6 +75,11 @@ export interface CallOverlaySnapshot {
 	roomName: string;
 	participants: readonly CallOverlayParticipant[];
 }
+
+/** Wire form of a snapshot; see `WireCallOverlayParticipant`. */
+type WireCallOverlaySnapshot = Omit<CallOverlaySnapshot, "participants"> & {
+	participants: readonly WireCallOverlayParticipant[];
+};
 
 /** The snapshot shown before any producer responds / when no call is active. */
 export const INACTIVE_SNAPSHOT: CallOverlaySnapshot = {
@@ -99,7 +115,9 @@ function openChannel(): BroadcastChannel | null {
  *  consumer against an absurd/hostile same-origin message. Real calls are tiny. */
 const MAX_PARTICIPANTS = 1000;
 
-function isValidParticipant(value: unknown): value is CallOverlayParticipant {
+function isValidParticipant(
+	value: unknown,
+): value is WireCallOverlayParticipant {
 	if (typeof value !== "object" || value === null) return false;
 	const p = value as Record<string, unknown>;
 	return (
@@ -132,7 +150,7 @@ function allValidParticipants(arr: readonly unknown[]): boolean {
 	return true;
 }
 
-function isValidSnapshot(value: unknown): value is CallOverlaySnapshot {
+function isValidSnapshot(value: unknown): value is WireCallOverlaySnapshot {
 	if (typeof value !== "object" || value === null) return false;
 	const s = value as Record<string, unknown>;
 	return (
@@ -150,7 +168,7 @@ function isValidSnapshot(value: unknown): value is CallOverlaySnapshot {
  * payload (e.g. an own `__proto__` key) so they can never reach `reconcile`,
  * whose assignment-based writes would otherwise pollute store prototypes.
  */
-function sanitizeSnapshot(s: CallOverlaySnapshot): CallOverlaySnapshot {
+function sanitizeSnapshot(s: WireCallOverlaySnapshot): CallOverlaySnapshot {
 	return {
 		active: s.active,
 		roomName: s.roomName,

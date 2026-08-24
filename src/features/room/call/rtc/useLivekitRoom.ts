@@ -61,7 +61,7 @@ export interface RtcParticipant {
 	isLocal: boolean;
 	/**
 	 * True when no call membership matched this LiveKit identity, so
-	 * `displayName` is the neutral "Unknown participant" fallback rather
+	 * `displayName` is the neutral `Unknown (prefix…)` fallback rather
 	 * than a resolved Matrix name. Happens e.g. for peers whose membership
 	 * event we never ingested but whose MSC4195-hashed identity joins our
 	 * SFU (#488). `identity` keeps the raw value for a debugging tooltip.
@@ -461,20 +461,24 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		focusUrl: string | null,
 	): boolean => {
 		if (!focusUrl || !oldest) return false;
-		// The elected/primary transport plus the full published list: an
-		// MSC4143 peer may publish to several SFUs at once, and reaching
-		// ours through ANY of them means we do receive their media.
-		// Both accessors read event-authored data - a legacy event may omit
+		// Only `getTransport` - the SDK's per-kind answer to "which transport
+		// does this membership publish media to" (RTC kind: the primary
+		// published transport; legacy multi_sfu: foci_preferred[0]; legacy
+		// oldest_membership: the elected oldest's transport). Deliberately
+		// NOT unioned with `membership.transports`: for legacy
+		// oldest_membership peers that list is an election OFFER, not a
+		// publish set, and matching our SFU against an unused offer would
+		// reintroduce the false "muted" row #488 removes. (An MSC4143 peer
+		// multi-publishing to us as a secondary transport reads foreign
+		// here; accepted until real multi-SFU support.)
+		// `getTransport` reads event-authored data - a legacy event may omit
 		// `foci_preferred` entirely (the SDK validator tolerates that, and
-		// its getters then return undefined or deref a hole) - so treat a
-		// throw or a missing list as "can't tell" rather than letting one
-		// malformed peer event crash the whole participant snapshot.
-		let published: ReturnType<CallMembership["getTransport"]>[];
+		// the getter then derefs a hole) - so treat a throw as "can't tell"
+		// rather than letting one malformed peer event crash the whole
+		// participant snapshot.
+		let published: ReturnType<CallMembership["getTransport"]>;
 		try {
-			published = [
-				membership.getTransport(oldest),
-				...(membership.transports ?? []),
-			];
+			published = membership.getTransport(oldest);
 		} catch (e) {
 			// Console-only: expected for event-authored holes, but an SDK
 			// upgrade changing getTransport's contract would otherwise
@@ -484,14 +488,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			});
 			return false;
 		}
-		const urls = published
-			.filter(
-				(t): t is LivekitTransport => t !== undefined && isLivekitTransport(t),
-			)
-			.map((t) => canonicalSfuUrl(t.livekit_service_url))
-			.filter((u): u is string => u !== null);
-		if (urls.length === 0) return false;
-		return !urls.some((u) => u === focusUrl);
+		if (published === undefined || !isLivekitTransport(published)) {
+			return false;
+		}
+		const url = canonicalSfuUrl(published.livekit_service_url);
+		if (url === null) return false;
+		return url !== focusUrl;
 	};
 
 	// Membership lookup + foreign-SFU classification, keyed by

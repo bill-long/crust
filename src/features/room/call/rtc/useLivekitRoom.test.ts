@@ -71,10 +71,10 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 	return { roomFactory, lkMock, jwtMock };
 });
 
-// Keep the real module (notably `normaliseJwtServiceUrl`, which foreign-SFU
-// detection uses for URL comparison) and stub only the network-touching
-// token fetch. A full-module factory would silently replace the normaliser
-// with undefined and fail the comparison open.
+// Keep the real module (notably the real `LivekitJwtError` class - the hook
+// constructs and instanceof-checks it, so a look-alike stub class would
+// break the JWT-error-status tests) and stub only the network-touching
+// token fetch.
 vi.mock("./fetchLivekitToken", async (importOriginal) => ({
 	...(await importOriginal<typeof import("./fetchLivekitToken")>()),
 	fetchLivekitToken: jwtMock,
@@ -214,7 +214,7 @@ const livekitFocus: LivekitTransport = {
 /**
  * CallMembership mock with the members `resolveIdentity` reads: the
  * identity match fields plus the transport surface `publishesElsewhere`
- * inspects (`createdTs`/`getTransport`/`transports`). Defaults to
+ * inspects (`createdTs`/`getTransport`). Defaults to
  * publishing on the same SFU we dial (`livekitFocus`).
  */
 function makeMembership(over?: {
@@ -228,7 +228,6 @@ function makeMembership(over?: {
 		deviceId: "BBB",
 		createdTs: () => 1,
 		getTransport: () => over?.transport ?? livekitFocus,
-		transports: [],
 	} as unknown as CallMembership;
 }
 
@@ -689,7 +688,7 @@ describe("useLivekitRoom", () => {
 		expect(remote?.isUnresolved).toBe(false);
 	});
 
-	it("falls back to Unknown participant when no membership matches, keeping the raw identity", async () => {
+	it("falls back to the neutral Unknown label when no membership matches, keeping the raw identity", async () => {
 		const hashed = "Skmtraes3t6qvxNu6PqAqnQGqJYFwzTKldauTOY0fh4";
 		const fakeRoom = createFakeRoom();
 		fakeRoom.remoteParticipants.set(hashed, {
@@ -727,7 +726,7 @@ describe("useLivekitRoom", () => {
 	it("resolves the local participant to the client's own profile during the join race", async () => {
 		// Our own membership event round-trips through /sync after LiveKit
 		// connects; until it lands no membership matches our identity, but
-		// the local tile must never read "Unknown participant (you)".
+		// the local tile must never read as an unknown participant.
 		const fakeRoom = createFakeRoom();
 		roomFactory.current = () => fakeRoom;
 		const { client } = createClient();
@@ -882,7 +881,6 @@ describe("useLivekitRoom", () => {
 		);
 		const broken = makeMembership();
 		Object.assign(broken, {
-			transports: undefined,
 			getTransport: () => {
 				throw new TypeError(
 					"Cannot read properties of undefined (reading '0')",

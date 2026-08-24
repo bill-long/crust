@@ -647,7 +647,14 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 					youClass="ml-1 text-[10px] opacity-75"
 				/>
 				<MicStatusIcon
-					muted={props.participant.isMuted}
+					// Local row: the voice store is the responsive source of truth
+					// (reflects a mute click before LiveKit's round-trip settles),
+					// matching the mute toolbar button and the PiP panel.
+					muted={
+						props.participant.isLocal
+							? !voiceMicEnabled()
+							: props.participant.isMuted
+					}
 					micUnavailable={props.participant.micUnavailable}
 					isForeignSfu={props.participant.isForeignSfu}
 				/>
@@ -690,7 +697,10 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 	const label = createMemo(() => {
 		const p = sharer();
 		if (p?.isLocal) return "Your screen";
-		return `${p?.displayName ?? props.identity}’s screen`;
+		// Same #488 rule as ParticipantNameLabel: never render the opaque
+		// LiveKit identity as a name. The participant entry can be missing
+		// for a tick while a share arrives; fall back neutrally.
+		return `${p?.displayName ?? "Unknown"}’s screen`;
 	});
 
 	createEffect(() => {
