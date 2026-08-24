@@ -394,14 +394,15 @@ describe("rtcE2EEBridge", () => {
 		expect(terminate1).toHaveBeenCalledTimes(1);
 	});
 
-	it("new cached keys only pump into the most recently acquired binding", async () => {
+	it("new cached keys fan out to every acquired binding (#496 multi-SFU)", async () => {
+		// Multi-SFU runs the primary publish room plus subscriber-only
+		// rooms for foreign SFUs at once; every room's decoder needs every
+		// participant key.
 		const ctx = await newCtx();
 		const session = createFakeSession();
 		ctx.attach(session as never, () => true);
-		const b1 = ctx.bindRoom();
-		const kp1 = b1.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
-		const b2 = ctx.bindRoom();
-		const kp2 = b2.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		const { kp: kp1, release: release1 } = bindKp(ctx);
+		const { kp: kp2, release: release2 } = bindKp(ctx);
 		session.emit(
 			MatrixRTCSessionEvent.EncryptionKeyChanged,
 			new Uint8Array([42]),
@@ -410,10 +411,136 @@ describe("rtcE2EEBridge", () => {
 			"id",
 		);
 		await flush();
-		expect(kp1.calls).toHaveLength(0);
+		expect(kp1.calls.map((c) => c.keyIndex)).toEqual([1]);
 		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([1]);
-		b1.release();
-		b2.release();
+		release1();
+		release2();
+		ctx.dispose();
+	});
+
+	it("a released binding stops receiving new keys while its siblings continue", async () => {
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const { kp: kp1, release: release1 } = bindKp(ctx);
+		const { kp: kp2, release: release2 } = bindKp(ctx);
+		release1();
+		session.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([7]),
+			2,
+			{},
+			"id",
+		);
+		await flush();
+		expect(kp1.calls).toHaveLength(0);
+		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([2]);
+		release2();
+		ctx.dispose();
+	});
+
+	it("a late-acquired binding replays the cache AND receives subsequent keys", async () => {
+		// The foreign-SFU room typically binds well after the primary room
+		// (membership discovery lag): it must catch up via the cache replay
+		// and then stay subscribed to the live fan-out.
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const { release: release1 } = bindKp(ctx);
+		session.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([1]),
+			0,
+			{},
+			"peer",
+		);
+		await flush();
+		const { kp: kp2, release: release2 } = bindKp(ctx);
+		// Cache replay of key index 0.
+		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([0]);
+		session.emit(
+			MatrixRTCSessionEvent.EncryptionKeyChanged,
+			new Uint8Array([2]),
+			1,
+			{},
+			"peer",
+		);
+		await flush();
+		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([0, 1]);
+		release1();
+		release2();
+		ctx.dispose();
+	});
+
+	it("replay ends on the LOCAL participant's latest key when several participants are cached (#496)", async () => {
+		// livekit-client keeps ONE latestManuallySetKeyIndex per provider
+		// and its SignalConnected re-post marks only the matching key as
+		// current - which drives outgoing encryption. If a remote's key
+		// replayed last, a rebound Room would encrypt under a stale index.
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const emitKey = (id: string, byte: number, idx: number): void =>
+			session.emit(
+				MatrixRTCSessionEvent.EncryptionKeyChanged,
+				new Uint8Array([byte]),
+				idx,
+				{},
+				id,
+			);
+		// Local keys arrive FIRST (typical: our manager emits before
+		// remote key transport), remote later - naive cache order would
+		// end the replay on the remote's key.
+		emitKey("@me:hs:DEV", 1, 0);
+		emitKey("@me:hs:DEV", 2, 1);
+		emitKey("peer", 9, 3);
+		await flush();
+		await flush();
+		await flush();
+		const b = ctx.bindRoom({ localIdentity: "@me:hs:DEV" });
+		const kp = b.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		const lastCall = kp.calls[kp.calls.length - 1];
+		expect(kp.calls).toHaveLength(3);
+		expect(lastCall.participantIdentity).toBe("@me:hs:DEV");
+		expect(lastCall.keyIndex).toBe(1);
+		b.release();
+		ctx.dispose();
+	});
+
+	it("replay ends on the most recently set index after a rotation back (#496)", async () => {
+		// idx 0 → idx 1 → idx 0 again: the cache Map keeps idx 0 at its
+		// ORIGINAL insertion position, so naive iteration-order replay would
+		// end on idx 1 and leave the fresh provider's latest-manually-set
+		// index stale. The replay must end on idx 0 with the LATEST bytes.
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const emitKey = (byte: number, idx: number): void =>
+			session.emit(
+				MatrixRTCSessionEvent.EncryptionKeyChanged,
+				new Uint8Array([byte]),
+				idx,
+				{},
+				"peer",
+			);
+		emitKey(1, 0);
+		emitKey(2, 1);
+		emitKey(3, 0);
+		// Three queued imports chain sequentially; settle them all.
+		await flush();
+		await flush();
+		await flush();
+		const { kp, release } = bindKp(ctx);
+		const replay = kp.calls.map((c) => ({
+			idx: c.keyIndex,
+			marker: (c.key as unknown as { __marker: number }).__marker,
+		}));
+		// Both indices replayed; the LAST delivery is idx 0 with the
+		// re-rotated key bytes.
+		expect(replay).toHaveLength(2);
+		expect(replay[replay.length - 1]).toEqual({ idx: 0, marker: 3 });
+		expect(replay).toContainEqual({ idx: 1, marker: 2 });
+		release();
 		ctx.dispose();
 	});
 
