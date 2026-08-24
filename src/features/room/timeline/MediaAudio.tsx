@@ -113,7 +113,7 @@ export const MediaAudio: Component<{
 				<Match when={true}>
 					<button
 						type="button"
-						class={`${rowClass} text-text-secondary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover`}
+						class={`${rowClass} text-text-secondary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
 						onClick={() => setActivated(true)}
 						aria-label={`Load audio: ${props.label}`}
 					>

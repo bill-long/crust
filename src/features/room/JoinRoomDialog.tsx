@@ -380,7 +380,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 						disabled={submitting()}
 						aria-describedby={error() ? errorId : undefined}
 						aria-invalid={error() ? true : undefined}
-						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 					/>
 
 					<Show when={error()}>
@@ -413,7 +413,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 								autocomplete="off"
 								disabled={submitting()}
 								aria-describedby={offerId}
-								class="w-full rounded bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+								class="w-full rounded bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 							/>
 						</div>
 					</Show>
@@ -423,7 +423,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 							type="button"
 							onClick={tryClose}
 							disabled={submitting()}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 						>
 							Cancel
 						</button>
@@ -433,7 +433,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 								<button
 									type="submit"
 									disabled={submitting()}
-									class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+									class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 								>
 									{submitting() ? "Joining…" : "Join"}
 								</button>
@@ -443,7 +443,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 								type="button"
 								onClick={() => void handleKnock()}
 								disabled={submitting()}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							>
 								{submitting() ? "Sending…" : "Request to join"}
 							</button>

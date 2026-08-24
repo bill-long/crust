@@ -56,7 +56,7 @@ const UpdateCard: Component<{
 					props.onDismiss();
 				}}
 				aria-disabled={props.pending ?? false}
-				class={`rounded px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+				class={`rounded px-3 py-1.5 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 					props.pending
 						? "cursor-default text-text-disabled"
 						: "text-text-muted hover:bg-surface-2 hover:text-text-primary"
@@ -75,7 +75,7 @@ const UpdateCard: Component<{
 				// fades the box-shadow the focus ring is drawn with, and this button
 				// stays tab-focusable while pending (that is the point of
 				// aria-disabled), so the indicator has to keep its full contrast.
-				class={`rounded px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+				class={`rounded px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 					props.pending
 						? "cursor-default bg-accent/60"
 						: "bg-accent hover:bg-accent/90"

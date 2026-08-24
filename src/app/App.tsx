@@ -198,7 +198,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 							<button
 								type="button"
 								onClick={openDeviceSettings}
-								class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text transition-colors hover:bg-warning-bg/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning-border focus-visible:ring-inset"
+								class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-4 py-2 text-center text-sm text-warning-text transition-colors hover:bg-warning-bg/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-warning-border focus-visible:ring-inset"
 								aria-label="Encryption initialization failed. Open Devices & Security settings."
 							>
 								Encryption initialization failed — encrypted messages may not be

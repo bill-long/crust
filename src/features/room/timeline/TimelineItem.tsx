@@ -155,7 +155,7 @@ const FailedReactionPills: Component<{
 							</span>
 							<button
 								type="button"
-								class="rounded bg-surface-3 px-1.5 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-surface-3 px-1.5 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								onClick={() => props.onRetry(key)}
 								aria-label={`Retry sending reaction ${reactionLabel(key, props.emoteLookup)}`}
 							>
@@ -163,7 +163,7 @@ const FailedReactionPills: Component<{
 							</button>
 							<button
 								type="button"
-								class="rounded bg-surface-3 px-1.5 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+								class="rounded bg-surface-3 px-1.5 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 								onClick={() => props.onDiscard(key)}
 								aria-label={`Discard failed reaction ${reactionLabel(key, props.emoteLookup)}`}
 							>
@@ -273,7 +273,7 @@ const ReplyContext: Component<{
 					type="button"
 					onClick={() => props.onJump(eventId())}
 					aria-label="Jump to replied message"
-					class="mb-1 block w-full cursor-pointer rounded-sm border-l-2 border-border-strong pl-2 text-left text-xs text-text-disabled transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="mb-1 block w-full cursor-pointer rounded-sm border-l-2 border-border-strong pl-2 text-left text-xs text-text-disabled transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				>
 					{body}
 				</button>
@@ -361,7 +361,7 @@ const HoverToolbar: Component<{
 				<Popover.Trigger
 					as="button"
 					type="button"
-					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					aria-label="Add reaction"
 				>
 					<svg
@@ -379,7 +379,7 @@ const HoverToolbar: Component<{
 					</svg>
 				</Popover.Trigger>
 				<Popover.Portal>
-					<Popover.Content class="portal-scale z-50 focus:outline-none">
+					<Popover.Content class="portal-scale z-50 focus:outline-hidden">
 						<EmojiPicker
 							packs={props.packs}
 							onSelect={handlePick}
@@ -390,7 +390,7 @@ const HoverToolbar: Component<{
 			</Popover>
 			<button
 				type="button"
-				class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				onClick={props.onReply}
 				aria-label="Reply"
 			>
@@ -409,7 +409,7 @@ const HoverToolbar: Component<{
 			<Show when={props.onReplyInThread}>
 				<button
 					type="button"
-					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					onClick={() => props.onReplyInThread?.()}
 					aria-label="Reply in thread"
 				>
@@ -430,7 +430,7 @@ const HoverToolbar: Component<{
 			<Show when={props.onForward}>
 				<button
 					type="button"
-					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					onClick={() => props.onForward?.()}
 					aria-label="Forward"
 				>
@@ -452,7 +452,7 @@ const HoverToolbar: Component<{
 			<Show when={props.isOwnMessage && props.msgtype === "m.text"}>
 				<button
 					type="button"
-					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					onClick={props.onEdit}
 					aria-label="Edit"
 				>
@@ -472,7 +472,7 @@ const HoverToolbar: Component<{
 			<Show when={props.canPin}>
 				<button
 					type="button"
-					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					classList={{ "text-accent": props.isPinned }}
 					onClick={props.onTogglePin}
 					aria-label={props.isPinned ? "Unpin message" : "Pin message"}
@@ -496,7 +496,7 @@ const HoverToolbar: Component<{
 			<Show when={props.isOwnMessage}>
 				<button
 					type="button"
-					class="rounded p-1 text-xs text-danger-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+					class="rounded p-1 text-xs text-danger-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 					onClick={props.onDelete}
 					aria-label="Delete"
 				>
@@ -1112,7 +1112,7 @@ const TimelineItem: Component<{
 												type="button"
 												onClick={() => props.onOpenImage?.(ev.eventId)}
 												aria-label={`Open image${ev.mediaFilename ? `: ${ev.mediaFilename}` : ""} in full-screen viewer`}
-												class="inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 align-top focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0"
+												class="inline-block max-w-full cursor-zoom-in border-0 bg-transparent p-0 align-top focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0"
 											>
 												{imgEl}
 											</button>
@@ -1191,7 +1191,7 @@ const TimelineItem: Component<{
 							<Show when={props.onRetry}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={props.onRetry}
 								>
 									Retry
@@ -1200,7 +1200,7 @@ const TimelineItem: Component<{
 							<Show when={props.onDiscard}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 									onClick={props.onDiscard}
 								>
 									Discard
@@ -1221,7 +1221,7 @@ const TimelineItem: Component<{
 							<Show when={props.onCancel}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 									onClick={props.onCancel}
 									aria-label="Cancel sending message"
 								>
@@ -1245,7 +1245,7 @@ const TimelineItem: Component<{
 							<Show when={isRedactionCancellable() && props.onCancelRedaction}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 									onClick={props.onCancelRedaction}
 									aria-label="Cancel deleting message"
 								>
@@ -1267,7 +1267,7 @@ const TimelineItem: Component<{
 							<Show when={props.onRetryRedaction}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={props.onRetryRedaction}
 									aria-label="Retry deleting message"
 								>
@@ -1277,7 +1277,7 @@ const TimelineItem: Component<{
 							<Show when={props.onDiscardRedaction}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 									onClick={props.onDiscardRedaction}
 									aria-label="Discard pending deletion"
 								>
@@ -1315,7 +1315,7 @@ const TimelineItem: Component<{
 							<Show when={props.onRetryEdit}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-emphasis transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={props.onRetryEdit}
 									aria-label="Retry sending edit"
 								>
@@ -1325,7 +1325,7 @@ const TimelineItem: Component<{
 							<Show when={props.onDiscardEdit}>
 								<button
 									type="button"
-									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+									class="rounded bg-surface-3 px-2 py-0.5 text-text-muted transition-colors hover:bg-danger-bg/30 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger"
 									onClick={props.onDiscardEdit}
 									aria-label="Discard failed edit"
 								>

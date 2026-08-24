@@ -41,7 +41,7 @@ const FieldStatus: Component<FieldStatusProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => props.onRetry?.()}
-								class="rounded px-2 py-0.5 font-semibold text-danger-text underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text"
+								class="rounded px-2 py-0.5 font-semibold text-danger-text underline-offset-2 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 							>
 								Retry
 							</button>
@@ -50,7 +50,7 @@ const FieldStatus: Component<FieldStatusProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => props.onDismiss?.()}
-								class="rounded px-2 py-0.5 text-danger-text/80 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text"
+								class="rounded px-2 py-0.5 text-danger-text/80 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 								aria-label="Dismiss error"
 							>
 								Dismiss

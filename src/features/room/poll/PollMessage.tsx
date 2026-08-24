@@ -257,7 +257,7 @@ const EventCardHeader: Component<{ event: EventInfo }> = (props) => {
 						{(roomId) => (
 							<button
 								type="button"
-								class="mt-1 inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-surface-3 px-2 py-0.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-1 inline-flex max-w-full items-center gap-1 rounded-full border border-border-subtle bg-surface-3 px-2 py-0.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								title={roomId()}
 								onClick={() =>
 									// No /room route exists; /home/:roomId is the canonical
@@ -408,7 +408,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 			ref={cardRef}
 			tabindex="-1"
 			aria-busy={props.poll.hasPendingVote}
-			class="max-w-md rounded-lg border border-border-subtle bg-surface-2 p-3 focus-visible:outline-none"
+			class="max-w-md rounded-lg border border-border-subtle bg-surface-2 p-3 focus-visible:outline-hidden"
 		>
 			<Show when={props.poll.event}>
 				{(event) => <EventCardHeader event={event()} />}
@@ -488,7 +488,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 											tabindex={
 												isMultiSelect() || rovingId() === answer.id ? 0 : -1
 											}
-											class={`w-full rounded p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+											class={`w-full rounded p-1 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 												locked() ? "cursor-default" : "hover:bg-surface-3/60"
 											}`}
 											onClick={() => {
@@ -582,7 +582,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 										tabindex={
 											isMultiSelect() || rovingId() === answer.id ? 0 : -1
 										}
-										class={`flex w-full items-center justify-between gap-1 rounded-md border px-2 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+										class={`flex w-full items-center justify-between gap-1 rounded-md border px-2 py-1 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 											isMine()
 												? "border-accent/60 bg-accent/10 text-text-primary"
 												: "border-border-subtle bg-surface-3/50 text-text-secondary"
@@ -618,7 +618,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 												<Tooltip
 													content={voterNamesLabel()}
 													triggerTabIndex={0}
-													triggerClass="flex items-center rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+													triggerClass="flex items-center rounded focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 												>
 													{/* The tooltip is live-region-only while open,
 													    so keep the names reachable to AT as text. */}
@@ -649,7 +649,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 						Couldn't record your vote.{" "}
 						<button
 							type="button"
-							class="font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="font-medium underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							onClick={() => props.onVote(failed())}
 						>
 							Retry
@@ -670,7 +670,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 								<button
 									ref={endButtonRef}
 									type="button"
-									class="rounded px-1 text-xs text-text-muted transition-colors hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-1 text-xs text-text-muted transition-colors hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => {
 										setConfirmingEnd(true);
 										// The clicked button unmounts; keep keyboard
@@ -689,7 +689,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 								<button
 									ref={confirmButtonRef}
 									type="button"
-									class="rounded px-1 font-medium text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-1 font-medium text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => {
 										setConfirmingEnd(false);
 										props.onEndPoll();
@@ -703,7 +703,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 								</button>
 								<button
 									type="button"
-									class="rounded px-1 text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-1 text-text-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => {
 										setConfirmingEnd(false);
 										queueMicrotask(() => endButtonRef?.focus());
@@ -721,7 +721,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 					Couldn't end the poll.{" "}
 					<button
 						type="button"
-						class="font-medium underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="font-medium underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						onClick={() => props.onEndPoll()}
 					>
 						Retry

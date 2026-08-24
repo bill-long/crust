@@ -98,7 +98,7 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 					ref={(el: HTMLButtonElement) => {
 						triggerRef = el;
 					}}
-					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover data-expanded:bg-surface-3 data-expanded:text-text-secondary"
+					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover data-expanded:bg-surface-3 data-expanded:text-text-secondary"
 					aria-label="Message actions"
 				>
 					<svg
@@ -133,7 +133,7 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 						class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg"
 					>
 						<DropdownMenu.Item
-							class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
+							class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-hidden"
 							onSelect={() => fileInputRef?.click()}
 						>
 							{/* Inline paperclip, replacing the paperclip emoji (which reads
@@ -159,7 +159,7 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 						    over from the old strip buttons: these items open modal
 						    dialogs, not immediate actions. */}
 						<DropdownMenu.Item
-							class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
+							class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-hidden"
 							aria-haspopup="dialog"
 							onSelect={() => props.onOpenPoll()}
 						>
@@ -183,7 +183,7 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 						    a thread scope. */}
 						<Show when={!props.inThread}>
 							<DropdownMenu.Item
-								class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
+								class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-hidden"
 								aria-haspopup="dialog"
 								onSelect={() => props.onOpenEvent()}
 							>
@@ -207,7 +207,7 @@ const ComposerPlusMenu: Component<ComposerPlusMenuProps> = (props) => {
 						</Show>
 						<Show when={props.voiceSupported}>
 							<DropdownMenu.Item
-								class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-none"
+								class="flex min-h-11 cursor-pointer items-center gap-2.5 rounded px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:bg-surface-2 focus-visible:outline-hidden"
 								onSelect={() => props.onStartRecording()}
 							>
 								<svg

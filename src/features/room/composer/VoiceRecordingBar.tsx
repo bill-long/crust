@@ -67,7 +67,7 @@ const VoiceRecordingBar: Component<VoiceRecordingBarProps> = (props) => {
 			</div>
 			<button
 				type="button"
-				class="shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				onClick={() => props.onCancel()}
 				aria-label="Cancel recording"
 			>
@@ -87,7 +87,7 @@ const VoiceRecordingBar: Component<VoiceRecordingBarProps> = (props) => {
 			<button
 				ref={props.sendButtonRef}
 				type="button"
-				class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				onClick={() => props.onSend()}
 				aria-label="Send voice message"
 			>

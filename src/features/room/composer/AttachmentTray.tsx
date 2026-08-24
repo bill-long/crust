@@ -86,7 +86,7 @@ const AttachmentTray: Component<{
 									placeholder="Add a caption…"
 									disabled={uploading()}
 									aria-label={`Caption for ${name}`}
-									class="mt-1 w-full rounded bg-surface-2 px-2 py-1 text-xs text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover disabled:opacity-60"
+									class="mt-1 w-full rounded bg-surface-2 px-2 py-1 text-xs text-text-emphasis placeholder:text-text-disabled focus:outline-hidden focus:ring-1 focus:ring-accent-hover disabled:opacity-60"
 								/>
 								<Show when={uploading()}>
 									<div

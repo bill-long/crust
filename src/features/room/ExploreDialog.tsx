@@ -333,7 +333,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 								autocomplete="off"
 								spellcheck={false}
 								aria-describedby={error() ? errorId : undefined}
-								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 						</div>
 						<div class="w-36 shrink-0">
@@ -348,13 +348,13 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 								placeholder="Server (optional)"
 								autocomplete="off"
 								spellcheck={false}
-								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 						</div>
 						<button
 							type="submit"
 							disabled={loading()}
-							class="shrink-0 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="shrink-0 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 						>
 							Search
 						</button>
@@ -453,7 +453,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 														onClick={() => void handleJoin(room)}
 														disabled={joinState() === "joining"}
 														aria-label={`Join ${directoryRoomName(room)}`}
-														class={`shrink-0 rounded px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+														class={`shrink-0 rounded px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline-hidden focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${
 															joinState() === "error"
 																? "bg-danger-bg/40 text-danger-text hover:bg-danger-bg/60 focus-visible:ring-danger"
 																: "bg-accent text-text-primary hover:bg-accent-hover focus-visible:ring-accent-hover"
@@ -476,7 +476,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 											type="button"
 											onClick={() => void loadMore()}
 											disabled={loadingMore()}
-											class="rounded px-3 py-1.5 text-sm text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+											class="rounded px-3 py-1.5 text-sm text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{loadingMore() ? "Loading…" : "Load more rooms"}
 										</button>
@@ -490,7 +490,7 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 						<button
 							type="button"
 							onClick={props.onClose}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						>
 							Close
 						</button>

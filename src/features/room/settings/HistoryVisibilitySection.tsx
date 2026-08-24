@@ -93,7 +93,7 @@ const HistoryVisibilitySection: Component<HistoryVisibilitySectionProps> = (
 										if (!disabled() && histOpt.value() !== opt.value)
 											void setHistoryVis(opt.value);
 									}}
-									class="rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									classList={{
 										"bg-accent text-text-primary":
 											histOpt.value() === opt.value,

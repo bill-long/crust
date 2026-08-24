@@ -173,7 +173,7 @@ const PermissionsTab: Component<PermissionsTabProps> = (props) => {
 														if (perms.canSetPowerLevels())
 															handleSelect(row.key, opt2.value);
 													}}
-													class="px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+													class="px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 													classList={{
 														"bg-accent text-text-primary":
 															current() === opt2.value,

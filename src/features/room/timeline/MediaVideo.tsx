@@ -190,7 +190,7 @@ export const MediaVideo: Component<{
 				<Match when={true}>
 					<button
 						type="button"
-						class="group relative mt-1 flex items-center justify-center overflow-hidden rounded bg-surface-2 transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="group relative mt-1 flex items-center justify-center overflow-hidden rounded bg-surface-2 transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						style={reserveStyle()}
 						onClick={() => setActivated(true)}
 						aria-label={`Play video: ${props.label}`}

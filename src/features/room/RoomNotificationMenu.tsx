@@ -153,7 +153,7 @@ const RoomNotificationMenu: Component<RoomNotificationMenuProps> = (props) => {
 	return (
 		<DropdownMenu>
 			<DropdownMenu.Trigger
-				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 				classList={{
 					"text-accent": isNonDefault(),
 					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
@@ -173,7 +173,7 @@ const RoomNotificationMenu: Component<RoomNotificationMenuProps> = (props) => {
 					<For each={LEVELS}>
 						{(opt) => (
 							<DropdownMenu.Item
-								class="flex cursor-pointer flex-col rounded px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+								class="flex cursor-pointer flex-col rounded px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
 								classList={{
 									"bg-surface-2": level() === opt.value,
 									"pointer-events-none opacity-50": saving(),

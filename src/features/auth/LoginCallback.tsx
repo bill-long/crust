@@ -51,7 +51,7 @@ const LoginCallback: Component = () => {
 					<button
 						type="button"
 						onClick={() => navigate("/login", { replace: true })}
-						class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+						class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
 					>
 						Back to log in
 					</button>

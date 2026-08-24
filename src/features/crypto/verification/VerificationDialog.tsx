@@ -141,7 +141,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.cancel()}
-								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Cancel
 							</button>
@@ -170,14 +170,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => v.rejectSas()}
-								class="rounded bg-danger-bg/50 px-4 py-2 text-sm font-medium text-danger-text-bright transition-colors hover:bg-danger-bg/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-danger-bg/50 px-4 py-2 text-sm font-medium text-danger-text-bright transition-colors hover:bg-danger-bg/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								They don't match
 							</button>
 							<button
 								type="button"
 								onClick={() => v.confirmSas()}
-								class="rounded bg-success px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-success-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-success px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-success-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								They match
 							</button>
@@ -217,7 +217,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Done
 							</button>
@@ -239,7 +239,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Close
 							</button>
@@ -259,7 +259,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Close
 							</button>
@@ -298,7 +298,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-2 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Done
 							</button>
@@ -321,14 +321,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 								<button
 									type="button"
 									onClick={handleClose}
-									class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="mt-2 rounded bg-surface-3 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Close
 								</button>
 								<button
 									type="button"
 									onClick={() => setRecoveryStep("idle")}
-									class="mt-2 rounded bg-accent px-3 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="mt-2 rounded bg-accent px-3 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Try again
 								</button>
@@ -357,7 +357,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 									v.requestSelfVerification();
 									reclaimFocus();
 								}}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Verify with another session
 							</button>
@@ -365,7 +365,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 								<button
 									type="button"
 									onClick={verifyWithRecoveryKey}
-									class="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Use recovery key
 								</button>
@@ -373,7 +373,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleClose}
-								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Cancel
 							</button>

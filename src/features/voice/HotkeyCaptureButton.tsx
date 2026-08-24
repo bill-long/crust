@@ -168,7 +168,7 @@ export const HotkeyCaptureButton: Component = () => {
 				type="button"
 				onClick={startCapture}
 				disabled={capturing()}
-				class="flex-1 rounded bg-surface-2 px-2 py-1 text-left text-xs text-text-primary transition-colors hover:bg-surface-1 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3 any-pointer-coarse:text-sm"
+				class="flex-1 rounded bg-surface-2 px-2 py-1 text-left text-xs text-text-primary transition-colors hover:bg-surface-1 disabled:cursor-default focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3 any-pointer-coarse:text-sm"
 				aria-label={
 					capturing()
 						? "Press a key combination, or press Escape to cancel"
@@ -186,7 +186,7 @@ export const HotkeyCaptureButton: Component = () => {
 				<button
 					type="button"
 					onClick={clearBinding}
-					class="flex h-6 w-6 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-1 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+					class="flex h-6 w-6 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-1 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					aria-label="Clear mic hotkey binding"
 					title="Clear binding"
 				>

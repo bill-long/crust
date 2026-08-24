@@ -267,7 +267,7 @@ const SearchPanel: Component<{
 			gutter={6}
 		>
 			<Popover.Trigger
-				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 				classList={{
 					"bg-surface-3 text-text-emphasis": open(),
 					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
@@ -283,7 +283,7 @@ const SearchPanel: Component<{
 			<Popover.Portal>
 				<Popover.Content
 					id={panelId}
-					class="portal-scale z-50 flex w-[380px] max-w-[90vw] flex-col gap-2 rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
+					class="portal-scale z-50 flex w-[380px] max-w-[90vw] flex-col gap-2 rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-hidden"
 					role="dialog"
 					aria-label="Search messages"
 					onOpenAutoFocus={(e) => {
@@ -326,7 +326,7 @@ const SearchPanel: Component<{
 								autocomplete="off"
 								aria-controls={results().length > 0 ? listboxId : undefined}
 								aria-activedescendant={activeDescendantId()}
-								class="min-w-0 flex-1 bg-transparent text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none"
+								class="min-w-0 flex-1 bg-transparent text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-hidden"
 							/>
 							<Show when={search.loading()}>
 								<span class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
@@ -394,7 +394,7 @@ const SearchPanel: Component<{
 							type="button"
 							onClick={() => search.loadMore()}
 							disabled={search.loading()}
-							class="self-center rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							class="self-center rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						>
 							{search.loading() ? "Loading…" : "Load more"}
 						</button>

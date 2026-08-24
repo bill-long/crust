@@ -623,7 +623,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => props.onPrev?.()}
-								class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								aria-label="Previous image"
 							>
 								<svg
@@ -642,7 +642,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => props.onNext?.()}
-								class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								aria-label="Next image"
 							>
 								<svg
@@ -661,7 +661,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						<button
 							type="button"
 							onClick={() => zoomBy(1 / ZOOM_STEP)}
-							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Zoom out"
 						>
 							<svg
@@ -680,7 +680,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						<button
 							type="button"
 							onClick={resetToFit}
-							class="rounded px-2 py-1 text-xs text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded px-2 py-1 text-xs text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Fit to viewport"
 							aria-current={isFitted() ? "true" : undefined}
 						>
@@ -689,7 +689,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						<button
 							type="button"
 							onClick={setActualSize}
-							class="rounded px-2 py-1 text-xs tabular-nums text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded px-2 py-1 text-xs tabular-nums text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Zoom to 100%"
 						>
 							{zoomPercent()}%
@@ -697,7 +697,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 						<button
 							type="button"
 							onClick={() => zoomBy(ZOOM_STEP)}
-							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Zoom in"
 						>
 							<svg
@@ -730,7 +730,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 													? "Decrypting…"
 													: "Download"
 										}
-										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
 										aria-label="Download image"
 									>
 										<svg
@@ -768,7 +768,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 												</>
 											);
 											const openClass =
-												"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover";
+												"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
 											// Encrypted: a button minting a fresh, independently-revoked
 											// blob URL (the displaySrc blob is revoked on unmount and
 											// would break the opened tab). Plain: a normal anchor.
@@ -806,7 +806,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 							type="button"
 							ref={closeBtnRef}
 							onClick={tryClose}
-							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Close"
 						>
 							<svg

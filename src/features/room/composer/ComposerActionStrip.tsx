@@ -70,7 +70,7 @@ const ComposerActionStrip: Component<ComposerActionStripProps> = (props) => {
 				<button
 					ref={props.gifButtonRef}
 					type="button"
-					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					onClick={() => props.onToggleGif()}
 					aria-label="Open GIF picker"
 					aria-expanded={props.gifOpen}
@@ -82,7 +82,7 @@ const ComposerActionStrip: Component<ComposerActionStripProps> = (props) => {
 			<button
 				ref={props.emojiButtonRef}
 				type="button"
-				class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="rounded p-1 text-text-disabled transition-colors hover:bg-surface-3 hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				onClick={() => props.onToggleEmoji()}
 				aria-label="Open emoji picker"
 				aria-expanded={props.emojiOpen}

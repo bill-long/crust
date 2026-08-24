@@ -77,7 +77,7 @@ const MemberRow: Component<{
 		>
 			<DropdownMenu>
 				<DropdownMenu.Trigger
-					class={`${rowClass} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover`}
+					class={`${rowClass} focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover`}
 					aria-label={`Actions for ${props.member.displayName}`}
 				>
 					<MemberRowContent member={props.member} broken={props.broken} />
@@ -85,13 +85,13 @@ const MemberRow: Component<{
 				<DropdownMenu.Portal>
 					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
 						<DropdownMenu.Item
-							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
 							onSelect={() => props.onMessage(props.member)}
 						>
 							Message
 						</DropdownMenu.Item>
 						<DropdownMenu.Item
-							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
 							onSelect={() => props.onToggleIgnore(props.member)}
 						>
 							{isIgnored() ? "Unblock" : "Block"}

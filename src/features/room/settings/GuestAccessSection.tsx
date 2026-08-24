@@ -85,7 +85,7 @@ const GuestAccessSection: Component<GuestAccessSectionProps> = (props) => {
 										if (!disabled() && opt.value() !== o.value)
 											void setGuestAccess(o.value);
 									}}
-									class="rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									classList={{
 										"bg-accent text-text-primary": opt.value() === o.value,
 										"text-text-secondary hover:bg-surface-2":

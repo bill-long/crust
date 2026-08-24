@@ -44,7 +44,7 @@ const SearchResultRow: Component<{
 				}
 			}}
 			onFocus={() => props.onFocus()}
-			class="group flex w-full cursor-pointer flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+			class="group flex w-full cursor-pointer flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		>
 			<span class="sr-only">
 				Search result, press Enter to jump to message:{" "}

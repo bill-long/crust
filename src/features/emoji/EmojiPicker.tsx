@@ -246,7 +246,7 @@ const EmojiPicker: Component<{
 					value={query()}
 					onInput={(e) => setQuery(e.currentTarget.value)}
 					placeholder="Search emoji…"
-					class="w-full rounded-md bg-surface-1 px-3 py-1.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					class="w-full rounded-md bg-surface-1 px-3 py-1.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-hidden focus:ring-1 focus:ring-accent-hover"
 					aria-label="Search emoji"
 				/>
 			</div>

@@ -75,7 +75,7 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 							onClick={() => hangUp()()}
 							title="Disconnect from the call"
 							aria-label="Disconnect from call"
-							class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
+							class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
 						>
 							<svg
 								class="h-3.5 w-3.5"

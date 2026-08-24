@@ -84,7 +84,7 @@ const InviteCard: Component<InviteCardProps> = (props) => {
 					onClick={props.onDecline}
 					disabled={props.pending() !== null}
 					aria-busy={props.pending() === "decline"}
-					class="min-w-24 rounded px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+					class="min-w-24 rounded px-4 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					{props.pending() === "decline" ? "Declining…" : "Decline"}
 				</button>
@@ -93,7 +93,7 @@ const InviteCard: Component<InviteCardProps> = (props) => {
 					onClick={props.onAccept}
 					disabled={props.pending() !== null}
 					aria-busy={props.pending() === "accept"}
-					class="min-w-24 rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+					class="min-w-24 rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
 				>
 					{props.pending() === "accept" ? "Accepting…" : "Accept"}
 				</button>

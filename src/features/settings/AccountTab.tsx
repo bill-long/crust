@@ -201,7 +201,7 @@ const AccountTab: Component = () => {
 							type="button"
 							onClick={() => fileInputRef.click()}
 							disabled={avatarUploading()}
-							class="relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-2xl font-semibold text-text-secondary transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="relative flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-2xl font-semibold text-text-secondary transition-opacity hover:opacity-80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Change avatar"
 							aria-describedby={avatarError() ? "avatar-error" : undefined}
 						>
@@ -238,7 +238,7 @@ const AccountTab: Component = () => {
 							type="button"
 							onClick={() => fileInputRef.click()}
 							disabled={avatarUploading()}
-							class="text-xs text-accent-text transition-colors hover:text-accent-text-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="text-xs text-accent-text transition-colors hover:text-accent-text-bright focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-describedby={avatarError() ? "avatar-error" : undefined}
 						>
 							Change avatar
@@ -269,7 +269,7 @@ const AccountTab: Component = () => {
 									<button
 										type="button"
 										onClick={startEditingName}
-										class="rounded px-2 py-0.5 text-xs text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										class="rounded px-2 py-0.5 text-xs text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									>
 										Edit
 									</button>
@@ -291,7 +291,7 @@ const AccountTab: Component = () => {
 									}}
 									onKeyDown={handleNameKeyDown}
 									disabled={nameSaving()}
-									class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									placeholder="Display name"
 									aria-label="Display name"
 									aria-describedby={nameError() ? "name-error" : undefined}
@@ -300,7 +300,7 @@ const AccountTab: Component = () => {
 									type="button"
 									onClick={saveName}
 									disabled={nameSaving()}
-									class="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									{nameSaving() ? "Saving…" : "Save"}
 								</button>
@@ -308,7 +308,7 @@ const AccountTab: Component = () => {
 									type="button"
 									onClick={cancelEditingName}
 									disabled={nameSaving()}
-									class="rounded px-2 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-2 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								>
 									Cancel
 								</button>
@@ -347,7 +347,7 @@ const AccountTab: Component = () => {
 							setBlockError("");
 						}}
 						onKeyDown={handleBlockKeyDown}
-						class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						placeholder="@user:server.com"
 						aria-label="User ID to block"
 						aria-describedby={blockError() ? "block-error" : undefined}
@@ -355,7 +355,7 @@ const AccountTab: Component = () => {
 					<button
 						type="button"
 						onClick={blockUser}
-						class="rounded bg-surface-3 px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="rounded bg-surface-3 px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					>
 						Block
 					</button>
@@ -390,7 +390,7 @@ const AccountTab: Component = () => {
 										type="button"
 										onClick={() => unblockUser(blockedId)}
 										disabled={unblockingUser() === blockedId}
-										class="shrink-0 rounded px-2 py-1 text-xs text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										class="shrink-0 rounded px-2 py-1 text-xs text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 										aria-label={`Unblock ${blockedId}`}
 									>
 										{unblockingUser() === blockedId ? "Unblocking…" : "Unblock"}

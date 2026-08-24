@@ -123,7 +123,7 @@ const SplitAudioButton: Component<{
 				<button
 					type="button"
 					onClick={props.onToggle}
-					class={`flex h-8 w-8 items-center justify-center rounded-l transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+					class={`flex h-8 w-8 items-center justify-center rounded-l transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 						props.active
 							? "text-danger-text hover:bg-surface-3"
 							: "text-text-muted hover:bg-surface-3 hover:text-text-primary"
@@ -134,7 +134,7 @@ const SplitAudioButton: Component<{
 				</button>
 				{/* Dropdown arrow */}
 				<Popover.Trigger
-					class="flex h-8 w-4 items-center justify-center rounded-r transition-colors text-text-muted hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="flex h-8 w-4 items-center justify-center rounded-r transition-colors text-text-muted hover:bg-surface-3 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					aria-label={`${props.label} options`}
 				>
 					<ChevronUpIcon />
@@ -143,7 +143,7 @@ const SplitAudioButton: Component<{
 
 			{/* Drop-up menu */}
 			<Popover.Portal>
-				<Popover.Content class="portal-scale z-50 min-w-48 rounded-lg bg-surface-3 p-3 shadow-xl focus:outline-none">
+				<Popover.Content class="portal-scale z-50 min-w-48 rounded-lg bg-surface-3 p-3 shadow-xl focus:outline-hidden">
 					{props.menuContent}
 				</Popover.Content>
 			</Popover.Portal>
@@ -226,7 +226,7 @@ const MicConfigMenu: Component = () => {
 							updateSetting("micMode", v);
 						}
 					}}
-					class="w-full rounded bg-surface-2 px-2 py-1 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3 any-pointer-coarse:text-sm"
+					class="w-full rounded bg-surface-2 px-2 py-1 text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3 any-pointer-coarse:text-sm"
 					aria-label="Microphone transmission mode"
 				>
 					<option value="voice-activity">Voice activity</option>
@@ -363,7 +363,7 @@ const UserBar: Component<UserBarProps> = (props) => {
 			<button
 				type="button"
 				onClick={props.onSettingsClick}
-				class="flex h-8 w-8 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="flex h-8 w-8 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				aria-label="User settings"
 			>
 				<GearIcon />

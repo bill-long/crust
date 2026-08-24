@@ -139,7 +139,7 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 					<button
 						type="button"
 						onClick={() => void refetch()}
-						class="font-semibold underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text"
+						class="font-semibold underline-offset-2 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 					>
 						Retry
 					</button>

@@ -88,7 +88,7 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 				type="button"
 				onClick={() => props.onExpand()}
 				aria-expanded="false"
-				class="group/btn flex min-w-0 flex-1 items-center gap-2 rounded text-left text-xs text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+				class="group/btn flex min-w-0 flex-1 items-center gap-2 rounded text-left text-xs text-text-muted transition-colors hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 			>
 				<span class="flex shrink-0 -space-x-1.5" aria-hidden="true">
 					<For each={stack()}>

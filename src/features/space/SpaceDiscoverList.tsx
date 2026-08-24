@@ -58,7 +58,7 @@ const DiscoverEntry: Component<{
 							type="button"
 							onClick={props.onRequest}
 							aria-label={`Request to join ${props.room.name}`}
-							class="shrink-0 rounded bg-accent/80 px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="shrink-0 rounded bg-accent/80 px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						>
 							Request
 						</button>
@@ -77,7 +77,7 @@ const DiscoverEntry: Component<{
 										? `Retry joining ${props.room.name}`
 										: `Join ${props.room.name}`
 						}
-						class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+						class={`shrink-0 rounded px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 							isJoined()
 								? "bg-success-bg/50 text-success-text"
 								: isError()
@@ -188,7 +188,7 @@ export const SpaceDiscoverList: Component<{
 						type="button"
 						onClick={() => hierarchy.loadMore()}
 						disabled={hierarchy.loadingMore}
-						class="rounded px-3 py-1 text-[10px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-50"
+						class="rounded px-3 py-1 text-[10px] text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-wait disabled:opacity-50"
 					>
 						{hierarchy.loadingMore ? "Loading…" : "Load more rooms"}
 					</button>

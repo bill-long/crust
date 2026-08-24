@@ -213,7 +213,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 							maxLength={340}
 							value={question()}
 							onInput={(e) => setQuestion(e.currentTarget.value)}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							placeholder="What should we have for lunch?"
 						/>
 					</label>
@@ -235,13 +235,13 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 											}
 											data-option-index={index()}
 											aria-label={`Option ${index() + 1}`}
-											class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+											class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 											placeholder={`Option ${index() + 1}`}
 										/>
 										<Show when={answers.length > MIN_ANSWERS}>
 											<button
 												type="button"
-												class="rounded p-1 text-text-muted transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+												class="rounded p-1 text-text-muted transition-colors hover:bg-surface-2 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 												aria-label={`Remove option ${index() + 1}`}
 												onClick={() => {
 													const removed = index();
@@ -275,7 +275,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 						</div>
 						<button
 							type="button"
-							class="mt-2 rounded px-1 text-sm text-accent-text transition-colors hover:text-accent-text-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="mt-2 rounded px-1 text-sm text-accent-text transition-colors hover:text-accent-text-bright focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							disabled={answers.length >= MAX_ANSWERS}
 							onClick={() => {
 								setAnswers(answers.length, { text: "" });
@@ -321,7 +321,7 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 								max={answerCap()}
 								value={maxSelectionsRaw()}
 								onInput={(e) => setMaxSelectionsRaw(e.currentTarget.value)}
-								class="w-16 rounded border border-border-subtle bg-surface-2 px-2 py-1 text-text-primary focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="w-16 rounded border border-border-subtle bg-surface-2 px-2 py-1 text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 							answers
 						</label>
@@ -331,14 +331,14 @@ const CreatePollDialog: Component<CreatePollDialogProps> = (props) => {
 						<button
 							type="button"
 							onClick={() => props.onClose()}
-							class="rounded px-4 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+							class="rounded px-4 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 						>
 							Cancel
 						</button>
 						<button
 							type="submit"
 							disabled={!canSubmit()}
-							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 						>
 							Create poll
 						</button>
