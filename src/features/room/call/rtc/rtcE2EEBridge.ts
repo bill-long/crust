@@ -91,8 +91,19 @@ export interface RtcE2EEContext {
 	 * focus-change reconnect (or a late-joining foreign-SFU room)
 	 * doesn't drop frames that the relay already has the key material
 	 * for.
+	 *
+	 * `localIdentity` is the LOCAL participant's rtcBackendIdentity
+	 * (`userId:deviceId` under the legacy membership format Crust sends).
+	 * Pass it whenever known: livekit-client keeps ONE
+	 * `latestManuallySetKeyIndex` per provider (not per participant), and
+	 * on SignalConnected it re-posts cached keys to the worker marking
+	 * only the key matching that single index as current - which drives
+	 * OUTGOING encryption. The replay therefore ends on the local
+	 * participant's latest key so a rebound Room never encrypts under a
+	 * stale index. Omitting it falls back to arbitrary participant order
+	 * (safe only when no local keys are cached).
 	 */
-	bindRoom(): RtcE2EERoomBinding;
+	bindRoom(opts?: { localIdentity?: string }): RtcE2EERoomBinding;
 	/**
 	 * Tear down the relay. Idempotent. Detaches any still-attached
 	 * listener, bumps the epoch so any in-flight `importKey` from a
@@ -332,7 +343,7 @@ export async function createRtcE2EEContext(
 		session.reemitEncryptionKeys();
 	};
 
-	const bindRoom = (): RtcE2EERoomBinding => {
+	const bindRoom = (opts?: { localIdentity?: string }): RtcE2EERoomBinding => {
 		if (disposed) {
 			throw new Error("RtcE2EEContext: bindRoom called after dispose");
 		}
@@ -343,11 +354,24 @@ export async function createRtcE2EEContext(
 		// path observes a keyProvider that already knows about every
 		// participant's current key. Without this, focus-change
 		// reconnects (and late-binding foreign-SFU rooms) would silently
-		// start with no keys until the next rotation. Per participant the
-		// most recently set index is replayed LAST so the fresh provider's
-		// `latestManuallySetKeyIndex` matches the live providers' (see
-		// `lastSetIndex`).
-		for (const [id, indices] of keyCache) {
+		// start with no keys until the next rotation.
+		//
+		// Replay ORDER matters only for the very last delivery: at this
+		// point no E2EEManager listens on the provider (the Room doesn't
+		// exist yet), so these keys reach the worker via livekit-client's
+		// SignalConnected re-post, which marks as current ONLY the key
+		// whose index equals the provider's single global
+		// `latestManuallySetKeyIndex` - and "current" drives OUTGOING
+		// encryption. So the LOCAL participant's most recently set key is
+		// replayed last of all (see `lastSetIndex`); per-participant
+		// last-set ordering keeps the bytes right when an index was
+		// rotated back to. A stale global index would make a rebound Room
+		// encrypt frames peers no longer accept until the next rotation.
+		const localId = opts?.localIdentity;
+		const replayParticipant = (
+			id: string,
+			indices: Map<number, CryptoKey>,
+		): void => {
 			const last = lastSetIndex.get(id);
 			for (const [idx, cryptoKey] of indices) {
 				if (idx !== last) deliverKey(keyProvider, id, idx, cryptoKey);
@@ -356,6 +380,13 @@ export async function createRtcE2EEContext(
 				const lastKey = indices.get(last);
 				if (lastKey) deliverKey(keyProvider, id, last, lastKey);
 			}
+		};
+		for (const [id, indices] of keyCache) {
+			if (id !== localId) replayParticipant(id, indices);
+		}
+		if (localId !== undefined) {
+			const localKeys = keyCache.get(localId);
+			if (localKeys) replayParticipant(localId, localKeys);
 		}
 
 		let released = false;

@@ -472,6 +472,41 @@ describe("rtcE2EEBridge", () => {
 		ctx.dispose();
 	});
 
+	it("replay ends on the LOCAL participant's latest key when several participants are cached (#496)", async () => {
+		// livekit-client keeps ONE latestManuallySetKeyIndex per provider
+		// and its SignalConnected re-post marks only the matching key as
+		// current - which drives outgoing encryption. If a remote's key
+		// replayed last, a rebound Room would encrypt under a stale index.
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const emitKey = (id: string, byte: number, idx: number): void =>
+			session.emit(
+				MatrixRTCSessionEvent.EncryptionKeyChanged,
+				new Uint8Array([byte]),
+				idx,
+				{},
+				id,
+			);
+		// Local keys arrive FIRST (typical: our manager emits before
+		// remote key transport), remote later - naive cache order would
+		// end the replay on the remote's key.
+		emitKey("@me:hs:DEV", 1, 0);
+		emitKey("@me:hs:DEV", 2, 1);
+		emitKey("peer", 9, 3);
+		await flush();
+		await flush();
+		await flush();
+		const b = ctx.bindRoom({ localIdentity: "@me:hs:DEV" });
+		const kp = b.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		const lastCall = kp.calls[kp.calls.length - 1];
+		expect(kp.calls).toHaveLength(3);
+		expect(lastCall.participantIdentity).toBe("@me:hs:DEV");
+		expect(lastCall.keyIndex).toBe(1);
+		b.release();
+		ctx.dispose();
+	});
+
 	it("replay ends on the most recently set index after a rotation back (#496)", async () => {
 		// idx 0 → idx 1 → idx 0 again: the cache Map keeps idx 0 at its
 		// ORIGINAL insertion position, so naive iteration-order replay would
