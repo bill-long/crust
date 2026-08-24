@@ -1,3 +1,4 @@
+import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { Popover } from "@kobalte/core/popover";
 import type { MatrixClient } from "matrix-js-sdk";
 import { EventStatus } from "matrix-js-sdk";
@@ -309,18 +310,26 @@ const HoverToolbar: Component<{
 	/** Forward the message to another room. Absent for non-forwardable
 	    events (polls, echoes, decryption failures, stickers). */
 	onForward?: () => void;
+	/** Open the raw-event viewer for this message. */
+	onViewSource: () => void;
+	/** Report the message to the homeserver admins. Absent for the user's
+	    own messages. */
+	onReport?: () => void;
 }> = (props) => {
 	const [pickerOpen, setPickerOpen] = createSignal(false);
+	const [menuOpen, setMenuOpen] = createSignal(false);
 	const handlePick = (item: PickerEmoji): void => {
 		const key = item.kind === "custom" ? item.emote.mxcUrl : item.emoji.unicode;
 		props.onReactPick(key);
 		setPickerOpen(false);
 	};
+	const menuItemClass =
+		"flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-left text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden";
 	return (
 		<div
 			class="pointer-events-none absolute -top-4 right-4 z-10 flex items-center gap-0.5 rounded-md bg-surface-2 px-0.5 py-0.5 shadow-lg opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
 			classList={{
-				"!pointer-events-auto !opacity-100": pickerOpen(),
+				"!pointer-events-auto !opacity-100": pickerOpen() || menuOpen(),
 			}}
 		>
 			<Popover
@@ -484,6 +493,42 @@ const HoverToolbar: Component<{
 					</svg>
 				</button>
 			</Show>
+			<DropdownMenu open={menuOpen()} onOpenChange={setMenuOpen} gutter={6}>
+				<DropdownMenu.Trigger
+					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					aria-label="More"
+					title="More"
+				>
+					<svg
+						class="h-4 w-4"
+						viewBox="0 0 24 24"
+						fill="currentColor"
+						aria-hidden="true"
+					>
+						<circle cx="5" cy="12" r="2" />
+						<circle cx="12" cy="12" r="2" />
+						<circle cx="19" cy="12" r="2" />
+					</svg>
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Portal>
+					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+						<DropdownMenu.Item
+							class={menuItemClass}
+							onSelect={props.onViewSource}
+						>
+							View source
+						</DropdownMenu.Item>
+						<Show when={props.onReport}>
+							<DropdownMenu.Item
+								class="flex w-full cursor-pointer items-center gap-2 rounded px-3 py-2 text-left text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+								onSelect={() => props.onReport?.()}
+							>
+								Report message
+							</DropdownMenu.Item>
+						</Show>
+					</DropdownMenu.Content>
+				</DropdownMenu.Portal>
+			</DropdownMenu>
 		</div>
 	);
 };
@@ -507,6 +552,11 @@ const TimelineItem: Component<{
 	onJumpToReply: (eventId: string) => void;
 	onEdit: () => void;
 	onDelete: () => void;
+	/** Open the raw-event viewer for this message (#447). */
+	onViewSource: () => void;
+	/** Report the message to the homeserver admins (#447). Absent for the
+	    user's own messages and local echoes. */
+	onReport?: () => void;
 	onTogglePin?: () => void;
 	canPin?: boolean;
 	isPinned?: boolean;
@@ -767,6 +817,8 @@ const TimelineItem: Component<{
 						onDelete={props.onDelete}
 						onTogglePin={() => props.onTogglePin?.()}
 						onForward={props.onForward}
+						onViewSource={props.onViewSource}
+						onReport={props.onReport}
 					/>
 				</Show>
 

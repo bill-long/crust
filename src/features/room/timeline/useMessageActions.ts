@@ -85,9 +85,19 @@ export function useMessageActions(
 		}
 	};
 
-	const onDelete = async (eventId: string): Promise<void> => {
+	const onDelete = async (eventId: string, reason?: string): Promise<void> => {
+		// Failure surfaces inline on the row ("Delete failed" + Retry /
+		// Discard over the optimistic redaction echo), so the funnel stays
+		// console-only here.
+		const trimmed = reason?.trim();
 		try {
-			await client.redactEvent(roomId(), sendThreadId(), eventId);
+			await client.redactEvent(
+				roomId(),
+				sendThreadId(),
+				eventId,
+				undefined,
+				trimmed ? { reason: trimmed } : undefined,
+			);
 		} catch (e) {
 			reportError(e, { logLabel: "Delete failed" });
 		}
