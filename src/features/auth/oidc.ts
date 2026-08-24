@@ -375,10 +375,11 @@ export async function completeOidcLogin(
 	// The OP reports its own failures (access_denied, server_error, ...) as
 	// query params on the redirect - surface them instead of the generic
 	// "missing code" error below.
-	const oidcError = params.get("error");
+	// Both params capped like the registration path: OP-controlled text,
+	// rendered in the error banner - and reachable by anyone crafting a
+	// callback URL.
+	const oidcError = params.get("error")?.slice(0, 200);
 	if (oidcError) {
-		// Same cap as the registration path: OP-controlled text, rendered in
-		// the error banner - and reachable by anyone crafting a callback URL.
 		const description = params.get("error_description")?.slice(0, 200);
 		throw new Error(
 			description

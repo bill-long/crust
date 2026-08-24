@@ -94,8 +94,10 @@ check("tauri.conf.json useHttpsScheme", () =>
 
 if (failed) {
 	console.error(
-		"check-csp-sync: the baseline CSP is the <meta> tag in index.html; " +
-			"update docker-nginx.conf / desktop/src-tauri/tauri.conf.json to match.",
+		"check-csp-sync: the baseline CSP is the <meta> tag in index.html " +
+			"(docker-nginx.conf / desktop/src-tauri/tauri.conf.json must match), " +
+			"and every desktop window must keep useHttpsScheme: true (#486). " +
+			"See the problems above for which check failed.",
 	);
 	process.exit(1);
 }
