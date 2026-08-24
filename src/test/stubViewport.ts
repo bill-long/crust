@@ -13,9 +13,20 @@
  */
 
 const resizeCallbacks: Array<() => void> = [];
+let stubbedObserverInstalls = 0;
 
-/** Invoke every ResizeObserver created while the stub was active. */
+/**
+ * Invoke every ResizeObserver created while the stub was active. Throws
+ * when no stubbed ResizeObserver is installed (a real one already existed,
+ * e.g. browser-mode vitest, or stubViewport wasn't called) - a silent
+ * no-op there would fail the caller's assertions for an opaque reason.
+ */
 export function triggerStubbedResize(): void {
+	if (stubbedObserverInstalls === 0) {
+		throw new Error(
+			"triggerStubbedResize: no stubbed ResizeObserver installed - the environment has a real ResizeObserver (resize it for real) or stubViewport was not called",
+		);
+	}
 	for (const cb of [...resizeCallbacks]) cb();
 }
 
@@ -46,7 +57,9 @@ export function stubViewport(height: number | (() => number)): () => void {
 			unobserve(): void {}
 			disconnect(): void {}
 		};
+		stubbedObserverInstalls++;
 		restore.push(() => {
+			stubbedObserverInstalls--;
 			resizeCallbacks.length = 0;
 			delete g.ResizeObserver;
 		});

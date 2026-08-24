@@ -45,6 +45,23 @@ function lastAtOrBelow(offsets: number[], target: number, n: number): number {
 	return lo;
 }
 
+/**
+ * Clamp a raw `[first, last)` row pair into the final window: grow by
+ * `overscan`, keep at least one row, bound to `[0, count]`. The single home
+ * of the window-boundary invariant, shared by both offset paths.
+ */
+function clampRowRange(
+	count: number,
+	first: number,
+	last: number,
+	overscan: number,
+): [number, number] {
+	return [
+		Math.max(0, first - overscan),
+		Math.min(count, Math.max(last, first + 1) + overscan),
+	];
+}
+
 /** Smallest `i` in `[0, n]` with `offsets[i] >= target` (binary search). */
 function firstAtOrAbove(offsets: number[], target: number, n: number): number {
 	let lo = 0;
@@ -74,10 +91,7 @@ export function visibleRowRange(
 	// firstAtOrAbove gives the first row starting at/after the viewport bottom;
 	// that row is exclusive, and it's already the count of overlapping rows.
 	const last = firstAtOrAbove(offsets, scrollTop + viewportH, count);
-	return [
-		Math.max(0, first - overscan),
-		Math.min(count, Math.max(last, first + 1) + overscan),
-	];
+	return clampRowRange(count, first, last, overscan);
 }
 
 /**
@@ -97,10 +111,7 @@ export function uniformVisibleRowRange(
 	// floor/ceil mirror lastAtOrBelow / firstAtOrAbove on the prefix sums.
 	const first = Math.min(count, Math.floor(scrollTop / rowHeight));
 	const last = Math.min(count, Math.ceil((scrollTop + viewportH) / rowHeight));
-	return [
-		Math.max(0, first - overscan),
-		Math.min(count, Math.max(last, first + 1) + overscan),
-	];
+	return clampRowRange(count, first, last, overscan);
 }
 
 /** Imperative surface handed to the `controller` callback. */
@@ -211,11 +222,13 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	// Prefix sums for per-row heights; `null` for a uniform height, where
 	// offsets are `i * rowHeight` in O(1) and rebuilding an O(n) array as a
 	// filtered list changes length on each keystroke would be pure waste.
-	// Recomputed only when the count or row sizing changes - not on scroll.
+	// The non-numeric branch reads `local.each` (not `count()`) on purpose:
+	// a height callback may derive from item metadata, so a same-length
+	// `each` swap must still rebuild the sums.
 	const offsets = createMemo(() =>
 		typeof local.rowHeight === "number"
 			? null
-			: computeRowOffsets(count(), local.rowHeight),
+			: computeRowOffsets(local.each.length, local.rowHeight),
 	);
 	/** Top edge of row `i` (`i === count` gives the total content height). */
 	const rowTop = (i: number): number => {

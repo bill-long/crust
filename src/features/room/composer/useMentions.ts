@@ -38,42 +38,23 @@ export function useMentions(deps: UseMentionsDeps) {
 		return room ? room.getJoinedMembers() : [];
 	});
 
-	// Lowercased search index, built lazily on the first active mention query
-	// and cached per member-list identity: the lowercasing shouldn't run per
-	// keystroke (the filter below sits in the input handler's synchronous
-	// path), but most sessions never type '@' at all, so the composer also
-	// shouldn't pay a full-roster mapping on every mount / room switch.
-	let searchIndexSource: RoomMember[] | undefined;
-	let searchIndex: Array<{
-		member: RoomMember;
-		searchName: string;
-		searchId: string;
-	}> = [];
-
 	// Shared filtered member list - used by both picker and ARIA state.
 	// Unbounded: the picker windows its rows (VirtualList), so a large match
 	// set costs this one filter pass, not DOM nodes - every member stays
 	// reachable by scrolling/arrowing instead of being cut at a cap. (The
-	// picker itself gets no filterFn, so this is the only per-keystroke
-	// pass over the member list.)
+	// picker itself gets no filterFn, so this is the only per-keystroke pass
+	// over the member list.) Names are read live on purpose: the SDK mutates
+	// RoomMember.name in place on rename, so any search index cached against
+	// the (per-room stable) member-array identity would go stale.
 	const filteredMembers = createMemo(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
-		const members = roomMembers();
-		if (searchIndexSource !== members) {
-			searchIndexSource = members;
-			searchIndex = members.map((member) => ({
-				member,
-				searchName: (member.name ?? "").toLowerCase(),
-				searchId: member.userId.toLowerCase(),
-			}));
-		}
 		const lowerQ = q.toLowerCase();
-		return searchIndex
-			.filter(
-				(e) => e.searchName.includes(lowerQ) || e.searchId.includes(lowerQ),
-			)
-			.map((e) => e.member);
+		return roomMembers().filter(
+			(m) =>
+				(m.name ?? "").toLowerCase().includes(lowerQ) ||
+				m.userId.toLowerCase().includes(lowerQ),
+		);
 	});
 
 	const pickerRendered = () => filteredMembers().length > 0;

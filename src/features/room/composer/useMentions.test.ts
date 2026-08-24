@@ -69,6 +69,25 @@ describe("useMentions filteredMembers", () => {
 		}
 	});
 
+	it("sees a live display-name change (the SDK mutates RoomMember in place)", () => {
+		const bob = makeMember("@bob:example.com", "Bob");
+		const { mentions, dispose } = setup([bob]);
+		try {
+			// Prime a query so any identity-keyed cache would be built now.
+			mentions.setMentionQuery("bob");
+			expect(mentions.filteredMembers().length).toBe(1);
+			// matrix-js-sdk updates the member object in place on rename; the
+			// members array identity does not change.
+			(bob as { name: string }).name = "Robert";
+			mentions.setMentionQuery("rob");
+			expect(mentions.filteredMembers().map((m) => m.userId)).toEqual([
+				"@bob:example.com",
+			]);
+		} finally {
+			dispose();
+		}
+	});
+
 	it("is empty when no mention is being typed (null query)", () => {
 		const { mentions, dispose } = setup([
 			makeMember("@alice:example.com", "Alice"),

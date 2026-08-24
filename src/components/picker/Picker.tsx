@@ -67,14 +67,13 @@ export function createPicker<T>() {
 			),
 		);
 
-		// Clamp highlight index when the filtered list shrinks
+		// Clamp highlight index when the filtered list shrinks. filtered()
+		// already tracks whatever query the consumer wires in, so its length
+		// is the one dependency that matters.
 		createEffect(
 			on(
-				() => [props.query, filtered().length] as const,
-				() =>
-					setHighlightIndex((i) =>
-						Math.min(i, Math.max(0, filtered().length - 1)),
-					),
+				() => filtered().length,
+				(len) => setHighlightIndex((i) => Math.min(i, Math.max(0, len - 1))),
 			),
 		);
 
