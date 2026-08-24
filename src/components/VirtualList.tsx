@@ -215,9 +215,11 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	const [padTop, setPadTop] = createSignal(0);
 	const overscan = (): number => local.overscan ?? 3;
 
-	// Row count as its own memo, so the offsets rebuild below keys on the
-	// count rather than on every new array identity a filtering caller
-	// produces per keystroke.
+	// Row count as its own memo: the uniform-height geometry below (range,
+	// totalHeight) keys on it, so a filtering caller re-minting a
+	// same-length array per keystroke doesn't retrigger that math. The
+	// per-row offsets memo deliberately keys on the array identity instead -
+	// see its comment.
 	const count = createMemo(() => local.each.length);
 	// Prefix sums for per-row heights; `null` for a uniform height, where
 	// offsets are `i * rowHeight` in O(1) and rebuilding an O(n) array as a
@@ -260,6 +262,9 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	// A scroll requested while the viewport still measures 0 (a popover that
 	// lays out a frame after mounting - the case this component exists for)
 	// can't be positioned yet; park it and re-assert once a height lands.
+	// A call while `each` is empty is dropped instead of parked: an empty
+	// list has no row to hold a position for, and a caller tracking its
+	// items (like the Picker's highlight effect) re-asserts when they land.
 	let pendingScrollIndex = -1;
 	const scrollToIndex = (index: number): void =>
 		untrack(() => {
@@ -280,11 +285,17 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 			// signal only learns that from the (async) scroll event.
 			let target = el.scrollTop;
 			if (top < target) target = top;
+			// A fully visible row takes neither branch and never writes: the
+			// clamp below excludes the container's bottom padding, so writing
+			// an unchanged-in-intent target would nudge a list parked at its
+			// true bottom up by that padding.
 			else if (bottom > target + vh) target = bottom - vh;
+			else return;
 			// Clamp to the known geometry (bottom padding excluded - no target
 			// above needs it), so a stale baseline can't park the window past
 			// the real maximum scroll.
 			target = Math.max(0, Math.min(target, padTop() + rowTop(n) - vh));
+			if (target === el.scrollTop) return;
 			el.scrollTop = target;
 			setScrollTop(target);
 		});
@@ -301,6 +312,9 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 		on(
 			() => local.resetKey,
 			() => {
+				// A parked deferred scroll belonged to the previous dataset;
+				// letting it fire would defeat the reset-to-top guarantee.
+				pendingScrollIndex = -1;
 				if (scrollRef) scrollRef.scrollTop = 0;
 				setScrollTop(0);
 			},

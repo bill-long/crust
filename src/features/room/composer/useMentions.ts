@@ -50,6 +50,10 @@ export function useMentions(deps: UseMentionsDeps) {
 		const q = mentionQuery();
 		if (q === null) return [];
 		const lowerQ = q.toLowerCase();
+		// Bare '@' matches everyone - skip the per-member lowercasing pass
+		// entirely rather than string-matching 2x per member for a foregone
+		// conclusion.
+		if (lowerQ === "") return roomMembers();
 		return roomMembers().filter(
 			(m) =>
 				(m.name ?? "").toLowerCase().includes(lowerQ) ||

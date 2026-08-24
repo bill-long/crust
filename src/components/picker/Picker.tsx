@@ -94,10 +94,12 @@ export function createPicker<T>() {
 			if (idx < 0 || idx >= items.length) return undefined;
 			// Only reference a row that is actually mounted: the user can
 			// wheel-scroll the highlighted row out of the virtualized window
-			// (unmounting it), and ARIA forbids referencing absent elements
-			// (SearchPanel's activeDescendantId idiom). Reading mountedRange
-			// here is deliberate tracking - the id comes back when the row
-			// scrolls back into the window.
+			// (unmounting it), and ARIA forbids referencing absent elements.
+			// Sibling implementations of this invariant (rowEls-map flavor,
+			// for lists that own their row elements): SearchPanel,
+			// PinnedMessagesPanel, ThreadListPanel. Reading mountedRange here
+			// is deliberate tracking - the id comes back when the row scrolls
+			// back into the window.
 			const range = listController()?.mountedRange();
 			if (range && (idx < range[0] || idx >= range[1])) return undefined;
 			return `${listboxId}-item-${idx}`;
