@@ -186,7 +186,7 @@ const RoomEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors ${
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
 					: "text-text-secondary hover:bg-surface-2"
@@ -247,7 +247,7 @@ const InviteEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors ${
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
 					: "text-text-secondary hover:bg-surface-2"
@@ -286,7 +286,7 @@ const KnockEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors ${
+			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
 					: "text-text-secondary hover:bg-surface-2"
@@ -330,7 +330,7 @@ const SubspaceEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
-			class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-text-secondary transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+			class="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-text-secondary transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
 		>
 			<div class="flex min-w-0 flex-1 items-center gap-2">
 				<SpaceIcon />
@@ -621,7 +621,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 							onClick={() => props.onOpenSpaceSettings?.(spaceId())}
 							aria-label="Space settings"
 							title="Space settings"
-							class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+							class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
 						>
 							<svg
 								aria-hidden="true"
@@ -646,7 +646,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 						onClick={openNewDm}
 						aria-label="New direct message"
 						title="New direct message"
-						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
 					>
 						<svg
 							aria-hidden="true"
@@ -672,7 +672,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 						onClick={openJoin}
 						aria-label="Join a room"
 						title="Join a room"
-						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
 					>
 						<svg
 							aria-hidden="true"
@@ -700,7 +700,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 						onClick={openExplore}
 						aria-label="Explore public rooms"
 						title="Explore public rooms"
-						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
 					>
 						<svg
 							aria-hidden="true"
@@ -727,7 +727,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 						onClick={openCreate}
 						aria-label="Create room"
 						title="Create room"
-						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
+						class="inline-flex h-8 w-8 min-h-11 min-w-11 shrink-0 items-center justify-center rounded text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover sm:min-h-0 sm:min-w-0"
 					>
 						<svg
 							aria-hidden="true"

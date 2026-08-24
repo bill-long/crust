@@ -134,7 +134,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 			<button
 				type="button"
 				onClick={openSpace}
-				class={`relative flex items-center justify-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${sizeClass()} ${roundingClass()} ${
+				class={`relative flex items-center justify-center transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${sizeClass()} ${roundingClass()} ${
 					isSelected()
 						? "bg-surface-2 text-text-primary"
 						: "bg-surface-3 text-text-secondary hover:bg-surface-4"
@@ -195,10 +195,10 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 					</ContextMenu.Trigger>
 
 					<ContextMenu.Portal>
-						<ContextMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-none">
+						<ContextMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
 							<Show when={props.onOpenSpaceSettings}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
 									onSelect={() =>
 										props.onOpenSpaceSettings?.(props.space.roomId)
 									}
@@ -208,7 +208,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 							</Show>
 							<Show when={canInviteToSpace()}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
 									onSelect={() => props.onInviteSpace?.(props.space.roomId)}
 								>
 									Invite people
@@ -216,7 +216,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 							</Show>
 							<Show when={props.onLeaveSpace}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-none"
+									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
 									onSelect={() => props.onLeaveSpace?.(props.space.roomId)}
 								>
 									Leave space
@@ -290,7 +290,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 					<button
 						type="button"
 						onClick={() => navigate("/home")}
-						class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all ${
+						class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 							homeSelected()
 								? "rounded-xl bg-surface-2 text-text-primary"
 								: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -380,7 +380,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									onClick={() =>
 										navigate(`/space/${encodeURIComponent(space.roomId)}`)
 									}
-									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-accent transition-all ${
+									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-accent transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text-primary ${
 										isSelected()
 											? "rounded-xl bg-surface-2 text-text-primary"
 											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -439,7 +439,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									onClick={() =>
 										navigate(`/space/${encodeURIComponent(space.roomId)}`)
 									}
-									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-border-strong transition-all ${
+									class={`peer relative flex h-10 w-10 items-center justify-center rounded-2xl ring-2 ring-border-strong transition-all focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-text-primary ${
 										isSelected()
 											? "rounded-xl bg-surface-2 text-text-primary"
 											: "bg-surface-3 text-text-secondary hover:rounded-xl hover:bg-surface-4"
@@ -487,7 +487,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 					<button
 						type="button"
 						onClick={() => setCreateOpen(true)}
-						class="peer flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-3 text-success-text transition-all hover:rounded-xl hover:bg-success hover:text-accent-foreground"
+						class="peer flex h-10 w-10 items-center justify-center rounded-2xl bg-surface-3 text-success-text transition-all hover:rounded-xl hover:bg-success hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						title="Create space"
 						aria-label="Create space"
 					>
