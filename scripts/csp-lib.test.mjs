@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	appendDevCspSources,
+	checkDesktopOriginScheme,
 	comparePolicies,
 	DEV_EXTRA_SOURCES,
 	extractHtmlCsp,
@@ -294,5 +295,28 @@ describe("check-csp-sync.mjs", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+// The single lock on the desktop origin scheme (issue #486): serving the
+// packaged app over http://tauri.localhost breaks OAuth registration, and
+// flipping the scheme in either direction orphans installed clients'
+// per-origin storage.
+describe("checkDesktopOriginScheme", () => {
+	it("passes the repository config", () => {
+		const conf = JSON.parse(
+			readFileSync(join(ROOT, "desktop/src-tauri/tauri.conf.json"), "utf8"),
+		);
+		expect(checkDesktopOriginScheme(conf)).toEqual([]);
+	});
+
+	it("flags a window without useHttpsScheme", () => {
+		const conf = { app: { windows: [{ label: "main" }] } };
+		expect(checkDesktopOriginScheme(conf)).toHaveLength(1);
+		expect(checkDesktopOriginScheme(conf)[0]).toContain("main");
+	});
+
+	it("flags an empty window list rather than passing vacuously", () => {
+		expect(checkDesktopOriginScheme({ app: { windows: [] } })).toHaveLength(1);
 	});
 });

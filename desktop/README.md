@@ -15,6 +15,30 @@ a native desktop app. It adds two things the browser can't do:
 The shell bundles the built web app (`frontendDist: "../../dist"`), so build the
 web app first.
 
+## Origin: https://tauri.localhost
+
+The packaged app serves the bundle over `https://tauri.localhost`
+(`useHttpsScheme: true` in `tauri.conf.json`), not WebView2's default
+`http://tauri.localhost`. OAuth dynamic registration sends
+`window.location.origin` as the client_uri, and the OP refuses non-HTTPS
+("Client URI must be HTTPS."), which made OAuth login unusable in the shell
+(#486). `checkDesktopOriginScheme` in `scripts/csp-lib.mjs` locks the
+setting - enforced by `scripts/check-csp-sync.mjs` at build time (which the
+release workflow runs) and unit-tested in `scripts/csp-lib.test.mjs`.
+
+**The scheme is the origin**, so flipping it is a storage migration event:
+everything per-origin - the session in localStorage, the IndexedDB crypto
+store, settings, the service worker registration - is left behind under the
+old origin and the app starts logged out. That happened once, deliberately,
+in the release that fixed #486; installed clients logged in again and
+re-verified (Devices & Security > Verify). Flipping it BACK would orphan
+storage a second time, which is why the test above exists. The old-origin
+data stays on disk in the WebView2 profile until the app's data directory is
+cleared; it is inert.
+
+`ipc.localhost` follows the same scheme, so the CSP allows both
+`http://ipc.localhost` and `https://ipc.localhost`.
+
 ## Global hotkeys
 
 | Shortcut       | Action                                            |

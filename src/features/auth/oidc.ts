@@ -6,9 +6,11 @@
  *
  *  1. {@link probeDelegatedAuth} - does this homeserver delegate auth?
  *  2. {@link startOidcLogin} - dynamic client registration (cached per
- *     issuer) via the SDK's OAuth2 class, then the authorization URL with
- *     PKCE (the SDK generates the verifier; we persist it, keyed by state,
- *     in our own sessionStorage entry); the caller navigates to the URL.
+ *     issuer) via our own fetch (the SDK's registerClient discards the
+ *     OP's error_description, issue #486), then the authorization URL with
+ *     PKCE via the SDK's OAuth2 class (it generates the verifier; we
+ *     persist it, keyed by state, in our own sessionStorage entry); the
+ *     caller navigates to the URL.
  *  3. {@link completeOidcLogin} - verify the returned state, exchange the
  *     code (SDK OAuth2.completeAuthorizationCodeGrant), then whoami for
  *     the user/device IDs.
@@ -59,6 +61,102 @@ export function oidcRedirectUri(): string {
 /** Absolute URL advertised as the client's home page at registration. */
 function oidcClientUri(): string {
 	return `${window.location.origin}${basePrefix}/`;
+}
+
+/**
+ * Register this install with the OP (RFC 7591 dynamic registration).
+ * Hand-rolled rather than the SDK's OAuth2.registerClient, which maps every
+ * failure to the opaque "Dynamic registration failed" and discards the OP's
+ * error_description - exactly the text that diagnoses a rejected
+ * client_uri ("Client URI must be HTTPS.", issue #486).
+ */
+async function registerOidcClient(
+	metadata: ValidatedAuthMetadata,
+	redirectUri: string,
+): Promise<string> {
+	if (!metadata.registration_endpoint) {
+		// "Login service" like the other registration errors: the metadata is
+		// the OP's, which can be a different host than the homeserver.
+		throw new Error(
+			"The login service does not support automatic app registration.",
+		);
+	}
+	// Pinned to web schemes like the authorization URL below: the endpoint is
+	// homeserver-supplied, and in the desktop shell the CSP admits non-web
+	// schemes (ipc:) that a fetch must never be steered into.
+	let endpoint: URL;
+	try {
+		endpoint = new URL(metadata.registration_endpoint);
+	} catch {
+		throw new Error("The login service metadata is invalid.");
+	}
+	if (endpoint.protocol !== "https:" && endpoint.protocol !== "http:") {
+		throw new Error("The login service metadata is invalid.");
+	}
+	let response: Response;
+	try {
+		response = await fetch(endpoint, {
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				client_name: "Crust",
+				client_uri: oidcClientUri(),
+				application_type: "web",
+				redirect_uris: [redirectUri],
+				// Sent explicitly although RFC 7591 makes them optional: the
+				// RFC's defaults when omitted are ["code"] and
+				// ["authorization_code"] alone - an OP applying them would
+				// register this app WITHOUT the refresh grant it later uses.
+				// This cannot over-restrict either: getAuthMetadata validation
+				// already refuses OPs whose grant_types_supported lacks
+				// refresh_token, so every OP that reaches this request
+				// advertises both. (The SDK's own default additionally asks
+				// for the device grant, which this app never uses.)
+				response_types: ["code"],
+				grant_types: ["authorization_code", "refresh_token"],
+				token_endpoint_auth_method: "none",
+			}),
+		});
+	} catch {
+		// "Login service", not "homeserver": the registration endpoint belongs
+		// to the OP from the auth metadata, which can be a different host.
+		throw new Error(
+			"Could not reach the login service to register this app. Check your connection and try again.",
+		);
+	}
+	if (!response.ok) {
+		// Surface the OP's reason when it gives one. Server-controlled text:
+		// rendered as plain text by the error banner, and capped so a
+		// misbehaving server can't flood the UI.
+		let description = "";
+		try {
+			const body: unknown = await response.json();
+			const d = (body as { error_description?: unknown }).error_description;
+			if (typeof d === "string") description = d.slice(0, 200);
+		} catch {
+			// Non-JSON error body - fall through to the generic message.
+		}
+		throw new Error(
+			description
+				? `The login service rejected this app's registration: ${description}`
+				: `Dynamic registration failed (HTTP ${response.status}).`,
+		);
+	}
+	let clientId: unknown;
+	try {
+		clientId = ((await response.json()) as { client_id?: unknown }).client_id;
+	} catch {
+		// Handled below: a non-JSON success body has no client_id.
+	}
+	if (typeof clientId !== "string" || clientId.length === 0) {
+		throw new Error(
+			"The login service returned an invalid registration response.",
+		);
+	}
+	return clientId;
 }
 
 // --- Dynamic client registration cache (localStorage, keyed by issuer) ---
@@ -217,12 +315,7 @@ export async function startOidcLogin(
 	const redirectUri = oidcRedirectUri();
 	let clientId = getCachedClientId(metadata.issuer);
 	if (!clientId) {
-		clientId = await OAuth2.registerClient(metadata, {
-			client_name: "Crust",
-			client_uri: oidcClientUri(),
-			application_type: "web",
-			redirect_uris: [redirectUri],
-		});
+		clientId = await registerOidcClient(metadata, redirectUri);
 		cacheClientId(metadata.issuer, clientId);
 	}
 
@@ -294,9 +387,12 @@ export async function completeOidcLogin(
 	// The OP reports its own failures (access_denied, server_error, ...) as
 	// query params on the redirect - surface them instead of the generic
 	// "missing code" error below.
-	const oidcError = params.get("error");
+	// Both params capped like the registration path: OP-controlled text,
+	// rendered in the error banner - and reachable by anyone crafting a
+	// callback URL.
+	const oidcError = params.get("error")?.slice(0, 200);
 	if (oidcError) {
-		const description = params.get("error_description");
+		const description = params.get("error_description")?.slice(0, 200);
 		throw new Error(
 			description
 				? `Login failed: ${description} (${oidcError}).`

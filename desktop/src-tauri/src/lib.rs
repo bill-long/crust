@@ -89,7 +89,23 @@ fn overlay_url(app: &AppHandle) -> Result<WebviewUrl, String> {
 
 fn build_overlay(app: &AppHandle) -> Result<(), String> {
     let url = overlay_url(app)?;
+    // Runtime-built windows do not inherit the config window's
+    // useHttpsScheme (#486): without matching it, the custom-protocol
+    // interceptor registers under the http origin while the URL above
+    // (derived from the main window) is https, and the overlay loads
+    // nothing - in packaged builds only, since dev serves the devUrl.
+    // Read from the same window overlay_url() reads ("main"), not merely
+    // the first configured one, so the two cannot drift; the fallback
+    // matches the shipped config, whose gate keeps it https.
+    let https_scheme = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .map_or(true, |w| w.use_https_scheme);
     WebviewWindowBuilder::new(app, OVERLAY_LABEL, url)
+        .use_https_scheme(https_scheme)
         .title("Crust — Voice")
         .inner_size(320.0, 420.0)
         .min_inner_size(240.0, 200.0)

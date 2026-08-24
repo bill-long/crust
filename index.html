@@ -13,20 +13,25 @@
 		     - media-src https:: the click-to-load inline video player streams
 		       direct media links (e.g. CDN .mp4 URLs) from their origin,
 		       matching how img-src already permits remote https images.
-		     - connect-src ipc: http://ipc.localhost: Tauri IPC. Required in
-		       the baseline: the desktop shell serves this same built
-		       index.html and enforces this meta policy alongside its own
-		       header CSP (browsers apply the intersection), so omitting them
-		       would break desktop IPC. On the web they add nothing
+		     - connect-src ipc: http://ipc.localhost https://ipc.localhost:
+		       Tauri IPC. Required in the baseline: the desktop shell serves
+		       this same built index.html and enforces this meta policy
+		       alongside its own header CSP (browsers apply the
+		       intersection), so omitting them would break desktop IPC.
+		       ipc.localhost follows the window's scheme, and the shell
+		       serves over https://tauri.localhost (useHttpsScheme, #486);
+		       https://ipc.localhost is already covered by the https: source
+		       today but is listed explicitly so scheme parity survives any
+		       future tightening of https:. On the web they add nothing
 		       meaningful: ipc: is not a fetchable scheme in browsers, and
-		       http://ipc.localhost is loopback-only while connect-src
+		       the ipc.localhost origins are loopback-only while connect-src
 		       already allows any https: origin.
 		     In dev, vite.config.ts appends DEV_EXTRA_SOURCES (see
 		     scripts/csp-lib.mjs: the HMR websocket plus plain-http dev
 		     endpoints), mirroring tauri.conf.json's devCsp. -->
 		<meta
 			http-equiv="Content-Security-Policy"
-			content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; media-src 'self' blob: https:; connect-src 'self' https: wss: ipc: http://ipc.localhost; frame-src https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+			content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; media-src 'self' blob: https:; connect-src 'self' https: wss: ipc: http://ipc.localhost https://ipc.localhost; frame-src https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
 		/>
 		<!-- interactive-widget=resizes-content makes the on-screen keyboard
 		     shrink the layout viewport (and thus 100dvh) instead of overlaying

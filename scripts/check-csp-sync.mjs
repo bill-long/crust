@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+	checkDesktopOriginScheme,
 	comparePolicies,
 	DEV_EXTRA_SOURCES,
 	extractHtmlCsp,
@@ -81,10 +82,22 @@ if (baseline) {
 	);
 }
 
+// Not CSP, but the same file and the same class of guard: the desktop
+// webview origin scheme (issue #486). Checked here because this script is
+// the desktop-config gate that actually runs in every build, including the
+// release workflow's, which never runs the test suite.
+check("tauri.conf.json useHttpsScheme", () =>
+	checkDesktopOriginScheme(
+		JSON.parse(read("desktop/src-tauri/tauri.conf.json")),
+	),
+);
+
 if (failed) {
 	console.error(
-		"check-csp-sync: the baseline CSP is the <meta> tag in index.html; " +
-			"update docker-nginx.conf / desktop/src-tauri/tauri.conf.json to match.",
+		"check-csp-sync: the baseline CSP is the <meta> tag in index.html " +
+			"(docker-nginx.conf / desktop/src-tauri/tauri.conf.json must match), " +
+			"and every desktop window must keep useHttpsScheme: true (#486). " +
+			"See the problems above for which check failed.",
 	);
 	process.exit(1);
 }
