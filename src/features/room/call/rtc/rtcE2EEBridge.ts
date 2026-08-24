@@ -81,7 +81,7 @@ export interface RtcE2EEContext {
 	 * `Room` instance. Caller MUST call `release()` when the Room is
 	 * torn down (focus-change reconnect, leave, dispose). Several
 	 * bindings may be acquired at once (#496: the primary publish room
-	 * plus one subscriber-only room per foreign SFU) — every key that
+	 * plus one subscriber-only room per foreign SFU) - every key that
 	 * arrives while a binding is acquired is fanned out to ALL of them,
 	 * since each owns a private keyProvider+worker pair and shares no
 	 * state with its siblings.
@@ -193,6 +193,15 @@ export async function createRtcE2EEContext(
 	// identity bytes opaque — a future identity format containing any
 	// separator character can't desync the cache.
 	const keyCache = new Map<string, Map<number, CryptoKey>>();
+	// Per participant, the key index that was set LAST on the live
+	// providers. `Map.set` on an existing index keeps its original
+	// insertion position, so a rotation BACK to an earlier index (idx 0 →
+	// idx 1 → idx 0) diverges from the cache's iteration order. Replays
+	// must end on this index: livekit-client records the last-set index as
+	// `latestManuallySetKeyIndex` and encodes outgoing frames with it, so
+	// replaying in plain iteration order could leave a freshly bound Room
+	// encrypting with a stale index that peers no longer accept.
+	const lastSetIndex = new Map<string, number>();
 	const cacheSet = (id: string, idx: number, key: CryptoKey): void => {
 		let inner = keyCache.get(id);
 		if (!inner) {
@@ -200,6 +209,25 @@ export async function createRtcE2EEContext(
 			keyCache.set(id, inner);
 		}
 		inner.set(idx, key);
+		lastSetIndex.set(id, idx);
+	};
+
+	// Single delivery helper shared by the live fan-out (`pumpKey`) and the
+	// `bindRoom` cache replay so the swallow policy cannot diverge between
+	// them: `onSetEncryptionKey` is synchronous and shouldn't throw, but a
+	// self-contained validation throw (livekit-client rejects an empty
+	// identity without sharedKey) must not become an unhandled rejection -
+	// nor kill the queue or starve a sibling binding.
+	const deliverKey = (
+		keyProvider: MatrixRtcKeyProvider,
+		id: string,
+		idx: number,
+		cryptoKey: CryptoKey,
+	): void => {
+		keyProvider.setMatrixKey(id, cryptoKey, idx).catch(() => {
+			// Swallow per-key: the provider simply lacks this index; LiveKit's
+			// decoder surfaces an error if a remote frame ever uses it.
+		});
 	};
 
 	// Tracks EVERY currently-acquired binding. Serves two purposes:
@@ -207,9 +235,9 @@ export async function createRtcE2EEContext(
 	// releases any the consumer forgot (a binding whose reference was
 	// dropped without release() would otherwise leak its worker).
 	//
-	// Multi-SFU (#496): several LiveKit Rooms are live at once — the
+	// Multi-SFU (#496): several LiveKit Rooms are live at once - the
 	// primary publish room plus one subscriber-only room per foreign
-	// SFU — and every room's decoder needs every participant key. Each
+	// SFU - and every room's decoder needs every participant key. Each
 	// binding owns a private {keyProvider, worker} pair, so fanning the
 	// same key out to all of them shares no state and cannot conflict;
 	// a binding overlapping its own teardown (focus-change reconnect)
@@ -221,12 +249,7 @@ export async function createRtcE2EEContext(
 
 	const pumpKey = (id: string, idx: number, cryptoKey: CryptoKey): void => {
 		for (const binding of acquiredBindings) {
-			binding.keyProvider.setMatrixKey(id, cryptoKey, idx).catch(() => {
-				// onSetEncryptionKey is synchronous; the wrapper above only
-				// returns a Promise for symmetry with the import path — it
-				// shouldn't throw, but swallow if it does so one bad key
-				// doesn't kill the queue (or starve a sibling binding).
-			});
+			deliverKey(binding.keyProvider, id, idx, cryptoKey);
 		}
 	};
 
@@ -298,6 +321,7 @@ export async function createRtcE2EEContext(
 			// (not detach) so this doesn't disturb the intended
 			// "replay cached keys into a fresh Room" semantics.
 			keyCache.clear();
+			lastSetIndex.clear();
 		};
 		activeDetach = detach;
 		return detach;
@@ -318,11 +342,19 @@ export async function createRtcE2EEContext(
 		// returning so the consumer's `new lk.Room({e2ee})` + connect
 		// path observes a keyProvider that already knows about every
 		// participant's current key. Without this, focus-change
-		// reconnects would silently start with no keys until the next
-		// rotation.
+		// reconnects (and late-binding foreign-SFU rooms) would silently
+		// start with no keys until the next rotation. Per participant the
+		// most recently set index is replayed LAST so the fresh provider's
+		// `latestManuallySetKeyIndex` matches the live providers' (see
+		// `lastSetIndex`).
 		for (const [id, indices] of keyCache) {
+			const last = lastSetIndex.get(id);
 			for (const [idx, cryptoKey] of indices) {
-				void keyProvider.setMatrixKey(id, cryptoKey, idx);
+				if (idx !== last) deliverKey(keyProvider, id, idx, cryptoKey);
+			}
+			if (last !== undefined) {
+				const lastKey = indices.get(last);
+				if (lastKey) deliverKey(keyProvider, id, last, lastKey);
 			}
 		}
 
@@ -342,7 +374,7 @@ export async function createRtcE2EEContext(
 			},
 		};
 		// From here on, new cached keys fan out to this binding too
-		// (alongside every other still-acquired one — see `pumpKey`).
+		// (alongside every other still-acquired one - see `pumpKey`).
 		acquiredBindings.add(binding);
 		return {
 			e2eeOptions: { keyProvider, worker },
@@ -362,6 +394,7 @@ export async function createRtcE2EEContext(
 		// mutates the set.
 		for (const b of [...acquiredBindings]) b.release();
 		keyCache.clear();
+		lastSetIndex.clear();
 	};
 
 	return {

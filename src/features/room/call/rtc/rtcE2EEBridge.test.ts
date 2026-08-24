@@ -401,10 +401,8 @@ describe("rtcE2EEBridge", () => {
 		const ctx = await newCtx();
 		const session = createFakeSession();
 		ctx.attach(session as never, () => true);
-		const b1 = ctx.bindRoom();
-		const kp1 = b1.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
-		const b2 = ctx.bindRoom();
-		const kp2 = b2.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		const { kp: kp1, release: release1 } = bindKp(ctx);
+		const { kp: kp2, release: release2 } = bindKp(ctx);
 		session.emit(
 			MatrixRTCSessionEvent.EncryptionKeyChanged,
 			new Uint8Array([42]),
@@ -415,8 +413,8 @@ describe("rtcE2EEBridge", () => {
 		await flush();
 		expect(kp1.calls.map((c) => c.keyIndex)).toEqual([1]);
 		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([1]);
-		b1.release();
-		b2.release();
+		release1();
+		release2();
 		ctx.dispose();
 	});
 
@@ -424,11 +422,9 @@ describe("rtcE2EEBridge", () => {
 		const ctx = await newCtx();
 		const session = createFakeSession();
 		ctx.attach(session as never, () => true);
-		const b1 = ctx.bindRoom();
-		const kp1 = b1.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
-		const b2 = ctx.bindRoom();
-		const kp2 = b2.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
-		b1.release();
+		const { kp: kp1, release: release1 } = bindKp(ctx);
+		const { kp: kp2, release: release2 } = bindKp(ctx);
+		release1();
 		session.emit(
 			MatrixRTCSessionEvent.EncryptionKeyChanged,
 			new Uint8Array([7]),
@@ -439,7 +435,7 @@ describe("rtcE2EEBridge", () => {
 		await flush();
 		expect(kp1.calls).toHaveLength(0);
 		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([2]);
-		b2.release();
+		release2();
 		ctx.dispose();
 	});
 
@@ -450,7 +446,7 @@ describe("rtcE2EEBridge", () => {
 		const ctx = await newCtx();
 		const session = createFakeSession();
 		ctx.attach(session as never, () => true);
-		const b1 = ctx.bindRoom();
+		const { release: release1 } = bindKp(ctx);
 		session.emit(
 			MatrixRTCSessionEvent.EncryptionKeyChanged,
 			new Uint8Array([1]),
@@ -459,8 +455,7 @@ describe("rtcE2EEBridge", () => {
 			"peer",
 		);
 		await flush();
-		const b2 = ctx.bindRoom();
-		const kp2 = b2.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
+		const { kp: kp2, release: release2 } = bindKp(ctx);
 		// Cache replay of key index 0.
 		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([0]);
 		session.emit(
@@ -472,8 +467,45 @@ describe("rtcE2EEBridge", () => {
 		);
 		await flush();
 		expect(kp2.calls.map((c) => c.keyIndex)).toEqual([0, 1]);
-		b1.release();
-		b2.release();
+		release1();
+		release2();
+		ctx.dispose();
+	});
+
+	it("replay ends on the most recently set index after a rotation back (#496)", async () => {
+		// idx 0 → idx 1 → idx 0 again: the cache Map keeps idx 0 at its
+		// ORIGINAL insertion position, so naive iteration-order replay would
+		// end on idx 1 and leave the fresh provider's latest-manually-set
+		// index stale. The replay must end on idx 0 with the LATEST bytes.
+		const ctx = await newCtx();
+		const session = createFakeSession();
+		ctx.attach(session as never, () => true);
+		const emitKey = (byte: number, idx: number): void =>
+			session.emit(
+				MatrixRTCSessionEvent.EncryptionKeyChanged,
+				new Uint8Array([byte]),
+				idx,
+				{},
+				"peer",
+			);
+		emitKey(1, 0);
+		emitKey(2, 1);
+		emitKey(3, 0);
+		// Three queued imports chain sequentially; settle them all.
+		await flush();
+		await flush();
+		await flush();
+		const { kp, release } = bindKp(ctx);
+		const replay = kp.calls.map((c) => ({
+			idx: c.keyIndex,
+			marker: (c.key as unknown as { __marker: number }).__marker,
+		}));
+		// Both indices replayed; the LAST delivery is idx 0 with the
+		// re-rotated key bytes.
+		expect(replay).toHaveLength(2);
+		expect(replay[replay.length - 1]).toEqual({ idx: 0, marker: 3 });
+		expect(replay).toContainEqual({ idx: 1, marker: 2 });
+		release();
 		ctx.dispose();
 	});
 

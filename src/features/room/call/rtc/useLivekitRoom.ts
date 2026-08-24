@@ -301,8 +301,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// LiveKit's E2EEManager attaches listeners on the keyProvider that
 	// only fully detach once disconnect runs the close handlers.
 	// Releasing the binding terminates that Room's dedicated worker and
-	// drops the keyProvider from the relay's active-pump slot, so the
-	// next `bindRoom()` (focus-change reconnect) starts clean.
+	// unregisters its keyProvider from the relay's fan-out set (#496) -
+	// an unreleased binding would keep receiving every key and leak its
+	// worker, so teardown MUST release even on error paths.
 	let binding: import("./rtcE2EEBridge").RtcE2EERoomBinding | null = null;
 	// Tracks the most recently kicked-off teardown so external callers
 	// (`CallSessionController`'s bridge-dispose onCleanup) can chain off it.
