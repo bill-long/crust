@@ -984,10 +984,14 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// listeners on it, leaking per Room instance). `localIdentity`
 			// (the same `userId:deviceId` lk-jwt-service assigns us) lets
 			// the cache replay end on OUR latest key so a rebound Room
-			// never encrypts under a stale current index.
+			// never encrypts under a stale current index. A logged-in
+			// client always has a userId, but guard anyway - a bogus
+			// "null:DEV" identity would silently never match the cache,
+			// while omitting it falls back to the documented order.
+			const localUserId = opts.client.getUserId();
 			const localBinding =
 				e2eeCtx?.bindRoom({
-					localIdentity: `${opts.client.getUserId()}:${deviceId}`,
+					localIdentity: localUserId ? `${localUserId}:${deviceId}` : undefined,
 				}) ?? null;
 			pendingBinding = localBinding;
 			const r = new lk.Room({
