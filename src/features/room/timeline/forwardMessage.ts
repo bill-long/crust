@@ -6,10 +6,8 @@ import {
 	parseEncryptedFile,
 } from "../composer/media/attachmentCrypto";
 import { uploadBlob } from "../composer/media/uploadMedia";
-import type { TimelineEvent } from "./timelineTypes";
+import { TEXT_MSGTYPES, type TimelineEvent } from "./timelineTypes";
 
-/** Message types forwarded as rebuilt text content. */
-const TEXT_MSGTYPES = new Set(["m.text", "m.notice", "m.emote"]);
 /** Attachment types forwarded as media content (re-uploaded when needed). */
 const MEDIA_MSGTYPES = new Set(["m.image", "m.video", "m.audio", "m.file"]);
 

@@ -1,65 +1,68 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { copyMessageText, isCopyableText } from "./copyMessageText";
+import { describe, expect, it } from "vitest";
+import { copyableText } from "./copyMessageText";
+import type { TimelineEvent } from "./timelineTypes";
 
-const pushNotice = vi.hoisted(() => vi.fn());
-vi.mock("../../../stores/notices", () => ({ pushNotice }));
+function makeEvent(overrides: Partial<TimelineEvent>): TimelineEvent {
+	return {
+		msgtype: "m.text",
+		body: "",
+		mediaCaption: null,
+		isDecryptionFailure: false,
+		...overrides,
+	} as TimelineEvent;
+}
 
-describe("isCopyableText", () => {
-	it("accepts the text-like msgtypes with a body", () => {
-		expect(isCopyableText("m.text", "hello")).toBe(true);
-		expect(isCopyableText("m.notice", "hello")).toBe(true);
-		expect(isCopyableText("m.emote", "waves")).toBe(true);
-	});
-
-	it("rejects media msgtypes and empty bodies", () => {
-		expect(isCopyableText("m.image", "cat.png")).toBe(false);
-		expect(isCopyableText("m.file", "doc.pdf")).toBe(false);
-		expect(isCopyableText("m.text", "")).toBe(false);
-	});
-});
-
-describe("copyMessageText", () => {
-	const writeText = vi.fn<(text: string) => Promise<void>>();
-	let consoleError: ReturnType<typeof vi.spyOn>;
-
-	beforeEach(() => {
-		writeText.mockReset().mockResolvedValue(undefined);
-		pushNotice.mockReset();
-		vi.stubGlobal("navigator", { clipboard: { writeText } });
-		consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-	});
-
-	afterEach(() => {
-		vi.unstubAllGlobals();
-		consoleError.mockRestore();
-	});
-
-	it("writes the body to the clipboard", async () => {
-		await copyMessageText("hello world");
-		expect(writeText).toHaveBeenCalledWith("hello world");
-		expect(pushNotice).not.toHaveBeenCalled();
-	});
-
-	it("strips the reply fallback before copying", async () => {
-		await copyMessageText("> <@alice:hs> quoted\n\nactual reply");
-		expect(writeText).toHaveBeenCalledWith("actual reply");
-	});
-
-	it("toasts when the clipboard write rejects", async () => {
-		writeText.mockRejectedValue(new Error("denied"));
-		await copyMessageText("hello");
-		expect(pushNotice).toHaveBeenCalledWith(
-			"Couldn't copy the message text.",
-			"error",
+describe("copyableText", () => {
+	it("returns the body for the text-like msgtypes", () => {
+		expect(copyableText(makeEvent({ msgtype: "m.text", body: "hi" }))).toBe(
+			"hi",
+		);
+		expect(copyableText(makeEvent({ msgtype: "m.notice", body: "hi" }))).toBe(
+			"hi",
+		);
+		expect(copyableText(makeEvent({ msgtype: "m.emote", body: "waves" }))).toBe(
+			"waves",
 		);
 	});
 
-	it("toasts when the Clipboard API is unavailable", async () => {
-		vi.stubGlobal("navigator", {});
-		await copyMessageText("hello");
-		expect(pushNotice).toHaveBeenCalledWith(
-			"Couldn't copy the message text.",
-			"error",
-		);
+	it("strips the reply fallback and trims, matching forward-as-text", () => {
+		expect(
+			copyableText(
+				makeEvent({ body: "> <@alice:hs> quoted\n\nactual reply\n\n" }),
+			),
+		).toBe("actual reply");
+	});
+
+	it("returns null for an empty or whitespace-only body", () => {
+		expect(copyableText(makeEvent({ body: "" }))).toBeNull();
+		expect(copyableText(makeEvent({ body: "  \n " }))).toBeNull();
+	});
+
+	it("returns the caption for captioned media", () => {
+		expect(
+			copyableText(
+				makeEvent({
+					msgtype: "m.image",
+					body: "cat.png",
+					mediaCaption: "look at this cat",
+				}),
+			),
+		).toBe("look at this cat");
+	});
+
+	it("returns null for uncaptioned media (the body is a filename)", () => {
+		expect(
+			copyableText(
+				makeEvent({ msgtype: "m.file", body: "doc.pdf", mediaCaption: null }),
+			),
+		).toBeNull();
+	});
+
+	it("returns null for decryption failures", () => {
+		expect(
+			copyableText(
+				makeEvent({ body: "placeholder", isDecryptionFailure: true }),
+			),
+		).toBeNull();
 	});
 });

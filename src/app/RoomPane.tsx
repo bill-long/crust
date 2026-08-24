@@ -33,6 +33,7 @@ import { ThreadListPanel } from "../features/room/threads/ThreadListPanel";
 import { ThreadPanel } from "../features/room/threads/ThreadPanel";
 import { createThreadPanelState } from "../features/room/threads/threadPanelState";
 import { TimelineView } from "../features/room/timeline/TimelineView";
+import { roomTopicText } from "../lib/roomTopic";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { isMobile } from "../stores/viewport";
 
@@ -181,18 +182,15 @@ const RoomPane: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
 	// Room topic for the header line under the room name (#446). Topics can
-	// contain newlines; the header shows a single truncated line and keeps
-	// the full text reachable via the tooltip.
-	const topicContent = useRoomStateContent<{ topic?: unknown }>(
+	// contain newlines; the header shows a single normalized truncated line,
+	// while the tooltip carries the raw topic with its line structure.
+	const topicContent = useRoomStateContent(
 		props.client,
 		() => props.rid,
 		"m.room.topic",
 	);
-	const topicLine = createMemo(() => {
-		const t = topicContent()?.topic;
-		if (typeof t !== "string") return "";
-		return t.replace(/\s+/g, " ").trim();
-	});
+	const topicRaw = createMemo(() => roomTopicText(topicContent()));
+	const topicLine = createMemo(() => topicRaw().replace(/\s+/g, " ").trim());
 
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
 
@@ -272,7 +270,13 @@ const RoomPane: Component<{
 						</svg>
 					</button>
 				</Show>
-				<div class="flex min-w-0 flex-col justify-center">
+				{/* flex-1 (zero flex basis) so a paragraph-length topic truncates
+					instead of starving the action toolbar of width. */}
+				{/* Items stay stretched (no self-start): a stretched flex-col item
+					gets a definite width, so min-w-0 + truncate can clip a
+					paragraph-length topic. Fit-content sizing here would let the
+					nowrap text force the whole three-pane layout wider. */}
+				<div class="flex min-w-0 flex-1 flex-col justify-center">
 					<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 						{props.roomName}
 					</span>
@@ -280,8 +284,8 @@ const RoomPane: Component<{
 						<button
 							type="button"
 							onClick={() => props.onOpenSettings()}
-							title={topicLine()}
-							class="min-w-0 truncate rounded text-left text-xs text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
+							title={topicRaw()}
+							class="min-w-0 truncate rounded text-left text-xs text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 						>
 							{topicLine()}
 							<span class="sr-only">. Open room settings</span>

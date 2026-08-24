@@ -6,6 +6,17 @@ import type { TimelineSource } from "../threads/timelineSource";
 import type { MembershipTransition, StateNotice } from "./stateNotice";
 
 /**
+ * Msgtypes whose `body` is user-authored text. The single source for
+ * every consumer that treats "a text message" as a category: forwarding
+ * (rebuilt text content), room search, and the Copy text action.
+ */
+export const TEXT_MSGTYPES: ReadonlySet<string> = new Set([
+	"m.text",
+	"m.notice",
+	"m.emote",
+]);
+
+/**
  * Aggregated reaction data for a single key on a single message.
  *
  * `senders` holds one entry per unique reactor (deduped by user ID),

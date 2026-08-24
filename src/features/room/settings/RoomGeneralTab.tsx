@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import { Tooltip } from "../../../components/Tooltip";
 import { createImageFallback } from "../../../lib/imageFallback";
+import { roomTopicText } from "../../../lib/roomTopic";
 import { FieldStatus } from "./FieldStatus";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
@@ -81,12 +82,12 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 	};
 
 	// ----- m.room.topic -----
-	const topicContent = useRoomStateContent<{ topic?: string }>(
+	const topicContent = useRoomStateContent(
 		props.client,
 		roomId,
 		"m.room.topic",
 	);
-	const serverTopic = createMemo<string>(() => topicContent()?.topic ?? "");
+	const serverTopic = createMemo<string>(() => roomTopicText(topicContent()));
 	const topicOpt = useOptimisticState<string>({ serverValue: serverTopic });
 	const [topicDraft, setTopicDraft] = createSignal("");
 	const [topicDirty, setTopicDirty] = createSignal(false);

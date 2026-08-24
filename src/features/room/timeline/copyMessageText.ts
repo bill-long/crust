@@ -1,36 +1,23 @@
 import { stripReplyFallback } from "../../../lib/replyFallback";
-import { reportError } from "../../../lib/reportError";
-
-/** Msgtypes whose `body` is user-authored text worth offering "Copy text" for. */
-const COPYABLE_MSGTYPES = new Set(["m.text", "m.notice", "m.emote"]);
-
-/** Whether the hover toolbar should offer "Copy text" for this event. */
-export function isCopyableText(msgtype: string, body: string): boolean {
-	return COPYABLE_MSGTYPES.has(msgtype) && body.length > 0;
-}
+import { TEXT_MSGTYPES, type TimelineEvent } from "./timelineTypes";
 
 /**
- * Copy a message body to the clipboard, with the legacy `> ` reply-fallback
- * preamble stripped so the copied text matches what the timeline renders.
+ * Text the "Copy text" action offers for an event, or null when there is
+ * no user-authored text to copy (so the menu item is omitted):
  *
- * Success is silent (Discord-style; the copy is instant and the menu has
- * already closed). Failure - including a missing Clipboard API - surfaces a
- * toast via `reportError`: no inline affordance exists for this action, so
- * per the error-handling convention it gets a `userMessage`.
+ * - text-like messages ({@link TEXT_MSGTYPES}): the body with the legacy
+ *   `> ` reply-fallback preamble stripped and surrounding whitespace
+ *   trimmed, matching the sibling forward-as-text normalization
+ *   (`forwardMessage.ts`);
+ * - captioned media: the caption;
+ * - decryption failures: nothing (the body is not readable content).
  */
-export async function copyMessageText(body: string): Promise<void> {
-	const text = stripReplyFallback(body);
-	try {
-		const clipboard =
-			typeof navigator !== "undefined" ? navigator.clipboard : undefined;
-		if (!clipboard?.writeText) {
-			throw new Error("Clipboard API unavailable");
-		}
-		await clipboard.writeText(text);
-	} catch (e) {
-		reportError(e, {
-			userMessage: "Couldn't copy the message text.",
-			logLabel: "copyMessageText failed",
-		});
+export function copyableText(ev: TimelineEvent): string | null {
+	if (ev.isDecryptionFailure) return null;
+	if (TEXT_MSGTYPES.has(ev.msgtype)) {
+		const text = stripReplyFallback(ev.body).trim();
+		return text !== "" ? text : null;
 	}
+	const caption = ev.mediaCaption?.trim();
+	return caption ? caption : null;
 }

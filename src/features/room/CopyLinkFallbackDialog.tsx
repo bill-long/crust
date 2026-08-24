@@ -14,15 +14,24 @@ const FOCUSABLE =
 
 interface CopyLinkFallbackDialogProps {
 	/**
-	 * The link to display. Snapshot taken at open time by the caller so the
-	 * dialog keeps showing the link the user asked to copy even if the
-	 * underlying room changes.
+	 * The text to display (a link, or any other text the user asked to
+	 * copy). Snapshot taken at open time by the caller so the dialog keeps
+	 * showing the text the user asked to copy even if the underlying room
+	 * changes.
 	 */
 	url: string;
 	/** Heading text. Defaults to "Copy room link". */
 	title?: string;
 	/** Accessible label for the readonly link input. Defaults to "Room link". */
 	inputLabel?: string;
+	/** Body text. Defaults to the link-flavored explanation. */
+	description?: string;
+	/**
+	 * Render the text in a readonly textarea instead of a single-line
+	 * input. Required for multiline text - an `<input>` value cannot
+	 * contain newlines, so copying from it would silently lose them.
+	 */
+	multiline?: boolean;
 	open: () => boolean;
 	onClose: () => void;
 }
@@ -32,7 +41,7 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 ) => {
 	trackAppModalOpen(props.open);
 	let overlayRef!: HTMLDivElement;
-	let inputRef: HTMLInputElement | undefined;
+	let inputRef: HTMLInputElement | HTMLTextAreaElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 
 	const titleId = createUniqueId();
@@ -106,18 +115,37 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 						{props.title ?? "Copy room link"}
 					</h2>
 					<p id={descId} class="mb-3 text-sm text-text-muted">
-						Your browser blocked clipboard access. Select the link and copy it
-						manually.
+						{props.description ??
+							"Your browser blocked clipboard access. Select the link and copy it manually."}
 					</p>
-					<input
-						ref={inputRef}
-						type="text"
-						readOnly
-						value={props.url}
-						aria-label={props.inputLabel ?? "Room link"}
-						onFocus={(e) => e.currentTarget.select()}
-						class="mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-					/>
+					<Show
+						when={props.multiline}
+						fallback={
+							<input
+								ref={(el) => {
+									inputRef = el;
+								}}
+								type="text"
+								readOnly
+								value={props.url}
+								aria-label={props.inputLabel ?? "Room link"}
+								onFocus={(e) => e.currentTarget.select()}
+								class="mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							/>
+						}
+					>
+						<textarea
+							ref={(el) => {
+								inputRef = el;
+							}}
+							readOnly
+							value={props.url}
+							rows={4}
+							aria-label={props.inputLabel ?? "Room link"}
+							onFocus={(e) => e.currentTarget.select()}
+							class="mb-4 w-full resize-none rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						/>
+					</Show>
 					<div class="flex justify-end">
 						<button
 							type="button"

@@ -21,6 +21,7 @@ import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
+import { CopyLinkFallbackDialog } from "../CopyLinkFallbackDialog";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import { PollMessage } from "../poll/PollMessage";
@@ -28,7 +29,8 @@ import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
 import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
-import { copyMessageText, isCopyableText } from "./copyMessageText";
+import { createCopyLink } from "../useCopyLink";
+import { copyableText } from "./copyMessageText";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
 import { MediaAudio } from "./MediaAudio";
@@ -314,8 +316,9 @@ const HoverToolbar: Component<{
 	onForward?: () => void;
 	/** Open the raw-event viewer for this message. */
 	onViewSource: () => void;
-	/** Copy the message text to the clipboard. Absent for events without a
-	    user-authored text body (media, polls, stickers). */
+	/** Copy the message text to the clipboard. Absent when `copyableText`
+	    offers nothing (polls, stickers, uncaptioned media, decryption
+	    failures). */
 	onCopyText?: () => void;
 	/** Report the message to the homeserver admins. Absent for the user's
 	    own messages. */
@@ -637,6 +640,11 @@ const TimelineItem: Component<{
 	isSenderIgnored?: boolean;
 }> = (props) => {
 	const ev = props.event;
+	// "Copy text" reuses the copy-room-link state machine so a blocked
+	// clipboard gets the same manual-copy fallback dialog instead of a
+	// dead-end (success stays silent, Discord-style). Null hides the item.
+	const copyText = copyableText(ev);
+	const copyLink = createCopyLink();
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
 	);
@@ -854,12 +862,26 @@ const TimelineItem: Component<{
 						onForward={props.onForward}
 						onViewSource={props.onViewSource}
 						onCopyText={
-							isCopyableText(ev.msgtype, ev.body)
-								? () => void copyMessageText(ev.body)
-								: undefined
+							copyText !== null ? () => void copyLink.copy(copyText) : undefined
 						}
 						onReport={props.onReport}
 					/>
+				</Show>
+
+				{/* Manual-copy fallback for "Copy text" when the clipboard is
+				    blocked or unavailable - same surface as copy-room-link. */}
+				<Show when={copyLink.fallbackLink()}>
+					{(text) => (
+						<CopyLinkFallbackDialog
+							url={text()}
+							title="Copy text"
+							inputLabel="Message text"
+							description="Your browser blocked clipboard access. Select the text and copy it manually."
+							multiline
+							open={() => copyLink.fallbackLink() !== null}
+							onClose={copyLink.clearFallback}
+						/>
+					)}
 				</Show>
 
 				<Show

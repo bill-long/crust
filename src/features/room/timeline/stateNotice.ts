@@ -3,6 +3,7 @@ import {
 	CALL_MEMBER_EVENT_TYPE,
 	callMembershipExpiresAt,
 } from "../../../client/summaries";
+import { roomTopicText } from "../../../lib/roomTopic";
 
 /**
  * Derived text for a non-message state event (m.room.member, m.room.name,
@@ -569,9 +570,8 @@ export function buildStateNotice(
 		};
 	}
 	if (type === "m.room.topic") {
-		const oldTopic = typeof prev.topic === "string" ? prev.topic.trim() : "";
-		const newTopic =
-			typeof content.topic === "string" ? content.topic.trim() : "";
+		const oldTopic = roomTopicText(prev).trim();
+		const newTopic = roomTopicText(content).trim();
 		if (oldTopic === newTopic) return null;
 		if (!newTopic) {
 			return { text: `${actor} removed the topic`, icon: "info" };

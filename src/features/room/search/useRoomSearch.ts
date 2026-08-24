@@ -16,6 +16,7 @@ import {
 	onCleanup,
 } from "solid-js";
 import { threadJumpTarget } from "../../../lib/threadEvents";
+import { TEXT_MSGTYPES } from "../timeline/timelineTypes";
 
 /**
  * Server search returns results across all the user's rooms by default;
@@ -98,7 +99,7 @@ export function projectEvent(
 	const body = typeof content.body === "string" ? content.body : "";
 	if (!body) return null;
 	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
-	if (msgtype !== "m.text" && msgtype !== "m.emote" && msgtype !== "m.notice") {
+	if (!TEXT_MSGTYPES.has(msgtype)) {
 		return null;
 	}
 	const sender = ev.getSender() ?? "";
