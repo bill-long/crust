@@ -1813,8 +1813,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		// (and binding release) BEFORE this unmount-driven no-op
 		// teardown resolves. The chained teardown also clears the foreign
 		// rooms; the trailing disposeAll only flips the terminal flag so a
-		// stray late reconcile can never reconnect anything.
-		void trackTeardown().then(() => foreign.disposeAll());
+		// stray late reconcile can never reconnect anything. `.finally`
+		// (not `.then`) - the terminal latch must run even if a future
+		// regression makes the teardown chain reject.
+		void trackTeardown().finally(() => void foreign.disposeAll());
 	});
 
 	return {
