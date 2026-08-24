@@ -31,6 +31,7 @@ import { userSettings } from "../../../../stores/settings";
 import { playPresenceCue } from "../../notificationSound";
 import { createPresenceCue, type PresenceCueDeps } from "./callPresenceCue";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
+import { createForeignSfuRooms } from "./foreignSfuRooms";
 import { oldestMembership } from "./useRtcSession";
 
 export type LivekitConnectionStatus =
@@ -450,33 +451,29 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		}
 	};
 
-	// True when the membership's published transport(s) do not include the
-	// SFU we dialed. Such a peer (legacy `multi_sfu` / MSC4143
-	// multi-transport) joins our SFU subscriber-only: their media goes to an
-	// SFU we never connect to, so no tracks (and no real mute state)
-	// arrive here. Surfaced so the UI can say so instead of showing a
-	// misleading "muted" row (#488).
-	const publishesElsewhere = (
+	// The LiveKit transport this membership publishes media to, or null when
+	// it cannot be determined. Only `getTransport` - the SDK's per-kind
+	// answer (RTC kind: the primary published transport; legacy multi_sfu:
+	// foci_preferred[0]; legacy oldest_membership: the elected oldest's
+	// transport). Deliberately NOT unioned with `membership.transports`:
+	// for legacy oldest_membership peers that list is an election OFFER,
+	// not a publish set, and matching our SFU against an unused offer would
+	// reintroduce the false "muted" row #488 removes. KNOWN LIMITATION: an
+	// MSC4143 peer multi-publishing to us as a secondary transport reads
+	// foreign here, so we would ALSO dial its primary and - with no
+	// cross-room media dedupe - attach its audio twice (echo). No shipping
+	// client multi-publishes today; if one appears, dedupe media per
+	// identity across rooms (or skip origins of peers already publishing
+	// to us) before flagging them foreign.
+	// `getTransport` reads event-authored data - a legacy event may omit
+	// `foci_preferred` entirely (the SDK validator tolerates that, and the
+	// getter then derefs a hole) - so treat a throw as "can't tell" rather
+	// than letting one malformed peer event crash the whole participant
+	// snapshot.
+	const publishedLivekitTransport = (
 		membership: CallMembership,
-		oldest: CallMembership | null,
-		focusUrl: string | null,
-	): boolean => {
-		if (!focusUrl || !oldest) return false;
-		// Only `getTransport` - the SDK's per-kind answer to "which transport
-		// does this membership publish media to" (RTC kind: the primary
-		// published transport; legacy multi_sfu: foci_preferred[0]; legacy
-		// oldest_membership: the elected oldest's transport). Deliberately
-		// NOT unioned with `membership.transports`: for legacy
-		// oldest_membership peers that list is an election OFFER, not a
-		// publish set, and matching our SFU against an unused offer would
-		// reintroduce the false "muted" row #488 removes. (An MSC4143 peer
-		// multi-publishing to us as a secondary transport reads foreign
-		// here; accepted until real multi-SFU support.)
-		// `getTransport` reads event-authored data - a legacy event may omit
-		// `foci_preferred` entirely (the SDK validator tolerates that, and
-		// the getter then derefs a hole) - so treat a throw as "can't tell"
-		// rather than letting one malformed peer event crash the whole
-		// participant snapshot.
+		oldest: CallMembership,
+	): LivekitTransport | null => {
 		let published: ReturnType<CallMembership["getTransport"]>;
 		try {
 			published = membership.getTransport(oldest);
@@ -487,15 +484,25 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			reportError(e, {
 				logLabel: `rtc: getTransport failed for membership of ${membership.userId}`,
 			});
-			return false;
+			return null;
 		}
 		if (published === undefined || !isLivekitTransport(published)) {
-			return false;
+			return null;
 		}
-		const url = canonicalSfuUrl(published.livekit_service_url);
-		if (url === null) return false;
-		return url !== focusUrl;
+		return published;
 	};
+
+	interface MembershipEntry {
+		membership: CallMembership;
+		/** Transport the membership publishes to (per-kind SDK semantics),
+		 *  or null when undeterminable. */
+		publishedTransport: LivekitTransport | null;
+		/** Canonical origin of `publishedTransport` (null when either is
+		 *  missing/malformed). */
+		publishedOrigin: string | null;
+		/** Publishes to a different SFU origin than the one we dialed. */
+		isForeignSfu: boolean;
+	}
 
 	// Membership lookup + foreign-SFU classification, keyed by
 	// `rtcBackendIdentity`. Memoized on [memberships, focus] because
@@ -503,19 +510,28 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// during active speech) while this classification only changes when the
 	// membership list or the dialed focus does - and `getTransport` on a
 	// legacy membership deep-compares event content, far too heavy for the
-	// active-speaker tick.
+	// active-speaker tick. Also feeds `desiredForeignSfus`, the set of
+	// foreign SFUs the receive-only connections (#495) should dial.
 	const membershipInfo = createMemo(() => {
 		const list = opts.memberships();
 		const focusUrl = canonicalSfuUrl(opts.focus()?.livekit_service_url);
 		const oldest = oldestMembership(list);
-		const map = new Map<
-			string,
-			{ membership: CallMembership; isForeignSfu: boolean }
-		>();
+		const map = new Map<string, MembershipEntry>();
 		for (const membership of list) {
+			const publishedTransport = oldest
+				? publishedLivekitTransport(membership, oldest)
+				: null;
+			const publishedOrigin = publishedTransport
+				? canonicalSfuUrl(publishedTransport.livekit_service_url)
+				: null;
 			map.set(membership.rtcBackendIdentity, {
 				membership,
-				isForeignSfu: publishesElsewhere(membership, oldest, focusUrl),
+				publishedTransport,
+				publishedOrigin,
+				isForeignSfu:
+					publishedOrigin !== null &&
+					focusUrl !== null &&
+					publishedOrigin !== focusUrl,
 			});
 		}
 		return map;
@@ -589,7 +605,17 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	};
 
 	const snapshotParticipants = (r: LivekitRoom): void => {
+		// Merge the primary room with every connected foreign room (#495):
+		// a multi-SFU peer appears in OUR room subscriber-only (no tracks)
+		// and in THEIR room with publications, so the roster is the union
+		// and, per identity, the publishing room's state wins.
+		const foreignRooms = foreign
+			.rooms()
+			.flatMap((h) => (h.state === "connected" && h.room ? [h.room] : []));
 		const speakingIds = new Set(r.activeSpeakers.map((p) => p.identity));
+		for (const fr of foreignRooms) {
+			for (const p of fr.activeSpeakers) speakingIds.add(p.identity);
+		}
 		const seen = new Set<string>();
 		const reuseOrBuild = (
 			identity: string,
@@ -642,22 +668,56 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				false,
 			),
 		);
-		for (const p of r.remoteParticipants.values()) {
-			const micPub = Array.from(p.audioTrackPublications.values()).find(
-				(pub) => pub.source === "microphone",
-			);
-			const info = resolveIdentity(p.identity, false);
+		// Roster union across rooms, keyed by identity. For a duplicate
+		// (multi-SFU peers connect to every SFU, subscriber-only except
+		// their own) the record WITH a microphone publication wins - that
+		// is the room they publish to, and its mute state is the real one.
+		const localIdentity = r.localParticipant.identity;
+		const mergedRemotes = new Map<
+			string,
+			{ micPub: { isMuted?: boolean } | undefined }
+		>();
+		const collectRemotes = (source: LivekitRoom): void => {
+			for (const p of source.remoteParticipants.values()) {
+				// Our own subscriber identity in a foreign room is not a
+				// remote peer. (lk-jwt-service derives the same
+				// `userId:deviceId` identity everywhere for us.)
+				if (p.identity === localIdentity) continue;
+				const micPub = Array.from(p.audioTrackPublications.values()).find(
+					(pub) => pub.source === "microphone",
+				);
+				const existing = mergedRemotes.get(p.identity);
+				if (
+					!existing ||
+					(micPub !== undefined && existing.micPub === undefined)
+				) {
+					mergedRemotes.set(p.identity, { micPub });
+				}
+			}
+		};
+		collectRemotes(r);
+		for (const fr of foreignRooms) collectRemotes(fr);
+		for (const [identity, { micPub }] of mergedRemotes) {
+			const info = resolveIdentity(identity, false);
+			// "Audio unavailable" only when no room delivers a mic
+			// publication AND we can't expect one: the peer is unmapped, or
+			// publishes to a foreign SFU we are NOT connected to (failed /
+			// still connecting). Once their SFU connection is live, a
+			// missing publication means what it means for same-SFU peers -
+			// no mic - and renders as the ordinary muted state (#495).
+			const entry = membershipInfo().get(identity);
+			const foreignReachable =
+				entry?.publishedOrigin != null &&
+				foreign.stateOf(entry.publishedOrigin) === "connected";
 			out.push(
 				reuseOrBuild(
-					p.identity,
+					identity,
 					info,
-					speakingIds.has(p.identity),
+					speakingIds.has(identity),
 					micPub?.isMuted ?? true,
 					false,
-					// No mic publication on our SFU + a peer we can't vouch for
-					// (publishes elsewhere, or unmapped identity): the fallback
-					// `isMuted` above is an artifact, not a mute (#488).
-					micPub === undefined && (info.isForeignSfu || info.isUnresolved),
+					micPub === undefined &&
+						(info.isUnresolved || (info.isForeignSfu && !foreignReachable)),
 				),
 			);
 		}
@@ -766,6 +826,65 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			identity,
 			sid,
 		);
+
+	// Receive-only connections to foreign SFUs (#495): one subscriber-only
+	// LiveKit room per distinct SFU origin that some membership publishes
+	// to. Media lands in the SAME sinks as the primary room (audio
+	// attachments, video/screen-share maps), so every downstream surface
+	// works unchanged; `snapshotParticipants` merges rosters across rooms.
+	const foreign = createForeignSfuRooms({
+		client: opts.client,
+		loadLivekit: opts.loadLivekit ?? (() => import("livekit-client")),
+		e2ee: () => opts.e2ee?.() ?? null,
+		attachAudioTrack,
+		detachAudioTrack,
+		upsertVideoTrack,
+		removeVideoTrackIfMatches,
+		upsertScreenShareTrack,
+		removeScreenShareTrackIfMatches,
+		onChanged: () => {
+			if (room) snapshotParticipants(room);
+		},
+		onRosterChanged: () => {
+			if (room) {
+				snapshotParticipants(room);
+				presenceCue.schedule();
+			}
+		},
+	});
+
+	// The foreign SFUs the receive-only connections should currently dial:
+	// canonical origin → transport, for every membership publishing to a
+	// different origin than our primary focus. Empty while the primary room
+	// is not connected - foreign rooms exist to complement a live call, and
+	// this collapses the set to nothing on leave/error so the reconcile
+	// below tears them down.
+	const desiredForeignSfus = createMemo((): Map<string, LivekitTransport> => {
+		const map = new Map<string, LivekitTransport>();
+		if (status() !== "connected") return map;
+		for (const entry of membershipInfo().values()) {
+			if (
+				entry.isForeignSfu &&
+				entry.publishedOrigin !== null &&
+				entry.publishedTransport !== null &&
+				!map.has(entry.publishedOrigin)
+			) {
+				map.set(entry.publishedOrigin, entry.publishedTransport);
+			}
+		}
+		return map;
+	});
+
+	// Drive the foreign connection set. `reconcile` diffs internally, so
+	// re-running with an unchanged set (every membership tick re-mints the
+	// Map) is cheap; a tick is also what re-attempts a failed origin after
+	// its backoff.
+	createEffect(
+		on(desiredForeignSfus, (desired) => {
+			if (disposed) return;
+			foreign.reconcile(desired);
+		}),
+	);
 
 	// Reconcile the local participant's camera publication into `videoTrackMap`
 	// only. Called from `LocalTrackPublished` / `LocalTrackUnpublished` so the
@@ -892,6 +1011,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	};
 
 	const teardown = async (): Promise<void> => {
+		// Start the foreign teardown first (it detaches its media and
+		// disconnects in the background) and await it below, so
+		// `teardownComplete()` keeps its contract for FOREIGN bindings too:
+		// every binding released only after its room's disconnect resolved,
+		// before the controller may dispose the E2EE context.
+		const foreignCleared = foreign.clear();
 		detachAll();
 		resetCallDerivedState();
 		const r = room;
@@ -908,6 +1033,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		// Release AFTER disconnect resolves so the LiveKit close handlers
 		// finish using the keyProvider/worker before we terminate them.
 		b?.release();
+		await foreignCleared;
 	};
 
 	// Wraps every `teardown()` invocation so `teardownComplete()` always
@@ -1685,8 +1811,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		// Chains via trackTeardown so an in-flight focus-change or
 		// explicit-disconnect teardown finishes its `r.disconnect()`
 		// (and binding release) BEFORE this unmount-driven no-op
-		// teardown resolves.
-		void trackTeardown();
+		// teardown resolves. The chained teardown also clears the foreign
+		// rooms; the trailing disposeAll only flips the terminal flag so a
+		// stray late reconcile can never reconnect anything. `.finally`
+		// (not `.then`) - the terminal latch must run even if a future
+		// regression makes the teardown chain reject.
+		void trackTeardown().finally(() => void foreign.disposeAll());
 	});
 
 	return {
