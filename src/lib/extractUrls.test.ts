@@ -297,3 +297,13 @@ describe("spoilered URLs (MSC2010)", () => {
 		).toEqual(["https://visible.example"]);
 	});
 });
+
+describe("spoiler attribute on the anchor itself", () => {
+	it("does not preview an anchor that carries data-mx-spoiler", () => {
+		expect(
+			extractUrlsFromHtml(
+				'<a data-mx-spoiler href="https://leak.example/x">hint</a>',
+			),
+		).toEqual([]);
+	});
+});

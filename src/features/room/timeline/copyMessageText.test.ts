@@ -78,3 +78,16 @@ describe("copyableText", () => {
 		).toBeNull();
 	});
 });
+
+describe("spoiler placeholder bodies", () => {
+	it("offers nothing to copy for a /spoiler message", () => {
+		expect(
+			copyableText(
+				makeEvent({
+					body: "[Spoiler]",
+					formattedBody: "<span data-mx-spoiler>secret</span>",
+				}),
+			),
+		).toBeNull();
+	});
+});

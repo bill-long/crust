@@ -13,6 +13,13 @@ export interface WireDraft {
 }
 
 /**
+ * The plain-text `body` a /spoiler message carries instead of its hidden
+ * text (MSC2010). Body-derived surfaces (edit prefill, copy text) gate
+ * on this via `bodyIsSpoilerPlaceholder`.
+ */
+export const SPOILER_PLACEHOLDER = "[Spoiler]";
+
+/**
  * The single draft-to-wire transform: slash commands parse on the raw
  * draft, then markdown (unless the command asked for plain), then the
  * /spoiler wrap. Both the send path and the live preview consume this,
@@ -37,7 +44,7 @@ export function draftToWire(
 		return { body, formatted_body, msgtype: command.msgtype };
 	}
 	return {
-		body: "[Spoiler]",
+		body: SPOILER_PLACEHOLDER,
 		formatted_body: `<span data-mx-spoiler>${
 			formatted_body ?? escapeHtml(body).replace(/\n/g, "<br>")
 		}</span>`,

@@ -229,6 +229,9 @@ export function extractUrlsFromHtml(html: string): string[] {
 	// like mx-reply, where the quoted message's links shouldn't preview).
 	for (const a of root.querySelectorAll("a")) {
 		if (hasExcludedAncestor(a)) continue;
+		// The spoiler attribute can sit ON the anchor itself (MSC2010
+		// allows it on any element), not just on an ancestor span.
+		if (a.hasAttribute("data-mx-spoiler")) continue;
 		const href = a.getAttribute("href");
 		if (!href) continue;
 		const canonical = canonicalizeUrl(href);

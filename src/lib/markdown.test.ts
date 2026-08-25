@@ -239,3 +239,17 @@ describe("formatMarkdown protected fragments inside spoilers", () => {
 		expect(formatted_body).not.toContain("￿");
 	});
 });
+
+describe("formatMarkdown multi-line spoilers", () => {
+	it("hides a spoiler spanning a Shift+Enter newline (fails closed)", () => {
+		expect(html("||secret line1\nline2||")).toBe(
+			"<span data-mx-spoiler>secret line1<br>line2</span>",
+		);
+	});
+
+	it("keeps || literal inside a code fence", () => {
+		expect(html("```\na || b || c\n```")).toBe(
+			"<pre><code>a || b || c\n</code></pre>",
+		);
+	});
+});

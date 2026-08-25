@@ -1,3 +1,5 @@
+import { stripReplyFallback } from "../../../lib/replyFallback";
+import { SPOILER_PLACEHOLDER } from "../composer/draftToWire";
 import type { TimelineEvent } from "./timelineTypes";
 
 /**
@@ -14,24 +16,37 @@ import type { TimelineEvent } from "./timelineTypes";
  */
 export function isEditableEvent(ev: TimelineEvent, myUserId: string): boolean {
 	return (
-		ev.senderId === myUserId &&
-		(ev.msgtype === "m.text" || ev.msgtype === "m.emote") &&
-		ev.status === null &&
-		!editWouldLoseContent(ev)
+		ev.senderId === myUserId && isEditableContent(ev) && ev.status === null
 	);
 }
 
 /**
- * True when prefilling an edit draft from `ev.body` would destroy
- * content the body doesn't carry: a /spoiler message's body is the
- * "[Spoiler]" placeholder (MSC2010) while the real text lives only in
- * formatted_body, so a routine edit would replace the message with the
- * literal placeholder. Such messages get no edit affordance.
+ * Content-level editability: a text-like msgtype whose body can prefill
+ * an edit draft without losing content. Shared by {@link isEditableEvent}
+ * and the hover toolbar's Edit gate so the two rules can't drift (the
+ * ownership/send-status clauses stay per call site).
  */
-export function editWouldLoseContent(ev: TimelineEvent): boolean {
+export function isEditableContent(ev: TimelineEvent): boolean {
 	return (
-		ev.body === "[Spoiler]" &&
-		(ev.formattedBody?.includes("data-mx-spoiler") ?? false)
+		(ev.msgtype === "m.text" || ev.msgtype === "m.emote") &&
+		!bodyIsSpoilerPlaceholder(ev)
+	);
+}
+
+/**
+ * True when `ev.body` is a /spoiler placeholder that doesn't carry the
+ * message's real text (which lives only in formatted_body per MSC2010) -
+ * possibly behind a reply fallback, which a reply's wire body prepends.
+ * Any body-derived surface (edit prefill, copy text) would produce the
+ * literal placeholder instead of the content, so those affordances gate
+ * on this.
+ */
+export function bodyIsSpoilerPlaceholder(ev: TimelineEvent): boolean {
+	// formattedBody first: it short-circuits the regex work for the vast
+	// majority of messages (and for partial test fixtures without a body).
+	return (
+		(ev.formattedBody?.includes("data-mx-spoiler") ?? false) &&
+		stripReplyFallback(ev.body).trim() === SPOILER_PLACEHOLDER
 	);
 }
 

@@ -31,7 +31,7 @@ import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
 import { copyableText } from "./copyMessageText";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
-import { editWouldLoseContent } from "./editableEvents";
+import { isEditableContent } from "./editableEvents";
 import { MediaAudio } from "./MediaAudio";
 import { MediaFile } from "./MediaFile";
 import { MediaVideo } from "./MediaVideo";
@@ -857,11 +857,7 @@ const TimelineItem: Component<{
 				>
 					<HoverToolbar
 						isOwnMessage={props.isOwnMessage}
-						canEdit={
-							props.isOwnMessage &&
-							(ev.msgtype === "m.text" || ev.msgtype === "m.emote") &&
-							!editWouldLoseContent(ev)
-						}
+						canEdit={props.isOwnMessage && isEditableContent(ev)}
 						canPin={props.canPin ?? false}
 						isPinned={props.isPinned ?? false}
 						packs={props.packs}

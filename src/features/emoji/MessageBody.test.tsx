@@ -311,6 +311,17 @@ describe("MessageBody spoilers (MSC2010)", () => {
 		expect(container.querySelectorAll(".spoiler.revealed").length).toBe(0);
 	});
 
+	it("wraps a spoilered anchor so the control carries no href", () => {
+		const c = renderFormatted(
+			'<a data-mx-spoiler href="https://leak.example/x">hint</a>',
+		);
+		const spoiler = c.querySelector(".spoiler");
+		expect(spoiler?.tagName).toBe("SPAN");
+		expect(spoiler?.getAttribute("href")).toBeNull();
+		const a = spoiler?.querySelector(".spoiler-content a");
+		expect(a?.getAttribute("tabindex")).toBe("-1");
+	});
+
 	it("round-trips the composer's ||...|| markdown into a spoiler control", () => {
 		const c = renderComposed("the killer is ||the butler||");
 		const spoiler = c.querySelector(".spoiler");

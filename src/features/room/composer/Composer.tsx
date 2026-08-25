@@ -283,11 +283,12 @@ const Composer: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
 
 	// Live preview: render the in-progress draft through the SAME send→receive
-	// pipeline a real message takes (draftToWire → MessageBody), so what the
-	// user previews is byte-identical to what recipients render - slash
-	// commands and the /spoiler wrap included. Computed only when the preview
-	// is open; returns null for an empty draft so the panel can show a
-	// placeholder instead of an empty box.
+	// pipeline a real message takes (draftToWire → MessageBody), so the
+	// previewed CONTENT is byte-identical to what recipients render - slash
+	// commands and the /spoiler wrap included. (Row-level framing like the
+	// emote "* Name" line lives in TimelineItem, outside this panel.)
+	// Computed only when the preview is open; returns null for an empty
+	// draft so the panel can show a placeholder instead of an empty box.
 	const previewContent = createMemo(() => {
 		if (!previewOpen()) return null;
 		// Trim BEFORE parsing, exactly like send() does - otherwise a
@@ -302,7 +303,12 @@ const Composer: Component<{
 		// the preview must mirror that too.
 		if (props.editingEvent) {
 			const { body, formatted_body } = formatMarkdown(msg, mentionList, emoji);
-			return { body, formatted_body, msgtype: "m.text" as const };
+			// Mirrors the edit send path: msgtype follows the edit target.
+			const msgtype =
+				props.editingEvent.msgtype === "m.emote"
+					? ("m.emote" as const)
+					: ("m.text" as const);
+			return { body, formatted_body, msgtype };
 		}
 		return draftToWire(msg, mentionList, emoji);
 	});

@@ -149,3 +149,14 @@ describe("isEditableEvent additions (#448)", () => {
 		expect(isEditableEvent(spoiler, ME)).toBe(false);
 	});
 });
+
+describe("bodyIsSpoilerPlaceholder behind a reply fallback", () => {
+	it("rejects editing a /spoiler sent as a reply", () => {
+		const spoilerReply = {
+			...ev({ senderId: ME, msgtype: "m.text" }),
+			body: "> <@bob:example.com> hi\n\n[Spoiler]",
+			formattedBody: "<span data-mx-spoiler>secret</span>",
+		} as unknown as Parameters<typeof isEditableEvent>[0];
+		expect(isEditableEvent(spoilerReply, ME)).toBe(false);
+	});
+});

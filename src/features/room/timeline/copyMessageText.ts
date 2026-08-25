@@ -1,5 +1,6 @@
 import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { stripReplyFallback } from "../../../lib/replyFallback";
+import { bodyIsSpoilerPlaceholder } from "./editableEvents";
 import type { TimelineEvent } from "./timelineTypes";
 
 /**
@@ -17,6 +18,9 @@ import type { TimelineEvent } from "./timelineTypes";
  */
 export function copyableText(ev: TimelineEvent): string | null {
 	if (ev.isDecryptionFailure) return null;
+	// A /spoiler body is the "[Spoiler]" placeholder, not the content -
+	// copying (and announcing) the literal placeholder helps nobody.
+	if (bodyIsSpoilerPlaceholder(ev)) return null;
 	if (TEXT_MSGTYPES.has(ev.msgtype)) {
 		const text = stripReplyFallback(ev.body).trim();
 		return text !== "" ? text : null;

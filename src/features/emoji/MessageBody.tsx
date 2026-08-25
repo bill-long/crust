@@ -175,10 +175,13 @@ function sanitizeMatrixHtml(
 		content.className = "spoiler-content";
 		content.setAttribute("aria-hidden", "true");
 		let spoiler: Element;
-		if (el.tagName === "IMG") {
-			// A spoilered image (e.g. a custom emoticon - MSC2010 allows
-			// the attribute on images): an <img> can't host the reveal
-			// control or the content wrapper itself, so wrap it.
+		if (el.tagName === "IMG" || el.tagName === "A") {
+			// A spoilered image can't host the reveal control or the
+			// content wrapper itself; a spoilered ANCHOR must not become
+			// the control either - keeping its href on the wrapper would
+			// leak the hidden URL via hover, middle-click, and the context
+			// menu while unrevealed. Wrap both in a neutral span (MSC2010
+			// allows the attribute on any element).
 			spoiler = document.createElement("span");
 			el.replaceWith(spoiler);
 			content.appendChild(el);
