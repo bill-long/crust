@@ -15,7 +15,17 @@ export interface MentionIntent {
 	userId: string;
 	/** Raw display name (or user ID) - the composer normalizes it. */
 	name: string;
+	/** Stamped at request time; see {@link MENTION_INTENT_TTL_MS}. */
+	at: number;
 }
+
+/**
+ * An intent is only valid for the gesture that fired it. If no matching
+ * composer was mounted to consume it (a thread panel closing in the same
+ * tick), it must not replay into a composer mounted much later - the
+ * consumer drops anything older than this.
+ */
+export const MENTION_INTENT_TTL_MS = 5_000;
 
 const [mentionIntent, setMentionIntent] = createSignal<MentionIntent | null>(
 	null,
@@ -23,10 +33,10 @@ const [mentionIntent, setMentionIntent] = createSignal<MentionIntent | null>(
 
 export { mentionIntent };
 
-export function requestMention(intent: MentionIntent): void {
+export function requestMention(intent: Omit<MentionIntent, "at">): void {
 	// A fresh object every call: the consumer clears the signal after
 	// handling, and a new reference retriggers even an identical payload.
-	setMentionIntent({ ...intent });
+	setMentionIntent({ ...intent, at: Date.now() });
 }
 
 /**

@@ -7,7 +7,7 @@ import {
 	createFailedImageUrls,
 	type FailedImageUrls,
 } from "../../lib/imageFallback";
-import { openProfileCard } from "./profile/profileCard";
+import { openProfileCard, profileAnchorKey } from "./profile/profileCard";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
 type FlatItem =
@@ -49,6 +49,9 @@ const MemberRow: Component<{
 			type="button"
 			class="flex w-full items-center gap-2 px-3 py-1.5 text-text-secondary hover:bg-surface-2/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
 			aria-label={`View profile of ${props.member.displayName}`}
+			// The open card re-resolves its anchor to the re-minted row by
+			// this key (typing/profile events re-mint entries constantly).
+			data-profile-anchor={profileAnchorKey(props.roomId, props.member.userId)}
 			onClick={(e) =>
 				openProfileCard({
 					userId: props.member.userId,

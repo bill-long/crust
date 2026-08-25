@@ -20,6 +20,7 @@ import {
 } from "../../../lib/markdown";
 import {
 	clearMentionIntent,
+	MENTION_INTENT_TTL_MS,
 	mentionIntent,
 } from "../../../stores/composerIntents";
 import { pushNotice } from "../../../stores/notices";
@@ -156,6 +157,9 @@ const Composer: Component<{
 		if (intent.roomId !== props.roomId) return;
 		if (intent.threadRootId !== (props.threadRootId ?? null)) return;
 		clearMentionIntent();
+		// An intent nothing consumed at fire time (its composer had just
+		// unmounted) must not replay into a composer mounted much later.
+		if (Date.now() - intent.at > MENTION_INTENT_TTL_MS) return;
 		untrack(() => insertMention(intent.userId, intent.name));
 	});
 

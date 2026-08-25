@@ -1,5 +1,6 @@
 import { Popover } from "@kobalte/core/popover";
 import { useNavigate } from "@solidjs/router";
+import { type MatrixEvent, RoomStateEvent } from "matrix-js-sdk";
 import {
 	type Component,
 	createMemo,
@@ -16,7 +17,6 @@ import { reportError } from "../../../lib/reportError";
 import { requestMention } from "../../../stores/composerIntents";
 import { isUserIgnored, setUserIgnored } from "../../../stores/ignoredUsers";
 import { KickBanConfirm } from "../settings/KickBanConfirm";
-import { effectiveUsersDefault } from "../settings/powerLevelPresets";
 import {
 	type MemberAction,
 	performKickOrBan,
@@ -26,7 +26,9 @@ import { findExistingDmRoom, readDirectMap, startDm } from "../startDm";
 import { roleForPowerLevel } from "../useMemberList";
 import {
 	closeProfileCard,
+	markAnchorDismiss,
 	type ProfileCardRequest,
+	profileAnchorKey,
 	profileCardRequest,
 } from "./profileCard";
 
@@ -67,20 +69,49 @@ const ProfileCardPopover: Component<{
 		disposed = true;
 	});
 
-	// The anchor is a live element in a list that re-mints rows (typing
-	// notifications, virtua recycling, room switches). When it leaves the
-	// DOM the popover would reposition against a zero rect, so close
-	// instead - Discord does the same on scroll-away.
+	// The anchor is a live element in lists that re-mint rows. A member
+	// row is re-minted by ANY entry change - typing, and notably the very
+	// promote/demote this card fires - so a detached anchor first tries to
+	// re-resolve to the re-minted row via its data-profile-anchor marker
+	// (keeping the card, its role label, and any error banner alive), and
+	// only closes when the row is truly gone (scrolled away, room switch).
+	const [anchor, setAnchor] = createSignal(req.anchor);
+	const anchorKey = profileAnchorKey(req.roomId, req.userId);
 	const detachWatch = setInterval(() => {
-		if (!req.anchor.isConnected) closeProfileCard();
+		if (anchor().isConnected) return;
+		const reminted = document.querySelector<HTMLElement>(
+			`[data-profile-anchor="${CSS.escape(anchorKey)}"]`,
+		);
+		if (reminted) {
+			setAnchor(reminted);
+		} else {
+			closeProfileCard();
+		}
 	}, 300);
 	onCleanup(() => clearInterval(detachWatch));
 
-	const member = createMemo(() =>
-		req.roomId
+	// Member state is not reactive on its own: a lazy-loaded member (or a
+	// profile change) landing while the card is open must recompute the
+	// role and moderation gates, so bump a tick on this user's member
+	// events.
+	const [memberTick, setMemberTick] = createSignal(0);
+	const onMembersChanged = (event: MatrixEvent): void => {
+		if (
+			event.getRoomId() === req.roomId &&
+			event.getStateKey?.() === req.userId
+		) {
+			setMemberTick((n) => n + 1);
+		}
+	};
+	client.on(RoomStateEvent.Members, onMembersChanged);
+	onCleanup(() => client.off(RoomStateEvent.Members, onMembersChanged));
+
+	const member = createMemo(() => {
+		memberTick();
+		return req.roomId
 			? (client.getRoom(req.roomId)?.getMember(req.userId) ?? null)
-			: null,
-	);
+			: null;
+	});
 	// Cheap path first: room member state. Only when the user isn't a
 	// known member (a pill for a non-member, or no room context) fall
 	// back to a lazy profile fetch; a failure just leaves the MXID.
@@ -106,14 +137,12 @@ const ProfileCardPopover: Component<{
 	});
 	const avatar = createImageFallback(avatarUrl);
 
-	// Role from the live power-level content (not the member snapshot) so a
+	// Role from the SAME power-level source the moderation gates read, so
+	// the label and the buttons can never disagree; live, so a
 	// promote/demote fired from this card updates the label in place.
 	const targetPowerLevel = createMemo<number | null>(() => {
 		if (!req.roomId || !member()) return null;
-		const pl = moderation.plContent();
-		const raw = pl?.users?.[req.userId];
-		if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-		return effectiveUsersDefault(pl);
+		return moderation.perms.targetPowerLevel(req.userId);
 	});
 	const role = createMemo(() => {
 		const pl = targetPowerLevel();
@@ -184,6 +213,9 @@ const ProfileCardPopover: Component<{
 		setActionErrorLocal(null);
 		try {
 			await setUserIgnored(client, req.userId, ignoring);
+			// A card dismissed mid-flight must not close whichever card the
+			// user has since opened.
+			if (disposed) return;
 			closeProfileCard();
 		} catch (err) {
 			// Console-only: the card's inline banner is the user surface.
@@ -248,12 +280,33 @@ const ProfileCardPopover: Component<{
 			onOpenChange={(open) => {
 				if (!open) closeProfileCard();
 			}}
-			anchorRef={() => req.anchor}
+			anchorRef={anchor}
 			placement="right-start"
 			gutter={8}
 		>
 			<Popover.Portal>
-				<Popover.Content class="portal-scale z-50 w-72 rounded-lg border border-border-subtle bg-surface-2 shadow-lg focus:outline-hidden">
+				<Popover.Content
+					class="portal-scale z-50 w-72 rounded-lg border border-border-subtle bg-surface-2 shadow-lg focus:outline-hidden"
+					// An outside-pointerdown that lands on the anchor is the
+					// first half of a toggle-close gesture: mark it so the
+					// click half doesn't immediately reopen the card. Other
+					// dismissals (Esc, actions) leave the anchor clickable.
+					onPointerDownOutside={(e) => {
+						const target = e.target;
+						if (target instanceof Node && anchor().contains(target)) {
+							markAnchorDismiss(anchor());
+						}
+					}}
+					// There is no Popover.Trigger (the anchor is an arbitrary
+					// clicked element), so Kobalte's default close-focus has
+					// nothing to restore to and keyboard focus would drop to
+					// the body - send it back to the anchor instead.
+					onCloseAutoFocus={(e) => {
+						e.preventDefault();
+						const el = anchor();
+						if (el.isConnected) el.focus();
+					}}
+				>
 					<div class="flex items-center gap-3 border-b border-border-subtle p-4">
 						<div
 							class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-xl font-semibold text-text-secondary"
@@ -303,38 +356,44 @@ const ProfileCardPopover: Component<{
 						)}
 					</Show>
 
-					<div class="p-1">
-						<Show when={!isSelf()}>
-							<button
-								type="button"
-								class={ACTION_CLASS}
-								disabled={dmPending()}
-								onClick={() => void handleMessage()}
-							>
-								{dmPending() ? "Opening…" : "Message"}
-							</button>
-						</Show>
-						<Show when={req.roomId}>
-							<button
-								type="button"
-								class={ACTION_CLASS}
-								onClick={handleMention}
-							>
-								Mention
-							</button>
-						</Show>
-						<Show when={!isSelf()}>
-							<button
-								type="button"
-								class={
-									isUserIgnored(req.userId) ? ACTION_CLASS : DANGER_ACTION_CLASS
-								}
-								onClick={() => void handleToggleIgnore()}
-							>
-								{isUserIgnored(req.userId) ? "Unblock" : "Block"}
-							</button>
-						</Show>
-					</div>
+					{/* Hidden entirely on an own-profile card outside a room,
+					    where every action inside would be hidden anyway. */}
+					<Show when={!isSelf() || req.roomId}>
+						<div class="p-1">
+							<Show when={!isSelf()}>
+								<button
+									type="button"
+									class={ACTION_CLASS}
+									disabled={dmPending()}
+									onClick={() => void handleMessage()}
+								>
+									{dmPending() ? "Opening…" : "Message"}
+								</button>
+							</Show>
+							<Show when={req.roomId}>
+								<button
+									type="button"
+									class={ACTION_CLASS}
+									onClick={handleMention}
+								>
+									Mention
+								</button>
+							</Show>
+							<Show when={!isSelf()}>
+								<button
+									type="button"
+									class={
+										isUserIgnored(req.userId)
+											? ACTION_CLASS
+											: DANGER_ACTION_CLASS
+									}
+									onClick={() => void handleToggleIgnore()}
+								>
+									{isUserIgnored(req.userId) ? "Unblock" : "Block"}
+								</button>
+							</Show>
+						</div>
+					</Show>
 
 					<Show when={moderationTargets().any}>
 						<div class="border-t border-border-subtle p-1">

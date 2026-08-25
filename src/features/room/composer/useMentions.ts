@@ -169,7 +169,14 @@ export function useMentions(deps: UseMentionsDeps) {
 	function insertMention(userId: string, rawName: string): void {
 		const el = deps.getTextarea();
 		const currentText = deps.text();
-		const pos = el ? el.selectionStart : currentText.length;
+		// Trust the caret only while the textarea is actually focused: an
+		// unfocused textarea whose value was set programmatically (restored
+		// draft) reports a stale selectionStart, which would splice the
+		// mention mid-sentence instead of appending.
+		const pos =
+			el && document.activeElement === el
+				? el.selectionStart
+				: currentText.length;
 		const before = currentText.slice(0, pos);
 		const displayName = insertableName(rawName, userId);
 		const pad = before.length === 0 || /\s$/.test(before) ? "" : " ";

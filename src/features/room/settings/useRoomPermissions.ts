@@ -53,6 +53,12 @@ export interface RoomPermissions {
 	 * for the rationale (a mod can promote to mod but not to admin).
 	 */
 	canChangePowerLevel: (targetUserId: string, requestedPL: number) => boolean;
+	/**
+	 * A target user's effective power level (their `users` entry, or the
+	 * room's users_default). The SAME source the can* gates read, so a
+	 * role label derived from it can never disagree with the gates.
+	 */
+	targetPowerLevel: (targetUserId: string) => number;
 }
 
 function canSendStateEvent(
@@ -203,5 +209,6 @@ export function useRoomPermissions(
 			canModerateTarget(targetUserId, canKickMemo),
 		canBanTarget: (targetUserId) => canModerateTarget(targetUserId, canBanMemo),
 		canChangePowerLevel,
+		targetPowerLevel,
 	};
 }
