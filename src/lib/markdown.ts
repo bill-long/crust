@@ -160,13 +160,25 @@ function formatInline(line: string, ctx: InlineContext): string {
 	}
 
 	// Emphasis on the escaped text. Bold before italic so `**x**` wins.
-	// Spoilers first so `||**x**||` nests emphasis inside the span.
+	const applyEmphasis = (input: string): string => {
+		let out = input;
+		out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+		out = out.replace(/~~(.+?)~~/g, "<del>$1</del>");
+		out = out.replace(/\*(.+?)\*/g, "<em>$1</em>");
+		out = out.replace(/(^|[^\w])_(.+?)_(?!\w)/g, "$1<em>$2</em>");
+		return out;
+	};
+	// Spoilers first, with emphasis applied INSIDE and the whole span
+	// protected: letting the emphasis pass run across the span boundary
+	// would mis-nest the HTML, and parser recovery then pushes part of the
+	// spoilered text OUTSIDE the hiding span. A content-hiding feature must
+	// fail closed, so the span becomes an opaque placeholder instead.
 	const beforeEmphasis = s;
-	s = s.replace(/\|\|(.+?)\|\|/g, "<span data-mx-spoiler>$1</span>");
-	s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-	s = s.replace(/~~(.+?)~~/g, "<del>$1</del>");
-	s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
-	s = s.replace(/(^|[^\w])_(.+?)_(?!\w)/g, "$1<em>$2</em>");
+	s = s.replace(/\|\|(.+?)\|\|/g, (_m, inner: string) => {
+		ctx.flags.inline = true;
+		return protect(ctx, `<span data-mx-spoiler>${applyEmphasis(inner)}</span>`);
+	});
+	s = applyEmphasis(s);
 	if (s !== beforeEmphasis) ctx.flags.inline = true;
 
 	return s;

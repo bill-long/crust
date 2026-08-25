@@ -190,7 +190,7 @@ describe("formatMarkdown — mixed block + text", () => {
 	});
 });
 
-describe("formatMarkdown — spoilers", () => {
+describe("formatMarkdown spoiler syntax", () => {
 	it("renders ||text|| as a data-mx-spoiler span", () => {
 		expect(html("a ||hidden|| b")).toBe(
 			"a <span data-mx-spoiler>hidden</span> b",
@@ -206,5 +206,15 @@ describe("formatMarkdown — spoilers", () => {
 	it("leaves a single unpaired || alone", () => {
 		const { formatted_body } = formatMarkdown("a || b");
 		expect(formatted_body).toBeNull();
+	});
+
+	it("fails closed when emphasis markers interleave with the spoiler", () => {
+		// Without protection, the italic pass would match across the span
+		// boundary and parser recovery would push part of the spoilered
+		// text OUTSIDE the hiding span. The span must stay intact; the
+		// dangling `*` outside simply stays literal.
+		expect(html("x *y ||z* w||")).toBe(
+			"x *y <span data-mx-spoiler>z* w</span>",
+		);
 	});
 });

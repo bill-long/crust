@@ -291,10 +291,15 @@ body {
 
 /* m.emote (#448): the "* Name action" line flows the message body
  * inline after the sender name, so MessageBody's block roots (the plain
- * <p> fallback and the rendered-HTML wrapper) display inline here. */
+ * <p> fallback and the rendered-HTML wrapper) display inline here -
+ * including <p> INSIDE the rendered HTML, which CommonMark-based
+ * senders wrap even one-line emote bodies in. True block content
+ * (blockquote, lists, code fences) deliberately keeps flowing as
+ * blocks below the name line rather than being force-inlined. */
 .emote-body > p,
 .emote-body > .message-body,
-.emote-body > .message-body > div {
+.emote-body > .message-body > div,
+.emote-body .message-body p {
 	display: inline;
 }
 

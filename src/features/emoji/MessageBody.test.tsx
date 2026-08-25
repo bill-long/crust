@@ -1,5 +1,6 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("solid-refresh", () => ({
@@ -14,6 +15,7 @@ vi.mock("solid-refresh", () => ({
 import { formatMarkdown } from "../../lib/markdown";
 import { createMockClient } from "../../test/mockClient";
 import { MessageBody } from "./MessageBody";
+import type { ResolvedEmote } from "./types";
 
 afterEach(cleanup);
 
@@ -209,6 +211,60 @@ describe("MessageBody spoilers (MSC2010)", () => {
 			new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
 		);
 		expect(spoiler?.classList.contains("revealed")).toBe(true);
+	});
+
+	it("wraps a spoilered emoticon image in a reveal control", () => {
+		const c = renderFormatted(
+			'<img data-mx-emoticon data-mx-spoiler src="mxc://hs/abc" alt=":x:">',
+		);
+		const spoiler = c.querySelector(".spoiler");
+		expect(spoiler?.getAttribute("role")).toBe("button");
+		const img = spoiler?.querySelector(".spoiler-content img");
+		expect(img).not.toBeNull();
+	});
+
+	it("keeps anchors inside hidden spoiler content out of the tab order until revealed", () => {
+		const c = renderFormatted(
+			'<span data-mx-spoiler>see <a href="https://example.com">link</a> and https://bare.example</span>',
+		);
+		const anchors = [...c.querySelectorAll(".spoiler-content a")];
+		// The explicit anchor AND the one linkify created from the bare URL.
+		expect(anchors.length).toBe(2);
+		for (const a of anchors) {
+			expect(a.getAttribute("tabindex")).toBe("-1");
+		}
+		c.querySelector<HTMLElement>(".spoiler-content")?.dispatchEvent(
+			new MouseEvent("click", { bubbles: true }),
+		);
+		for (const a of c.querySelectorAll(".spoiler-content a")) {
+			expect(a.getAttribute("tabindex")).toBeNull();
+		}
+	});
+
+	it("keeps a revealed spoiler revealed when the html regenerates", () => {
+		const [lookup, setLookup] = createSignal(new Map<string, ResolvedEmote>());
+		const { container } = render(() => (
+			<MessageBody
+				body="fallback"
+				format="org.matrix.custom.html"
+				formattedBody="<span data-mx-spoiler>secret</span>"
+				isEdited={false}
+				client={client}
+				shortcodeLookup={lookup()}
+			/>
+		));
+		container
+			.querySelector<HTMLElement>(".spoiler-content")
+			?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		expect(
+			container.querySelector(".spoiler")?.classList.contains("revealed"),
+		).toBe(true);
+		// New Map identity (image packs finishing their load) regenerates
+		// the innerHTML; the reveal must survive.
+		setLookup(new Map());
+		const spoiler = container.querySelector(".spoiler");
+		expect(spoiler?.classList.contains("revealed")).toBe(true);
+		expect(spoiler?.getAttribute("aria-expanded")).toBe("true");
 	});
 
 	it("round-trips the composer's ||...|| markdown into a spoiler control", () => {

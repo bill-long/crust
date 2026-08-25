@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "../timeline/timelineTypes";
 import {
 	applyMentions,
+	buildEditContent,
 	buildReplyFallback,
 	buildTextMessageContent,
 	mentionUserIds,
@@ -199,5 +200,15 @@ describe("buildTextMessageContent msgtype", () => {
 		);
 		expect(content.msgtype).toBe("m.emote");
 		expect(content.body).toBe("waves");
+	});
+});
+
+describe("buildEditContent msgtype", () => {
+	it("keeps an emote an emote through an edit", () => {
+		const content = buildEditContent("waves more", null, [], "$t", "m.emote");
+		expect(content.msgtype).toBe("m.emote");
+		expect((content["m.new_content"] as Record<string, unknown>).msgtype).toBe(
+			"m.emote",
+		);
 	});
 });

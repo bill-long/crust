@@ -50,7 +50,11 @@ export function parseSlashCommand(input: string): ParsedSlashCommand {
 	const command = match[1].toLowerCase();
 	const rest = match[2]?.trim() ?? "";
 
-	const emoticon = EMOTICONS[command];
+	// Object.hasOwn: a plain-object lookup would resolve "/constructor"
+	// et al. through Object.prototype and send a Function as the body.
+	const emoticon = Object.hasOwn(EMOTICONS, command)
+		? EMOTICONS[command]
+		: undefined;
 	if (emoticon !== undefined) {
 		return {
 			text: rest ? `${emoticon} ${rest}` : emoticon,

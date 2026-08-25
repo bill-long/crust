@@ -39,6 +39,7 @@ import { ComposerContextBanner } from "./ComposerContextBanner";
 import { ComposerPlusMenu } from "./ComposerPlusMenu";
 import { createComposerFormatting } from "./composerFormatting";
 import { composerTextareaScope } from "./composerTextarea";
+import { draftToWire } from "./draftToWire";
 import { FormattingToolbar } from "./FormattingToolbar";
 import type { PendingAttachment } from "./media/types";
 import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
@@ -46,7 +47,6 @@ import {
 	createVoiceRecorder,
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
-import { parseSlashCommand } from "./slashCommands";
 import { useAttachments } from "./useAttachments";
 import { useMentions } from "./useMentions";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
@@ -283,15 +283,16 @@ const Composer: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
 
 	// Live preview: render the in-progress draft through the SAME send→receive
-	// pipeline a real message takes (formatMarkdown → MessageBody), so what the
-	// user previews is byte-identical to what recipients render. Computed only
-	// when the preview is open; returns null for an empty draft so the panel can
-	// show a placeholder instead of an empty box.
+	// pipeline a real message takes (draftToWire → MessageBody), so what the
+	// user previews is byte-identical to what recipients render - slash
+	// commands and the /spoiler wrap included. Computed only when the preview
+	// is open; returns null for an empty draft so the panel can show a
+	// placeholder instead of an empty box.
 	const previewContent = createMemo(() => {
 		if (!previewOpen()) return null;
 		const msg = text();
 		if (!msg.trim()) return null;
-		return formatMarkdown(
+		return draftToWire(
 			msg,
 			reconcileMentions(msg),
 			findCustomEmoji(msg, shortcodeLookup()),
@@ -558,6 +559,7 @@ const Composer: Component<{
 				formatted_body,
 				currentMentions,
 				props.editingEvent.eventId,
+				props.editingEvent.msgtype === "m.emote" ? "m.emote" : "m.text",
 			);
 
 			const draft = text();
@@ -684,26 +686,17 @@ const Composer: Component<{
 			// Otherwise fall through to send the trailing text message.
 		}
 
-		// Slash commands parse on the raw draft, before markdown (#448).
-		const command = parseSlashCommand(msg);
-		const { body, formatted_body } = command.plain
-			? { body: command.text, formatted_body: null }
-			: formatMarkdown(command.text, currentMentions, emoji);
-		// /spoiler wraps the whole formatted message; the plain body keeps
-		// the text (per MSC2010, the fallback body is not hidden).
-		const formattedFinal = command.spoiler
-			? `<span data-mx-spoiler>${
-					formatted_body ?? escapeHtml(body).replace(/\n/g, "<br>")
-				}</span>`
-			: formatted_body;
+		// Slash commands + markdown + spoiler wrap, via the shared
+		// draft-to-wire transform (the preview consumes the same one).
+		const wire = draftToWire(msg, currentMentions, emoji);
 		const content = buildTextMessageContent(
-			body,
-			formattedFinal,
+			wire.body,
+			wire.formatted_body,
 			currentMentions,
 			replyTo && !replyConsumed ? replyTo : null,
 			roomId,
 			client.getUserId() ?? "",
-			command.msgtype,
+			wire.msgtype,
 		);
 
 		setSending(true);

@@ -89,4 +89,11 @@ describe("parseSlashCommand", () => {
 		expect(parseSlashCommand("/ me").text).toBe("/ me");
 		expect(parseSlashCommand("/2cents").text).toBe("/2cents");
 	});
+
+	it("does not resolve commands through Object.prototype", () => {
+		expect(parseSlashCommand("/constructor").text).toBe("/constructor");
+		expect(parseSlashCommand("/hasOwnProperty hi").text).toBe(
+			"/hasOwnProperty hi",
+		);
+	});
 });

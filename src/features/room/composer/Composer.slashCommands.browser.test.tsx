@@ -87,11 +87,13 @@ describe("Composer slash commands (send path)", () => {
 		expect(content.formatted_body).toBeUndefined();
 	});
 
-	it("/spoiler wraps the formatted body in a data-mx-spoiler span", async () => {
+	it("/spoiler wraps the formatted body and hides the plain-text fallback", async () => {
 		const { client, textarea } = setup();
 		const content = await sendText(client, textarea, "/spoiler the ending");
 		expect(content.msgtype).toBe("m.text");
-		expect(content.body).toBe("the ending");
+		// MSC2010: the fallback body must not leak the hidden content
+		// (push notifications, room-list previews, plaintext clients).
+		expect(content.body).toBe("[Spoiler]");
 		expect(content.formatted_body).toBe(
 			"<span data-mx-spoiler>the ending</span>",
 		);

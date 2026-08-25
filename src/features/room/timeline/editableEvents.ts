@@ -1,8 +1,9 @@
 import type { TimelineEvent } from "./timelineTypes";
 
 /**
- * Whether `ev` is a message the current user can edit: their own, plain
- * `m.text`, and fully sent.
+ * Whether `ev` is a message the current user can edit: their own, a text
+ * message (`m.text`) or an emote (`m.emote`, the `/me` path), and fully
+ * sent.
  *
  * The send-status check matters for the up-arrow shortcut specifically: a
  * just-sent message that's still a local echo has no real event id yet, so an
@@ -13,7 +14,9 @@ import type { TimelineEvent } from "./timelineTypes";
  */
 export function isEditableEvent(ev: TimelineEvent, myUserId: string): boolean {
 	return (
-		ev.senderId === myUserId && ev.msgtype === "m.text" && ev.status === null
+		ev.senderId === myUserId &&
+		(ev.msgtype === "m.text" || ev.msgtype === "m.emote") &&
+		ev.status === null
 	);
 }
 
@@ -23,7 +26,7 @@ export function isEditableEvent(ev: TimelineEvent, myUserId: string): boolean {
  * is {@link isEditableEvent}.
  *
  * Crucially this does NOT hunt backward past the user's own non-editable
- * *message* tail. If their latest message is an image, an emote, or a still
+ * *message* tail. If their latest message is an image or a still
  * in-flight echo, the shortcut no-ops (returns `null`) rather than silently
  * jumping to an older message and editing the wrong one. The user's own
  * non-message rows (membership / state notices like a display-name or avatar
