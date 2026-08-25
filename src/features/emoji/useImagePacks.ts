@@ -210,14 +210,7 @@ export function useImagePacks(
 							result.push({
 								id: packId,
 								displayName: packName,
-								avatarUrl: content.pack?.avatar_url
-									? (client.mxcUrlToHttp(
-											content.pack.avatar_url,
-											32,
-											32,
-											"crop",
-										) ?? null)
-									: null,
+								avatarUrl: avatarHttpUrl(client, content.pack?.avatar_url, 32),
 								emotes,
 							});
 						}

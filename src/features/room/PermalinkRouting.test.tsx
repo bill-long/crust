@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal, type ParentComponent } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,8 +9,9 @@ import {
 	_resetJoinDialogForTests,
 	joinDialogRequest,
 } from "../../stores/joinDialog";
-import { clearNotices, notices } from "../../stores/notices";
+import { clearNotices } from "../../stores/notices";
 import { findJoinedRoomId, PermalinkRouting } from "./PermalinkRouting";
+import { closeProfileCard, profileCardRequest } from "./profile/profileCard";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -23,9 +24,13 @@ vi.mock("solid-refresh", () => ({
 const navigateMock = vi.fn();
 // Controllable location: tests set `locationState.pathname` before clicking.
 const locationState = { pathname: "/home" };
+// Controllable route params (useDecodedParams wraps useParams): tests set
+// `paramsState.roomId` to simulate viewing a room.
+const paramsState: { roomId?: string } = {};
 vi.mock("@solidjs/router", () => ({
 	useNavigate: () => navigateMock,
 	useLocation: () => locationState,
+	useParams: () => paramsState,
 }));
 
 const optimisticallyMarkJoined = vi.fn();
@@ -119,7 +124,9 @@ afterEach(() => {
 	optimisticallyMarkJoined.mockReset();
 	_resetJoinDialogForTests();
 	clearNotices();
+	closeProfileCard();
 	locationState.pathname = "/home";
+	paramsState.roomId = undefined;
 });
 
 /** Render the router plus one anchor, then dispatch a real (cancelable) click. */
@@ -291,54 +298,35 @@ describe("PermalinkRouting click handling", () => {
 		});
 	});
 
-	it("starts a DM for a user link and navigates to it", async () => {
-		const { client, createRoom } = makeClient({
-			createdRoomId: "!dm:example.com",
-		});
+	it("opens the profile card for a user pill, anchored to the pill (#444)", () => {
+		const { client, createRoom } = makeClient();
+		paramsState.roomId = "!room:example.org";
 		const event = clickLink(client, "https://matrix.to/#/@alice:example.org");
 		expect(event.defaultPrevented).toBe(true);
-		await waitFor(() => {
-			expect(navigateMock).toHaveBeenCalledWith(
-				`/dm/${encodeURIComponent("!dm:example.com")}`,
-			);
-		});
-		expect(createRoom).toHaveBeenCalledOnce();
-		expect(optimisticallyMarkJoined).toHaveBeenCalledWith("!dm:example.com", {
-			name: "@alice:example.org",
-			avatarUrl: null,
-			isDirect: true,
-		});
-	});
-
-	it("opens an existing joined DM instantly, without a createRoom round-trip", () => {
-		const { client, createRoom } = makeClient({
-			rooms: [makeRoomStub("!existing:example.com")],
-			direct: { "@alice:example.org": ["!existing:example.com"] },
-		});
-		const event = clickLink(client, "https://matrix.to/#/@alice:example.org");
-		expect(event.defaultPrevented).toBe(true);
-		// Synchronous navigation (no waitFor): the fast path awaits nothing.
-		expect(navigateMock).toHaveBeenCalledWith(
-			`/dm/${encodeURIComponent("!existing:example.com")}`,
-		);
+		const request = profileCardRequest();
+		expect(request?.userId).toBe("@alice:example.org");
+		expect(request?.roomId).toBe("!room:example.org");
+		expect(request?.anchor).toBe(screen.getByText("the link"));
+		// The card owns Open DM now - the pill itself starts nothing.
 		expect(createRoom).not.toHaveBeenCalled();
-		expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
+		expect(navigateMock).not.toHaveBeenCalled();
 	});
 
-	it("shows an error toast when starting the DM fails", async () => {
-		const { client } = makeClient({ failCreateRoom: true });
-		const event = clickLink(client, "https://matrix.to/#/@alice:example.org");
+	it("opens the card without room context on non-room routes", () => {
+		const { client } = makeClient();
+		locationState.pathname = "/home";
+		clickLink(client, "https://matrix.to/#/@alice:example.org");
+		expect(profileCardRequest()?.roomId).toBeNull();
+	});
+
+	it("opens the card for the user's own pill too", () => {
+		const { client, createRoom } = makeClient();
+		const event = clickLink(client, "https://matrix.to/#/@test:example.com");
 		expect(event.defaultPrevented).toBe(true);
-		await waitFor(() => {
-			expect(
-				notices().some(
-					(n) =>
-						n.tone === "error" &&
-						n.message === "Couldn't start the conversation. Please try again.",
-				),
-			).toBe(true);
-		});
+		expect(profileCardRequest()?.userId).toBe("@test:example.com");
+		expect(createRoom).not.toHaveBeenCalled();
 		expect(navigateMock).not.toHaveBeenCalled();
+		expect(joinDialogRequest()).toBeNull();
 	});
 
 	it("handles matrix: URIs", () => {
@@ -350,17 +338,6 @@ describe("PermalinkRouting click handling", () => {
 		expect(navigateMock).toHaveBeenCalledWith(
 			`/home/${encodeURIComponent("!joined:example.org")}`,
 		);
-	});
-
-	it("leaves the user's own pill to the browser (no in-app target yet)", () => {
-		const { client, createRoom } = makeClient();
-		const event = clickLink(client, "https://matrix.to/#/@test:example.com");
-		// Not intercepted: no self-DM exists to route to, so the external
-		// matrix.to fallback proceeds like any non-permalink.
-		expect(event.defaultPrevented).toBe(false);
-		expect(createRoom).not.toHaveBeenCalled();
-		expect(navigateMock).not.toHaveBeenCalled();
-		expect(joinDialogRequest()).toBeNull();
 	});
 
 	it("ignores clicks another handler already cancelled", () => {

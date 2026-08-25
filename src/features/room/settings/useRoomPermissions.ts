@@ -53,6 +53,12 @@ export interface RoomPermissions {
 	 * for the rationale (a mod can promote to mod but not to admin).
 	 */
 	canChangePowerLevel: (targetUserId: string, requestedPL: number) => boolean;
+	/**
+	 * A target user's effective power level (their `users` entry, or the
+	 * room's users_default). The SAME source the can* gates read, so a
+	 * role label derived from it can never disagree with the gates.
+	 */
+	targetPowerLevel: (targetUserId: string) => number;
 }
 
 function canSendStateEvent(
@@ -150,9 +156,22 @@ export function useRoomPermissions(
 		createMemo(() => myPowerLevel() >= effectiveLevel(plContent(), key));
 
 	const targetPowerLevel = (targetUserId: string): number => {
+		// Read the PL content FIRST so reactive callers subscribe to PL
+		// changes regardless of which branch answers.
 		const pl = plContent();
 		const raw = pl.users?.[targetUserId];
 		if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+		// No users entry: prefer the SDK-computed member power before the
+		// users_default fallback - in newer room versions the creator is
+		// privileged WITHOUT a users entry, and the SDK models that in
+		// RoomMember.powerLevel (so the creator reads as admin here and,
+		// via canModerateTarget, can't be kicked by a mere admin - which
+		// matches server auth).
+		const rid = roomId();
+		const member = rid ? client.getRoom(rid)?.getMember(targetUserId) : null;
+		if (member && typeof member.powerLevel === "number") {
+			return member.powerLevel;
+		}
 		return effectiveUsersDefault(pl);
 	};
 
@@ -203,5 +222,6 @@ export function useRoomPermissions(
 			canModerateTarget(targetUserId, canKickMemo),
 		canBanTarget: (targetUserId) => canModerateTarget(targetUserId, canBanMemo),
 		canChangePowerLevel,
+		targetPowerLevel,
 	};
 }

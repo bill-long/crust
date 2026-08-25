@@ -1,5 +1,5 @@
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { EventType, type MatrixClient } from "matrix-js-sdk";
+import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { Virtualizer } from "virtua/solid";
 import { RowAvatar } from "../../../components/RowAvatar";
@@ -7,27 +7,18 @@ import { avatarInitial } from "../../../lib/avatar";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { useMemberList } from "../useMemberList";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteByUserIdForm } from "./InviteByUserIdForm";
+import { KickBanConfirm } from "./KickBanConfirm";
 import {
-	levelForDemote,
-	type PowerLevelContent,
-	withUserLevel,
-} from "./powerLevelPresets";
+	type MemberAction,
+	useModerationActions,
+} from "./useModerationActions";
 import { usePendingInvites } from "./usePendingInvites";
 import { usePendingKnocks } from "./usePendingKnocks";
-import { useRoomPermissions } from "./useRoomPermissions";
-import { useRoomStateContent } from "./useRoomStateContent";
 
 interface MembersTabProps {
 	client: MatrixClient;
 	roomId: string;
-}
-
-interface MemberAction {
-	kind: "promote-mod" | "promote-admin" | "demote" | "kick" | "ban";
-	userId: string;
-	displayName: string;
 }
 
 const MembersTab: Component<MembersTabProps> = (props) => {
@@ -36,20 +27,12 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 	// hooks rebuild their entries on any member event, so <For> remounts the
 	// rows and per-row error state would re-paint the broken image (#457).
 	const brokenAvatars = createFailedImageUrls();
-	const perms = useRoomPermissions(props.client, roomId);
+	const moderation = useModerationActions(props.client, roomId);
+	const { perms, actionError, pendingAction, setPendingAction } = moderation;
 	const memberList = useMemberList(props.client, roomId);
 	const invites = usePendingInvites(props.client, roomId);
 	const knocks = usePendingKnocks(props.client, roomId);
-	const plContent = useRoomStateContent<PowerLevelContent>(
-		props.client,
-		roomId,
-		"m.room.power_levels",
-	);
 
-	const [actionError, setActionError] = createSignal<string | null>(null);
-	const [pendingAction, setPendingAction] = createSignal<MemberAction | null>(
-		null,
-	);
 	const [openMenuFor, setOpenMenuFor] = createSignal<string | null>(null);
 	const [revokeError, setRevokeError] = createSignal<{
 		userId: string;
@@ -69,105 +52,11 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 
 	let scrollRef!: HTMLDivElement;
 
-	// Serialize PL writes so rapid consecutive promote/demote actions
-	// can't race against each other. The chain not only awaits prior
-	// sends but also threads a local "pending PL" snapshot so write N
-	// merges against write N-1's changes (the server echo may not have
-	// arrived by the time write N reads `plContent()`).
-	let plWriteChain: Promise<void> = Promise.resolve();
-	let pendingPL: PowerLevelContent | null = null;
-	let plWriteSeq = 0;
-	const writePowerLevel = (
-		userId: string,
-		level: number | null,
-	): Promise<void> => {
-		const mySeq = ++plWriteSeq;
-		const run = plWriteChain.then(async () => {
-			const base = pendingPL ?? plContent();
-			const next = withUserLevel(base, userId, level);
-			pendingPL = next;
-			try {
-				await props.client.sendStateEvent(
-					props.roomId,
-					EventType.RoomPowerLevels,
-					next as unknown as Record<string, unknown>,
-					"",
-				);
-			} finally {
-				// Drop the overlay once the most-recent write settles
-				// so a later burst rebases on the freshest server snapshot.
-				if (mySeq === plWriteSeq) pendingPL = null;
-			}
-		});
-		// Keep the chain alive on failure so one bad write doesn't
-		// permanently break serialization.
-		plWriteChain = run.catch(() => {});
-		return run;
-	};
-
-	const performAction = async (action: MemberAction): Promise<void> => {
-		setActionError(null);
-		try {
-			switch (action.kind) {
-				case "promote-mod":
-					if (!perms.canChangePowerLevel(action.userId, 50)) {
-						setActionError(
-							perms.canSetPowerLevels()
-								? "You can't change this member's power level."
-								: "You don't have permission to change power levels.",
-						);
-						return;
-					}
-					await writePowerLevel(action.userId, 50);
-					break;
-				case "promote-admin":
-					if (!perms.canChangePowerLevel(action.userId, 100)) {
-						setActionError(
-							perms.canSetPowerLevels()
-								? "You can't change this member's power level."
-								: "You don't have permission to change power levels.",
-						);
-						return;
-					}
-					await writePowerLevel(action.userId, 100);
-					break;
-				case "demote": {
-					const demote = levelForDemote(plContent());
-					if (!perms.canChangePowerLevel(action.userId, demote.level ?? 0)) {
-						setActionError(
-							perms.canSetPowerLevels()
-								? "You can't change this member's power level."
-								: "You don't have permission to change power levels.",
-						);
-						return;
-					}
-					await writePowerLevel(action.userId, demote.level);
-					break;
-				}
-			}
-		} catch (e) {
-			setActionError(e instanceof Error ? e.message : "Action failed.");
-		}
-	};
-
-	// Kick/Ban are invoked from inside ConfirmDialog.onConfirm — let the
-	// promise reject so the dialog catches and renders the error inline
-	// instead of closing first and surfacing the failure elsewhere.
-	const performKickOrBan = async (action: MemberAction): Promise<void> => {
-		if (action.kind === "kick") {
-			await props.client.kick(props.roomId, action.userId);
-		} else if (action.kind === "ban") {
-			await props.client.ban(props.roomId, action.userId);
-		}
-	};
-
+	// The moderation state and writes live in useModerationActions (shared
+	// with the profile card); this wrapper just closes the row menu first.
 	const requestAction = (action: MemberAction): void => {
 		setOpenMenuFor(null);
-		if (action.kind === "kick" || action.kind === "ban") {
-			setPendingAction(action);
-			return;
-		}
-		void performAction(action);
+		moderation.requestAction(action);
 	};
 
 	const revokeInvite = async (userId: string): Promise<void> => {
@@ -397,17 +286,14 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 					<Virtualizer scrollRef={scrollRef} data={allMembers()}>
 						{(m) => {
 							const canPromoteMod = createMemo(() =>
-								perms.canChangePowerLevel(m.userId, 50),
+								moderation.canPromoteMod(m.userId),
 							);
 							const canPromoteAdmin = createMemo(() =>
-								perms.canChangePowerLevel(m.userId, 100),
+								moderation.canPromoteAdmin(m.userId),
 							);
-							const canDemote = createMemo(() => {
-								const level = levelForDemote(plContent()).level ?? 0;
-								return (
-									m.powerLevel > 0 && perms.canChangePowerLevel(m.userId, level)
-								);
-							});
+							const canDemote = createMemo(() =>
+								moderation.canDemote(m.userId, m.powerLevel),
+							);
 							const canKickTarget = createMemo(() =>
 								perms.canKickTarget(m.userId),
 							);
@@ -539,29 +425,10 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 				</div>
 			</section>
 
-			<ConfirmDialog
-				open={() => pendingAction() !== null}
+			<KickBanConfirm
+				action={pendingAction}
 				onClose={() => setPendingAction(null)}
-				title={
-					pendingAction()?.kind === "ban"
-						? `Ban ${pendingAction()?.displayName}?`
-						: `Kick ${pendingAction()?.displayName}?`
-				}
-				body={
-					<p>
-						{pendingAction()?.kind === "ban"
-							? "They won't be able to rejoin unless unbanned."
-							: "They can rejoin if the room is public or someone re-invites them."}
-					</p>
-				}
-				confirmLabel={pendingAction()?.kind === "ban" ? "Ban" : "Kick"}
-				destructive
-				onConfirm={async () => {
-					const a = pendingAction();
-					if (!a) return;
-					await performKickOrBan(a);
-					setPendingAction(null);
-				}}
+				onConfirm={(a) => moderation.performKickOrBan(a)}
 			/>
 		</div>
 	);

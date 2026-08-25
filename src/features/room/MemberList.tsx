@@ -1,14 +1,4 @@
-import { DropdownMenu } from "@kobalte/core/dropdown-menu";
-import { useNavigate } from "@solidjs/router";
-import {
-	type Component,
-	createMemo,
-	createSignal,
-	Match,
-	onCleanup,
-	Show,
-	Switch,
-} from "solid-js";
+import { type Component, createMemo, Match, Show, Switch } from "solid-js";
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
@@ -17,9 +7,7 @@ import {
 	createFailedImageUrls,
 	type FailedImageUrls,
 } from "../../lib/imageFallback";
-import { reportError } from "../../lib/reportError";
-import { isUserIgnored, setUserIgnored } from "../../stores/ignoredUsers";
-import { startDm } from "./startDm";
+import { openProfileCard, profileAnchorKey } from "./profile/profileCard";
 import { type MemberEntry, useMemberList } from "./useMemberList";
 
 type FlatItem =
@@ -51,114 +39,42 @@ const MemberRowContent: Component<{
 
 const MemberRow: Component<{
 	member: MemberEntry;
-	isSelf: boolean;
+	roomId: string;
 	/** Fail-closed avatar state, owned by the list - a typing notification
 	 *  re-mints this member's entry, which remounts the row. */
 	broken: FailedImageUrls;
-	onMessage: (member: MemberEntry) => void;
-	onToggleIgnore: (member: MemberEntry) => void;
 }> = (props) => {
-	const rowClass =
-		"flex w-full items-center gap-2 px-3 py-1.5 text-text-secondary hover:bg-surface-2/50";
-	const isIgnored = () => isUserIgnored(props.member.userId);
-
 	return (
-		<Show
-			when={!props.isSelf}
-			fallback={
-				<div class={rowClass}>
-					<MemberRowContent member={props.member} broken={props.broken} />
-				</div>
+		<button
+			type="button"
+			class="flex w-full items-center gap-2 px-3 py-1.5 text-text-secondary hover:bg-surface-2/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
+			aria-label={`View profile of ${props.member.displayName}`}
+			// The open card re-resolves its anchor to the re-minted row by
+			// this key (typing/profile events re-mint entries constantly).
+			data-profile-anchor={profileAnchorKey(props.roomId, props.member.userId)}
+			onClick={(e) =>
+				openProfileCard({
+					userId: props.member.userId,
+					roomId: props.roomId,
+					anchor: e.currentTarget,
+				})
 			}
 		>
-			<DropdownMenu>
-				<DropdownMenu.Trigger
-					class={`${rowClass} focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover`}
-					aria-label={`Actions for ${props.member.displayName}`}
-				>
-					<MemberRowContent member={props.member} broken={props.broken} />
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Portal>
-					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
-						<DropdownMenu.Item
-							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
-							onSelect={() => props.onMessage(props.member)}
-						>
-							Message
-						</DropdownMenu.Item>
-						<DropdownMenu.Item
-							class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
-							onSelect={() => props.onToggleIgnore(props.member)}
-						>
-							{isIgnored() ? "Unblock" : "Block"}
-						</DropdownMenu.Item>
-					</DropdownMenu.Content>
-				</DropdownMenu.Portal>
-			</DropdownMenu>
-		</Show>
+			<MemberRowContent member={props.member} broken={props.broken} />
+		</button>
 	);
 };
 
 const MemberList: Component<{ roomId: string }> = (props) => {
-	const { client, optimisticallyMarkJoined } = useClient();
+	const { client } = useClient();
 	// Fail-closed avatars, keyed by URL at the list level: a typing
 	// notification re-mints that member's entry, so the row remounts and
 	// per-row error state would re-paint the broken image (#457).
 	const brokenAvatars = createFailedImageUrls();
-	const navigate = useNavigate();
 	const { groups, memberCount, loading } = useMemberList(
 		client,
 		() => props.roomId,
 	);
-
-	const selfId = createMemo(() => client.getUserId());
-	const [dmError, setDmError] = createSignal<string | null>(null);
-	const [startingDm, setStartingDm] = createSignal(false);
-
-	let mounted = true;
-	onCleanup(() => {
-		mounted = false;
-	});
-
-	const handleMessage = async (member: MemberEntry): Promise<void> => {
-		if (startingDm()) return;
-		setDmError(null);
-		setStartingDm(true);
-		try {
-			const { roomId } = await startDm(client, member.userId);
-			if (!mounted) return;
-			optimisticallyMarkJoined(roomId, {
-				name: member.displayName,
-				avatarUrl: member.avatarUrl,
-				isDirect: true,
-			});
-			navigate(`/dm/${encodeURIComponent(roomId)}`);
-		} catch (err) {
-			if (!mounted) return;
-			setDmError(
-				err instanceof Error
-					? err.message
-					: "Couldn't start the conversation. Please try again.",
-			);
-		} finally {
-			if (mounted) setStartingDm(false);
-		}
-	};
-
-	const handleToggleIgnore = async (member: MemberEntry): Promise<void> => {
-		const ignoring = !isUserIgnored(member.userId);
-		try {
-			await setUserIgnored(client, member.userId, ignoring);
-		} catch (err) {
-			// The dropdown closes on select, leaving no inline surface - toast.
-			reportError(err, {
-				logLabel: "Toggle ignore failed",
-				userMessage: ignoring
-					? `Couldn't block ${member.displayName}. Try again.`
-					: `Couldn't unblock ${member.displayName}. Try again.`,
-			});
-		}
-	};
 
 	// Cache flat-item wrappers so item references stay stable across refreshes
 	// when the underlying data hasn't changed. Virtua + Solid's <For> keys by
@@ -229,15 +145,6 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 				</span>
 			</div>
 
-			<Show when={dmError()}>
-				<p
-					class="border-b border-border-subtle bg-danger-bg/30 px-4 py-2 text-xs text-danger-text"
-					role="alert"
-				>
-					{dmError()}
-				</p>
-			</Show>
-
 			{/* Virtualized member list */}
 			<div ref={scrollRef} class="flex-1 overflow-y-auto">
 				<Show
@@ -270,12 +177,8 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 										{(m) => (
 											<MemberRow
 												member={m().member}
+												roomId={props.roomId}
 												broken={brokenAvatars}
-												isSelf={m().member.userId === selfId()}
-												onMessage={(member) => void handleMessage(member)}
-												onToggleIgnore={(member) =>
-													void handleToggleIgnore(member)
-												}
 											/>
 										)}
 									</Match>

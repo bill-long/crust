@@ -9,6 +9,10 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import "../../../styles/global.css";
+import {
+	clearMentionIntent,
+	requestMention,
+} from "../../../stores/composerIntents";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
 
@@ -38,7 +42,10 @@ function makeClient() {
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-afterEach(() => cleanup());
+afterEach(() => {
+	cleanup();
+	clearMentionIntent();
+});
 
 function typeAndSend(container: HTMLElement, text: string): void {
 	const ta = container.querySelector("textarea");
@@ -206,5 +213,46 @@ describe("Composer thread sends", () => {
 		expect(roomId).toBe(ROOM);
 		expect(threadId).toBe("$root");
 		expect(type).toBe("org.matrix.msc3381.poll.start");
+	});
+	it("delivers a profile-card mention intent to the matching composer only (#444)", async () => {
+		const client = makeClient();
+		const { container } = render(() => (
+			<TestClientProvider client={client}>
+				<div data-composer="room">
+					<Composer roomId={ROOM} packs={[]} />
+				</div>
+				<div data-composer="thread">
+					<Composer roomId={ROOM} threadRootId="$root" packs={[]} />
+				</div>
+			</TestClientProvider>
+		));
+		const roomTa = container.querySelector<HTMLTextAreaElement>(
+			'[data-composer="room"] textarea',
+		);
+		const threadTa = container.querySelector<HTMLTextAreaElement>(
+			'[data-composer="thread"] textarea',
+		);
+		if (!roomTa || !threadTa) throw new Error("textareas not found");
+
+		requestMention({
+			roomId: ROOM,
+			threadRootId: null,
+			userId: "@alice:example.com",
+			name: "Alice",
+		});
+		await tick();
+		expect(roomTa.value).toBe("@Alice ");
+		expect(threadTa.value).toBe("");
+
+		requestMention({
+			roomId: ROOM,
+			threadRootId: "$root",
+			userId: "@bob:example.com",
+			name: "Bob",
+		});
+		await tick();
+		expect(threadTa.value).toBe("@Bob ");
+		// The room composer kept only its own mention.
+		expect(roomTa.value).toBe("@Alice ");
 	});
 });

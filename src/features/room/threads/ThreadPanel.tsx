@@ -70,6 +70,10 @@ export const ThreadPanel: Component<{
 			tabindex="-1"
 			class="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-hidden"
 			aria-label="Thread"
+			// Marks this subtree for the document-level pill click router: a
+			// profile card opened from a pill in here targets this thread's
+			// composer for Mention (#444).
+			data-thread-root={props.threadId}
 			onKeyDown={(e) => {
 				// defaultPrevented: the composer's own Escape handling (cancel
 				// reply/edit) marks the event handled; the first Escape must

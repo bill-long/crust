@@ -45,6 +45,7 @@ import {
 	capStoreToRealLimit,
 	isSyntheticEventId,
 	mergeRowsByTimestamp,
+	senderProfileFields,
 	syntheticCallLeaveId,
 } from "./timelineHelpers";
 import type {
@@ -344,7 +345,8 @@ export function useTimeline(
 	 *  re-projection, only rows whose sender actually changed are visited,
 	 *  and the fine-grained store writes only touch fields whose values
 	 *  differ - so it can run unconditionally on member-state churn. The
-	 *  name rule mirrors eventToTimelineEvent (`member?.name ?? sender`). */
+	 *  fields come from senderProfileFields, the same rule the projection
+	 *  snapshots, so the two can't drift. */
 	function refreshSenderProfiles(
 		room: Room,
 		changedIds: ReadonlySet<string>,
@@ -360,11 +362,7 @@ export function useTimeline(
 		const profileFor = (senderId: string) => {
 			let p = profiles.get(senderId);
 			if (!p) {
-				const member = room.getMember(senderId);
-				p = {
-					name: member?.name ?? senderId,
-					avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48),
-				};
+				p = senderProfileFields(client, room.getMember(senderId), senderId);
 				profiles.set(senderId, p);
 			}
 			return p;

@@ -8,7 +8,6 @@ import {
 	THREAD_RELATION_TYPE,
 } from "matrix-js-sdk";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
-import { avatarHttpUrl } from "../../../lib/avatar";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -29,6 +28,7 @@ import {
 	buildReplySnippet,
 	hasControlChar,
 	sanitizeMultiline,
+	senderProfileFields,
 } from "./timelineHelpers";
 import type { ReactionAggregate, TimelineEvent } from "./timelineTypes";
 
@@ -427,20 +427,16 @@ export function eventToTimelineEvent(
 	// live via the watcher's ThreadEvent subscription.
 	const thread = threadWatcher?.getSummary(event, room) ?? null;
 
-	// Sender avatar for the message-group header, from current room member
-	// state. The optional call tolerates stripped test doubles without the
-	// method (see stateNotice.test.ts fixtures, which share this projection).
-	const senderAvatarUrl = avatarHttpUrl(
-		client,
-		member?.getMxcAvatarUrl?.(),
-		48,
-	);
+	// Sender name + avatar for the message-group header, from current room
+	// member state via the ONE shared rule (refreshSenderProfiles patches
+	// the same fields on member churn and must agree).
+	const senderProfile = senderProfileFields(client, member, sender);
 
 	return {
 		eventId: event.getId() ?? "",
 		senderId: sender,
-		senderName: member?.name ?? sender,
-		senderAvatarUrl,
+		senderName: senderProfile.name,
+		senderAvatarUrl: senderProfile.avatarUrl,
 		timestamp: event.getTs(),
 		type: event.getType(),
 		msgtype: typeof content.msgtype === "string" ? content.msgtype : "",

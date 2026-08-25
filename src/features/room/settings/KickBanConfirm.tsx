@@ -1,0 +1,44 @@
+import type { Component } from "solid-js";
+import { ConfirmDialog } from "./ConfirmDialog";
+import type { MemberAction } from "./useModerationActions";
+
+/**
+ * The kick/ban confirmation dialog, shared by the settings Members tab
+ * and the profile card host. `onConfirm` may reject - ConfirmDialog then
+ * renders the error inline instead of closing first.
+ */
+const KickBanConfirm: Component<{
+	/** The parked kick/ban action; null renders nothing. */
+	action: () => MemberAction | null;
+	onClose: () => void;
+	onConfirm: (action: MemberAction) => Promise<void>;
+}> = (props) => {
+	return (
+		<ConfirmDialog
+			open={() => props.action() !== null}
+			onClose={props.onClose}
+			title={
+				props.action()?.kind === "ban"
+					? `Ban ${props.action()?.displayName}?`
+					: `Kick ${props.action()?.displayName}?`
+			}
+			body={
+				<p>
+					{props.action()?.kind === "ban"
+						? "They won't be able to rejoin unless unbanned."
+						: "They can rejoin if the room is public or someone re-invites them."}
+				</p>
+			}
+			confirmLabel={props.action()?.kind === "ban" ? "Ban" : "Kick"}
+			destructive
+			onConfirm={async () => {
+				const action = props.action();
+				if (!action) return;
+				await props.onConfirm(action);
+				props.onClose();
+			}}
+		/>
+	);
+};
+
+export { KickBanConfirm };

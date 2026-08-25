@@ -8,6 +8,7 @@ import {
 	onCleanup,
 	onMount,
 	Show,
+	untrack,
 } from "solid-js";
 import { unwrap } from "solid-js/store";
 import { useClient } from "../../../client/client";
@@ -17,6 +18,10 @@ import {
 	escapeHtml,
 	formatMarkdown,
 } from "../../../lib/markdown";
+import {
+	consumeMentionIntentFor,
+	mentionIntent,
+} from "../../../stores/composerIntents";
 import { pushNotice } from "../../../stores/notices";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -129,6 +134,7 @@ const Composer: Component<{
 		detectMention,
 		reconcileMentions,
 		onMentionSelect,
+		insertMention,
 	} = useMentions({
 		client,
 		roomId: () => props.roomId,
@@ -137,6 +143,23 @@ const Composer: Component<{
 		setText,
 		autoResize: () => autoResize(),
 	});
+
+	// Mention intents from the profile card (stores/composerIntents.ts):
+	// matched on room AND thread target so the room composer and a thread
+	// panel's composer never both insert, consumed once, TTL'd - all of
+	// which lives in consumeMentionIntentFor. The insert itself is
+	// untracked - it reads text()/refs that must not become dependencies
+	// of this effect.
+	createEffect(() => {
+		mentionIntent();
+		const intent = consumeMentionIntentFor(
+			props.roomId,
+			props.threadRootId ?? null,
+		);
+		if (!intent) return;
+		untrack(() => insertMention(intent.userId, intent.name));
+	});
+
 	const [emojiPickerOpen, setEmojiPickerOpen] = createSignal(false);
 	const [gifPickerOpen, setGifPickerOpen] = createSignal(false);
 	const [pollDialogOpen, setPollDialogOpen] = createSignal(false);

@@ -2,11 +2,11 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, onCleanup, onMount } from "solid-js";
 import { basePrefix, stripBasePath } from "../../app/basePath";
+import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import { parseMatrixUri } from "../../lib/matrixUri";
-import { reportError } from "../../lib/reportError";
 import { requestJoinDialog } from "../../stores/joinDialog";
-import { findExistingDmRoom, readDirectMap, startDm } from "./startDm";
+import { openProfileCard } from "./profile/profileCard";
 
 /**
  * Resolve a room ID or alias to the ID of a room the user has JOINED, or
@@ -49,14 +49,15 @@ export function findJoinedRoomId(
  *   - event permalink              -> navigate + `?event=` deep link, which
  *                                     RoomPane turns into a timeline jump
  *   - room link to an unknown room -> join-room dialog, prefilled
- *   - user link                    -> start (or reuse) a DM with that user
+ *   - user link                    -> profile card anchored to the pill
+ *                                     (#444; Open DM lives on the card)
  *
  * Anything that isn't a Matrix permalink, and clicks with modifiers or
  * non-left buttons, fall through to the anchor's default external-open
  * behavior.
  */
 const PermalinkRouting: Component = () => {
-	const { client, summaries, optimisticallyMarkJoined } = useClient();
+	const { client, summaries } = useClient();
 	const navigate = useNavigate();
 	const location = useLocation();
 
@@ -77,34 +78,11 @@ const PermalinkRouting: Component = () => {
 		return `/home/${encoded}`;
 	};
 
-	const openDm = async (userId: string): Promise<void> => {
-		try {
-			// Fast path: a DM the user has already joined opens with no
-			// network round-trip, matching the <16ms interaction budget.
-			// Invite-fallback rooms and fresh creations still await startDm.
-			const existing = findExistingDmRoom(
-				client,
-				userId,
-				readDirectMap(client),
-			);
-			if (existing && client.getRoom(existing)?.getMyMembership() === "join") {
-				navigate(`/dm/${encodeURIComponent(existing)}`);
-				return;
-			}
-			const { roomId } = await startDm(client, userId);
-			optimisticallyMarkJoined(roomId, {
-				name: userId,
-				avatarUrl: null,
-				isDirect: true,
-			});
-			navigate(`/dm/${encodeURIComponent(roomId)}`);
-		} catch (err) {
-			reportError(err, {
-				userMessage: "Couldn't start the conversation. Please try again.",
-				logLabel: "Failed to open DM from permalink",
-			});
-		}
-	};
+	// Room the user is currently viewing (null on non-room routes), from
+	// the router's own matched params rather than a re-parse of the path -
+	// safeDecode included. Gives a pill's profile card its role/moderation
+	// context and Mention target.
+	const params = useDecodedParams<{ roomId?: string }>();
 
 	const onDocumentClick = (e: MouseEvent): void => {
 		if (e.defaultPrevented) return;
@@ -119,17 +97,23 @@ const PermalinkRouting: Component = () => {
 		if (!href) return;
 		const target = parseMatrixUri(href);
 		if (!target) return;
-		if (target.kind === "user" && target.userId === client.getUserId()) {
-			// Own pill: no self-DM and no in-app target while there's no
-			// profile popover - leave the click unintercepted so it opens
-			// matrix.to externally like any non-permalink.
-			return;
-		}
 		// It's a Matrix permalink - suppress the external open and route it.
 		e.preventDefault();
 
 		if (target.kind === "user") {
-			void openDm(target.userId);
+			// A user pill opens the profile card anchored to the pill (#444)
+			// - including the user's own pill. Open DM lives on the card. A
+			// pill inside the thread panel targets that thread's composer for
+			// Mention (the panel marks its subtree with data-thread-root).
+			openProfileCard({
+				userId: target.userId,
+				roomId: params.roomId ?? null,
+				threadRootId:
+					anchor
+						.closest("[data-thread-root]")
+						?.getAttribute("data-thread-root") ?? null,
+				anchor: anchor as HTMLElement,
+			});
 			return;
 		}
 

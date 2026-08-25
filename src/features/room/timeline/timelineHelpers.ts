@@ -1,9 +1,34 @@
-import { M_POLL_START, type MatrixEvent } from "matrix-js-sdk";
+import {
+	M_POLL_START,
+	type MatrixClient,
+	type MatrixEvent,
+	type RoomMember,
+} from "matrix-js-sdk";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import { pollPreviewText } from "../../../lib/pollCopy";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import { isVoiceMessageContent } from "../../../lib/voiceMessage";
 import type { SyntheticCallLeave } from "./stateNotice";
 import type { TimelineEvent } from "./timelineTypes";
+
+/**
+ * Sender profile fields projected into timeline rows: display name and
+ * 48px-crop avatar URL from current member state. ONE definition on
+ * purpose - `eventToTimelineEvent` snapshots these at projection time
+ * and `refreshSenderProfiles` re-derives them on member churn, and the
+ * two must never drift. The optional call tolerates stripped test
+ * doubles without `getMxcAvatarUrl`.
+ */
+export function senderProfileFields(
+	client: MatrixClient,
+	member: RoomMember | null | undefined,
+	senderId: string,
+): { name: string; avatarUrl: string | null } {
+	return {
+		name: member?.name ?? senderId,
+		avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48),
+	};
+}
 
 // ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F) — the single
 // boundary both `hasControlChar` (reject) and `stripControlChars` (sanitize)

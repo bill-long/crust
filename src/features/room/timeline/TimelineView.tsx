@@ -21,6 +21,7 @@ import {
 } from "../../emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../CopyLinkFallbackDialog";
 import { Composer } from "../composer/Composer";
+import { openProfileCard } from "../profile/profileCard";
 import {
 	mainTimelineSource,
 	threadTimelineSource,
@@ -128,6 +129,15 @@ const TimelineView: Component<{
 	// recycling a row and is shared across rows rendering the same avatar
 	// (#457).
 	const brokenAvatars = createFailedImageUrls();
+	// One stable handler for every virtualized row (#444). Reads props
+	// lazily, so it stays correct across thread changes.
+	const onOpenProfile = (userId: string, anchor: HTMLElement): void =>
+		openProfileCard({
+			userId,
+			roomId: props.roomId,
+			threadRootId: props.thread?.threadId ?? null,
+			anchor,
+		});
 	// Memoized: useTimeline reads source() in hot per-event paths, so the
 	// source object must be stable per thread change, not per call.
 	const timelineSource = createMemo(() =>
@@ -1079,6 +1089,7 @@ const TimelineView: Component<{
 												<TimelineItem
 													event={event}
 													brokenAvatars={brokenAvatars}
+													onOpenProfile={onOpenProfile}
 													showHeader={shouldShowHeader(events, indexAcc())}
 													isOwnMessage={event.senderId === myUserId}
 													canPin={props.canPin}
