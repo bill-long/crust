@@ -60,7 +60,13 @@ export function openProfileCard(
 		closeProfileCard();
 		return;
 	}
-	setProfileCardRequest({ threadRootId: null, ...request });
+	// Normalize explicitly: a caller passing `threadRootId: undefined`
+	// (from a `string | undefined` source) must still store null, or the
+	// composer's strict-equality target match would never fire.
+	setProfileCardRequest({
+		...request,
+		threadRootId: request.threadRootId ?? null,
+	});
 }
 
 export function closeProfileCard(): void {

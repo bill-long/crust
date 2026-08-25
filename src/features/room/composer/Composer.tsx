@@ -19,8 +19,7 @@ import {
 	formatMarkdown,
 } from "../../../lib/markdown";
 import {
-	clearMentionIntent,
-	MENTION_INTENT_TTL_MS,
+	consumeMentionIntentFor,
 	mentionIntent,
 } from "../../../stores/composerIntents";
 import { pushNotice } from "../../../stores/notices";
@@ -145,21 +144,19 @@ const Composer: Component<{
 		autoResize: () => autoResize(),
 	});
 
-	// Mention intents from the profile card (stores/composerIntents.ts).
-	// Matched on room AND thread target so the room composer and a thread
-	// panel's composer never both insert, and consumed once so a remount
-	// of the same room's composer doesn't replay a stale intent. The
-	// insert itself is untracked - it reads text()/refs that must not
-	// become dependencies of this effect.
+	// Mention intents from the profile card (stores/composerIntents.ts):
+	// matched on room AND thread target so the room composer and a thread
+	// panel's composer never both insert, consumed once, TTL'd - all of
+	// which lives in consumeMentionIntentFor. The insert itself is
+	// untracked - it reads text()/refs that must not become dependencies
+	// of this effect.
 	createEffect(() => {
-		const intent = mentionIntent();
+		mentionIntent();
+		const intent = consumeMentionIntentFor(
+			props.roomId,
+			props.threadRootId ?? null,
+		);
 		if (!intent) return;
-		if (intent.roomId !== props.roomId) return;
-		if (intent.threadRootId !== (props.threadRootId ?? null)) return;
-		clearMentionIntent();
-		// An intent nothing consumed at fire time (its composer had just
-		// unmounted) must not replay into a composer mounted much later.
-		if (Date.now() - intent.at > MENTION_INTENT_TTL_MS) return;
 		untrack(() => insertMention(intent.userId, intent.name));
 	});
 

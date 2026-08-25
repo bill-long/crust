@@ -40,10 +40,27 @@ export function requestMention(intent: Omit<MentionIntent, "at">): void {
 }
 
 /**
- * Consume the pending intent. The matching composer calls this after
- * inserting so a later remount of the same room's composer (room
- * switch and back) doesn't replay a stale intent.
+ * Consume the pending intent if it targets the given composer. Returns
+ * null (leaving the intent in place) on a room/thread mismatch, and
+ * consumes-but-drops an expired intent - one nothing claimed at fire
+ * time must not replay into a composer mounted much later. The match,
+ * consume-once, and TTL rules live here so they are testable apart from
+ * the composer.
  */
+export function consumeMentionIntentFor(
+	roomId: string,
+	threadRootId: string | null,
+): MentionIntent | null {
+	const intent = mentionIntent();
+	if (!intent) return null;
+	if (intent.roomId !== roomId) return null;
+	if (intent.threadRootId !== threadRootId) return null;
+	setMentionIntent(null);
+	if (Date.now() - intent.at > MENTION_INTENT_TTL_MS) return null;
+	return intent;
+}
+
+/** Test hook / hard reset. */
 export function clearMentionIntent(): void {
 	setMentionIntent(null);
 }

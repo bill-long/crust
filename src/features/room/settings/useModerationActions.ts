@@ -30,6 +30,10 @@ export async function performKickOrBan(
 		await client.kick(roomId, action.userId);
 	} else if (action.kind === "ban") {
 		await client.ban(roomId, action.userId);
+	} else {
+		// Fail fast: silently closing the confirm dialog without acting
+		// would mask a routing bug (only kick/ban ever park for confirm).
+		throw new Error(`Not a kick/ban action: ${action.kind}`);
 	}
 }
 
