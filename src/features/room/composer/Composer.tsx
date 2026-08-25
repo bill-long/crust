@@ -46,6 +46,7 @@ import {
 	createVoiceRecorder,
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
+import { parseSlashCommand } from "./slashCommands";
 import { useAttachments } from "./useAttachments";
 import { useMentions } from "./useMentions";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
@@ -683,18 +684,26 @@ const Composer: Component<{
 			// Otherwise fall through to send the trailing text message.
 		}
 
-		const { body, formatted_body } = formatMarkdown(
-			msg,
-			currentMentions,
-			emoji,
-		);
+		// Slash commands parse on the raw draft, before markdown (#448).
+		const command = parseSlashCommand(msg);
+		const { body, formatted_body } = command.plain
+			? { body: command.text, formatted_body: null }
+			: formatMarkdown(command.text, currentMentions, emoji);
+		// /spoiler wraps the whole formatted message; the plain body keeps
+		// the text (per MSC2010, the fallback body is not hidden).
+		const formattedFinal = command.spoiler
+			? `<span data-mx-spoiler>${
+					formatted_body ?? escapeHtml(body).replace(/\n/g, "<br>")
+				}</span>`
+			: formatted_body;
 		const content = buildTextMessageContent(
 			body,
-			formatted_body,
+			formattedFinal,
 			currentMentions,
 			replyTo && !replyConsumed ? replyTo : null,
 			roomId,
 			client.getUserId() ?? "",
+			command.msgtype,
 		);
 
 		setSending(true);

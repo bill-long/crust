@@ -153,3 +153,70 @@ describe("MessageBody rich-reply fallback", () => {
 		expect(container.textContent).toContain("a genuine quote");
 	});
 });
+
+describe("MessageBody spoilers (MSC2010)", () => {
+	function renderFormatted(formattedBody: string, body = "fallback") {
+		const { container } = render(() => (
+			<MessageBody
+				body={body}
+				format="org.matrix.custom.html"
+				formattedBody={formattedBody}
+				isEdited={false}
+				client={client}
+				shortcodeLookup={new Map()}
+			/>
+		));
+		return container;
+	}
+
+	it("renders data-mx-spoiler as a hidden click-to-reveal control", () => {
+		const c = renderFormatted("before <span data-mx-spoiler>secret</span>");
+		const spoiler = c.querySelector(".spoiler");
+		expect(spoiler).not.toBeNull();
+		expect(spoiler?.getAttribute("role")).toBe("button");
+		expect(spoiler?.getAttribute("tabindex")).toBe("0");
+		expect(spoiler?.getAttribute("aria-expanded")).toBe("false");
+		expect(spoiler?.getAttribute("aria-label")).toBe("Spoiler");
+		const content = spoiler?.querySelector(".spoiler-content");
+		expect(content?.getAttribute("aria-hidden")).toBe("true");
+		expect(content?.textContent).toBe("secret");
+	});
+
+	it("carries the spoiler reason into the accessible label", () => {
+		const c = renderFormatted(
+			'<span data-mx-spoiler="movie ending">secret</span>',
+		);
+		const spoiler = c.querySelector(".spoiler");
+		expect(spoiler?.getAttribute("aria-label")).toBe("Spoiler: movie ending");
+	});
+
+	it("reveals on click (one-way) and unhides the content", () => {
+		const c = renderFormatted("<span data-mx-spoiler>secret</span>");
+		const content = c.querySelector<HTMLElement>(".spoiler-content");
+		content?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		const spoiler = c.querySelector(".spoiler");
+		expect(spoiler?.classList.contains("revealed")).toBe(true);
+		expect(spoiler?.getAttribute("aria-expanded")).toBe("true");
+		expect(
+			spoiler?.querySelector(".spoiler-content")?.getAttribute("aria-hidden"),
+		).toBeNull();
+	});
+
+	it("reveals from the keyboard with Enter", () => {
+		const c = renderFormatted("<span data-mx-spoiler>secret</span>");
+		const spoiler = c.querySelector<HTMLElement>(".spoiler");
+		spoiler?.dispatchEvent(
+			new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+		);
+		expect(spoiler?.classList.contains("revealed")).toBe(true);
+	});
+
+	it("round-trips the composer's ||...|| markdown into a spoiler control", () => {
+		const c = renderComposed("the killer is ||the butler||");
+		const spoiler = c.querySelector(".spoiler");
+		expect(spoiler).not.toBeNull();
+		expect(spoiler?.querySelector(".spoiler-content")?.textContent).toBe(
+			"the butler",
+		);
+	});
+});

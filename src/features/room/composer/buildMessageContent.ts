@@ -138,9 +138,10 @@ export function applyMentions(
 }
 
 /**
- * Build the content for a plain `m.text` message. When `replyTo` is non-null,
- * merges the reply fallback (body + formatted_body prefixes), the
- * `m.in_reply_to` relation, and the parent's author into `m.mentions`.
+ * Build the content for a text-like message (`m.text` by default;
+ * `m.emote` for `/me`). When `replyTo` is non-null, merges the reply
+ * fallback (body + formatted_body prefixes), the `m.in_reply_to`
+ * relation, and the parent's author into `m.mentions`.
  */
 export function buildTextMessageContent(
 	body: string,
@@ -149,9 +150,10 @@ export function buildTextMessageContent(
 	replyTo: TimelineEvent | null,
 	roomId: string,
 	myUserId: string,
+	msgtype: "m.text" | "m.emote" = "m.text",
 ): Record<string, unknown> {
 	const content: Record<string, unknown> = {
-		msgtype: "m.text",
+		msgtype,
 		body,
 	};
 	if (formattedBody) {

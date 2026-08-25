@@ -160,7 +160,9 @@ function formatInline(line: string, ctx: InlineContext): string {
 	}
 
 	// Emphasis on the escaped text. Bold before italic so `**x**` wins.
+	// Spoilers first so `||**x**||` nests emphasis inside the span.
 	const beforeEmphasis = s;
+	s = s.replace(/\|\|(.+?)\|\|/g, "<span data-mx-spoiler>$1</span>");
 	s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 	s = s.replace(/~~(.+?)~~/g, "<del>$1</del>");
 	s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");

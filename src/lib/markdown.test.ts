@@ -189,3 +189,22 @@ describe("formatMarkdown — mixed block + text", () => {
 		expect(html("intro\n# Title")).toBe("intro<h1>Title</h1>");
 	});
 });
+
+describe("formatMarkdown — spoilers", () => {
+	it("renders ||text|| as a data-mx-spoiler span", () => {
+		expect(html("a ||hidden|| b")).toBe(
+			"a <span data-mx-spoiler>hidden</span> b",
+		);
+	});
+
+	it("nests emphasis inside a spoiler", () => {
+		expect(html("||**secret**||")).toBe(
+			"<span data-mx-spoiler><strong>secret</strong></span>",
+		);
+	});
+
+	it("leaves a single unpaired || alone", () => {
+		const { formatted_body } = formatMarkdown("a || b");
+		expect(formatted_body).toBeNull();
+	});
+});

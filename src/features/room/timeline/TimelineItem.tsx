@@ -1050,16 +1050,33 @@ const TimelineItem: Component<{
 														? extractGifUrl(ev.body)
 														: null;
 												if (!gifUrl) {
+													const messageBody = () => (
+														<MessageBody
+															body={ev.body}
+															format={ev.format}
+															formattedBody={ev.formattedBody}
+															isEdited={ev.isEdited}
+															client={props.client}
+															shortcodeLookup={props.shortcodeLookup}
+														/>
+													);
 													return (
 														<>
-															<MessageBody
-																body={ev.body}
-																format={ev.format}
-																formattedBody={ev.formattedBody}
-																isEdited={ev.isEdited}
-																client={props.client}
-																shortcodeLookup={props.shortcodeLookup}
-															/>
+															{/* m.emote renders Element-style as one italic
+															    "* Name action" line (#448); the emote-body
+															    class inlines MessageBody's block roots. */}
+															<Show
+																when={ev.msgtype === "m.emote"}
+																fallback={messageBody()}
+															>
+																<div class="emote-body text-sm italic text-text-secondary">
+																	<span aria-hidden="true">* </span>
+																	<span class="font-medium">
+																		{ev.senderName}
+																	</span>{" "}
+																	{messageBody()}
+																</div>
+															</Show>
 															<UrlPreviewList
 																client={props.client}
 																urls={previewUrls}

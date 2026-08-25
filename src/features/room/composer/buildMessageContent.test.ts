@@ -180,3 +180,24 @@ describe("buildTextMessageContent with a reply", () => {
 		expect(content["m.mentions"]).toBeUndefined();
 	});
 });
+
+describe("buildTextMessageContent msgtype", () => {
+	it("defaults to m.text", () => {
+		const content = buildTextMessageContent("hi", null, [], null, ROOM, ME);
+		expect(content.msgtype).toBe("m.text");
+	});
+
+	it("sends m.emote when asked (the /me path)", () => {
+		const content = buildTextMessageContent(
+			"waves",
+			null,
+			[],
+			null,
+			ROOM,
+			ME,
+			"m.emote",
+		);
+		expect(content.msgtype).toBe("m.emote");
+		expect(content.body).toBe("waves");
+	});
+});

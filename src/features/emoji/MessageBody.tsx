@@ -56,6 +56,7 @@ const ALLOWED_ATTR = [
 	"data-mx-color",
 	"data-mx-emoticon",
 	"data-mx-maths",
+	"data-mx-spoiler",
 	"color",
 	"name",
 	"target",
@@ -101,6 +102,7 @@ function sanitizeMatrixHtml(
 			"data-mx-color",
 			"data-mx-pill",
 			"data-mx-maths",
+			"data-mx-spoiler",
 		],
 		ALLOWED_URI_REGEXP,
 	});
@@ -139,6 +141,30 @@ function sanitizeMatrixHtml(
 	for (const a of div.querySelectorAll("a")) {
 		a.setAttribute("target", "_blank");
 		a.setAttribute("rel", "noopener noreferrer");
+	}
+
+	// Spoilers (MSC2010): [data-mx-spoiler] becomes a click-to-reveal
+	// control. Content moves into an inner aria-hidden wrapper so screen
+	// readers don't read it until revealed; the reveal itself is handled
+	// by MessageBody's delegated click/keydown (static innerHTML can't
+	// carry handlers). The attribute's value is the optional reason.
+	for (const spoiler of div.querySelectorAll("[data-mx-spoiler]")) {
+		if (spoiler.tagName === "IMG") continue; // emoticon guard above owns imgs
+		const reason = spoiler.getAttribute("data-mx-spoiler");
+		const content = document.createElement("span");
+		content.className = "spoiler-content";
+		content.setAttribute("aria-hidden", "true");
+		while (spoiler.firstChild) content.appendChild(spoiler.firstChild);
+		spoiler.appendChild(content);
+		spoiler.classList.add("spoiler");
+		spoiler.setAttribute("role", "button");
+		spoiler.setAttribute("tabindex", "0");
+		spoiler.setAttribute("aria-expanded", "false");
+		spoiler.setAttribute(
+			"aria-label",
+			reason ? `Spoiler: ${reason}` : "Spoiler",
+		);
+		if (reason) spoiler.setAttribute("title", `Spoiler: ${reason}`);
 	}
 
 	// Linkify bare URLs in text nodes (Crust's markdown layer doesn't
@@ -352,6 +378,31 @@ function plainTextToHtml(
 }
 
 /**
+ * One-way spoiler reveal, shared by the delegated click and keydown
+ * handlers on the rendered-HTML container. Marks the control expanded
+ * and lifts the aria-hidden off its content.
+ */
+function revealSpoiler(e: MouseEvent | KeyboardEvent): void {
+	if (
+		e instanceof KeyboardEvent &&
+		e.key !== "Enter" &&
+		e.key !== " " &&
+		e.key !== "Spacebar"
+	) {
+		return;
+	}
+	const target = e.target;
+	if (!(target instanceof Element)) return;
+	const spoiler = target.closest(".spoiler");
+	if (!spoiler || spoiler.classList.contains("revealed")) return;
+	e.preventDefault();
+	e.stopPropagation();
+	spoiler.classList.add("revealed");
+	spoiler.setAttribute("aria-expanded", "true");
+	spoiler.querySelector(".spoiler-content")?.removeAttribute("aria-hidden");
+}
+
+/**
  * Renders a message body: sanitized HTML for formatted_body, or plain text
  * with :shortcode: replacement for custom emoji.
  */
@@ -391,7 +442,15 @@ const MessageBody: Component<{
 		>
 			{(html) => (
 				<div class="message-body break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
-					<div innerHTML={html()} />
+					{/* Delegated spoiler reveal: the sanitized innerHTML can't
+					    carry handlers, so clicks/keys on .spoiler controls are
+					    caught here. Reveal is one-way (Discord-style). */}
+					{/* biome-ignore lint/a11y/noStaticElementInteractions: passive delegate for the sanitizer-generated role="button" spoiler spans inside the static innerHTML, which cannot carry handlers themselves */}
+					<div
+						innerHTML={html()}
+						onClick={revealSpoiler}
+						onKeyDown={revealSpoiler}
+					/>
 					<Show when={props.isEdited}>
 						<span class="ml-1 text-xs text-text-disabled">(edited)</span>
 					</Show>
