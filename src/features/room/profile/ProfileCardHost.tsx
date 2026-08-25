@@ -2,21 +2,24 @@ import { Popover } from "@kobalte/core/popover";
 import { useNavigate } from "@solidjs/router";
 import {
 	type Component,
-	createEffect,
 	createMemo,
 	createResource,
 	createSignal,
+	onCleanup,
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { createImageFallback } from "../../../lib/imageFallback";
+import { reportError } from "../../../lib/reportError";
 import { requestMention } from "../../../stores/composerIntents";
 import { isUserIgnored, setUserIgnored } from "../../../stores/ignoredUsers";
-import { ConfirmDialog } from "../settings/ConfirmDialog";
+import { KickBanConfirm } from "../settings/KickBanConfirm";
 import { effectiveUsersDefault } from "../settings/powerLevelPresets";
 import {
-	type ModerationActions,
+	type MemberAction,
+	performKickOrBan,
 	useModerationActions,
 } from "../settings/useModerationActions";
 import { findExistingDmRoom, readDirectMap, startDm } from "../startDm";
@@ -41,12 +44,37 @@ const DANGER_ACTION_CLASS =
  */
 const ProfileCardPopover: Component<{
 	request: ProfileCardRequest;
-	moderation: ModerationActions;
+	/** Park a kick/ban for the host's confirm dialog (which outlives the
+	 *  popover) with the room captured at park time. */
+	onKickBan: (action: MemberAction, roomId: string) => void;
 }> = (props) => {
 	const { client, optimisticallyMarkJoined } = useClient();
 	const navigate = useNavigate();
 	const req = props.request;
 	const isSelf = () => client.getUserId() === req.userId;
+	// Scoped to this popover instance (not the session-long host): the
+	// PL-write chain, error state, and the client-wide listeners the
+	// permission machinery registers all live only while a card for THIS
+	// room is open - a fresh card can never see another room's chain or
+	// stale error.
+	const moderation = useModerationActions(client, () => req.roomId ?? "");
+
+	// Async flows below (startDm) may resolve after the keyed popover is
+	// disposed (Esc, click-away, room switch). They must not navigate or
+	// write state for a card the user already dismissed.
+	let disposed = false;
+	onCleanup(() => {
+		disposed = true;
+	});
+
+	// The anchor is a live element in a list that re-mints rows (typing
+	// notifications, virtua recycling, room switches). When it leaves the
+	// DOM the popover would reposition against a zero rect, so close
+	// instead - Discord does the same on scroll-away.
+	const detachWatch = setInterval(() => {
+		if (!req.anchor.isConnected) closeProfileCard();
+	}, 300);
+	onCleanup(() => clearInterval(detachWatch));
 
 	const member = createMemo(() =>
 		req.roomId
@@ -82,7 +110,7 @@ const ProfileCardPopover: Component<{
 	// promote/demote fired from this card updates the label in place.
 	const targetPowerLevel = createMemo<number | null>(() => {
 		if (!req.roomId || !member()) return null;
-		const pl = props.moderation.plContent();
+		const pl = moderation.plContent();
 		const raw = pl?.users?.[req.userId];
 		if (typeof raw === "number" && Number.isFinite(raw)) return raw;
 		return effectiveUsersDefault(pl);
@@ -114,6 +142,10 @@ const ProfileCardPopover: Component<{
 				return;
 			}
 			const { roomId } = await startDm(client, req.userId);
+			// A card dismissed mid-flight must not yank the user into the
+			// DM they cancelled (the room itself was still created; it
+			// surfaces in the DM list via sync).
+			if (disposed) return;
 			optimisticallyMarkJoined(roomId, {
 				name: displayName(),
 				avatarUrl: avatarUrl(),
@@ -122,13 +154,17 @@ const ProfileCardPopover: Component<{
 			navigate(`/dm/${encodeURIComponent(roomId)}`);
 			closeProfileCard();
 		} catch (err) {
+			// Console-only: the card's inline banner is the user surface.
+			reportError(err, { logLabel: "Start DM from profile card failed" });
+			if (disposed) return;
 			setActionErrorLocal(
-				err instanceof Error
-					? err.message
-					: "Couldn't start the conversation. Please try again.",
+				userFacingErrorMessage(
+					err,
+					"Couldn't start the conversation. Please try again.",
+				),
 			);
 		} finally {
-			setDmPending(false);
+			if (!disposed) setDmPending(false);
 		}
 	};
 
@@ -149,7 +185,10 @@ const ProfileCardPopover: Component<{
 		try {
 			await setUserIgnored(client, req.userId, ignoring);
 			closeProfileCard();
-		} catch {
+		} catch (err) {
+			// Console-only: the card's inline banner is the user surface.
+			reportError(err, { logLabel: "Toggle ignore failed" });
+			if (disposed) return;
 			setActionErrorLocal(
 				ignoring
 					? `Couldn't block ${displayName()}. Try again.`
@@ -169,14 +208,11 @@ const ProfileCardPopover: Component<{
 				any: false,
 			};
 		}
-		const promoteMod = props.moderation.canPromoteMod(req.userId);
-		const promoteAdmin = props.moderation.canPromoteAdmin(req.userId);
-		const demote = props.moderation.canDemote(
-			req.userId,
-			targetPowerLevel() ?? 0,
-		);
-		const kick = props.moderation.perms.canKickTarget(req.userId);
-		const ban = props.moderation.perms.canBanTarget(req.userId);
+		const promoteMod = moderation.canPromoteMod(req.userId);
+		const promoteAdmin = moderation.canPromoteAdmin(req.userId);
+		const demote = moderation.canDemote(req.userId, targetPowerLevel() ?? 0);
+		const kick = moderation.perms.canKickTarget(req.userId);
+		const ban = moderation.perms.canBanTarget(req.userId);
 		return {
 			promoteMod,
 			promoteAdmin,
@@ -190,14 +226,20 @@ const ProfileCardPopover: Component<{
 	const moderate = (
 		kind: "promote-mod" | "promote-admin" | "demote" | "kick" | "ban",
 	): void => {
-		props.moderation.requestAction({
+		if (!req.roomId) return;
+		const action: MemberAction = {
 			kind,
 			userId: req.userId,
 			displayName: displayName(),
-		});
-		// Kick/Ban continue in the host's ConfirmDialog; the popover
-		// closes so the two focus traps never coexist.
-		if (kind === "kick" || kind === "ban") closeProfileCard();
+		};
+		if (kind === "kick" || kind === "ban") {
+			// Kick/Ban continue in the host's ConfirmDialog; the popover
+			// closes so the two focus traps never coexist.
+			props.onKickBan(action, req.roomId);
+			closeProfileCard();
+			return;
+		}
+		moderation.requestAction(action);
 	};
 
 	return (
@@ -250,7 +292,7 @@ const ProfileCardPopover: Component<{
 						</div>
 					</div>
 
-					<Show when={actionErrorLocal() ?? props.moderation.actionError()}>
+					<Show when={actionErrorLocal() ?? moderation.actionError()}>
 						{(message) => (
 							<p
 								class="border-b border-border-subtle bg-danger-bg/30 px-4 py-2 text-xs text-danger-text"
@@ -357,46 +399,33 @@ const ProfileCardPopover: Component<{
  */
 const ProfileCardHost: Component = () => {
 	const { client } = useClient();
-	// The moderation room latches (never clears) so a kick/ban confirmed
-	// AFTER the card closed still targets the room the card was opened in.
-	const [moderationRoomId, setModerationRoomId] = createSignal("");
-	createEffect(() => {
-		const roomId = profileCardRequest()?.roomId;
-		if (roomId) setModerationRoomId(roomId);
-	});
-	const moderation = useModerationActions(client, moderationRoomId);
+	// Kick/Ban parked here with their room captured at park time, so the
+	// ConfirmDialog outlives the keyed popover AND can never fire against
+	// a different room than the card it came from.
+	const [pendingKickBan, setPendingKickBan] = createSignal<{
+		action: MemberAction;
+		roomId: string;
+	} | null>(null);
 
 	return (
 		<>
 			<Show when={profileCardRequest()} keyed>
 				{(request) => (
-					<ProfileCardPopover request={request} moderation={moderation} />
+					<ProfileCardPopover
+						request={request}
+						onKickBan={(action, roomId) =>
+							setPendingKickBan({ action, roomId })
+						}
+					/>
 				)}
 			</Show>
-			<ConfirmDialog
-				open={() => moderation.pendingAction() !== null}
-				onClose={() => moderation.setPendingAction(null)}
-				title={
-					moderation.pendingAction()?.kind === "ban"
-						? `Ban ${moderation.pendingAction()?.displayName}?`
-						: `Kick ${moderation.pendingAction()?.displayName}?`
-				}
-				body={
-					<p>
-						{moderation.pendingAction()?.kind === "ban"
-							? "They won't be able to rejoin unless unbanned."
-							: "They can rejoin if the room is public or someone re-invites them."}
-					</p>
-				}
-				confirmLabel={
-					moderation.pendingAction()?.kind === "ban" ? "Ban" : "Kick"
-				}
-				destructive
-				onConfirm={async () => {
-					const action = moderation.pendingAction();
-					if (!action) return;
-					await moderation.performKickOrBan(action);
-					moderation.setPendingAction(null);
+			<KickBanConfirm
+				action={() => pendingKickBan()?.action ?? null}
+				onClose={() => setPendingKickBan(null)}
+				onConfirm={async (action) => {
+					const pending = pendingKickBan();
+					if (!pending) return;
+					await performKickOrBan(client, pending.roomId, action);
 				}}
 			/>
 		</>

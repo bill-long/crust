@@ -15,11 +15,7 @@ export interface MentionIntent {
 	userId: string;
 	/** Raw display name (or user ID) - the composer normalizes it. */
 	name: string;
-	/** Monotonic id so repeated identical requests still retrigger. */
-	seq: number;
 }
-
-let seq = 0;
 
 const [mentionIntent, setMentionIntent] = createSignal<MentionIntent | null>(
 	null,
@@ -27,9 +23,10 @@ const [mentionIntent, setMentionIntent] = createSignal<MentionIntent | null>(
 
 export { mentionIntent };
 
-export function requestMention(intent: Omit<MentionIntent, "seq">): void {
-	seq += 1;
-	setMentionIntent({ ...intent, seq });
+export function requestMention(intent: MentionIntent): void {
+	// A fresh object every call: the consumer clears the signal after
+	// handling, and a new reference retriggers even an identical payload.
+	setMentionIntent({ ...intent });
 }
 
 /**

@@ -101,6 +101,40 @@ export function useMentions(deps: UseMentionsDeps) {
 		});
 	}
 
+	/** Normalize a display name for insertion: strip the leading @ of a
+	 *  userId-shaped fallback to avoid `@@user:server`. */
+	function insertableName(rawName: string, userId: string): string {
+		const trimmed = rawName.trim() || userId;
+		return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+	}
+
+	/** Record a mention, deduped by userId. On a dedupe hit the stored
+	 *  displayName is UPDATED to the just-inserted one - the entry must
+	 *  match the token now in the text, or reconcileMentions prunes it at
+	 *  send and the mention goes out unpilled (a rename between two
+	 *  inserts of the same user would otherwise strand the old name). */
+	function commitMention(userId: string, displayName: string): void {
+		setMentions((prev) => {
+			const existing = prev.findIndex((m) => m.userId === userId);
+			if (existing < 0) return [...prev, { userId, displayName }];
+			if (prev[existing].displayName === displayName) return prev;
+			const next = [...prev];
+			next[existing] = { userId, displayName };
+			return next;
+		});
+	}
+
+	/** Move the caret past the insertion and refocus the textarea. */
+	function placeCaretAfter(position: number): void {
+		requestAnimationFrame(() => {
+			const ta = deps.getTextarea();
+			if (!ta) return;
+			ta.setSelectionRange(position, position);
+			ta.focus();
+			deps.autoResize();
+		});
+	}
+
 	function onMentionSelect(member: RoomMember): void {
 		const el = deps.getTextarea();
 		if (!el) return;
@@ -112,9 +146,7 @@ export function useMentions(deps: UseMentionsDeps) {
 		if (!triggerMatch) return;
 		const atIdx = before.length - triggerMatch[2].length - 1;
 
-		const rawName = member.name?.trim() || member.userId;
-		// Strip leading @ from userId fallback to avoid @@user:server
-		const displayName = rawName.startsWith("@") ? rawName.slice(1) : rawName;
+		const displayName = insertableName(member.name ?? "", member.userId);
 		const insertion = `@${displayName} `;
 		// Replace the entire @partial token (from @ through any non-whitespace after caret)
 		const afterCaret = currentText.slice(pos);
@@ -124,22 +156,8 @@ export function useMentions(deps: UseMentionsDeps) {
 
 		deps.setText(newText);
 		setMentionQuery(null);
-
-		// Add to mentions list (deduplicate by userId)
-		setMentions((prev) => {
-			if (prev.some((m) => m.userId === member.userId)) return prev;
-			return [...prev, { userId: member.userId, displayName }];
-		});
-
-		// Move caret after inserted mention
-		requestAnimationFrame(() => {
-			const ta = deps.getTextarea();
-			if (!ta) return;
-			const newPos = atIdx + insertion.length;
-			ta.setSelectionRange(newPos, newPos);
-			ta.focus();
-			deps.autoResize();
-		});
+		commitMention(member.userId, displayName);
+		placeCaretAfter(atIdx + insertion.length);
 	}
 
 	/**
@@ -153,28 +171,12 @@ export function useMentions(deps: UseMentionsDeps) {
 		const currentText = deps.text();
 		const pos = el ? el.selectionStart : currentText.length;
 		const before = currentText.slice(0, pos);
-		// Strip leading @ from userId-shaped names to avoid @@user:server
-		const trimmedName = rawName.trim() || userId;
-		const displayName = trimmedName.startsWith("@")
-			? trimmedName.slice(1)
-			: trimmedName;
+		const displayName = insertableName(rawName, userId);
 		const pad = before.length === 0 || /\s$/.test(before) ? "" : " ";
 		const insertion = `${pad}@${displayName} `;
 		deps.setText(before + insertion + currentText.slice(pos));
-
-		setMentions((prev) => {
-			if (prev.some((m) => m.userId === userId)) return prev;
-			return [...prev, { userId, displayName }];
-		});
-
-		requestAnimationFrame(() => {
-			const ta = deps.getTextarea();
-			if (!ta) return;
-			const newPos = pos + insertion.length;
-			ta.setSelectionRange(newPos, newPos);
-			ta.focus();
-			deps.autoResize();
-		});
+		commitMention(userId, displayName);
+		placeCaretAfter(pos + insertion.length);
 	}
 
 	return {

@@ -35,6 +35,7 @@ function renderItem(event: TimelineEvent, showHeader = true) {
 			emoteLookup={new Map()}
 			packs={[]}
 			brokenAvatars={createFailedImageUrls()}
+			onOpenProfile={() => {}}
 		/>
 	));
 }

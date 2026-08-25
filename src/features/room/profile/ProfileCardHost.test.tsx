@@ -159,6 +159,52 @@ describe("ProfileCardHost (#444)", () => {
 		expect(card().textContent).toContain("Member");
 	});
 
+	it("toggles closed when the trigger row is clicked again", async () => {
+		setup();
+		await openCard("Alice");
+		fireEvent.click(screen.getByLabelText("View profile of Alice"));
+		await waitFor(() =>
+			expect(document.querySelector('[role="dialog"]')).toBeNull(),
+		);
+	});
+
+	it("opens an existing joined DM instantly, without a createRoom round-trip", async () => {
+		const { client, room } = setup();
+		const dmRoom = createMockRoom("!dm:example.com", [], []);
+		(dmRoom as unknown as { getMyMembership: () => string }).getMyMembership =
+			() => "join";
+		client.__setRooms(
+			new Map([
+				["!room:example.com", room],
+				["!dm:example.com", dmRoom],
+			]),
+		);
+		client.__setAccountData("m.direct", {
+			"@alice:example.com": ["!dm:example.com"],
+		});
+		await openCard("Alice");
+		fireEvent.click(screen.getByText("Message"));
+		await waitFor(() =>
+			expect(navigateMock).toHaveBeenCalledWith(
+				`/dm/${encodeURIComponent("!dm:example.com")}`,
+			),
+		);
+		expect(client.createRoom).not.toHaveBeenCalled();
+	});
+
+	it("surfaces a failed DM start inline and keeps the card open", async () => {
+		const { client } = setup();
+		client.createRoom.mockRejectedValue(new TypeError("Failed to fetch"));
+		await openCard("Alice");
+		fireEvent.click(screen.getByText("Message"));
+		await waitFor(() =>
+			expect(card().querySelector('[role="alert"]')?.textContent).toContain(
+				"Couldn't start the conversation",
+			),
+		);
+		expect(navigateMock).not.toHaveBeenCalled();
+	});
+
 	it("starts a DM from the Message action and navigates to it", async () => {
 		const { client } = setup();
 		(client as unknown as { setAccountData: unknown }).setAccountData = vi

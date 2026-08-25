@@ -24,9 +24,13 @@ vi.mock("solid-refresh", () => ({
 const navigateMock = vi.fn();
 // Controllable location: tests set `locationState.pathname` before clicking.
 const locationState = { pathname: "/home" };
+// Controllable route params (useDecodedParams wraps useParams): tests set
+// `paramsState.roomId` to simulate viewing a room.
+const paramsState: { roomId?: string } = {};
 vi.mock("@solidjs/router", () => ({
 	useNavigate: () => navigateMock,
 	useLocation: () => locationState,
+	useParams: () => paramsState,
 }));
 
 const optimisticallyMarkJoined = vi.fn();
@@ -122,6 +126,7 @@ afterEach(() => {
 	clearNotices();
 	closeProfileCard();
 	locationState.pathname = "/home";
+	paramsState.roomId = undefined;
 });
 
 /** Render the router plus one anchor, then dispatch a real (cancelable) click. */
@@ -295,7 +300,7 @@ describe("PermalinkRouting click handling", () => {
 
 	it("opens the profile card for a user pill, anchored to the pill (#444)", () => {
 		const { client, createRoom } = makeClient();
-		locationState.pathname = `/home/${encodeURIComponent("!room:example.org")}`;
+		paramsState.roomId = "!room:example.org";
 		const event = clickLink(client, "https://matrix.to/#/@alice:example.org");
 		expect(event.defaultPrevented).toBe(true);
 		const request = profileCardRequest();

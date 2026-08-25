@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, onCleanup, onMount } from "solid-js";
 import { basePrefix, stripBasePath } from "../../app/basePath";
+import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import { parseMatrixUri } from "../../lib/matrixUri";
 import { requestJoinDialog } from "../../stores/joinDialog";
@@ -77,16 +78,11 @@ const PermalinkRouting: Component = () => {
 		return `/home/${encoded}`;
 	};
 
-	/** Room the user is currently viewing, from the route; null on
-	 *  non-room routes. Gives a pill's profile card its role/moderation
-	 *  context and Mention target. */
-	const currentRoomIdFromPath = (): string | null => {
-		const path = stripBasePath(location.pathname, basePrefix);
-		const match =
-			/^\/(?:home|dm)\/([^/]+)/.exec(path) ??
-			/^\/space\/[^/]+\/([^/]+)/.exec(path);
-		return match ? decodeURIComponent(match[1]) : null;
-	};
+	// Room the user is currently viewing (null on non-room routes), from
+	// the router's own matched params rather than a re-parse of the path -
+	// safeDecode included. Gives a pill's profile card its role/moderation
+	// context and Mention target.
+	const params = useDecodedParams<{ roomId?: string }>();
 
 	const onDocumentClick = (e: MouseEvent): void => {
 		if (e.defaultPrevented) return;
@@ -106,10 +102,16 @@ const PermalinkRouting: Component = () => {
 
 		if (target.kind === "user") {
 			// A user pill opens the profile card anchored to the pill (#444)
-			// - including the user's own pill. Open DM lives on the card.
+			// - including the user's own pill. Open DM lives on the card. A
+			// pill inside the thread panel targets that thread's composer for
+			// Mention (the panel marks its subtree with data-thread-root).
 			openProfileCard({
 				userId: target.userId,
-				roomId: currentRoomIdFromPath(),
+				roomId: params.roomId ?? null,
+				threadRootId:
+					anchor
+						.closest("[data-thread-root]")
+						?.getAttribute("data-thread-root") ?? null,
 				anchor: anchor as HTMLElement,
 			});
 			return;

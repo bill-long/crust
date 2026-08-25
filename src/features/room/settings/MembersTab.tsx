@@ -7,8 +7,8 @@ import { avatarInitial } from "../../../lib/avatar";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { useMemberList } from "../useMemberList";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { InviteByUserIdForm } from "./InviteByUserIdForm";
+import { KickBanConfirm } from "./KickBanConfirm";
 import {
 	type MemberAction,
 	useModerationActions,
@@ -425,29 +425,10 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 				</div>
 			</section>
 
-			<ConfirmDialog
-				open={() => pendingAction() !== null}
+			<KickBanConfirm
+				action={pendingAction}
 				onClose={() => setPendingAction(null)}
-				title={
-					pendingAction()?.kind === "ban"
-						? `Ban ${pendingAction()?.displayName}?`
-						: `Kick ${pendingAction()?.displayName}?`
-				}
-				body={
-					<p>
-						{pendingAction()?.kind === "ban"
-							? "They won't be able to rejoin unless unbanned."
-							: "They can rejoin if the room is public or someone re-invites them."}
-					</p>
-				}
-				confirmLabel={pendingAction()?.kind === "ban" ? "Ban" : "Kick"}
-				destructive
-				onConfirm={async () => {
-					const a = pendingAction();
-					if (!a) return;
-					await moderation.performKickOrBan(a);
-					setPendingAction(null);
-				}}
+				onConfirm={(a) => moderation.performKickOrBan(a)}
 			/>
 		</div>
 	);

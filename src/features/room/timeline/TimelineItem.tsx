@@ -659,8 +659,9 @@ const TimelineItem: Component<{
 	 *  de-duplicate a broken URL across rows. */
 	brokenAvatars: FailedImageUrls;
 	/** Open the sender's profile card anchored to the clicked header
-	 *  avatar/name (#444). The header stays non-interactive when absent. */
-	onOpenProfile?: (userId: string, anchor: HTMLElement) => void;
+	 *  avatar/name (#444). Required: the header avatar and name are real
+	 *  buttons, and a silently inert button is worse than a loud prop. */
+	onOpenProfile: (userId: string, anchor: HTMLElement) => void;
 }> = (props) => {
 	const ev = props.event;
 	// Lazy accessor (not a setup-time const, which would go stale when a
@@ -910,36 +911,20 @@ const TimelineItem: Component<{
 					{/* Avatar - image when the sender has one, initials circle
 					    otherwise or when the URL fails to load (fail-closed).
 					    Both states are the same 8x8 box, so no layout shift.
-					    A profile-card entry point when the timeline wires one. */}
-					<Show
-						when={props.onOpenProfile}
-						fallback={
-							<div class="mt-0.5 shrink-0">
-								<Avatar
-									url={ev.senderAvatarUrl}
-									initial={avatarInitial(ev.senderName)}
-									loading="lazy"
-									broken={props.brokenAvatars}
-								/>
-							</div>
-						}
+					    A button: opens the sender's profile card (#444). */}
+					<button
+						type="button"
+						class="mt-0.5 shrink-0 rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						aria-label={`View profile of ${ev.senderName.trim() || ev.senderId}`}
+						onClick={(e) => props.onOpenProfile(ev.senderId, e.currentTarget)}
 					>
-						<button
-							type="button"
-							class="mt-0.5 shrink-0 rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label={`View profile of ${ev.senderName.trim() || ev.senderId}`}
-							onClick={(e) =>
-								props.onOpenProfile?.(ev.senderId, e.currentTarget)
-							}
-						>
-							<Avatar
-								url={ev.senderAvatarUrl}
-								initial={avatarInitial(ev.senderName)}
-								loading="lazy"
-								broken={props.brokenAvatars}
-							/>
-						</button>
-					</Show>
+						<Avatar
+							url={ev.senderAvatarUrl}
+							initial={avatarInitial(ev.senderName)}
+							loading="lazy"
+							broken={props.brokenAvatars}
+						/>
+					</button>
 				</Show>
 
 				<div class="min-w-0 flex-1">
@@ -953,24 +938,15 @@ const TimelineItem: Component<{
 						}
 					>
 						<div class="flex items-baseline gap-2">
-							<Show
-								when={props.onOpenProfile}
-								fallback={
-									<span class="text-sm font-semibold text-text-emphasis">
-										{ev.senderName.trim() || "Unknown"}
-									</span>
+							<button
+								type="button"
+								class="rounded text-sm font-semibold text-text-emphasis hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onClick={(e) =>
+									props.onOpenProfile(ev.senderId, e.currentTarget)
 								}
 							>
-								<button
-									type="button"
-									class="rounded text-sm font-semibold text-text-emphasis hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-									onClick={(e) =>
-										props.onOpenProfile?.(ev.senderId, e.currentTarget)
-									}
-								>
-									{ev.senderName.trim() || "Unknown"}
-								</button>
-							</Show>
+								{ev.senderName.trim() || "Unknown"}
+							</button>
 							<span class="text-xs text-text-muted" title={fullDateTime()}>
 								{formattedTime()}
 							</span>

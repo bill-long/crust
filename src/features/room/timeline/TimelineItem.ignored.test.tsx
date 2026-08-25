@@ -44,6 +44,7 @@ function renderItem(
 			emoteLookup={new Map()}
 			packs={[]}
 			brokenAvatars={createFailedImageUrls()}
+			onOpenProfile={() => {}}
 		/>
 	));
 }

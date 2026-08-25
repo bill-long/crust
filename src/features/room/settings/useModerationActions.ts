@@ -1,5 +1,6 @@
 import { EventType, type MatrixClient } from "matrix-js-sdk";
 import { type Accessor, createSignal } from "solid-js";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import {
 	levelForDemote,
 	type PowerLevelContent,
@@ -12,6 +13,24 @@ export interface MemberAction {
 	kind: "promote-mod" | "promote-admin" | "demote" | "kick" | "ban";
 	userId: string;
 	displayName: string;
+}
+
+/**
+ * Run a parked kick/ban. Standalone (not hook state) so a caller whose
+ * confirm dialog outlives the component that parked the action - the
+ * profile card host - can execute it with the room captured at park
+ * time. Rejects on failure so ConfirmDialog renders the error inline.
+ */
+export async function performKickOrBan(
+	client: MatrixClient,
+	roomId: string,
+	action: MemberAction,
+): Promise<void> {
+	if (action.kind === "kick") {
+		await client.kick(roomId, action.userId);
+	} else if (action.kind === "ban") {
+		await client.ban(roomId, action.userId);
+	}
 }
 
 export interface ModerationActions {
@@ -134,20 +153,15 @@ export function useModerationActions(
 				}
 			}
 		} catch (e) {
-			setActionError(e instanceof Error ? e.message : "Action failed.");
+			setActionError(userFacingErrorMessage(e, "Action failed."));
 		}
 	};
 
-	// Kick/Ban are invoked from inside ConfirmDialog.onConfirm — let the
+	// Kick/Ban are invoked from inside ConfirmDialog.onConfirm - let the
 	// promise reject so the dialog catches and renders the error inline
 	// instead of closing first and surfacing the failure elsewhere.
-	const performKickOrBan = async (action: MemberAction): Promise<void> => {
-		if (action.kind === "kick") {
-			await client.kick(roomId(), action.userId);
-		} else if (action.kind === "ban") {
-			await client.ban(roomId(), action.userId);
-		}
-	};
+	const performKickOrBanAction = (action: MemberAction): Promise<void> =>
+		performKickOrBan(client, roomId(), action);
 
 	const requestAction = (action: MemberAction): void => {
 		if (action.kind === "kick" || action.kind === "ban") {
@@ -173,7 +187,7 @@ export function useModerationActions(
 		pendingAction,
 		setPendingAction,
 		requestAction,
-		performKickOrBan,
+		performKickOrBan: performKickOrBanAction,
 		canPromoteMod,
 		canPromoteAdmin,
 		canDemote,
