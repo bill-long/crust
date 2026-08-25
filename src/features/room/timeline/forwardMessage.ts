@@ -1,12 +1,13 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
+import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import {
 	decryptAttachment,
 	parseEncryptedFile,
 } from "../composer/media/attachmentCrypto";
 import { uploadBlob } from "../composer/media/uploadMedia";
-import { TEXT_MSGTYPES, type TimelineEvent } from "./timelineTypes";
+import type { TimelineEvent } from "./timelineTypes";
 
 /** Attachment types forwarded as media content (re-uploaded when needed). */
 const MEDIA_MSGTYPES = new Set(["m.image", "m.video", "m.audio", "m.file"]);

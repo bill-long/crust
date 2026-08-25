@@ -50,6 +50,18 @@ describe("copyableText", () => {
 		).toBe("look at this cat");
 	});
 
+	it("strips a legacy reply fallback from a caption (mirrors forward-media)", () => {
+		expect(
+			copyableText(
+				makeEvent({
+					msgtype: "m.image",
+					body: "cat.png",
+					mediaCaption: "> <@alice:hs> quoted\n\nactual caption",
+				}),
+			),
+		).toBe("actual caption");
+	});
+
 	it("returns null for uncaptioned media (the body is a filename)", () => {
 		expect(
 			copyableText(

@@ -1,5 +1,6 @@
+import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { stripReplyFallback } from "../../../lib/replyFallback";
-import { TEXT_MSGTYPES, type TimelineEvent } from "./timelineTypes";
+import type { TimelineEvent } from "./timelineTypes";
 
 /**
  * Text the "Copy text" action offers for an event, or null when there is
@@ -9,7 +10,9 @@ import { TEXT_MSGTYPES, type TimelineEvent } from "./timelineTypes";
  *   `> ` reply-fallback preamble stripped and surrounding whitespace
  *   trimmed, matching the sibling forward-as-text normalization
  *   (`forwardMessage.ts`);
- * - captioned media: the caption;
+ * - captioned media: the caption, fallback-stripped the same way (a
+ *   caption is the media event's `body`, which a legacy reply prefixes
+ *   too - mirrors the forward-media path);
  * - decryption failures: nothing (the body is not readable content).
  */
 export function copyableText(ev: TimelineEvent): string | null {
@@ -18,6 +21,7 @@ export function copyableText(ev: TimelineEvent): string | null {
 		const text = stripReplyFallback(ev.body).trim();
 		return text !== "" ? text : null;
 	}
-	const caption = ev.mediaCaption?.trim();
-	return caption ? caption : null;
+	if (!ev.mediaCaption) return null;
+	const caption = stripReplyFallback(ev.mediaCaption).trim();
+	return caption !== "" ? caption : null;
 }

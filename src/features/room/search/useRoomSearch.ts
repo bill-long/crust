@@ -15,8 +15,8 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { threadJumpTarget } from "../../../lib/threadEvents";
-import { TEXT_MSGTYPES } from "../timeline/timelineTypes";
 
 /**
  * Server search returns results across all the user's rooms by default;
