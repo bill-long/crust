@@ -1,4 +1,4 @@
-import { ClientEvent, type Room, RoomStateEvent } from "matrix-js-sdk";
+import { RoomStateEvent } from "matrix-js-sdk";
 import {
 	type Component,
 	createEffect,
@@ -10,6 +10,7 @@ import {
 import { useClient } from "../../../client/client";
 import { activeCallRoomId } from "../../../stores/activeCall";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
+import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import { currentCallSession } from "./rtc/callSessionStore";
 import { switchCall } from "./rtc/switchCall";
 
@@ -50,16 +51,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	// Bump when the Room object first appears (deep-link before initial
 	// sync completes). Without this the effect below sees room === null
 	// at mount time and never resubscribes once sync delivers the room.
-	const [roomAvailableTick, setRoomAvailableTick] = createSignal(0);
-
-	const onClientRoom = (room: Room): void => {
-		if (room.roomId !== props.roomId) return;
-		setRoomAvailableTick((n) => n + 1);
-	};
-	client.on(ClientEvent.Room, onClientRoom);
-	onCleanup(() => {
-		client.off(ClientEvent.Room, onClientRoom);
-	});
+	const roomAvailableTick = useRoomAvailableTick(client, () => props.roomId);
 
 	createEffect(() => {
 		// Track both signals so we resubscribe after the room appears.

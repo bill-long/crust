@@ -161,7 +161,11 @@ export const ResizableLayout: Component<{
 
 	return (
 		<Show when={!isMobile()} fallback={<MobileLayout {...props} />}>
-			<div class="flex min-h-0 flex-1">
+			{/* min-w-0: without it this flex item's automatic minimum is the
+				min-content of the whole three-pane row, so one long nowrap
+				line (room name, header topic) widens the entire app instead
+				of truncating. */}
+			<div class="flex min-h-0 min-w-0 flex-1">
 				{/* Left sidebar: spaces + room list + user bar */}
 				<div
 					class="flex shrink-0 flex-col"

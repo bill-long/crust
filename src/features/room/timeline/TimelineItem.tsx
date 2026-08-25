@@ -28,6 +28,7 @@ import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
 import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
+import { copyableText } from "./copyMessageText";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
 import { MediaAudio } from "./MediaAudio";
@@ -313,6 +314,10 @@ const HoverToolbar: Component<{
 	onForward?: () => void;
 	/** Open the raw-event viewer for this message. */
 	onViewSource: () => void;
+	/** Copy the message text to the clipboard. Absent when `copyableText`
+	    offers nothing (polls, stickers, uncaptioned media, decryption
+	    failures). */
+	onCopyText?: () => void;
 	/** Report the message to the homeserver admins. Absent for the user's
 	    own messages. */
 	onReport?: () => void;
@@ -535,6 +540,17 @@ const HoverToolbar: Component<{
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Portal>
 					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+						<Show when={props.onCopyText}>
+							{/* afterMenuClose: on the blocked-clipboard path the copy
+							    opens the fallback dialog, which must not capture the
+							    closing menu item as its focus-restore target. */}
+							<DropdownMenu.Item
+								class={menuItemClass()}
+								onSelect={afterMenuClose(() => props.onCopyText?.())}
+							>
+								Copy text
+							</DropdownMenu.Item>
+						</Show>
 						<DropdownMenu.Item
 							class={menuItemClass()}
 							onSelect={afterMenuClose(props.onViewSource)}
@@ -577,6 +593,14 @@ const TimelineItem: Component<{
 	onDelete: () => void;
 	/** Open the raw-event viewer for this message (#447). */
 	onViewSource: () => void;
+	/**
+	 * Copy `text` to the clipboard (the timeline owns the copy state and
+	 * its manual-copy fallback dialog - a `fixed` dialog cannot render
+	 * inside a virtua row, whose `contain: layout` wrapper would clip it).
+	 * The toolbar item renders only when this is wired AND the event has
+	 * user-authored text per `copyableText`.
+	 */
+	onCopyText?: (text: string) => void;
 	/** Report the message to the homeserver admins (#447). Absent for the
 	    user's own messages and local echoes. */
 	onReport?: () => void;
@@ -625,6 +649,11 @@ const TimelineItem: Component<{
 	isSenderIgnored?: boolean;
 }> = (props) => {
 	const ev = props.event;
+	// Lazy accessor (not a setup-time const, which would go stale when a
+	// reconcile-based rebuild updates the row's body/caption in place
+	// without remounting; not an eager memo either - only the overflow
+	// menu ever reads it, and virtua recycles rows constantly).
+	const copyText = (): string | null => copyableText(ev);
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
 	);
@@ -841,6 +870,11 @@ const TimelineItem: Component<{
 						onTogglePin={() => props.onTogglePin?.()}
 						onForward={props.onForward}
 						onViewSource={props.onViewSource}
+						onCopyText={(() => {
+							const text = copyText();
+							const cb = props.onCopyText;
+							return text !== null && cb ? () => cb(text) : undefined;
+						})()}
 						onReport={props.onReport}
 					/>
 				</Show>

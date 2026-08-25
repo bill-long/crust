@@ -15,6 +15,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { threadJumpTarget } from "../../../lib/threadEvents";
 
 /**
@@ -98,7 +99,7 @@ export function projectEvent(
 	const body = typeof content.body === "string" ? content.body : "";
 	if (!body) return null;
 	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
-	if (msgtype !== "m.text" && msgtype !== "m.emote" && msgtype !== "m.notice") {
+	if (!TEXT_MSGTYPES.has(msgtype)) {
 		return null;
 	}
 	const sender = ev.getSender() ?? "";

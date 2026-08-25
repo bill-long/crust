@@ -250,7 +250,7 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 			<Show when={copyLink.fallbackLink()}>
 				{(url) => (
 					<CopyLinkFallbackDialog
-						url={url()}
+						text={url()}
 						title="Copy invite link"
 						inputLabel="Invite link"
 						open={() => copyLink.fallbackLink() !== null}

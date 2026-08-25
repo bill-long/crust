@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient } from "../../../test/mockClient";
+import { makeTimelineEvent } from "../../../test/timelineEvent";
 import { TimelineItem } from "./TimelineItem";
 import type { TimelineEvent } from "./timelineTypes";
 
@@ -13,53 +14,8 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
-function makeEvent(overrides: Partial<TimelineEvent> = {}): TimelineEvent {
-	return {
-		eventId: "$ev",
-		senderId: "@mallory:example.com",
-		senderName: "Mallory",
-		timestamp: 1000,
-		type: "m.room.message",
-		msgtype: "m.text",
-		body: "spam you should not see",
-		format: null,
-		formattedBody: null,
-		mediaUrl: null,
-		mediaWidth: null,
-		mediaHeight: null,
-		mediaFullUrl: null,
-		mediaPosterUrl: null,
-		mediaMimetype: null,
-		mediaSize: null,
-		mediaFilename: null,
-		mediaCaption: null,
-		mediaThumbnailUrl: null,
-		mediaThumbnailFile: null,
-		mediaThumbnailMimetype: null,
-		mediaIsEncrypted: false,
-		mediaEncryptedFile: null,
-		isVoice: false,
-		voiceDurationMs: null,
-		voiceWaveform: null,
-		isEncrypted: false,
-		isDecryptionFailure: false,
-		isEdited: false,
-		replyToId: null,
-		replyToSender: null,
-		replyToBody: null,
-		replyToThumbUrl: null,
-		replyToThumbEncryptedFile: null,
-		replyToThumbMimetype: null,
-		reactions: {},
-		myReactions: {},
-		status: null,
-		stateNotice: null,
-		membershipTransition: null,
-		poll: null,
-		thread: null,
-		...overrides,
-	};
-}
+const makeEvent = (overrides: Partial<TimelineEvent> = {}): TimelineEvent =>
+	makeTimelineEvent(overrides);
 
 function renderItem(
 	event: TimelineEvent,

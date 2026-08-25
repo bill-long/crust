@@ -1,4 +1,5 @@
 import {
+	ClientEvent,
 	type MatrixClient,
 	type MatrixEvent,
 	RoomStateEvent,
@@ -161,6 +162,26 @@ describe("useRoomStateContent", () => {
 				fakeStateEvent("!b:x", "m.room.name", {}),
 			);
 			expect(content()).toBeNull();
+		});
+	});
+
+	it("recovers when the Room object arrives after mount (ClientEvent.Room)", async () => {
+		// Deep-link before initial sync: the store has no Room yet, and the
+		// sync's RoomState.events fire before storeRoom - so the hook must
+		// re-read on ClientEvent.Room or it latches null forever.
+		const client = createMockClient();
+		await withRoot(async () => {
+			const content = useRoomStateContent<{ topic?: string }>(
+				client as unknown as MatrixClient,
+				() => "!late:x",
+				"m.room.topic",
+			);
+			expect(content()).toBeNull();
+			const room = createMockRoom("!late:x");
+			room.__setStateEvent("m.room.topic", "", { topic: "T" });
+			client.__setRooms(new Map([["!late:x", room]]));
+			client.__emit(ClientEvent.Room, room);
+			expect(content()?.topic).toBe("T");
 		});
 	});
 });

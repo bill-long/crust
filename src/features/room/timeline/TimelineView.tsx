@@ -19,11 +19,13 @@ import {
 	buildShortcodeLookup,
 	useImagePacks,
 } from "../../emoji/useImagePacks";
+import { CopyLinkFallbackDialog } from "../CopyLinkFallbackDialog";
 import { Composer } from "../composer/Composer";
 import {
 	mainTimelineSource,
 	threadTimelineSource,
 } from "../threads/timelineSource";
+import { createCopyLink } from "../useCopyLink";
 import { DateSeparator } from "./DateSeparator";
 import { DeleteMessageDialog } from "./DeleteMessageDialog";
 import { DragOverlay } from "./DragOverlay";
@@ -215,6 +217,13 @@ const TimelineView: Component<{
 	/** Message whose raw source is shown; non-null opens the viewer (#447). */
 	const [viewSourceTarget, setViewSourceTarget] =
 		createSignal<TimelineEvent | null>(null);
+	// "Copy text" state (#446): one copy-link state machine + fallback
+	// dialog for the whole timeline, hosted here because a `fixed` dialog
+	// can't render inside a virtua row (its `contain: layout` wrapper
+	// becomes the containing block and clips the overlay). Room isolation
+	// comes from the per-room keyed remount (Layout's keyed <Show>);
+	// createCopyLink's own onCleanup cancels in-flight copies then.
+	const copyText = createCopyLink();
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
 	);
@@ -1086,6 +1095,7 @@ const TimelineView: Component<{
 													onEdit={() => onEdit(event)}
 													onDelete={() => setDeleteTarget(event)}
 													onViewSource={() => setViewSourceTarget(event)}
+													onCopyText={(text) => void copyText.copy(text)}
 													onReport={
 														event.senderId !== myUserId && event.status === null
 															? () => setReportTarget(event)
@@ -1286,6 +1296,34 @@ const TimelineView: Component<{
 				getSourceEvent={getSourceEvent}
 				onClose={() => setViewSourceTarget(null)}
 			/>
+
+			{/* Success/failure announcement for "Copy text" - the menu item
+				leaves no visible trace on success, so the copy-state machine's
+				2s-windowed status is surfaced to screen readers here (same
+				pattern as the room-link button's live region). */}
+			<span aria-live="polite" role="status" class="sr-only">
+				{copyText.copyState() === "copied"
+					? "Message text copied to clipboard"
+					: copyText.copyState() === "error"
+						? "Failed to copy message text"
+						: ""}
+			</span>
+
+			{/* Manual-copy fallback for "Copy text" when the clipboard is
+				blocked or unavailable - same surface as copy-room-link. */}
+			<Show when={copyText.fallbackLink()}>
+				{(text) => (
+					<CopyLinkFallbackDialog
+						text={text()}
+						title="Copy text"
+						inputLabel="Message text"
+						description="Your browser blocked clipboard access. Select the text and copy it manually."
+						multiline
+						open={() => copyText.fallbackLink() !== null}
+						onClose={copyText.clearFallback}
+					/>
+				)}
+			</Show>
 		</main>
 	);
 };

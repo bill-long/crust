@@ -933,7 +933,7 @@ const Layout: Component = () => {
 			<Show when={copyLink.fallbackLink()}>
 				{(url) => (
 					<CopyLinkFallbackDialog
-						url={url()}
+						text={url()}
 						open={() => copyLink.fallbackLink() !== null}
 						onClose={() => copyLink.clearFallback()}
 					/>

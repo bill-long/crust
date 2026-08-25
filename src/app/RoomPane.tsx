@@ -28,10 +28,12 @@ import { PinnedMessagesPanel } from "../features/room/pinned/PinnedMessagesPanel
 import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
 import { RoomNotificationMenu } from "../features/room/RoomNotificationMenu";
 import { SearchPanel } from "../features/room/search/SearchPanel";
+import { useRoomStateContent } from "../features/room/settings/useRoomStateContent";
 import { ThreadListPanel } from "../features/room/threads/ThreadListPanel";
 import { ThreadPanel } from "../features/room/threads/ThreadPanel";
 import { createThreadPanelState } from "../features/room/threads/threadPanelState";
 import { TimelineView } from "../features/room/timeline/TimelineView";
+import { roomTopicLine, roomTopicText } from "../lib/roomTopic";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { isMobile } from "../stores/viewport";
 
@@ -179,6 +181,17 @@ const RoomPane: Component<{
 	const packs = useImagePacks(props.client, () => props.rid);
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
+	// Room topic for the header line under the room name (#446). Topics can
+	// contain newlines; the header shows a single normalized truncated line,
+	// while the tooltip carries the raw topic with its line structure.
+	const topicContent = useRoomStateContent(
+		props.client,
+		() => props.rid,
+		"m.room.topic",
+	);
+	const topicRaw = createMemo(() => roomTopicText(topicContent()));
+	const topicLine = createMemo(() => roomTopicLine(topicContent()));
+
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
 
 	// Thread shown in the right-hand panel (root event id) plus an optional
@@ -257,9 +270,33 @@ const RoomPane: Component<{
 						</svg>
 					</button>
 				</Show>
-				<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
-					{props.roomName}
-				</span>
+				{/* flex-1 (zero flex basis) so a paragraph-length topic truncates
+					instead of starving the action toolbar of width. */}
+				{/* Items stay stretched (no self-start): a stretched flex-col item
+					gets a definite width, so min-w-0 + truncate can clip a
+					paragraph-length topic. Fit-content sizing here would let the
+					nowrap text force the whole three-pane layout wider. The
+					column is flex-1 (zero basis: a long topic takes only leftover
+					space instead of starving the toolbar) with a min-w-24 floor
+					(a basis-0 item gets no share of negative free space, so
+					without the floor a narrow pane would collapse the name to
+					0px; the toolbar's overflow-x-auto absorbs the shortfall). */}
+				<div class="flex min-w-24 flex-1 flex-col justify-center">
+					<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
+						{props.roomName}
+					</span>
+					<Show when={topicLine()}>
+						<button
+							type="button"
+							onClick={props.onOpenSettings}
+							title={topicRaw()}
+							class="min-w-0 truncate rounded text-left text-xs text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+						>
+							{topicLine()}
+							<span class="sr-only">. Open room settings</span>
+						</button>
+					</Show>
+				</div>
 				<div class="flex min-w-0 items-center gap-1 overflow-x-auto [&>*]:shrink-0">
 					<CallButton
 						roomId={props.rid}
