@@ -29,7 +29,19 @@ export function enqueueKeyedWrite<K>(
 	task: () => Promise<void>,
 ): Promise<void> {
 	const pending = chains.get(key);
-	const next = pending ? pending.then(task) : task();
+	let next: Promise<void>;
+	if (pending) {
+		next = pending.then(task);
+	} else {
+		// Run synchronously, but convert a synchronous throw into a
+		// rejection so both arms honor the same contract (the caller's
+		// .catch sees every failure, and the chain bookkeeping still runs).
+		try {
+			next = task();
+		} catch (err) {
+			next = Promise.reject(err);
+		}
+	}
 	const stored = next.catch(() => {});
 	chains.set(key, stored);
 	stored.then(() => {

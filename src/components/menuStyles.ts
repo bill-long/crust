@@ -1,9 +1,9 @@
 /**
  * Shared chrome for the compact right-click / dropdown menus that use the
- * 180px surface (the spaces-sidebar tile menu, the room-list row menu, and
- * the timeline item's "More" menu). Other menus - e.g. the mobile
- * room-pane overflow with its larger touch geometry - keep their own
- * classes deliberately.
+ * 180px surface (the spaces-sidebar tile menu, the room-list row menu, the
+ * timeline item's "More" menu, and the composer "+" menu). Other menus -
+ * e.g. the mobile room-pane overflow with its larger touch geometry - keep
+ * their own classes deliberately.
  */
 export const menuContentClass =
 	"portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden";

@@ -85,7 +85,13 @@ export function markRoomUnread(ctx: MarkedUnreadContext, roomId: string): void {
 	if (ctx.summaries[roomId]?.markedUnread) return;
 	ctx.optimisticallySetMarkedUnread(roomId, true);
 	enqueueFlagWrite(ctx.client, roomId, true).catch((err) => {
-		ctx.optimisticallySetMarkedUnread(roomId, false);
+		// Roll back only while the optimistic value is still what's showing:
+		// an authoritative echo that flipped the flag mid-flight (another
+		// device's write, delivered by onRoomAccountData) must not be
+		// clobbered by this failed request's cleanup.
+		if (ctx.summaries[roomId]?.markedUnread === true) {
+			ctx.optimisticallySetMarkedUnread(roomId, false);
+		}
 		reportError(err, {
 			userMessage: "Couldn't mark the room as unread.",
 			logLabel: "Mark as unread failed",
@@ -111,7 +117,11 @@ export function clearRoomMarkedUnread(
 	if (!ctx.summaries[roomId]?.markedUnread) return;
 	ctx.optimisticallySetMarkedUnread(roomId, false);
 	enqueueFlagWrite(ctx.client, roomId, false).catch((err) => {
-		ctx.optimisticallySetMarkedUnread(roomId, true);
+		// Same echo-safe rollback as markRoomUnread: restore the dot only
+		// if nothing authoritative overwrote the optimistic clear meanwhile.
+		if (ctx.summaries[roomId]?.markedUnread === false) {
+			ctx.optimisticallySetMarkedUnread(roomId, true);
+		}
 		reportError(err, { logLabel: "Clearing marked-unread failed" });
 	});
 }

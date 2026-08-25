@@ -580,10 +580,16 @@ const RoomList: Component<RoomListProps> = (props) => {
 			const row = (e.target as Element | null)?.closest?.("[data-room-id]");
 			setMenuTarget(row?.getAttribute("data-room-id") ?? null);
 		};
-		el.addEventListener("pointerdown", aim, true);
+		// Mouse opens via the contextmenu path, so pointerdown aiming is
+		// only needed for touch/pen long-press - skip the closest() walk on
+		// every ordinary left-click.
+		const aimPress = (e: PointerEvent): void => {
+			if (e.pointerType !== "mouse") aim(e);
+		};
+		el.addEventListener("pointerdown", aimPress, true);
 		el.addEventListener("contextmenu", aim, true);
 		onCleanup(() => {
-			el.removeEventListener("pointerdown", aim, true);
+			el.removeEventListener("pointerdown", aimPress, true);
 			el.removeEventListener("contextmenu", aim, true);
 		});
 	});
@@ -881,7 +887,10 @@ const RoomList: Component<RoomListProps> = (props) => {
 					<ContextMenu.Content class={menuContentClass}>
 						<ContextMenu.Item
 							class={`${menuItemClass} ${menuItemDisabledClass}`}
-							disabled={!canMarkRoomUnread(summaries[menuTarget() ?? ""])}
+							disabled={(() => {
+								const target = menuTarget();
+								return !target || !canMarkRoomUnread(summaries[target]);
+							})()}
 							onSelect={() => {
 								const target = menuTarget();
 								if (target) markRoomUnread(clientCtx, target);
