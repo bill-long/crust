@@ -142,6 +142,41 @@ export function useMentions(deps: UseMentionsDeps) {
 		});
 	}
 
+	/**
+	 * Insert `@DisplayName ` at the caret without an @-trigger in the text
+	 * (the profile card's "Mention" action). Pads with a leading space when
+	 * the caret follows a non-whitespace character, mirrors
+	 * {@link onMentionSelect}'s dedupe and caret handling.
+	 */
+	function insertMention(userId: string, rawName: string): void {
+		const el = deps.getTextarea();
+		const currentText = deps.text();
+		const pos = el ? el.selectionStart : currentText.length;
+		const before = currentText.slice(0, pos);
+		// Strip leading @ from userId-shaped names to avoid @@user:server
+		const trimmedName = rawName.trim() || userId;
+		const displayName = trimmedName.startsWith("@")
+			? trimmedName.slice(1)
+			: trimmedName;
+		const pad = before.length === 0 || /\s$/.test(before) ? "" : " ";
+		const insertion = `${pad}@${displayName} `;
+		deps.setText(before + insertion + currentText.slice(pos));
+
+		setMentions((prev) => {
+			if (prev.some((m) => m.userId === userId)) return prev;
+			return [...prev, { userId, displayName }];
+		});
+
+		requestAnimationFrame(() => {
+			const ta = deps.getTextarea();
+			if (!ta) return;
+			const newPos = pos + insertion.length;
+			ta.setSelectionRange(newPos, newPos);
+			ta.focus();
+			deps.autoResize();
+		});
+	}
+
 	return {
 		mentions,
 		setMentions,
@@ -156,5 +191,6 @@ export function useMentions(deps: UseMentionsDeps) {
 		detectMention,
 		reconcileMentions,
 		onMentionSelect,
+		insertMention,
 	};
 }

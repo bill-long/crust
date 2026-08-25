@@ -21,6 +21,7 @@ import {
 } from "../../emoji/useImagePacks";
 import { CopyLinkFallbackDialog } from "../CopyLinkFallbackDialog";
 import { Composer } from "../composer/Composer";
+import { openProfileCard } from "../profile/profileCard";
 import {
 	mainTimelineSource,
 	threadTimelineSource,
@@ -1079,6 +1080,14 @@ const TimelineView: Component<{
 												<TimelineItem
 													event={event}
 													brokenAvatars={brokenAvatars}
+													onOpenProfile={(userId, anchor) =>
+														openProfileCard({
+															userId,
+															roomId: props.roomId,
+															threadRootId: props.thread?.threadId ?? null,
+															anchor,
+														})
+													}
 													showHeader={shouldShowHeader(events, indexAcc())}
 													isOwnMessage={event.senderId === myUserId}
 													canPin={props.canPin}

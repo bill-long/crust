@@ -41,6 +41,7 @@ import { JoinRoomDialogHost } from "../features/room/JoinRoomDialogHost";
 import { KnockPane } from "../features/room/knocks/KnockPane";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { PermalinkRouting } from "../features/room/PermalinkRouting";
+import { ProfileCardHost } from "../features/room/profile/ProfileCardHost";
 import { RoomList } from "../features/room/RoomList";
 import { buildRoomLinkUrl } from "../features/room/roomLink";
 import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
@@ -740,6 +741,9 @@ const Layout: Component = () => {
 			{/* Session-long join-room dialog host (store-driven open; renders
 				the dialog only while open) */}
 			<JoinRoomDialogHost client={client} />
+			{/* Session-long profile card host (store-driven open; anchored to
+				whichever member row / message header / pill requested it) */}
+			<ProfileCardHost />
 			{/* Public room directory (store-driven open, session-long host) */}
 			<ExploreDialog open={exploreDialogOpen} onClose={closeExploreDialog} />
 			{/* Resizable layout with user bar spanning left sidebar */}

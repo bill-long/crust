@@ -115,7 +115,7 @@ function setup() {
 }
 
 function aliceRow(): HTMLElement {
-	return screen.getByLabelText("Actions for Alice");
+	return screen.getByLabelText("View profile of Alice");
 }
 
 afterEach(() => {
