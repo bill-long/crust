@@ -29,8 +29,10 @@ interface CopyLinkFallbackDialogProps {
 	description?: string;
 	/**
 	 * Render the text in a readonly textarea instead of a single-line
-	 * input. Required for multiline text - an `<input>` value cannot
-	 * contain newlines, so copying from it would silently lose them.
+	 * input. Text containing a newline always gets the textarea - an
+	 * `<input>` value cannot hold newlines, so copying from one would
+	 * silently lose them - so this only forces the textarea for callers
+	 * whose single-line text should still render multiline-style.
 	 */
 	multiline?: boolean;
 	open: () => boolean;
@@ -140,7 +142,7 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 							"Your browser blocked clipboard access. Select the link and copy it manually."}
 					</p>
 					<Show
-						when={props.multiline}
+						when={props.multiline || props.text.includes("\n")}
 						fallback={
 							<input
 								ref={setFieldRef}

@@ -649,9 +649,11 @@ const TimelineItem: Component<{
 	isSenderIgnored?: boolean;
 }> = (props) => {
 	const ev = props.event;
-	// Memo (not a setup-time const): reconcile-based rebuilds can update
-	// the row's body/caption in place without remounting the component.
-	const copyText = createMemo(() => copyableText(ev));
+	// Lazy accessor (not a setup-time const, which would go stale when a
+	// reconcile-based rebuild updates the row's body/caption in place
+	// without remounting; not an eager memo either - only the overflow
+	// menu ever reads it, and virtua recycles rows constantly).
+	const copyText = (): string | null => copyableText(ev);
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
 	);

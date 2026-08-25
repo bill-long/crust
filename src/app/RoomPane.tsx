@@ -275,8 +275,13 @@ const RoomPane: Component<{
 				{/* Items stay stretched (no self-start): a stretched flex-col item
 					gets a definite width, so min-w-0 + truncate can clip a
 					paragraph-length topic. Fit-content sizing here would let the
-					nowrap text force the whole three-pane layout wider. */}
-				<div class="flex min-w-0 flex-1 flex-col justify-center">
+					nowrap text force the whole three-pane layout wider. The
+					column is flex-1 (zero basis: a long topic takes only leftover
+					space instead of starving the toolbar) with a min-w-24 floor
+					(a basis-0 item gets no share of negative free space, so
+					without the floor a narrow pane would collapse the name to
+					0px; the toolbar's overflow-x-auto absorbs the shortfall). */}
+				<div class="flex min-w-24 flex-1 flex-col justify-center">
 					<span class="min-w-0 truncate text-sm font-semibold text-text-emphasis">
 						{props.roomName}
 					</span>
