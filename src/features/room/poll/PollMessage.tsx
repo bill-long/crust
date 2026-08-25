@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { Tooltip } from "../../../components/Tooltip";
+import { avatarInitial } from "../../../lib/avatar";
 import { formatVoterNames } from "../../../lib/pollCopy";
 import { useThirtySecondTick } from "../../../lib/relativeTime";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
@@ -51,10 +52,7 @@ export const VoterAvatar: Component<{ voter: PollVoter }> = (props) => {
 			setImgFailed(false),
 		),
 	);
-	const initial = () =>
-		// The name falls back to the raw user id; strip its leading @ like
-		// the MemberList sibling does so avatar-less voters get a letter.
-		(props.voter.name.trim().replace(/^@/, "").charAt(0) || "?").toUpperCase();
+	const initial = () => avatarInitial(props.voter.name);
 	return (
 		<Show
 			when={!imgFailed() && props.voter.avatarUrl}

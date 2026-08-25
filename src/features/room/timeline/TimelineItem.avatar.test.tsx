@@ -55,7 +55,7 @@ describe("TimelineItem sender avatar (#517)", () => {
 	});
 
 	it("falls back to the sigil-stripped initial when there is no avatar", () => {
-		const { container } = renderItem(
+		const { container, getByText } = renderItem(
 			makeTimelineEvent({
 				senderAvatarUrl: null,
 				senderName: "@mallory:example.com",
@@ -63,9 +63,9 @@ describe("TimelineItem sender avatar (#517)", () => {
 		);
 		expect(container.querySelector("[data-event-id] img")).toBeNull();
 		// "@mallory:example.com" renders "M", not "@" (shared avatarInitial).
-		const row = container.querySelector("[data-event-id]");
-		expect(row?.textContent).toContain("M");
-		expect(row?.querySelector("div.mt-0\\.5")?.textContent).toBe("M");
+		// Exact-text query: the initial is the only element whose full text
+		// is the bare letter.
+		expect(getByText("M")).toBeTruthy();
 	});
 
 	it("shows no avatar slot on grouped continuation rows", () => {

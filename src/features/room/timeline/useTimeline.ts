@@ -10,6 +10,7 @@ import {
 	MatrixEventEvent,
 	type Room,
 	RoomEvent,
+	RoomStateEvent,
 	TimelineWindow,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
@@ -1561,15 +1562,37 @@ export function useTimeline(
 		loadRoom(roomId());
 	});
 
+	// Sender profile fields (senderName / senderAvatarUrl) are snapshotted at
+	// projection time, so a member's display-name or avatar change must
+	// re-project the already-rendered rows or the old profile sticks until an
+	// unrelated rebuild (#517). Debounced: join/leave bursts and lazy-load
+	// member backfills emit many member events at once, and one trailing
+	// rebuild covers them all.
+	const MEMBER_REBUILD_DEBOUNCE_MS = 250;
+	let memberRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+	const onMembersChanged = (event: MatrixEvent): void => {
+		if (!currentRoomId || event.getRoomId() !== currentRoomId) return;
+		if (memberRebuildTimer !== null) return;
+		const gen = roomGeneration;
+		memberRebuildTimer = setTimeout(() => {
+			memberRebuildTimer = null;
+			if (roomGeneration !== gen) return;
+			const room = currentRoomId ? client.getRoom(currentRoomId) : null;
+			if (room) rebuildEventsFromWindow(room);
+		}, MEMBER_REBUILD_DEBOUNCE_MS);
+	};
+
 	client.on(RoomEvent.Timeline, onTimelineEvent);
 	client.on(RoomEvent.TimelineReset, onTimelineReset);
 	client.on(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
 	client.on(MatrixEventEvent.Replaced, onReplaced);
 	client.on(ClientEvent.Room, onRoomAppeared);
+	client.on(RoomStateEvent.Members, onMembersChanged);
 
 	onCleanup(() => {
 		clearCallExpiryTimer();
+		if (memberRebuildTimer !== null) clearTimeout(memberRebuildTimer);
 		pollWatcher.dispose();
 		threadWatcher.dispose();
 		releaseThreadEchoRegistryIfEmpty(client, currentRoomId, currentSourceKey);
@@ -1579,6 +1602,7 @@ export function useTimeline(
 		client.off(MatrixEventEvent.Decrypted, onDecrypted);
 		client.off(MatrixEventEvent.Replaced, onReplaced);
 		client.off(ClientEvent.Room, onRoomAppeared);
+		client.off(RoomStateEvent.Members, onMembersChanged);
 	});
 
 	return {

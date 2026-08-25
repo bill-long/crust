@@ -21,6 +21,10 @@ export function avatarHttpUrl(
  * not "@"), uppercased; "?" when nothing usable remains.
  */
 export function avatarInitial(name: string): string {
-	const trimmed = name.replace(/^@/, "").trim();
-	return trimmed.charAt(0).toUpperCase() || "?";
+	const trimmed = name.trim().replace(/^@/, "");
+	// Array.from iterates code points, so an astral first character (an
+	// emoji-leading display name) stays whole instead of charAt() splitting
+	// it into a lone surrogate that paints as a replacement glyph.
+	const first = Array.from(trimmed)[0] ?? "";
+	return first.toUpperCase() || "?";
 }

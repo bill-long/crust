@@ -197,6 +197,46 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("re-projects rows when a member's avatar changes (debounced)", async () => {
+		const roomA = createMockRoom(
+			"!roomA:test",
+			[textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events[0].senderAvatarUrl).toBeNull();
+
+			roomA.__addMember({
+				userId: "@alice:test",
+				name: "Alice",
+				avatarUrl: "mxc://test/new-avatar",
+			});
+			client.__emit(
+				"RoomState.members",
+				createMatrixEvent({
+					eventId: "$member",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.member",
+					content: { membership: "join" },
+					ts: 2000,
+				}),
+			);
+			// The rebuild is debounced (250ms trailing); wait past it.
+			await new Promise((resolve) => setTimeout(resolve, 350));
+			expect(events[0].senderAvatarUrl).toBe(
+				"https://example.com/_matrix/media/v3/download/test/new-avatar",
+			);
+		});
+	});
+
 	it("returns empty events for unknown room", async () => {
 		const client = createMockClient(new Map());
 

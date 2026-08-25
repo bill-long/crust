@@ -55,6 +55,7 @@ import {
 import { SpacesSidebar } from "../features/space/SpacesSidebar";
 import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
+import { avatarHttpUrl, avatarInitial } from "../lib/avatar";
 import { cryptoActionLabel, deriveCryptoAction } from "../lib/cryptoAction";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
@@ -415,13 +416,10 @@ const Layout: Component = () => {
 		const localpart = uid.split(":")[0]?.replace("@", "").trim();
 		return localpart || uid || "User";
 	};
-	const initial = () => (displayName().trim() || "?").charAt(0).toUpperCase();
+	const initial = () => avatarInitial(displayName());
 
-	const avatarUrl = (): string | null => {
-		const mxc = profileAvatarMxc();
-		if (!mxc) return null;
-		return client.mxcUrlToHttp(mxc, 80, 80, "crop") ?? null;
-	};
+	const avatarUrl = (): string | null =>
+		avatarHttpUrl(client, profileAvatarMxc(), 80);
 
 	const cryptoAction = createMemo(
 		(): CryptoAction =>

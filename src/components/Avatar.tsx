@@ -30,7 +30,13 @@ const Avatar: Component<AvatarProps> = (props) => {
 		<Show
 			when={!avatar.failed() && props.url}
 			fallback={
-				<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
+				// Decorative: every call site puts the accessible name in
+				// adjacent text or a label, so the bare letter would only be
+				// noise read out before the real name.
+				<div
+					aria-hidden="true"
+					class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary"
+				>
 					{props.initial}
 				</div>
 			}

@@ -1,4 +1,5 @@
 import { type Component, Show } from "solid-js";
+import { avatarInitial } from "../../../lib/avatar";
 import { createImageFallback } from "../../../lib/imageFallback";
 import type { InvitePending } from "./useInviteActions";
 
@@ -34,7 +35,7 @@ const InviteCard: Component<InviteCardProps> = (props) => {
 				when={!avatar.failed() && props.avatarUrl}
 				fallback={
 					<div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xl font-semibold text-text-secondary">
-						{(props.name.trim() || "?").charAt(0).toUpperCase()}
+						{avatarInitial(props.name)}
 					</div>
 				}
 			>
