@@ -1,10 +1,9 @@
 import type { MatrixClient, Room } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../test/mockClient";
 import {
-	_resetMarkedUnreadConsumerForTests,
 	canMarkRoomUnread,
 	clearRoomMarkedUnread,
 	getRoomMarkedUnread,
@@ -112,22 +111,11 @@ describe("canMarkRoomUnread", () => {
 		expect(canMarkRoomUnread(summary("!r:x"))).toBe(true);
 	});
 
-	it("is false once an indicator is showing (count or flag)", () => {
+	it("is false once the room is unread (count or flag)", () => {
 		expect(canMarkRoomUnread(summary("!r:x", { unreadCount: 2 }))).toBe(false);
 		expect(canMarkRoomUnread(summary("!r:x", { markedUnread: true }))).toBe(
 			false,
 		);
-	});
-
-	it("ignores a muted room's hidden count but not its flag", () => {
-		expect(
-			canMarkRoomUnread(summary("!r:x", { unreadCount: 2 }), { muted: true }),
-		).toBe(true);
-		expect(
-			canMarkRoomUnread(summary("!r:x", { markedUnread: true }), {
-				muted: true,
-			}),
-		).toBe(false);
 	});
 });
 
@@ -255,9 +243,8 @@ describe("marked-unread write serialization", () => {
 });
 
 describe("useMarkedUnreadConsumer", () => {
-	beforeEach(() => {
-		_resetMarkedUnreadConsumerForTests();
-	});
+	// No per-test latch reset needed: the consumed latch is keyed per
+	// client (WeakMap) and every harness creates a fresh mock client.
 
 	function makeConsumerHarness(opts: { markedUnread: boolean }) {
 		const base = makeCtx(opts);
@@ -353,6 +340,23 @@ describe("useMarkedUnreadConsumer", () => {
 		h.setSummaries("!r:x", "markedUnread", true);
 		expect(h.client.setRoomAccountData).not.toHaveBeenCalled();
 		expect(h.summaries["!r:x"].markedUnread).toBe(true);
+		h.dispose();
+	});
+
+	it("re-arms when switching to a room whose entry has not synced yet", () => {
+		const h = makeStoreHarness();
+		h.setSummaries("!r:x", summary("!r:x"));
+		h.setRoomId("!r:x"); // open (nothing to clear; latch set)
+		h.setRoomId("!b:x"); // permalink into an unsynced room: no entry
+		// The first room gets marked (another device) while we are away.
+		h.setSummaries("!r:x", "markedUnread", true);
+		h.setRoomId("!r:x"); // return: a NEW open, so it must consume
+		expect(h.summaries["!r:x"].markedUnread).toBe(false);
+		expect(h.client.setRoomAccountData).toHaveBeenCalledWith(
+			"!r:x",
+			MARKED_UNREAD_TYPE,
+			{ unread: false },
+		);
 		h.dispose();
 	});
 

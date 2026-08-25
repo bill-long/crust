@@ -31,7 +31,11 @@ import {
 	getSpaceUnreadRollup,
 	type UnreadRollup,
 } from "../../client/summaries-selectors";
-import { menuContentClass, menuItemClass } from "../../components/menuStyles";
+import {
+	menuContentClass,
+	menuItemClass,
+	menuItemDisabledClass,
+} from "../../components/menuStyles";
 import { SpaceIcon } from "../../components/SpaceIcon";
 import { UnreadBadge } from "../../components/UnreadBadge";
 import { VirtualList } from "../../components/VirtualList";
@@ -187,21 +191,12 @@ const RoomEntry: Component<{
 	isSelected: boolean;
 	isMuted: boolean;
 	onClick: () => void;
-	/**
-	 * Aim the room list's single hoisted context menu at this row. Called
-	 * on pointerdown (mouse right-click and Kobalte's touch long-press
-	 * both start there) and on contextmenu (the keyboard Menu key fires it
-	 * with no preceding pointerdown); both bubble to the menu trigger
-	 * afterwards, which reads the freshly-set target.
-	 */
-	onAimContextMenu: () => void;
 }> = (props) => {
 	return (
 		<button
 			type="button"
 			onClick={props.onClick}
-			onPointerDown={props.onAimContextMenu}
-			onContextMenu={props.onAimContextMenu}
+			data-room-id={props.room.roomId}
 			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
@@ -562,38 +557,34 @@ const RoomList: Component<RoomListProps> = (props) => {
 	// Single hoisted context menu for every room row (one Kobalte menu
 	// instance instead of one per row - per-row menus cost ~30 reactive
 	// nodes each, against the repo's 16ms interaction budget in a
-	// several-hundred-room space). Rows aim it at themselves on
-	// pointerdown/contextmenu; the trigger wraps the whole list region and
-	// disables itself - falling through to the NATIVE context menu, the
-	// SpaceTile hasMenu() precedent - when the aimed row has nothing to
-	// offer (indicator already showing) or the press wasn't on a room row.
-	const [menuTarget, setMenuTarget] = createSignal<RoomSummary | null>(null);
-	const menuDisabled = (): boolean => {
-		const target = menuTarget();
-		return (
-			!target ||
-			!canMarkRoomUnread(summaries[target.roomId], {
-				muted: isMuted(target.roomId),
-			})
-		);
-	};
-	// Capture-phase reset so every press starts un-aimed; a room row's own
-	// bubble-phase aim handler then re-targets before Kobalte's trigger
-	// logic (outermost bubble) reads `disabled`. Manual listeners because
-	// Solid JSX has no capture modifier that survives Kobalte's
-	// polymorphic prop spread.
+	// several-hundred-room space). The capture listener below aims it at
+	// the pressed row; a press outside any room row disables the trigger,
+	// falling through to the NATIVE context menu. On a room row the menu
+	// always opens - non-actionable items render disabled (Discord's
+	// grayed-out treatment), which keeps the trigger logic item-agnostic
+	// as more row actions arrive.
+	const [menuTarget, setMenuTarget] = createSignal<string | null>(null);
+	const menuDisabled = (): boolean => menuTarget() === null;
+	// One capture-phase listener aims the menu: it runs before Kobalte's
+	// trigger logic reads `disabled`, and covers every path that can open
+	// the menu (mouse right-click and touch long-press start at
+	// pointerdown; the keyboard Menu key fires contextmenu with no
+	// preceding pointerdown). A press outside any room row aims at null.
+	// Manual listeners because Solid JSX has no capture modifier that
+	// survives Kobalte's polymorphic prop spread.
 	let menuRegionEl: HTMLElement | undefined;
 	onMount(() => {
 		const el = menuRegionEl;
 		if (!el) return;
-		const reset = (): void => {
-			setMenuTarget(null);
+		const aim = (e: Event): void => {
+			const row = (e.target as Element | null)?.closest?.("[data-room-id]");
+			setMenuTarget(row?.getAttribute("data-room-id") ?? null);
 		};
-		el.addEventListener("pointerdown", reset, true);
-		el.addEventListener("contextmenu", reset, true);
+		el.addEventListener("pointerdown", aim, true);
+		el.addEventListener("contextmenu", aim, true);
 		onCleanup(() => {
-			el.removeEventListener("pointerdown", reset, true);
-			el.removeEventListener("contextmenu", reset, true);
+			el.removeEventListener("pointerdown", aim, true);
+			el.removeEventListener("contextmenu", aim, true);
 		});
 	});
 
@@ -603,7 +594,6 @@ const RoomList: Component<RoomListProps> = (props) => {
 			isSelected={selectedRoomId() === room.roomId}
 			isMuted={isMuted(room.roomId)}
 			onClick={() => navigateToRoom(room.roomId)}
-			onAimContextMenu={() => setMenuTarget(room)}
 		/>
 	);
 
@@ -890,10 +880,11 @@ const RoomList: Component<RoomListProps> = (props) => {
 				<ContextMenu.Portal>
 					<ContextMenu.Content class={menuContentClass}>
 						<ContextMenu.Item
-							class={menuItemClass}
+							class={`${menuItemClass} ${menuItemDisabledClass}`}
+							disabled={!canMarkRoomUnread(summaries[menuTarget() ?? ""])}
 							onSelect={() => {
 								const target = menuTarget();
-								if (target) markRoomUnread(clientCtx, target.roomId);
+								if (target) markRoomUnread(clientCtx, target);
 							}}
 						>
 							Mark as unread

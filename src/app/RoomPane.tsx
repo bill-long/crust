@@ -10,6 +10,7 @@ import {
 	on,
 	Show,
 } from "solid-js";
+import { menuItemDisabledClass } from "../components/menuStyles";
 import {
 	clamp,
 	MAX_MEMBERS,
@@ -47,8 +48,10 @@ const RoomOverflowMenu: Component<{
 	leaving: () => boolean;
 	onLeave: () => void;
 }> = (props) => {
-	const itemClass =
-		"flex min-h-11 w-full cursor-pointer items-center gap-3 rounded px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden";
+	// Shared by every item so the two disableable ones (Mark as unread,
+	// Leave room) gray out the same way; the disabled variants are inert
+	// on enabled items.
+	const itemClass = `flex min-h-11 w-full cursor-pointer items-center gap-3 rounded px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden ${menuItemDisabledClass}`;
 	return (
 		<DropdownMenu>
 			<DropdownMenu.Trigger
@@ -131,7 +134,7 @@ const RoomOverflowMenu: Component<{
 						Copy room link
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
-						class={`${itemClass} data-disabled:cursor-default data-disabled:text-text-disabled data-disabled:hover:bg-transparent`}
+						class={itemClass}
 						disabled={!props.canMarkUnread()}
 						onSelect={props.onMarkUnread}
 					>

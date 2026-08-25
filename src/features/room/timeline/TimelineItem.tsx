@@ -13,6 +13,7 @@ import {
 	Switch,
 } from "solid-js";
 import { Avatar } from "../../../components/Avatar";
+import { menuContentClass } from "../../../components/menuStyles";
 import { avatarInitial } from "../../../lib/avatar";
 import {
 	extractUrlsFromHtml,
@@ -545,7 +546,7 @@ const HoverToolbar: Component<{
 					</svg>
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Portal>
-					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+					<DropdownMenu.Content class={menuContentClass}>
 						<Show when={props.onCopyText}>
 							{/* afterMenuClose: on the blocked-clipboard path the copy
 							    opens the fallback dialog, which must not capture the

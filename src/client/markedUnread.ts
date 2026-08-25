@@ -1,6 +1,7 @@
 import { EventType, type MatrixClient, type Room } from "matrix-js-sdk";
 import { type Accessor, createEffect, untrack } from "solid-js";
 import { reportError } from "../lib/reportError";
+import { enqueueKeyedWrite } from "../lib/writeQueue";
 import type { RoomSummary, SummariesStore } from "./summaries";
 
 /** Stable account-data type for the marked-unread flag (MSC2867). */
@@ -27,24 +28,13 @@ export function getRoomMarkedUnread(room: Room): boolean {
 }
 
 /**
- * Whether "Mark as unread" is currently actionable for `summary`: not when
- * an unread indicator is already showing. A muted room's hidden count does
- * NOT block the action - marking it unread is how the user makes it
- * visible despite the mute. This is the single gate for every surface that
- * offers the action (the room-list context menu and the room-pane overflow
- * item), so the two can't drift. Callers without mute information (the
- * room pane, where mute state is room-list-local) omit `opts.muted`, which
- * errs toward offering the action.
+ * Whether "Mark as unread" is currently actionable for `summary`: only for
+ * a room that is fully read and not already flagged. The single gate for
+ * every surface that offers the action (the room-list context menu and the
+ * room-pane overflow item), so the two can't disagree.
  */
-export function canMarkRoomUnread(
-	summary: RoomSummary | undefined,
-	opts: { muted?: boolean } = {},
-): boolean {
-	if (!summary) return false;
-	return !(
-		(summary.unreadCount > 0 && opts.muted !== true) ||
-		summary.markedUnread
-	);
+export function canMarkRoomUnread(summary: RoomSummary | undefined): boolean {
+	return !!summary && summary.unreadCount === 0 && !summary.markedUnread;
 }
 
 /**
@@ -78,25 +68,11 @@ function enqueueFlagWrite(
 		chains = new Map();
 		flagWriteChains.set(client, chains);
 	}
-	const write = (): Promise<void> =>
+	return enqueueKeyedWrite(chains, roomId, () =>
 		client
 			.setRoomAccountData(roomId, MARKED_UNREAD_TYPE, { unread })
-			.then(() => {});
-	// No chain pending: issue the request synchronously (the common case;
-	// also keeps the optimistic flip and the PUT in the same task).
-	const pending = chains.get(roomId);
-	const next = pending ? pending.then(write) : write();
-	// Store a settled-safe tail: a failed write must neither block later
-	// writes nor surface as an unhandled rejection (the caller of THIS
-	// write owns its error handling via the returned promise). Drop the
-	// entry once the tail settles so the map doesn't retain every room
-	// ever touched.
-	const stored = next.catch(() => {});
-	chains.set(roomId, stored);
-	stored.then(() => {
-		if (chains.get(roomId) === stored) chains.delete(roomId);
-	});
-	return next;
+			.then(() => {}),
+	);
 }
 
 /**
@@ -141,30 +117,32 @@ export function clearRoomMarkedUnread(
 }
 
 /**
- * The room whose marked-unread flag the open-room view last consumed.
- * Module-level rather than component state deliberately: Layout is
- * re-created on route-definition boundary crossings (e.g. a settings
- * round-trip), and a remount with the same room still open is not a new
- * "open" - it must not consume a flag the user set while viewing the room.
+ * The room whose marked-unread flag the CURRENT open has already consumed,
+ * per client. Lives outside any component (and is keyed by client, not
+ * stored globally, so a logout/login cycle starts clean) because the
+ * owning Layout can be re-created mid-view: the latch is what makes a
+ * remount with the same room still open not count as a new "open".
  */
-let lastConsumedRoomId: string | null = null;
-
-export function _resetMarkedUnreadConsumerForTests(): void {
-	lastConsumedRoomId = null;
-}
+const consumedLatch = new WeakMap<MatrixClient, string>();
 
 /**
  * Consume the marked-unread flag when a room is opened (MSC2867: viewing
- * the room clears it). "Opened" means the viewed room id transitioned - a
- * flag set while the room is already open (the room-pane overflow action,
- * or a right-click on the open room's row) survives until the room is
- * NEXT opened. The effect tracks the summary entry's identity (a
- * top-level store key) so a cold-launch restore straight into a marked
- * room still clears once the initial sync creates the entry, but not the
- * `markedUnread` field itself (a field-level store write), so marking the
- * open room can't re-trigger consumption. A flag arriving from another
- * device while the room is open likewise persists until reopen - same
- * open-consumes semantics Element applies.
+ * the room clears it - the same open-consumes semantics Element applies).
+ *
+ * "Open" is a transition of the viewed room id. Consequences, all
+ * deliberate:
+ * - A flag set while the room is already open (the room-pane overflow
+ *   action, a right-click on the open room's row, or another device)
+ *   survives until the room is NEXT opened.
+ * - Any route transition away from the room - the back-to-list gesture, a
+ *   different room, or a full-screen route like settings - ends the
+ *   current open, so returning is a new open and consumes.
+ *
+ * The effect tracks the summary entry's identity (a top-level store key)
+ * so a cold-launch restore straight into a marked room still clears once
+ * the initial sync creates the entry, but not the `markedUnread` field
+ * itself (a field-level store write), so marking the open room can't
+ * re-trigger consumption.
  */
 export function useMarkedUnreadConsumer(
 	ctx: MarkedUnreadContext,
@@ -172,16 +150,17 @@ export function useMarkedUnreadConsumer(
 ): void {
 	createEffect(() => {
 		const rid = roomId();
-		if (!rid) {
-			// Leaving the room view re-arms consumption, so mark-and-go-back
-			// followed by reopening the same room clears the flag.
-			lastConsumedRoomId = null;
-			return;
+		// A different room (or none) is open now: the previous room's open
+		// is over, so drop its latch even if the new room's entry hasn't
+		// synced yet - returning to the previous room must consume again.
+		if (rid !== consumedLatch.get(ctx.client)) {
+			consumedLatch.delete(ctx.client);
 		}
+		if (!rid) return;
 		// Wait for the entry: reading the key subscribes to its creation.
 		if (!ctx.summaries[rid]) return;
-		if (rid === lastConsumedRoomId) return;
-		lastConsumedRoomId = rid;
+		if (consumedLatch.get(ctx.client) === rid) return;
+		consumedLatch.set(ctx.client, rid);
 		untrack(() => clearRoomMarkedUnread(ctx, rid));
 	});
 }

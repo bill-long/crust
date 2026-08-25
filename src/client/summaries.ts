@@ -741,6 +741,11 @@ export function createSummariesStore(client: MatrixClient): {
 		updateUnreadCounts(room);
 	}
 
+	// Sync echoes are applied without pending-write suppression: in a
+	// mark-then-quickly-open sequence, a /sync snapshot taken between the
+	// two serialized PUTs can transiently re-light the dot on the open
+	// room until the clear's own echo lands. Accepted as self-healing
+	// rather than importing urlPreviewSync's echo-debounce machinery.
 	function onRoomAccountData(event: MatrixEvent, room: Room): void {
 		const type = event.getType();
 		if (type !== MARKED_UNREAD_TYPE && type !== MARKED_UNREAD_TYPE_UNSTABLE)

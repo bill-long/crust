@@ -334,15 +334,19 @@ describe("RoomList mark as unread (#446)", () => {
 		);
 	});
 
-	it("does not open the menu when the room already shows an unread indicator", () => {
+	it("disables the item when the room is already unread", async () => {
 		const unread = makeRoomSummary("!general:example.com", "general");
 		unread.unreadCount = 2;
 		const client = renderWithClient([unread]);
 		const row = screen.getByRole("button", { name: /general/ });
 		fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
-		// The single hoisted menu's trigger disables itself, falling through
-		// to the native context menu (SpaceTile hasMenu() precedent).
-		expect(screen.queryByRole("menuitem")).toBeNull();
+		// The menu still opens on a room row (Discord's grayed-out
+		// treatment); only the non-actionable item disables.
+		const item = await screen.findByRole("menuitem", {
+			name: "Mark as unread",
+		});
+		expect(item.getAttribute("aria-disabled")).toBe("true");
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
 		expect(client.setRoomAccountData).not.toHaveBeenCalled();
 	});
 
