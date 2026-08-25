@@ -6,7 +6,6 @@ import {
 	createMemo,
 	createSignal,
 	lazy,
-	on,
 	onCleanup,
 	onMount,
 	Show,
@@ -15,7 +14,11 @@ import {
 } from "solid-js";
 import { useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
-import { clearRoomMarkedUnread, markRoomUnread } from "../client/markedUnread";
+import {
+	canMarkRoomUnread,
+	markRoomUnread,
+	useMarkedUnreadConsumer,
+} from "../client/markedUnread";
 import { getSpaceRooms } from "../client/summaries-selectors";
 import {
 	clamp,
@@ -505,21 +508,9 @@ const Layout: Component = () => {
 	});
 
 	// Opening a room consumes its marked-unread flag (MSC2867), so the
-	// sidebar dot disappears the moment the room is viewed. `on` is
-	// load-bearing: it keys the effect to the route plus the summary
-	// ENTRY's identity (so a cold-launch restore still clears once the
-	// initial sync creates the entry) while leaving the flag itself
-	// untracked - the clear helper reads it internally, and tracking it
-	// would re-run this effect on the flag alone, instantly swallowing a
-	// mark made while the room is open (the room-pane overflow action).
-	createEffect(
-		on(
-			[roomId, (): unknown => (roomId() ? summaries[roomId() ?? ""] : null)],
-			([rid, entry]) => {
-				if (rid && entry) clearRoomMarkedUnread(clientCtx, rid);
-			},
-		),
-	);
+	// sidebar dot disappears the moment the room is viewed. The hook owns
+	// the "what counts as opening" policy - see useMarkedUnreadConsumer.
+	useMarkedUnreadConsumer(clientCtx, roomId);
 
 	// Restore the last room on a cold launch. The app boots on the bare root
 	// path ("/") with no room selected; reopen the room the user last had open
@@ -890,6 +881,7 @@ const Layout: Component = () => {
 										canInvite={canInviteHere}
 										onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
 										onMarkUnread={() => markRoomUnread(clientCtx, rid)}
+										canMarkUnread={() => canMarkRoomUnread(summaries[rid])}
 										leaving={() => isLeaving(rid)}
 										onLeave={handleLeave}
 										onOpenSettings={() =>

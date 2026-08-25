@@ -28,9 +28,12 @@ const UnreadBadge: Component<UnreadBadgeProps> = (props) => {
 			<Show
 				when={props.unread > 0}
 				fallback={
+					// role="img" (not a live region): an empty span with
+					// role="status" announces nothing, and mounting live regions
+					// per virtualized row is noise. Mirrors ActiveCallDot.
 					<span
 						class={`block h-2.5 w-2.5 shrink-0 rounded-full bg-indicator ${props.class ?? ""}`}
-						role="status"
+						role="img"
 						aria-label="Marked unread"
 						title="Marked unread"
 					/>

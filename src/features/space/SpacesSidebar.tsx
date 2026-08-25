@@ -21,6 +21,11 @@ import {
 	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import {
+	menuContentClass,
+	menuItemClass,
+	menuItemDangerClass,
+} from "../../components/menuStyles";
 import { UnreadBadge } from "../../components/UnreadBadge";
 import { avatarInitial } from "../../lib/avatar";
 import {
@@ -193,10 +198,10 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 					</ContextMenu.Trigger>
 
 					<ContextMenu.Portal>
-						<ContextMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+						<ContextMenu.Content class={menuContentClass}>
 							<Show when={props.onOpenSpaceSettings}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+									class={menuItemClass}
 									onSelect={() =>
 										props.onOpenSpaceSettings?.(props.space.roomId)
 									}
@@ -206,7 +211,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 							</Show>
 							<Show when={canInviteToSpace()}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+									class={menuItemClass}
 									onSelect={() => props.onInviteSpace?.(props.space.roomId)}
 								>
 									Invite people
@@ -214,7 +219,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 							</Show>
 							<Show when={props.onLeaveSpace}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+									class={menuItemDangerClass}
 									onSelect={() => props.onLeaveSpace?.(props.space.roomId)}
 								>
 									Leave space

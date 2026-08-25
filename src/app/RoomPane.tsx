@@ -43,6 +43,7 @@ const RoomOverflowMenu: Component<{
 	onOpenSettings: () => void;
 	onCopyLink: () => void;
 	onMarkUnread: () => void;
+	canMarkUnread: () => boolean;
 	leaving: () => boolean;
 	onLeave: () => void;
 }> = (props) => {
@@ -129,7 +130,11 @@ const RoomOverflowMenu: Component<{
 						</svg>
 						Copy room link
 					</DropdownMenu.Item>
-					<DropdownMenu.Item class={itemClass} onSelect={props.onMarkUnread}>
+					<DropdownMenu.Item
+						class={`${itemClass} data-disabled:cursor-default data-disabled:text-text-disabled data-disabled:hover:bg-transparent`}
+						disabled={!props.canMarkUnread()}
+						onSelect={props.onMarkUnread}
+					>
 						<svg
 							class="h-4 w-4 shrink-0 text-text-muted"
 							viewBox="0 0 24 24"
@@ -183,6 +188,7 @@ const RoomPane: Component<{
 	canInvite: () => boolean;
 	onInvite: () => void;
 	onMarkUnread: () => void;
+	canMarkUnread: () => boolean;
 	leaving: () => boolean;
 	onLeave: () => void;
 	onOpenSettings: () => void;
@@ -522,6 +528,7 @@ const RoomPane: Component<{
 							onOpenSettings={props.onOpenSettings}
 							onCopyLink={props.onCopyLink}
 							onMarkUnread={props.onMarkUnread}
+							canMarkUnread={props.canMarkUnread}
 							leaving={props.leaving}
 							onLeave={props.onLeave}
 						/>

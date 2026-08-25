@@ -1,5 +1,14 @@
 import type { RoomSummary, SummariesStore } from "./summaries";
 
+/** Aggregated unread state for a set of rooms (a space subtree, or Home):
+    summed notification counts plus whether any room in the set is
+    explicitly marked unread (MSC2867). */
+export interface UnreadRollup {
+	unread: number;
+	highlight: number;
+	markedUnread: boolean;
+}
+
 /**
  * Rooms inside a space: joined, non-space children sorted by recent activity.
  */
@@ -63,7 +72,7 @@ export function getSpaceSubspaces(
 export function getSpaceUnreadRollup(
 	summaries: SummariesStore,
 	spaceId: string,
-): { unread: number; highlight: number; markedUnread: boolean } {
+): UnreadRollup {
 	const root = summaries[spaceId];
 	if (!root?.isSpace || root.membership !== "join")
 		return { unread: 0, highlight: 0, markedUnread: false };
@@ -389,11 +398,7 @@ export function getTotalUnread(summaries: SummariesStore): number {
  * linear time (two passes over the store). Unlike those two selectors it does
  * not sort or build a result array, since only the totals are needed.
  */
-export function getHomeUnreadRollup(summaries: SummariesStore): {
-	unread: number;
-	highlight: number;
-	markedUnread: boolean;
-} {
+export function getHomeUnreadRollup(summaries: SummariesStore): UnreadRollup {
 	const spacedRoomIds = new Set<string>();
 	for (const s of Object.values(summaries)) {
 		if (s.isSpace && s.membership === "join") {

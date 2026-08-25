@@ -301,7 +301,7 @@ describe("RoomList mark as unread (#446)", () => {
 		marked.markedUnread = true;
 		renderWithClient([marked]);
 		const row = screen.getByRole("button", { name: /general/ });
-		const dot = within(row).getByRole("status", { name: "Marked unread" });
+		const dot = within(row).getByRole("img", { name: "Marked unread" });
 		expect(dot.textContent).toBe("");
 	});
 
@@ -334,17 +334,29 @@ describe("RoomList mark as unread (#446)", () => {
 		);
 	});
 
-	it("disables the item when the room already shows an unread indicator", async () => {
+	it("does not open the menu when the room already shows an unread indicator", () => {
 		const unread = makeRoomSummary("!general:example.com", "general");
 		unread.unreadCount = 2;
 		const client = renderWithClient([unread]);
 		const row = screen.getByRole("button", { name: /general/ });
 		fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
-		const item = await screen.findByRole("menuitem", {
-			name: "Mark as unread",
-		});
-		expect(item.getAttribute("aria-disabled")).toBe("true");
-		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		// The single hoisted menu's trigger disables itself, falling through
+		// to the native context menu (SpaceTile hasMenu() precedent).
+		expect(screen.queryByRole("menuitem")).toBeNull();
 		expect(client.setRoomAccountData).not.toHaveBeenCalled();
+	});
+
+	it("does not open the menu for a press outside a room row", () => {
+		renderWithClient([makeRoomSummary("!general:example.com", "general")]);
+		// Aim at a row first so a stale target exists, then right-click the
+		// empty list area below the rows: the capture-phase reset must
+		// un-aim before the trigger decides.
+		const row = screen.getByRole("button", { name: /general/ });
+		fireEvent.pointerDown(row, { button: 2 });
+		const region = row.closest(
+			"[data-expanded], div.flex.min-h-0",
+		) as HTMLElement;
+		fireEvent.contextMenu(region, { clientX: 10, clientY: 400 });
+		expect(screen.queryByRole("menuitem")).toBeNull();
 	});
 });

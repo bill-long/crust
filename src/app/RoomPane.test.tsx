@@ -97,6 +97,7 @@ function setup(
 			canInvite={() => false}
 			onInvite={() => {}}
 			onMarkUnread={() => {}}
+			canMarkUnread={() => true}
 			leaving={() => false}
 			onLeave={() => {}}
 			onOpenSettings={options.onOpenSettings ?? (() => {})}
