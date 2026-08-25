@@ -45,7 +45,10 @@ export function parseSlashCommand(input: string): ParsedSlashCommand {
 	// `//text` sends `/text` literally.
 	if (input.startsWith("//")) return passthrough(input.slice(1));
 
-	const match = /^\/([a-z]+)(?:[ \t]+([\s\S]*))?$/i.exec(input);
+	// \s separator (not just space/tab): "/me<Shift+Enter>waves" must
+	// still be a command - a hiding command like /spoiler silently
+	// falling through to literal text would send the secret in the clear.
+	const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/i.exec(input);
 	if (!match) return passthrough(input);
 	const command = match[1].toLowerCase();
 	const rest = match[2]?.trim() ?? "";

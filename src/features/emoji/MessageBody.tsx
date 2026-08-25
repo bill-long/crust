@@ -413,6 +413,9 @@ function applyReveal(spoiler: Element): void {
 	const content = spoiler.querySelector(".spoiler-content");
 	content?.removeAttribute("aria-hidden");
 	for (const a of content?.querySelectorAll('a[tabindex="-1"]') ?? []) {
+		// Only anchors belonging to THIS spoiler: a nested spoiler's
+		// content stays hidden, so its links must stay unfocusable.
+		if (a.closest(".spoiler") !== spoiler) continue;
 		a.removeAttribute("tabindex");
 	}
 }
@@ -443,23 +446,30 @@ const MessageBody: Component<{
 		return plainTextToHtml(props.body, props.shortcodeLookup);
 	});
 
-	// Revealed spoilers, keyed by data-spoiler-idx. Kept OUTSIDE the
-	// rendered HTML: the innerHTML regenerates whenever the memo's inputs
-	// change (notably the shortcodeLookup Map identity when image packs
-	// finish loading, or an edit), and a reveal held only as a CSS class
-	// would silently snap back to hidden.
-	const [revealedSpoilers, setRevealedSpoilers] = createSignal<
-		ReadonlySet<string>
-	>(new Set());
+	// Revealed spoilers, keyed by data-spoiler-idx AND pinned to the
+	// content they were revealed on. Kept OUTSIDE the rendered HTML: the
+	// innerHTML regenerates whenever the memo's inputs change (notably
+	// the shortcodeLookup Map identity when image packs finish loading),
+	// and a reveal held only as a CSS class would silently snap back to
+	// hidden. The content pin makes the positional idx keys safe: after
+	// an EDIT changes the message, stale indices must not unhide a
+	// spoiler the reader never clicked, so reveals for other content are
+	// simply ignored (and dropped on the next reveal).
+	const revealContent = (): string => props.formattedBody ?? props.body;
+	const [revealedSpoilers, setRevealedSpoilers] = createSignal<{
+		content: string;
+		ids: ReadonlySet<string>;
+	}>({ content: "", ids: new Set() });
 	let htmlRef: HTMLDivElement | undefined;
 	createEffect(() => {
 		renderedHtml();
 		const revealed = revealedSpoilers();
 		const root = htmlRef;
-		if (!root || revealed.size === 0) return;
+		if (!root || revealed.ids.size === 0) return;
+		if (revealed.content !== revealContent()) return;
 		for (const spoiler of root.querySelectorAll(".spoiler")) {
 			const idx = spoiler.getAttribute("data-spoiler-idx");
-			if (idx !== null && revealed.has(idx)) applyReveal(spoiler);
+			if (idx !== null && revealed.ids.has(idx)) applyReveal(spoiler);
 		}
 	});
 
@@ -484,7 +494,12 @@ const MessageBody: Component<{
 		applyReveal(spoiler);
 		const idx = spoiler.getAttribute("data-spoiler-idx");
 		if (idx !== null) {
-			setRevealedSpoilers((prev) => new Set(prev).add(idx));
+			const content = revealContent();
+			setRevealedSpoilers((prev) => ({
+				content,
+				// Drop reveals pinned to older content on the way.
+				ids: new Set(prev.content === content ? prev.ids : []).add(idx),
+			}));
 		}
 	};
 

@@ -267,6 +267,50 @@ describe("MessageBody spoilers (MSC2010)", () => {
 		expect(spoiler?.getAttribute("aria-expanded")).toBe("true");
 	});
 
+	it("keeps a nested spoiler hidden when only the outer one is revealed", () => {
+		const c = renderFormatted(
+			"<span data-mx-spoiler>outer <span data-mx-spoiler>inner " +
+				'<a href="https://hidden.example">link</a></span></span>',
+		);
+		const outer = c.querySelector<HTMLElement>(".spoiler");
+		outer
+			?.querySelector(":scope > .spoiler-content")
+			?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		expect(outer?.classList.contains("revealed")).toBe(true);
+		// The inner spoiler element (not outer's own content - a plain
+		// descendant selector would match that first).
+		const innerSpoiler = c.querySelectorAll(".spoiler")[1];
+		const inner = innerSpoiler?.querySelector(":scope > .spoiler-content");
+		expect(inner?.getAttribute("aria-hidden")).toBe("true");
+		expect(inner?.querySelector("a")?.getAttribute("tabindex")).toBe("-1");
+	});
+
+	it("resets reveal state when the message content changes (edit)", () => {
+		const [body, setBody] = createSignal(
+			"<span data-mx-spoiler>one</span> x <span data-mx-spoiler>two</span>",
+		);
+		const { container } = render(() => (
+			<MessageBody
+				body="fallback"
+				format="org.matrix.custom.html"
+				formattedBody={body()}
+				isEdited={false}
+				client={client}
+				shortcodeLookup={new Map()}
+			/>
+		));
+		container
+			.querySelector<HTMLElement>(".spoiler-content")
+			?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		expect(container.querySelectorAll(".spoiler.revealed").length).toBe(1);
+		// An edit reorders the spoilers; positional idx keys are now
+		// meaningless, so nothing may stay (or become) revealed.
+		setBody(
+			"<span data-mx-spoiler>NEW</span> y <span data-mx-spoiler>one</span>",
+		);
+		expect(container.querySelectorAll(".spoiler.revealed").length).toBe(0);
+	});
+
 	it("round-trips the composer's ||...|| markdown into a spoiler control", () => {
 		const c = renderComposed("the killer is ||the butler||");
 		const spoiler = c.querySelector(".spoiler");

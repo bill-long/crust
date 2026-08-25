@@ -286,3 +286,14 @@ describe("isPreviewableUrl", () => {
 		expect(isPreviewableUrl("matrix:r/foo:example.com")).toBe(false);
 	});
 });
+
+describe("spoilered URLs (MSC2010)", () => {
+	it("does not extract anchored or bare URLs inside data-mx-spoiler", () => {
+		expect(
+			extractUrlsFromHtml(
+				'<span data-mx-spoiler>see <a href="https://hidden.example/a">x</a>' +
+					" and https://hidden.example/b</span> https://visible.example",
+			),
+		).toEqual(["https://visible.example"]);
+	});
+});

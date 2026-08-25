@@ -218,3 +218,24 @@ describe("formatMarkdown spoiler syntax", () => {
 		);
 	});
 });
+
+describe("formatMarkdown protected fragments inside spoilers", () => {
+	it("restores a code span nested inside a spoiler", () => {
+		expect(html("a ||`code`|| b")).toBe(
+			"a <span data-mx-spoiler><code>code</code></span> b",
+		);
+	});
+
+	it("restores a link nested inside a spoiler", () => {
+		expect(html("||[x](https://e.example)||")).toBe(
+			'<span data-mx-spoiler><a href="https://e.example" target="_blank" rel="noreferrer noopener">x</a></span>',
+		);
+	});
+
+	it("never ships the placeholder sentinel to the wire", () => {
+		const { formatted_body } = formatMarkdown(
+			"a ||`code` and [x](https://e.example)|| b",
+		);
+		expect(formatted_body).not.toContain("￿");
+	});
+});

@@ -97,3 +97,15 @@ describe("parseSlashCommand", () => {
 		);
 	});
 });
+
+describe("newline after the command", () => {
+	it("accepts Shift+Enter between command and argument", () => {
+		expect(parseSlashCommand("/me\nwaves at everyone")).toEqual({
+			text: "waves at everyone",
+			msgtype: "m.emote",
+			plain: false,
+			spoiler: false,
+		});
+		expect(parseSlashCommand("/spoiler\nsecret").spoiler).toBe(true);
+	});
+});

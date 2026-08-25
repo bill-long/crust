@@ -132,3 +132,20 @@ describe("findLastEditableEvent", () => {
 		expect(findLastEditableEvent(events, ME)).toBeNull();
 	});
 });
+
+describe("isEditableEvent additions (#448)", () => {
+	it("accepts an own, sent m.emote (the /me path)", () => {
+		expect(isEditableEvent(ev({ senderId: ME, msgtype: "m.emote" }), ME)).toBe(
+			true,
+		);
+	});
+
+	it("rejects a /spoiler placeholder message (editing would lose the hidden text)", () => {
+		const spoiler = {
+			...ev({ senderId: ME, msgtype: "m.text" }),
+			body: "[Spoiler]",
+			formattedBody: "<span data-mx-spoiler>secret</span>",
+		} as unknown as Parameters<typeof isEditableEvent>[0];
+		expect(isEditableEvent(spoiler, ME)).toBe(false);
+	});
+});

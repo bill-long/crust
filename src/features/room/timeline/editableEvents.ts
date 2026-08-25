@@ -16,7 +16,22 @@ export function isEditableEvent(ev: TimelineEvent, myUserId: string): boolean {
 	return (
 		ev.senderId === myUserId &&
 		(ev.msgtype === "m.text" || ev.msgtype === "m.emote") &&
-		ev.status === null
+		ev.status === null &&
+		!editWouldLoseContent(ev)
+	);
+}
+
+/**
+ * True when prefilling an edit draft from `ev.body` would destroy
+ * content the body doesn't carry: a /spoiler message's body is the
+ * "[Spoiler]" placeholder (MSC2010) while the real text lives only in
+ * formatted_body, so a routine edit would replace the message with the
+ * literal placeholder. Such messages get no edit affordance.
+ */
+export function editWouldLoseContent(ev: TimelineEvent): boolean {
+	return (
+		ev.body === "[Spoiler]" &&
+		(ev.formattedBody?.includes("data-mx-spoiler") ?? false)
 	);
 }
 

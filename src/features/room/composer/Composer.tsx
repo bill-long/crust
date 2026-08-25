@@ -290,13 +290,21 @@ const Composer: Component<{
 	// placeholder instead of an empty box.
 	const previewContent = createMemo(() => {
 		if (!previewOpen()) return null;
-		const msg = text();
-		if (!msg.trim()) return null;
-		return draftToWire(
-			msg,
-			reconcileMentions(msg),
-			findCustomEmoji(msg, shortcodeLookup()),
-		);
+		// Trim BEFORE parsing, exactly like send() does - otherwise a
+		// leading space makes the preview and the send disagree about
+		// whether the draft is a slash command.
+		const msg = text().trim();
+		if (!msg) return null;
+		const mentionList = reconcileMentions(msg);
+		const emoji = findCustomEmoji(msg, shortcodeLookup());
+		// Edit mode sends through formatMarkdown with no slash-command
+		// parsing (an edit rewrites content, it doesn't run commands), so
+		// the preview must mirror that too.
+		if (props.editingEvent) {
+			const { body, formatted_body } = formatMarkdown(msg, mentionList, emoji);
+			return { body, formatted_body, msgtype: "m.text" as const };
+		}
+		return draftToWire(msg, mentionList, emoji);
 	});
 
 	let textareaRef: HTMLTextAreaElement | undefined;
@@ -545,7 +553,13 @@ const Composer: Component<{
 		// (see above) means an in-flight send can only touch its own disposed
 		// instance, never the newly selected room's fresh Composer.
 
-		// Edit mode: send m.replace event
+		// Edit mode: send m.replace event. Deliberately NOT draftToWire:
+		// an edit rewrites the message's content, it doesn't run slash
+		// commands (matching Element). Known limitation: editing a message
+		// whose body contains markdown-active characters that were sent
+		// plain (e.g. a /shrug emoticon's underscores) re-runs markdown
+		// over them - this repo's markdown has no backslash escapes to
+		// preserve such text through an edit.
 		if (props.editingEvent) {
 			const currentMentions = reconcileMentions(msg);
 			const emoji = findCustomEmoji(msg, shortcodeLookup());

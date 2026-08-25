@@ -189,8 +189,11 @@ function hasExcludedAncestor(node: Node): boolean {
 	let cur: Node | null = node.parentNode;
 	while (cur) {
 		if (cur.nodeType === 1) {
-			const tag = (cur as Element).tagName;
-			if (EXCLUDED_HTML_ANCESTORS.includes(tag)) return true;
+			const el = cur as Element;
+			if (EXCLUDED_HTML_ANCESTORS.includes(el.tagName)) return true;
+			// Spoilered content (MSC2010) must not leak through an
+			// unblurred OpenGraph preview card below the hidden text.
+			if (el.hasAttribute("data-mx-spoiler")) return true;
 		}
 		cur = cur.parentNode;
 	}
