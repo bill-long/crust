@@ -218,6 +218,26 @@ describe("useTimeline", () => {
 				name: "Alice",
 				avatarUrl: "mxc://test/new-avatar",
 			});
+			// Profile-neutral member churn (join/leave/PL) is filtered before
+			// the throttle: even though room state now carries the new avatar,
+			// this event must not trigger a rebuild.
+			client.__emit(
+				"RoomState.members",
+				createMatrixEvent({
+					eventId: "$member-neutral",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.member",
+					content: { membership: "join" },
+					prevContent: { membership: "join" },
+					ts: 2000,
+				}),
+			);
+			await new Promise((resolve) => setTimeout(resolve, 350));
+			expect(events[0].senderAvatarUrl).toBeNull();
+
+			// A profile delta (avatar_url changed) does trigger the throttled
+			// rebuild, which re-reads current member state.
 			client.__emit(
 				"RoomState.members",
 				createMatrixEvent({
@@ -225,11 +245,10 @@ describe("useTimeline", () => {
 					roomId: "!roomA:test",
 					sender: "@alice:test",
 					type: "m.room.member",
-					content: { membership: "join" },
-					ts: 2000,
+					content: { membership: "join", avatar_url: "mxc://test/new-avatar" },
+					ts: 2001,
 				}),
 			);
-			// The rebuild is debounced (250ms trailing); wait past it.
 			await new Promise((resolve) => setTimeout(resolve, 350));
 			expect(events[0].senderAvatarUrl).toBe(
 				"https://example.com/_matrix/media/v3/download/test/new-avatar",

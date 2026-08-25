@@ -40,6 +40,10 @@ describe("avatarInitial", () => {
 		expect(avatarInitial("  @alice:example.com")).toBe("A");
 	});
 
+	it("trims again after stripping, so a spaced sigil yields the letter", () => {
+		expect(avatarInitial("@ alice")).toBe("A");
+	});
+
 	it("keeps an astral first character whole", () => {
 		expect(avatarInitial("\u{1F431} cat")).toBe("\u{1F431}");
 	});

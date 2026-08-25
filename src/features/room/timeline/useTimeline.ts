@@ -359,6 +359,20 @@ export function useTimeline(
 		}
 	}
 
+	// Pending member-profile rebuild (armed by `onMembersChanged` below).
+	// Cleared on room switch: an armed timer for the outgoing room would
+	// otherwise swallow the incoming room's first member change - the
+	// throttle's "already armed" check would skip it, and the generation
+	// guard would then no-op the fire.
+	let memberRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function clearMemberRebuildTimer(): void {
+		if (memberRebuildTimer !== null) {
+			clearTimeout(memberRebuildTimer);
+			memberRebuildTimer = null;
+		}
+	}
+
 	function scheduleCallExpiryRefresh(room: Room, nextExpiry: number): void {
 		clearCallExpiryTimer();
 		const gen = roomGeneration;
@@ -541,9 +555,10 @@ export function useTimeline(
 		currentTimelineWindow = null;
 		deferredLiveCount = 0;
 		followingLive = true;
-		// Drop any pending expiry-leave timer from the previous room; the new
-		// room re-arms its own from the first rebuild.
+		// Drop any pending expiry-leave / member-rebuild timers from the
+		// previous room; the new room re-arms its own.
 		clearCallExpiryTimer();
+		clearMemberRebuildTimer();
 		setLoading(true);
 		setLoadingOlder(false);
 		setLoadingNewer(false);
@@ -1565,13 +1580,24 @@ export function useTimeline(
 	// Sender profile fields (senderName / senderAvatarUrl) are snapshotted at
 	// projection time, so a member's display-name or avatar change must
 	// re-project the already-rendered rows or the old profile sticks until an
-	// unrelated rebuild (#517). Debounced: join/leave bursts and lazy-load
-	// member backfills emit many member events at once, and one trailing
-	// rebuild covers them all.
-	const MEMBER_REBUILD_DEBOUNCE_MS = 250;
-	let memberRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+	// unrelated rebuild (#517). Throttled, leading-anchored: at most one
+	// rebuild per window, and the rebuild reads state when it fires, so every
+	// change landing inside the window is captured by that one pass. Events
+	// that change neither profile field (join/leave/PL churn, which can't
+	// affect the projected rows) are skipped before touching the timer.
+	const MEMBER_REBUILD_THROTTLE_MS = 250;
 	const onMembersChanged = (event: MatrixEvent): void => {
 		if (!currentRoomId || event.getRoomId() !== currentRoomId) return;
+		const content = event.getContent();
+		// Optional call: stripped test doubles may omit getPrevContent.
+		const prev =
+			typeof event.getPrevContent === "function" ? event.getPrevContent() : {};
+		if (
+			content.displayname === prev.displayname &&
+			content.avatar_url === prev.avatar_url
+		) {
+			return;
+		}
 		if (memberRebuildTimer !== null) return;
 		const gen = roomGeneration;
 		memberRebuildTimer = setTimeout(() => {
@@ -1579,7 +1605,7 @@ export function useTimeline(
 			if (roomGeneration !== gen) return;
 			const room = currentRoomId ? client.getRoom(currentRoomId) : null;
 			if (room) rebuildEventsFromWindow(room);
-		}, MEMBER_REBUILD_DEBOUNCE_MS);
+		}, MEMBER_REBUILD_THROTTLE_MS);
 	};
 
 	client.on(RoomEvent.Timeline, onTimelineEvent);
@@ -1592,7 +1618,7 @@ export function useTimeline(
 
 	onCleanup(() => {
 		clearCallExpiryTimer();
-		if (memberRebuildTimer !== null) clearTimeout(memberRebuildTimer);
+		clearMemberRebuildTimer();
 		pollWatcher.dispose();
 		threadWatcher.dispose();
 		releaseThreadEchoRegistryIfEmpty(client, currentRoomId, currentSourceKey);

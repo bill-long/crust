@@ -21,7 +21,10 @@ export function avatarHttpUrl(
  * not "@"), uppercased; "?" when nothing usable remains.
  */
 export function avatarInitial(name: string): string {
-	const trimmed = name.trim().replace(/^@/, "");
+	// Trim on both sides of the sigil strip: "  @alice" needs the leading
+	// trim for the anchor to match, and "@ alice" needs the trailing trim so
+	// the first character isn't the space the strip exposed.
+	const trimmed = name.trim().replace(/^@/, "").trim();
 	// Array.from iterates code points, so an astral first character (an
 	// emoji-leading display name) stays whole instead of charAt() splitting
 	// it into a lone surrogate that paints as a replacement glyph.
