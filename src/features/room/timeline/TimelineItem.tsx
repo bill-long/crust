@@ -31,6 +31,7 @@ import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
 import { copyableText } from "./copyMessageText";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
+import { isEditableContent } from "./editableEvents";
 import { MediaAudio } from "./MediaAudio";
 import { MediaFile } from "./MediaFile";
 import { MediaVideo } from "./MediaVideo";
@@ -298,7 +299,9 @@ function unsupportedLabel(msgtype: string): string {
 
 const HoverToolbar: Component<{
 	isOwnMessage: boolean;
-	msgtype: string | undefined;
+	/** Whether the Edit button renders (own text/emote message whose body
+	    can prefill an edit draft without losing content). */
+	canEdit: boolean;
 	canPin: boolean;
 	isPinned: boolean;
 	packs: ImagePack[];
@@ -454,7 +457,7 @@ const HoverToolbar: Component<{
 					</svg>
 				</button>
 			</Show>
-			<Show when={props.isOwnMessage && props.msgtype === "m.text"}>
+			<Show when={props.canEdit}>
 				<button
 					type="button"
 					class="rounded p-1 text-xs text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
@@ -854,7 +857,7 @@ const TimelineItem: Component<{
 				>
 					<HoverToolbar
 						isOwnMessage={props.isOwnMessage}
-						msgtype={ev.msgtype}
+						canEdit={props.isOwnMessage && isEditableContent(ev)}
 						canPin={props.canPin ?? false}
 						isPinned={props.isPinned ?? false}
 						packs={props.packs}
@@ -1050,16 +1053,33 @@ const TimelineItem: Component<{
 														? extractGifUrl(ev.body)
 														: null;
 												if (!gifUrl) {
+													const messageBody = () => (
+														<MessageBody
+															body={ev.body}
+															format={ev.format}
+															formattedBody={ev.formattedBody}
+															isEdited={ev.isEdited}
+															client={props.client}
+															shortcodeLookup={props.shortcodeLookup}
+														/>
+													);
 													return (
 														<>
-															<MessageBody
-																body={ev.body}
-																format={ev.format}
-																formattedBody={ev.formattedBody}
-																isEdited={ev.isEdited}
-																client={props.client}
-																shortcodeLookup={props.shortcodeLookup}
-															/>
+															{/* m.emote renders Element-style as one italic
+															    "* Name action" line (#448); the emote-body
+															    class inlines MessageBody's block roots. */}
+															<Show
+																when={ev.msgtype === "m.emote"}
+																fallback={messageBody()}
+															>
+																<div class="emote-body text-sm italic text-text-secondary">
+																	<span aria-hidden="true">* </span>
+																	<span class="font-medium">
+																		{ev.senderName}
+																	</span>{" "}
+																	{messageBody()}
+																</div>
+															</Show>
 															<UrlPreviewList
 																client={props.client}
 																urls={previewUrls}

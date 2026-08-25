@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineEvent } from "../timeline/timelineTypes";
 import {
 	applyMentions,
+	buildEditContent,
 	buildReplyFallback,
 	buildTextMessageContent,
 	mentionUserIds,
@@ -178,5 +179,36 @@ describe("buildTextMessageContent with a reply", () => {
 	it("omits m.mentions entirely for a non-reply with no typed mentions", () => {
 		const content = buildTextMessageContent("hi", null, [], null, ROOM, ME);
 		expect(content["m.mentions"]).toBeUndefined();
+	});
+});
+
+describe("buildTextMessageContent msgtype", () => {
+	it("defaults to m.text", () => {
+		const content = buildTextMessageContent("hi", null, [], null, ROOM, ME);
+		expect(content.msgtype).toBe("m.text");
+	});
+
+	it("sends m.emote when asked (the /me path)", () => {
+		const content = buildTextMessageContent(
+			"waves",
+			null,
+			[],
+			null,
+			ROOM,
+			ME,
+			"m.emote",
+		);
+		expect(content.msgtype).toBe("m.emote");
+		expect(content.body).toBe("waves");
+	});
+});
+
+describe("buildEditContent msgtype", () => {
+	it("keeps an emote an emote through an edit", () => {
+		const content = buildEditContent("waves more", null, [], "$t", "m.emote");
+		expect(content.msgtype).toBe("m.emote");
+		expect((content["m.new_content"] as Record<string, unknown>).msgtype).toBe(
+			"m.emote",
+		);
 	});
 });

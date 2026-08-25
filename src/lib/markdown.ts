@@ -160,6 +160,8 @@ function formatInline(line: string, ctx: InlineContext): string {
 	}
 
 	// Emphasis on the escaped text. Bold before italic so `**x**` wins.
+	// (||Spoilers|| were already pre-extracted in formatMarkdown - before
+	// the line split - so emphasis here can never cross a span boundary.)
 	const beforeEmphasis = s;
 	s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 	s = s.replace(/~~(.+?)~~/g, "<del>$1</del>");
@@ -200,6 +202,21 @@ export function formatMarkdown(
 			);
 		},
 	);
+
+	// Extract ||spoilers|| before the line split (but after code fences,
+	// so a || inside a fence stays literal): a spoiler spanning a
+	// Shift+Enter newline would otherwise match nothing per-line and the
+	// secret would ship in the clear - a content-hiding feature must fail
+	// closed. The inner content is inline-formatted per line; the span is
+	// protected so outer emphasis can't cross its boundary.
+	src = src.replace(/\|\|([\s\S]+?)\|\|/g, (_m, inner: string) => {
+		ctx.flags.inline = true;
+		const innerHtml = inner
+			.split("\n")
+			.map((l) => formatInline(l, ctx))
+			.join("<br>");
+		return protect(ctx, `<span data-mx-spoiler>${innerHtml}</span>`);
+	});
 
 	const lines = src.split("\n");
 	const out: string[] = [];
@@ -277,13 +294,23 @@ export function formatMarkdown(
 	}
 	flushText();
 
-	// Restore all protected fragments.
-	const html = out
-		.join("")
-		.replace(new RegExp(`${PH}(\\d+)${PH}`, "g"), (m, idx: string) => {
+	// Restore all protected fragments, recursively: a protected block can
+	// itself embed placeholder tokens (a ||spoiler|| protects its whole
+	// span AFTER code/link/mention/emoji fragments inside it were already
+	// protected), and a single non-recursive pass would ship the raw
+	// sentinel to the wire. Recursion is bounded by construction: a block
+	// can only reference blocks created before it, so indices strictly
+	// decrease down the chain and a cycle cannot form.
+	// (Fresh regex per call: sharing one /g regex across the recursive
+	// replace calls would corrupt its lastIndex mid-iteration.)
+	const restore = (s: string): string =>
+		s.replace(new RegExp(`${PH}(\\d+)${PH}`, "g"), (m, idx: string) => {
 			const n = Number(idx);
-			return n < ctx.protectedBlocks.length ? ctx.protectedBlocks[n] : m;
+			return n < ctx.protectedBlocks.length
+				? restore(ctx.protectedBlocks[n])
+				: m;
 		});
+	const html = restore(out.join(""));
 
 	const hasFormatting =
 		blockApplied || ctx.flags.inline || ctx.flags.mention || ctx.flags.emoji;

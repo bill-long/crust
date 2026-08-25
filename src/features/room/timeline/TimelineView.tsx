@@ -67,10 +67,16 @@ function shouldShowHeader(
 	// always show its own header so the grouping doesn't span the
 	// notice.
 	if (curr.stateNotice) return false;
+	// Emotes render as a self-identifying "* Name action" line (#448), so
+	// a separate avatar+name header would just double the name. Mirrors
+	// the state-notice rule: the emote shows no header, and the message
+	// after it always reintroduces its own.
+	if (curr.msgtype === "m.emote") return false;
 	if (index === 0) return true;
 	const prev = events[index - 1];
 	if (!prev) return true;
 	if (prev.stateNotice) return true;
+	if (prev.msgtype === "m.emote") return true;
 	if (prev.senderId !== curr.senderId) return true;
 	if (curr.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS) return true;
 	// Break group on day boundary so the date separator can land cleanly

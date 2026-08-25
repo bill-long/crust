@@ -189,3 +189,67 @@ describe("formatMarkdown — mixed block + text", () => {
 		expect(html("intro\n# Title")).toBe("intro<h1>Title</h1>");
 	});
 });
+
+describe("formatMarkdown spoiler syntax", () => {
+	it("renders ||text|| as a data-mx-spoiler span", () => {
+		expect(html("a ||hidden|| b")).toBe(
+			"a <span data-mx-spoiler>hidden</span> b",
+		);
+	});
+
+	it("nests emphasis inside a spoiler", () => {
+		expect(html("||**secret**||")).toBe(
+			"<span data-mx-spoiler><strong>secret</strong></span>",
+		);
+	});
+
+	it("leaves a single unpaired || alone", () => {
+		const { formatted_body } = formatMarkdown("a || b");
+		expect(formatted_body).toBeNull();
+	});
+
+	it("fails closed when emphasis markers interleave with the spoiler", () => {
+		// Without protection, the italic pass would match across the span
+		// boundary and parser recovery would push part of the spoilered
+		// text OUTSIDE the hiding span. The span must stay intact; the
+		// dangling `*` outside simply stays literal.
+		expect(html("x *y ||z* w||")).toBe(
+			"x *y <span data-mx-spoiler>z* w</span>",
+		);
+	});
+});
+
+describe("formatMarkdown protected fragments inside spoilers", () => {
+	it("restores a code span nested inside a spoiler", () => {
+		expect(html("a ||`code`|| b")).toBe(
+			"a <span data-mx-spoiler><code>code</code></span> b",
+		);
+	});
+
+	it("restores a link nested inside a spoiler", () => {
+		expect(html("||[x](https://e.example)||")).toBe(
+			'<span data-mx-spoiler><a href="https://e.example" target="_blank" rel="noreferrer noopener">x</a></span>',
+		);
+	});
+
+	it("never ships the placeholder sentinel to the wire", () => {
+		const { formatted_body } = formatMarkdown(
+			"a ||`code` and [x](https://e.example)|| b",
+		);
+		expect(formatted_body).not.toContain("￿");
+	});
+});
+
+describe("formatMarkdown multi-line spoilers", () => {
+	it("hides a spoiler spanning a Shift+Enter newline (fails closed)", () => {
+		expect(html("||secret line1\nline2||")).toBe(
+			"<span data-mx-spoiler>secret line1<br>line2</span>",
+		);
+	});
+
+	it("keeps || literal inside a code fence", () => {
+		expect(html("```\na || b || c\n```")).toBe(
+			"<pre><code>a || b || c\n</code></pre>",
+		);
+	});
+});

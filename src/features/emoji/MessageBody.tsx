@@ -1,6 +1,12 @@
 import DOMPurify from "dompurify";
 import type { MatrixClient } from "matrix-js-sdk";
-import { type Component, createMemo, Show } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createMemo,
+	createSignal,
+	Show,
+} from "solid-js";
 import { canonicalizeUrl, trimUrlTail, urlRegex } from "../../lib/extractUrls";
 import { escapeAttr, escapeHtml } from "../../lib/htmlEscape";
 import { linkifyTextNodes } from "../../lib/linkify";
@@ -56,6 +62,7 @@ const ALLOWED_ATTR = [
 	"data-mx-color",
 	"data-mx-emoticon",
 	"data-mx-maths",
+	"data-mx-spoiler",
 	"color",
 	"name",
 	"target",
@@ -101,6 +108,7 @@ function sanitizeMatrixHtml(
 			"data-mx-color",
 			"data-mx-pill",
 			"data-mx-maths",
+			"data-mx-spoiler",
 		],
 		ALLOWED_URI_REGEXP,
 	});
@@ -150,6 +158,53 @@ function sanitizeMatrixHtml(
 	// Replace :shortcode: in text nodes only (not attributes)
 	if (shortcodeLookup.size > 0) {
 		replaceShortcodesInTextNodes(div, shortcodeLookup, client);
+	}
+
+	// Spoilers (MSC2010): [data-mx-spoiler] becomes a click-to-reveal
+	// control. Runs LAST so anchors created by the linkify pass inside
+	// spoiler content also get de-focused below. Content moves into an
+	// inner aria-hidden wrapper so screen readers don't read it until
+	// revealed; the reveal itself is handled by MessageBody's delegated
+	// click/keydown (static innerHTML can't carry handlers). The
+	// attribute's value is the optional reason. The index attribute keys
+	// reveal state that must survive an innerHTML regeneration.
+	let spoilerIdx = 0;
+	for (const el of div.querySelectorAll("[data-mx-spoiler]")) {
+		const reason = el.getAttribute("data-mx-spoiler");
+		const content = document.createElement("span");
+		content.className = "spoiler-content";
+		content.setAttribute("aria-hidden", "true");
+		let spoiler: Element;
+		if (el.tagName === "IMG" || el.tagName === "A") {
+			// A spoilered image can't host the reveal control or the
+			// content wrapper itself; a spoilered ANCHOR must not become
+			// the control either - keeping its href on the wrapper would
+			// leak the hidden URL via hover, middle-click, and the context
+			// menu while unrevealed. Wrap both in a neutral span (MSC2010
+			// allows the attribute on any element).
+			spoiler = document.createElement("span");
+			el.replaceWith(spoiler);
+			content.appendChild(el);
+		} else {
+			spoiler = el;
+			while (el.firstChild) content.appendChild(el.firstChild);
+		}
+		spoiler.appendChild(content);
+		spoiler.classList.add("spoiler");
+		spoiler.setAttribute("role", "button");
+		spoiler.setAttribute("tabindex", "0");
+		spoiler.setAttribute("aria-expanded", "false");
+		spoiler.setAttribute(
+			"aria-label",
+			reason ? `Spoiler: ${reason}` : "Spoiler",
+		);
+		if (reason) spoiler.setAttribute("title", `Spoiler: ${reason}`);
+		spoiler.setAttribute("data-spoiler-idx", String(spoilerIdx++));
+		// aria-hidden content must not stay tab-reachable; the reveal
+		// restores focusability.
+		for (const a of content.querySelectorAll("a")) {
+			a.setAttribute("tabindex", "-1");
+		}
 	}
 
 	return div.innerHTML;
@@ -352,6 +407,23 @@ function plainTextToHtml(
 }
 
 /**
+ * Apply the revealed state to one spoiler control: expanded, content out
+ * of aria-hidden, and its anchors focusable again.
+ */
+function applyReveal(spoiler: Element): void {
+	spoiler.classList.add("revealed");
+	spoiler.setAttribute("aria-expanded", "true");
+	const content = spoiler.querySelector(".spoiler-content");
+	content?.removeAttribute("aria-hidden");
+	for (const a of content?.querySelectorAll('a[tabindex="-1"]') ?? []) {
+		// Only anchors belonging to THIS spoiler: a nested spoiler's
+		// content stays hidden, so its links must stay unfocusable.
+		if (a.closest(".spoiler") !== spoiler) continue;
+		a.removeAttribute("tabindex");
+	}
+}
+
+/**
  * Renders a message body: sanitized HTML for formatted_body, or plain text
  * with :shortcode: replacement for custom emoji.
  */
@@ -377,6 +449,63 @@ const MessageBody: Component<{
 		return plainTextToHtml(props.body, props.shortcodeLookup);
 	});
 
+	// Revealed spoilers, keyed by data-spoiler-idx AND pinned to the
+	// content they were revealed on. Kept OUTSIDE the rendered HTML: the
+	// innerHTML regenerates whenever the memo's inputs change (notably
+	// the shortcodeLookup Map identity when image packs finish loading),
+	// and a reveal held only as a CSS class would silently snap back to
+	// hidden. The content pin makes the positional idx keys safe: after
+	// an EDIT changes the message, stale indices must not unhide a
+	// spoiler the reader never clicked, so reveals for other content are
+	// simply ignored (and dropped on the next reveal).
+	const revealContent = (): string => props.formattedBody ?? props.body;
+	const [revealedSpoilers, setRevealedSpoilers] = createSignal<{
+		content: string;
+		ids: ReadonlySet<string>;
+	}>({ content: "", ids: new Set() });
+	let htmlRef: HTMLDivElement | undefined;
+	createEffect(() => {
+		renderedHtml();
+		const revealed = revealedSpoilers();
+		const root = htmlRef;
+		if (!root || revealed.ids.size === 0) return;
+		if (revealed.content !== revealContent()) return;
+		for (const spoiler of root.querySelectorAll(".spoiler")) {
+			const idx = spoiler.getAttribute("data-spoiler-idx");
+			if (idx !== null && revealed.ids.has(idx)) applyReveal(spoiler);
+		}
+	});
+
+	// One-way spoiler reveal (Discord-style), delegated: the sanitized
+	// innerHTML can't carry handlers, so clicks/keys on the generated
+	// .spoiler controls are caught on the container.
+	const onSpoilerActivate = (e: MouseEvent | KeyboardEvent): void => {
+		if (
+			e instanceof KeyboardEvent &&
+			e.key !== "Enter" &&
+			e.key !== " " &&
+			e.key !== "Spacebar"
+		) {
+			return;
+		}
+		const target = e.target;
+		if (!(target instanceof Element)) return;
+		const spoiler = target.closest(".spoiler");
+		if (!spoiler || spoiler.classList.contains("revealed")) return;
+		e.preventDefault();
+		e.stopPropagation();
+		applyReveal(spoiler);
+		const idx = spoiler.getAttribute("data-spoiler-idx");
+		if (idx !== null) {
+			const content = revealContent();
+			setRevealedSpoilers((prev) => ({
+				content,
+				// Drop reveals pinned to older content on the way.
+				ids: new Set(prev.content === content ? prev.ids : []).add(idx),
+			}));
+		}
+	};
+
 	return (
 		<Show
 			when={renderedHtml()}
@@ -391,7 +520,13 @@ const MessageBody: Component<{
 		>
 			{(html) => (
 				<div class="message-body break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
-					<div innerHTML={html()} />
+					{/* biome-ignore lint/a11y/noStaticElementInteractions: passive delegate for the sanitizer-generated role="button" spoiler spans inside the static innerHTML, which cannot carry handlers themselves */}
+					<div
+						ref={htmlRef}
+						innerHTML={html()}
+						onClick={onSpoilerActivate}
+						onKeyDown={onSpoilerActivate}
+					/>
 					<Show when={props.isEdited}>
 						<span class="ml-1 text-xs text-text-disabled">(edited)</span>
 					</Show>

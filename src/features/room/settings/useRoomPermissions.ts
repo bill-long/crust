@@ -4,6 +4,7 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
+import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import {
 	effectiveLevel,
 	effectiveUsersDefault,
@@ -93,8 +94,14 @@ export function useRoomPermissions(
 		client.off(RoomStateEvent.Events, onRoomState);
 	});
 
+	// Recovery for a Room that isn't in the store yet at mount (deep-link
+	// before initial sync) - without it every permission memo latches
+	// false and settings render read-only until an unrelated PL change.
+	const roomAvailableTick = useRoomAvailableTick(client, roomId);
+
 	const plContent = createMemo<PowerLevelContent>(() => {
 		tick();
+		roomAvailableTick();
 		const rid = roomId();
 		if (!rid) return {};
 		const room = client.getRoom(rid);
@@ -107,6 +114,7 @@ export function useRoomPermissions(
 
 	const myPowerLevel = createMemo<number>(() => {
 		tick();
+		roomAvailableTick();
 		const rid = roomId();
 		const uid = client.getUserId();
 		if (!rid || !uid) return 0;
@@ -134,6 +142,7 @@ export function useRoomPermissions(
 	const makeStateCan = (type: string): Accessor<boolean> =>
 		createMemo(() => {
 			tick();
+			roomAvailableTick();
 			return canSendStateEvent(client, roomId(), type);
 		});
 

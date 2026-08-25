@@ -39,6 +39,7 @@ import { ComposerContextBanner } from "./ComposerContextBanner";
 import { ComposerPlusMenu } from "./ComposerPlusMenu";
 import { createComposerFormatting } from "./composerFormatting";
 import { composerTextareaScope } from "./composerTextarea";
+import { draftToWire } from "./draftToWire";
 import { FormattingToolbar } from "./FormattingToolbar";
 import type { PendingAttachment } from "./media/types";
 import { createPendingAttachment, uploadAndSend } from "./media/uploadMedia";
@@ -282,19 +283,34 @@ const Composer: Component<{
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(props.packs));
 
 	// Live preview: render the in-progress draft through the SAME send→receive
-	// pipeline a real message takes (formatMarkdown → MessageBody), so what the
-	// user previews is byte-identical to what recipients render. Computed only
-	// when the preview is open; returns null for an empty draft so the panel can
-	// show a placeholder instead of an empty box.
+	// pipeline a real message takes (draftToWire → MessageBody), so the
+	// previewed CONTENT is byte-identical to what recipients render - slash
+	// commands and the /spoiler wrap included. (Row-level framing like the
+	// emote "* Name" line lives in TimelineItem, outside this panel.)
+	// Computed only when the preview is open; returns null for an empty
+	// draft so the panel can show a placeholder instead of an empty box.
 	const previewContent = createMemo(() => {
 		if (!previewOpen()) return null;
-		const msg = text();
-		if (!msg.trim()) return null;
-		return formatMarkdown(
-			msg,
-			reconcileMentions(msg),
-			findCustomEmoji(msg, shortcodeLookup()),
-		);
+		// Trim BEFORE parsing, exactly like send() does - otherwise a
+		// leading space makes the preview and the send disagree about
+		// whether the draft is a slash command.
+		const msg = text().trim();
+		if (!msg) return null;
+		const mentionList = reconcileMentions(msg);
+		const emoji = findCustomEmoji(msg, shortcodeLookup());
+		// Edit mode sends through formatMarkdown with no slash-command
+		// parsing (an edit rewrites content, it doesn't run commands), so
+		// the preview must mirror that too.
+		if (props.editingEvent) {
+			const { body, formatted_body } = formatMarkdown(msg, mentionList, emoji);
+			// Mirrors the edit send path: msgtype follows the edit target.
+			const msgtype =
+				props.editingEvent.msgtype === "m.emote"
+					? ("m.emote" as const)
+					: ("m.text" as const);
+			return { body, formatted_body, msgtype };
+		}
+		return draftToWire(msg, mentionList, emoji);
 	});
 
 	let textareaRef: HTMLTextAreaElement | undefined;
@@ -543,7 +559,13 @@ const Composer: Component<{
 		// (see above) means an in-flight send can only touch its own disposed
 		// instance, never the newly selected room's fresh Composer.
 
-		// Edit mode: send m.replace event
+		// Edit mode: send m.replace event. Deliberately NOT draftToWire:
+		// an edit rewrites the message's content, it doesn't run slash
+		// commands (matching Element). Known limitation: editing a message
+		// whose body contains markdown-active characters that were sent
+		// plain (e.g. a /shrug emoticon's underscores) re-runs markdown
+		// over them - this repo's markdown has no backslash escapes to
+		// preserve such text through an edit.
 		if (props.editingEvent) {
 			const currentMentions = reconcileMentions(msg);
 			const emoji = findCustomEmoji(msg, shortcodeLookup());
@@ -557,6 +579,7 @@ const Composer: Component<{
 				formatted_body,
 				currentMentions,
 				props.editingEvent.eventId,
+				props.editingEvent.msgtype === "m.emote" ? "m.emote" : "m.text",
 			);
 
 			const draft = text();
@@ -683,18 +706,17 @@ const Composer: Component<{
 			// Otherwise fall through to send the trailing text message.
 		}
 
-		const { body, formatted_body } = formatMarkdown(
-			msg,
-			currentMentions,
-			emoji,
-		);
+		// Slash commands + markdown + spoiler wrap, via the shared
+		// draft-to-wire transform (the preview consumes the same one).
+		const wire = draftToWire(msg, currentMentions, emoji);
 		const content = buildTextMessageContent(
-			body,
-			formatted_body,
+			wire.body,
+			wire.formatted_body,
 			currentMentions,
 			replyTo && !replyConsumed ? replyTo : null,
 			roomId,
 			client.getUserId() ?? "",
+			wire.msgtype,
 		);
 
 		setSending(true);
