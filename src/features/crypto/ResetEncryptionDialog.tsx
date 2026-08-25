@@ -207,7 +207,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 							<button
 								type="button"
 								onClick={() => setStep("uia")}
-								class="rounded bg-danger px-4 py-2 text-sm font-semibold text-danger-foreground transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-danger px-4 py-2 text-sm font-semibold text-danger-foreground transition-colors hover:bg-danger/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Reset encryption
 							</button>

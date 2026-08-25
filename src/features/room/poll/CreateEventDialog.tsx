@@ -296,7 +296,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 							maxLength={140}
 							value={title()}
 							onInput={(e) => setTitle(e.currentTarget.value)}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							placeholder="Game night"
 						/>
 					</label>
@@ -311,7 +311,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 								required
 								value={startRaw()}
 								onInput={(e) => setStartRaw(e.currentTarget.value)}
-								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 						</label>
 						<label class="block min-w-0 flex-1 text-sm">
@@ -323,7 +323,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 								value={endRaw()}
 								min={startRaw() || undefined}
 								onInput={(e) => setEndRaw(e.currentTarget.value)}
-								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 						</label>
 					</div>
@@ -341,7 +341,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 									</span>
 									<button
 										type="button"
-										class="rounded px-2 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										class="rounded px-2 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 										onClick={() => setChosenRoomId(null)}
 									>
 										Change
@@ -355,7 +355,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 								onInput={(e) => setRoomQuery(e.currentTarget.value)}
 								placeholder="Search rooms…"
 								aria-label="Search rooms for the event location"
-								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							/>
 							<Show when={filteredRooms().length > 0}>
 								<ul
@@ -367,7 +367,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 											<li>
 												<button
 													type="button"
-													class="w-full truncate px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+													class="w-full truncate px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 													onClick={() => {
 														setChosenRoomId(room.roomId);
 														setRoomQuery("");
@@ -392,7 +392,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 							fallback={
 								<button
 									type="button"
-									class="rounded border border-dashed border-border-default px-3 py-2 text-sm text-text-muted transition-colors hover:border-border-strong hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded border border-dashed border-border-default px-3 py-2 text-sm text-text-muted transition-colors hover:border-border-strong hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => imageInputRef?.click()}
 								>
 									Choose an image…
@@ -408,7 +408,7 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 									/>
 									<button
 										type="button"
-										class="rounded px-1 text-sm text-text-muted transition-colors hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										class="rounded px-1 text-sm text-text-muted transition-colors hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 										onClick={clearImage}
 									>
 										Remove
@@ -440,14 +440,14 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 							type="button"
 							disabled={sending()}
 							onClick={() => props.onClose()}
-							class="rounded px-4 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+							class="rounded px-4 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 						>
 							Cancel
 						</button>
 						<button
 							type="submit"
 							disabled={!canSubmit()}
-							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 						>
 							{sending() ? "Uploading…" : "Create event"}
 						</button>

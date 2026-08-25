@@ -190,7 +190,7 @@ export const FullCallOverlay: Component = () => {
 								s().requestClose();
 							}}
 							aria-disabled={s().leaving() || s().rtc.status() === "leaving"}
-							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text-disabled any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+							class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-text-disabled any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 							title="Close call"
 							aria-label="Close call"
 						>

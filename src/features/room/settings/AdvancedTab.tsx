@@ -50,7 +50,7 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				<button
 					type="button"
 					onClick={() => setShowLeave(true)}
-					class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text"
+					class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 				>
 					{props.isSpace ? "Leave space" : "Leave room"}
 				</button>

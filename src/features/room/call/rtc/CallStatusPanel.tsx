@@ -223,7 +223,7 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 							onClick={() => handleReturn(s())}
 							title="Return to the call's room"
 							aria-label={`Return to call in ${s().roomName()}`}
-							class="flex h-full min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+							class="flex h-full min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-1 text-left transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 						>
 							<span
 								aria-hidden="true"
@@ -260,7 +260,7 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 										? "Close floating voice overlay"
 										: "Open floating voice overlay"
 								}
-								class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-pressed:bg-surface-2 aria-pressed:text-text-primary any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+								class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover aria-pressed:bg-surface-2 aria-pressed:text-text-primary any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 							>
 								<svg
 									class="h-4 w-4"
@@ -295,7 +295,7 @@ export const CallStatusPanel: Component<CallStatusPanelProps> = (props) => {
 							disabled={s().leaving() || s().rtc.status() === "leaving"}
 							title="Disconnect from the call"
 							aria-label="Disconnect from call"
-							class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover disabled:opacity-50 any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+							class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover disabled:opacity-50 any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 						>
 							<svg
 								class="h-4 w-4"

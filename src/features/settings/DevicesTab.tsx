@@ -56,7 +56,7 @@ const ActionButton: Component<{
 	<button
 		type="button"
 		onClick={props.onClick}
-		class="rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+		class="rounded px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		classList={{
 			"bg-accent text-accent-foreground hover:bg-accent-hover": !props.danger,
 			"bg-danger text-danger-foreground hover:bg-danger/90": !!props.danger,
@@ -167,7 +167,7 @@ const DevicesTab: Component = () => {
 					<button
 						type="button"
 						onClick={handleAction}
-						class="mb-4 flex w-full items-center gap-3 rounded-lg bg-warning-bg/60 px-4 py-3 text-left text-sm text-warning-text-bright transition-colors hover:bg-warning-bg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="mb-4 flex w-full items-center gap-3 rounded-lg bg-warning-bg/60 px-4 py-3 text-left text-sm text-warning-text-bright transition-colors hover:bg-warning-bg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					>
 						<span class="text-base" aria-hidden="true">
 							{"\u26A0"}
@@ -409,7 +409,7 @@ const DevicesTab: Component = () => {
 						<button
 							type="button"
 							onClick={() => triggerCryptoAction("reset-recovery-key")}
-							class="shrink-0 rounded bg-surface-3 px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="shrink-0 rounded bg-surface-3 px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						>
 							Reset…
 						</button>

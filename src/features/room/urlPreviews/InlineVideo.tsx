@@ -37,7 +37,7 @@ const InlineVideo: Component<{ url: string }> = (props) => {
 			fallback={
 				<button
 					type="button"
-					class="group relative mt-1 flex aspect-video w-full max-w-md items-center justify-center overflow-hidden rounded bg-surface-2 transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+					class="group relative mt-1 flex aspect-video w-full max-w-md items-center justify-center overflow-hidden rounded bg-surface-2 transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
 					onClick={() => setActivated(true)}
 					aria-label="Load video"
 				>

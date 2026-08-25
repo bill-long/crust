@@ -20,7 +20,7 @@ const Toggle: Component<ToggleProps> = (props) => (
 		onClick={() => {
 			if (!props.disabled) props.onChange(!props.checked);
 		}}
-		class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+		class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		classList={{
 			"cursor-pointer": !props.disabled,
 			"cursor-not-allowed": !!props.disabled,

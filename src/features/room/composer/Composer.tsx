@@ -908,7 +908,7 @@ const Composer: Component<{
 					aria-autocomplete={pickerRendered() ? "list" : undefined}
 					aria-controls={pickerRendered() ? listboxId : undefined}
 					inert={voiceRecorder.recording() || undefined}
-					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					class="w-full resize-none rounded-lg bg-surface-2 px-4 py-2.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-hidden focus:ring-1 focus:ring-accent-hover"
 					style={{
 						// Reserve exactly the action strip's measured width, so
 						// the padding tracks whichever buttons are visible

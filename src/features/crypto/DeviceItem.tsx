@@ -95,7 +95,7 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => props.onVerify?.(props.device.deviceId)}
-								class="rounded bg-surface-3 px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-surface-3 px-2 py-1 text-xs text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Verify
 							</button>

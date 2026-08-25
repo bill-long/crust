@@ -242,7 +242,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 											type="button"
 											onClick={() => removeRoom(child.roomId)}
 											disabled={childrenState.pending()}
-											class="shrink-0 rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
+											class="shrink-0 rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
 											aria-label={`Remove ${child.name} from this space`}
 										>
 											{pendingRoomId() === child.roomId
@@ -280,7 +280,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 							onInput={(e) => setFilter(e.currentTarget.value)}
 							aria-labelledby={filterId}
 							placeholder="Search your rooms…"
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						/>
 					</label>
 					<Show
@@ -317,7 +317,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 											type="button"
 											onClick={() => addRoom(room.roomId)}
 											disabled={childrenState.pending()}
-											class="shrink-0 rounded bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+											class="shrink-0 rounded bg-accent px-2.5 py-1 text-xs font-medium text-accent-foreground hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 											aria-label={`Add ${room.name} to this space`}
 										>
 											{pendingRoomId() === room.roomId ? "Adding…" : "Add"}

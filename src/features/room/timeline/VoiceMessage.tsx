@@ -374,7 +374,7 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 							<Show when={!undecryptable() && !unsupported()}>
 								<button
 									type="button"
-									class="shrink-0 rounded px-1 text-xs font-medium text-text-secondary underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="shrink-0 rounded px-1 text-xs font-medium text-text-secondary underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={retry}
 								>
 									Retry
@@ -385,7 +385,7 @@ export const VoiceMessage: Component<VoiceMessageProps> = (props) => {
 				>
 					<button
 						type="button"
-						class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						aria-label={
 							playing() ? "Pause voice message" : "Play voice message"
 						}

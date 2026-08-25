@@ -68,7 +68,7 @@ export const ThreadPanel: Component<{
 		<section
 			ref={sectionRef}
 			tabindex="-1"
-			class="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none"
+			class="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-hidden"
 			aria-label="Thread"
 			onKeyDown={(e) => {
 				// defaultPrevented: the composer's own Escape handling (cancel
@@ -85,7 +85,7 @@ export const ThreadPanel: Component<{
 				<h2 class="text-sm font-semibold text-text-emphasis">Thread</h2>
 				<button
 					type="button"
-					class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					onClick={() => props.onClose()}
 					aria-label="Close thread"
 				>

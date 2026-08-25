@@ -289,7 +289,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 								onClick={() => {
 									if (perms.canSetAvatar()) fileInputRef.click();
 								}}
-								class="rounded bg-surface-2 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded bg-surface-2 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								classList={{
 									"opacity-60 cursor-not-allowed": !perms.canSetAvatar(),
 								}}
@@ -337,7 +337,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						onKeyDown={(e) => {
 							if (e.key === "Escape") cancelName();
 						}}
-						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
 					/>
 				</Tooltip>
 				<Show when={nameConflict() !== null}>
@@ -346,7 +346,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						<button
 							type="button"
 							onClick={cancelName}
-							class="underline hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="underline hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						>
 							view
 						</button>
@@ -358,7 +358,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 							type="button"
 							onClick={handleSaveName}
 							disabled={nameOpt.pending()}
-							class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						>
 							Save
 						</button>
@@ -366,7 +366,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 							type="button"
 							onClick={cancelName}
 							disabled={nameOpt.pending()}
-							class="rounded px-3 py-1.5 text-sm text-text-muted hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							class="rounded px-3 py-1.5 text-sm text-text-muted hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						>
 							Cancel
 						</button>
@@ -407,7 +407,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						onKeyDown={(e) => {
 							if (e.key === "Escape") cancelTopic();
 						}}
-						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+						class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
 					/>
 				</Tooltip>
 				<Show when={topicConflict() !== null}>
@@ -416,7 +416,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						<button
 							type="button"
 							onClick={cancelTopic}
-							class="underline hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="underline hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						>
 							view
 						</button>
@@ -428,7 +428,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 							type="button"
 							onClick={handleSaveTopic}
 							disabled={topicOpt.pending()}
-							class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						>
 							Save
 						</button>
@@ -436,7 +436,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 							type="button"
 							onClick={cancelTopic}
 							disabled={topicOpt.pending()}
-							class="rounded px-3 py-1.5 text-sm text-text-muted hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							class="rounded px-3 py-1.5 text-sm text-text-muted hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						>
 							Cancel
 						</button>

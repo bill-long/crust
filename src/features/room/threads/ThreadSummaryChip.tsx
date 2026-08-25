@@ -56,7 +56,7 @@ export const ThreadSummaryChip: Component<{
 				: {})}
 			class={`mt-1 inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface-2 px-2 py-0.5 text-xs text-text-secondary ${
 				props.onOpen
-					? "transition-colors hover:border-border-default hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					? "transition-colors hover:border-border-default hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					: ""
 			}`}
 		>

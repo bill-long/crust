@@ -116,13 +116,13 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 						value={props.url}
 						aria-label={props.inputLabel ?? "Room link"}
 						onFocus={(e) => e.currentTarget.select()}
-						class="mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					/>
 					<div class="flex justify-end">
 						<button
 							type="button"
 							onClick={props.onClose}
-							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						>
 							Close
 						</button>

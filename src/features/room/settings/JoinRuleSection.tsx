@@ -282,7 +282,7 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 										if (!disabled() && effectiveRule() !== opt.value)
 											setJoinRule(opt.value);
 									}}
-									class="rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									classList={{
 										"bg-accent text-text-primary":
 											effectiveRule() === opt.value,
@@ -328,7 +328,7 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 												type="button"
 												onClick={() => removeAllowSpace(entry.room_id)}
 												aria-label={`Remove ${spaceName(entry.room_id)}`}
-												class="shrink-0 rounded px-1.5 py-0.5 text-text-secondary transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+												class="shrink-0 rounded px-1.5 py-0.5 text-text-secondary transition-colors hover:bg-surface-3 hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 											>
 												Remove
 											</button>
@@ -355,7 +355,7 @@ const JoinRuleSection: Component<JoinRuleSectionProps> = (props) => {
 										<button
 											type="button"
 											onClick={() => addAllowSpace(candidate.roomId)}
-											class="rounded border border-border-subtle px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+											class="rounded border border-border-subtle px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 										>
 											+ {candidate.name}
 										</button>

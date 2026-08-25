@@ -1154,7 +1154,7 @@ const TimelineView: Component<{
 																const g = group();
 																if (g) collapseGroup(g);
 															}}
-															class="rounded text-left text-xs text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
+															class="rounded text-left text-xs text-text-muted transition-colors hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 														>
 															Show less
 														</button>

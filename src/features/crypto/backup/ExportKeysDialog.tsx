@@ -140,7 +140,7 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 									onInput={(e) => setPassphrase(e.currentTarget.value)}
 									autocomplete="new-password"
 									required
-									class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-hover"
+									class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
 								/>
 							</div>
 							<div>
@@ -157,7 +157,7 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 									onInput={(e) => setConfirm(e.currentTarget.value)}
 									autocomplete="new-password"
 									required
-									class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-hover"
+									class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
 								/>
 							</div>
 							<Show when={errorMessage()}>

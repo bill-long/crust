@@ -289,7 +289,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 												revoking() === inv.userId ||
 												!perms.canKickTarget(inv.userId)
 											}
-											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
+											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{revoking() === inv.userId ? "Revoking…" : "Revoke"}
 										</button>
@@ -348,7 +348,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 											type="button"
 											onClick={() => void resolveKnock(k.userId, "approve")}
 											disabled={knockPending() !== null || !perms.canInvite()}
-											class="rounded px-2 py-1 text-xs font-medium text-success-text hover:bg-success-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-text disabled:cursor-not-allowed disabled:opacity-60"
+											class="rounded px-2 py-1 text-xs font-medium text-success-text hover:bg-success-bg/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-success-text disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{knockPending()?.userId === k.userId &&
 											knockPending()?.action === "approve"
@@ -362,7 +362,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 												knockPending() !== null ||
 												!perms.canKickTarget(k.userId)
 											}
-											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
+											class="rounded px-2 py-1 text-xs font-medium text-danger-text hover:bg-danger-bg/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text disabled:cursor-not-allowed disabled:opacity-60"
 										>
 											{knockPending()?.userId === k.userId &&
 											knockPending()?.action === "decline"
@@ -453,7 +453,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 											}
 										>
 											<DropdownMenu.Trigger
-												class="rounded p-1 text-text-muted hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+												class="rounded p-1 text-text-muted hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 												aria-label={`Member actions for ${m.displayName}`}
 											>
 												⋯
@@ -462,7 +462,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 												<DropdownMenu.Content class="portal-scale z-50 min-w-[200px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg">
 													<Show when={canPromoteMod()}>
 														<DropdownMenu.Item
-															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2"
+															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-hidden focus-visible:bg-surface-2"
 															onSelect={() =>
 																requestAction({
 																	kind: "promote-mod",
@@ -476,7 +476,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 													</Show>
 													<Show when={canPromoteAdmin()}>
 														<DropdownMenu.Item
-															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2"
+															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-hidden focus-visible:bg-surface-2"
 															onSelect={() =>
 																requestAction({
 																	kind: "promote-admin",
@@ -490,7 +490,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 													</Show>
 													<Show when={canDemote()}>
 														<DropdownMenu.Item
-															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2"
+															class="cursor-pointer rounded px-3 py-1.5 text-sm text-text-primary hover:bg-surface-2 focus-visible:outline-hidden focus-visible:bg-surface-2"
 															onSelect={() =>
 																requestAction({
 																	kind: "demote",
@@ -504,7 +504,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 													</Show>
 													<Show when={canKickTarget()}>
 														<DropdownMenu.Item
-															class="cursor-pointer rounded px-3 py-1.5 text-sm text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:bg-danger-bg/30"
+															class="cursor-pointer rounded px-3 py-1.5 text-sm text-danger-text hover:bg-danger-bg/30 focus-visible:outline-hidden focus-visible:bg-danger-bg/30"
 															onSelect={() =>
 																requestAction({
 																	kind: "kick",
@@ -518,7 +518,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 													</Show>
 													<Show when={canBanTarget()}>
 														<DropdownMenu.Item
-															class="cursor-pointer rounded px-3 py-1.5 text-sm text-danger-text hover:bg-danger-bg/30 focus-visible:outline-none focus-visible:bg-danger-bg/30"
+															class="cursor-pointer rounded px-3 py-1.5 text-sm text-danger-text hover:bg-danger-bg/30 focus-visible:outline-hidden focus-visible:bg-danger-bg/30"
 															onSelect={() =>
 																requestAction({
 																	kind: "ban",

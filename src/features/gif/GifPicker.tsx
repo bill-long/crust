@@ -268,7 +268,7 @@ const GifPicker: Component<{
 					onInput={(e) => setQuery(e.currentTarget.value)}
 					placeholder={attr().searchPlaceholder}
 					aria-label={attr().searchPlaceholder}
-					class="w-full rounded bg-surface-1 px-3 py-1.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-none focus:ring-1 focus:ring-accent-hover"
+					class="w-full rounded bg-surface-1 px-3 py-1.5 text-sm text-text-emphasis placeholder:text-text-disabled focus:outline-hidden focus:ring-1 focus:ring-accent-hover"
 				/>
 			</div>
 
@@ -328,7 +328,7 @@ const GifPicker: Component<{
 											return (
 												<button
 													type="button"
-													class="group relative h-full overflow-hidden rounded bg-surface-1 transition-transform hover:scale-[1.02] focus:outline-none focus:ring-1 focus:ring-accent-hover"
+													class="group relative h-full overflow-hidden rounded bg-surface-1 transition-transform hover:scale-[1.02] focus:outline-hidden focus:ring-1 focus:ring-accent-hover"
 													onClick={() => props.onSelect(gif)}
 													aria-label={title || "GIF"}
 												>

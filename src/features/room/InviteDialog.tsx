@@ -164,7 +164,7 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 								<button
 									type="button"
 									onClick={() => void copyLink.copy(inviteUrl())}
-									class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-medium transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
+									class="inline-flex items-center gap-2 rounded bg-surface-2 px-3 py-2 text-sm font-medium transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
 									classList={{
 										"text-success-text": copyLink.copyState() === "copied",
 										"text-danger-text": copyLink.copyState() === "error",
@@ -235,7 +235,7 @@ const InviteDialog: Component<InviteDialogProps> = (props) => {
 								type="button"
 								onClick={tryClose}
 								disabled={submitting()}
-								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							>
 								Close
 							</button>

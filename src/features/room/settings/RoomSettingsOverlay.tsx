@@ -177,7 +177,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 									<button
 										type="button"
 										onClick={() => props.onTabChange(tab.id)}
-										class="w-full rounded px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										class="w-full rounded px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 										classList={{
 											"bg-surface-2 text-text-primary font-medium":
 												props.activeTab === tab.id,
@@ -204,7 +204,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 						<button
 							type="button"
 							onClick={props.onClose}
-							class="flex items-center gap-2 rounded p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="flex items-center gap-2 rounded p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label={`Close ${entityNoun()} settings`}
 						>
 							<CloseIcon />

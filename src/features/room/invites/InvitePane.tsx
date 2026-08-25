@@ -38,7 +38,7 @@ const InvitePane: Component<{
 					<button
 						type="button"
 						onClick={() => props.onBack()}
-						class="-ml-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
+						class="-ml-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
 						title="Back to room list"
 						aria-label="Back to room list"
 					>

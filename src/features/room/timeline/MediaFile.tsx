@@ -115,7 +115,7 @@ export const MediaFile: Component<{
 	);
 
 	const chipClass =
-		"mt-1 flex h-12 max-w-[min(100%,24rem)] items-center gap-2 rounded bg-surface-2 px-3 text-text-secondary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover";
+		"mt-1 flex h-12 max-w-[min(100%,24rem)] items-center gap-2 rounded bg-surface-2 px-3 text-text-secondary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
 
 	return (
 		<Show

@@ -195,7 +195,7 @@ const RecoveryKeyInput: Component = () => {
 						autocomplete="off"
 						ref={(el) => el.focus()}
 						spellcheck={false}
-						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
+						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
 					/>
 
 					<Show when={errorText()}>

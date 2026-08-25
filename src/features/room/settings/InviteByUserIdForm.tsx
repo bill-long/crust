@@ -177,7 +177,7 @@ const InviteByUserIdForm: Component<InviteByUserIdFormProps> = (props) => {
 					errorText() ? errorId : successText() ? statusId : undefined
 				}
 				aria-invalid={errorText() ? true : undefined}
-				class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+				class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 			/>
 
 			<Show when={errorText()}>
@@ -195,7 +195,7 @@ const InviteByUserIdForm: Component<InviteByUserIdFormProps> = (props) => {
 				<button
 					type="submit"
 					disabled={submitting()}
-					class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+					class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 				>
 					{submitting() ? "Inviting…" : (props.submitLabel ?? "Invite")}
 				</button>

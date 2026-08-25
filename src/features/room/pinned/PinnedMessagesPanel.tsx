@@ -239,7 +239,7 @@ const PinnedMessagesPanel: Component<{
 				ref={(el: HTMLButtonElement) => {
 					triggerEl = el;
 				}}
-				class="relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded px-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:min-w-11"
+				class="relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded px-1 transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:min-w-11"
 				classList={{
 					"bg-surface-3 text-text-emphasis": open(),
 					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
@@ -260,7 +260,7 @@ const PinnedMessagesPanel: Component<{
 			<Popover.Portal>
 				<Popover.Content
 					id={panelId}
-					class="portal-scale z-50 w-[360px] max-w-[90vw] rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
+					class="portal-scale z-50 w-[360px] max-w-[90vw] rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-hidden"
 					role="dialog"
 					aria-label="Pinned messages"
 					onKeyDown={onKeyDown}

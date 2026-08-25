@@ -52,7 +52,7 @@ const NoticeToast: Component<{ notice: Notice }> = (props) => {
 			<span class="min-w-0 break-words">{props.notice.message}</span>
 			<button
 				type="button"
-				class="-mr-1 shrink-0 rounded p-0.5 text-text-muted transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+				class="-mr-1 shrink-0 rounded p-0.5 text-text-muted transition-colors hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
 				aria-label="Dismiss notification"
 				onClick={() => dismissNotice(props.notice.id)}
 			>

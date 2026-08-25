@@ -71,7 +71,7 @@ function ScreenShareQualitySelect(): ReturnType<Component> {
 						updateSetting("rtcScreenShareQuality", value);
 					}
 				}}
-				class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 				aria-label="Screen share quality"
 			>
 				<For each={SCREEN_SHARE_QUALITIES}>
@@ -171,7 +171,7 @@ function MediaDeviceSelect(
 					onChange={(e) =>
 						updateSetting(props.settingKey, e.currentTarget.value)
 					}
-					class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+					class="rounded bg-surface-2 px-2 py-1 text-sm text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					aria-label={props.ariaLabel}
 				>
 					<option value="">{props.defaultOptionLabel}</option>
@@ -254,7 +254,7 @@ const AppGeneralTab: Component = () => {
 						<button
 							type="button"
 							onClick={() => updateSetting("timeFormat", "12h")}
-							class="rounded-md px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded-md px-3 py-1 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							classList={{
 								"bg-surface-3 text-text-primary font-medium":
 									userSettings().timeFormat === "12h",
@@ -268,7 +268,7 @@ const AppGeneralTab: Component = () => {
 						<button
 							type="button"
 							onClick={() => updateSetting("timeFormat", "24h")}
-							class="rounded-md px-3 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="rounded-md px-3 py-1 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							classList={{
 								"bg-surface-3 text-text-primary font-medium":
 									userSettings().timeFormat === "24h",

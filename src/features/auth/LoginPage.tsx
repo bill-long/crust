@@ -205,7 +205,7 @@ const LoginPage: Component = () => {
 									value={homeserver()}
 									onInput={(e) => setHomeserver(e.currentTarget.value)}
 									placeholder="strange.pizza"
-									class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
+									class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
 									required
 								/>
 							</div>
@@ -243,7 +243,7 @@ const LoginPage: Component = () => {
 										setUsername("");
 										setPassword("");
 									}}
-									class="shrink-0 text-sm text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
+									class="shrink-0 text-sm text-text-secondary underline-offset-2 transition-colors hover:text-text-primary hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
 								>
 									Use a different server
 								</button>
@@ -292,7 +292,7 @@ const LoginPage: Component = () => {
 											onInput={(e) => setUsername(e.currentTarget.value)}
 											placeholder="username"
 											autocomplete="username"
-											class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
+											class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
 											required
 										/>
 									</div>
@@ -310,7 +310,7 @@ const LoginPage: Component = () => {
 											onInput={(e) => setPassword(e.currentTarget.value)}
 											placeholder="••••••••"
 											autocomplete="current-password"
-											class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-none focus:ring-2 focus:ring-accent-hover"
+											class="w-full rounded bg-surface-2 px-3 py-2 text-text-primary placeholder:text-text-disabled focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
 											required
 										/>
 									</div>

@@ -281,7 +281,7 @@ const PinnedMessageRow: Component<{
 					if (myEl) props.rowRef?.(null, myEl);
 				});
 			}}
-			class="group flex flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 transition-colors hover:bg-surface-2 focus-within:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+			class="group flex flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 transition-colors hover:bg-surface-2 focus-within:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 			tabIndex={props.tabIndex}
 			aria-current={props.tabIndex === 0 ? "true" : undefined}
 			onFocus={() => props.onFocus?.()}
@@ -324,7 +324,7 @@ const PinnedMessageRow: Component<{
 							<div class="mt-1 flex justify-end">
 								<button
 									type="button"
-									class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => props.onUnpin()}
 								>
 									Unpin
@@ -366,7 +366,7 @@ const PinnedMessageRow: Component<{
 						<div class="mt-1 flex items-center justify-end gap-1 opacity-70 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
 							<button
 								type="button"
-								class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 								onClick={() => props.onJump(threadJumpTarget(r.event))}
 							>
 								Jump to
@@ -374,7 +374,7 @@ const PinnedMessageRow: Component<{
 							<Show when={props.canPin}>
 								<button
 									type="button"
-									class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+									class="rounded px-2 py-0.5 text-[11px] text-text-muted transition-colors hover:bg-surface-3 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									onClick={() => props.onUnpin()}
 								>
 									Unpin

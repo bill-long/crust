@@ -391,7 +391,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 									onClick={() => fileInputRef?.click()}
 									disabled={submitting() || avatarUploading()}
 									aria-describedby={avatarHintId}
-									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 								>
 									<Show when={avatarHttp()} fallback="Add avatar">
 										Replace
@@ -402,7 +402,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 										type="button"
 										onClick={removeAvatar}
 										disabled={submitting()}
-										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 									>
 										Remove
 									</button>
@@ -440,7 +440,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							value={name()}
 							onInput={(e) => setName(e.currentTarget.value)}
 							disabled={submitting()}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							placeholder="general"
 						/>
 					</label>
@@ -455,7 +455,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							value={topic()}
 							onInput={(e) => setTopic(e.currentTarget.value)}
 							disabled={submitting()}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							placeholder="What's this room about?"
 						/>
 					</label>
@@ -475,7 +475,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 								disabled={submitting()}
 								aria-describedby={aliasHintId}
 								aria-invalid={!aliasValid()}
-								class="flex-1 bg-transparent py-2 text-text-primary placeholder-text-faint focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+								class="flex-1 bg-transparent py-2 text-text-primary placeholder-text-faint focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
 								placeholder="general"
 							/>
 							<Show when={homeserverDomain()}>
@@ -564,7 +564,7 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							disabled={submitting()}
 							aria-describedby={inviteHintId}
 							aria-invalid={parsedInvites().error !== null}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							placeholder="@alice:server, @bob:server"
 						/>
 						<span
@@ -595,14 +595,14 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 							type="button"
 							onClick={tryClose}
 							disabled={submitting()}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 						>
 							Cancel
 						</button>
 						<button
 							type="submit"
 							disabled={!canSubmit()}
-							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 						>
 							<Show when={!submitting()} fallback="Creating…">
 								Create

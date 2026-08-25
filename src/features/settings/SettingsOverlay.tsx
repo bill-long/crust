@@ -156,7 +156,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 									<button
 										type="button"
 										onClick={() => props.onTabChange(tab.id)}
-										class="w-full rounded px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+										class="w-full rounded px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 										classList={{
 											"bg-surface-2 text-text-primary font-medium":
 												props.activeTab === tab.id,
@@ -192,7 +192,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 								props.onLogout();
 							}}
 							aria-disabled={props.loggingOut?.() ?? false}
-							class={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm text-danger-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover ${
+							class={`flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-sm text-danger-text transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
 								props.loggingOut?.()
 									? "cursor-not-allowed opacity-60"
 									: "hover:bg-danger-bg"
@@ -214,7 +214,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 						<button
 							type="button"
 							onClick={props.onClose}
-							class="flex items-center gap-2 rounded p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+							class="flex items-center gap-2 rounded p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							aria-label="Close settings"
 						>
 							<CloseIcon />

@@ -203,7 +203,7 @@ const ThreadListPanel: Component<{
 			tabIndex={focusedId() === row.rootId ? 0 : -1}
 			onFocus={() => setFocusedId(row.rootId)}
 			onClick={() => handleOpenThread(row.rootId)}
-			class="flex w-full flex-col gap-0.5 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover"
+			class="flex w-full flex-col gap-0.5 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		>
 			{/* No aria-label: the visible content (sender, time, snippet, reply
 				count, sr-only unread) IS the accessible name - an authored label
@@ -244,7 +244,7 @@ const ThreadListPanel: Component<{
 			gutter={6}
 		>
 			<Popover.Trigger
-				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
+				class="inline-flex h-8 w-8 items-center justify-center rounded transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 				classList={{
 					"bg-surface-3 text-text-emphasis": open(),
 					"text-text-disabled hover:bg-surface-2 hover:text-text-primary":
@@ -273,7 +273,7 @@ const ThreadListPanel: Component<{
 			<Popover.Portal>
 				<Popover.Content
 					id={panelId}
-					class="portal-scale z-50 flex w-[360px] max-w-[90vw] flex-col gap-2 rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-none"
+					class="portal-scale z-50 flex w-[360px] max-w-[90vw] flex-col gap-2 rounded-lg border border-border-subtle bg-surface-3 p-2 shadow-lg focus:outline-hidden"
 					role="dialog"
 					aria-label="Threads"
 					onKeyDown={onKeyDown}
@@ -344,7 +344,7 @@ const ThreadListPanel: Component<{
 							type="button"
 							onClick={() => list.loadMore()}
 							disabled={list.loadingMore()}
-							class="self-center rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							class="self-center rounded px-3 py-1 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-emphasis focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 						>
 							{list.loadingMore() ? "Loading…" : "Load more"}
 						</button>

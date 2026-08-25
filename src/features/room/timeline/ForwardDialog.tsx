@@ -210,7 +210,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 								aria-activedescendant={getActiveDescendant()}
 								aria-describedby={error() ? errorId : undefined}
 								aria-invalid={error() ? true : undefined}
-								class="mb-2 w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+								class="mb-2 w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
 							/>
 							<Picker
 								items={rooms()}
@@ -250,7 +250,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 								type="button"
 								onClick={tryClose}
 								disabled={forwarding()}
-								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							>
 								Cancel
 							</button>
