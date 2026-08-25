@@ -38,6 +38,13 @@ describe("avatarInitial", () => {
 		expect(avatarInitial("!abc:example.com")).toBe("A");
 	});
 
+	it("strips the sigil from vanity names too - a deliberate trade-off", () => {
+		// Call sites can't tell "#general:hs" (alias fallback, strip is an
+		// improvement) from "#1 Fans" (human-chosen name); one rule for
+		// both, pinned here so the choice is visible.
+		expect(avatarInitial("#1 Fans")).toBe("1");
+	});
+
 	it("trims before stripping, so a padded MXID still loses the sigil", () => {
 		expect(avatarInitial("  @alice:example.com")).toBe("A");
 	});

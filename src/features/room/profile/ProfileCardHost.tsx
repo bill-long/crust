@@ -10,9 +10,9 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { Avatar } from "../../../components/Avatar";
 import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
-import { createImageFallback } from "../../../lib/imageFallback";
 import { reportError } from "../../../lib/reportError";
 import { requestMention } from "../../../stores/composerIntents";
 import { isUserIgnored, setUserIgnored } from "../../../stores/ignoredUsers";
@@ -26,7 +26,6 @@ import { findExistingDmRoom, readDirectMap, startDm } from "../startDm";
 import { roleForPowerLevel } from "../useMemberList";
 import {
 	closeProfileCard,
-	markAnchorDismiss,
 	type ProfileCardRequest,
 	profileAnchorKey,
 	profileCardRequest,
@@ -58,8 +57,16 @@ const ProfileCardPopover: Component<{
 	// PL-write chain, error state, and the client-wide listeners the
 	// permission machinery registers all live only while a card for THIS
 	// room is open - a fresh card can never see another room's chain or
-	// stale error.
-	const moderation = useModerationActions(client, () => req.roomId ?? "");
+	// stale error. Kick/Ban park at the host, whose ConfirmDialog
+	// outlives this popover (the card closes when the dialog opens so
+	// their focus traps never coexist).
+	const moderation = useModerationActions(client, () => req.roomId ?? "", {
+		parkKickBan: (action) => {
+			if (!req.roomId) return;
+			props.onKickBan(action, req.roomId);
+			closeProfileCard();
+		},
+	});
 
 	// Async flows below (startDm) may resolve after the keyed popover is
 	// disposed (Esc, click-away, room switch). They must not navigate or
@@ -75,15 +82,28 @@ const ProfileCardPopover: Component<{
 	// re-resolve to the re-minted row via its data-profile-anchor marker
 	// (keeping the card, its role label, and any error banner alive), and
 	// only closes when the row is truly gone (scrolled away, room switch).
+	// Re-resolution is scoped to cards OPENED from a marked element:
+	// re-anchoring a timeline-header card to the same user's member-list
+	// row would teleport it across the screen, so those just close.
 	const [anchor, setAnchor] = createSignal(req.anchor);
+	const canReanchor = req.anchor.hasAttribute("data-profile-anchor");
 	const anchorKey = profileAnchorKey(req.roomId, req.userId);
 	const detachWatch = setInterval(() => {
 		if (anchor().isConnected) return;
-		const reminted = document.querySelector<HTMLElement>(
-			`[data-profile-anchor="${CSS.escape(anchorKey)}"]`,
-		);
+		// Attribute values are compared byte-for-byte instead of being
+		// interpolated into a selector - no escaping pitfalls, and only
+		// rendered (virtualized) rows carry the attribute.
+		const reminted = canReanchor
+			? ([
+					...document.querySelectorAll<HTMLElement>("[data-profile-anchor]"),
+				].find((el) => el.getAttribute("data-profile-anchor") === anchorKey) ??
+				null)
+			: null;
 		if (reminted) {
 			setAnchor(reminted);
+			// Keep the store's copy live too - openProfileCard's toggle
+			// branch compares against it.
+			req.anchor = reminted;
 		} else {
 			closeProfileCard();
 		}
@@ -135,7 +155,6 @@ const ProfileCardPopover: Component<{
 		const mxc = member()?.getMxcAvatarUrl() ?? fetchedProfile()?.avatar_url;
 		return avatarHttpUrl(client, mxc, 96);
 	});
-	const avatar = createImageFallback(avatarUrl);
 
 	// Role from the SAME power-level source the moderation gates read, so
 	// the label and the buttons can never disagree; live, so a
@@ -183,8 +202,15 @@ const ProfileCardPopover: Component<{
 			navigate(`/dm/${encodeURIComponent(roomId)}`);
 			closeProfileCard();
 		} catch (err) {
-			// Console-only: the card's inline banner is the user surface.
-			reportError(err, { logLabel: "Start DM from profile card failed" });
+			// The card's inline banner is the user surface - unless the card
+			// was dismissed mid-flight, where the failure would otherwise be
+			// invisible and a toast is the only surface left.
+			reportError(err, {
+				logLabel: "Start DM from profile card failed",
+				userMessage: disposed
+					? "Couldn't start the conversation. Please try again."
+					: undefined,
+			});
 			if (disposed) return;
 			setActionErrorLocal(
 				userFacingErrorMessage(
@@ -218,14 +244,18 @@ const ProfileCardPopover: Component<{
 			if (disposed) return;
 			closeProfileCard();
 		} catch (err) {
-			// Console-only: the card's inline banner is the user surface.
-			reportError(err, { logLabel: "Toggle ignore failed" });
+			const message = ignoring
+				? `Couldn't block ${displayName()}. Try again.`
+				: `Couldn't unblock ${displayName()}. Try again.`;
+			// The card's inline banner is the user surface - unless the card
+			// was dismissed mid-flight, where the failure would otherwise be
+			// invisible and a toast is the only surface left.
+			reportError(err, {
+				logLabel: "Toggle ignore failed",
+				userMessage: disposed ? message : undefined,
+			});
 			if (disposed) return;
-			setActionErrorLocal(
-				ignoring
-					? `Couldn't block ${displayName()}. Try again.`
-					: `Couldn't unblock ${displayName()}. Try again.`,
-			);
+			setActionErrorLocal(message);
 		}
 	};
 
@@ -259,19 +289,11 @@ const ProfileCardPopover: Component<{
 		kind: "promote-mod" | "promote-admin" | "demote" | "kick" | "ban",
 	): void => {
 		if (!req.roomId) return;
-		const action: MemberAction = {
+		moderation.requestAction({
 			kind,
 			userId: req.userId,
 			displayName: displayName(),
-		};
-		if (kind === "kick" || kind === "ban") {
-			// Kick/Ban continue in the host's ConfirmDialog; the popover
-			// closes so the two focus traps never coexist.
-			props.onKickBan(action, req.roomId);
-			closeProfileCard();
-			return;
-		}
-		moderation.requestAction(action);
+		});
 	};
 
 	return (
@@ -287,14 +309,15 @@ const ProfileCardPopover: Component<{
 			<Popover.Portal>
 				<Popover.Content
 					class="portal-scale z-50 w-72 rounded-lg border border-border-subtle bg-surface-2 shadow-lg focus:outline-hidden"
-					// An outside-pointerdown that lands on the anchor is the
-					// first half of a toggle-close gesture: mark it so the
-					// click half doesn't immediately reopen the card. Other
-					// dismissals (Esc, actions) leave the anchor clickable.
+					// An outside-pointerdown landing on the anchor is a
+					// toggle-close gesture: keep Kobalte from dismissing here,
+					// so the gesture's click reaches openProfileCard as a
+					// plain click on an open card and hits its same-anchor
+					// toggle branch - no timing heuristics involved.
 					onPointerDownOutside={(e) => {
 						const target = e.target;
 						if (target instanceof Node && anchor().contains(target)) {
-							markAnchorDismiss(anchor());
+							e.preventDefault();
 						}
 					}}
 					// There is no Popover.Trigger (the anchor is an arbitrary
@@ -308,26 +331,11 @@ const ProfileCardPopover: Component<{
 					}}
 				>
 					<div class="flex items-center gap-3 border-b border-border-subtle p-4">
-						<div
-							class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-xl font-semibold text-text-secondary"
-							aria-hidden="true"
-						>
-							<Show
-								when={!avatar.failed() && avatarUrl()}
-								fallback={<span>{avatarInitial(displayName())}</span>}
-							>
-								{(url) => (
-									<img
-										ref={avatar.ref}
-										src={url()}
-										alt=""
-										class="h-full w-full object-cover"
-										onError={avatar.onError}
-										onLoad={avatar.onLoad}
-									/>
-								)}
-							</Show>
-						</div>
+						<Avatar
+							url={avatarUrl()}
+							initial={avatarInitial(displayName())}
+							size="xl"
+						/>
 						<div class="min-w-0">
 							<Popover.Title class="truncate text-base font-semibold text-text-emphasis">
 								{displayName()}

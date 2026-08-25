@@ -9,6 +9,11 @@ interface AvatarProps {
 	initial: string;
 	alt?: string;
 	/**
+	 * Box size: "md" is the 32px list/header avatar (default), "xl" the
+	 * 64px profile-card portrait. Both share the fail-closed behavior.
+	 */
+	size?: "md" | "xl";
+	/**
 	 * Image loading strategy. Omitted by default (eager), matching the browser
 	 * default for above-the-fold avatars like UserBar. Lists pass "lazy".
 	 */
@@ -22,12 +27,17 @@ interface AvatarProps {
 	broken?: FailedImageUrls;
 }
 
-const FALLBACK_CLASS =
-	"flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary";
+const SIZE_CLASS = {
+	md: "h-8 w-8 text-xs",
+	xl: "h-16 w-16 text-xl",
+} as const;
 
-/** Compact 32px avatar with automatic image-error fallback. */
+/** Compact circular avatar with automatic image-error fallback. */
 const Avatar: Component<AvatarProps> = (props) => {
 	const avatar = createImageFallback(() => props.url, props.broken);
+	const sizeClass = () => SIZE_CLASS[props.size ?? "md"];
+	const fallbackClass = () =>
+		`flex ${sizeClass()} shrink-0 items-center justify-center rounded-full bg-surface-3 font-semibold text-text-secondary`;
 
 	return (
 		<Show
@@ -38,11 +48,11 @@ const Avatar: Component<AvatarProps> = (props) => {
 				// decorative (adjacent text carries the name) and the bare
 				// letter would only be noise read out before the real name.
 				props.alt ? (
-					<div role="img" aria-label={props.alt} class={FALLBACK_CLASS}>
+					<div role="img" aria-label={props.alt} class={fallbackClass()}>
 						{props.initial}
 					</div>
 				) : (
-					<div aria-hidden="true" class={FALLBACK_CLASS}>
+					<div aria-hidden="true" class={fallbackClass()}>
 						{props.initial}
 					</div>
 				)
@@ -55,7 +65,7 @@ const Avatar: Component<AvatarProps> = (props) => {
 					alt={props.alt ?? ""}
 					// bg paints the circle while the image is still in flight, so
 					// a lazy avatar never leaves a transparent gap in the layout.
-					class="h-8 w-8 shrink-0 rounded-full bg-surface-3 object-cover"
+					class={`${sizeClass()} shrink-0 rounded-full bg-surface-3 object-cover`}
 					loading={props.loading}
 					onError={avatar.onError}
 					onLoad={avatar.onLoad}

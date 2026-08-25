@@ -63,6 +63,17 @@ export interface ModerationActions {
 export function useModerationActions(
 	client: MatrixClient,
 	roomId: Accessor<string>,
+	options?: {
+		/**
+		 * Override where a kick/ban parks awaiting confirmation. The
+		 * default parks in this hook's own pendingAction (the Members
+		 * tab renders its KickBanConfirm from it); the profile card
+		 * parks at its host instead, whose dialog outlives the
+		 * popover-scoped hook. Keeping the "kick/ban park, everything
+		 * else runs" routing HERE means it exists exactly once.
+		 */
+		parkKickBan?: (action: MemberAction) => void;
+	},
 ): ModerationActions {
 	const perms = useRoomPermissions(client, roomId);
 	const plContent = useRoomStateContent<PowerLevelContent>(
@@ -165,7 +176,7 @@ export function useModerationActions(
 
 	const requestAction = (action: MemberAction): void => {
 		if (action.kind === "kick" || action.kind === "ban") {
-			setPendingAction(action);
+			(options?.parkKickBan ?? setPendingAction)(action);
 			return;
 		}
 		void performAction(action);
