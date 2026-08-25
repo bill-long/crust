@@ -223,12 +223,30 @@ describe("useTimeline", () => {
 			// the one advanceTimersByTimeAsync fires.
 			vi.useFakeTimers();
 			try {
+				// A change to a member with no rows in the window is skipped
+				// without touching the store.
+				client.__emit(
+					"RoomState.members",
+					createMatrixEvent({
+						eventId: "$member-other",
+						roomId: "!roomA:test",
+						sender: "@nobody:test",
+						stateKey: "@nobody:test",
+						type: "m.room.member",
+						content: { membership: "join" },
+						ts: 1999,
+					}),
+				);
+				await vi.advanceTimersByTimeAsync(MEMBER_REBUILD_THROTTLE_MS + 1);
+				expect(events[0].senderAvatarUrl).toBeNull();
+
 				client.__emit(
 					"RoomState.members",
 					createMatrixEvent({
 						eventId: "$member",
 						roomId: "!roomA:test",
 						sender: "@alice:test",
+						stateKey: "@alice:test",
 						type: "m.room.member",
 						content: {
 							membership: "join",

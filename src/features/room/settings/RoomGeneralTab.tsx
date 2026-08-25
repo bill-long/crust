@@ -8,7 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { Tooltip } from "../../../components/Tooltip";
-import { avatarHttpUrl } from "../../../lib/avatar";
+import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
 import { createImageFallback } from "../../../lib/imageFallback";
 import { roomTopicText } from "../../../lib/roomTopic";
 import { FieldStatus } from "./FieldStatus";
@@ -255,10 +255,9 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 							when={!avatarImg.failed() && avatarHttp()}
 							fallback={
 								<span class="text-2xl font-semibold text-text-muted">
-									{(props.client.getRoom(props.roomId)?.name ?? "?")
-										.trim()
-										.charAt(0)
-										.toUpperCase() || "?"}
+									{avatarInitial(
+										props.client.getRoom(props.roomId)?.name ?? "",
+									)}
 								</span>
 							}
 						>

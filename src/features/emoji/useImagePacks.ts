@@ -6,6 +6,7 @@ import {
 } from "matrix-js-sdk";
 import type { AccountDataEvents } from "matrix-js-sdk/lib/@types/event";
 import { createMemo, createSignal, onCleanup } from "solid-js";
+import { avatarHttpUrl } from "../../lib/avatar";
 import type {
 	EmoteRoomsContent,
 	ImagePack,
@@ -126,10 +127,7 @@ export function useImagePacks(
 				result.push({
 					id: "user",
 					displayName: content.pack?.display_name?.trim() || "My Emojis",
-					avatarUrl: content.pack?.avatar_url
-						? (client.mxcUrlToHttp(content.pack.avatar_url, 32, 32, "crop") ??
-							null)
-						: null,
+					avatarUrl: avatarHttpUrl(client, content.pack?.avatar_url, 32),
 					emotes,
 				});
 			}
@@ -160,14 +158,7 @@ export function useImagePacks(
 						result.push({
 							id: packId,
 							displayName: packName,
-							avatarUrl: content.pack?.avatar_url
-								? (client.mxcUrlToHttp(
-										content.pack.avatar_url,
-										32,
-										32,
-										"crop",
-									) ?? null)
-								: null,
+							avatarUrl: avatarHttpUrl(client, content.pack?.avatar_url, 32),
 							emotes,
 						});
 					}

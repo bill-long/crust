@@ -339,12 +339,20 @@ export function useTimeline(
 	}
 
 	/** Patch the snapshotted sender profile fields (senderName /
-	 *  senderAvatarUrl) of every row in place from current member state, one
-	 *  lookup per distinct sender. Cheap by design - no re-projection, and
-	 *  the fine-grained store writes only touch rows whose values actually
-	 *  changed - so it can run unconditionally on member-state churn. The
+	 *  senderAvatarUrl) of the changed members' rows in place from current
+	 *  member state, one lookup per distinct sender. Cheap by design - no
+	 *  re-projection, only rows whose sender actually changed are visited,
+	 *  and the fine-grained store writes only touch fields whose values
+	 *  differ - so it can run unconditionally on member-state churn. The
 	 *  name rule mirrors eventToTimelineEvent (`member?.name ?? sender`). */
-	function refreshSenderProfiles(room: Room): void {
+	function refreshSenderProfiles(
+		room: Room,
+		changedIds: ReadonlySet<string>,
+	): void {
+		// Bail without entering the store's write path when none of the
+		// changed members ever posted in the window (lazy-load member fill
+		// in a large room is mostly users with no message on screen).
+		if (!events.some((row) => changedIds.has(row.senderId))) return;
 		const profiles = new Map<
 			string,
 			{ name: string; avatarUrl: string | null }
@@ -364,7 +372,7 @@ export function useTimeline(
 		setEvents(
 			produce((draft) => {
 				for (const row of draft) {
-					if (!row.senderId) continue;
+					if (!changedIds.has(row.senderId)) continue;
 					const p = profileFor(row.senderId);
 					if (row.senderName !== p.name) row.senderName = p.name;
 					if (row.senderAvatarUrl !== p.avatarUrl) {
@@ -400,12 +408,15 @@ export function useTimeline(
 		}
 	}
 
-	// Pending member-profile refresh (armed by `onMembersChanged` below).
+	// Pending member-profile refresh (armed by `onMembersChanged` below):
+	// the one-shot timer plus the member IDs that changed inside its window.
 	// Cleared on room switch as hygiene; the fire itself re-resolves the
 	// room from currentRoomId, so a stray fire is correct either way.
 	let memberRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+	const pendingMemberIds = new Set<string>();
 
 	function clearMemberRebuildTimer(): void {
+		pendingMemberIds.clear();
 		if (memberRebuildTimer !== null) {
 			clearTimeout(memberRebuildTimer);
 			memberRebuildTimer = null;
@@ -1620,21 +1631,28 @@ export function useTimeline(
 	// projection time, so member-state churn must refresh already-rendered
 	// rows or an avatar/display-name change (or lazy-loaded member state
 	// arriving after backfill) sticks until an unrelated rebuild (#517).
-	// Unconditional like useMemberList's Members listener - filtering on a
-	// content-vs-prev profile delta misses real renames (the SDK backfills
-	// profile fields into leave content, and re-emits unchanged events when
-	// disambiguation flips). Throttled, leading-anchored: at most one refresh
-	// per window, and the refresh reads state when it fires, so every change
-	// landing inside the window is captured by that one cheap pass. No
-	// generation guard: the fire re-resolves the room from currentRoomId, so
-	// running after a room switch or jump is correct (and near-free).
+	// No content-vs-prev profile filtering - it misses real renames (the SDK
+	// backfills profile fields into leave content, and re-emits unchanged
+	// events when disambiguation flips); instead the affected member IDs are
+	// collected and the refresh visits only their rows. Trailing-edge
+	// throttle: the first event arms a one-shot timer, the refresh lands
+	// MEMBER_REBUILD_THROTTLE_MS later and reads state then, so every change
+	// inside the window is captured by that one cheap pass. No generation
+	// guard: the fire re-resolves the room from currentRoomId, so running
+	// after a room switch or jump is correct (and near-free).
 	const onMembersChanged = (event: MatrixEvent): void => {
 		if (!currentRoomId || event.getRoomId() !== currentRoomId) return;
+		// The state key of an m.room.member event is the affected user.
+		const memberId = event.getStateKey?.() ?? "";
+		if (!memberId) return;
+		pendingMemberIds.add(memberId);
 		if (memberRebuildTimer !== null) return;
 		memberRebuildTimer = setTimeout(() => {
 			memberRebuildTimer = null;
+			const changed = new Set(pendingMemberIds);
+			pendingMemberIds.clear();
 			const room = currentRoomId ? client.getRoom(currentRoomId) : null;
-			if (room) refreshSenderProfiles(room);
+			if (room) refreshSenderProfiles(room, changed);
 		}, MEMBER_REBUILD_THROTTLE_MS);
 	};
 
