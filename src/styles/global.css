@@ -299,7 +299,7 @@ body {
 .emote-body > p,
 .emote-body > .message-body,
 .emote-body > .message-body > div,
-.emote-body .message-body p {
+.emote-body > .message-body > div > p {
 	display: inline;
 }
 
