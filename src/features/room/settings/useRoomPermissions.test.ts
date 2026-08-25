@@ -68,6 +68,43 @@ describe("useRoomPermissions", () => {
 		});
 	});
 
+	it("targetPowerLevel prefers SDK member power over users_default for creators", async () => {
+		// Newer room versions privilege the creator WITHOUT a users entry;
+		// the SDK models that in RoomMember.powerLevel. With users: {} the
+		// raw content would report users_default (0) - the label and the
+		// moderation gates must see the member's real power instead.
+		const room = createMockRoom(
+			"!r:x",
+			[],
+			[
+				{
+					userId: "@creator:example.com",
+					name: "Creator",
+					membership: "join",
+					powerLevel: 100,
+				},
+			],
+		);
+		room.__setStateEvent("m.room.power_levels", "", { users: {} });
+		const client = createMockClient(new Map([["!r:x", room]]));
+		await withRoot(async () => {
+			const perms = useRoomPermissions(
+				client as unknown as MatrixClient,
+				() => "!r:x",
+			);
+			expect(perms.targetPowerLevel("@creator:example.com")).toBe(100);
+			// An explicit users entry still wins over the member power.
+			room.__setStateEvent("m.room.power_levels", "", {
+				users: { "@creator:example.com": 50 },
+			});
+			client.__emit(
+				RoomStateEvent.Events,
+				fakeStateEvent("!r:x", "m.room.power_levels"),
+			);
+			expect(perms.targetPowerLevel("@creator:example.com")).toBe(50);
+		});
+	});
+
 	it("derives canSetX from maySendStateEvent and re-derives on PL change", async () => {
 		const room = createMockRoom("!r:x");
 		const client = createMockClient(new Map([["!r:x", room]]));
