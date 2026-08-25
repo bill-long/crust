@@ -6,6 +6,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { containFocusWhileOpen } from "../../lib/focusTrap";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { trackAppModalOpen } from "../../stores/modalStack";
 
@@ -19,7 +20,7 @@ interface CopyLinkFallbackDialogProps {
 	 * showing the text the user asked to copy even if the underlying room
 	 * changes.
 	 */
-	url: string;
+	text: string;
 	/** Heading text. Defaults to "Copy room link". */
 	title?: string;
 	/** Accessible label for the readonly link input. Defaults to "Room link". */
@@ -47,6 +48,16 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 	const titleId = createUniqueId();
 	const descId = createUniqueId();
 
+	// Shared by the input and textarea branches so the two can't drift.
+	const fieldClass =
+		"mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
+	const setFieldRef = (el: HTMLInputElement | HTMLTextAreaElement): void => {
+		inputRef = el;
+	};
+	const selectField = (e: {
+		currentTarget: HTMLInputElement | HTMLTextAreaElement;
+	}): void => e.currentTarget.select();
+
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
@@ -70,6 +81,16 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 		}
 		previousFocus = null;
 	});
+
+	// An opener can asynchronously restore focus to itself after the dialog
+	// took its initial focus (Kobalte's dropdown refocuses its trigger on a
+	// timer after unmount - the "Copy text" path), which would strand the
+	// overlay-scoped Escape/Tab handling. Recapture while open.
+	containFocusWhileOpen(
+		props.open,
+		() => overlayRef,
+		() => inputRef,
+	);
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
 		if (e.key === "Escape") {
@@ -122,28 +143,24 @@ const CopyLinkFallbackDialog: Component<CopyLinkFallbackDialogProps> = (
 						when={props.multiline}
 						fallback={
 							<input
-								ref={(el) => {
-									inputRef = el;
-								}}
+								ref={setFieldRef}
 								type="text"
 								readOnly
-								value={props.url}
+								value={props.text}
 								aria-label={props.inputLabel ?? "Room link"}
-								onFocus={(e) => e.currentTarget.select()}
-								class="mb-4 w-full rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onFocus={selectField}
+								class={fieldClass}
 							/>
 						}
 					>
 						<textarea
-							ref={(el) => {
-								inputRef = el;
-							}}
+							ref={setFieldRef}
 							readOnly
-							value={props.url}
+							value={props.text}
 							rows={4}
 							aria-label={props.inputLabel ?? "Room link"}
-							onFocus={(e) => e.currentTarget.select()}
-							class="mb-4 w-full resize-none rounded bg-surface-2 px-3 py-2 font-mono text-xs text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							onFocus={selectField}
+							class={`${fieldClass} resize-none`}
 						/>
 					</Show>
 					<div class="flex justify-end">

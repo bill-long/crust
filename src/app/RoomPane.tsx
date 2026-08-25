@@ -33,7 +33,7 @@ import { ThreadListPanel } from "../features/room/threads/ThreadListPanel";
 import { ThreadPanel } from "../features/room/threads/ThreadPanel";
 import { createThreadPanelState } from "../features/room/threads/threadPanelState";
 import { TimelineView } from "../features/room/timeline/TimelineView";
-import { roomTopicText } from "../lib/roomTopic";
+import { roomTopicLine, roomTopicText } from "../lib/roomTopic";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { isMobile } from "../stores/viewport";
 
@@ -190,7 +190,7 @@ const RoomPane: Component<{
 		"m.room.topic",
 	);
 	const topicRaw = createMemo(() => roomTopicText(topicContent()));
-	const topicLine = createMemo(() => topicRaw().replace(/\s+/g, " ").trim());
+	const topicLine = createMemo(() => roomTopicLine(topicContent()));
 
 	const [jumpRequest, setJumpRequest] = createSignal<string | null>(null);
 
@@ -283,7 +283,7 @@ const RoomPane: Component<{
 					<Show when={topicLine()}>
 						<button
 							type="button"
-							onClick={() => props.onOpenSettings()}
+							onClick={props.onOpenSettings}
 							title={topicRaw()}
 							class="min-w-0 truncate rounded text-left text-xs text-text-muted transition-colors hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:min-h-11"
 						>

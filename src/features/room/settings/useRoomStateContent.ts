@@ -1,11 +1,10 @@
 import {
-	ClientEvent,
 	type MatrixClient,
 	type MatrixEvent,
-	type Room,
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
+import { useRoomAvailableTick } from "../useRoomAvailableTick";
 
 /**
  * Reactive accessor for one specific room-state event's content.
@@ -37,24 +36,17 @@ export function useRoomStateContent<T = Record<string, unknown>>(
 
 	// Recovery for a Room that isn't in the store yet at mount (deep-link
 	// before initial sync, or room creation navigating before the Room
-	// lands). During sync the SDK emits RoomState.events BEFORE storeRoom,
-	// so without this the memo could read `getRoom(rid) === null` on the
-	// last tick and latch null until an unrelated state change. Mirrors
-	// usePinnedEvents' ClientEvent.Room subscription.
-	const onClientRoom = (room: Room): void => {
-		if (room.roomId !== roomId()) return;
-		setTick((n) => n + 1);
-	};
+	// lands) - without it the memo could latch null.
+	const roomAvailableTick = useRoomAvailableTick(client, roomId);
 
 	client.on(RoomStateEvent.Events, onRoomState);
-	client.on(ClientEvent.Room, onClientRoom);
 	onCleanup(() => {
 		client.off(RoomStateEvent.Events, onRoomState);
-		client.off(ClientEvent.Room, onClientRoom);
 	});
 
 	return createMemo<T | null>(() => {
 		tick();
+		roomAvailableTick();
 		const rid = roomId();
 		if (!rid) return null;
 		const room = client.getRoom(rid);

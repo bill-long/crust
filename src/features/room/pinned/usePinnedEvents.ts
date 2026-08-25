@@ -1,5 +1,4 @@
 import {
-	ClientEvent,
 	EventTimelineSet,
 	EventType,
 	type MatrixClient,
@@ -15,6 +14,7 @@ import {
 	createSignal,
 	onCleanup,
 } from "solid-js";
+import { useRoomAvailableTick } from "../useRoomAvailableTick";
 
 /**
  * Reactive view of `m.room.pinned_events` for one room with a local
@@ -123,7 +123,7 @@ export function usePinnedEvents(
 	// available on the client. Handles deep-link mount where the hook
 	// runs before /sync has produced the Room — without this, canPin
 	// stays stuck at false until a manual room change/remount.
-	const [roomAvailableTick, setRoomAvailableTick] = createSignal(0);
+	const roomAvailableTick = useRoomAvailableTick(client, roomId);
 	const [overlay, setOverlay] = createSignal<OverlayState | null>(null);
 	const [pending, setPending] = createSignal(false);
 	const [lastError, setLastError] = createSignal<string | null>(null);
@@ -244,18 +244,6 @@ export function usePinnedEvents(
 		onCleanup(() => {
 			room.removeListener(RoomStateEvent.Update, onStateUpdate);
 		});
-	});
-
-	// Watch for our Room becoming available after mount (deep-link
-	// before initial sync). Bump roomAvailableTick so dependent memos
-	// (canPin, serverPinned) and the state-update subscription re-run.
-	const onClientRoom = (room: Room): void => {
-		if (room.roomId !== roomId()) return;
-		setRoomAvailableTick((n) => n + 1);
-	};
-	client.on(ClientEvent.Room, onClientRoom);
-	onCleanup(() => {
-		client.off(ClientEvent.Room, onClientRoom);
 	});
 
 	// One room-level timeline subscription for every pinned row, filtered

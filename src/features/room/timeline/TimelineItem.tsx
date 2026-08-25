@@ -21,7 +21,6 @@ import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ImagePack, PickerEmoji, ResolvedEmote } from "../../emoji/types";
 import { extractGifUrl, InlineGif } from "../../gif/InlineGif";
-import { CopyLinkFallbackDialog } from "../CopyLinkFallbackDialog";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
 import { PollMessage } from "../poll/PollMessage";
@@ -29,7 +28,6 @@ import { ThreadSummaryChip } from "../threads/ThreadSummaryChip";
 import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
-import { createCopyLink } from "../useCopyLink";
 import { copyableText } from "./copyMessageText";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
@@ -543,9 +541,12 @@ const HoverToolbar: Component<{
 				<DropdownMenu.Portal>
 					<DropdownMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
 						<Show when={props.onCopyText}>
+							{/* afterMenuClose: on the blocked-clipboard path the copy
+							    opens the fallback dialog, which must not capture the
+							    closing menu item as its focus-restore target. */}
 							<DropdownMenu.Item
 								class={menuItemClass()}
-								onSelect={() => props.onCopyText?.()}
+								onSelect={afterMenuClose(() => props.onCopyText?.())}
 							>
 								Copy text
 							</DropdownMenu.Item>
@@ -592,6 +593,14 @@ const TimelineItem: Component<{
 	onDelete: () => void;
 	/** Open the raw-event viewer for this message (#447). */
 	onViewSource: () => void;
+	/**
+	 * Copy `text` to the clipboard (the timeline owns the copy state and
+	 * its manual-copy fallback dialog - a `fixed` dialog cannot render
+	 * inside a virtua row, whose `contain: layout` wrapper would clip it).
+	 * The toolbar item renders only when this is wired AND the event has
+	 * user-authored text per `copyableText`.
+	 */
+	onCopyText?: (text: string) => void;
 	/** Report the message to the homeserver admins (#447). Absent for the
 	    user's own messages and local echoes. */
 	onReport?: () => void;
@@ -640,11 +649,9 @@ const TimelineItem: Component<{
 	isSenderIgnored?: boolean;
 }> = (props) => {
 	const ev = props.event;
-	// "Copy text" reuses the copy-room-link state machine so a blocked
-	// clipboard gets the same manual-copy fallback dialog instead of a
-	// dead-end (success stays silent, Discord-style). Null hides the item.
-	const copyText = copyableText(ev);
-	const copyLink = createCopyLink();
+	// Memo (not a setup-time const): reconcile-based rebuilds can update
+	// the row's body/caption in place without remounting the component.
+	const copyText = createMemo(() => copyableText(ev));
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
 	);
@@ -861,27 +868,13 @@ const TimelineItem: Component<{
 						onTogglePin={() => props.onTogglePin?.()}
 						onForward={props.onForward}
 						onViewSource={props.onViewSource}
-						onCopyText={
-							copyText !== null ? () => void copyLink.copy(copyText) : undefined
-						}
+						onCopyText={(() => {
+							const text = copyText();
+							const cb = props.onCopyText;
+							return text !== null && cb ? () => cb(text) : undefined;
+						})()}
 						onReport={props.onReport}
 					/>
-				</Show>
-
-				{/* Manual-copy fallback for "Copy text" when the clipboard is
-				    blocked or unavailable - same surface as copy-room-link. */}
-				<Show when={copyLink.fallbackLink()}>
-					{(text) => (
-						<CopyLinkFallbackDialog
-							url={text()}
-							title="Copy text"
-							inputLabel="Message text"
-							description="Your browser blocked clipboard access. Select the text and copy it manually."
-							multiline
-							open={() => copyLink.fallbackLink() !== null}
-							onClose={copyLink.clearFallback}
-						/>
-					)}
 				</Show>
 
 				<Show

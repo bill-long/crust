@@ -15,3 +15,15 @@ export function roomTopicText(
 	const topic = content?.topic;
 	return typeof topic === "string" ? topic : "";
 }
+
+/**
+ * {@link roomTopicText} normalized to a single display line: whitespace
+ * runs (including newlines) collapse to one space, ends trimmed. For
+ * one-line surfaces like the room header; pair with the raw text in a
+ * tooltip when the line structure matters.
+ */
+export function roomTopicLine(
+	content: Record<string, unknown> | null | undefined,
+): string {
+	return roomTopicText(content).replace(/\s+/g, " ").trim();
+}

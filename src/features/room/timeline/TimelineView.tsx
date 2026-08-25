@@ -19,11 +19,13 @@ import {
 	buildShortcodeLookup,
 	useImagePacks,
 } from "../../emoji/useImagePacks";
+import { CopyLinkFallbackDialog } from "../CopyLinkFallbackDialog";
 import { Composer } from "../composer/Composer";
 import {
 	mainTimelineSource,
 	threadTimelineSource,
 } from "../threads/timelineSource";
+import { createCopyLink } from "../useCopyLink";
 import { DateSeparator } from "./DateSeparator";
 import { DeleteMessageDialog } from "./DeleteMessageDialog";
 import { DragOverlay } from "./DragOverlay";
@@ -215,6 +217,19 @@ const TimelineView: Component<{
 	/** Message whose raw source is shown; non-null opens the viewer (#447). */
 	const [viewSourceTarget, setViewSourceTarget] =
 		createSignal<TimelineEvent | null>(null);
+	// "Copy text" state (#446): one copy-link state machine + fallback
+	// dialog for the whole timeline, hosted here because a `fixed` dialog
+	// can't render inside a virtua row (its `contain: layout` wrapper
+	// becomes the containing block and clips the overlay). Reset on room
+	// switch so a stale fallback never leaks into another room.
+	const copyText = createCopyLink();
+	createEffect(
+		on(
+			() => props.roomId,
+			() => copyText.reset(),
+			{ defer: true },
+		),
+	);
 	const [editingEvent, setEditingEvent] = createSignal<TimelineEvent | null>(
 		null,
 	);
@@ -1086,6 +1101,7 @@ const TimelineView: Component<{
 													onEdit={() => onEdit(event)}
 													onDelete={() => setDeleteTarget(event)}
 													onViewSource={() => setViewSourceTarget(event)}
+													onCopyText={(text) => void copyText.copy(text)}
 													onReport={
 														event.senderId !== myUserId && event.status === null
 															? () => setReportTarget(event)
@@ -1286,6 +1302,22 @@ const TimelineView: Component<{
 				getSourceEvent={getSourceEvent}
 				onClose={() => setViewSourceTarget(null)}
 			/>
+
+			{/* Manual-copy fallback for "Copy text" when the clipboard is
+				blocked or unavailable - same surface as copy-room-link. */}
+			<Show when={copyText.fallbackLink()}>
+				{(text) => (
+					<CopyLinkFallbackDialog
+						text={text()}
+						title="Copy text"
+						inputLabel="Message text"
+						description="Your browser blocked clipboard access. Select the text and copy it manually."
+						multiline
+						open={() => copyText.fallbackLink() !== null}
+						onClose={copyText.clearFallback}
+					/>
+				)}
+			</Show>
 		</main>
 	);
 };
