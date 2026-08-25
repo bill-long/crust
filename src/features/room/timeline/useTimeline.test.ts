@@ -17,7 +17,7 @@ import {
 } from "../../../test/mockClient";
 import { mergeRowsByTimestamp } from "./timelineHelpers";
 import type { TimelineEvent } from "./useTimeline";
-import { useTimeline } from "./useTimeline";
+import { MEMBER_REBUILD_THROTTLE_MS, useTimeline } from "./useTimeline";
 
 const row = (eventId: string, timestamp: number): TimelineEvent =>
 	({ eventId, timestamp }) as unknown as TimelineEvent;
@@ -197,7 +197,7 @@ describe("useTimeline", () => {
 		});
 	});
 
-	it("re-projects rows when a member's avatar changes (debounced)", async () => {
+	it("refreshes sender profile fields when member state changes (throttled)", async () => {
 		const roomA = createMockRoom(
 			"!roomA:test",
 			[textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000)],
@@ -212,47 +212,41 @@ describe("useTimeline", () => {
 			);
 			await flushPromises();
 			expect(events[0].senderAvatarUrl).toBeNull();
+			expect(events[0].senderName).toBe("Alice");
 
 			roomA.__addMember({
 				userId: "@alice:test",
-				name: "Alice",
+				name: "Alicia",
 				avatarUrl: "mxc://test/new-avatar",
 			});
-			// Profile-neutral member churn (join/leave/PL) is filtered before
-			// the throttle: even though room state now carries the new avatar,
-			// this event must not trigger a rebuild.
-			client.__emit(
-				"RoomState.members",
-				createMatrixEvent({
-					eventId: "$member-neutral",
-					roomId: "!roomA:test",
-					sender: "@alice:test",
-					type: "m.room.member",
-					content: { membership: "join" },
-					prevContent: { membership: "join" },
-					ts: 2000,
-				}),
-			);
-			await new Promise((resolve) => setTimeout(resolve, 350));
-			expect(events[0].senderAvatarUrl).toBeNull();
-
-			// A profile delta (avatar_url changed) does trigger the throttled
-			// rebuild, which re-reads current member state.
-			client.__emit(
-				"RoomState.members",
-				createMatrixEvent({
-					eventId: "$member",
-					roomId: "!roomA:test",
-					sender: "@alice:test",
-					type: "m.room.member",
-					content: { membership: "join", avatar_url: "mxc://test/new-avatar" },
-					ts: 2001,
-				}),
-			);
-			await new Promise((resolve) => setTimeout(resolve, 350));
+			// Fake timers BEFORE the emit, so the throttle timer it arms is
+			// the one advanceTimersByTimeAsync fires.
+			vi.useFakeTimers();
+			try {
+				client.__emit(
+					"RoomState.members",
+					createMatrixEvent({
+						eventId: "$member",
+						roomId: "!roomA:test",
+						sender: "@alice:test",
+						type: "m.room.member",
+						content: {
+							membership: "join",
+							avatar_url: "mxc://test/new-avatar",
+						},
+						ts: 2000,
+					}),
+				);
+				// Nothing changes synchronously - the refresh is throttled.
+				expect(events[0].senderAvatarUrl).toBeNull();
+				await vi.advanceTimersByTimeAsync(MEMBER_REBUILD_THROTTLE_MS + 1);
+			} finally {
+				vi.useRealTimers();
+			}
 			expect(events[0].senderAvatarUrl).toBe(
 				"https://example.com/_matrix/media/v3/download/test/new-avatar",
 			);
+			expect(events[0].senderName).toBe("Alicia");
 		});
 	});
 

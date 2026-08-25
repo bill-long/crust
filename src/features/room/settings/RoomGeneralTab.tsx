@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { Tooltip } from "../../../components/Tooltip";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import { createImageFallback } from "../../../lib/imageFallback";
 import { roomTopicText } from "../../../lib/roomTopic";
 import { FieldStatus } from "./FieldStatus";
@@ -162,11 +163,9 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 	let uploadGen = 0;
 	let fileInputRef!: HTMLInputElement;
 
-	const avatarHttp = createMemo<string | null>(() => {
-		const mxc = avatarOpt.value();
-		if (!mxc) return null;
-		return props.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null;
-	});
+	const avatarHttp = createMemo<string | null>(() =>
+		avatarHttpUrl(props.client, avatarOpt.value(), 96),
+	);
 
 	// Fail-closed preview: a 404/decode failure falls back to the room's
 	// initial instead of the browser's broken-image icon (#457).

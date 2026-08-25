@@ -1,4 +1,5 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import { avatarInitial } from "../../../../lib/avatar";
 import {
 	createFailedImageUrls,
 	createImageFallback,
@@ -130,7 +131,7 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 														aria-hidden="true"
 														class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-emphasis"
 													>
-														{(p.displayName.trim()[0] ?? "?").toUpperCase()}
+														{avatarInitial(p.displayName)}
 													</span>
 												}
 											>

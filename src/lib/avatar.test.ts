@@ -32,8 +32,10 @@ describe("avatarInitial", () => {
 		expect(avatarInitial("alice")).toBe("A");
 	});
 
-	it("strips the MXID sigil so a raw user ID renders its letter", () => {
+	it("strips a leading Matrix sigil so raw IDs render their letter", () => {
 		expect(avatarInitial("@alice:example.com")).toBe("A");
+		expect(avatarInitial("#general:example.com")).toBe("G");
+		expect(avatarInitial("!abc:example.com")).toBe("A");
 	});
 
 	it("trims before stripping, so a padded MXID still loses the sigil", () => {

@@ -6,6 +6,7 @@ import {
 	createSignal,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { avatarHttpUrl } from "../../lib/avatar";
 import {
 	type DiscoverableRoom,
 	extractViaServers,
@@ -54,7 +55,7 @@ export function useSpaceHierarchy(
 ): SpaceHierarchy {
 	const { client, summaries, optimisticallyMarkJoined } = useClient();
 	const mxcToHttp = (mxcUrl: string): string | null =>
-		client.mxcUrlToHttp(mxcUrl, 48, 48, "crop") ?? null;
+		avatarHttpUrl(client, mxcUrl, 48);
 
 	type HierarchyResult = {
 		rooms: HierarchyRoom[];

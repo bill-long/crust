@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { RowAvatar } from "../../../components/RowAvatar";
+import { avatarInitial } from "../../../lib/avatar";
 import { createFailedImageUrls } from "../../../lib/imageFallback";
 import {
 	linkRoomToSpace,
@@ -192,9 +193,6 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 			.finally(() => setPendingRoomId(null));
 	};
 
-	const initial = (name: string): string =>
-		name.trim().charAt(0).toUpperCase() || "?";
-
 	return (
 		<div class="space-y-8">
 			<Show when={childrenState.lastError()}>
@@ -225,7 +223,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 										<RowAvatar
 											shape="square"
 											url={child.avatarUrl}
-											initial={initial(child.name)}
+											initial={avatarInitial(child.name)}
 											broken={brokenAvatars}
 										/>
 										<div class="min-w-0">
@@ -301,7 +299,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 											<RowAvatar
 												shape="square"
 												url={room.avatarUrl}
-												initial={initial(room.name)}
+												initial={avatarInitial(room.name)}
 												broken={brokenAvatars}
 											/>
 											<div class="min-w-0">

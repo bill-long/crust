@@ -199,6 +199,10 @@ function isDisplayable(
 const WINDOW_LIMIT = 2000;
 const INITIAL_WINDOW_SIZE = 500;
 
+/** Throttle window for the member-profile refresh; exported so tests can
+ *  advance fake timers by the real constant instead of a magic sleep. */
+export const MEMBER_REBUILD_THROTTLE_MS = 250;
+
 /** Module-level default so the source identity is stable across renders. */
 const MAIN_SOURCE = mainTimelineSource();
 
@@ -334,6 +338,43 @@ export function useTimeline(
 		);
 	}
 
+	/** Patch the snapshotted sender profile fields (senderName /
+	 *  senderAvatarUrl) of every row in place from current member state, one
+	 *  lookup per distinct sender. Cheap by design - no re-projection, and
+	 *  the fine-grained store writes only touch rows whose values actually
+	 *  changed - so it can run unconditionally on member-state churn. The
+	 *  name rule mirrors eventToTimelineEvent (`member?.name ?? sender`). */
+	function refreshSenderProfiles(room: Room): void {
+		const profiles = new Map<
+			string,
+			{ name: string; avatarUrl: string | null }
+		>();
+		const profileFor = (senderId: string) => {
+			let p = profiles.get(senderId);
+			if (!p) {
+				const member = room.getMember(senderId);
+				p = {
+					name: member?.name ?? senderId,
+					avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48),
+				};
+				profiles.set(senderId, p);
+			}
+			return p;
+		};
+		setEvents(
+			produce((draft) => {
+				for (const row of draft) {
+					if (!row.senderId) continue;
+					const p = profileFor(row.senderId);
+					if (row.senderName !== p.name) row.senderName = p.name;
+					if (row.senderAvatarUrl !== p.avatarUrl) {
+						row.senderAvatarUrl = p.avatarUrl;
+					}
+				}
+			}),
+		);
+	}
+
 	// Server-clock tracker so expiry-based call-leave synthesis is robust to
 	// client clock skew (the homeserver populated `created_ts` / `expires`
 	// against its own clock). Seeded from window events on every rebuild and
@@ -359,11 +400,9 @@ export function useTimeline(
 		}
 	}
 
-	// Pending member-profile rebuild (armed by `onMembersChanged` below).
-	// Cleared on room switch: an armed timer for the outgoing room would
-	// otherwise swallow the incoming room's first member change - the
-	// throttle's "already armed" check would skip it, and the generation
-	// guard would then no-op the fire.
+	// Pending member-profile refresh (armed by `onMembersChanged` below).
+	// Cleared on room switch as hygiene; the fire itself re-resolves the
+	// room from currentRoomId, so a stray fire is correct either way.
 	let memberRebuildTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function clearMemberRebuildTimer(): void {
@@ -1578,33 +1617,24 @@ export function useTimeline(
 	});
 
 	// Sender profile fields (senderName / senderAvatarUrl) are snapshotted at
-	// projection time, so a member's display-name or avatar change must
-	// re-project the already-rendered rows or the old profile sticks until an
-	// unrelated rebuild (#517). Throttled, leading-anchored: at most one
-	// rebuild per window, and the rebuild reads state when it fires, so every
-	// change landing inside the window is captured by that one pass. Events
-	// that change neither profile field (join/leave/PL churn, which can't
-	// affect the projected rows) are skipped before touching the timer.
-	const MEMBER_REBUILD_THROTTLE_MS = 250;
+	// projection time, so member-state churn must refresh already-rendered
+	// rows or an avatar/display-name change (or lazy-loaded member state
+	// arriving after backfill) sticks until an unrelated rebuild (#517).
+	// Unconditional like useMemberList's Members listener - filtering on a
+	// content-vs-prev profile delta misses real renames (the SDK backfills
+	// profile fields into leave content, and re-emits unchanged events when
+	// disambiguation flips). Throttled, leading-anchored: at most one refresh
+	// per window, and the refresh reads state when it fires, so every change
+	// landing inside the window is captured by that one cheap pass. No
+	// generation guard: the fire re-resolves the room from currentRoomId, so
+	// running after a room switch or jump is correct (and near-free).
 	const onMembersChanged = (event: MatrixEvent): void => {
 		if (!currentRoomId || event.getRoomId() !== currentRoomId) return;
-		const content = event.getContent();
-		// Optional call: stripped test doubles may omit getPrevContent.
-		const prev =
-			typeof event.getPrevContent === "function" ? event.getPrevContent() : {};
-		if (
-			content.displayname === prev.displayname &&
-			content.avatar_url === prev.avatar_url
-		) {
-			return;
-		}
 		if (memberRebuildTimer !== null) return;
-		const gen = roomGeneration;
 		memberRebuildTimer = setTimeout(() => {
 			memberRebuildTimer = null;
-			if (roomGeneration !== gen) return;
 			const room = currentRoomId ? client.getRoom(currentRoomId) : null;
-			if (room) rebuildEventsFromWindow(room);
+			if (room) refreshSenderProfiles(room);
 		}, MEMBER_REBUILD_THROTTLE_MS);
 	};
 
