@@ -29,9 +29,11 @@ export function avatarInitial(name: string): string {
 		.trim()
 		.replace(/^[@#!]/, "")
 		.trim();
-	// Array.from iterates code points, so an astral first character (an
-	// emoji-leading display name) stays whole instead of charAt() splitting
-	// it into a lone surrogate that paints as a replacement glyph.
-	const first = Array.from(trimmed)[0] ?? "";
+	// codePointAt reads the full first code point, so an astral character
+	// (an emoji-leading display name) stays whole instead of charAt()
+	// splitting it into a lone surrogate that paints as a replacement
+	// glyph - without allocating the whole string the way Array.from would.
+	const cp = trimmed.codePointAt(0);
+	const first = cp === undefined ? "" : String.fromCodePoint(cp);
 	return first.toUpperCase() || "?";
 }
