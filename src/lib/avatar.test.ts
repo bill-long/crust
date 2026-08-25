@@ -50,6 +50,11 @@ describe("avatarInitial", () => {
 		expect(avatarInitial("\u{1F431} cat")).toBe("\u{1F431}");
 	});
 
+	it("keeps a single glyph when uppercasing expands the code point", () => {
+		// German sharp s uppercases to "SS"; the circle holds one glyph.
+		expect(avatarInitial("ßeta")).toBe("S");
+	});
+
 	it("falls back to ? when nothing usable remains", () => {
 		expect(avatarInitial("")).toBe("?");
 		expect(avatarInitial("@")).toBe("?");

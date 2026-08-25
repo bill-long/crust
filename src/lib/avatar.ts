@@ -34,6 +34,10 @@ export function avatarInitial(name: string): string {
 	// splitting it into a lone surrogate that paints as a replacement
 	// glyph - without allocating the whole string the way Array.from would.
 	const cp = trimmed.codePointAt(0);
-	const first = cp === undefined ? "" : String.fromCodePoint(cp);
-	return first.toUpperCase() || "?";
+	if (cp === undefined) return "?";
+	// toUpperCase can expand one code point into several ("ß" -> "SS");
+	// keep only the first so the circle always holds a single glyph.
+	const upper = String.fromCodePoint(cp).toUpperCase();
+	const upperCp = upper.codePointAt(0);
+	return upperCp === undefined ? "?" : String.fromCodePoint(upperCp);
 }
