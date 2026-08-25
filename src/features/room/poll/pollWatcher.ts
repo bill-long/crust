@@ -8,6 +8,7 @@ import {
 	RelationsEvent,
 	type Room,
 } from "matrix-js-sdk";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import { threadJumpTarget } from "../../../lib/threadEvents";
 import { hasControlChar } from "../timeline/timelineHelpers";
 import { type EventInfo, parseEventBlock } from "./eventBlock";
@@ -213,15 +214,10 @@ export function createPollWatcher(
 			if (cached) return cached;
 			const member = watchedRoom?.getMember(userId);
 			const rawName = member?.name?.trim().slice(0, MAX_VOTER_NAME_LENGTH);
-			const mxc = member?.getMxcAvatarUrl();
 			const voter: PollVoter = {
 				userId,
 				name: rawName && !hasControlChar(rawName) ? rawName : userId,
-				// || (not ??): mxcUrlToHttp returns "" for non-mxc input, and
-				// the PollVoter contract is null-or-URL.
-				avatarUrl: mxc
-					? client.mxcUrlToHttp(mxc, 32, 32, "crop") || null
-					: null,
+				avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl(), 32),
 			};
 			entry.voterCache.set(userId, voter);
 			return voter;

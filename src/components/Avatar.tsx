@@ -40,7 +40,9 @@ const Avatar: Component<AvatarProps> = (props) => {
 					ref={avatar.ref}
 					src={url()}
 					alt={props.alt ?? ""}
-					class="h-8 w-8 shrink-0 rounded-full object-cover"
+					// bg paints the circle while the image is still in flight, so
+					// a lazy avatar never leaves a transparent gap in the layout.
+					class="h-8 w-8 shrink-0 rounded-full bg-surface-3 object-cover"
 					loading={props.loading}
 					onError={avatar.onError}
 					onLoad={avatar.onLoad}

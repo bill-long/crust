@@ -19,6 +19,7 @@ import {
 	MATERIAL_OFFSET_CHANGE_MS,
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import { reportError } from "../../../lib/reportError";
 import { isThreadReply } from "../../../lib/threadEvents";
 import { parsePollStart } from "../poll/pollSnapshot";
@@ -72,10 +73,7 @@ function buildSyntheticCallLeaveEvent(
 ): TimelineEvent {
 	const member = room.getMember(leave.userId);
 	const subject = member?.name?.trim() || leave.userId;
-	const mxc = member?.getMxcAvatarUrl?.() ?? "";
-	const avatarUrl = mxc
-		? (client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null)
-		: null;
+	const avatarUrl = avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48);
 	return {
 		eventId: syntheticCallLeaveId(leave),
 		senderId: leave.userId,

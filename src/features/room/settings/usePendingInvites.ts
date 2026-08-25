@@ -12,6 +12,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { avatarHttpUrl } from "../../../lib/avatar";
 
 export interface PendingInvite {
 	userId: string;
@@ -22,13 +23,12 @@ export interface PendingInvite {
 }
 
 function buildInvite(member: RoomMember, client: MatrixClient): PendingInvite {
-	const mxc = member.getMxcAvatarUrl();
 	const event = (member as RoomMember & { events?: { member?: MatrixEvent } })
 		.events?.member;
 	return {
 		userId: member.userId,
 		displayName: member.name?.trim() || member.userId,
-		avatarUrl: mxc ? (client.mxcUrlToHttp(mxc, 32, 32, "crop") ?? null) : null,
+		avatarUrl: avatarHttpUrl(client, member.getMxcAvatarUrl(), 32),
 		invitedAt: event?.getTs() ?? null,
 		invitedBy: event?.getSender() ?? null,
 	};

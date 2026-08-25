@@ -3,6 +3,7 @@ import {
 	CALL_MEMBER_EVENT_TYPE,
 	callMembershipExpiresAt,
 } from "../../../client/summaries";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import { roomTopicText } from "../../../lib/roomTopic";
 
 /**
@@ -638,9 +639,7 @@ function memberAvatarUrl(
 		typeof content.avatar_url === "string" ? content.avatar_url : "";
 	const fromPrev = typeof prev.avatar_url === "string" ? prev.avatar_url : "";
 	const fromMember = room.getMember(stateKey)?.getMxcAvatarUrl?.() ?? "";
-	const mxc = fromContent || fromPrev || fromMember;
-	if (!mxc) return null;
-	return client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null;
+	return avatarHttpUrl(client, fromContent || fromPrev || fromMember, 48);
 }
 
 /**
@@ -653,9 +652,7 @@ function callMemberAvatarUrl(
 	room: Room,
 	sender: string,
 ): string | null {
-	const mxc = room.getMember(sender)?.getMxcAvatarUrl?.() ?? "";
-	if (!mxc) return null;
-	return client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null;
+	return avatarHttpUrl(client, room.getMember(sender)?.getMxcAvatarUrl?.(), 48);
 }
 
 /**

@@ -172,6 +172,9 @@ describe("useTimeline", () => {
 		);
 
 		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+		// The mock ignores the thumbnail params, so pin the 48px-crop
+		// contract via the call args rather than the returned URL shape.
+		const toHttp = vi.spyOn(client, "mxcUrlToHttp");
 
 		await withRoot(async (_dispose) => {
 			const { events } = useTimeline(
@@ -183,6 +186,12 @@ describe("useTimeline", () => {
 
 			expect(events[0].senderAvatarUrl).toBe(
 				"https://example.com/_matrix/media/v3/download/test/alice-avatar",
+			);
+			expect(toHttp).toHaveBeenCalledWith(
+				"mxc://test/alice-avatar",
+				48,
+				48,
+				"crop",
 			);
 			expect(events[1].senderAvatarUrl).toBeNull();
 		});

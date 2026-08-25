@@ -13,6 +13,7 @@ import {
 	Switch,
 } from "solid-js";
 import { Avatar } from "../../../components/Avatar";
+import { avatarInitial } from "../../../lib/avatar";
 import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
@@ -909,7 +910,7 @@ const TimelineItem: Component<{
 					<div class="mt-0.5 shrink-0">
 						<Avatar
 							url={ev.senderAvatarUrl}
-							initial={(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
+							initial={avatarInitial(ev.senderName)}
 							loading="lazy"
 							broken={props.brokenAvatars}
 						/>
@@ -1417,9 +1418,7 @@ const TimelineItem: Component<{
 										role="img"
 										aria-label={`Read by ${receipt.displayName}`}
 									>
-										{(receipt.displayName.trim() || "?")
-											.charAt(0)
-											.toUpperCase()}
+										{avatarInitial(receipt.displayName)}
 									</div>
 								)}
 							</For>

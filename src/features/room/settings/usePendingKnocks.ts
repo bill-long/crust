@@ -12,6 +12,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { avatarHttpUrl } from "../../../lib/avatar";
 
 export interface PendingKnock {
 	userId: string;
@@ -23,14 +24,13 @@ export interface PendingKnock {
 }
 
 function buildKnock(member: RoomMember, client: MatrixClient): PendingKnock {
-	const mxc = member.getMxcAvatarUrl();
 	const event = (member as RoomMember & { events?: { member?: MatrixEvent } })
 		.events?.member;
 	const reason = event?.getContent()?.reason;
 	return {
 		userId: member.userId,
 		displayName: member.name?.trim() || member.userId,
-		avatarUrl: mxc ? (client.mxcUrlToHttp(mxc, 32, 32, "crop") ?? null) : null,
+		avatarUrl: avatarHttpUrl(client, member.getMxcAvatarUrl(), 32),
 		knockedAt: event?.getTs() ?? null,
 		reason:
 			typeof reason === "string" && reason.trim()

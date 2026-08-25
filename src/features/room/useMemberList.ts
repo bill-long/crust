@@ -7,6 +7,7 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
+import { avatarHttpUrl } from "../../lib/avatar";
 
 export interface MemberEntry {
 	userId: string;
@@ -30,13 +31,10 @@ function roleForPowerLevel(powerLevel: number): RoleLabel {
 }
 
 function buildEntry(member: RoomMember, client: MatrixClient): MemberEntry {
-	const mxcUrl = member.getMxcAvatarUrl();
 	return {
 		userId: member.userId,
 		displayName: member.name?.trim() || member.userId,
-		avatarUrl: mxcUrl
-			? (client.mxcUrlToHttp(mxcUrl, 32, 32, "crop") ?? null)
-			: null,
+		avatarUrl: avatarHttpUrl(client, member.getMxcAvatarUrl(), 32),
 		powerLevel: member.powerLevel ?? 0,
 		isTyping: member.typing ?? false,
 	};

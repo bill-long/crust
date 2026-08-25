@@ -8,6 +8,7 @@ import {
 	THREAD_RELATION_TYPE,
 } from "matrix-js-sdk";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -427,12 +428,13 @@ export function eventToTimelineEvent(
 	const thread = threadWatcher?.getSummary(event, room) ?? null;
 
 	// Sender avatar for the message-group header, from current room member
-	// state (mirrors `memberAvatarUrl` in stateNotice.ts). The optional call
-	// tolerates stripped test doubles without the method.
-	const senderAvatarMxc = member?.getMxcAvatarUrl?.() ?? "";
-	const senderAvatarUrl = senderAvatarMxc
-		? (client.mxcUrlToHttp(senderAvatarMxc, 48, 48, "crop") ?? null)
-		: null;
+	// state. The optional call tolerates stripped test doubles without the
+	// method (see stateNotice.test.ts fixtures, which share this projection).
+	const senderAvatarUrl = avatarHttpUrl(
+		client,
+		member?.getMxcAvatarUrl?.(),
+		48,
+	);
 
 	return {
 		eventId: event.getId() ?? "",
