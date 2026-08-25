@@ -1,6 +1,7 @@
 import { UserEvent } from "matrix-js-sdk";
 import { type Component, createSignal, For, onCleanup, Show } from "solid-js";
 import { useClient } from "../../client/client";
+import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
 import { createImageFallback } from "../../lib/imageFallback";
 import { SectionHeading } from "./SettingsControls";
 
@@ -37,15 +38,10 @@ const AccountTab: Component = () => {
 	const currentAvatarUrl = (): string | null => {
 		profileVersion(); // subscribe to refreshes
 		const user = client.getUser(userId());
-		const mxc = user?.avatarUrl;
-		if (!mxc) return null;
-		return client.mxcUrlToHttp(mxc, 80, 80, "crop") ?? null;
+		return avatarHttpUrl(client, user?.avatarUrl, 80);
 	};
 
-	const initial = (): string => {
-		const name = currentDisplayName().trim() || "?";
-		return name.replace(/^@/, "").charAt(0).toUpperCase() || "?";
-	};
+	const initial = (): string => avatarInitial(currentDisplayName());
 
 	// --- Display name editing ---
 	const [editingName, setEditingName] = createSignal(false);

@@ -3,6 +3,7 @@ import { EventType, type MatrixClient } from "matrix-js-sdk";
 import { type Component, createMemo, createSignal, For, Show } from "solid-js";
 import { Virtualizer } from "virtua/solid";
 import { RowAvatar } from "../../../components/RowAvatar";
+import { avatarInitial } from "../../../lib/avatar";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { useMemberList } from "../useMemberList";
@@ -222,9 +223,6 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 		}
 	};
 
-	const initial = (name: string): string =>
-		name.trim().charAt(0).toUpperCase() || "?";
-
 	return (
 		<div class="space-y-8">
 			{/* Invite */}
@@ -264,7 +262,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 									<div class="flex min-w-0 items-center gap-3">
 										<RowAvatar
 											url={inv.avatarUrl}
-											initial={initial(inv.displayName)}
+											initial={avatarInitial(inv.displayName)}
 											broken={brokenAvatars}
 										/>
 										<div class="min-w-0">
@@ -319,7 +317,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 									<div class="flex min-w-0 items-center gap-3">
 										<RowAvatar
 											url={k.avatarUrl}
-											initial={initial(k.displayName)}
+											initial={avatarInitial(k.displayName)}
 											broken={brokenAvatars}
 										/>
 										<div class="min-w-0">
@@ -433,7 +431,7 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 									<div class="flex min-w-0 items-center gap-3">
 										<RowAvatar
 											url={m.avatarUrl}
-											initial={initial(m.displayName)}
+											initial={avatarInitial(m.displayName)}
 											broken={brokenAvatars}
 										/>
 										<div class="min-w-0">

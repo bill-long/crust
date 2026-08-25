@@ -1,4 +1,5 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import { avatarInitial } from "../../../lib/avatar";
 import {
 	createImageFallback,
 	type FailedImageUrls,
@@ -35,11 +36,6 @@ interface GroupedMembershipNoticeProps {
 }
 
 const MAX_STACK = 3;
-
-function initialOf(name: string): string {
-	const trimmed = name.replace(/^@/, "").trim();
-	return trimmed.charAt(0).toUpperCase() || "?";
-}
 
 /**
  * Collapsed summary row for a run of consecutive same-kind membership
@@ -102,7 +98,7 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 									when={!avatar.failed() && m.avatarUrl}
 									fallback={
 										<span class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-secondary ring-2 ring-surface-0">
-											{initialOf(m.name)}
+											{avatarInitial(m.name)}
 										</span>
 									}
 								>

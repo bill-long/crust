@@ -7,6 +7,7 @@ import {
 	onMount,
 	Show,
 } from "solid-js";
+import { avatarInitial } from "../../../../lib/avatar";
 import {
 	createFailedImageUrls,
 	createImageFallback,
@@ -615,7 +616,7 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 							aria-hidden="true"
 							class="flex aspect-square w-[clamp(3rem,45cqmin,14rem)] items-center justify-center rounded-full bg-surface-3 font-semibold text-text-emphasis text-[clamp(1rem,18cqmin,4rem)]"
 						>
-							{(props.participant.displayName.trim()[0] ?? "?").toUpperCase()}
+							{avatarInitial(props.participant.displayName)}
 						</div>
 					}
 				>

@@ -22,6 +22,9 @@ interface AvatarProps {
 	broken?: FailedImageUrls;
 }
 
+const FALLBACK_CLASS =
+	"flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary";
+
 /** Compact 32px avatar with automatic image-error fallback. */
 const Avatar: Component<AvatarProps> = (props) => {
 	const avatar = createImageFallback(() => props.url, props.broken);
@@ -30,9 +33,19 @@ const Avatar: Component<AvatarProps> = (props) => {
 		<Show
 			when={!avatar.failed() && props.url}
 			fallback={
-				<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-					{props.initial}
-				</div>
+				// Mirror the image branch's semantics: with an `alt`, the
+				// fallback keeps announcing the same name; without one it is
+				// decorative (adjacent text carries the name) and the bare
+				// letter would only be noise read out before the real name.
+				props.alt ? (
+					<div role="img" aria-label={props.alt} class={FALLBACK_CLASS}>
+						{props.initial}
+					</div>
+				) : (
+					<div aria-hidden="true" class={FALLBACK_CLASS}>
+						{props.initial}
+					</div>
+				)
 			}
 		>
 			{(url) => (
@@ -40,7 +53,9 @@ const Avatar: Component<AvatarProps> = (props) => {
 					ref={avatar.ref}
 					src={url()}
 					alt={props.alt ?? ""}
-					class="h-8 w-8 shrink-0 rounded-full object-cover"
+					// bg paints the circle while the image is still in flight, so
+					// a lazy avatar never leaves a transparent gap in the layout.
+					class="h-8 w-8 shrink-0 rounded-full bg-surface-3 object-cover"
 					loading={props.loading}
 					onError={avatar.onError}
 					onLoad={avatar.onLoad}

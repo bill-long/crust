@@ -21,6 +21,7 @@ import {
 	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import { avatarInitial } from "../../lib/avatar";
 import {
 	createFailedImageUrls,
 	createImageFallback,
@@ -147,7 +148,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 					when={!avatar.failed() && props.space.avatarUrl}
 					fallback={
 						<span class={`font-semibold ${nested() ? "text-xs" : "text-sm"}`}>
-							{(props.space.name.trim() || "?").charAt(0).toUpperCase()}
+							{avatarInitial(props.space.name)}
 						</span>
 					}
 				>
@@ -393,7 +394,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 										when={!avatar.failed() && space.avatarUrl}
 										fallback={
 											<span class="text-sm font-semibold">
-												{(space.name.trim() || "?").charAt(0).toUpperCase()}
+												{avatarInitial(space.name)}
 											</span>
 										}
 									>
@@ -452,7 +453,7 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 										when={!avatar.failed() && space.avatarUrl}
 										fallback={
 											<span class="text-sm font-semibold">
-												{(space.name.trim() || "?").charAt(0).toUpperCase()}
+												{avatarInitial(space.name)}
 											</span>
 										}
 									>

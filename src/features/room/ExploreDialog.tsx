@@ -12,6 +12,7 @@ import {
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
+import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { trapTabKey } from "../../lib/focusTrap";
 import { createFailedImageUrls } from "../../lib/imageFallback";
@@ -394,21 +395,8 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 										return (
 											<div class="flex w-full items-center gap-2 rounded px-2 py-2 text-text-muted hover:bg-surface-2/50">
 												<Avatar
-													url={
-														room.avatar_url
-															? client.mxcUrlToHttp(
-																	room.avatar_url,
-																	64,
-																	64,
-																	"crop",
-																) || null
-															: null
-													}
-													initial={(
-														directoryRoomName(room).replace(/^[@#!]/, "") || "?"
-													)
-														.charAt(0)
-														.toUpperCase()}
+													url={avatarHttpUrl(client, room.avatar_url, 64)}
+													initial={avatarInitial(directoryRoomName(room))}
 													loading="lazy"
 													broken={brokenAvatars}
 												/>

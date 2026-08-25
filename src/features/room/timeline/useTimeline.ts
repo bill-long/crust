@@ -10,6 +10,7 @@ import {
 	MatrixEventEvent,
 	type Room,
 	RoomEvent,
+	RoomStateEvent,
 	TimelineWindow,
 } from "matrix-js-sdk";
 import { createEffect, createSignal, onCleanup } from "solid-js";
@@ -19,6 +20,7 @@ import {
 	MATERIAL_OFFSET_CHANGE_MS,
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import { avatarHttpUrl } from "../../../lib/avatar";
 import { reportError } from "../../../lib/reportError";
 import { isThreadReply } from "../../../lib/threadEvents";
 import { parsePollStart } from "../poll/pollSnapshot";
@@ -72,14 +74,12 @@ function buildSyntheticCallLeaveEvent(
 ): TimelineEvent {
 	const member = room.getMember(leave.userId);
 	const subject = member?.name?.trim() || leave.userId;
-	const mxc = member?.getMxcAvatarUrl?.() ?? "";
-	const avatarUrl = mxc
-		? (client.mxcUrlToHttp(mxc, 48, 48, "crop") ?? null)
-		: null;
+	const avatarUrl = avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48);
 	return {
 		eventId: syntheticCallLeaveId(leave),
 		senderId: leave.userId,
 		senderName: subject,
+		senderAvatarUrl: avatarUrl,
 		timestamp: leave.expiresAt,
 		type: CALL_MEMBER_EVENT_TYPE,
 		msgtype: "",
@@ -198,6 +198,10 @@ function isDisplayable(
 
 const WINDOW_LIMIT = 2000;
 const INITIAL_WINDOW_SIZE = 500;
+
+/** Throttle window for the member-profile refresh; exported so tests can
+ *  advance fake timers by the real constant instead of a magic sleep. */
+export const MEMBER_REBUILD_THROTTLE_MS = 250;
 
 /** Module-level default so the source identity is stable across renders. */
 const MAIN_SOURCE = mainTimelineSource();
@@ -334,6 +338,51 @@ export function useTimeline(
 		);
 	}
 
+	/** Patch the snapshotted sender profile fields (senderName /
+	 *  senderAvatarUrl) of the changed members' rows in place from current
+	 *  member state, one lookup per distinct sender. Cheap by design - no
+	 *  re-projection, only rows whose sender actually changed are visited,
+	 *  and the fine-grained store writes only touch fields whose values
+	 *  differ - so it can run unconditionally on member-state churn. The
+	 *  name rule mirrors eventToTimelineEvent (`member?.name ?? sender`). */
+	function refreshSenderProfiles(
+		room: Room,
+		changedIds: ReadonlySet<string>,
+	): void {
+		// Bail without entering the store's write path when none of the
+		// changed members ever posted in the window (lazy-load member fill
+		// in a large room is mostly users with no message on screen).
+		if (!events.some((row) => changedIds.has(row.senderId))) return;
+		const profiles = new Map<
+			string,
+			{ name: string; avatarUrl: string | null }
+		>();
+		const profileFor = (senderId: string) => {
+			let p = profiles.get(senderId);
+			if (!p) {
+				const member = room.getMember(senderId);
+				p = {
+					name: member?.name ?? senderId,
+					avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48),
+				};
+				profiles.set(senderId, p);
+			}
+			return p;
+		};
+		setEvents(
+			produce((draft) => {
+				for (const row of draft) {
+					if (!changedIds.has(row.senderId)) continue;
+					const p = profileFor(row.senderId);
+					if (row.senderName !== p.name) row.senderName = p.name;
+					if (row.senderAvatarUrl !== p.avatarUrl) {
+						row.senderAvatarUrl = p.avatarUrl;
+					}
+				}
+			}),
+		);
+	}
+
 	// Server-clock tracker so expiry-based call-leave synthesis is robust to
 	// client clock skew (the homeserver populated `created_ts` / `expires`
 	// against its own clock). Seeded from window events on every rebuild and
@@ -356,6 +405,21 @@ export function useTimeline(
 		if (callExpiryTimer !== null) {
 			clearTimeout(callExpiryTimer);
 			callExpiryTimer = null;
+		}
+	}
+
+	// Pending member-profile refresh (armed by `onMembersChanged` below):
+	// the one-shot timer plus the member IDs that changed inside its window.
+	// Cleared on room switch as hygiene; the fire itself re-resolves the
+	// room from currentRoomId, so a stray fire is correct either way.
+	let memberRebuildTimer: ReturnType<typeof setTimeout> | null = null;
+	const pendingMemberIds = new Set<string>();
+
+	function clearMemberRebuildTimer(): void {
+		pendingMemberIds.clear();
+		if (memberRebuildTimer !== null) {
+			clearTimeout(memberRebuildTimer);
+			memberRebuildTimer = null;
 		}
 	}
 
@@ -541,9 +605,10 @@ export function useTimeline(
 		currentTimelineWindow = null;
 		deferredLiveCount = 0;
 		followingLive = true;
-		// Drop any pending expiry-leave timer from the previous room; the new
-		// room re-arms its own from the first rebuild.
+		// Drop any pending expiry-leave / member-rebuild timers from the
+		// previous room; the new room re-arms its own.
 		clearCallExpiryTimer();
+		clearMemberRebuildTimer();
 		setLoading(true);
 		setLoadingOlder(false);
 		setLoadingNewer(false);
@@ -1562,15 +1627,46 @@ export function useTimeline(
 		loadRoom(roomId());
 	});
 
+	// Sender profile fields (senderName / senderAvatarUrl) are snapshotted at
+	// projection time, so member-state churn must refresh already-rendered
+	// rows or an avatar/display-name change (or lazy-loaded member state
+	// arriving after backfill) sticks until an unrelated rebuild (#517).
+	// No content-vs-prev profile filtering - it misses real renames (the SDK
+	// backfills profile fields into leave content, and re-emits unchanged
+	// events when disambiguation flips); instead the affected member IDs are
+	// collected and the refresh visits only their rows. Trailing-edge
+	// throttle: the first event arms a one-shot timer, the refresh lands
+	// MEMBER_REBUILD_THROTTLE_MS later and reads state then, so every change
+	// inside the window is captured by that one cheap pass. No generation
+	// guard: the fire re-resolves the room from currentRoomId, so running
+	// after a room switch or jump is correct (and near-free).
+	const onMembersChanged = (event: MatrixEvent): void => {
+		if (!currentRoomId || event.getRoomId() !== currentRoomId) return;
+		// The state key of an m.room.member event is the affected user.
+		const memberId = event.getStateKey?.() ?? "";
+		if (!memberId) return;
+		pendingMemberIds.add(memberId);
+		if (memberRebuildTimer !== null) return;
+		memberRebuildTimer = setTimeout(() => {
+			memberRebuildTimer = null;
+			const changed = new Set(pendingMemberIds);
+			pendingMemberIds.clear();
+			const room = currentRoomId ? client.getRoom(currentRoomId) : null;
+			if (room) refreshSenderProfiles(room, changed);
+		}, MEMBER_REBUILD_THROTTLE_MS);
+	};
+
 	client.on(RoomEvent.Timeline, onTimelineEvent);
 	client.on(RoomEvent.TimelineReset, onTimelineReset);
 	client.on(RoomEvent.LocalEchoUpdated, onLocalEchoUpdated);
 	client.on(MatrixEventEvent.Decrypted, onDecrypted);
 	client.on(MatrixEventEvent.Replaced, onReplaced);
 	client.on(ClientEvent.Room, onRoomAppeared);
+	client.on(RoomStateEvent.Members, onMembersChanged);
 
 	onCleanup(() => {
 		clearCallExpiryTimer();
+		clearMemberRebuildTimer();
 		pollWatcher.dispose();
 		threadWatcher.dispose();
 		releaseThreadEchoRegistryIfEmpty(client, currentRoomId, currentSourceKey);
@@ -1580,6 +1676,7 @@ export function useTimeline(
 		client.off(MatrixEventEvent.Decrypted, onDecrypted);
 		client.off(MatrixEventEvent.Replaced, onReplaced);
 		client.off(ClientEvent.Room, onRoomAppeared);
+		client.off(RoomStateEvent.Members, onMembersChanged);
 	});
 
 	return {

@@ -123,9 +123,10 @@ const TimelineView: Component<{
 	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
-	// Fail-closed avatars for the grouped membership notices, owned here so the
-	// state outlives the timeline virtualizer recycling a notice row and is
-	// shared across notices rendering the same avatar (#457).
+	// Fail-closed avatars for message-header senders and grouped membership
+	// notices, owned here so the state outlives the timeline virtualizer
+	// recycling a row and is shared across rows rendering the same avatar
+	// (#457).
 	const brokenAvatars = createFailedImageUrls();
 	// Memoized: useTimeline reads source() in hot per-event paths, so the
 	// source object must be stable per thread change, not per call.
@@ -1077,6 +1078,7 @@ const TimelineView: Component<{
 											<Match when={mode() === "item"}>
 												<TimelineItem
 													event={event}
+													brokenAvatars={brokenAvatars}
 													showHeader={shouldShowHeader(events, indexAcc())}
 													isOwnMessage={event.senderId === myUserId}
 													canPin={props.canPin}

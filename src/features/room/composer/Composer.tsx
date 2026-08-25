@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { unwrap } from "solid-js/store";
 import { useClient } from "../../../client/client";
+import { avatarInitial } from "../../../lib/avatar";
 import {
 	type CustomEmoji,
 	escapeHtml,
@@ -880,7 +881,7 @@ const Composer: Component<{
 					renderItem={(member, highlighted) => (
 						<div class="flex items-center gap-2">
 							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">
-								{((member.name ?? "").trim() || "?").charAt(0).toUpperCase()}
+								{avatarInitial(member.name ?? member.userId)}
 							</div>
 							<div class="min-w-0 flex-1">
 								<span

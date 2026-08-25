@@ -20,6 +20,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { avatarHttpUrl } from "../../../../lib/avatar";
 import { reportError } from "../../../../lib/reportError";
 import {
 	SCREEN_SHARE_CONTENT_HINT,
@@ -582,9 +583,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			isForeignSfu: entry?.isForeignSfu ?? false,
 			displayName: user?.displayName ?? userId,
 			// Small crop for compact surfaces (PiP panel rows at ~32px).
-			avatarUrl: mxc
-				? (opts.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null)
-				: null,
+			avatarUrl: avatarHttpUrl(opts.client, mxc, 96),
 			// The full call tile renders this avatar large (up to 14rem ≈ 224px
 			// CSS, ~448px on a 2× display) and scales it with the participant
 			// count, so request a high-res thumbnail to stay crisp instead of
@@ -598,9 +597,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// requests. On large calls the tiles shrink so the browser
 			// downscales these crops; the only cost is a modest one-time
 			// overfetch, which we accept in favour of never upscaling.
-			avatarUrlLarge: mxc
-				? (opts.client.mxcUrlToHttp(mxc, 448, 448, "crop") ?? null)
-				: null,
+			avatarUrlLarge: avatarHttpUrl(opts.client, mxc, 448),
 		};
 	};
 

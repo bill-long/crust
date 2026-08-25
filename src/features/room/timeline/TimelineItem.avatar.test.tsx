@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFailedImageUrls } from "../../../lib/imageFallback";
@@ -15,12 +15,12 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
-function renderItem(event: TimelineEvent) {
+function renderItem(event: TimelineEvent, showHeader = true) {
 	const client = createMockClient();
 	return render(() => (
 		<TimelineItem
 			event={event}
-			showHeader={true}
+			showHeader={showHeader}
 			isOwnMessage={false}
 			onReact={() => {}}
 			onVote={() => {}}
@@ -41,30 +41,40 @@ function renderItem(event: TimelineEvent) {
 
 afterEach(() => cleanup());
 
-describe("TimelineItem m.emote rendering (#448)", () => {
-	it("renders an emote as an italic '* Name action' line", () => {
+describe("TimelineItem sender avatar (#517)", () => {
+	it("renders the avatar image in the group header when a URL is present", () => {
 		const { container } = renderItem(
 			makeTimelineEvent({
-				senderName: "Mallory",
-				msgtype: "m.emote",
-				body: "waves at everyone",
+				senderAvatarUrl: "https://example.com/avatar.png",
 			}),
 		);
-		const line = container.querySelector(".emote-body");
-		expect(line).not.toBeNull();
-		expect(line?.textContent).toContain("Mallory");
-		expect(line?.textContent).toContain("waves at everyone");
-		// The decorative asterisk is hidden from screen readers.
-		expect(
-			line?.querySelector('[aria-hidden="true"]')?.textContent?.trim(),
-		).toBe("*");
+		const img = container.querySelector<HTMLImageElement>(
+			"[data-event-id] img",
+		);
+		expect(img?.getAttribute("src")).toBe("https://example.com/avatar.png");
 	});
 
-	it("renders a plain text message without the emote wrapper", () => {
-		const { container } = renderItem(
-			makeTimelineEvent({ body: "ordinary message" }),
+	it("falls back to the sigil-stripped initial when there is no avatar", () => {
+		const { container, getByText } = renderItem(
+			makeTimelineEvent({
+				senderAvatarUrl: null,
+				senderName: "@mallory:example.com",
+			}),
 		);
-		expect(container.querySelector(".emote-body")).toBeNull();
-		expect(screen.getByText("ordinary message")).toBeTruthy();
+		expect(container.querySelector("[data-event-id] img")).toBeNull();
+		// "@mallory:example.com" renders "M", not "@" (shared avatarInitial).
+		// Exact-text query: the initial is the only element whose full text
+		// is the bare letter.
+		expect(getByText("M")).toBeTruthy();
+	});
+
+	it("shows no avatar slot on grouped continuation rows", () => {
+		const { container } = renderItem(
+			makeTimelineEvent({
+				senderAvatarUrl: "https://example.com/avatar.png",
+			}),
+			false,
+		);
+		expect(container.querySelector("[data-event-id] img")).toBeNull();
 	});
 });

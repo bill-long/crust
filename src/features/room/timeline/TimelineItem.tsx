@@ -12,10 +12,13 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
+import { Avatar } from "../../../components/Avatar";
+import { avatarInitial } from "../../../lib/avatar";
 import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
 } from "../../../lib/extractUrls";
+import type { FailedImageUrls } from "../../../lib/imageFallback";
 import { userSettings } from "../../../stores/settings";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -650,6 +653,11 @@ const TimelineItem: Component<{
 	 * unaffected - they render through the stateNotice branch.
 	 */
 	isSenderIgnored?: boolean;
+	/** Timeline-owned fail-closed registry for sender avatars. Required (not
+	 *  per-row) because virtua recycles/remounts rows constantly - per-row
+	 *  error state would be discarded on every remount and would not
+	 *  de-duplicate a broken URL across rows. */
+	brokenAvatars: FailedImageUrls;
 }> = (props) => {
 	const ev = props.event;
 	// Lazy accessor (not a setup-time const, which would go stale when a
@@ -896,9 +904,16 @@ const TimelineItem: Component<{
 						</div>
 					}
 				>
-					{/* Avatar */}
-					<div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-secondary">
-						{(ev.senderName.trim() || "?").charAt(0).toUpperCase()}
+					{/* Avatar - image when the sender has one, initials circle
+					    otherwise or when the URL fails to load (fail-closed).
+					    Both states are the same 8x8 box, so no layout shift. */}
+					<div class="mt-0.5 shrink-0">
+						<Avatar
+							url={ev.senderAvatarUrl}
+							initial={avatarInitial(ev.senderName)}
+							loading="lazy"
+							broken={props.brokenAvatars}
+						/>
 					</div>
 				</Show>
 
@@ -1403,9 +1418,7 @@ const TimelineItem: Component<{
 										role="img"
 										aria-label={`Read by ${receipt.displayName}`}
 									>
-										{(receipt.displayName.trim() || "?")
-											.charAt(0)
-											.toUpperCase()}
+										{avatarInitial(receipt.displayName)}
 									</div>
 								)}
 							</For>

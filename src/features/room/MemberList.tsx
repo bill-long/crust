@@ -12,6 +12,7 @@ import {
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
+import { avatarInitial } from "../../lib/avatar";
 import {
 	createFailedImageUrls,
 	type FailedImageUrls,
@@ -24,11 +25,6 @@ import { type MemberEntry, useMemberList } from "./useMemberList";
 type FlatItem =
 	| { type: "header"; role: string; count: number }
 	| { type: "member"; member: MemberEntry };
-
-/** First letter of a member's name for the avatar fallback. */
-function avatarInitial(name: string): string {
-	return name.replace(/^@/, "").charAt(0).toUpperCase() || "?";
-}
 
 /** Shared visual content for a member row (avatar + name + typing state). */
 const MemberRowContent: Component<{

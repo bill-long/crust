@@ -17,7 +17,7 @@ import {
 } from "../../../test/mockClient";
 import { mergeRowsByTimestamp } from "./timelineHelpers";
 import type { TimelineEvent } from "./useTimeline";
-import { useTimeline } from "./useTimeline";
+import { MEMBER_REBUILD_THROTTLE_MS, useTimeline } from "./useTimeline";
 
 const row = (eventId: string, timestamp: number): TimelineEvent =>
 	({ eventId, timestamp }) as unknown as TimelineEvent;
@@ -151,6 +151,120 @@ describe("useTimeline", () => {
 			expect(events[0].body).toBe("hello");
 			expect(events[1].body).toBe("world");
 			expect(loading()).toBe(false);
+		});
+	});
+
+	it("resolves the sender avatar from member state, null when absent", async () => {
+		const roomA = createMockRoom(
+			"!roomA:test",
+			[
+				textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+				textMessage("!roomA:test", "$2", "@bob:test", "world", 2000),
+			],
+			[
+				{
+					userId: "@alice:test",
+					name: "Alice",
+					avatarUrl: "mxc://test/alice-avatar",
+				},
+				{ userId: "@bob:test", name: "Bob" },
+			],
+		);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+		// The mock ignores the thumbnail params, so pin the 48px-crop
+		// contract via the call args rather than the returned URL shape.
+		const toHttp = vi.spyOn(client, "mxcUrlToHttp");
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events[0].senderAvatarUrl).toBe(
+				"https://example.com/_matrix/media/v3/download/test/alice-avatar",
+			);
+			expect(toHttp).toHaveBeenCalledWith(
+				"mxc://test/alice-avatar",
+				48,
+				48,
+				"crop",
+			);
+			expect(events[1].senderAvatarUrl).toBeNull();
+		});
+	});
+
+	it("refreshes sender profile fields when member state changes (throttled)", async () => {
+		const roomA = createMockRoom(
+			"!roomA:test",
+			[textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+			expect(events[0].senderAvatarUrl).toBeNull();
+			expect(events[0].senderName).toBe("Alice");
+
+			roomA.__addMember({
+				userId: "@alice:test",
+				name: "Alicia",
+				avatarUrl: "mxc://test/new-avatar",
+			});
+			// Fake timers BEFORE the emit, so the throttle timer it arms is
+			// the one advanceTimersByTimeAsync fires.
+			vi.useFakeTimers();
+			try {
+				// A change to a member with no rows in the window is skipped
+				// without touching the store.
+				client.__emit(
+					"RoomState.members",
+					createMatrixEvent({
+						eventId: "$member-other",
+						roomId: "!roomA:test",
+						sender: "@nobody:test",
+						stateKey: "@nobody:test",
+						type: "m.room.member",
+						content: { membership: "join" },
+						ts: 1999,
+					}),
+				);
+				await vi.advanceTimersByTimeAsync(MEMBER_REBUILD_THROTTLE_MS + 1);
+				expect(events[0].senderAvatarUrl).toBeNull();
+
+				client.__emit(
+					"RoomState.members",
+					createMatrixEvent({
+						eventId: "$member",
+						roomId: "!roomA:test",
+						sender: "@alice:test",
+						stateKey: "@alice:test",
+						type: "m.room.member",
+						content: {
+							membership: "join",
+							avatar_url: "mxc://test/new-avatar",
+						},
+						ts: 2000,
+					}),
+				);
+				// Nothing changes synchronously - the refresh is throttled.
+				expect(events[0].senderAvatarUrl).toBeNull();
+				await vi.advanceTimersByTimeAsync(MEMBER_REBUILD_THROTTLE_MS + 1);
+			} finally {
+				vi.useRealTimers();
+			}
+			expect(events[0].senderAvatarUrl).toBe(
+				"https://example.com/_matrix/media/v3/download/test/new-avatar",
+			);
+			expect(events[0].senderName).toBe("Alicia");
 		});
 	});
 

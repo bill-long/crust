@@ -16,6 +16,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { avatarHttpUrl } from "../../lib/avatar";
 import { trapTabKey } from "../../lib/focusTrap";
 import { parseInvites } from "../../lib/inviteParsing";
 import { linkRoomToSpace } from "../../lib/spaceChildLink";
@@ -114,11 +115,9 @@ const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
 
 	const homeserverDomain = createMemo(() => props.client.getDomain() ?? "");
 
-	const avatarHttp = createMemo<string | null>(() => {
-		const mxc = avatarMxc();
-		if (!mxc) return null;
-		return props.client.mxcUrlToHttp(mxc, 96, 96, "crop") ?? null;
-	});
+	const avatarHttp = createMemo<string | null>(() =>
+		avatarHttpUrl(props.client, avatarMxc(), 96),
+	);
 
 	const canSubmit = createMemo(() => {
 		if (submitting()) return false;
