@@ -80,6 +80,7 @@ function buildSyntheticCallLeaveEvent(
 		eventId: syntheticCallLeaveId(leave),
 		senderId: leave.userId,
 		senderName: subject,
+		senderAvatarUrl: avatarUrl,
 		timestamp: leave.expiresAt,
 		type: CALL_MEMBER_EVENT_TYPE,
 		msgtype: "",

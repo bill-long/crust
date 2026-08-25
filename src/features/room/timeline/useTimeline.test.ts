@@ -154,6 +154,40 @@ describe("useTimeline", () => {
 		});
 	});
 
+	it("resolves the sender avatar from member state, null when absent", async () => {
+		const roomA = createMockRoom(
+			"!roomA:test",
+			[
+				textMessage("!roomA:test", "$1", "@alice:test", "hello", 1000),
+				textMessage("!roomA:test", "$2", "@bob:test", "world", 2000),
+			],
+			[
+				{
+					userId: "@alice:test",
+					name: "Alice",
+					avatarUrl: "mxc://test/alice-avatar",
+				},
+				{ userId: "@bob:test", name: "Bob" },
+			],
+		);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async (_dispose) => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+
+			await flushPromises();
+
+			expect(events[0].senderAvatarUrl).toBe(
+				"https://example.com/_matrix/media/v3/download/test/alice-avatar",
+			);
+			expect(events[1].senderAvatarUrl).toBeNull();
+		});
+	});
+
 	it("returns empty events for unknown room", async () => {
 		const client = createMockClient(new Map());
 

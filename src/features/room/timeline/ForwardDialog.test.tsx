@@ -57,6 +57,7 @@ function makeTimelineEvent(): TimelineEvent {
 		eventId: "$ev",
 		senderId: "@alice:example.com",
 		senderName: "Alice",
+		senderAvatarUrl: null,
 		timestamp: 1000,
 		type: "m.room.message",
 		msgtype: "m.text",

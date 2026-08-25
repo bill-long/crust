@@ -426,10 +426,19 @@ export function eventToTimelineEvent(
 	// live via the watcher's ThreadEvent subscription.
 	const thread = threadWatcher?.getSummary(event, room) ?? null;
 
+	// Sender avatar for the message-group header, from current room member
+	// state (mirrors `memberAvatarUrl` in stateNotice.ts). The optional call
+	// tolerates stripped test doubles without the method.
+	const senderAvatarMxc = member?.getMxcAvatarUrl?.() ?? "";
+	const senderAvatarUrl = senderAvatarMxc
+		? (client.mxcUrlToHttp(senderAvatarMxc, 48, 48, "crop") ?? null)
+		: null;
+
 	return {
 		eventId: event.getId() ?? "",
 		senderId: sender,
 		senderName: member?.name ?? sender,
+		senderAvatarUrl,
 		timestamp: event.getTs(),
 		type: event.getType(),
 		msgtype: typeof content.msgtype === "string" ? content.msgtype : "",

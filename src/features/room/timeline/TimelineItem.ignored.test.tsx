@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { createMockClient } from "../../../test/mockClient";
 import { makeTimelineEvent } from "../../../test/timelineEvent";
 import { TimelineItem } from "./TimelineItem";
@@ -42,6 +43,7 @@ function renderItem(
 			shortcodeLookup={new Map()}
 			emoteLookup={new Map()}
 			packs={[]}
+			brokenAvatars={createFailedImageUrls()}
 		/>
 	));
 }

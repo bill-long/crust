@@ -40,6 +40,7 @@ function mkEvent(eventId: string, body: string, ts: number): TimelineEvent {
 		eventId,
 		senderId: "@alice:example.com",
 		senderName: "Alice",
+		senderAvatarUrl: null,
 		timestamp: ts,
 		type: "m.room.message",
 		msgtype: "m.text",

@@ -23,6 +23,13 @@ export interface TimelineEvent {
 	eventId: string;
 	senderId: string;
 	senderName: string;
+	/**
+	 * Scaled (48px crop) http URL of the sender's avatar, resolved from room
+	 * member state at projection time (mirrors `memberAvatarUrl` in
+	 * stateNotice.ts). Null when the member is unknown or has no avatar —
+	 * the header renderer then shows the initials circle instead.
+	 */
+	senderAvatarUrl: string | null;
 	timestamp: number;
 	type: string;
 	msgtype: string;

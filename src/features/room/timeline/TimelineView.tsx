@@ -1077,6 +1077,7 @@ const TimelineView: Component<{
 											<Match when={mode() === "item"}>
 												<TimelineItem
 													event={event}
+													brokenAvatars={brokenAvatars}
 													showHeader={shouldShowHeader(events, indexAcc())}
 													isOwnMessage={event.senderId === myUserId}
 													canPin={props.canPin}

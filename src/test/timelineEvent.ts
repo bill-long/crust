@@ -12,6 +12,7 @@ export function makeTimelineEvent(
 		eventId: "$ev",
 		senderId: "@mallory:example.com",
 		senderName: "Mallory",
+		senderAvatarUrl: null,
 		timestamp: 1000,
 		type: "m.room.message",
 		msgtype: "m.text",

@@ -10,6 +10,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import "../../../styles/global.css";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { createMockClient } from "../../../test/mockClient";
 import { makeTimelineEvent } from "../../../test/timelineEvent";
 import { TimelineItem } from "./TimelineItem";
@@ -35,6 +36,7 @@ function renderItem(event: TimelineEvent, onCopyText?: (text: string) => void) {
 			shortcodeLookup={new Map()}
 			emoteLookup={new Map()}
 			packs={[]}
+			brokenAvatars={createFailedImageUrls()}
 		/>
 	));
 }
