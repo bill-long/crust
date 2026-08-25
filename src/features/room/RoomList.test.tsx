@@ -50,6 +50,7 @@ function makeRoomSummary(roomId: string, name: string): RoomSummary {
 		lastMessage: null,
 		unreadCount: 0,
 		highlightCount: 0,
+		markedUnread: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -101,6 +102,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkJoined: vi.fn(),
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
+				optimisticallySetMarkedUnread: vi.fn(),
 			}}
 		>
 			{props.children}
@@ -278,5 +280,71 @@ describe("RoomList directory browse (#304)", () => {
 		expect(
 			screen.queryByRole("button", { name: "Explore public rooms" }),
 		).toBeNull();
+	});
+});
+
+describe("RoomList mark as unread (#446)", () => {
+	function renderWithClient(
+		seed: RoomSummary[],
+	): ReturnType<typeof createMockClient> {
+		const client = createMockClient();
+		render(() => (
+			<Wrapper client={client} seed={seed}>
+				<RoomList />
+			</Wrapper>
+		));
+		return client;
+	}
+
+	it("renders a dot (not a count) for a room that is only marked unread", () => {
+		const marked = makeRoomSummary("!general:example.com", "general");
+		marked.markedUnread = true;
+		renderWithClient([marked]);
+		const row = screen.getByRole("button", { name: /general/ });
+		const dot = within(row).getByRole("status", { name: "Marked unread" });
+		expect(dot.textContent).toBe("");
+	});
+
+	it("prefers the numeric badge when the room also has unread messages", () => {
+		const marked = makeRoomSummary("!general:example.com", "general");
+		marked.markedUnread = true;
+		marked.unreadCount = 3;
+		renderWithClient([marked]);
+		const row = screen.getByRole("button", { name: /general/ });
+		expect(within(row).getByRole("status", { name: "3 unread" })).toBeTruthy();
+		expect(
+			within(row).queryByRole("status", { name: "Marked unread" }),
+		).toBeNull();
+	});
+
+	it("right-click 'Mark as unread' writes m.marked_unread account data", async () => {
+		const client = renderWithClient([
+			makeRoomSummary("!general:example.com", "general"),
+		]);
+		const row = screen.getByRole("button", { name: /general/ });
+		fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+		const item = await screen.findByRole("menuitem", {
+			name: "Mark as unread",
+		});
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(client.setRoomAccountData).toHaveBeenCalledWith(
+			"!general:example.com",
+			"m.marked_unread",
+			{ unread: true },
+		);
+	});
+
+	it("disables the item when the room already shows an unread indicator", async () => {
+		const unread = makeRoomSummary("!general:example.com", "general");
+		unread.unreadCount = 2;
+		const client = renderWithClient([unread]);
+		const row = screen.getByRole("button", { name: /general/ });
+		fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+		const item = await screen.findByRole("menuitem", {
+			name: "Mark as unread",
+		});
+		expect(item.getAttribute("aria-disabled")).toBe("true");
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(client.setRoomAccountData).not.toHaveBeenCalled();
 	});
 });

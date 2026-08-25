@@ -178,6 +178,7 @@ function renderController(opts?: { encrypted?: boolean }): {
 				optimisticallyMarkJoined: () => {},
 				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
+				optimisticallySetMarkedUnread: () => {},
 			}}
 		>
 			<CallSessionController

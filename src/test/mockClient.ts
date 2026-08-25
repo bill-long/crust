@@ -278,6 +278,11 @@ export function createMockRoom(
 	};
 
 	const roomListeners = new Map<string, Set<(...args: unknown[]) => void>>();
+	// Per-room account data (e.g. m.marked_unread), keyed by event type.
+	const roomAccountData = new Map<
+		string,
+		{ getContent: () => Record<string, unknown>; getType: () => string }
+	>();
 	/** Mirrors `Room.threads`: tests register Thread(-shaped) objects via
 	 *  `room.threads.set(...)` and emit `ThreadEvent.*` on the room. */
 	const threadsMap = new Map<string, unknown>();
@@ -309,6 +314,7 @@ export function createMockRoom(
 		},
 		getLiveTimeline: () => timeline,
 		getUnfilteredTimelineSet: () => timelineSet,
+		getAccountData: (type: string) => roomAccountData.get(type),
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
 			readUpTo.get(userId) ?? null,
 		getMember: (userId: string) => {
@@ -357,6 +363,20 @@ export function createMockRoom(
 		},
 		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);
+		},
+		/** Test helper: set or remove per-room account data. */
+		__setRoomAccountData: (
+			type: string,
+			content: Record<string, unknown> | null,
+		) => {
+			if (content === null) {
+				roomAccountData.delete(type);
+			} else {
+				roomAccountData.set(type, {
+					getContent: () => content,
+					getType: () => type,
+				});
+			}
 		},
 		__setTyping: (userId: string, typing: boolean) => {
 			const m = memberState.find((m) => m.userId === userId);
@@ -485,6 +505,7 @@ export function createMockClient(
 		decryptEventIfNeeded: vi.fn().mockResolvedValue(undefined),
 		paginateEventTimeline: vi.fn().mockResolvedValue(false),
 		getAccountData: (type: string) => accountData.get(type) ?? null,
+		setRoomAccountData: vi.fn().mockResolvedValue({}),
 		getHomeserverUrl: () => "https://example.com",
 		on: (event: string, handler: (...args: unknown[]) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());

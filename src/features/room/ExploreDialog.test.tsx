@@ -87,6 +87,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkJoined,
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
+				optimisticallySetMarkedUnread: vi.fn(),
 			}}
 		>
 			{props.children}
@@ -470,6 +471,7 @@ describe("ExploreDialog", () => {
 					lastMessage: null,
 					unreadCount: 0,
 					highlightCount: 0,
+					markedUnread: false,
 					membership: "join",
 					isEncrypted: false,
 					isDirect: false,

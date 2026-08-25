@@ -1,3 +1,4 @@
+import { ContextMenu } from "@kobalte/core/context-menu";
 import { useNavigate } from "@solidjs/router";
 import {
 	ClientEvent,
@@ -15,6 +16,7 @@ import {
 } from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
+import { markRoomUnread } from "../../client/markedUnread";
 import type { RoomSummary } from "../../client/summaries";
 import {
 	getDmRooms,
@@ -28,6 +30,7 @@ import {
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
 import { SpaceIcon } from "../../components/SpaceIcon";
+import { UnreadBadge } from "../../components/UnreadBadge";
 import { VirtualList } from "../../components/VirtualList";
 import { spaceLandingPath } from "../../lib/spaceLanding";
 import { requestExploreDialog } from "../../stores/exploreDialog";
@@ -181,56 +184,74 @@ const RoomEntry: Component<{
 	isSelected: boolean;
 	isMuted: boolean;
 	onClick: () => void;
+	onMarkUnread: () => void;
 }> = (props) => {
+	// An indicator is already showing — nothing to mark. The menu item stays
+	// visible but disabled (Discord grays out rather than hides). A muted
+	// room's hidden count doesn't count as "showing": marking it unread is
+	// how the user makes it visible despite the mute.
+	const alreadyUnread = (): boolean =>
+		(props.room.unreadCount > 0 && !props.isMuted) || props.room.markedUnread;
 	return (
-		<button
-			type="button"
-			onClick={props.onClick}
-			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
-				props.isSelected
-					? "bg-surface-3 text-text-primary"
-					: "text-text-secondary hover:bg-surface-2"
-			}`}
-			aria-current={props.isSelected ? "true" : undefined}
-		>
-			<div class="min-w-0 flex-1">
-				<div class="flex items-center gap-2">
-					<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
-						<ChannelTypeIcon kind={props.room.kind} />
-					</Show>
-					<span
-						class="min-w-0 flex-1 truncate text-sm font-medium"
-						classList={{
-							"text-text-disabled": props.isMuted && !props.isSelected,
-						}}
-					>
-						{props.room.name.trim() || "Unnamed room"}
-					</span>
-					<Show when={props.room.isEncrypted}>
-						<EncryptedBadge />
-					</Show>
-					<Show when={props.room.callActive}>
-						<ActiveCallDot />
-					</Show>
-					<Show when={props.isMuted}>
-						<BellOffBadge />
-					</Show>
-				</div>
-			</div>
-
-			{/* Unread badge — hidden when muted */}
-			<Show when={props.room.unreadCount > 0 && !props.isMuted}>
-				<span
-					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-						props.room.highlightCount > 0 ? "bg-danger" : "bg-indicator"
+		<ContextMenu>
+			<ContextMenu.Trigger>
+				<button
+					type="button"
+					onClick={props.onClick}
+					class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
+						props.isSelected
+							? "bg-surface-3 text-text-primary"
+							: "text-text-secondary hover:bg-surface-2"
 					}`}
-					role="status"
-					aria-label={`${props.room.unreadCount} unread${props.room.highlightCount > 0 ? `, ${props.room.highlightCount} highlighted` : ""}`}
+					aria-current={props.isSelected ? "true" : undefined}
 				>
-					{props.room.unreadCount > 99 ? "99+" : props.room.unreadCount}
-				</span>
-			</Show>
-		</button>
+					<div class="min-w-0 flex-1">
+						<div class="flex items-center gap-2">
+							<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
+								<ChannelTypeIcon kind={props.room.kind} />
+							</Show>
+							<span
+								class="min-w-0 flex-1 truncate text-sm font-medium"
+								classList={{
+									"text-text-disabled": props.isMuted && !props.isSelected,
+								}}
+							>
+								{props.room.name.trim() || "Unnamed room"}
+							</span>
+							<Show when={props.room.isEncrypted}>
+								<EncryptedBadge />
+							</Show>
+							<Show when={props.room.callActive}>
+								<ActiveCallDot />
+							</Show>
+							<Show when={props.isMuted}>
+								<BellOffBadge />
+							</Show>
+						</div>
+					</div>
+
+					{/* Numeric badge hidden when muted; the marked-unread dot still
+						shows — it's an explicit user action, not room noise. */}
+					<UnreadBadge
+						unread={props.isMuted ? 0 : props.room.unreadCount}
+						highlight={props.isMuted ? 0 : props.room.highlightCount}
+						markedUnread={props.room.markedUnread}
+						class="shrink-0"
+					/>
+				</button>
+			</ContextMenu.Trigger>
+			<ContextMenu.Portal>
+				<ContextMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+					<ContextMenu.Item
+						class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden data-disabled:cursor-default data-disabled:text-text-disabled data-disabled:hover:bg-transparent"
+						disabled={alreadyUnread()}
+						onSelect={props.onMarkUnread}
+					>
+						Mark as unread
+					</ContextMenu.Item>
+				</ContextMenu.Content>
+			</ContextMenu.Portal>
+		</ContextMenu>
 	);
 };
 
@@ -320,7 +341,11 @@ const KnockEntry: Component<{
     the current list. */
 const SubspaceEntry: Component<{
 	space: RoomSummary;
-	unreadRollup: () => { unread: number; highlight: number };
+	unreadRollup: () => {
+		unread: number;
+		highlight: number;
+		markedUnread: boolean;
+	};
 	onClick: () => void;
 }> = (props) => {
 	// Memoized so the subtree walk runs once per summaries change, not
@@ -338,17 +363,12 @@ const SubspaceEntry: Component<{
 					{props.space.name.trim() || "Unnamed space"}
 				</span>
 			</div>
-			<Show when={rollup().unread > 0}>
-				<span
-					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-						rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-					}`}
-					role="status"
-					aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
-				>
-					{rollup().unread > 99 ? "99+" : rollup().unread}
-				</span>
-			</Show>
+			<UnreadBadge
+				unread={rollup().unread}
+				highlight={rollup().highlight}
+				markedUnread={rollup().markedUnread}
+				class="shrink-0"
+			/>
 		</button>
 	);
 };
@@ -362,7 +382,8 @@ interface RoomListProps {
 }
 
 const RoomList: Component<RoomListProps> = (props) => {
-	const { client, summaries } = useClient();
+	const clientCtx = useClient();
+	const { client, summaries } = clientCtx;
 	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
 
@@ -557,6 +578,7 @@ const RoomList: Component<RoomListProps> = (props) => {
 			isSelected={selectedRoomId() === room.roomId}
 			isMuted={isMuted(room.roomId)}
 			onClick={() => navigateToRoom(room.roomId)}
+			onMarkUnread={() => markRoomUnread(clientCtx, room.roomId)}
 		/>
 	);
 

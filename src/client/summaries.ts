@@ -17,6 +17,11 @@ import {
 } from "../lib/pollCopy";
 import { isThreadReply, isThreadTimelineData } from "../lib/threadEvents";
 import {
+	getRoomMarkedUnread,
+	MARKED_UNREAD_TYPE,
+	MARKED_UNREAD_TYPE_UNSTABLE,
+} from "./markedUnread";
+import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
 	type ServerTimeTracker,
@@ -29,6 +34,8 @@ export interface RoomSummary {
 	lastMessage: { body: string; sender: string; timestamp: number } | null;
 	unreadCount: number;
 	highlightCount: number;
+	/** Explicitly marked unread by the user (MSC2867 `m.marked_unread`). */
+	markedUnread: boolean;
 	membership: string;
 	isEncrypted: boolean;
 	isDirect: boolean;
@@ -278,6 +285,7 @@ function buildSummary(
 		highlightCount: room.getUnreadNotificationCount(
 			NotificationCountType.Highlight,
 		),
+		markedUnread: getRoomMarkedUnread(room),
 		membership: room.getMyMembership(),
 		isEncrypted: room.hasEncryptionStateEvent(),
 		isDirect: dmRoomIds.has(room.roomId),
@@ -387,6 +395,7 @@ export function createSummariesStore(client: MatrixClient): {
 	optimisticallyMarkJoined: (roomId: string, info: OptimisticJoinInfo) => void;
 	optimisticallyMarkKnocked: (roomId: string, info: OptimisticJoinInfo) => void;
 	optimisticallyMarkLeft: (roomId: string) => void;
+	optimisticallySetMarkedUnread: (roomId: string, value: boolean) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const baseUrl = client.getHomeserverUrl();
@@ -487,6 +496,7 @@ export function createSummariesStore(client: MatrixClient): {
 					lastMessage: null,
 					unreadCount: 0,
 					highlightCount: 0,
+					markedUnread: false,
 					membership: "join",
 					isEncrypted: false,
 					isDirect: info.isDirect === true,
@@ -534,6 +544,7 @@ export function createSummariesStore(client: MatrixClient): {
 					lastMessage: null,
 					unreadCount: 0,
 					highlightCount: 0,
+					markedUnread: false,
 					membership: "knock",
 					isEncrypted: false,
 					isDirect: false,
@@ -566,6 +577,18 @@ export function createSummariesStore(client: MatrixClient): {
 		const existing = summaries[roomId];
 		if (!existing || existing.membership === "leave") return;
 		setSummaries(roomId, "membership", "leave");
+	}
+
+	/**
+	 * Optimistically flip the marked-unread flag so the sidebar indicator
+	 * reacts the moment the user marks (or opens) a room, without waiting
+	 * for the `m.marked_unread` account-data round-trip. The authoritative
+	 * update (`onRoomAccountData`) confirms or corrects it when /sync
+	 * delivers the account-data event. No-op when the room has no entry.
+	 */
+	function optimisticallySetMarkedUnread(roomId: string, value: boolean): void {
+		if (!summaries[roomId]) return;
+		setSummaries(roomId, "markedUnread", value);
 	}
 
 	function upsertRoom(room: Room): void {
@@ -718,6 +741,17 @@ export function createSummariesStore(client: MatrixClient): {
 		updateUnreadCounts(room);
 	}
 
+	function onRoomAccountData(event: MatrixEvent, room: Room): void {
+		const type = event.getType();
+		if (type !== MARKED_UNREAD_TYPE && type !== MARKED_UNREAD_TYPE_UNSTABLE)
+			return;
+		if (!summaries[room.roomId]) {
+			upsertRoom(room);
+			return;
+		}
+		setSummaries(room.roomId, "markedUnread", getRoomMarkedUnread(room));
+	}
+
 	function onMyMembership(room: Room): void {
 		if (!summaries[room.roomId]) {
 			upsertRoom(room);
@@ -827,6 +861,7 @@ export function createSummariesStore(client: MatrixClient): {
 		client.on(RoomEvent.Timeline, onRoomTimeline);
 		client.on(RoomEvent.Receipt, onReceipt);
 		client.on(RoomEvent.MyMembership, onMyMembership);
+		client.on(RoomEvent.AccountData, onRoomAccountData);
 		client.on(ClientEvent.AccountData, onAccountData);
 		client.on(RoomStateEvent.Events, onRoomStateEvents);
 	}
@@ -840,6 +875,7 @@ export function createSummariesStore(client: MatrixClient): {
 		client.off(RoomEvent.Timeline, onRoomTimeline);
 		client.off(RoomEvent.Receipt, onReceipt);
 		client.off(RoomEvent.MyMembership, onMyMembership);
+		client.off(RoomEvent.AccountData, onRoomAccountData);
 		client.off(ClientEvent.AccountData, onAccountData);
 		client.off(RoomStateEvent.Events, onRoomStateEvents);
 	}
@@ -852,5 +888,6 @@ export function createSummariesStore(client: MatrixClient): {
 		optimisticallyMarkJoined,
 		optimisticallyMarkKnocked,
 		optimisticallyMarkLeft,
+		optimisticallySetMarkedUnread,
 	};
 }

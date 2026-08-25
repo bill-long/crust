@@ -21,6 +21,7 @@ import {
 	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import { UnreadBadge } from "../../components/UnreadBadge";
 import { avatarInitial } from "../../lib/avatar";
 import {
 	createFailedImageUrls,
@@ -165,17 +166,13 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				</Show>
 
 				{/* Unread badge */}
-				<Show when={rollup().unread > 0}>
-					<span
-						class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-							rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-						}`}
-						role="status"
-						aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
-					>
-						{rollup().unread > 99 ? "99+" : rollup().unread}
-					</span>
-				</Show>
+				<UnreadBadge
+					unread={rollup().unread}
+					highlight={rollup().highlight}
+					markedUnread={rollup().markedUnread}
+					size="sm"
+					class="absolute -right-1 -top-1"
+				/>
 			</button>
 		</>
 	);
@@ -316,17 +313,13 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 						</svg>
 
 						{/* Unread badge for DMs / home rooms */}
-						<Show when={homeRollup().unread > 0}>
-							<span
-								class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-									homeRollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-								}`}
-								role="status"
-								aria-label={`${homeRollup().unread} unread${homeRollup().highlight > 0 ? `, ${homeRollup().highlight} highlighted` : ""}`}
-							>
-								{homeRollup().unread > 99 ? "99+" : homeRollup().unread}
-							</span>
-						</Show>
+						<UnreadBadge
+							unread={homeRollup().unread}
+							highlight={homeRollup().highlight}
+							markedUnread={homeRollup().markedUnread}
+							size="sm"
+							class="absolute -right-1 -top-1"
+						/>
 
 						{/* Pending-invite badge - bottom corner so it can coexist
 							with the unread badge above. Accent = action needed,

@@ -37,6 +37,7 @@ function makeSummary(
 		lastMessage: null,
 		unreadCount: 0,
 		highlightCount: 0,
+		markedUnread: false,
 		membership,
 		isEncrypted: false,
 		isDirect: false,

@@ -6,6 +6,7 @@ import {
 	createMemo,
 	createSignal,
 	lazy,
+	on,
 	onCleanup,
 	onMount,
 	Show,
@@ -14,6 +15,7 @@ import {
 } from "solid-js";
 import { useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
+import { clearRoomMarkedUnread, markRoomUnread } from "../client/markedUnread";
 import { getSpaceRooms } from "../client/summaries-selectors";
 import {
 	clamp,
@@ -167,8 +169,9 @@ function saveThreadWidth(w: number): void {
 const [loggingOut, setLoggingOut] = createSignal(false);
 
 const Layout: Component = () => {
+	const clientCtx = useClient();
 	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
-		useClient();
+		clientCtx;
 	// Mount the global PTT/PTM hotkey listener once at the app shell. The
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
@@ -500,6 +503,23 @@ const Layout: Component = () => {
 		const rid = roomId();
 		if (rid) setLastRoom(rid, params.spaceId);
 	});
+
+	// Opening a room consumes its marked-unread flag (MSC2867), so the
+	// sidebar dot disappears the moment the room is viewed. `on` is
+	// load-bearing: it keys the effect to the route plus the summary
+	// ENTRY's identity (so a cold-launch restore still clears once the
+	// initial sync creates the entry) while leaving the flag itself
+	// untracked - the clear helper reads it internally, and tracking it
+	// would re-run this effect on the flag alone, instantly swallowing a
+	// mark made while the room is open (the room-pane overflow action).
+	createEffect(
+		on(
+			[roomId, (): unknown => (roomId() ? summaries[roomId() ?? ""] : null)],
+			([rid, entry]) => {
+				if (rid && entry) clearRoomMarkedUnread(clientCtx, rid);
+			},
+		),
+	);
 
 	// Restore the last room on a cold launch. The app boots on the bare root
 	// path ("/") with no room selected; reopen the room the user last had open
@@ -869,6 +889,7 @@ const Layout: Component = () => {
 										onCopyLink={() => handleCopyRoomLink(rid)}
 										canInvite={canInviteHere}
 										onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
+										onMarkUnread={() => markRoomUnread(clientCtx, rid)}
 										leaving={() => isLeaving(rid)}
 										onLeave={handleLeave}
 										onOpenSettings={() =>

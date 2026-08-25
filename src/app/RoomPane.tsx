@@ -42,6 +42,7 @@ const RoomOverflowMenu: Component<{
 	onInvite: () => void;
 	onOpenSettings: () => void;
 	onCopyLink: () => void;
+	onMarkUnread: () => void;
 	leaving: () => boolean;
 	onLeave: () => void;
 }> = (props) => {
@@ -128,6 +129,22 @@ const RoomOverflowMenu: Component<{
 						</svg>
 						Copy room link
 					</DropdownMenu.Item>
+					<DropdownMenu.Item class={itemClass} onSelect={props.onMarkUnread}>
+						<svg
+							class="h-4 w-4 shrink-0 text-text-muted"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M4 4h11a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" />
+							<circle cx="19" cy="5" r="3" fill="currentColor" stroke="none" />
+						</svg>
+						Mark as unread
+					</DropdownMenu.Item>
 					<DropdownMenu.Item
 						class={`${itemClass} text-danger-text hover:bg-danger-bg/20 focus-visible:bg-danger-bg/20`}
 						disabled={props.leaving()}
@@ -165,6 +182,7 @@ const RoomPane: Component<{
 	onCopyLink: () => void;
 	canInvite: () => boolean;
 	onInvite: () => void;
+	onMarkUnread: () => void;
 	leaving: () => boolean;
 	onLeave: () => void;
 	onOpenSettings: () => void;
@@ -503,6 +521,7 @@ const RoomPane: Component<{
 							onInvite={props.onInvite}
 							onOpenSettings={props.onOpenSettings}
 							onCopyLink={props.onCopyLink}
+							onMarkUnread={props.onMarkUnread}
 							leaving={props.leaving}
 							onLeave={props.onLeave}
 						/>
