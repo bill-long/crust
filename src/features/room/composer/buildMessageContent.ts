@@ -63,6 +63,7 @@ export function buildEditContent(
 	mentions: Mention[],
 	targetEventId: string,
 	msgtype: "m.text" | "m.emote" = "m.text",
+	roomMention = false,
 ): Record<string, unknown> {
 	const newContent: Record<string, unknown> = {
 		msgtype,
@@ -72,11 +73,10 @@ export function buildEditContent(
 		newContent.format = "org.matrix.custom.html";
 		newContent.formatted_body = formattedBody;
 	}
-	if (mentions.length > 0) {
-		newContent["m.mentions"] = {
-			user_ids: mentions.map((m) => m.userId),
-		};
-	}
+	// No reply target on an edit (the relation is m.replace), so the
+	// reply-author merge inside applyMentions is inert; myUserId is only
+	// read on that path.
+	applyMentions(newContent, mentions, null, "", roomMention);
 
 	const content: Record<string, unknown> = {
 		msgtype,
@@ -121,19 +121,25 @@ export function mentionUserIds(
 
 /**
  * Set `content["m.mentions"]` from the typed mentions plus the reply target's
- * author (see {@link mentionUserIds}), or remove the field when there are none.
- * Shared by every send path so the `m.mentions` shape and the reply-mention
- * rule live in exactly one place.
+ * author (see {@link mentionUserIds}) and the `@room` everyone-mention flag,
+ * or remove the field when there is nothing to carry. Shared by every send
+ * path so the `m.mentions` shape and the reply-mention rule live in exactly
+ * one place. Per spec, `room` is emitted only as `true` (never `false`) and
+ * the "@room" text itself stays plain - no pill, no HTML.
  */
 export function applyMentions(
 	content: Record<string, unknown>,
 	mentions: Mention[],
 	replyTo: TimelineEvent | null,
 	myUserId: string,
+	roomMention = false,
 ): void {
 	const userIds = mentionUserIds(mentions, replyTo, myUserId);
-	if (userIds.length > 0) {
-		content["m.mentions"] = { user_ids: userIds };
+	const mentionsContent: Record<string, unknown> = {};
+	if (userIds.length > 0) mentionsContent.user_ids = userIds;
+	if (roomMention) mentionsContent.room = true;
+	if (Object.keys(mentionsContent).length > 0) {
+		content["m.mentions"] = mentionsContent;
 	} else {
 		delete content["m.mentions"];
 	}
@@ -153,6 +159,7 @@ export function buildTextMessageContent(
 	roomId: string,
 	myUserId: string,
 	msgtype: "m.text" | "m.emote" = "m.text",
+	roomMention = false,
 ): Record<string, unknown> {
 	const content: Record<string, unknown> = {
 		msgtype,
@@ -162,7 +169,7 @@ export function buildTextMessageContent(
 		content.format = "org.matrix.custom.html";
 		content.formatted_body = formattedBody;
 	}
-	applyMentions(content, mentions, replyTo, myUserId);
+	applyMentions(content, mentions, replyTo, myUserId, roomMention);
 
 	// Add reply metadata + fallback if replying.
 	if (replyTo) {

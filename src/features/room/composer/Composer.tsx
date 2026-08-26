@@ -54,7 +54,7 @@ import {
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
 import { useAttachments } from "./useAttachments";
-import { useMentions } from "./useMentions";
+import { isRoomMentionCandidate, useMentions } from "./useMentions";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
 
 const SHORTCODE_RE = /(?:^|[^:\w]):([a-zA-Z0-9_-]{2,50}):(?![\w:])/g;
@@ -123,16 +123,19 @@ const Composer: Component<{
 	const {
 		mentions,
 		setMentions,
+		roomMentionIntent,
+		setRoomMentionIntent,
 		mentionQuery,
 		setMentionQuery,
 		MentionPicker,
 		handlePickerKey,
 		getActiveDescendant,
 		listboxId,
-		filteredMembers,
+		mentionCandidates,
 		pickerRendered,
 		detectMention,
 		reconcileMentions,
+		reconcileRoomMention,
 		onMentionSelect,
 		insertMention,
 	} = useMentions({
@@ -469,6 +472,7 @@ const Composer: Component<{
 			() => props.editingEvent,
 			(ev) => {
 				setMentions([]);
+				setRoomMentionIntent(false);
 				setMentionQuery(null);
 				setGifPickerOpen(false);
 				// Entering edit mode discards an active recording: the edit UI
@@ -592,6 +596,7 @@ const Composer: Component<{
 		// preserve such text through an edit.
 		if (props.editingEvent) {
 			const currentMentions = reconcileMentions(msg);
+			const currentRoomMention = reconcileRoomMention(msg);
 			const emoji = findCustomEmoji(msg, shortcodeLookup());
 			const { body: newBody, formatted_body } = formatMarkdown(
 				msg,
@@ -604,13 +609,16 @@ const Composer: Component<{
 				currentMentions,
 				props.editingEvent.eventId,
 				props.editingEvent.msgtype === "m.emote" ? "m.emote" : "m.text",
+				currentRoomMention,
 			);
 
 			const draft = text();
 			const draftMentions = mentions();
+			const draftRoomMention = roomMentionIntent();
 			setText("");
 			setError(null);
 			setMentions([]);
+			setRoomMentionIntent(false);
 			setMentionQuery(null);
 			setEmojiPickerOpen(false);
 			setSending(true);
@@ -632,6 +640,7 @@ const Composer: Component<{
 				if (!text()) {
 					setText(draft);
 					setMentions(draftMentions);
+					setRoomMentionIntent(draftRoomMention);
 				}
 				setError(e instanceof Error ? e.message : "Failed to edit message");
 				requestAnimationFrame(autoResize);
@@ -650,12 +659,15 @@ const Composer: Component<{
 		// text the user types while the upload is in flight.
 		const hasText = msg.length > 0;
 		const currentMentions = hasText ? reconcileMentions(msg) : [];
+		const currentRoomMention = hasText ? reconcileRoomMention(msg) : false;
 		const emoji = hasText ? findCustomEmoji(msg, shortcodeLookup()) : [];
 		const draft = text();
 		const draftMentions = mentions();
+		const draftRoomMention = roomMentionIntent();
 		setText("");
 		setError(null);
 		setMentions([]);
+		setRoomMentionIntent(false);
 		setMentionQuery(null);
 		setEmojiPickerOpen(false);
 		setGifPickerOpen(false);
@@ -667,6 +679,7 @@ const Composer: Component<{
 			if (!text()) {
 				setText(draft);
 				setMentions(draftMentions);
+				setRoomMentionIntent(draftRoomMention);
 				requestAnimationFrame(autoResize);
 			}
 		};
@@ -741,6 +754,7 @@ const Composer: Component<{
 			roomId,
 			client.getUserId() ?? "",
 			wire.msgtype,
+			currentRoomMention,
 		);
 
 		setSending(true);
@@ -769,6 +783,7 @@ const Composer: Component<{
 		stopTyping();
 		setText("");
 		setMentions([]);
+		setRoomMentionIntent(false);
 		setMentionQuery(null);
 		requestAnimationFrame(autoResize);
 		props.onCancelEdit?.();
@@ -897,29 +912,49 @@ const Composer: Component<{
 			</Show>
 			<div class="relative">
 				<MentionPicker
-					items={filteredMembers()}
+					items={mentionCandidates()}
 					visible={mentionQuery() !== null}
 					onSelect={onMentionSelect}
 					onClose={() => setMentionQuery(null)}
-					renderItem={(member, highlighted) => (
-						<div class="flex items-center gap-2">
-							<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">
-								{avatarInitial(member.name ?? member.userId)}
+					renderItem={(candidate, highlighted) =>
+						isRoomMentionCandidate(candidate) ? (
+							<div class="flex items-center gap-2">
+								<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">
+									@
+								</div>
+								<div class="min-w-0 flex-1">
+									<span
+										class={
+											highlighted ? "text-text-primary" : "text-text-secondary"
+										}
+									>
+										room
+									</span>
+									<span class="ml-1 text-xs text-text-faint">
+										Notify the whole room
+									</span>
+								</div>
 							</div>
-							<div class="min-w-0 flex-1">
-								<span
-									class={
-										highlighted ? "text-text-primary" : "text-text-secondary"
-									}
-								>
-									{member.name?.trim() || member.userId}
-								</span>
-								<span class="ml-1 text-xs text-text-faint">
-									{member.userId}
-								</span>
+						) : (
+							<div class="flex items-center gap-2">
+								<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">
+									{avatarInitial(candidate.name ?? candidate.userId)}
+								</div>
+								<div class="min-w-0 flex-1">
+									<span
+										class={
+											highlighted ? "text-text-primary" : "text-text-secondary"
+										}
+									>
+										{candidate.name?.trim() || candidate.userId}
+									</span>
+									<span class="ml-1 text-xs text-text-faint">
+										{candidate.userId}
+									</span>
+								</div>
 							</div>
-						</div>
-					)}
+						)
+					}
 					position={{ bottom: "100%", left: "0" }}
 				/>
 				{/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: role is conditionally combobox */}

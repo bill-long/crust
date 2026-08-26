@@ -3,6 +3,25 @@ import { type Accessor, createMemo, createSignal } from "solid-js";
 import { createPicker } from "../../../components/picker/Picker";
 import type { Mention } from "../../../lib/markdown";
 
+/**
+ * Sentinel autocomplete entry for the `@room` everyone-mention (#448). A
+ * module-level singleton so the picker's reference-keyed rows stay stable
+ * across keystrokes, and so a type guard can tell it apart from the raw
+ * `RoomMember` references the member rows keep (wrapping members would
+ * re-mint every row per keystroke).
+ */
+export const ROOM_MENTION_CANDIDATE = Object.freeze({
+	roomMention: true as const,
+});
+
+export type MentionCandidate = RoomMember | typeof ROOM_MENTION_CANDIDATE;
+
+export function isRoomMentionCandidate(
+	candidate: MentionCandidate,
+): candidate is typeof ROOM_MENTION_CANDIDATE {
+	return "roomMention" in candidate;
+}
+
 interface UseMentionsDeps {
 	client: MatrixClient;
 	roomId: Accessor<string>;
@@ -24,6 +43,11 @@ interface UseMentionsDeps {
 export function useMentions(deps: UseMentionsDeps) {
 	const [mentions, setMentions] = createSignal<Mention[]>([]);
 	const [mentionQuery, setMentionQuery] = createSignal<string | null>(null);
+	// The user picked `@room` from the autocomplete and the token is still
+	// in the text. Intent-based like user mentions: plain-typed "@room"
+	// without a pick does NOT set `m.mentions.room` (matching how a typed
+	// @Name without a pick goes out unpilled and unmentioned).
+	const [roomMentionIntent, setRoomMentionIntent] = createSignal(false);
 
 	// Mention picker
 	const {
@@ -31,14 +55,27 @@ export function useMentions(deps: UseMentionsDeps) {
 		handlePickerKey,
 		getActiveDescendant,
 		listboxId,
-	} = createPicker<RoomMember>();
+	} = createPicker<MentionCandidate>();
 
 	const roomMembers = createMemo(() => {
 		const room = deps.client.getRoom(deps.roomId());
 		return room ? room.getJoinedMembers() : [];
 	});
 
-	// Shared filtered member list - used by both picker and ARIA state.
+	// Whether the sender's power level may trigger a room notification
+	// (`m.room.power_levels` `notifications.room`, default PL 50) - the
+	// same SDK check Element gates its @room entry on. Read live per
+	// candidate-list computation; like SpaceTile's canInvite this accepts
+	// mild staleness (no state-event subscription) since the receivers'
+	// clients re-validate the sender's power level anyway.
+	const canRoomMention = (): boolean => {
+		const room = deps.client.getRoom(deps.roomId());
+		const userId = deps.client.getUserId();
+		if (!room || !userId) return false;
+		return room.currentState.mayTriggerNotifOfType("room", userId);
+	};
+
+	// Shared filtered candidate list - used by both picker and ARIA state.
 	// Unbounded: the picker windows its rows (VirtualList), so a large match
 	// set costs this one filter pass, not DOM nodes - every member stays
 	// reachable by scrolling/arrowing instead of being cut at a cap. (The
@@ -46,22 +83,31 @@ export function useMentions(deps: UseMentionsDeps) {
 	// over the member list.) Names are read live on purpose: the SDK mutates
 	// RoomMember.name in place on rename, so any search index cached against
 	// the (per-room stable) member-array identity would go stale.
-	const filteredMembers = createMemo(() => {
+	// The `@room` entry leads the list when the query prefixes "room" and
+	// the sender may trigger room notifications; member rows keep their raw
+	// RoomMember references (see ROOM_MENTION_CANDIDATE).
+	const mentionCandidates = createMemo<MentionCandidate[]>(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
 		const lowerQ = q.toLowerCase();
 		// Bare '@' matches everyone - skip the per-member lowercasing pass
 		// entirely rather than string-matching 2x per member for a foregone
 		// conclusion.
-		if (lowerQ === "") return roomMembers();
-		return roomMembers().filter(
-			(m) =>
-				(m.name ?? "").toLowerCase().includes(lowerQ) ||
-				m.userId.toLowerCase().includes(lowerQ),
-		);
+		const members =
+			lowerQ === ""
+				? roomMembers()
+				: roomMembers().filter(
+						(m) =>
+							(m.name ?? "").toLowerCase().includes(lowerQ) ||
+							m.userId.toLowerCase().includes(lowerQ),
+					);
+		if ("room".startsWith(lowerQ) && canRoomMention()) {
+			return [ROOM_MENTION_CANDIDATE, ...members];
+		}
+		return members;
 	});
 
-	const pickerRendered = () => filteredMembers().length > 0;
+	const pickerRendered = () => mentionCandidates().length > 0;
 
 	function detectMention(currentText?: string): void {
 		const el = deps.getTextarea();
@@ -77,28 +123,44 @@ export function useMentions(deps: UseMentionsDeps) {
 		}
 	}
 
-	/** Prune mentions whose @DisplayName is no longer in non-code text */
-	function reconcileMentions(msg: string): Mention[] {
-		// Strip code blocks and inline code so mentions inside code don't count
-		const stripped = msg
+	/** Strip code blocks and inline code so mentions inside code don't count. */
+	function stripCode(msg: string): string {
+		return msg
 			.replace(/```(?:[^\n]*\n[\s\S]*?```|[\s\S]*?```)/g, "")
 			.replace(/`[^`]+`/g, "");
-		return mentions().filter((m) => {
-			const token = `@${m.displayName}`;
-			// Scan all occurrences in stripped text - keep if any has valid word boundaries
-			let searchFrom = 0;
-			while (searchFrom < stripped.length) {
-				const idx = stripped.indexOf(token, searchFrom);
-				if (idx < 0) return false;
-				const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
-				const afterIdx = idx + token.length;
-				const afterOk =
-					afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
-				if (beforeOk && afterOk) return true;
-				searchFrom = idx + 1;
-			}
-			return false;
-		});
+	}
+
+	/** Whether `token` occurs in `stripped` with word boundaries on both sides. */
+	function hasBoundedToken(stripped: string, token: string): boolean {
+		let searchFrom = 0;
+		while (searchFrom < stripped.length) {
+			const idx = stripped.indexOf(token, searchFrom);
+			if (idx < 0) return false;
+			const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
+			const afterIdx = idx + token.length;
+			const afterOk =
+				afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
+			if (beforeOk && afterOk) return true;
+			searchFrom = idx + 1;
+		}
+		return false;
+	}
+
+	/** Prune mentions whose @DisplayName is no longer in non-code text */
+	function reconcileMentions(msg: string): Mention[] {
+		const stripped = stripCode(msg);
+		return mentions().filter((m) =>
+			hasBoundedToken(stripped, `@${m.displayName}`),
+		);
+	}
+
+	/**
+	 * Whether the send should carry `m.mentions.room`: the user picked the
+	 * `@room` entry AND its token is still present in non-code text (same
+	 * prune rule as user mentions).
+	 */
+	function reconcileRoomMention(msg: string): boolean {
+		return roomMentionIntent() && hasBoundedToken(stripCode(msg), "@room");
 	}
 
 	/** Normalize a display name for insertion: strip the leading @ of a
@@ -135,7 +197,7 @@ export function useMentions(deps: UseMentionsDeps) {
 		});
 	}
 
-	function onMentionSelect(member: RoomMember): void {
+	function onMentionSelect(candidate: MentionCandidate): void {
 		const el = deps.getTextarea();
 		if (!el) return;
 		const pos = el.selectionStart;
@@ -146,7 +208,9 @@ export function useMentions(deps: UseMentionsDeps) {
 		if (!triggerMatch) return;
 		const atIdx = before.length - triggerMatch[2].length - 1;
 
-		const displayName = insertableName(member.name ?? "", member.userId);
+		const displayName = isRoomMentionCandidate(candidate)
+			? "room"
+			: insertableName(candidate.name ?? "", candidate.userId);
 		const insertion = `@${displayName} `;
 		// Replace the entire @partial token (from @ through any non-whitespace after caret)
 		const afterCaret = currentText.slice(pos);
@@ -156,7 +220,11 @@ export function useMentions(deps: UseMentionsDeps) {
 
 		deps.setText(newText);
 		setMentionQuery(null);
-		commitMention(member.userId, displayName);
+		if (isRoomMentionCandidate(candidate)) {
+			setRoomMentionIntent(true);
+		} else {
+			commitMention(candidate.userId, displayName);
+		}
 		placeCaretAfter(atIdx + insertion.length);
 	}
 
@@ -191,14 +259,17 @@ export function useMentions(deps: UseMentionsDeps) {
 		setMentions,
 		mentionQuery,
 		setMentionQuery,
+		roomMentionIntent,
+		setRoomMentionIntent,
 		MentionPicker,
 		handlePickerKey,
 		getActiveDescendant,
 		listboxId,
-		filteredMembers,
+		mentionCandidates,
 		pickerRendered,
 		detectMention,
 		reconcileMentions,
+		reconcileRoomMention,
 		onMentionSelect,
 		insertMention,
 	};

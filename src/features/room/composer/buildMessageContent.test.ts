@@ -212,3 +212,55 @@ describe("buildEditContent msgtype", () => {
 		);
 	});
 });
+
+describe("@room mention (#448)", () => {
+	it("applyMentions sets room:true alone when there are no user ids", () => {
+		const content: Record<string, unknown> = {};
+		applyMentions(content, [], null, ME, true);
+		expect(content["m.mentions"]).toEqual({ room: true });
+	});
+
+	it("applyMentions carries room:true alongside user ids", () => {
+		const content: Record<string, unknown> = {};
+		applyMentions(content, [], makeEvent("hi"), ME, true);
+		expect(content["m.mentions"]).toEqual({
+			user_ids: ["@alice:example.com"],
+			room: true,
+		});
+	});
+
+	it("never emits room:false", () => {
+		const content: Record<string, unknown> = {};
+		applyMentions(content, [], null, ME, false);
+		expect(content).not.toHaveProperty("m.mentions");
+	});
+
+	it("buildTextMessageContent threads the flag through", () => {
+		const content = buildTextMessageContent(
+			"@room hi",
+			null,
+			[],
+			null,
+			ROOM,
+			ME,
+			"m.text",
+			true,
+		);
+		expect(content["m.mentions"]).toEqual({ room: true });
+		// Plain token: no pill, no HTML forced by the mention.
+		expect(content.formatted_body).toBeUndefined();
+	});
+
+	it("buildEditContent carries the flag on m.new_content", () => {
+		const content = buildEditContent(
+			"@room updated",
+			null,
+			[],
+			"$target:example.com",
+			"m.text",
+			true,
+		);
+		const newContent = content["m.new_content"] as Record<string, unknown>;
+		expect(newContent["m.mentions"]).toEqual({ room: true });
+	});
+});
