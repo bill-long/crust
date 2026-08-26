@@ -9,6 +9,7 @@ import {
 	SyncState,
 } from "matrix-js-sdk";
 import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
+import { VerificationMethod } from "matrix-js-sdk/lib/types";
 import {
 	createContext,
 	createEffect,
@@ -144,6 +145,22 @@ interface ClientContextValue {
 	clearSecretStorageCache: () => void;
 }
 
+/**
+ * Verification methods advertised to the other party (#452).
+ *
+ * Deliberately narrower than the SDK's default, which also includes
+ * `m.qr_code.scan.v1`: Crust has no camera capture path, so advertising scan
+ * support would invite the other device to display a QR code we can never
+ * read, stranding the flow. What we do support is showing a code for the
+ * other device to scan, confirming its scan (`m.reciprocate.v1`), and emoji
+ * comparison as the universal fallback.
+ */
+const SUPPORTED_VERIFICATION_METHODS = [
+	VerificationMethod.Sas,
+	VerificationMethod.ShowQrCode,
+	VerificationMethod.Reciprocate,
+];
+
 const ClientContext = createContext<ClientContextValue>();
 
 /**
@@ -213,6 +230,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// disables them by default only because old clients relied on
 		// timeline-set identity assumptions Crust does not make.
 		timelineSupport: true,
+		verificationMethods: SUPPORTED_VERIFICATION_METHODS,
 		cryptoCallbacks: {
 			getSecretStorageKey: async (
 				opts: {

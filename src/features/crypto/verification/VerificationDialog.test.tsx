@@ -14,11 +14,20 @@ import { RecoveryKeyCancelledError } from "../../../client/recoveryKeyCancelled"
 import type { VerificationHandle, VerificationState } from "./useVerification";
 import { VerificationDialog } from "./VerificationDialog";
 
+/** Bytes standing in for VerificationRequest.generateQRCode(). */
+const QR_BYTES = new Uint8ClampedArray(
+	Array.from({ length: 120 }, (_, i) => (i * 37 + 128) % 256),
+);
+
 function makeHandle(initial: VerificationState = "idle") {
 	const [state, setState] = createSignal<VerificationState>(initial);
+	const [qrBytes, setQrBytes] = createSignal<Uint8ClampedArray | undefined>(
+		undefined,
+	);
 	const handle = {
 		state,
 		emoji: () => undefined,
+		qrBytes,
 		error: () => "",
 		isSelfVerification: () => true,
 		otherUserId: () => "",
@@ -27,13 +36,25 @@ function makeHandle(initial: VerificationState = "idle") {
 		}),
 		requestDeviceVerification: vi.fn(async () => {}),
 		acceptIncoming: vi.fn(),
+		startSas: vi.fn(async () => {}),
 		confirmSas: vi.fn(async () => {}),
 		rejectSas: vi.fn(),
+		confirmQr: vi.fn(),
+		rejectQr: vi.fn(),
 		cancel: vi.fn(),
 		reset: vi.fn(),
 		setState,
+		setQrBytes,
 	};
 	return handle as unknown as VerificationHandle & typeof handle;
+}
+
+/** Put the handle in the state where our QR code is on screen. */
+function showingQr() {
+	const handle = makeHandle();
+	handle.setQrBytes(QR_BYTES);
+	handle.setState("qr-showing");
+	return handle;
 }
 
 afterEach(() => {
@@ -200,5 +221,96 @@ describe("VerificationDialog self-verification entry", () => {
 		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
 		expect(onClose).not.toHaveBeenCalled();
 		expect(handle.cancel).not.toHaveBeenCalled();
+	});
+});
+
+describe("VerificationDialog QR views (#452)", () => {
+	it("renders the QR code with an accessible name", () => {
+		render(() => (
+			<VerificationDialog verification={showingQr()} onClose={() => {}} />
+		));
+		const code = screen.getByRole("img", { name: "Verification QR code" });
+		// A path with dark modules, not an empty frame.
+		expect(code.querySelector("path")?.getAttribute("d")).toBeTruthy();
+	});
+
+	it("offers emoji as the way out of a code that cannot be scanned", () => {
+		const handle = showingQr();
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		fireEvent.click(
+			screen.getByRole("button", { name: "Can't scan? Compare emoji" }),
+		);
+		expect(handle.startSas).toHaveBeenCalledTimes(1);
+	});
+
+	it("confirms the other side's scan", () => {
+		const handle = makeHandle("qr-reciprocate");
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+		expect(handle.confirmQr).toHaveBeenCalledTimes(1);
+	});
+
+	it("rejects the other side's scan", () => {
+		const handle = makeHandle("qr-reciprocate");
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		fireEvent.click(screen.getByRole("button", { name: "No" }));
+		expect(handle.rejectQr).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not tell the user to accept a request they already accepted", () => {
+		// `ready` means both sides are in; the dialog is picking a method.
+		const handle = makeHandle("ready");
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		expect(screen.getByText("Setting up verification")).toBeTruthy();
+		expect(screen.queryByText(/accept the verification request/i)).toBeNull();
+	});
+
+	it("offers a way out while waiting on the other side to finish", () => {
+		// Confirming a scan is fire-and-forget, so a lost `done` would
+		// otherwise strand the user on this spinner with no exit.
+		const handle = makeHandle("qr-confirmed");
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(handle.cancel).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps focus in the dialog when the other device swaps the view", () => {
+		// The other device scanning is not a local click: whatever the user
+		// had focused unmounts under them, and focus on the body costs them
+		// both Escape and Tab.
+		const handle = showingQr();
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		const button = screen.getByRole("button", {
+			name: "Can't scan? Compare emoji",
+		});
+		button.focus();
+		expect(document.activeElement).toBe(button);
+
+		handle.setState("qr-reciprocate");
+
+		expect(document.activeElement).toBe(screen.getByRole("dialog"));
+	});
+
+	it("cancels rather than closing while a code is on screen", () => {
+		const handle = showingQr();
+		const onClose = vi.fn();
+		render(() => (
+			<VerificationDialog verification={handle} onClose={onClose} />
+		));
+		fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+		expect(handle.cancel).toHaveBeenCalledTimes(1);
+		expect(onClose).not.toHaveBeenCalled();
 	});
 });

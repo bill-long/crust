@@ -32,6 +32,9 @@ importers:
       solid-js:
         specifier: ^1.9.12
         version: 1.9.12
+      uqr:
+        specifier: ^0.1.3
+        version: 0.1.3
       virtua:
         specifier: ^0.49.1
         version: 0.49.1(solid-js@1.9.12)
@@ -2626,6 +2629,9 @@ packages:
     hasBin: true
     peerDependencies:
       browserslist: '>= 4.21.0'
+
+  uqr@0.1.3:
+    resolution: {integrity: sha512-0rjE8iEJe4YmT9TOhwsZtqCMRLc5DXZUI2UEYUUg63ikBkqqE5EYWaI0etFe/5KUcmcYwLih2RND1kq+hrUJXA==}
 
   virtua@0.49.1:
     resolution: {integrity: sha512-6f79msqg3jzNFdqJiS0FSzhRN1EHlDhR7EvW7emp6z5qQ22VdsReiDHflkpMEMhoAyUuYr69nwT0aagiM7NrUg==}
@@ -5649,6 +5655,8 @@ snapshots:
       browserslist: 4.28.8
       escalade: 3.2.0
       picocolors: 1.1.1
+
+  uqr@0.1.3: {}
 
   virtua@0.49.1(solid-js@1.9.12):
     optionalDependencies:
