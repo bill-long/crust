@@ -9,6 +9,7 @@ import {
 import { isRecoveryKeyCancelled } from "../../../client/recoveryKeyCancelled";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { EmojiDisplay } from "./EmojiDisplay";
+import { QrCodeDisplay } from "./QrCodeDisplay";
 import type { VerificationHandle } from "./useVerification";
 
 interface VerificationDialogProps {
@@ -27,10 +28,12 @@ interface VerificationDialogProps {
 type RecoveryStep = "idle" | "working" | "done" | "error";
 
 /**
- * Modal dialog for SAS emoji verification. Shows the appropriate UI
- * for each verification state: waiting, emoji comparison, done, or error.
- * For self-verification it can also run the recovery-key route, which
- * lives outside the SAS handle: its own small step machine below.
+ * Modal dialog for interactive device verification. Shows the appropriate UI
+ * for each verification state: waiting, a QR code for the other device to
+ * scan, the confirmation prompt once it has scanned, emoji comparison, done,
+ * or error. For self-verification it can also run the recovery-key route,
+ * which lives outside the verification handle: its own small step machine
+ * below.
  */
 const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	const v = props.verification;
@@ -123,8 +126,8 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 		>
 			<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 				<Switch>
-					{/* Waiting for other side */}
-					<Match when={v.state() === "requested" || v.state() === "ready"}>
+					{/* Sent, waiting for the other side to accept */}
+					<Match when={v.state() === "requested"}>
 						<div class="flex flex-col items-center gap-4">
 							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
 							<h2 class="text-lg font-semibold text-text-primary">
@@ -138,6 +141,130 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 									Open your other session and accept the verification request.
 								</Show>
 							</p>
+							<button
+								type="button"
+								onClick={() => v.cancel()}
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Cancel
+							</button>
+						</div>
+					</Match>
+
+					{/* Accepted; settling on a method. Separate from `requested`
+					    because that view tells the user to go accept the request,
+					    which they already have: this covers both building the QR
+					    code and starting emoji from "Can't scan?". */}
+					<Match when={v.state() === "ready"}>
+						<div class="flex flex-col items-center gap-4">
+							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+							<h2 class="text-lg font-semibold text-text-primary">
+								Setting up verification
+							</h2>
+							<p class="text-center text-sm text-text-muted">
+								This will only take a moment.
+							</p>
+							<button
+								type="button"
+								onClick={() => v.cancel()}
+								class="mt-2 rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Cancel
+							</button>
+						</div>
+					</Match>
+
+					{/* Our QR code, waiting for the other device to scan it */}
+					<Match when={v.state() === "qr-showing"}>
+						<h2 class="mb-2 text-center text-lg font-semibold text-text-primary">
+							Scan this code
+						</h2>
+						<p class="mb-4 text-center text-sm text-text-muted">
+							<Show
+								when={v.isSelfVerification()}
+								fallback="Ask them to scan this code from their session."
+							>
+								Scan this code from your other session to verify this one.
+							</Show>
+						</p>
+
+						<div class="mb-6 flex justify-center">
+							<Show when={v.qrBytes()}>
+								{(bytes) => (
+									<QrCodeDisplay bytes={bytes()} label="Verification QR code" />
+								)}
+							</Show>
+						</div>
+
+						<div class="flex justify-center gap-3">
+							<button
+								type="button"
+								onClick={() => v.cancel()}
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								onClick={() => v.startSas()}
+								class="rounded bg-surface-3 px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Can't scan? Compare emoji
+							</button>
+						</div>
+					</Match>
+
+					{/* The other device scanned our code and is waiting on us */}
+					<Match when={v.state() === "qr-reciprocate"}>
+						<h2 class="mb-4 text-center text-lg font-semibold text-text-primary">
+							Confirm the scan
+						</h2>
+						<p class="mb-6 text-center text-sm text-text-muted">
+							<Show
+								when={v.isSelfVerification()}
+								fallback="Their session scanned the code. Confirm only if it reports the verification succeeded."
+							>
+								Your other session scanned the code. Confirm only if it reports
+								the verification succeeded.
+							</Show>
+						</p>
+
+						<div class="flex justify-center gap-3">
+							<button
+								type="button"
+								onClick={() => v.rejectQr()}
+								class="rounded bg-danger-bg/50 px-4 py-2 text-sm font-medium text-danger-text-bright transition-colors hover:bg-danger-bg/70 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								No
+							</button>
+							<button
+								type="button"
+								onClick={() => v.confirmQr()}
+								class="rounded bg-success px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-success-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Yes
+							</button>
+						</div>
+					</Match>
+
+					{/* Scan confirmed; waiting for the other side's m.key.verification.done */}
+					<Match when={v.state() === "qr-confirmed"}>
+						<div class="flex flex-col items-center gap-4">
+							<div class="h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-success-text" />
+							<h2 class="text-lg font-semibold text-text-primary">
+								Finishing verification
+							</h2>
+							<p class="text-sm text-text-muted">
+								Waiting for the other device.
+							</p>
+							{/* Confirming a scan is fire-and-forget: the SDK's
+							    ShowQrCodeCallbacks.confirm() returns void and
+							    swallows a failed send, so unlike the emoji route
+							    there is no error to surface if our `done` never
+							    leaves. Without an exit this spinner is a dead end.
+							    Cancelling here is legitimate - the SDK deliberately
+							    keeps the request open until the other side's `done`
+							    arrives, precisely so the user can still back out. */}
 							<button
 								type="button"
 								onClick={() => v.cancel()}

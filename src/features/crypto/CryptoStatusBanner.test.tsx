@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { VerificationHandle } from "./verification/useVerification";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -40,18 +41,26 @@ vi.mock("./verification/IncomingVerificationToast", () => ({
 }));
 const requestSelfVerification = vi.fn(async () => {});
 const requestDeviceVerification = vi.fn(async (_deviceId: string) => {});
+// Annotated with the real handle type: the factory is otherwise structurally
+// unchecked, so a new member on VerificationHandle would go missing here and
+// only surface as "undefined is not a function" the first time a test drove
+// the banner past the idle state.
 vi.mock("./verification/useVerification", () => ({
-	useVerification: () => ({
+	useVerification: (): VerificationHandle => ({
 		state: () => "idle",
 		emoji: () => undefined,
+		qrBytes: () => undefined,
 		error: () => "",
 		isSelfVerification: () => true,
 		otherUserId: () => "",
 		requestSelfVerification: (...a: []) => requestSelfVerification(...a),
 		requestDeviceVerification: (id: string) => requestDeviceVerification(id),
 		acceptIncoming: () => {},
+		startSas: async () => {},
 		confirmSas: async () => {},
 		rejectSas: () => {},
+		confirmQr: () => {},
+		rejectQr: () => {},
 		cancel: () => {},
 		reset: () => {},
 	}),
