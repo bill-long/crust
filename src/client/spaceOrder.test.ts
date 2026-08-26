@@ -125,7 +125,7 @@ describe("moveRootSpace", () => {
 		await flush();
 	});
 
-	it("stamps every unordered space up to the target on first move", () => {
+	it("moving an unordered space to the front stamps only the moved space", () => {
 		const roots = [
 			spaceSummary("!a:x"),
 			spaceSummary("!b:x"),

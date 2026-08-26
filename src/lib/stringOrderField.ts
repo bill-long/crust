@@ -84,12 +84,13 @@ export function reorderLexicographically(
 	toIndex: number,
 	maxLen = 50,
 ): OrderUpdate[] {
-	// Sanity check inputs.
+	// Sanity check inputs. (Upstream accepts === length, but that index is
+	// out of range for everything below - reject it.)
 	if (
 		fromIndex < 0 ||
 		toIndex < 0 ||
-		fromIndex > orders.length ||
-		toIndex > orders.length ||
+		fromIndex >= orders.length ||
+		toIndex >= orders.length ||
 		fromIndex === toIndex
 	) {
 		return [];
@@ -108,6 +109,10 @@ export function reorderLexicographically(
 
 	let canMoveLeft = true;
 	const orderAfterTarget = newOrder[toIndex + 1]?.order;
+	// Number.MAX_VALUE is an integer-valued double, so BigInt() converts it
+	// exactly (unlike upstream's BigInt(Number.MIN_VALUE), which throws);
+	// it exceeds any real order's base (alphabet 95^maxLen 50 < 1e99 <
+	// 1.8e308), making it a safe "unbounded above" sentinel.
 	const nextBase =
 		orderAfterTarget !== undefined
 			? stringToBase(orderAfterTarget)

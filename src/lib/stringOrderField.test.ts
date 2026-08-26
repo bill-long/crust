@@ -78,6 +78,9 @@ describe("reorderLexicographically", () => {
 		expect(reorderLexicographically(["a", "b"], 1, 1)).toStrictEqual([]);
 		expect(reorderLexicographically(["a", "b"], -1, 0)).toStrictEqual([]);
 		expect(reorderLexicographically(["a", "b"], 0, 5)).toStrictEqual([]);
+		// === length is out of range too (upstream accepted it; we reject).
+		expect(reorderLexicographically(["a", "b"], 0, 2)).toStrictEqual([]);
+		expect(reorderLexicographically(["a", "b"], 2, 0)).toStrictEqual([]);
 	});
 
 	it("works when moving left", () => {
