@@ -426,6 +426,13 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 	};
 
 	const startSas = async (): Promise<void> => {
+		// Switching away from a code we already generated is a supported
+		// transition, not a hack: the rust request holds a Qr verification at
+		// this point, and `RustVerificationRequest.onChange` explicitly swaps
+		// it for a SAS one (`_verifier instanceof RustQrCodeVerifier` ->
+		// `setVerifier(new RustSASVerifier(...))`). Element ships the same
+		// button over an already-shown code.
+		//
 		// `qr-showing` is both the only view that offers this and, per
 		// `bindVerifier`, proof that no method has started yet - so this one
 		// check also guarantees `startSasVerification` will not no-op and

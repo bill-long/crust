@@ -1,5 +1,6 @@
 import {
 	type Component,
+	createEffect,
 	createSignal,
 	Match,
 	onCleanup,
@@ -53,6 +54,18 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 		const active = document.activeElement;
 		if (!active || active === document.body) dialogEl?.focus();
 	};
+
+	// Most view swaps here are driven by the *other* device, not by a local
+	// click: it accepts, it scans, it confirms. Whatever the user had focused
+	// unmounts underneath them and focus falls to the body, which costs them
+	// Escape (the handler lives on the container and only sees bubbled keys)
+	// and Tab (the content behind the dialog is inert). reclaimFocus only
+	// acts when focus was genuinely lost, so a user who moved elsewhere in
+	// the meantime is left alone.
+	createEffect(() => {
+		v.state();
+		reclaimFocus();
+	});
 
 	const verifyWithRecoveryKey = async (): Promise<void> => {
 		const run = props.verifyWithRecoveryKey;
@@ -261,12 +274,14 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							    ShowQrCodeCallbacks.confirm() returns void and drops
 							    the promise its send runs on, so a failed `done`
 							    becomes an unhandled rejection rather than something
-							    the dialog can report. Unlike the emoji route there
-							    is no error to show, and without an exit this spinner
-							    is a dead end. Cancelling here is legitimate - the SDK
-							    deliberately keeps the request open until the other
-							    side's `done` arrives, precisely so the user can still
-							    back out. */}
+							    the dialog can report. Unlike the emoji route there is
+							    no error to show, so without this the spinner is a
+							    dead end.
+							    The exit is not free: our `done` is already sent, so
+							    cancelling here can leave the other device trusting us
+							    while we do not trust it. A stuck spinner with no way
+							    out is the worse of the two, but if this ever needs
+							    revisiting, that asymmetry is the cost. */}
 							<button
 								type="button"
 								onClick={() => v.cancel()}

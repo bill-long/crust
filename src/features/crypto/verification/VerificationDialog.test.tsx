@@ -284,6 +284,25 @@ describe("VerificationDialog QR views (#452)", () => {
 		expect(handle.cancel).toHaveBeenCalledTimes(1);
 	});
 
+	it("keeps focus in the dialog when the other device swaps the view", () => {
+		// The other device scanning is not a local click: whatever the user
+		// had focused unmounts under them, and focus on the body costs them
+		// both Escape and Tab.
+		const handle = showingQr();
+		render(() => (
+			<VerificationDialog verification={handle} onClose={() => {}} />
+		));
+		const button = screen.getByRole("button", {
+			name: "Can't scan? Compare emoji",
+		});
+		button.focus();
+		expect(document.activeElement).toBe(button);
+
+		handle.setState("qr-reciprocate");
+
+		expect(document.activeElement).toBe(screen.getByRole("dialog"));
+	});
+
 	it("cancels rather than closing while a code is on screen", () => {
 		const handle = showingQr();
 		const onClose = vi.fn();
