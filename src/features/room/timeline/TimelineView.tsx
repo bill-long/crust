@@ -248,8 +248,21 @@ const TimelineView: Component<{
 	// tick before the virtualizer renders its rows and the observer reports.
 	// Suppressing that tick means asking whether an unrendered row is off
 	// screen, which has no answer - so this trade is deliberate.
-	const showJumpToUnread = (): boolean =>
-		!loading() && !unreadBoundarySeen() && firstUnreadEventId() !== null;
+	// The frozen boundary can stop being a row while the user is still here:
+	// redacting it, or ignoring its sender, drops it from the store while the
+	// SDK keeps it in the window. The divider then never mounts (so the
+	// affordance never retires) and the jump lands on an id no row carries
+	// (so it scrolls nowhere) - a button that sits there doing nothing on
+	// every click. Memoised, and short-circuited once retired, so the scan
+	// costs nothing in the common case.
+	const unreadBoundaryPresent = createMemo(() => {
+		if (unreadBoundarySeen()) return false;
+		const target = firstUnreadEventId();
+		if (!target) return false;
+		return events.some((ev) => ev.eventId === target);
+	});
+
+	const showJumpToUnread = (): boolean => !loading() && unreadBoundaryPresent();
 
 	const jumpToUnread = (): void => {
 		const target = firstUnreadEventId();

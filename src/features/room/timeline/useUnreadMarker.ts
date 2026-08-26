@@ -153,6 +153,11 @@ export function useUnreadMarker(
 		// window - where the user most needs the boundary.
 		if (!resolved) return null;
 
+		// Freeze even when the answer is "nothing unread". Unlike the
+		// unresolved case above, this is a real answer: the receipt landed on
+		// a loaded row, and everything after it on that row is either ours or
+		// a notice. Later arrivals cannot change it, because the user is here
+		// reading them.
 		placementGeneration = gen;
 		const index = firstUnreadIndex(rows, resolved, myUserId);
 		placedBoundary = index === -1 ? null : rows[index].eventId;

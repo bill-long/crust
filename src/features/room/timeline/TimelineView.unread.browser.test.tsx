@@ -272,6 +272,26 @@ describe("unread divider (#446)", () => {
 		expect(findDivider(container)).toBeTruthy();
 	});
 
+	it("retires the affordance when the boundary row leaves the timeline", async () => {
+		// Redacting the boundary (or ignoring its sender) drops it from the
+		// store while the SDK keeps it in the window: the divider can never
+		// mount, so the button would otherwise sit there doing nothing.
+		const events = [
+			mkEvent("$read", "read message", 1700000000000),
+			...Array.from({ length: 60 }, (_, i) =>
+				mkEvent(`$unread${i}`, `unread message ${i}`, 1700000060000 + i * 1000),
+			),
+		];
+		const { container } = mountRoom(events, "$read");
+		await vi.waitFor(() => expect(findJumpButton(container)).toBeTruthy());
+
+		harness.setRoomState(ROOM_ID, {
+			events: events.filter((e) => e.eventId !== "$unread0"),
+		});
+
+		await vi.waitFor(() => expect(findJumpButton(container)).toBeNull());
+	});
+
 	it("draws no divider in a room we have read to the end", async () => {
 		const { container } = mountRoom(groupedPair(), "$unread");
 		await new Promise((r) => setTimeout(r, 150));
