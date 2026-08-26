@@ -67,11 +67,6 @@ function shouldShowHeader(
 ): boolean {
 	const curr = events[index];
 	if (!curr) return true;
-	// Break the group at the unread divider, for the same reason the day
-	// boundary breaks it: the divider lands between the two halves, and a
-	// headerless continuation row under it reads as an orphan - a red rule
-	// followed by a bare line with no avatar or name.
-	if (curr.eventId === firstUnreadEventId && !curr.stateNotice) return true;
 	// State notices render as a compact one-liner without an avatar or
 	// header — and a regular message immediately after a notice should
 	// always show its own header so the grouping doesn't span the
@@ -82,6 +77,13 @@ function shouldShowHeader(
 	// the state-notice rule: the emote shows no header, and the message
 	// after it always reintroduces its own.
 	if (curr.msgtype === "m.emote") return false;
+	// Break the group at the unread divider, for the same reason the day
+	// boundary breaks it: the divider lands between the two halves, and a
+	// headerless continuation row under it reads as an orphan - a red rule
+	// followed by a bare line with no avatar or name. Below the notice and
+	// emote rules deliberately: those rows identify their own sender, so
+	// forcing a header on them would print the name twice.
+	if (curr.eventId === firstUnreadEventId) return true;
 	if (index === 0) return true;
 	const prev = events[index - 1];
 	if (!prev) return true;
@@ -215,15 +217,13 @@ const TimelineView: Component<{
 		{
 			events: () => events,
 			getWindowEvents,
-			canLoadNewer,
 		},
 	);
-	// Latched the first time the divider renders. The virtualizer only mounts
-	// rows at or near the viewport, so rendering at all means the user has
-	// reached the boundary - at which point the affordance has done its job
-	// and retires for this visit. Without the latch it would keep resurfacing
-	// to point at messages read minutes ago, because the snapshot deliberately
-	// pins the boundary for as long as the room is open.
+	// Latched once the divider has actually been in the viewport, at which
+	// point the affordance has done its job and retires for this visit.
+	// Without the latch it would keep resurfacing to point at messages read
+	// minutes ago, because the snapshot deliberately pins the boundary for as
+	// long as the room is open.
 	const [unreadBoundarySeen, setUnreadBoundarySeen] = createSignal(false);
 	const markUnreadBoundarySeen = (): void => {
 		setUnreadBoundarySeen(true);
@@ -234,12 +234,31 @@ const TimelineView: Component<{
 	// overscan above the viewport - the dominant case this exists for - it is
 	// not in the DOM to ask. The cost is that in a room short enough for the
 	// divider to be on screen from the start, the button can be up for the
-	// tick before the virtualizer renders its rows. Suppressing that tick
-	// means asking whether the divider is off screen, which is the question
-	// that has no answer for an unrendered row - so this trade is deliberate,
-	// not an oversight.
+	// tick before the virtualizer renders its rows and the observer reports.
+	// Suppressing that tick means asking whether an unrendered row is off
+	// screen, which has no answer - so this trade is deliberate.
 	const showJumpToUnread = (): boolean =>
 		!loading() && !unreadBoundarySeen() && jumpTargetEventId() !== null;
+
+	const jumpToUnread = (): void => {
+		const target = jumpTargetEventId();
+		if (!target) return;
+		// Hand focus to the scroller first. This button unmounts the moment
+		// the divider is seen, and focus on a removed element falls to
+		// <body>, restarting a keyboard user's next Tab from the top of the
+		// document. It also lets the flash effect adopt the target row, which
+		// it refuses to do while focus sits outside the scroller.
+		scrollRef?.focus({ preventScroll: true });
+		void jumpToEvent(target).then(() => {
+			// The receipt can be an event this timeline never draws - a
+			// reaction sent from another client. Loading its context is what
+			// finally lets the divider be placed, so land on that row rather
+			// than on an id no row carries. Already-loaded targets take
+			// jumpToEvent's fast path, so this is a scroll, not a reload.
+			const settled = firstUnreadEventId();
+			if (settled && settled !== target) void jumpToEvent(settled);
+		});
+	};
 
 	// Reactive "now" that updates at local midnight so separator labels
 	// like "Today" / "Yesterday" stay accurate for sessions left open
@@ -1275,12 +1294,7 @@ const TimelineView: Component<{
 						{/* Jump to where the user left off; see showJumpToUnread. */}
 						<Show when={showJumpToUnread()}>
 							<div class="pointer-events-auto">
-								<JumpToUnreadButton
-									onClick={() => {
-										const id = jumpTargetEventId();
-										if (id) void jumpToEvent(id);
-									}}
-								/>
+								<JumpToUnreadButton onClick={jumpToUnread} />
 							</div>
 						</Show>
 

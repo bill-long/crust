@@ -8,8 +8,13 @@ import { useUnreadMarker } from "./useUnreadMarker";
 const ME = "@me:example.com";
 const THEM = "@them:example.com";
 
-function row(eventId: string, senderId: string = THEM): TimelineEvent {
-	return { eventId, senderId, stateNotice: null } as TimelineEvent;
+let nextTs = 1000;
+function row(
+	eventId: string,
+	senderId: string = THEM,
+	timestamp = nextTs++,
+): TimelineEvent {
+	return { eventId, senderId, timestamp, stateNotice: null } as TimelineEvent;
 }
 
 /** Raw-window stand-in: only getId() is read by the resolver. */
@@ -19,13 +24,13 @@ function raw(eventId: string): MatrixEvent {
 
 interface Scope {
 	readUpTo: string | null;
+	/** Send time of that receipt: when we last read. */
+	readUpToTs?: number;
 }
 
 interface MountOptions {
 	/** Raw SDK window; defaults to mirroring the rendered rows. */
 	windowEvents?: MatrixEvent[];
-	/** Newer events exist beyond the loaded slice. */
-	canLoadNewer?: boolean;
 	threads?: Record<string, Scope>;
 	/** Withhold the room from the store until `events` next changes. */
 	roomMissingAtFirst?: boolean;
@@ -36,11 +41,26 @@ function mount(
 	events: readonly TimelineEvent[],
 	options: MountOptions = {},
 ) {
+	// `data` without a `ts` is how a receipt that carries no send time
+	// reaches us, and is distinct from one whose send time is 0.
+	const wrap = (s: Scope) =>
+		s.readUpTo
+			? {
+					eventId: s.readUpTo,
+					data: s.readUpToTs === undefined ? {} : { ts: s.readUpToTs },
+				}
+			: null;
 	const roomStub = {
 		getEventReadUpTo: vi.fn(() => scope.readUpTo),
+		getReadReceiptForUserId: vi.fn(() => wrap(scope)),
 		getThread: vi.fn((id: string) => {
 			const t = options.threads?.[id];
-			return t ? { getEventReadUpTo: () => t.readUpTo } : null;
+			return t
+				? {
+						getEventReadUpTo: () => t.readUpTo,
+						getReadReceiptForUserId: () => wrap(t),
+					}
+				: null;
 		}),
 	};
 	let roomAvailable = !options.roomMissingAtFirst;
@@ -59,9 +79,6 @@ function mount(
 	const [rows, setRowStore] = createStore<TimelineEvent[]>([...events]);
 	const setRows = (next: readonly TimelineEvent[]): void =>
 		setRowStore(reconcile([...next]));
-	const [canLoadNewer, setCanLoadNewer] = createSignal(
-		options.canLoadNewer ?? false,
-	);
 	const [windowEvents, setWindowEvents] = createSignal<MatrixEvent[]>(
 		options.windowEvents ?? events.map((e) => raw(e.eventId)),
 	);
@@ -70,7 +87,6 @@ function mount(
 		useUnreadMarker(client, roomId, thread, {
 			events: () => rows,
 			getWindowEvents: () => windowEvents(),
-			canLoadNewer,
 		}),
 	);
 	return {
@@ -78,7 +94,6 @@ function mount(
 		setRoomId,
 		setThread,
 		setRows,
-		setCanLoadNewer,
 		setWindowEvents,
 		makeRoomAvailable: () => {
 			roomAvailable = true;
@@ -191,19 +206,35 @@ describe("useUnreadMarker jump target", () => {
 	it("falls back to the receipt when the boundary is off the window", () => {
 		// More than a window's worth arrived since the last read: the divider
 		// cannot be drawn, which is exactly when the user most needs a way
-		// back. jumpToEvent loads that context.
-		const { marker } = mount({ readUpTo: "$older" }, [row("$b"), row("$c")]);
+		// back. jumpToEvent loads that context. The receipt predates every
+		// loaded row, which is what marks this as a real backlog.
+		const { marker } = mount({ readUpTo: "$older", readUpToTs: 500 }, [
+			row("$b", THEM, 1000),
+			row("$c", THEM, 2000),
+		]);
 		expect(marker.firstUnreadEventId()).toBeNull();
 		expect(marker.jumpTargetEventId()).toBe("$older");
 	});
 
-	it("offers nothing while the user is reading back through history", () => {
-		// Paginated away from the live end: an unfound receipt is just as
-		// likely to be newer than the window as older, so pointing anywhere
-		// would be a guess.
-		const { marker } = mount({ readUpTo: "$older" }, [row("$b"), row("$c")], {
-			canLoadNewer: true,
-		});
+	it("offers nothing after deep scrollback in a room we have read", () => {
+		// The window has been paginated back so far that its forward end was
+		// trimmed, dropping the receipt out of it. The receipt is *newer*
+		// than everything loaded, so the boundary is behind the user, not
+		// ahead - pointing at it would send them back to a message they read.
+		const { marker } = mount({ readUpTo: "$newest", readUpToTs: 9000 }, [
+			row("$old1", THEM, 1000),
+			row("$old2", THEM, 2000),
+		]);
+		expect(marker.jumpTargetEventId()).toBeNull();
+	});
+
+	it("offers nothing when the receipt carries no send time", () => {
+		// Without a timestamp there is no way to tell a backlog from a
+		// trimmed window; withhold rather than guess.
+		const { marker } = mount({ readUpTo: "$older" }, [
+			row("$b", THEM, 1000),
+			row("$c", THEM, 2000),
+		]);
 		expect(marker.jumpTargetEventId()).toBeNull();
 	});
 

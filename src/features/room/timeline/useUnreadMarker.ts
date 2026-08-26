@@ -24,12 +24,13 @@ interface UnreadMarkerDeps {
 	events: Accessor<readonly TimelineEvent[]>;
 	/** Raw SDK window, for resolving a receipt that points at a row we never draw. */
 	getWindowEvents: () => MatrixEvent[];
-	/**
-	 * True while newer events exist beyond the loaded slice. When false the
-	 * window reaches the live end, which is what lets an unfound receipt be
-	 * read as "older than everything loaded" rather than "newer".
-	 */
-	canLoadNewer: Accessor<boolean>;
+}
+
+/** Our own receipt, snapshotted: which event, and when we sent it. */
+interface ReceiptSnapshot {
+	eventId: string;
+	/** Send time of the receipt, or null when the server did not give one. */
+	ts: number | null;
 }
 
 /**
@@ -77,7 +78,7 @@ export function useUnreadMarker(
 	// ever re-mount to fix it.
 	let capturedRoomId: string | null = null;
 	let capturedThreadId: string | undefined;
-	const readUpToId = createMemo<string | null>((prev) => {
+	const receipt = createMemo<ReceiptSnapshot | null>((prev) => {
 		const currentRoomId = roomId();
 		const currentThreadId = thread()?.threadId;
 		if (
@@ -100,8 +101,19 @@ export function useUnreadMarker(
 
 		capturedRoomId = currentRoomId;
 		capturedThreadId = currentThreadId;
-		return scope.getEventReadUpTo(myUserId) ?? null;
+
+		// The wrapped receipt carries the send time, which is what tells a
+		// genuine backlog apart from a trimmed window (see jumpTargetEventId).
+		// `getEventReadUpTo` is the fallback because it also considers private
+		// receipts, so it can know an id the wrapped read receipt does not.
+		const wrapped = scope.getReadReceiptForUserId(myUserId);
+		const eventId = wrapped?.eventId ?? scope.getEventReadUpTo(myUserId);
+		if (!eventId) return null;
+		const ts = wrapped?.eventId === eventId ? (wrapped.data?.ts ?? null) : null;
+		return { eventId, ts };
 	});
+
+	const readUpToId = createMemo(() => receipt()?.eventId ?? null);
 
 	/**
 	 * The receipt resolved onto a row we actually draw. Reading a message
@@ -131,16 +143,23 @@ export function useUnreadMarker(
 		const inWindow = firstUnreadEventId();
 		if (inWindow) return inWindow;
 
-		// Nothing to draw, but there may still be somewhere to go. The
-		// receipt is only *older* than the window - rather than newer, or
-		// already the newest row - when the window reaches the live end and
-		// still does not contain it. Requiring that keeps the affordance off
-		// while the user is simply reading back through history.
-		const receiptId = readUpToId();
-		if (!receiptId) return null;
-		if (deps.canLoadNewer()) return null;
+		// Nothing to draw, but there may still be somewhere to go. Offering
+		// it turns on telling a genuine backlog - the boundary is older than
+		// everything loaded - apart from a window that simply does not reach
+		// it, which is what deep back-pagination produces in a room that is
+		// fully read. The receipt's send time answers that: we sent it when
+		// we last read, so a receipt newer than the oldest loaded row means
+		// the window is behind us, not ahead.
+		const snapshot = receipt();
+		if (!snapshot) return null;
 		if (resolvedReadUpToId()) return null;
-		return receiptId;
+		const rows = deps.events();
+		if (rows.length === 0) return null;
+		// No timestamp means no way to tell the two apart; withhold rather
+		// than point the user at a room they have already read.
+		if (snapshot.ts === null) return null;
+		if (snapshot.ts >= rows[0].timestamp) return null;
+		return snapshot.eventId;
 	});
 
 	return { firstUnreadEventId, jumpTargetEventId };

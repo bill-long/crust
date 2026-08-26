@@ -94,9 +94,13 @@ function groupedPair(): TimelineEvent[] {
 	];
 }
 
-function mountRoom(events: TimelineEvent[], readUpTo: string | null) {
+function mountRoom(
+	events: TimelineEvent[],
+	readUpTo: string | null,
+	readUpToTs = 0,
+) {
 	const room = createMockRoom(ROOM_ID, [], [{ userId: ALICE, name: "Alice" }]);
-	if (readUpTo) room.__setReadUpTo(ME, readUpTo);
+	if (readUpTo) room.__setReadUpTo(ME, readUpTo, readUpToTs);
 	const rooms = new Map([[ROOM_ID, room]]);
 	const client = createMockClient(rooms);
 
@@ -208,12 +212,35 @@ describe("unread divider (#446)", () => {
 				mkEvent(`$unread${i}`, `unread message ${i}`, 1700000060000 + i * 1000),
 			),
 		];
-		const { container } = mountRoom(events, "$read");
+		// Receipt sent before every loaded row: a real backlog, not a window
+		// whose forward end was trimmed by deep scrollback.
+		const { container } = mountRoom(events, "$read", 1);
 
 		await vi.waitFor(() => expect(findJumpButton(container)).toBeTruthy());
 		// And the divider itself is genuinely not rendered - otherwise this
 		// would be testing the on-screen case by accident.
 		expect(findDivider(container)).toBeNull();
+	});
+
+	it("leaves an emote's self-identifying line alone at the boundary", async () => {
+		// The emote rule suppresses the header because "* Alice waves"
+		// already names the sender; the unread break must not override it
+		// and print the name twice.
+		const emote = { ...mkEvent("$unread", "waves", 1700000060000) };
+		emote.msgtype = "m.emote";
+		const { container } = mountRoom(
+			[mkEvent("$read", "read message", 1700000000000), emote],
+			"$read",
+		);
+		await vi.waitFor(() => expect(findDivider(container)).toBeTruthy());
+
+		const unreadRow = container.querySelector<HTMLElement>(
+			'[data-event-id="$unread"]',
+		);
+		const nameButtons = [
+			...(unreadRow?.querySelectorAll<HTMLElement>("button") ?? []),
+		].filter((b) => b.textContent?.trim() === "Alice");
+		expect(nameButtons).toHaveLength(0);
 	});
 
 	it("draws no divider in a room we have read to the end", async () => {
