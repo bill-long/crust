@@ -113,6 +113,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkLeft: vi.fn(),
 				optimisticallySetMarkedUnread: vi.fn(),
 				optimisticallySetRoomTag: vi.fn(),
+				optimisticallySetSpaceOrder: vi.fn(),
 				forgetRoomLocally: vi.fn(),
 			}}
 		>

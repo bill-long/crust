@@ -180,6 +180,7 @@ function renderController(opts?: { encrypted?: boolean }): {
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
 				optimisticallySetRoomTag: () => {},
+				optimisticallySetSpaceOrder: () => {},
 				forgetRoomLocally: () => {},
 			}}
 		>

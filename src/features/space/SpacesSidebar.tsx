@@ -11,6 +11,7 @@ import {
 } from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
+import { moveRootSpace } from "../../client/spaceOrder";
 import type { RoomSummary } from "../../client/summaries";
 import {
 	flattenSpaceTree,
@@ -25,6 +26,7 @@ import {
 	menuContentClass,
 	menuItemClass,
 	menuItemDangerClass,
+	menuItemDisabledClass,
 } from "../../components/menuStyles";
 import { UnreadBadge } from "../../components/UnreadBadge";
 import { avatarInitial } from "../../lib/avatar";
@@ -76,6 +78,15 @@ interface SpaceTileProps {
 	onOpenSpaceSettings?: (spaceId: string) => void;
 	onLeaveSpace?: (spaceId: string) => void;
 	onInviteSpace?: (spaceId: string) => void;
+	/**
+	 * This tile's position among the rail's ROOT tiles, or null for a
+	 * nested subspace tile. Root ordering is the user's manual m.space_order
+	 * arrangement; subspace order comes from the parent's m.space.child
+	 * state, so only roots offer Move up/down.
+	 */
+	rootPosition?: Accessor<{ index: number; count: number } | null>;
+	/** Move this root space one slot up (-1) or down (+1) in the rail. */
+	onMoveSpace?: (spaceId: string, delta: -1 | 1) => void;
 	/** Fail-closed avatar state, shared with the rest of the rail. */
 	brokenAvatars: FailedImageUrls;
 }
@@ -110,8 +121,19 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 		const room = client.getRoom(props.space.roomId);
 		return !!room?.canInvite(userId);
 	};
+	// Only meaningful with 2+ roots: a lone root would get a menu of two
+	// permanently-disabled items (an empty-feeling popover when no other
+	// handler is wired).
+	const canMove = (): boolean => {
+		if (!props.onMoveSpace) return false;
+		const pos = props.rootPosition?.();
+		return pos != null && pos.count > 1;
+	};
 	const hasMenu = (): boolean =>
-		!!props.onOpenSpaceSettings || !!props.onLeaveSpace || canInviteToSpace();
+		!!props.onOpenSpaceSettings ||
+		!!props.onLeaveSpace ||
+		canInviteToSpace() ||
+		canMove();
 
 	const openSpace = (): void => {
 		navigate(spaceLandingPath(summaries, props.space.roomId));
@@ -217,6 +239,28 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 									Invite people
 								</ContextMenu.Item>
 							</Show>
+							{/* Keyboard-accessible alternative to drag-reorder: only
+							    for ROOT tiles - subspace order is the parent's
+							    m.space.child state, not the user's account data. */}
+							<Show when={canMove()}>
+								<ContextMenu.Item
+									class={`${menuItemClass} ${menuItemDisabledClass}`}
+									disabled={props.rootPosition?.()?.index === 0}
+									onSelect={() => props.onMoveSpace?.(props.space.roomId, -1)}
+								>
+									Move up
+								</ContextMenu.Item>
+								<ContextMenu.Item
+									class={`${menuItemClass} ${menuItemDisabledClass}`}
+									disabled={(() => {
+										const pos = props.rootPosition?.();
+										return !pos || pos.index >= pos.count - 1;
+									})()}
+									onSelect={() => props.onMoveSpace?.(props.space.roomId, 1)}
+								>
+									Move down
+								</ContextMenu.Item>
+							</Show>
 							<Show when={props.onLeaveSpace}>
 								<ContextMenu.Item
 									class={menuItemDangerClass}
@@ -253,7 +297,7 @@ interface SpacesSidebarProps {
 }
 
 const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
-	const { client, summaries } = useClient();
+	const { client, summaries, optimisticallySetSpaceOrder } = useClient();
 	const params = useDecodedParams<{ spaceId?: string }>();
 	const navigate = useNavigate();
 	const [createOpen, setCreateOpen] = createSignal(false);
@@ -269,6 +313,72 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 	// list, membership, name) re-runs the memo, and re-minted node
 	// wrappers would remount every tile (and any open context menu).
 	const spaceTree = createMemo(() => flattenSpaceTree(getSpaceTree(summaries)));
+
+	// ----- Manual root ordering (m.space_order, part of #449) -----
+	// The rail's root tiles in display order; move targets index into this.
+	const rootSpaces = createMemo(() =>
+		spaceTree().spaces.filter(
+			(s) => (spaceTree().depths.get(s.roomId) ?? 0) === 0,
+		),
+	);
+	const isRootId = (roomId: string): boolean =>
+		(spaceTree().depths.get(roomId) ?? 0) === 0;
+
+	const performMove = (fromIndex: number, toIndex: number): void => {
+		moveRootSpace(
+			{ client, summaries, optimisticallySetSpaceOrder },
+			rootSpaces(),
+			fromIndex,
+			toIndex,
+		);
+	};
+
+	/** Menu path: move a root space one slot up or down. */
+	const moveRoot = (spaceId: string, delta: -1 | 1): void => {
+		const roots = rootSpaces();
+		const from = roots.findIndex((r) => r.roomId === spaceId);
+		const to = from + delta;
+		if (from === -1 || to < 0 || to >= roots.length) return;
+		performMove(from, to);
+	};
+
+	// Drag-reorder state: which root tile is being dragged, and where the
+	// drop would land (an insertion edge on another root tile). Cleared on
+	// drop and on dragend (which also covers drags cancelled off-rail).
+	const [draggedSpaceId, setDraggedSpaceId] = createSignal<string | null>(null);
+	const [dropTarget, setDropTarget] = createSignal<{
+		roomId: string;
+		edge: "before" | "after";
+	} | null>(null);
+
+	const onRowDragOver = (space: RoomSummary, e: DragEvent): void => {
+		const dragged = draggedSpaceId();
+		if (!dragged || dragged === space.roomId || !isRootId(space.roomId)) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const edge = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+		setDropTarget({ roomId: space.roomId, edge });
+	};
+
+	const onRowDrop = (space: RoomSummary, e: DragEvent): void => {
+		e.preventDefault();
+		const dragged = draggedSpaceId();
+		const target = dropTarget();
+		setDraggedSpaceId(null);
+		setDropTarget(null);
+		if (!dragged || !target || target.roomId !== space.roomId) return;
+		const roots = rootSpaces();
+		const from = roots.findIndex((r) => r.roomId === dragged);
+		const targetIdx = roots.findIndex((r) => r.roomId === space.roomId);
+		if (from === -1 || targetIdx === -1) return;
+		// Convert the insertion edge into a post-removal index (moveElement
+		// removes the dragged item first, shifting later positions left).
+		let to = target.edge === "before" ? targetIdx : targetIdx + 1;
+		if (from < to) to -= 1;
+		if (to !== from) performMove(from, to);
+	};
+
 	const invitedSpaces = createMemo(() => getInvitedSpaces(summaries));
 	// Spaces with a pending join request (knock). Surfaced as tiles because
 	// no room-level selector includes spaces - without these, a knocked
@@ -348,14 +458,54 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 				    restructure re-indents without remounting the tile. */}
 				<For each={spaceTree().spaces}>
 					{(space) => (
-						<SpaceTile
-							space={space}
-							brokenAvatars={brokenAvatars}
-							depth={() => spaceTree().depths.get(space.roomId) ?? 0}
-							onOpenSpaceSettings={props.onOpenSpaceSettings}
-							onLeaveSpace={props.onLeaveSpace}
-							onInviteSpace={props.onInviteSpace}
-						/>
+						// Root tiles are draggable to reorder (with Move up/down in
+						// the context menu as the keyboard path). The wrapper owns
+						// the drag plumbing so SpaceTile stays presentation-only;
+						// the insertion line renders into the rail's row gap.
+						<div
+							class="relative"
+							draggable={isRootId(space.roomId)}
+							on:dragstart={(e: DragEvent) => {
+								if (!isRootId(space.roomId)) return;
+								setDraggedSpaceId(space.roomId);
+								if (e.dataTransfer) {
+									e.dataTransfer.effectAllowed = "move";
+									e.dataTransfer.setData("text/plain", space.roomId);
+								}
+							}}
+							on:dragover={(e: DragEvent) => onRowDragOver(space, e)}
+							on:drop={(e: DragEvent) => onRowDrop(space, e)}
+							on:dragend={() => {
+								setDraggedSpaceId(null);
+								setDropTarget(null);
+							}}
+						>
+							<Show when={dropTarget()?.roomId === space.roomId}>
+								<div
+									aria-hidden="true"
+									class={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-accent ${
+										dropTarget()?.edge === "before" ? "-top-0.5" : "-bottom-0.5"
+									}`}
+								/>
+							</Show>
+							<SpaceTile
+								space={space}
+								brokenAvatars={brokenAvatars}
+								depth={() => spaceTree().depths.get(space.roomId) ?? 0}
+								rootPosition={() => {
+									const idx = rootSpaces().findIndex(
+										(r) => r.roomId === space.roomId,
+									);
+									return idx === -1
+										? null
+										: { index: idx, count: rootSpaces().length };
+								}}
+								onMoveSpace={moveRoot}
+								onOpenSpaceSettings={props.onOpenSpaceSettings}
+								onLeaveSpace={props.onLeaveSpace}
+								onInviteSpace={props.onInviteSpace}
+							/>
+						</div>
 					)}
 				</For>
 

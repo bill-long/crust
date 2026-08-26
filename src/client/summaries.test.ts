@@ -1171,6 +1171,44 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 		store.cleanup();
 	});
 
+	it("seeds spaceOrder from room account data on init (#449)", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		room.__setRoomAccountData("im.vector.web.space_order", { order: "aa" });
+		const { store } = makeStore(room);
+		expect(store.summaries["!r:x"].spaceOrder).toBe("aa");
+		store.cleanup();
+	});
+
+	it("updates spaceOrder when its account-data event arrives (#449)", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const { client, store } = makeStore(room);
+		expect(store.summaries["!r:x"].spaceOrder).toBeNull();
+
+		room.__setRoomAccountData("im.vector.web.space_order", { order: "m" });
+		client.__emit(
+			"Room.accountData",
+			accountDataEvent("im.vector.web.space_order"),
+			room,
+		);
+		expect(store.summaries["!r:x"].spaceOrder).toBe("m");
+
+		store.cleanup();
+	});
+
+	it("optimisticallySetSpaceOrder sets an existing entry and no-ops for a missing one (#449)", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const { store } = makeStore(room);
+
+		store.optimisticallySetSpaceOrder("!r:x", "q");
+		expect(store.summaries["!r:x"].spaceOrder).toBe("q");
+		store.optimisticallySetSpaceOrder("!r:x", null);
+		expect(store.summaries["!r:x"].spaceOrder).toBeNull();
+		store.optimisticallySetSpaceOrder("!missing:x", "q");
+		expect(store.summaries["!missing:x"]).toBeUndefined();
+
+		store.cleanup();
+	});
+
 	it("optimisticallySetMarkedUnread flips an existing entry and no-ops for a missing one", () => {
 		const room = stubRoomForStore(createMockRoom("!r:x"));
 		const { store } = makeStore(room);

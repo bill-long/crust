@@ -16,6 +16,7 @@ function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		spaceOrder: null,
 		isMuted: false,
 		membership: "join",
 		isEncrypted: false,

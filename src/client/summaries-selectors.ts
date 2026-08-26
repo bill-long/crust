@@ -1,3 +1,4 @@
+import { compareSpaceOrder } from "./spaceOrder";
 import type { RoomSummary, SummariesStore } from "./summaries";
 
 /** Aggregated unread state for a set of rooms (a space subtree, or Home):
@@ -232,7 +233,9 @@ export interface SpaceTreeNode {
 /**
  * Build the spaces-sidebar tree from the summary store (#443).
  *
- * Roots are joined spaces no other joined space claims as a child; each
+ * Roots are joined spaces no other joined space claims as a child,
+ * ordered by the user's manual `m.space_order` arrangement
+ * (`compareSpaceOrder`: ordered first, then name); each
  * root carries its joined subspaces nested (name-sorted) up to
  * {@link MAX_SIDEBAR_SPACE_DEPTH}. Space graphs are user-controlled and
  * can contain cycles (A contains B contains A), diamonds (two parents
@@ -281,11 +284,11 @@ export function getSpaceTree(summaries: SummariesStore): SpaceTreeNode[] {
 	}
 	// Cycle members and depth-capped spaces never got placed; append them
 	// as roots rather than dropping them from the rail, then re-sort so
-	// natural and fallback roots form one name-sorted run.
+	// natural and fallback roots form one order-then-name-sorted run.
 	for (const space of spaces) {
 		if (!visited.has(space.roomId)) roots.push(build(space, 0));
 	}
-	roots.sort((a, b) => a.space.name.localeCompare(b.space.name));
+	roots.sort((a, b) => compareSpaceOrder(a.space, b.space));
 	return roots;
 }
 
