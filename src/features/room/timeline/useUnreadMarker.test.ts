@@ -1,5 +1,6 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { describe, expect, it, vi } from "vitest";
 import type { TimelineEvent } from "./timelineTypes";
 import { useUnreadMarker } from "./useUnreadMarker";
@@ -52,7 +53,12 @@ function mount(
 	const [thread, setThread] = createSignal<{ threadId: string } | undefined>(
 		undefined,
 	);
-	const [rows, setRows] = createSignal<readonly TimelineEvent[]>(events);
+	// A store, not a signal: production passes `useTimeline`'s store array, and
+	// a signal would hide the fact that reading the accessor alone tracks
+	// nothing on a store proxy.
+	const [rows, setRowStore] = createStore<TimelineEvent[]>([...events]);
+	const setRows = (next: readonly TimelineEvent[]): void =>
+		setRowStore(reconcile([...next]));
 	const [canLoadNewer, setCanLoadNewer] = createSignal(
 		options.canLoadNewer ?? false,
 	);
@@ -62,7 +68,7 @@ function mount(
 
 	const marker = createRoot(() =>
 		useUnreadMarker(client, roomId, thread, {
-			events: rows,
+			events: () => rows,
 			getWindowEvents: () => windowEvents(),
 			canLoadNewer,
 		}),
@@ -151,19 +157,21 @@ describe("useUnreadMarker divider placement", () => {
 		expect(marker.firstUnreadEventId()).toBe("$c");
 	});
 
-	it("recovers when the room is not in the store yet", () => {
-		// A thread's Thread object in particular is created lazily, and the
-		// room subtree is keyed - nothing re-mounts to try again, so a miss
-		// at first evaluation would disable the divider for the whole visit.
-		const { marker, setRows, makeRoomAvailable } = mount(
+	it("recovers when the scope is not in the store yet", () => {
+		// The real shape of a cold open: no rows and no room yet. A thread's
+		// Thread object in particular is created lazily, and the room subtree
+		// is keyed - nothing re-mounts to try again, so a miss at the first
+		// evaluation would disable the divider for the whole visit.
+		const { marker, setRows, setWindowEvents, makeRoomAvailable } = mount(
 			{ readUpTo: "$a" },
-			[row("$a"), row("$b")],
+			[],
 			{ roomMissingAtFirst: true },
 		);
 		expect(marker.firstUnreadEventId()).toBeNull();
 
 		makeRoomAvailable();
 		setRows([row("$a"), row("$b")]);
+		setWindowEvents([raw("$a"), raw("$b")]);
 
 		expect(marker.firstUnreadEventId()).toBe("$b");
 	});

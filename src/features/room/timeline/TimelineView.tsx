@@ -218,34 +218,28 @@ const TimelineView: Component<{
 			canLoadNewer,
 		},
 	);
-	// Whether the divider is on screen, as reported by the divider itself.
-	// Undefined means "not known yet" and is distinct from false: the
-	// observer's first callback is asynchronous, so starting at false would
-	// flash the jump button over a divider in plain view for a frame. It also
-	// stays undefined where there is no IntersectionObserver, which withholds
-	// the button rather than pointing at something already visible.
-	const [unreadDividerVisible, setUnreadDividerVisible] = createSignal<
-		boolean | undefined
-	>(undefined);
-	// Latched once the user has actually laid eyes on the divider. After that
-	// the affordance retires for this visit - the snapshot deliberately pins
-	// the boundary for as long as the room is open, and without this the
-	// button would keep resurfacing to point at messages read minutes ago
-	// every time the divider scrolled out of view.
+	// Latched the first time the divider renders. The virtualizer only mounts
+	// rows at or near the viewport, so rendering at all means the user has
+	// reached the boundary - at which point the affordance has done its job
+	// and retires for this visit. Without the latch it would keep resurfacing
+	// to point at messages read minutes ago, because the snapshot deliberately
+	// pins the boundary for as long as the room is open.
 	const [unreadBoundarySeen, setUnreadBoundarySeen] = createSignal(false);
-	const onUnreadDividerVisibility = (visible: boolean): void => {
-		setUnreadDividerVisible(visible);
-		if (visible) setUnreadBoundarySeen(true);
+	const markUnreadBoundarySeen = (): void => {
+		setUnreadBoundarySeen(true);
 	};
-	// Offer the jump when there is somewhere to go and the boundary is not
-	// already in front of the user. No divider row at all (the boundary is
-	// outside the loaded window) counts as off screen.
-	const showJumpToUnread = (): boolean => {
-		if (loading() || unreadBoundarySeen()) return false;
-		if (!jumpTargetEventId()) return false;
-		if (!firstUnreadEventId()) return true;
-		return unreadDividerVisible() === false;
-	};
+	// Offer the jump while there is somewhere to go and the user has not got
+	// there yet. Deliberately not keyed on the divider being *rendered*: the
+	// row it lives on is virtualized, so for any boundary further than the
+	// overscan above the viewport - the dominant case this exists for - it is
+	// not in the DOM to ask. The cost is that in a room short enough for the
+	// divider to be on screen from the start, the button can be up for the
+	// tick before the virtualizer renders its rows. Suppressing that tick
+	// means asking whether the divider is off screen, which is the question
+	// that has no answer for an unrendered row - so this trade is deliberate,
+	// not an oversight.
+	const showJumpToUnread = (): boolean =>
+		!loading() && !unreadBoundarySeen() && jumpTargetEventId() !== null;
 
 	// Reactive "now" that updates at local midnight so separator labels
 	// like "Today" / "Yesterday" stay accurate for sessions left open
@@ -1111,9 +1105,7 @@ const TimelineView: Component<{
 											/>
 										</Show>
 										<Show when={event.eventId === firstUnreadEventId()}>
-											<UnreadDivider
-												onVisibilityChange={onUnreadDividerVisibility}
-											/>
+											<UnreadDivider onSeen={markUnreadBoundarySeen} />
 										</Show>
 										<Switch>
 											<Match when={mode() === "summary"}>
@@ -1275,47 +1267,57 @@ const TimelineView: Component<{
 						<div class="h-2" aria-hidden="true" />
 					</div>
 
-					{/* Jump to where the user left off; see showJumpToUnread. */}
-					<Show when={showJumpToUnread()}>
-						<JumpToUnreadButton
-							onClick={() => {
-								const id = jumpTargetEventId();
-								if (id) void jumpToEvent(id);
-							}}
-						/>
-					</Show>
+					{/* Floating controls, stacked bottom-right. Owning the
+					     anchoring here rather than in each button keeps them
+					     from overlapping or leaving a gap when only one of
+					     them applies. */}
+					<div class="pointer-events-none absolute right-4 bottom-4 z-10 flex flex-col items-end gap-2">
+						{/* Jump to where the user left off; see showJumpToUnread. */}
+						<Show when={showJumpToUnread()}>
+							<div class="pointer-events-auto">
+								<JumpToUnreadButton
+									onClick={() => {
+										const id = jumpTargetEventId();
+										if (id) void jumpToEvent(id);
+									}}
+								/>
+							</div>
+						</Show>
 
-					{/* Scroll-to-bottom / Jump to latest button.
-					     Show when scrolled up OR when behind live (even at
-					     bottom of current slice, so jump-to-live is reachable). */}
-					<Show when={!atBottom() || canLoadNewer()}>
-						<ScrollToBottomButton
-							behindLive={canLoadNewer()}
-							onClick={() => {
-								// User-initiated jump back to the live end re-arms
-								// `wantsBottom` so the settle loop + new-message
-								// effect resume pinning when fresh events arrive.
-								setWantsBottom(true);
-								if (canLoadNewer()) {
-									// Ensure atBottom is true so that when jumpToLive
-									// clears canLoadNewer, the followingLive effect
-									// sees [true, false] and confirms followingLive
-									// instead of seeing [false, false] and reverting it.
-									setAtBottom(true);
-									jumpToLive();
-								} else {
-									const el = scrollRef;
-									if (el) {
-										markProgrammaticScroll();
-										el.scrollTo({
-											top: el.scrollHeight,
-											behavior: "smooth",
-										});
-									}
-								}
-							}}
-						/>
-					</Show>
+						{/* Scroll-to-bottom / Jump to latest button.
+						     Show when scrolled up OR when behind live (even at
+						     bottom of current slice, so jump-to-live is reachable). */}
+						<Show when={!atBottom() || canLoadNewer()}>
+							<div class="pointer-events-auto">
+								<ScrollToBottomButton
+									behindLive={canLoadNewer()}
+									onClick={() => {
+										// User-initiated jump back to the live end re-arms
+										// `wantsBottom` so the settle loop + new-message
+										// effect resume pinning when fresh events arrive.
+										setWantsBottom(true);
+										if (canLoadNewer()) {
+											// Ensure atBottom is true so that when jumpToLive
+											// clears canLoadNewer, the followingLive effect
+											// sees [true, false] and confirms followingLive
+											// instead of seeing [false, false] and reverting it.
+											setAtBottom(true);
+											jumpToLive();
+										} else {
+											const el = scrollRef;
+											if (el) {
+												markProgrammaticScroll();
+												el.scrollTo({
+													top: el.scrollHeight,
+													behavior: "smooth",
+												});
+											}
+										}
+									}}
+								/>
+							</div>
+						</Show>
+					</div>
 				</div>
 			</Show>
 

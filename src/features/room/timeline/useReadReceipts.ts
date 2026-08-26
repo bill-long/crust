@@ -8,7 +8,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
-import { resolveReceiptToDisplayable } from "./receiptResolution";
+import { createReceiptResolver } from "./receiptResolution";
 import type { TimelineEvent } from "./timelineTypes";
 
 interface ReadReceiptEntry {
@@ -74,8 +74,11 @@ export function useReadReceipts(
 			displayableIds.add(ev.eventId);
 		}
 
-		const timelineEvents = deps.getWindowEvents();
-		const isDisplayable = (id: string): boolean => displayableIds.has(id);
+		// One resolver for the whole member sweep: it builds its index map
+		// once instead of re-scanning the window per member.
+		const resolveReceipt = createReceiptResolver(deps.getWindowEvents(), (id) =>
+			displayableIds.has(id),
+		);
 
 		const members = room.getMembers();
 		for (const member of members) {
@@ -84,14 +87,9 @@ export function useReadReceipts(
 			if (!receiptId) continue;
 
 			// A receipt can point at an event we never render (an edit, a
-			// reaction); resolveReceiptToDisplayable walks back to the row it
-			// actually marks. Shared with the unread divider so the two
-			// cannot disagree about where a receipt lands.
-			const readUpToId = resolveReceiptToDisplayable(
-				receiptId,
-				isDisplayable,
-				timelineEvents,
-			);
+			// reaction); the resolver walks back to the row it actually marks.
+			// Shared with the unread divider so the two cannot disagree.
+			const readUpToId = resolveReceipt(receiptId);
 			if (!readUpToId) continue;
 
 			if (!map[readUpToId]) map[readUpToId] = [];

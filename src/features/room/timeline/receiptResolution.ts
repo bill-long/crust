@@ -1,7 +1,7 @@
 import type { MatrixEvent } from "matrix-js-sdk";
 
 /**
- * Resolve a read receipt to the row it should mark.
+ * Resolves read receipts to the rows they should mark.
  *
  * A receipt can point at an event the timeline never renders - an edit, a
  * reaction, a redaction - because clients send receipts for whatever event
@@ -9,28 +9,44 @@ import type { MatrixEvent } from "matrix-js-sdk";
  * walking backwards through the raw window to the nearest event that *is*
  * displayable, which is the row the user actually read up to.
  *
- * Shared by the two consumers of that rule so they cannot drift: the
- * "read by" avatars (other people's receipts) and the unread divider (our
- * own). Returns null when nothing can be resolved - the receipt is outside
- * the loaded window, or every event back to its start is non-displayable.
+ * Built once per window rather than exposed as a bare function: the "read by"
+ * avatars resolve one receipt per room member, and re-scanning the window
+ * (up to 2000 events) for each of them on every receipt tick is main-thread
+ * work measured in millions of comparisons.
  *
- * @param receiptEventId - the event the receipt points at
- * @param isDisplayable - membership test for the rendered rows
+ * Both consumers - the "read by" avatars and the unread divider - construct
+ * this from the same displayable set, so they cannot disagree about where a
+ * given receipt lands.
+ *
  * @param windowEvents - the raw SDK window, oldest first
+ * @param isDisplayable - membership test for the rendered rows
  */
-export function resolveReceiptToDisplayable(
-	receiptEventId: string,
-	isDisplayable: (eventId: string) => boolean,
+export function createReceiptResolver(
 	windowEvents: readonly MatrixEvent[],
-): string | null {
-	if (isDisplayable(receiptEventId)) return receiptEventId;
+	isDisplayable: (eventId: string) => boolean,
+): (receiptEventId: string) => string | null {
+	let indexById: Map<string, number> | null = null;
 
-	const start = windowEvents.findIndex((ev) => ev.getId() === receiptEventId);
-	if (start === -1) return null;
+	return (receiptEventId: string): string | null => {
+		if (isDisplayable(receiptEventId)) return receiptEventId;
 
-	for (let i = start; i >= 0; i--) {
-		const id = windowEvents[i].getId();
-		if (id && isDisplayable(id)) return id;
-	}
-	return null;
+		// Built lazily: receipts that already point at a drawn row - the
+		// common case - never need it.
+		if (!indexById) {
+			indexById = new Map();
+			for (let i = 0; i < windowEvents.length; i++) {
+				const id = windowEvents[i].getId();
+				if (id !== undefined) indexById.set(id, i);
+			}
+		}
+
+		const start = indexById.get(receiptEventId);
+		if (start === undefined) return null;
+
+		for (let i = start; i >= 0; i--) {
+			const id = windowEvents[i].getId();
+			if (id && isDisplayable(id)) return id;
+		}
+		return null;
+	};
 }

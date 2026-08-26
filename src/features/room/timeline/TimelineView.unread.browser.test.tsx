@@ -186,17 +186,34 @@ describe("unread divider (#446)", () => {
 		).toBeTruthy();
 	});
 
-	it("never flashes the jump button over a divider in plain view", async () => {
-		// The IntersectionObserver's first callback is asynchronous, so a
-		// visibility signal starting at `false` would render the button for a
-		// frame before retracting it.
+	it("retires the jump button once the divider has been reached", async () => {
+		// The virtualizer renders its rows a tick after mount, so the button
+		// can be up for that tick - it retires as soon as the divider exists,
+		// and must then stay gone rather than resurfacing on every scroll.
 		const { container } = mountRoom(groupedPair(), "$read");
-		expect(findJumpButton(container)).toBeNull();
-
 		await vi.waitFor(() => expect(findDivider(container)).toBeTruthy());
-		// Give the observer several frames to report.
+		await vi.waitFor(() => expect(findJumpButton(container)).toBeNull());
+
 		await new Promise((r) => setTimeout(r, 150));
 		expect(findJumpButton(container)).toBeNull();
+	});
+
+	it("offers the jump when the boundary is far above the viewport", async () => {
+		// The dominant case: enough unread that the divider's row is nowhere
+		// near the viewport, so the virtualizer never mounts it. Keying the
+		// affordance off the divider being rendered misses exactly this.
+		const events = [
+			mkEvent("$read", "read message", 1700000000000),
+			...Array.from({ length: 60 }, (_, i) =>
+				mkEvent(`$unread${i}`, `unread message ${i}`, 1700000060000 + i * 1000),
+			),
+		];
+		const { container } = mountRoom(events, "$read");
+
+		await vi.waitFor(() => expect(findJumpButton(container)).toBeTruthy());
+		// And the divider itself is genuinely not rendered - otherwise this
+		// would be testing the on-screen case by accident.
+		expect(findDivider(container)).toBeNull();
 	});
 
 	it("draws no divider in a room we have read to the end", async () => {

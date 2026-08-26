@@ -6,14 +6,15 @@ interface JumpToUnreadButtonProps {
 }
 
 /**
- * Floating affordance that takes the user to where they left off, stacked
- * above the scroll-to-bottom button. Only offered while the divider is off
- * screen - once it is in view there is nothing left to point at.
+ * Affordance that takes the user to where they left off. Positioned by the
+ * timeline's floating-control stack rather than anchoring itself: the
+ * scroll-to-bottom button below it comes and goes, so a fixed offset would
+ * leave it hanging over empty space.
  */
 const JumpToUnreadButton: Component<JumpToUnreadButtonProps> = (props) => (
 	<button
 		type="button"
-		class="absolute bottom-16 right-4 z-10 flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+		class="flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		onClick={props.onClick}
 		aria-label="Jump to first unread message"
 	>
