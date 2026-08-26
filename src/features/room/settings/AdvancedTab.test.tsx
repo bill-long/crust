@@ -324,9 +324,9 @@ describe("AdvancedTab", () => {
 		fireEvent.click(button("Leave room"));
 		fireEvent.click(button("Leave"));
 		await waitFor(() =>
-			expect(
-				(client as unknown as ActionClient).leave,
-			).toHaveBeenCalledTimes(1),
+			expect((client as unknown as ActionClient).leave).toHaveBeenCalledTimes(
+				1,
+			),
 		);
 
 		// The leave is in flight; a membership flip must not unmount the

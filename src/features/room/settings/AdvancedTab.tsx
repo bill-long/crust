@@ -19,9 +19,11 @@ interface AdvancedTabProps {
 	/** Called when the Forget action completes (room purged server-side). */
 	onForgot?: (roomId: string) => void;
 	/**
-	 * The user's membership in the room ("join", "leave", "ban", ...).
-	 * Drives the Danger zone action: already-left/banned rooms offer
-	 * Forget instead of Leave. Undefined is treated as joined.
+	 * The user's membership in the room ("join", "leave", "ban", ...),
+	 * preferably the reactive summaries-backed value. Drives the Danger
+	 * zone action: already-left/banned rooms offer Forget instead of
+	 * Leave. When omitted, the tab falls back to the SDK room's own
+	 * membership; a room unknown to both is treated as joined.
 	 */
 	membership?: string;
 	/** When true, label copy uses "space" instead of "room". */
@@ -127,7 +129,7 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				body={
 					<p>
 						{canForget()
-							? `This removes the ${noun()} from your account entirely, including the history you had access to. Rejoining later starts fresh.`
+							? `This removes the ${noun()} from your account, including your copy of its history.`
 							: props.isSpace
 								? "You'll be removed from this space. You can rejoin if the space is public or someone re-invites you. Rooms you're a member of inside the space will not be affected."
 								: "You'll stop receiving messages in this room. You can rejoin if the room is public or someone re-invites you."}
