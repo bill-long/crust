@@ -47,9 +47,24 @@ function mount(
 		}),
 	};
 	let roomAvailable = !options.roomMissingAtFirst;
+	// The hook subscribes to RoomEvent.Receipt so a receipt landing after the
+	// rows have settled still re-triggers the capture.
+	const receiptListeners = new Set<
+		(e: unknown, r: { roomId: string }) => void
+	>();
 	const client = {
 		getUserId: () => ME,
 		getRoom: vi.fn(() => (roomAvailable ? roomStub : null)),
+		on: vi.fn(
+			(_event: string, fn: (e: unknown, r: { roomId: string }) => void) => {
+				receiptListeners.add(fn);
+			},
+		),
+		off: vi.fn(
+			(_event: string, fn: (e: unknown, r: { roomId: string }) => void) => {
+				receiptListeners.delete(fn);
+			},
+		),
 	} as unknown as MatrixClient;
 
 	const [roomId, setRoomId] = createSignal("!a:example.com");
@@ -83,6 +98,9 @@ function mount(
 		},
 		hideRoom: () => {
 			roomAvailable = false;
+		},
+		emitReceipt: (room = "!a:example.com") => {
+			for (const fn of receiptListeners) fn({}, { roomId: room });
 		},
 	};
 }
@@ -221,6 +239,59 @@ describe("useUnreadMarker divider placement", () => {
 		scope.readUpTo = "$a";
 		setRows([row("$a"), row("$b"), row("$c")]);
 		setWindowEvents([raw("$a"), raw("$b"), raw("$c")]);
+
+		expect(marker.firstUnreadEventId()).toBe("$b");
+	});
+
+	it("places the boundary once back-pagination reaches it", () => {
+		// More unread than the initial window: the receipt resolves to nothing
+		// at first. Freezing on that failure would leave the divider off for
+		// the whole visit even after the user scrolls back to it - and this
+		// is the case where they most need it.
+		const scope: Scope = { readUpTo: "$old" };
+		const { marker, setRows, setWindowEvents } = mount(scope, [
+			row("$c"),
+			row("$d"),
+		]);
+		expect(marker.firstUnreadEventId()).toBeNull();
+
+		setRows([row("$old"), row("$c"), row("$d")]);
+		setWindowEvents([raw("$old"), raw("$c"), raw("$d")]);
+
+		expect(marker.firstUnreadEventId()).toBe("$c");
+	});
+
+	it("does not decide a room from the previous room's rows", () => {
+		// The scope switches before the store swaps its rows, which is the
+		// production ordering. Deciding in that window resolves the new
+		// room's receipt against the old room's events, finds nothing, and
+		// would freeze the new room with no divider at all.
+		const scope: Scope = { readUpTo: "$a" };
+		const { marker, setRoomId, setRows, setWindowEvents } = mount(scope, [
+			row("$a"),
+			row("$b"),
+		]);
+		expect(marker.firstUnreadEventId()).toBe("$b");
+
+		scope.readUpTo = "$x";
+		setRoomId("!other:example.com");
+		expect(marker.firstUnreadEventId()).toBeNull();
+
+		setRows([row("$x"), row("$y")]);
+		setWindowEvents([raw("$x"), raw("$y")]);
+
+		expect(marker.firstUnreadEventId()).toBe("$y");
+	});
+
+	it("captures a receipt that arrives after the rows have settled", () => {
+		// m.receipt is an ephemeral: it touches no timeline event, so without
+		// the receipt subscription nothing would re-run the capture.
+		const scope: Scope = { readUpTo: null };
+		const { marker, emitReceipt } = mount(scope, [row("$a"), row("$b")]);
+		expect(marker.firstUnreadEventId()).toBeNull();
+
+		scope.readUpTo = "$a";
+		emitReceipt();
 
 		expect(marker.firstUnreadEventId()).toBe("$b");
 	});

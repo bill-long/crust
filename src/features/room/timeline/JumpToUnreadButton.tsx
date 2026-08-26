@@ -16,7 +16,9 @@ const JumpToUnreadButton: Component<JumpToUnreadButtonProps> = (props) => (
 		type="button"
 		class="flex items-center gap-1 rounded-full bg-surface-3 px-3 py-2 text-text-secondary shadow-lg transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		onClick={props.onClick}
-		aria-label="Jump to first unread message"
+		// Starts with the visible label so voice control can match what the
+		// user reads ("click Unread"), then says where it goes.
+		aria-label="Unread: jump to first unread message"
 	>
 		<span aria-hidden="true">↑</span>
 		<span class="text-xs">Unread</span>

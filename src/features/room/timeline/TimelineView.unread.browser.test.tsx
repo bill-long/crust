@@ -123,9 +123,7 @@ const findDivider = (root: ParentNode): HTMLElement | null =>
 	) ?? null;
 
 const findJumpButton = (root: ParentNode): HTMLElement | null =>
-	root.querySelector<HTMLElement>(
-		'button[aria-label="Jump to first unread message"]',
-	);
+	root.querySelector<HTMLElement>('button[aria-label^="Unread"]');
 
 afterEach(() => {
 	cleanup();

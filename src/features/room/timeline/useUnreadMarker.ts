@@ -1,5 +1,6 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
-import { type Accessor, createMemo } from "solid-js";
+import { RoomEvent } from "matrix-js-sdk";
+import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { createReceiptResolver } from "./receiptResolution";
 import type { TimelineEvent } from "./timelineTypes";
 import { firstUnreadIndex } from "./unreadMarker";
@@ -7,17 +8,8 @@ import { firstUnreadIndex } from "./unreadMarker";
 export interface UnreadMarker {
 	/**
 	 * The row the "New messages" divider goes above, and the row the jump
-	 * affordance lands on. Null when there is nothing unread, or when the
-	 * boundary is not in the loaded window.
-	 *
-	 * That second case - more than a window's worth arrived since the last
-	 * read - is a deliberate gap rather than an oversight. Placing the
-	 * boundary needs the receipt to be *in* the window, and every signal
-	 * available for guessing at it from outside is wrong in an ordinary
-	 * situation: the receipt's send time misreads a partial catch-up in
-	 * another client, and the forward-pagination flag misreads a window whose
-	 * far end the SDK trimmed during deep scrollback. Offering nothing is
-	 * honest; offering a jump into a room the user has already read is not.
+	 * affordance lands on. Null when nothing was unread on arrival, or while
+	 * the boundary cannot yet be placed.
 	 */
 	firstUnreadEventId: Accessor<string | null>;
 }
@@ -47,19 +39,25 @@ function displayableIds(events: readonly TimelineEvent[]): Set<string> {
 /**
  * Where the "New messages" divider goes.
  *
- * Decided once per timeline scope, from the read receipt as it stood when the
- * user arrived, and then frozen. Both halves of that matter:
+ * Two things are captured, at different moments, and conflating them is the
+ * mistake this shape exists to avoid.
  *
- * Reading the receipt live would erase the boundary in the same frame the
- * user arrived to look at it, because opening a room immediately sends a
- * receipt for the newest event (`useReadReceipts`).
+ * The **receipt** is taken as early as it can be read, because opening a room
+ * immediately sends a receipt for the newest event (`useReadReceipts`) - wait
+ * any longer and the boundary is gone before the user has looked at it.
  *
- * Re-deriving the boundary from a live event list would do the opposite,
- * and worse: with the snapshot pinned behind the newest event, every message
- * that arrived while the user sat watching the live end would look unread and
- * pull a red divider in above itself. Freezing means the divider marks where
- * the user actually left off and stays there, the way Discord holds its
- * divider until you leave the channel and come back.
+ * The **placement** is taken as soon as that receipt can be resolved onto a
+ * loaded row, and only then is it frozen. Freezing earlier would strand the
+ * feature: a receipt further back than the initial window resolves to
+ * nothing, and the divider must still appear when back-pagination reaches it.
+ * Freezing later - re-deriving from a live event list - is worse: with the
+ * receipt pinned behind the newest event, every message arriving while the
+ * user sat watching the live end would look unread and pull a red divider in
+ * above itself.
+ *
+ * The result is that the divider marks where the user actually left off and
+ * stays there, the way Discord holds its divider until you leave the channel
+ * and come back.
  *
  * `Room` and `Thread` both extend the SDK's `ReadReceipt`, so the thread panel
  * gets its own boundary from its own receipt with no special-casing here.
@@ -70,53 +68,76 @@ export function useUnreadMarker(
 	thread: Accessor<{ threadId: string } | undefined>,
 	deps: UnreadMarkerDeps,
 ): UnreadMarker {
-	let scopeRoomId: string | null = null;
-	let scopeThreadId: string | undefined;
-	let decided = false;
+	// A receipt arrives as an ephemeral in `/sync` and touches no timeline
+	// event, so in a quiet room nothing else would ever re-run the capture
+	// below. Same seam `useReadReceipts` uses.
+	const [receiptTick, setReceiptTick] = createSignal(0);
+	const onReceipt = (_event: unknown, room: { roomId: string }): void => {
+		if (room.roomId === roomId()) setReceiptTick((n) => n + 1);
+	};
+	client.on(RoomEvent.Receipt, onReceipt);
+	onCleanup(() => client.off(RoomEvent.Receipt, onReceipt));
 
-	const firstUnreadEventId = createMemo<string | null>((prev) => {
+	// One generation per timeline scope, so both captures below reset
+	// together and neither can carry the previous room's answer forward.
+	let lastRoomId: string | null = null;
+	let lastThreadId: string | undefined;
+	let generation = 0;
+	const scope = createMemo(() => {
 		const currentRoomId = roomId();
 		const currentThreadId = thread()?.threadId;
-
-		if (scopeRoomId !== currentRoomId || scopeThreadId !== currentThreadId) {
-			scopeRoomId = currentRoomId;
-			scopeThreadId = currentThreadId;
-			decided = false;
-		} else if (decided) {
-			// Frozen for this scope. Nothing that arrives later can move the
-			// boundary, and nothing that arrives later is unread - the user
-			// is here reading it.
-			return prev ?? null;
+		if (currentRoomId !== lastRoomId || currentThreadId !== lastThreadId) {
+			lastRoomId = currentRoomId;
+			lastThreadId = currentThreadId;
+			generation++;
 		}
+		return { roomId: currentRoomId, threadId: currentThreadId, generation };
+	});
 
-		// Everything below is the one-shot attempt. It keeps retrying, driven
-		// by the rows it reads, until it has a scope and a receipt to work
-		// from - a room can be absent from the store on a cold open, and a
-		// thread's `Thread` object is created lazily. Without the retry a
-		// single unlucky first evaluation would disable the divider for the
-		// whole visit, since the room subtree is keyed and never re-mounts.
-		const rows = deps.events();
-		if (rows.length === 0) return null;
+	// Capture 1: the receipt, as early as it can be read.
+	let receiptGeneration = -1;
+	let capturedReceipt: string | null = null;
+	const readUpToId = createMemo(() => {
+		const { roomId: currentRoomId, threadId, generation: gen } = scope();
+		if (receiptGeneration === gen) return capturedReceipt;
+
+		// Retry triggers. A room can be absent from the store on a cold open
+		// and a thread's `Thread` object is created lazily, so the first
+		// evaluation often has nothing to read.
+		receiptTick();
+		deps.events().length;
 
 		const myUserId = client.getUserId();
 		const room = client.getRoom(currentRoomId);
 		if (!room || !myUserId) return null;
-		const scope = currentThreadId ? room.getThread(currentThreadId) : room;
-		if (!scope) return null;
-
-		const receiptId = scope.getEventReadUpTo(myUserId);
-		// No receipt yet is not the same as nothing unread: the room can
-		// arrive in sync before its `m.receipt` ephemeral is applied. Keep
-		// retrying rather than freezing the feature off for the visit.
+		const target = threadId ? room.getThread(threadId) : room;
+		if (!target) return null;
+		const receiptId = target.getEventReadUpTo(myUserId);
 		if (!receiptId) return null;
 
-		decided = true;
+		receiptGeneration = gen;
+		capturedReceipt = receiptId;
+		return receiptId;
+	});
+
+	// Capture 2: the placement, frozen once the receipt lands on a real row.
+	let placementGeneration = -1;
+	let placedBoundary: string | null = null;
+	const firstUnreadEventId = createMemo(() => {
+		const { generation: gen } = scope();
+		if (placementGeneration === gen) return placedBoundary;
+
+		const receiptId = readUpToId();
+		if (!receiptId) return null;
+		const myUserId = client.getUserId();
+		if (!myUserId) return null;
+		const rows = deps.events();
+		if (rows.length === 0) return null;
 
 		// A receipt can point at a row this timeline never draws - an edit, a
 		// reaction, a state notice - so walk back to the one it really marks.
 		// The fast path covers the common case without building the id set or
-		// copying the SDK window; both only happen on this single evaluation
-		// either way.
+		// copying the SDK window; neither happens more than once per scope.
 		const onRow = rows.find((ev) => ev.eventId === receiptId);
 		let resolved: string | null;
 		if (onRow && !onRow.stateNotice) {
@@ -127,9 +148,15 @@ export function useUnreadMarker(
 				displayable.has(id),
 			)(receiptId);
 		}
+		// Not in this window yet. Leave it undecided: back-pagination may
+		// still bring it in, and this is the case - more unread than one
+		// window - where the user most needs the boundary.
+		if (!resolved) return null;
 
+		placementGeneration = gen;
 		const index = firstUnreadIndex(rows, resolved, myUserId);
-		return index === -1 ? null : rows[index].eventId;
+		placedBoundary = index === -1 ? null : rows[index].eventId;
+		return placedBoundary;
 	});
 
 	return { firstUnreadEventId };
