@@ -10,6 +10,7 @@ import {
 	on,
 	Show,
 } from "solid-js";
+import { menuItemDisabledClass } from "../components/menuStyles";
 import {
 	clamp,
 	MAX_MEMBERS,
@@ -42,11 +43,15 @@ const RoomOverflowMenu: Component<{
 	onInvite: () => void;
 	onOpenSettings: () => void;
 	onCopyLink: () => void;
+	onMarkUnread: () => void;
+	canMarkUnread: () => boolean;
 	leaving: () => boolean;
 	onLeave: () => void;
 }> = (props) => {
-	const itemClass =
-		"flex min-h-11 w-full cursor-pointer items-center gap-3 rounded px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden";
+	// Shared by every item so the two disableable ones (Mark as unread,
+	// Leave room) gray out the same way; the disabled variants are inert
+	// on enabled items.
+	const itemClass = `flex min-h-11 w-full cursor-pointer items-center gap-3 rounded px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden ${menuItemDisabledClass}`;
 	return (
 		<DropdownMenu>
 			<DropdownMenu.Trigger
@@ -129,6 +134,26 @@ const RoomOverflowMenu: Component<{
 						Copy room link
 					</DropdownMenu.Item>
 					<DropdownMenu.Item
+						class={itemClass}
+						disabled={!props.canMarkUnread()}
+						onSelect={props.onMarkUnread}
+					>
+						<svg
+							class="h-4 w-4 shrink-0 text-text-muted"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M4 4h11a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4Z" />
+							<circle cx="19" cy="5" r="3" fill="currentColor" stroke="none" />
+						</svg>
+						Mark as unread
+					</DropdownMenu.Item>
+					<DropdownMenu.Item
 						class={`${itemClass} text-danger-text hover:bg-danger-bg/20 focus-visible:bg-danger-bg/20`}
 						disabled={props.leaving()}
 						onSelect={() => props.onLeave()}
@@ -165,6 +190,8 @@ const RoomPane: Component<{
 	onCopyLink: () => void;
 	canInvite: () => boolean;
 	onInvite: () => void;
+	onMarkUnread: () => void;
+	canMarkUnread: () => boolean;
 	leaving: () => boolean;
 	onLeave: () => void;
 	onOpenSettings: () => void;
@@ -503,6 +530,8 @@ const RoomPane: Component<{
 							onInvite={props.onInvite}
 							onOpenSettings={props.onOpenSettings}
 							onCopyLink={props.onCopyLink}
+							onMarkUnread={props.onMarkUnread}
+							canMarkUnread={props.canMarkUnread}
 							leaving={props.leaving}
 							onLeave={props.onLeave}
 						/>

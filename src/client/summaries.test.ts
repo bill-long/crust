@@ -1068,6 +1068,105 @@ describe("createSummariesStore optimisticallyMarkLeft", () => {
 	});
 });
 
+describe("createSummariesStore marked-unread (MSC2867)", () => {
+	function stubRoomForStore(room: ReturnType<typeof createMockRoom>) {
+		const r = room as unknown as Record<string, unknown>;
+		r.isCallRoom = () => false;
+		r.isElementVideoRoom = () => false;
+		r.getAvatarUrl = () => null;
+		r.getUnreadNotificationCount = () => 0;
+		r.getMyMembership = () => "join";
+		r.hasEncryptionStateEvent = () => false;
+		return room;
+	}
+
+	function makeStore(room: ReturnType<typeof createMockRoom>) {
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+		return { client, store };
+	}
+
+	const accountDataEvent = (type: string) =>
+		({ getType: () => type }) as unknown as MatrixEvent;
+
+	it("seeds markedUnread from room account data on init", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		room.__setRoomAccountData("m.marked_unread", { unread: true });
+		const { store } = makeStore(room);
+		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+		store.cleanup();
+	});
+
+	it("updates markedUnread when the stable account-data event arrives", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const { client, store } = makeStore(room);
+		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+
+		room.__setRoomAccountData("m.marked_unread", { unread: true });
+		client.__emit(
+			"Room.accountData",
+			accountDataEvent("m.marked_unread"),
+			room,
+		);
+		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+
+		room.__setRoomAccountData("m.marked_unread", { unread: false });
+		client.__emit(
+			"Room.accountData",
+			accountDataEvent("m.marked_unread"),
+			room,
+		);
+		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+
+		store.cleanup();
+	});
+
+	it("updates markedUnread when the unstable account-data event arrives", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const { client, store } = makeStore(room);
+
+		room.__setRoomAccountData("com.famedly.marked_unread", { unread: true });
+		client.__emit(
+			"Room.accountData",
+			accountDataEvent("com.famedly.marked_unread"),
+			room,
+		);
+		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+
+		store.cleanup();
+	});
+
+	it("ignores unrelated room account-data types", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const { client, store } = makeStore(room);
+
+		// The flag exists in room state but the emitted event is unrelated,
+		// so the handler must not re-read it.
+		room.__setRoomAccountData("m.marked_unread", { unread: true });
+		client.__emit("Room.accountData", accountDataEvent("m.fully_read"), room);
+		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+
+		store.cleanup();
+	});
+
+	it("optimisticallySetMarkedUnread flips an existing entry and no-ops for a missing one", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const { store } = makeStore(room);
+
+		store.optimisticallySetMarkedUnread("!r:x", true);
+		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+		store.optimisticallySetMarkedUnread("!r:x", false);
+		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+
+		store.optimisticallySetMarkedUnread("!missing:x", true);
+		expect(store.summaries["!missing:x"]).toBeUndefined();
+
+		store.cleanup();
+	});
+});
+
 describe("createSummariesStore poll previews", () => {
 	function stubRoomForStore(room: ReturnType<typeof createMockRoom>) {
 		const r = room as unknown as Record<string, unknown>;

@@ -1,0 +1,176 @@
+import { EventType, type MatrixClient, type Room } from "matrix-js-sdk";
+import { type Accessor, createEffect, untrack } from "solid-js";
+import { reportError } from "../lib/reportError";
+import { enqueueKeyedWrite } from "../lib/writeQueue";
+import type { RoomSummary, SummariesStore } from "./summaries";
+
+/** Stable account-data type for the marked-unread flag (MSC2867). */
+export const MARKED_UNREAD_TYPE = EventType.MarkedUnread;
+/**
+ * Pre-stabilization type some clients still write; read as a fallback so a
+ * flag set elsewhere isn't invisible here. Writes use the stable type only
+ * (matching Element).
+ */
+export const MARKED_UNREAD_TYPE_UNSTABLE = "com.famedly.marked_unread";
+
+/**
+ * Whether `room` is explicitly marked unread (MSC2867). The stable event
+ * wins when it carries a boolean `unread`; otherwise the unstable fallback
+ * is consulted. Malformed content reads as false.
+ */
+export function getRoomMarkedUnread(room: Room): boolean {
+	const stable = room.getAccountData(MARKED_UNREAD_TYPE)?.getContent()?.unread;
+	if (typeof stable === "boolean") return stable;
+	return (
+		room.getAccountData(MARKED_UNREAD_TYPE_UNSTABLE)?.getContent()?.unread ===
+		true
+	);
+}
+
+/**
+ * Whether "Mark as unread" is currently actionable for `summary`: only for
+ * a room that is fully read and not already flagged. The single gate for
+ * every surface that offers the action (the room-list context menu and the
+ * room-pane overflow item), so the two can't disagree.
+ */
+export function canMarkRoomUnread(summary: RoomSummary | undefined): boolean {
+	return !!summary && summary.unreadCount === 0 && !summary.markedUnread;
+}
+
+/**
+ * The slice of `ClientContextValue` the marked-unread actions need. Both
+ * actions are optimistic-first: the summary flag flips immediately and the
+ * account-data write confirms (or rolls back) afterwards.
+ */
+interface MarkedUnreadContext {
+	client: MatrixClient;
+	summaries: SummariesStore;
+	optimisticallySetMarkedUnread: (roomId: string, value: boolean) => void;
+}
+
+/**
+ * Per-room, per-client chains serializing `m.marked_unread` writes. Mark
+ * and clear PUT opposite values to the same key on independent requests,
+ * so an ordinary mark-then-open sequence could otherwise commit out of
+ * order server-side and leave the flag set for a room the user just
+ * opened. Keyed by client (WeakMap) so a logout/login cycle can't chain
+ * onto a dead client's writes.
+ */
+const flagWriteChains = new WeakMap<MatrixClient, Map<string, Promise<void>>>();
+
+function enqueueFlagWrite(
+	client: MatrixClient,
+	roomId: string,
+	unread: boolean,
+): Promise<void> {
+	let chains = flagWriteChains.get(client);
+	if (!chains) {
+		chains = new Map();
+		flagWriteChains.set(client, chains);
+	}
+	return enqueueKeyedWrite(chains, roomId, () =>
+		client
+			.setRoomAccountData(roomId, MARKED_UNREAD_TYPE, { unread })
+			.then(() => {}),
+	);
+}
+
+/**
+ * Mark `roomId` unread: flip the summary flag so the sidebar dot appears
+ * instantly, then persist `m.marked_unread` account data. Rolled back with
+ * an error toast if the write fails (the dot is the only feedback surface,
+ * so a silent failure would look like success). No-op when already marked.
+ */
+export function markRoomUnread(ctx: MarkedUnreadContext, roomId: string): void {
+	if (ctx.summaries[roomId]?.markedUnread) return;
+	ctx.optimisticallySetMarkedUnread(roomId, true);
+	enqueueFlagWrite(ctx.client, roomId, true).catch((err) => {
+		// Roll back only while the optimistic value is still what's showing:
+		// an authoritative echo that flipped the flag mid-flight (another
+		// device's write, delivered by onRoomAccountData) must not be
+		// clobbered by this failed request's cleanup.
+		if (ctx.summaries[roomId]?.markedUnread === true) {
+			ctx.optimisticallySetMarkedUnread(roomId, false);
+		}
+		reportError(err, {
+			userMessage: "Couldn't mark the room as unread.",
+			logLabel: "Mark as unread failed",
+		});
+	});
+}
+
+/**
+ * Clear the marked-unread flag. Gated on the summary flag - which includes
+ * optimistic state - so a room that isn't marked does no account-data
+ * write at all. A failed write rolls the flag back on: the PUT changed
+ * nothing server-side and /sync only re-delivers account data that
+ * changed, so without the rollback this device would show the room read
+ * while the server (and every other device) still has it marked - and the
+ * gate above would block any retry. With the rollback, the restored dot is
+ * the visible feedback and the next open retries the write, so the failure
+ * itself stays console-only.
+ */
+export function clearRoomMarkedUnread(
+	ctx: MarkedUnreadContext,
+	roomId: string,
+): void {
+	if (!ctx.summaries[roomId]?.markedUnread) return;
+	ctx.optimisticallySetMarkedUnread(roomId, false);
+	enqueueFlagWrite(ctx.client, roomId, false).catch((err) => {
+		// Same echo-safe rollback as markRoomUnread: restore the dot only
+		// if nothing authoritative overwrote the optimistic clear meanwhile.
+		if (ctx.summaries[roomId]?.markedUnread === false) {
+			ctx.optimisticallySetMarkedUnread(roomId, true);
+		}
+		reportError(err, { logLabel: "Clearing marked-unread failed" });
+	});
+}
+
+/**
+ * The room whose marked-unread flag the CURRENT open has already consumed,
+ * per client. Lives outside any component (and is keyed by client, not
+ * stored globally, so a logout/login cycle starts clean) because the
+ * owning Layout can be re-created mid-view: the latch is what makes a
+ * remount with the same room still open not count as a new "open".
+ */
+const consumedLatch = new WeakMap<MatrixClient, string>();
+
+/**
+ * Consume the marked-unread flag when a room is opened (MSC2867: viewing
+ * the room clears it - the same open-consumes semantics Element applies).
+ *
+ * "Open" is a transition of the viewed room id. Consequences, all
+ * deliberate:
+ * - A flag set while the room is already open (the room-pane overflow
+ *   action, a right-click on the open room's row, or another device)
+ *   survives until the room is NEXT opened.
+ * - Any route transition away from the room - the back-to-list gesture, a
+ *   different room, or a full-screen route like settings - ends the
+ *   current open, so returning is a new open and consumes.
+ *
+ * The effect tracks the summary entry's identity (a top-level store key)
+ * so a cold-launch restore straight into a marked room still clears once
+ * the initial sync creates the entry, but not the `markedUnread` field
+ * itself (a field-level store write), so marking the open room can't
+ * re-trigger consumption.
+ */
+export function useMarkedUnreadConsumer(
+	ctx: MarkedUnreadContext,
+	roomId: Accessor<string | undefined>,
+): void {
+	createEffect(() => {
+		const rid = roomId();
+		// A different room (or none) is open now: the previous room's open
+		// is over, so drop its latch even if the new room's entry hasn't
+		// synced yet - returning to the previous room must consume again.
+		if (rid !== consumedLatch.get(ctx.client)) {
+			consumedLatch.delete(ctx.client);
+		}
+		if (!rid) return;
+		// Wait for the entry: reading the key subscribes to its creation.
+		if (!ctx.summaries[rid]) return;
+		if (consumedLatch.get(ctx.client) === rid) return;
+		consumedLatch.set(ctx.client, rid);
+		untrack(() => clearRoomMarkedUnread(ctx, rid));
+	});
+}

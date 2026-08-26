@@ -96,6 +96,8 @@ function setup(
 			onCopyLink={() => {}}
 			canInvite={() => false}
 			onInvite={() => {}}
+			onMarkUnread={() => {}}
+			canMarkUnread={() => true}
 			leaving={() => false}
 			onLeave={() => {}}
 			onOpenSettings={options.onOpenSettings ?? (() => {})}

@@ -10,6 +10,7 @@ function makeSummary(overrides: Partial<RoomSummary>): RoomSummary {
 		lastMessage: null,
 		unreadCount: 0,
 		highlightCount: 0,
+		markedUnread: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,

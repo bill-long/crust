@@ -89,6 +89,16 @@ interface ClientContextValue {
 	 */
 	optimisticallyMarkLeft: (roomId: string) => void;
 	/**
+	 * Optimistically flip `roomId`'s marked-unread flag (MSC2867) so the
+	 * sidebar indicator reacts instantly when the user marks or opens a
+	 * room, without waiting for the `m.marked_unread` account-data
+	 * round-trip. The authoritative account-data sync confirms or corrects
+	 * it. Callers normally go through `markRoomUnread` /
+	 * `clearRoomMarkedUnread` (see `client/markedUnread.ts`) rather than
+	 * calling this directly.
+	 */
+	optimisticallySetMarkedUnread: (roomId: string, value: boolean) => void;
+	/**
 	 * Request the recovery key from the user. Components that show a
 	 * recovery key input dialog should call setRecoveryKeyResolver to
 	 * register themselves.
@@ -303,6 +313,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		optimisticallyMarkJoined,
 		optimisticallyMarkKnocked,
 		optimisticallyMarkLeft,
+		optimisticallySetMarkedUnread,
 	} = createSummariesStore(matrixClient);
 
 	// Keep the OS/taskbar app badge in sync with live unread state while this
@@ -458,6 +469,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				optimisticallyMarkJoined,
 				optimisticallyMarkKnocked,
 				optimisticallyMarkLeft,
+				optimisticallySetMarkedUnread,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,
 				clearSecretStorageCache,

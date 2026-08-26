@@ -14,6 +14,11 @@ import {
 } from "solid-js";
 import { useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
+import {
+	canMarkRoomUnread,
+	markRoomUnread,
+	useMarkedUnreadConsumer,
+} from "../client/markedUnread";
 import { getSpaceRooms } from "../client/summaries-selectors";
 import {
 	clamp,
@@ -167,8 +172,9 @@ function saveThreadWidth(w: number): void {
 const [loggingOut, setLoggingOut] = createSignal(false);
 
 const Layout: Component = () => {
+	const clientCtx = useClient();
 	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
-		useClient();
+		clientCtx;
 	// Mount the global PTT/PTM hotkey listener once at the app shell. The
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
@@ -500,6 +506,11 @@ const Layout: Component = () => {
 		const rid = roomId();
 		if (rid) setLastRoom(rid, params.spaceId);
 	});
+
+	// Opening a room consumes its marked-unread flag (MSC2867), so the
+	// sidebar dot disappears the moment the room is viewed. The hook owns
+	// the "what counts as opening" policy - see useMarkedUnreadConsumer.
+	useMarkedUnreadConsumer(clientCtx, roomId);
 
 	// Restore the last room on a cold launch. The app boots on the bare root
 	// path ("/") with no room selected; reopen the room the user last had open
@@ -869,6 +880,8 @@ const Layout: Component = () => {
 										onCopyLink={() => handleCopyRoomLink(rid)}
 										canInvite={canInviteHere}
 										onInvite={() => setInviteTarget({ id: rid, kind: "room" })}
+										onMarkUnread={() => markRoomUnread(clientCtx, rid)}
+										canMarkUnread={() => canMarkRoomUnread(summaries[rid])}
 										leaving={() => isLeaving(rid)}
 										onLeave={handleLeave}
 										onOpenSettings={() =>

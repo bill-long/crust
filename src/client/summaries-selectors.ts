@@ -1,5 +1,14 @@
 import type { RoomSummary, SummariesStore } from "./summaries";
 
+/** Aggregated unread state for a set of rooms (a space subtree, or Home):
+    summed notification counts plus whether any room in the set is
+    explicitly marked unread (MSC2867). */
+export interface UnreadRollup {
+	unread: number;
+	highlight: number;
+	markedUnread: boolean;
+}
+
 /**
  * Rooms inside a space: joined, non-space children sorted by recent activity.
  */
@@ -52,22 +61,25 @@ export function getSpaceSubspaces(
 /**
  * Rollup unread + highlight counts for a space's joined non-space
  * descendants: direct child rooms plus, recursively, the rooms of joined
- * subspaces (#443). Traversal is membership-gated (only a joined space
- * exposes an authoritative child list) and cycle-safe - space graphs are
- * user-controlled and can contain A<->B loops or self-references, so each
- * room/space is entered at most once. Iterative so pathologically deep
- * nesting can't overflow the call stack.
+ * subspaces (#443). `markedUnread` is true when any descendant room is
+ * explicitly marked unread (MSC2867), so the flag stays visible while the
+ * space is collapsed to a tile. Traversal is membership-gated (only a
+ * joined space exposes an authoritative child list) and cycle-safe - space
+ * graphs are user-controlled and can contain A<->B loops or
+ * self-references, so each room/space is entered at most once. Iterative
+ * so pathologically deep nesting can't overflow the call stack.
  */
 export function getSpaceUnreadRollup(
 	summaries: SummariesStore,
 	spaceId: string,
-): { unread: number; highlight: number } {
+): UnreadRollup {
 	const root = summaries[spaceId];
 	if (!root?.isSpace || root.membership !== "join")
-		return { unread: 0, highlight: 0 };
+		return { unread: 0, highlight: 0, markedUnread: false };
 
 	let unread = 0;
 	let highlight = 0;
+	let markedUnread = false;
 	const visited = new Set<string>([spaceId]);
 	const stack: string[] = [...root.children];
 	while (stack.length > 0) {
@@ -81,9 +93,10 @@ export function getSpaceUnreadRollup(
 		} else {
 			unread += child.unreadCount;
 			highlight += child.highlightCount;
+			markedUnread ||= child.markedUnread;
 		}
 	}
-	return { unread, highlight };
+	return { unread, highlight, markedUnread };
 }
 
 /**
@@ -361,6 +374,10 @@ export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
  * unread for a space's rooms is counted on the rooms themselves), but unlike
  * `getHomeUnreadRollup` this counts space-child rooms too — the badge reflects
  * everything unread, not just what's visible under Home.
+ *
+ * A room that is only marked unread (MSC2867) contributes nothing here: the
+ * OS badge is a numeric message count and the flag carries no count, matching
+ * how the push gateway (which knows nothing of the flag) computes `unread`.
  */
 export function getTotalUnread(summaries: SummariesStore): number {
 	let unread = 0;
@@ -381,10 +398,7 @@ export function getTotalUnread(summaries: SummariesStore): number {
  * linear time (two passes over the store). Unlike those two selectors it does
  * not sort or build a result array, since only the totals are needed.
  */
-export function getHomeUnreadRollup(summaries: SummariesStore): {
-	unread: number;
-	highlight: number;
-} {
+export function getHomeUnreadRollup(summaries: SummariesStore): UnreadRollup {
 	const spacedRoomIds = new Set<string>();
 	for (const s of Object.values(summaries)) {
 		if (s.isSpace && s.membership === "join") {
@@ -394,6 +408,7 @@ export function getHomeUnreadRollup(summaries: SummariesStore): {
 
 	let unread = 0;
 	let highlight = 0;
+	let markedUnread = false;
 	for (const s of Object.values(summaries)) {
 		if (s.membership !== "join" || s.isSpace) continue;
 		// DMs always count; non-DM (orphan) rooms count only when they don't
@@ -401,6 +416,7 @@ export function getHomeUnreadRollup(summaries: SummariesStore): {
 		if (!s.isDirect && spacedRoomIds.has(s.roomId)) continue;
 		unread += s.unreadCount;
 		highlight += s.highlightCount;
+		markedUnread ||= s.markedUnread;
 	}
-	return { unread, highlight };
+	return { unread, highlight, markedUnread };
 }

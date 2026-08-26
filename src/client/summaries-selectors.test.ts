@@ -25,6 +25,7 @@ function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 		lastMessage: null,
 		unreadCount: 0,
 		highlightCount: 0,
+		markedUnread: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -44,7 +45,11 @@ function store(rooms: RoomSummary[]): SummariesStore {
 
 describe("getHomeUnreadRollup", () => {
 	it("returns zero when there are no home rooms", () => {
-		expect(getHomeUnreadRollup(store([]))).toEqual({ unread: 0, highlight: 0 });
+		expect(getHomeUnreadRollup(store([]))).toEqual({
+			unread: 0,
+			highlight: 0,
+			markedUnread: false,
+		});
 	});
 
 	it("sums unread and highlight across DMs and orphan rooms", () => {
@@ -58,7 +63,11 @@ describe("getHomeUnreadRollup", () => {
 			room({ roomId: "!dm2", isDirect: true, unreadCount: 3 }),
 			room({ roomId: "!orphan", unreadCount: 4, highlightCount: 2 }),
 		]);
-		expect(getHomeUnreadRollup(s)).toEqual({ unread: 9, highlight: 3 });
+		expect(getHomeUnreadRollup(s)).toEqual({
+			unread: 9,
+			highlight: 3,
+			markedUnread: false,
+		});
 	});
 
 	it("excludes spaces and space-child rooms (counted under their space)", () => {
@@ -68,7 +77,11 @@ describe("getHomeUnreadRollup", () => {
 			room({ roomId: "!dm", isDirect: true, unreadCount: 1 }),
 		]);
 		// Only the DM counts; the space itself and its child are excluded.
-		expect(getHomeUnreadRollup(s)).toEqual({ unread: 1, highlight: 0 });
+		expect(getHomeUnreadRollup(s)).toEqual({
+			unread: 1,
+			highlight: 0,
+			markedUnread: false,
+		});
 	});
 
 	it("excludes rooms the user has not joined", () => {
@@ -82,7 +95,30 @@ describe("getHomeUnreadRollup", () => {
 			room({ roomId: "!left", membership: "leave", unreadCount: 9 }),
 			room({ roomId: "!dm", isDirect: true, unreadCount: 2 }),
 		]);
-		expect(getHomeUnreadRollup(s)).toEqual({ unread: 2, highlight: 0 });
+		expect(getHomeUnreadRollup(s)).toEqual({
+			unread: 2,
+			highlight: 0,
+			markedUnread: false,
+		});
+	});
+
+	it("flags markedUnread when any home room is explicitly marked", () => {
+		const s = store([
+			room({ roomId: "!dm", isDirect: true, markedUnread: true }),
+		]);
+		expect(getHomeUnreadRollup(s)).toEqual({
+			unread: 0,
+			highlight: 0,
+			markedUnread: true,
+		});
+	});
+
+	it("does not flag markedUnread for a marked room that belongs to a space", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!child"] }),
+			room({ roomId: "!child", markedUnread: true }),
+		]);
+		expect(getHomeUnreadRollup(s).markedUnread).toBe(false);
 	});
 });
 
@@ -339,6 +375,7 @@ describe("getSpaceUnreadRollup recursion (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
 			unread: 5,
 			highlight: 1,
+			markedUnread: false,
 		});
 	});
 
@@ -356,11 +393,13 @@ describe("getSpaceUnreadRollup recursion (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
 			unread: 5,
 			highlight: 2,
+			markedUnread: false,
 		});
 		// The subspace's own rollup is just its subtree.
 		expect(getSpaceUnreadRollup(s, "!sub")).toEqual({
 			unread: 4,
 			highlight: 2,
+			markedUnread: false,
 		});
 	});
 
@@ -378,6 +417,7 @@ describe("getSpaceUnreadRollup recursion (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
 			unread: 0,
 			highlight: 0,
+			markedUnread: false,
 		});
 	});
 
@@ -391,6 +431,7 @@ describe("getSpaceUnreadRollup recursion (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
 			unread: 5,
 			highlight: 0,
+			markedUnread: false,
 		});
 	});
 
@@ -402,6 +443,20 @@ describe("getSpaceUnreadRollup recursion (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
 			unread: 1,
 			highlight: 0,
+			markedUnread: false,
+		});
+	});
+
+	it("flags markedUnread when any descendant room is explicitly marked", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!sub"] }),
+			room({ roomId: "!sub", isSpace: true, children: ["!grandchild"] }),
+			room({ roomId: "!grandchild", markedUnread: true }),
+		]);
+		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
+			unread: 0,
+			highlight: 0,
+			markedUnread: true,
 		});
 	});
 
@@ -415,6 +470,7 @@ describe("getSpaceUnreadRollup recursion (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!space")).toEqual({
 			unread: 7,
 			highlight: 0,
+			markedUnread: false,
 		});
 	});
 });
@@ -593,6 +649,7 @@ describe("getSpaceTree / rollup wire-debris edges (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
 			unread: 5,
 			highlight: 0,
+			markedUnread: false,
 		});
 	});
 
@@ -611,6 +668,7 @@ describe("getSpaceTree / rollup wire-debris edges (#443)", () => {
 		expect(getSpaceUnreadRollup(s, "!a")).toEqual({
 			unread: 1,
 			highlight: 0,
+			markedUnread: false,
 		});
 	});
 });

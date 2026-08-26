@@ -21,6 +21,12 @@ import {
 	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import {
+	menuContentClass,
+	menuItemClass,
+	menuItemDangerClass,
+} from "../../components/menuStyles";
+import { UnreadBadge } from "../../components/UnreadBadge";
 import { avatarInitial } from "../../lib/avatar";
 import {
 	createFailedImageUrls,
@@ -165,17 +171,13 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				</Show>
 
 				{/* Unread badge */}
-				<Show when={rollup().unread > 0}>
-					<span
-						class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-							rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-						}`}
-						role="status"
-						aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
-					>
-						{rollup().unread > 99 ? "99+" : rollup().unread}
-					</span>
-				</Show>
+				<UnreadBadge
+					unread={rollup().unread}
+					highlight={rollup().highlight}
+					markedUnread={rollup().markedUnread}
+					size="sm"
+					class="absolute -right-1 -top-1"
+				/>
 			</button>
 		</>
 	);
@@ -196,10 +198,10 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 					</ContextMenu.Trigger>
 
 					<ContextMenu.Portal>
-						<ContextMenu.Content class="portal-scale z-50 min-w-[180px] rounded-lg border border-border-subtle bg-surface-3 p-1 shadow-lg focus-visible:outline-hidden">
+						<ContextMenu.Content class={menuContentClass}>
 							<Show when={props.onOpenSpaceSettings}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+									class={menuItemClass}
 									onSelect={() =>
 										props.onOpenSpaceSettings?.(props.space.roomId)
 									}
@@ -209,7 +211,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 							</Show>
 							<Show when={canInviteToSpace()}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+									class={menuItemClass}
 									onSelect={() => props.onInviteSpace?.(props.space.roomId)}
 								>
 									Invite people
@@ -217,7 +219,7 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 							</Show>
 							<Show when={props.onLeaveSpace}>
 								<ContextMenu.Item
-									class="flex cursor-pointer items-center rounded px-3 py-2 text-sm text-danger-text transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+									class={menuItemDangerClass}
 									onSelect={() => props.onLeaveSpace?.(props.space.roomId)}
 								>
 									Leave space
@@ -316,17 +318,13 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 						</svg>
 
 						{/* Unread badge for DMs / home rooms */}
-						<Show when={homeRollup().unread > 0}>
-							<span
-								class={`absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-									homeRollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-								}`}
-								role="status"
-								aria-label={`${homeRollup().unread} unread${homeRollup().highlight > 0 ? `, ${homeRollup().highlight} highlighted` : ""}`}
-							>
-								{homeRollup().unread > 99 ? "99+" : homeRollup().unread}
-							</span>
-						</Show>
+						<UnreadBadge
+							unread={homeRollup().unread}
+							highlight={homeRollup().highlight}
+							markedUnread={homeRollup().markedUnread}
+							size="sm"
+							class="absolute -right-1 -top-1"
+						/>
 
 						{/* Pending-invite badge - bottom corner so it can coexist
 							with the unread badge above. Accent = action needed,

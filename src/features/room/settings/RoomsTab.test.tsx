@@ -37,6 +37,7 @@ function makeSummary(
 		lastMessage: null,
 		unreadCount: 0,
 		highlightCount: 0,
+		markedUnread: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -77,6 +78,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkJoined: () => {},
 				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
+				optimisticallySetMarkedUnread: () => {},
 			}}
 		>
 			{props.children}

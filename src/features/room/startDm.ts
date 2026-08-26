@@ -1,4 +1,5 @@
 import { EventType, type MatrixClient, Preset } from "matrix-js-sdk";
+import { enqueueKeyedWrite } from "../../lib/writeQueue";
 
 /**
  * The `m.direct` account-data map: a record of user ID -> list of room IDs
@@ -98,7 +99,8 @@ export interface StartDmOptions {
  * settles (the local echo updates `getAccountData`). Keyed per client so an
  * account switch doesn't entangle the new client's writes with the old
  * client's chain. Cross-device writes remain last-writer-wins — the spec
- * offers no compare-and-set for account data.
+ * offers no compare-and-set for account data. Chain mechanics live in
+ * `lib/writeQueue.ts` (shared with the marked-unread flag writes).
  */
 const directWriteChains = new WeakMap<MatrixClient, Promise<void>>();
 
@@ -113,8 +115,7 @@ export function recordDmInDirectMap(
 	userId: string,
 	roomId: string,
 ): Promise<void> {
-	const chain = directWriteChains.get(client) ?? Promise.resolve();
-	const run = chain.then(async () => {
+	return enqueueKeyedWrite(directWriteChains, client, async () => {
 		const nextMap = addDmToMap(readDirectMap(client), userId, roomId);
 		// Serialize a plain-prototype object: matrix-js-sdk's setAccountData
 		// runs deepCompare, which calls hasOwnProperty on the content — a
@@ -123,12 +124,6 @@ export function recordDmInDirectMap(
 		// setter, so the boundary object stays pollution-safe too.
 		await client.setAccountData(EventType.Direct, { ...nextMap });
 	});
-	// Keep the chain alive on failure so one bad write doesn't wedge later ones.
-	directWriteChains.set(
-		client,
-		run.catch(() => {}),
-	);
-	return run;
 }
 
 /**

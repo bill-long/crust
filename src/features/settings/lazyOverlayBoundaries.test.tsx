@@ -64,6 +64,7 @@ const ClientWrapper: ParentComponent<{
 				optimisticallyMarkJoined,
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
+				optimisticallySetMarkedUnread: vi.fn(),
 			}}
 		>
 			{props.children}

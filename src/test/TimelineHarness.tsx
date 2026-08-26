@@ -233,6 +233,7 @@ export const TestClientProvider: ParentComponent<{
 				optimisticallyMarkJoined: () => {},
 				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
+				optimisticallySetMarkedUnread: () => {},
 			}}
 		>
 			{props.children}

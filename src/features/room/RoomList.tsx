@@ -1,3 +1,4 @@
+import { ContextMenu } from "@kobalte/core/context-menu";
 import { useNavigate } from "@solidjs/router";
 import {
 	ClientEvent,
@@ -11,10 +12,12 @@ import {
 	For,
 	type JSX,
 	onCleanup,
+	onMount,
 	Show,
 } from "solid-js";
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
+import { canMarkRoomUnread, markRoomUnread } from "../../client/markedUnread";
 import type { RoomSummary } from "../../client/summaries";
 import {
 	getDmRooms,
@@ -26,8 +29,15 @@ import {
 	getSpaceRooms,
 	getSpaceSubspaces,
 	getSpaceUnreadRollup,
+	type UnreadRollup,
 } from "../../client/summaries-selectors";
+import {
+	menuContentClass,
+	menuItemClass,
+	menuItemDisabledClass,
+} from "../../components/menuStyles";
 import { SpaceIcon } from "../../components/SpaceIcon";
+import { UnreadBadge } from "../../components/UnreadBadge";
 import { VirtualList } from "../../components/VirtualList";
 import { spaceLandingPath } from "../../lib/spaceLanding";
 import { requestExploreDialog } from "../../stores/exploreDialog";
@@ -186,6 +196,7 @@ const RoomEntry: Component<{
 		<button
 			type="button"
 			onClick={props.onClick}
+			data-room-id={props.room.roomId}
 			class={`flex w-full items-center gap-2 rounded px-3 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover ${
 				props.isSelected
 					? "bg-surface-3 text-text-primary"
@@ -218,18 +229,14 @@ const RoomEntry: Component<{
 				</div>
 			</div>
 
-			{/* Unread badge — hidden when muted */}
-			<Show when={props.room.unreadCount > 0 && !props.isMuted}>
-				<span
-					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-						props.room.highlightCount > 0 ? "bg-danger" : "bg-indicator"
-					}`}
-					role="status"
-					aria-label={`${props.room.unreadCount} unread${props.room.highlightCount > 0 ? `, ${props.room.highlightCount} highlighted` : ""}`}
-				>
-					{props.room.unreadCount > 99 ? "99+" : props.room.unreadCount}
-				</span>
-			</Show>
+			{/* Numeric badge hidden when muted; the marked-unread dot still
+				shows - it's an explicit user action, not room noise. */}
+			<UnreadBadge
+				unread={props.isMuted ? 0 : props.room.unreadCount}
+				highlight={props.isMuted ? 0 : props.room.highlightCount}
+				markedUnread={props.room.markedUnread}
+				class="shrink-0"
+			/>
 		</button>
 	);
 };
@@ -320,7 +327,7 @@ const KnockEntry: Component<{
     the current list. */
 const SubspaceEntry: Component<{
 	space: RoomSummary;
-	unreadRollup: () => { unread: number; highlight: number };
+	unreadRollup: () => UnreadRollup;
 	onClick: () => void;
 }> = (props) => {
 	// Memoized so the subtree walk runs once per summaries change, not
@@ -338,17 +345,12 @@ const SubspaceEntry: Component<{
 					{props.space.name.trim() || "Unnamed space"}
 				</span>
 			</div>
-			<Show when={rollup().unread > 0}>
-				<span
-					class={`flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-text-primary ${
-						rollup().highlight > 0 ? "bg-danger" : "bg-indicator"
-					}`}
-					role="status"
-					aria-label={`${rollup().unread} unread${rollup().highlight > 0 ? `, ${rollup().highlight} highlighted` : ""}`}
-				>
-					{rollup().unread > 99 ? "99+" : rollup().unread}
-				</span>
-			</Show>
+			<UnreadBadge
+				unread={rollup().unread}
+				highlight={rollup().highlight}
+				markedUnread={rollup().markedUnread}
+				class="shrink-0"
+			/>
 		</button>
 	);
 };
@@ -362,7 +364,8 @@ interface RoomListProps {
 }
 
 const RoomList: Component<RoomListProps> = (props) => {
-	const { client, summaries } = useClient();
+	const clientCtx = useClient();
+	const { client, summaries } = clientCtx;
 	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
 
@@ -549,6 +552,46 @@ const RoomList: Component<RoomListProps> = (props) => {
 			}
 		}
 		return out;
+	});
+
+	// Single hoisted context menu for every room row (one Kobalte menu
+	// instance instead of one per row - per-row menus cost ~30 reactive
+	// nodes each, against the repo's 16ms interaction budget in a
+	// several-hundred-room space). The capture listener below aims it at
+	// the pressed row; a press outside any room row disables the trigger,
+	// falling through to the NATIVE context menu. On a room row the menu
+	// always opens - non-actionable items render disabled (Discord's
+	// grayed-out treatment), which keeps the trigger logic item-agnostic
+	// as more row actions arrive.
+	const [menuTarget, setMenuTarget] = createSignal<string | null>(null);
+	const menuDisabled = (): boolean => menuTarget() === null;
+	// One capture-phase listener aims the menu: it runs before Kobalte's
+	// trigger logic reads `disabled`, and covers every path that can open
+	// the menu (mouse right-click and touch long-press start at
+	// pointerdown; the keyboard Menu key fires contextmenu with no
+	// preceding pointerdown). A press outside any room row aims at null.
+	// Manual listeners because Solid JSX has no capture modifier that
+	// survives Kobalte's polymorphic prop spread.
+	let menuRegionEl: HTMLElement | undefined;
+	onMount(() => {
+		const el = menuRegionEl;
+		if (!el) return;
+		const aim = (e: Event): void => {
+			const row = (e.target as Element | null)?.closest?.("[data-room-id]");
+			setMenuTarget(row?.getAttribute("data-room-id") ?? null);
+		};
+		// Mouse opens via the contextmenu path, so pointerdown aiming is
+		// only needed for touch/pen long-press - skip the closest() walk on
+		// every ordinary left-click.
+		const aimPress = (e: PointerEvent): void => {
+			if (e.pointerType !== "mouse") aim(e);
+		};
+		el.addEventListener("pointerdown", aimPress, true);
+		el.addEventListener("contextmenu", aim, true);
+		onCleanup(() => {
+			el.removeEventListener("pointerdown", aimPress, true);
+			el.removeEventListener("contextmenu", aim, true);
+		});
 	});
 
 	const renderRoom = (room: RoomSummary): JSX.Element => (
@@ -752,77 +795,112 @@ const RoomList: Component<RoomListProps> = (props) => {
 				Crossing the threshold swaps scroll containers, so scroll position
 				resets - an accepted edge (it only happens at exactly the boundary
 				count, and VirtualList must own its scroller). */}
-			<Show
-				when={isHome() && homeItems().length > VIRTUALIZE_THRESHOLD}
-				fallback={
-					<div class="flex-1 overflow-y-auto p-1">
-						{/* Space the user is only invited to: no authoritative
-							child list exists, so show the accept/decline panel
-							instead of rooms + Discover. Keyed so in-flight/error
-							state can't leak across a switch between two invited
-							spaces. */}
-						<Show when={!isHome() && spaceMembership() === "invite"}>
-							<Show when={params.spaceId} keyed>
-								{(sid) => (
-									<SpaceInvitePanel
-										spaceId={sid}
-										onDeclined={() => navigate("/home")}
-									/>
-								)}
-							</Show>
-						</Show>
-
-						<Show when={!isHome() && spaceMembership() !== "invite"}>
-							<Show when={spaceInvites().length > 0}>
-								<div class="h-9 px-3 pb-1 pt-2">
-									<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
-										Invites
-									</span>
-								</div>
-								<For each={spaceInvites()}>{(room) => renderInvite(room)}</For>
-							</Show>
-							<Show when={spaceKnocks().length > 0}>
-								<div class="h-9 px-3 pb-1 pt-2">
-									<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
-										Requests
-									</span>
-								</div>
-								<For each={spaceKnocks()}>{(room) => renderKnock(room)}</For>
-							</Show>
-							<For each={spaceSubspaces()}>
-								{(space) => renderSubspace(space)}
-							</For>
-							<For each={spaceRooms()}>{(room) => renderRoom(room)}</For>
-							<SpaceDiscoverList
-								spaceId={() => params.spaceId}
-								hasListedRooms={() =>
-									spaceRooms().length > 0 ||
-									spaceSubspaces().length > 0 ||
-									spaceInvites().length > 0 ||
-									spaceKnocks().length > 0
-								}
-							/>
-						</Show>
-
-						<Show when={isHome()}>
-							<For each={homeItems()}>{(item) => renderHomeItem(item)}</For>
-							<Show when={homeItems().length === 0}>
-								<p class="px-3 py-4 text-center text-xs text-text-faint">
-									No rooms yet
-								</p>
-							</Show>
-						</Show>
-					</div>
-				}
-			>
-				<VirtualList
-					each={homeItems()}
-					rowHeight={homeRowHeight()}
-					class="flex-1 overflow-y-auto p-1"
+			<ContextMenu>
+				{/* A press outside a room row leaves the target null (the
+					capture-phase reset above) and the disabled trigger falls
+					through to the NATIVE context menu - Kobalte skips
+					preventDefault when disabled. */}
+				<ContextMenu.Trigger
+					ref={(el: HTMLElement) => {
+						menuRegionEl = el;
+					}}
+					class="flex min-h-0 flex-1 flex-col"
+					disabled={menuDisabled()}
 				>
-					{(item) => renderHomeItem(item)}
-				</VirtualList>
-			</Show>
+					<Show
+						when={isHome() && homeItems().length > VIRTUALIZE_THRESHOLD}
+						fallback={
+							<div class="flex-1 overflow-y-auto p-1">
+								{/* Space the user is only invited to: no authoritative
+									child list exists, so show the accept/decline panel
+									instead of rooms + Discover. Keyed so in-flight/error
+									state can't leak across a switch between two invited
+									spaces. */}
+								<Show when={!isHome() && spaceMembership() === "invite"}>
+									<Show when={params.spaceId} keyed>
+										{(sid) => (
+											<SpaceInvitePanel
+												spaceId={sid}
+												onDeclined={() => navigate("/home")}
+											/>
+										)}
+									</Show>
+								</Show>
+
+								<Show when={!isHome() && spaceMembership() !== "invite"}>
+									<Show when={spaceInvites().length > 0}>
+										<div class="h-9 px-3 pb-1 pt-2">
+											<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
+												Invites
+											</span>
+										</div>
+										<For each={spaceInvites()}>
+											{(room) => renderInvite(room)}
+										</For>
+									</Show>
+									<Show when={spaceKnocks().length > 0}>
+										<div class="h-9 px-3 pb-1 pt-2">
+											<span class="text-xs font-semibold uppercase tracking-wider text-text-disabled">
+												Requests
+											</span>
+										</div>
+										<For each={spaceKnocks()}>
+											{(room) => renderKnock(room)}
+										</For>
+									</Show>
+									<For each={spaceSubspaces()}>
+										{(space) => renderSubspace(space)}
+									</For>
+									<For each={spaceRooms()}>{(room) => renderRoom(room)}</For>
+									<SpaceDiscoverList
+										spaceId={() => params.spaceId}
+										hasListedRooms={() =>
+											spaceRooms().length > 0 ||
+											spaceSubspaces().length > 0 ||
+											spaceInvites().length > 0 ||
+											spaceKnocks().length > 0
+										}
+									/>
+								</Show>
+
+								<Show when={isHome()}>
+									<For each={homeItems()}>{(item) => renderHomeItem(item)}</For>
+									<Show when={homeItems().length === 0}>
+										<p class="px-3 py-4 text-center text-xs text-text-faint">
+											No rooms yet
+										</p>
+									</Show>
+								</Show>
+							</div>
+						}
+					>
+						<VirtualList
+							each={homeItems()}
+							rowHeight={homeRowHeight()}
+							class="flex-1 overflow-y-auto p-1"
+						>
+							{(item) => renderHomeItem(item)}
+						</VirtualList>
+					</Show>
+				</ContextMenu.Trigger>
+				<ContextMenu.Portal>
+					<ContextMenu.Content class={menuContentClass}>
+						<ContextMenu.Item
+							class={`${menuItemClass} ${menuItemDisabledClass}`}
+							disabled={(() => {
+								const target = menuTarget();
+								return !target || !canMarkRoomUnread(summaries[target]);
+							})()}
+							onSelect={() => {
+								const target = menuTarget();
+								if (target) markRoomUnread(clientCtx, target);
+							}}
+						>
+							Mark as unread
+						</ContextMenu.Item>
+					</ContextMenu.Content>
+				</ContextMenu.Portal>
+			</ContextMenu>
 
 			<CreateRoomDialog
 				client={client}
