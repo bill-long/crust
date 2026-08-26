@@ -145,9 +145,13 @@ export function mentionUserIds(
 
 /**
  * Set `content["m.mentions"]` from the typed mentions plus the reply target's
- * author (see {@link mentionUserIds}) and the `@room` everyone-mention flag,
- * or remove the field when there is nothing to carry. Shared by every send
- * path so the `m.mentions` shape and the reply-mention rule live in exactly
+ * author (see {@link mentionUserIds}) and the `@room` everyone-mention flag.
+ * ALWAYS attached - an empty object when there is nothing to carry - per
+ * the intentional-mentions spec: the mere presence of `m.mentions` disables
+ * the legacy body-matching push rules (`.m.rule.roomnotif`,
+ * `.m.rule.contains_display_name`), so omitting it would let a hand-typed
+ * "@room" (or an edit whose body keeps one) ping the whole room. Shared by
+ * every send path so the shape and the reply-mention rule live in exactly
  * one place. Per spec, `room` is emitted only as `true` (never `false`) and
  * the "@room" text itself stays plain - no pill, no HTML.
  */
@@ -162,11 +166,7 @@ export function applyMentions(
 	const mentionsContent: Record<string, unknown> = {};
 	if (userIds.length > 0) mentionsContent.user_ids = userIds;
 	if (roomMention) mentionsContent.room = true;
-	if (Object.keys(mentionsContent).length > 0) {
-		content["m.mentions"] = mentionsContent;
-	} else {
-		delete content["m.mentions"];
-	}
+	content["m.mentions"] = mentionsContent;
 }
 
 /**

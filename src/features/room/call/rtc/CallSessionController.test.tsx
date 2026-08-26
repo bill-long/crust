@@ -179,6 +179,7 @@ function renderController(opts?: { encrypted?: boolean }): {
 				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
+				optimisticallySetRoomTag: () => {},
 			}}
 		>
 			<CallSessionController

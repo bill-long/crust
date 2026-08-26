@@ -383,6 +383,7 @@ describe("PollMessage event card (#418)", () => {
 					optimisticallyMarkKnocked: () => {},
 					optimisticallyMarkLeft: () => {},
 					optimisticallySetMarkedUnread: () => {},
+					optimisticallySetRoomTag: () => {},
 				}}
 			>
 				<PollMessage

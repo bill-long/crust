@@ -59,6 +59,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft,
 				optimisticallySetMarkedUnread: vi.fn(),
+				optimisticallySetRoomTag: vi.fn(),
 			}}
 		>
 			{props.children}

@@ -1,15 +1,16 @@
 import { EventType, type MatrixClient, type Room } from "matrix-js-sdk";
 import { type Accessor, createEffect, untrack } from "solid-js";
 import { reportError } from "../lib/reportError";
-import { enqueueKeyedWrite } from "../lib/writeQueue";
+import { enqueueOwnerKeyedWrite } from "../lib/writeQueue";
 import type { RoomSummary, SummariesStore } from "./summaries";
 
 /** Stable account-data type for the marked-unread flag (MSC2867). */
 export const MARKED_UNREAD_TYPE = EventType.MarkedUnread;
 /**
  * Pre-stabilization type some clients still write; read as a fallback so a
- * flag set elsewhere isn't invisible here. Writes use the stable type only
- * (matching Element).
+ * flag set elsewhere isn't invisible here. Writes target the stable type,
+ * mirrored onto this one only when the room already carries it (see
+ * enqueueFlagWrite).
  */
 export const MARKED_UNREAD_TYPE_UNSTABLE = "com.famedly.marked_unread";
 
@@ -29,12 +30,21 @@ export function getRoomMarkedUnread(room: Room): boolean {
 
 /**
  * Whether "Mark as unread" is currently actionable for `summary`: only for
- * a room that is fully read and not already flagged. The single gate for
- * every surface that offers the action (the room-list context menu and the
- * room-pane overflow item), so the two can't disagree.
+ * a JOINED room (a room left on another device keeps its entry until sync
+ * prunes it, and flagging it would strand account data nothing renders)
+ * that shows as fully read and isn't already flagged. "Shows as" matches
+ * the row's badge exactly: a muted room's hidden count doesn't block the
+ * action - marking it unread is how the user makes a muted room visible.
+ * The single gate for every surface that offers the action (the room-list
+ * context menu and the room-pane overflow item), so they can't disagree.
  */
 export function canMarkRoomUnread(summary: RoomSummary | undefined): boolean {
-	return !!summary && summary.unreadCount === 0 && !summary.markedUnread;
+	return (
+		!!summary &&
+		summary.membership === "join" &&
+		!summary.markedUnread &&
+		(summary.unreadCount === 0 || summary.isMuted)
+	);
 }
 
 /**
@@ -63,16 +73,20 @@ function enqueueFlagWrite(
 	roomId: string,
 	unread: boolean,
 ): Promise<void> {
-	let chains = flagWriteChains.get(client);
-	if (!chains) {
-		chains = new Map();
-		flagWriteChains.set(client, chains);
-	}
-	return enqueueKeyedWrite(chains, roomId, () =>
-		client
-			.setRoomAccountData(roomId, MARKED_UNREAD_TYPE, { unread })
-			.then(() => {}),
-	);
+	return enqueueOwnerKeyedWrite(flagWriteChains, client, roomId, async () => {
+		await client.setRoomAccountData(roomId, MARKED_UNREAD_TYPE, { unread });
+		// Mirror onto the unstable type when the room carries one: with a
+		// stable-only write, the read precedence (stable boolean wins)
+		// would permanently mask every future unstable-only mark from a
+		// pre-stabilization client - Crust would clear its own view while
+		// that client's marks stay invisible forever.
+		if (client.getRoom(roomId)?.getAccountData(MARKED_UNREAD_TYPE_UNSTABLE)) {
+			const unstableKey = MARKED_UNREAD_TYPE_UNSTABLE as unknown as Parameters<
+				MatrixClient["setRoomAccountData"]
+			>[1];
+			await client.setRoomAccountData(roomId, unstableKey, { unread });
+		}
+	});
 }
 
 /**
@@ -184,6 +198,15 @@ export function useMarkedUnreadConsumer(
 		if (!ctx.summaries[rid]) return;
 		if (consumedLatch.get(ctx.client) === rid) return;
 		consumedLatch.set(ctx.client, rid);
-		untrack(() => clearRoomMarkedUnread(ctx, rid));
+		// Consume on a microtask: an entry created mid-/sync-batch (a
+		// timeline event precedes the batch's account data in the SDK's
+		// processing) would otherwise latch before the marked-unread flag
+		// lands a few statements later, leaving it unconsumed on the open
+		// room. The batch is synchronous, so by microtask time the flag is
+		// in. Re-check the route in case it changed before the flush.
+		queueMicrotask(() => {
+			if (roomId() !== rid) return;
+			untrack(() => clearRoomMarkedUnread(ctx, rid));
+		});
 	});
 }

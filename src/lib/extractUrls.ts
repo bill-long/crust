@@ -122,10 +122,12 @@ export function isPreviewableUrl(url: string): boolean {
  * from a plain-text body. Returns the body with those regions replaced
  * by spaces so URLs inside them aren't matched by `urlRegex`.
  *
- * Replacing with spaces (rather than empty string) preserves line/column
- * positions so any future caller that needs them stays correct.
+ * Replacing with spaces (rather than empty string) preserves positions -
+ * load-bearing for the mention reconcilers (`useMentions`), where an
+ * empty-string splice would fuse the surrounding text into phantom
+ * tokens ("@ro`x`om" reading as "@room").
  */
-function stripCodeRegions(text: string): string {
+export function stripCodeRegions(text: string): string {
 	return text.replace(/```[\s\S]*?```|`[^`\n]+`/g, (m) => " ".repeat(m.length));
 }
 

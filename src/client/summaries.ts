@@ -5,6 +5,7 @@ import {
 	type MatrixClient,
 	type MatrixEvent,
 	NotificationCountType,
+	PushRuleActionName,
 	type Room,
 	RoomEvent,
 	RoomStateEvent,
@@ -22,6 +23,11 @@ import {
 	MARKED_UNREAD_TYPE_UNSTABLE,
 } from "./markedUnread";
 import {
+	FAVOURITE_TAG,
+	getRoomTagState,
+	type SidebarRoomTag,
+} from "./roomTags";
+import {
 	createServerTimeTracker,
 	MATERIAL_OFFSET_CHANGE_MS,
 	type ServerTimeTracker,
@@ -36,6 +42,16 @@ export interface RoomSummary {
 	highlightCount: number;
 	/** Explicitly marked unread by the user (MSC2867 `m.marked_unread`). */
 	markedUnread: boolean;
+	/** Tagged `m.favourite` - surfaces in the Home list's Favorites section. */
+	isFavourite: boolean;
+	/** Tagged `m.lowpriority` - sinks to the Home list's Low priority section. */
+	isLowPriority: boolean;
+	/**
+	 * A `crust.mute.<roomId>` dont-notify push-rule override is active for
+	 * this room. Kept on the summary so every consumer (row badge, name
+	 * dimming, the mark-as-unread gate) shares one definition of "muted".
+	 */
+	isMuted: boolean;
 	membership: string;
 	isEncrypted: boolean;
 	isDirect: boolean;
@@ -258,6 +274,7 @@ function buildSummary(
 	room: Room,
 	baseUrl: string,
 	dmRoomIds: Set<string>,
+	mutedRoomIds: Set<string>,
 	now: number,
 ): RoomSummary {
 	// Find the most recent displayable event for the lastMessage preview
@@ -286,6 +303,9 @@ function buildSummary(
 			NotificationCountType.Highlight,
 		),
 		markedUnread: getRoomMarkedUnread(room),
+		isFavourite: getRoomTagState(room).favourite,
+		isLowPriority: getRoomTagState(room).lowPriority,
+		isMuted: mutedRoomIds.has(room.roomId),
 		membership: room.getMyMembership(),
 		isEncrypted: room.hasEncryptionStateEvent(),
 		isDirect: dmRoomIds.has(room.roomId),
@@ -294,6 +314,28 @@ function buildSummary(
 		callActive: isCallActive(room, now),
 		children: isSpace ? getSpaceChildren(room) : [],
 	};
+}
+
+/**
+ * Room ids with an active `crust.mute.<roomId>` dont-notify push-rule
+ * override - the app's mute mechanism (see RoomNotificationMenu). One
+ * parse per push-rules change; consumers read the per-room boolean off
+ * the summary.
+ */
+function getMutedRoomIds(client: MatrixClient): Set<string> {
+	const muted = new Set<string>();
+	const overrides = client.pushRules?.global?.override;
+	if (!overrides) return muted;
+	for (const r of overrides) {
+		if (r.enabled === false) continue;
+		if (
+			r.rule_id.startsWith("crust.mute.") &&
+			r.actions.some((a) => a === PushRuleActionName.DontNotify)
+		) {
+			muted.add(r.rule_id.slice("crust.mute.".length));
+		}
+	}
+	return muted;
 }
 
 function getDmRoomIds(client: MatrixClient): Set<string> {
@@ -396,12 +438,18 @@ export function createSummariesStore(client: MatrixClient): {
 	optimisticallyMarkKnocked: (roomId: string, info: OptimisticJoinInfo) => void;
 	optimisticallyMarkLeft: (roomId: string) => void;
 	optimisticallySetMarkedUnread: (roomId: string, value: boolean) => void;
+	optimisticallySetRoomTag: (
+		roomId: string,
+		tag: SidebarRoomTag,
+		value: boolean,
+	) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const baseUrl = client.getHomeserverUrl();
 	const serverTime: ServerTimeTracker = createServerTimeTracker();
 
 	let dmRoomIds = new Set<string>();
+	let mutedRoomIds = new Set<string>();
 
 	// Per-room expiry timers. When `callActive` is true for a room, we
 	// schedule a setTimeout that fires shortly after the earliest known
@@ -497,6 +545,9 @@ export function createSummariesStore(client: MatrixClient): {
 					unreadCount: 0,
 					highlightCount: 0,
 					markedUnread: false,
+					isFavourite: false,
+					isLowPriority: false,
+					isMuted: false,
 					membership: "join",
 					isEncrypted: false,
 					isDirect: info.isDirect === true,
@@ -545,6 +596,9 @@ export function createSummariesStore(client: MatrixClient): {
 					unreadCount: 0,
 					highlightCount: 0,
 					markedUnread: false,
+					isFavourite: false,
+					isLowPriority: false,
+					isMuted: false,
 					membership: "knock",
 					isEncrypted: false,
 					isDirect: false,
@@ -591,6 +645,25 @@ export function createSummariesStore(client: MatrixClient): {
 		setSummaries(roomId, "markedUnread", value);
 	}
 
+	/**
+	 * Optimistically flip a sidebar tag flag so the row moves section the
+	 * moment the user toggles it, without waiting for the m.tag write. The
+	 * authoritative update (`onRoomTags`) confirms or corrects it when
+	 * /sync delivers the tag event. No-op when the room has no entry.
+	 */
+	function optimisticallySetRoomTag(
+		roomId: string,
+		tag: SidebarRoomTag,
+		value: boolean,
+	): void {
+		if (!summaries[roomId]) return;
+		setSummaries(
+			roomId,
+			tag === FAVOURITE_TAG ? "isFavourite" : "isLowPriority",
+			value,
+		);
+	}
+
 	function upsertRoom(room: Room): void {
 		setSummaries(
 			produce((s) => {
@@ -598,6 +671,7 @@ export function createSummariesStore(client: MatrixClient): {
 					room,
 					baseUrl,
 					dmRoomIds,
+					mutedRoomIds,
 					serverTime.now(),
 				);
 			}),
@@ -757,6 +831,16 @@ export function createSummariesStore(client: MatrixClient): {
 		setSummaries(room.roomId, "markedUnread", getRoomMarkedUnread(room));
 	}
 
+	function onRoomTags(_event: MatrixEvent, room: Room): void {
+		if (!summaries[room.roomId]) {
+			upsertRoom(room);
+			return;
+		}
+		const tags = getRoomTagState(room);
+		setSummaries(room.roomId, "isFavourite", tags.favourite);
+		setSummaries(room.roomId, "isLowPriority", tags.lowPriority);
+	}
+
 	function onMyMembership(room: Room): void {
 		if (!summaries[room.roomId]) {
 			upsertRoom(room);
@@ -766,7 +850,19 @@ export function createSummariesStore(client: MatrixClient): {
 	}
 
 	function onAccountData(event: MatrixEvent): void {
-		if (event.getType() !== EventType.Direct) return;
+		const type = event.getType();
+		if (type === "m.push_rules") {
+			mutedRoomIds = getMutedRoomIds(client);
+			setSummaries(
+				produce((s) => {
+					for (const roomId of Object.keys(s)) {
+						s[roomId].isMuted = mutedRoomIds.has(roomId);
+					}
+				}),
+			);
+			return;
+		}
+		if (type !== EventType.Direct) return;
 		dmRoomIds = getDmRoomIds(client);
 		setSummaries(
 			produce((s) => {
@@ -834,6 +930,7 @@ export function createSummariesStore(client: MatrixClient): {
 
 	function init(): void {
 		dmRoomIds = getDmRoomIds(client);
+		mutedRoomIds = getMutedRoomIds(client);
 
 		// Seed the server-time tracker from existing room state before
 		// building any room summaries, so `callActive` is computed against
@@ -867,6 +964,7 @@ export function createSummariesStore(client: MatrixClient): {
 		client.on(RoomEvent.Receipt, onReceipt);
 		client.on(RoomEvent.MyMembership, onMyMembership);
 		client.on(RoomEvent.AccountData, onRoomAccountData);
+		client.on(RoomEvent.Tags, onRoomTags);
 		client.on(ClientEvent.AccountData, onAccountData);
 		client.on(RoomStateEvent.Events, onRoomStateEvents);
 	}
@@ -881,6 +979,7 @@ export function createSummariesStore(client: MatrixClient): {
 		client.off(RoomEvent.Receipt, onReceipt);
 		client.off(RoomEvent.MyMembership, onMyMembership);
 		client.off(RoomEvent.AccountData, onRoomAccountData);
+		client.off(RoomEvent.Tags, onRoomTags);
 		client.off(ClientEvent.AccountData, onAccountData);
 		client.off(RoomStateEvent.Events, onRoomStateEvents);
 	}
@@ -894,5 +993,6 @@ export function createSummariesStore(client: MatrixClient): {
 		optimisticallyMarkKnocked,
 		optimisticallyMarkLeft,
 		optimisticallySetMarkedUnread,
+		optimisticallySetRoomTag,
 	};
 }

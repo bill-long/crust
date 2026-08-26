@@ -49,3 +49,26 @@ export function enqueueKeyedWrite<K>(
 	});
 	return next;
 }
+
+/**
+ * `enqueueKeyedWrite` with lazily-created per-owner chain maps: chains
+ * live in a WeakMap keyed by an owner object (typically a MatrixClient,
+ * so a logout/login cycle can't chain onto a dead client's writes and the
+ * old client's state is collectable). This is the one home of the
+ * optimistic account-data write discipline - serialize per key, converge
+ * (never blind-invert) on failure - shared by the marked-unread and room
+ * tag layers.
+ */
+export function enqueueOwnerKeyedWrite<O extends object, K>(
+	chainsByOwner: WeakMap<O, Map<K, Promise<void>>>,
+	owner: O,
+	key: K,
+	task: () => Promise<void>,
+): Promise<void> {
+	let chains = chainsByOwner.get(owner);
+	if (!chains) {
+		chains = new Map();
+		chainsByOwner.set(owner, chains);
+	}
+	return enqueueKeyedWrite(chains, key, task);
+}

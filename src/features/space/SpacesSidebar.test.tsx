@@ -46,6 +46,9 @@ function makeSpaceSummary(roomId: string, name: string): RoomSummary {
 		unreadCount: 0,
 		highlightCount: 0,
 		markedUnread: false,
+		isFavourite: false,
+		isLowPriority: false,
+		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -65,6 +68,9 @@ function makeRoomSummary(roomId: string, name: string): RoomSummary {
 		unreadCount: 0,
 		highlightCount: 0,
 		markedUnread: false,
+		isFavourite: false,
+		isLowPriority: false,
+		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -109,6 +115,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
 				optimisticallySetMarkedUnread: vi.fn(),
+				optimisticallySetRoomTag: vi.fn(),
 			}}
 		>
 			{props.children}
