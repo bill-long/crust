@@ -271,6 +271,10 @@ export function createMockRoom(
 		},
 		maySendStateEvent: (type: string, _userId: string) =>
 			canSendStateByType.has(type) ? !!canSendStateByType.get(type) : true,
+		// Power-level gate for @room notifications (useMentions). Constant
+		// false: the @room candidate never appears in mock-backed tests
+		// (useMentions' own tests use a local mock to exercise the true case).
+		mayTriggerNotifOfType: (_notifLevelKey: string, _userId: string) => false,
 		// Read by the SDK Poll model's validateEndEvent for non-creator
 		// poll-end events.
 		maySendRedactionForEvent: (_event: unknown, _userId: string) =>

@@ -51,11 +51,24 @@ export function buildReplyFallback(
 	return { bodyPrefix, htmlPrefix };
 }
 
+/** The edit target's own `m.mentions`, for the newly-added diff below. */
+export interface PrevMentions {
+	userIds: string[];
+	room: boolean;
+}
+
 /**
  * Build the content for an `m.replace` edit of `targetEventId`. The wrapper
  * body carries the `* ` fallback prefix (Matrix convention) while `m.new_content`
  * carries the clean replacement (with its own format / mentions). `msgtype`
  * mirrors the edit target's so editing an `/me` emote keeps it an emote.
+ *
+ * Mentions land in two places, per the intentional-mentions spec: the full
+ * current set goes on `m.new_content` (the replacement's rendering state),
+ * while the TOP-LEVEL content carries only the mentions `prevMentions`
+ * didn't already have - push rules evaluate the top level, so this is what
+ * notifies, and restating existing mentions there would re-ping everyone
+ * on every typo fix (Element's attachMentions does the same diff).
  */
 export function buildEditContent(
 	newBody: string,
@@ -63,6 +76,8 @@ export function buildEditContent(
 	mentions: Mention[],
 	targetEventId: string,
 	msgtype: "m.text" | "m.emote" = "m.text",
+	roomMention = false,
+	prevMentions: PrevMentions = { userIds: [], room: false },
 ): Record<string, unknown> {
 	const newContent: Record<string, unknown> = {
 		msgtype,
@@ -72,11 +87,10 @@ export function buildEditContent(
 		newContent.format = "org.matrix.custom.html";
 		newContent.formatted_body = formattedBody;
 	}
-	if (mentions.length > 0) {
-		newContent["m.mentions"] = {
-			user_ids: mentions.map((m) => m.userId),
-		};
-	}
+	// No reply target on an edit (the relation is m.replace), so the
+	// reply-author merge inside applyMentions is inert; myUserId is only
+	// read on that path.
+	applyMentions(newContent, mentions, null, "", roomMention);
 
 	const content: Record<string, unknown> = {
 		msgtype,
@@ -91,6 +105,16 @@ export function buildEditContent(
 		content.format = "org.matrix.custom.html";
 		content.formatted_body = `* ${formattedBody}`;
 	}
+	const addedMentions = mentions.filter(
+		(m) => !prevMentions.userIds.includes(m.userId),
+	);
+	applyMentions(
+		content,
+		addedMentions,
+		null,
+		"",
+		roomMention && !prevMentions.room,
+	);
 	return content;
 }
 
@@ -121,19 +145,25 @@ export function mentionUserIds(
 
 /**
  * Set `content["m.mentions"]` from the typed mentions plus the reply target's
- * author (see {@link mentionUserIds}), or remove the field when there are none.
- * Shared by every send path so the `m.mentions` shape and the reply-mention
- * rule live in exactly one place.
+ * author (see {@link mentionUserIds}) and the `@room` everyone-mention flag,
+ * or remove the field when there is nothing to carry. Shared by every send
+ * path so the `m.mentions` shape and the reply-mention rule live in exactly
+ * one place. Per spec, `room` is emitted only as `true` (never `false`) and
+ * the "@room" text itself stays plain - no pill, no HTML.
  */
 export function applyMentions(
 	content: Record<string, unknown>,
 	mentions: Mention[],
 	replyTo: TimelineEvent | null,
 	myUserId: string,
+	roomMention = false,
 ): void {
 	const userIds = mentionUserIds(mentions, replyTo, myUserId);
-	if (userIds.length > 0) {
-		content["m.mentions"] = { user_ids: userIds };
+	const mentionsContent: Record<string, unknown> = {};
+	if (userIds.length > 0) mentionsContent.user_ids = userIds;
+	if (roomMention) mentionsContent.room = true;
+	if (Object.keys(mentionsContent).length > 0) {
+		content["m.mentions"] = mentionsContent;
 	} else {
 		delete content["m.mentions"];
 	}
@@ -153,6 +183,7 @@ export function buildTextMessageContent(
 	roomId: string,
 	myUserId: string,
 	msgtype: "m.text" | "m.emote" = "m.text",
+	roomMention = false,
 ): Record<string, unknown> {
 	const content: Record<string, unknown> = {
 		msgtype,
@@ -162,7 +193,7 @@ export function buildTextMessageContent(
 		content.format = "org.matrix.custom.html";
 		content.formatted_body = formattedBody;
 	}
-	applyMentions(content, mentions, replyTo, myUserId);
+	applyMentions(content, mentions, replyTo, myUserId, roomMention);
 
 	// Add reply metadata + fallback if replying.
 	if (replyTo) {
