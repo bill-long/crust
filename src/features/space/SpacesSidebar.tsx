@@ -321,6 +321,12 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 			(s) => (spaceTree().depths.get(s.roomId) ?? 0) === 0,
 		),
 	);
+	// O(1) per-tile index lookups (every tile's menu-item state reads its
+	// root position on each tree rebuild - a per-tile findIndex would make
+	// that O(roots x spaces)).
+	const rootIndexById = createMemo(
+		() => new Map(rootSpaces().map((r, i) => [r.roomId, i])),
+	);
 	const isRootId = (roomId: string): boolean =>
 		(spaceTree().depths.get(roomId) ?? 0) === 0;
 
@@ -335,21 +341,25 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 
 	/** Menu path: move a root space one slot up or down. */
 	const moveRoot = (spaceId: string, delta: -1 | 1): void => {
-		const roots = rootSpaces();
-		const from = roots.findIndex((r) => r.roomId === spaceId);
+		const from = rootIndexById().get(spaceId) ?? -1;
 		const to = from + delta;
-		if (from === -1 || to < 0 || to >= roots.length) return;
+		if (from === -1 || to < 0 || to >= rootSpaces().length) return;
 		performMove(from, to);
 	};
 
 	// Drag-reorder state: which root tile is being dragged, and where the
 	// drop would land (an insertion edge on another root tile). Cleared on
 	// drop and on dragend (which also covers drags cancelled off-rail).
+	// Value-equality on the drop target so a pointer held over one row
+	// (dragover fires continuously) doesn't rerun every row's indicator
+	// condition per event.
 	const [draggedSpaceId, setDraggedSpaceId] = createSignal<string | null>(null);
 	const [dropTarget, setDropTarget] = createSignal<{
 		roomId: string;
 		edge: "before" | "after";
-	} | null>(null);
+	} | null>(null, {
+		equals: (a, b) => a?.roomId === b?.roomId && a?.edge === b?.edge,
+	});
 
 	const onRowDragOver = (space: RoomSummary, e: DragEvent): void => {
 		const dragged = draggedSpaceId();
@@ -368,16 +378,26 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 		setDropTarget({ roomId: space.roomId, edge });
 	};
 
-	const onRowDrop = (space: RoomSummary, e: DragEvent): void => {
+	// Rail-level dragover/drop (not per-row): the rows sit in a gap-1
+	// column, and a release in a gap, on the divider, or below the list
+	// would otherwise be silently disallowed while the insertion line
+	// still advertises a drop point. The rail accepts the drop wherever
+	// it lands and honors the current indicator.
+	const onRailDragOver = (e: DragEvent): void => {
+		if (!draggedSpaceId() || !dropTarget()) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+	};
+
+	const onRailDrop = (e: DragEvent): void => {
 		e.preventDefault();
 		const dragged = draggedSpaceId();
 		const target = dropTarget();
 		setDraggedSpaceId(null);
 		setDropTarget(null);
-		if (!dragged || !target || target.roomId !== space.roomId) return;
-		const roots = rootSpaces();
-		const from = roots.findIndex((r) => r.roomId === dragged);
-		const targetIdx = roots.findIndex((r) => r.roomId === space.roomId);
+		if (!dragged || !target) return;
+		const from = rootIndexById().get(dragged) ?? -1;
+		const targetIdx = rootIndexById().get(target.roomId) ?? -1;
 		if (from === -1 || targetIdx === -1) return;
 		// Convert the insertion edge into a post-removal index (moveElement
 		// removes the dragged item first, shifting later positions left).
@@ -404,7 +424,11 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 			{/* Top: scrolling list of Home + spaces. flex-1 + min-h-0 lets it
 			    shrink below content height so the footer stays visible and
 			    the inner list scrolls instead of pushing the footer off. */}
-			<div class="flex min-h-0 flex-1 flex-col items-stretch gap-1 overflow-y-auto">
+			<div
+				class="flex min-h-0 flex-1 flex-col items-stretch gap-1 overflow-y-auto"
+				on:dragover={onRailDragOver}
+				on:drop={onRailDrop}
+			>
 				{/* Home button */}
 				<SidebarItem selected={homeSelected}>
 					<button
@@ -489,7 +513,6 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 								}
 							}}
 							on:dragover={(e: DragEvent) => onRowDragOver(space, e)}
-							on:drop={(e: DragEvent) => onRowDrop(space, e)}
 							on:dragend={() => {
 								setDraggedSpaceId(null);
 								setDropTarget(null);
@@ -508,10 +531,8 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 								brokenAvatars={brokenAvatars}
 								depth={() => spaceTree().depths.get(space.roomId) ?? 0}
 								rootPosition={() => {
-									const idx = rootSpaces().findIndex(
-										(r) => r.roomId === space.roomId,
-									);
-									return idx === -1
+									const idx = rootIndexById().get(space.roomId);
+									return idx === undefined
 										? null
 										: { index: idx, count: rootSpaces().length };
 								}}

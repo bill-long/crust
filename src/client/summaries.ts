@@ -709,6 +709,13 @@ export function createSummariesStore(client: MatrixClient): {
 	}
 
 	function upsertRoom(room: Room): void {
+		// A room absent from the SDK store is forgotten (forgetRoomLocally
+		// removed it): drop straggler events from the still-live Room
+		// object's re-emitters instead of resurrecting the entry the
+		// DeleteRoom purge just removed. The leave path never hits this
+		// (its entry persists with membership "leave"); only forget
+		// deletes entries for rooms that can still emit.
+		if (!client.getRoom(room.roomId)) return;
 		setSummaries(
 			produce((s) => {
 				s[room.roomId] = buildSummary(

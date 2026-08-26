@@ -23,7 +23,7 @@ const VALID_ORDER = new RegExp(`^[\\x20-\\x7E]{0,${MAX_ORDER_LEN}}$`);
 
 /**
  * The validated `order` string for a space, or null when absent/malformed
- * (non-string, empty, over-long, or non-printable-ASCII content reads as
+ * (non-string, over-long, or non-printable-ASCII content reads as
  * unordered, matching Element's `validOrder`).
  */
 export function getSpaceOrder(room: Room): string | null {

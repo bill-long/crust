@@ -6,14 +6,13 @@ import {
 	waitFor,
 } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
-import { createSignal, type ParentComponent } from "solid-js";
+import { createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppSyncState, CryptoState } from "../../../client/client";
-import { ClientContext } from "../../../client/client";
 import type { SummariesStore } from "../../../client/summaries";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { makeSummary } from "../../../test/summaryFixtures";
+import { TestClientProvider } from "../../../test/TimelineHarness";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -28,47 +27,6 @@ import {
 	RoomSettingsOverlay,
 	type RoomSettingsTab,
 } from "./RoomSettingsOverlay";
-
-/** Minimal ClientContext for the Advanced tab's summaries-backed reads. */
-const Wrapper: ParentComponent<{
-	client: ReturnType<typeof createMockClient>;
-	summaries: SummariesStore;
-}> = (props) => {
-	const [syncState] = createSignal<AppSyncState>("live");
-	const [cryptoState] = createSignal<CryptoState>("ready");
-	return (
-		<ClientContext.Provider
-			value={{
-				client: props.client as unknown as MatrixClient,
-				syncState,
-				cryptoState,
-				summaries: props.summaries,
-				cryptoStatus: {
-					crossSigningReady: () => true,
-					thisDeviceVerified: () => true,
-					backupVersion: () => null,
-					backupOnServer: () => false,
-					backupTrusted: () => true,
-					secretStorageReady: () => true,
-					crossSigningStatus: () => undefined,
-					refresh: async () => {},
-				},
-				requestRecoveryKey: async () => null,
-				setRecoveryKeyResolver: () => {},
-				clearSecretStorageCache: () => {},
-				optimisticallyMarkJoined: () => {},
-				optimisticallyMarkKnocked: () => {},
-				optimisticallyMarkLeft: () => {},
-				optimisticallySetMarkedUnread: () => {},
-				optimisticallySetRoomTag: () => {},
-				optimisticallySetSpaceOrder: () => {},
-				forgetRoomLocally: () => {},
-			}}
-		>
-			{props.children}
-		</ClientContext.Provider>
-	);
-};
 
 function setup(
 	active: RoomSettingsTab = "general",
@@ -101,7 +59,7 @@ function setup(
 		const [activeTab, setTab] = createSignal(active);
 		setActive = setTab;
 		return (
-			<Wrapper client={client} summaries={summaries}>
+			<TestClientProvider client={client} summaries={summaries}>
 				<RoomSettingsOverlay
 					client={client as unknown as MatrixClient}
 					roomId="!room:example.com"
@@ -111,7 +69,7 @@ function setup(
 					isSpace={isSpace}
 					onForgot={options?.onForgot}
 				/>
-			</Wrapper>
+			</TestClientProvider>
 		);
 	});
 

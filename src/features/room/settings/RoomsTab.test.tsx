@@ -6,16 +6,13 @@ import {
 	within,
 } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
-import { createSignal, type ParentComponent } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AppSyncState, CryptoState } from "../../../client/client";
-import { ClientContext } from "../../../client/client";
 import {
 	createSummariesStore,
 	type RoomSummary,
-	type SummariesStore,
 } from "../../../client/summaries";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { TestClientProvider } from "../../../test/TimelineHarness";
 import { RoomsTab } from "./RoomsTab";
 
 vi.mock("solid-refresh", () => ({
@@ -52,46 +49,6 @@ function makeSummary(
 		...partial,
 	};
 }
-
-const Wrapper: ParentComponent<{
-	client: ReturnType<typeof createMockClient>;
-	summaries: SummariesStore;
-}> = (props) => {
-	const [syncState] = createSignal<AppSyncState>("live");
-	const [cryptoState] = createSignal<CryptoState>("ready");
-	return (
-		<ClientContext.Provider
-			value={{
-				client: props.client as unknown as MatrixClient,
-				syncState,
-				cryptoState,
-				summaries: props.summaries,
-				cryptoStatus: {
-					crossSigningReady: () => true,
-					thisDeviceVerified: () => true,
-					backupVersion: () => null,
-					backupOnServer: () => false,
-					backupTrusted: () => true,
-					secretStorageReady: () => true,
-					crossSigningStatus: () => undefined,
-					refresh: async () => {},
-				},
-				requestRecoveryKey: async () => null,
-				setRecoveryKeyResolver: () => {},
-				clearSecretStorageCache: () => {},
-				optimisticallyMarkJoined: () => {},
-				optimisticallyMarkKnocked: () => {},
-				optimisticallyMarkLeft: () => {},
-				optimisticallySetMarkedUnread: () => {},
-				optimisticallySetRoomTag: () => {},
-				optimisticallySetSpaceOrder: () => {},
-				forgetRoomLocally: () => {},
-			}}
-		>
-			{props.children}
-		</ClientContext.Provider>
-	);
-};
 
 function setup(opts?: {
 	canManage?: boolean;
@@ -141,9 +98,9 @@ function setup(opts?: {
 	);
 
 	render(() => (
-		<Wrapper client={client} summaries={store.summaries}>
+		<TestClientProvider client={client} summaries={store.summaries}>
 			<RoomsTab client={client as unknown as MatrixClient} roomId="!space:x" />
-		</Wrapper>
+		</TestClientProvider>
 	));
 
 	return { client, store };

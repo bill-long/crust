@@ -25,9 +25,15 @@ interface AdvancedTabProps {
 
 const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	// ----- Leave / Forget -----
-	// One confirm dialog covers both danger actions (KickBanConfirm-style):
-	// which action it performs is fully derived from canForget().
+	// One confirm dialog covers both danger actions (KickBanConfirm-style).
+	// The action is SNAPSHOTTED when the dialog opens: a membership flip
+	// mid-flight must not swap the copy under an in-flight request, or a
+	// leave failure would render inside a Forget-titled dialog.
 	const [showConfirm, setShowConfirm] = createSignal(false);
+	const [confirmAction, setConfirmAction] = createSignal<"leave" | "forget">(
+		"leave",
+	);
+	const confirmIsForget = (): boolean => confirmAction() === "forget";
 	// True while a confirmed leave/forget request is in flight, so the
 	// membership-flip effect below doesn't unmount the dialog out from
 	// under a request whose failure still needs to render inline.
@@ -55,7 +61,7 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	// now the wrong one and the server would reject it - close the dialog
 	// instead of letting the user confirm a stale action. A dialog with a
 	// request in flight is left mounted so a failure can still render its
-	// inline error; the dialog's copy re-derives to the now-valid action.
+	// inline error, under the snapshotted action's own copy.
 	createEffect(
 		on(
 			canForget,
@@ -111,7 +117,10 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				</h3>
 				<button
 					type="button"
-					onClick={() => setShowConfirm(true)}
+					onClick={() => {
+						setConfirmAction(canForget() ? "forget" : "leave");
+						setShowConfirm(true);
+					}}
 					class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 				>
 					{`${canForget() ? "Forget" : "Leave"} ${noun()}`}
@@ -121,25 +130,23 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 			<ConfirmDialog
 				open={showConfirm}
 				onClose={() => setShowConfirm(false)}
-				title={`${canForget() ? "Forget" : "Leave"} ${roomName()}?`}
+				title={`${confirmIsForget() ? "Forget" : "Leave"} ${roomName()}?`}
 				body={
 					<p>
-						{canForget()
+						{confirmIsForget()
 							? `This removes the ${noun()} from your account, including your copy of its history.`
 							: props.isSpace
 								? "You'll be removed from this space. You can rejoin if the space is public or someone re-invites you. Rooms you're a member of inside the space will not be affected."
 								: "You'll stop receiving messages in this room. You can rejoin if the room is public or someone re-invites you."}
 					</p>
 				}
-				confirmLabel={canForget() ? "Forget" : "Leave"}
-				pendingLabel={canForget() ? "Forgetting…" : "Leaving…"}
+				confirmLabel={confirmIsForget() ? "Forget" : "Leave"}
+				pendingLabel={confirmIsForget() ? "Forgetting…" : "Leaving…"}
 				destructive
 				onConfirm={async () => {
 					setActionPending(true);
 					try {
-						// Re-derive at confirm time: the dialog can outlive a
-						// membership flip (see the effect above).
-						if (canForget()) {
+						if (confirmIsForget()) {
 							await handleForget();
 						} else {
 							await handleLeave();
