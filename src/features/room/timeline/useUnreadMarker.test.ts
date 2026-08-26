@@ -177,6 +177,54 @@ describe("useUnreadMarker divider placement", () => {
 		expect(marker.firstUnreadEventId()).toBe("$b");
 	});
 
+	it("does not mark a message that arrives while the user is watching", () => {
+		// The failure this guards: the snapshot sits behind the newest event,
+		// so anything arriving afterwards looks unread and pulls a red
+		// divider in above itself - for a message the user watched land.
+		const scope: Scope = { readUpTo: "$b" };
+		const { marker, setRows, setWindowEvents } = mount(scope, [
+			row("$a"),
+			row("$b"),
+		]);
+		expect(marker.firstUnreadEventId()).toBeNull();
+
+		setRows([row("$a"), row("$b"), row("$c")]);
+		setWindowEvents([raw("$a"), raw("$b"), raw("$c")]);
+
+		expect(marker.firstUnreadEventId()).toBeNull();
+	});
+
+	it("does not move the boundary as the conversation continues", () => {
+		const scope: Scope = { readUpTo: "$a" };
+		const { marker, setRows, setWindowEvents } = mount(scope, [
+			row("$a"),
+			row("$b"),
+		]);
+		expect(marker.firstUnreadEventId()).toBe("$b");
+
+		setRows([row("$a"), row("$b"), row("$c"), row("$d")]);
+		setWindowEvents([raw("$a"), raw("$b"), raw("$c"), raw("$d")]);
+
+		expect(marker.firstUnreadEventId()).toBe("$b");
+	});
+
+	it("keeps trying while the receipt has not arrived", () => {
+		// A room can reach the store before its m.receipt ephemeral is
+		// applied. Freezing on that would disable the divider for the visit.
+		const scope: Scope = { readUpTo: null };
+		const { marker, setRows, setWindowEvents } = mount(scope, [
+			row("$a"),
+			row("$b"),
+		]);
+		expect(marker.firstUnreadEventId()).toBeNull();
+
+		scope.readUpTo = "$a";
+		setRows([row("$a"), row("$b"), row("$c")]);
+		setWindowEvents([raw("$a"), raw("$b"), raw("$c")]);
+
+		expect(marker.firstUnreadEventId()).toBe("$b");
+	});
+
 	it("marks nothing when we have never read the room", () => {
 		const { marker } = mount({ readUpTo: null }, [row("$a"), row("$b")]);
 		expect(marker.firstUnreadEventId()).toBeNull();

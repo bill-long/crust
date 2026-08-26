@@ -47,13 +47,19 @@ function displayableIds(events: readonly TimelineEvent[]): Set<string> {
 /**
  * Where the "New messages" divider goes.
  *
- * The read receipt this derives from is a *snapshot*, taken when the timeline
- * scope changes rather than read live. That is the whole point: opening a room
- * immediately sends a receipt for the newest event (`useReadReceipts`), so a
- * live read would erase the boundary in the same frame the user arrived to
- * look at it. Snapshotting keeps the divider where the user left off for as
- * long as they stay - the same way Discord holds its divider until you leave
- * the channel and come back.
+ * Decided once per timeline scope, from the read receipt as it stood when the
+ * user arrived, and then frozen. Both halves of that matter:
+ *
+ * Reading the receipt live would erase the boundary in the same frame the
+ * user arrived to look at it, because opening a room immediately sends a
+ * receipt for the newest event (`useReadReceipts`).
+ *
+ * Re-deriving the boundary from a live event list would do the opposite,
+ * and worse: with the snapshot pinned behind the newest event, every message
+ * that arrived while the user sat watching the live end would look unread and
+ * pull a red divider in above itself. Freezing means the divider marks where
+ * the user actually left off and stays there, the way Discord holds its
+ * divider until you leave the channel and come back.
  *
  * `Room` and `Thread` both extend the SDK's `ReadReceipt`, so the thread panel
  * gets its own boundary from its own receipt with no special-casing here.
@@ -64,78 +70,65 @@ export function useUnreadMarker(
 	thread: Accessor<{ threadId: string } | undefined>,
 	deps: UnreadMarkerDeps,
 ): UnreadMarker {
-	// Latched per scope rather than computed per read. The latch is what
-	// makes this a snapshot; the retry is because the scope may not exist yet
-	// when this first runs - a thread's `Thread` object in particular is
-	// created lazily. Without it, one unlucky mount would disable the divider
-	// for the whole visit, and the room subtree is keyed, so nothing would
-	// ever re-mount to fix it.
-	let capturedRoomId: string | null = null;
-	let capturedThreadId: string | undefined;
-	const readUpToId = createMemo<string | null>((prev) => {
+	let scopeRoomId: string | null = null;
+	let scopeThreadId: string | undefined;
+	let decided = false;
+
+	const firstUnreadEventId = createMemo<string | null>((prev) => {
 		const currentRoomId = roomId();
 		const currentThreadId = thread()?.threadId;
-		if (
-			capturedRoomId === currentRoomId &&
-			capturedThreadId === currentThreadId
-		)
+
+		if (scopeRoomId !== currentRoomId || scopeThreadId !== currentThreadId) {
+			scopeRoomId = currentRoomId;
+			scopeThreadId = currentThreadId;
+			decided = false;
+		} else if (decided) {
+			// Frozen for this scope. Nothing that arrives later can move the
+			// boundary, and nothing that arrives later is unread - the user
+			// is here reading it.
 			return prev ?? null;
+		}
 
-		// The scope changed, so the previous snapshot is not ours to keep:
-		// holding it would place this room's divider from another room's
-		// receipt while we wait for the store to catch up.
-		capturedRoomId = null;
-		capturedThreadId = undefined;
+		// Everything below is the one-shot attempt. It keeps retrying, driven
+		// by the rows it reads, until it has a scope and a receipt to work
+		// from - a room can be absent from the store on a cold open, and a
+		// thread's `Thread` object is created lazily. Without the retry a
+		// single unlucky first evaluation would disable the divider for the
+		// whole visit, since the room subtree is keyed and never re-mounts.
+		const rows = deps.events();
+		if (rows.length === 0) return null;
 
-		// `.length`, not the accessor alone: `events` is a Solid store proxy,
-		// and reading it without touching a property fires no get-trap and
-		// tracks nothing. This is the retry trigger - rows arriving means the
-		// room is in the store, which is when a scope that was missing turns up.
-		deps.events().length;
-
-		const room = client.getRoom(currentRoomId);
 		const myUserId = client.getUserId();
+		const room = client.getRoom(currentRoomId);
 		if (!room || !myUserId) return null;
 		const scope = currentThreadId ? room.getThread(currentThreadId) : room;
 		if (!scope) return null;
 
-		capturedRoomId = currentRoomId;
-		capturedThreadId = currentThreadId;
-		return scope.getEventReadUpTo(myUserId) ?? null;
-	});
-
-	/**
-	 * The receipt resolved onto a row we actually draw. Reading a message
-	 * from another client can leave the receipt on an edit or a reaction,
-	 * which this timeline never renders; without the walk-back the boundary
-	 * would silently vanish even though it sits well inside the window.
-	 */
-	const resolvedReadUpToId = createMemo(() => {
-		const receiptId = readUpToId();
+		const receiptId = scope.getEventReadUpTo(myUserId);
+		// No receipt yet is not the same as nothing unread: the room can
+		// arrive in sync before its `m.receipt` ephemeral is applied. Keep
+		// retrying rather than freezing the feature off for the visit.
 		if (!receiptId) return null;
-		const rows = deps.events();
 
-		// Fast path for the overwhelmingly common case. This memo re-runs on
-		// every per-row mutation - a reaction, an edit, a local echo settling
-		// - and building the id set plus copying the whole SDK window each
-		// time is work the walk-back rarely needs.
-		const row = rows.find((ev) => ev.eventId === receiptId);
-		if (row && !row.stateNotice) return receiptId;
-		// Not drawn (or drawn only as a notice): fall through to the
-		// walk-back, which is what finds the row it really marks.
+		decided = true;
 
-		const displayable = displayableIds(rows);
-		const resolve = createReceiptResolver(deps.getWindowEvents(), (id) =>
-			displayable.has(id),
-		);
-		return resolve(receiptId);
-	});
+		// A receipt can point at a row this timeline never draws - an edit, a
+		// reaction, a state notice - so walk back to the one it really marks.
+		// The fast path covers the common case without building the id set or
+		// copying the SDK window; both only happen on this single evaluation
+		// either way.
+		const onRow = rows.find((ev) => ev.eventId === receiptId);
+		let resolved: string | null;
+		if (onRow && !onRow.stateNotice) {
+			resolved = receiptId;
+		} else {
+			const displayable = displayableIds(rows);
+			resolved = createReceiptResolver(deps.getWindowEvents(), (id) =>
+				displayable.has(id),
+			)(receiptId);
+		}
 
-	const firstUnreadEventId = createMemo(() => {
-		const myUserId = client.getUserId();
-		if (!myUserId) return null;
-		const rows = deps.events();
-		const index = firstUnreadIndex(rows, resolvedReadUpToId(), myUserId);
+		const index = firstUnreadIndex(rows, resolved, myUserId);
 		return index === -1 ? null : rows[index].eventId;
 	});
 

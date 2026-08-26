@@ -254,15 +254,19 @@ const TimelineView: Component<{
 	const jumpToUnread = (): void => {
 		const target = firstUnreadEventId();
 		if (!target) return;
-		// Cancel the bottom pin before jumping, as every other jump here
-		// does. `wantsBottom` defaults to true and only a deliberate upward
-		// gesture clears it; the programmatic scroll runs inside
-		// markProgrammaticScroll, so onScroll will not clear it either. Left
-		// set, the row-growth re-anchor snaps the view straight back to the
-		// live end as virtua measures the rows the jump just mounted - and
-		// since the divider was never seen, the button is still there to be
-		// clicked again.
-		setWantsBottom(false);
+		// Set the bottom pin to match where we are going, rather than always
+		// clearing it as the other jumps here do - theirs always target
+		// history, this one can target the newest row when a single message
+		// is unread. Left set for a historical target, the row-growth
+		// re-anchor drags the view back to the live end as virtua measures
+		// the rows the jump just mounted. Left clear for a live-end target,
+		// the timeline sits at the bottom without following it, and new
+		// arrivals pile up below the fold with no "Jump to latest" offered
+		// (that button is hidden while atBottom reads true).
+		const rows = events;
+		const targetIsLive =
+			rows.length > 0 && rows[rows.length - 1].eventId === target;
+		setWantsBottom(targetIsLive);
 		// Hand focus to the scroller too. This button unmounts the moment the
 		// divider is seen, and focus on a removed element falls to <body>,
 		// restarting a keyboard user's next Tab from the top of the document.
