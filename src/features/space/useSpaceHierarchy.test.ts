@@ -89,6 +89,7 @@ function setupMockClient(overrides: Record<string, unknown> = {}) {
 				markedUnread: false,
 				isFavourite: false,
 				isLowPriority: false,
+				spaceOrder: null,
 				isMuted: false,
 				membership: "join",
 				isEncrypted: false,

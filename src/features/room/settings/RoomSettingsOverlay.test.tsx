@@ -7,8 +7,12 @@ import {
 } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal } from "solid-js";
+import { createStore } from "solid-js/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SummariesStore } from "../../../client/summaries";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { makeSummary } from "../../../test/summaryFixtures";
+import { TestClientProvider } from "../../../test/TimelineHarness";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -43,21 +47,29 @@ function setup(
 	const onClose = vi.fn();
 	const onTabChange = vi.fn();
 	let setActive!: (tab: RoomSettingsTab) => void;
+	const [summaries] = createStore<SummariesStore>({
+		"!room:example.com": makeSummary("!room:example.com", {
+			name: "Test Room",
+			membership: options?.membership ?? "join",
+			isSpace: isSpace ?? false,
+		}),
+	});
 
 	render(() => {
 		const [activeTab, setTab] = createSignal(active);
 		setActive = setTab;
 		return (
-			<RoomSettingsOverlay
-				client={client as unknown as MatrixClient}
-				roomId="!room:example.com"
-				activeTab={activeTab()}
-				onTabChange={onTabChange}
-				onClose={onClose}
-				isSpace={isSpace}
-				membership={options?.membership}
-				onForgot={options?.onForgot}
-			/>
+			<TestClientProvider client={client} summaries={summaries}>
+				<RoomSettingsOverlay
+					client={client as unknown as MatrixClient}
+					roomId="!room:example.com"
+					activeTab={activeTab()}
+					onTabChange={onTabChange}
+					onClose={onClose}
+					isSpace={isSpace}
+					onForgot={options?.onForgot}
+				/>
+			</TestClientProvider>
 		);
 	});
 

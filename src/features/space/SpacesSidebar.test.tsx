@@ -3,6 +3,7 @@ import {
 	fireEvent,
 	render,
 	screen,
+	waitFor,
 	within,
 } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
@@ -48,6 +49,7 @@ function makeSpaceSummary(roomId: string, name: string): RoomSummary {
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		spaceOrder: null,
 		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
@@ -70,6 +72,7 @@ function makeRoomSummary(roomId: string, name: string): RoomSummary {
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		spaceOrder: null,
 		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
@@ -116,6 +119,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkLeft: vi.fn(),
 				optimisticallySetMarkedUnread: vi.fn(),
 				optimisticallySetRoomTag: vi.fn(),
+				optimisticallySetSpaceOrder: vi.fn(),
 				forgetRoomLocally: vi.fn(),
 			}}
 		>
@@ -731,5 +735,93 @@ describe("SpacesSidebar tile avatar fallback (#457)", () => {
 
 		expect(tile.querySelector("img")).toBeNull();
 		expect(within(tile).getByText("P")).toBeTruthy();
+	});
+});
+
+describe("SpacesSidebar space reordering (#449)", () => {
+	const SPACE_ORDER_TYPE = "im.vector.web.space_order";
+
+	function setupTwoRoots(): { client: ReturnType<typeof createMockClient> } {
+		const client = createMockClient();
+		render(() => (
+			<Wrapper
+				client={client}
+				seed={[
+					makeSpaceSummary("!alpha:example.com", "Alpha"),
+					makeSpaceSummary("!beta:example.com", "Beta"),
+				]}
+			>
+				<SpacesSidebar onOpenSpaceSettings={vi.fn()} />
+			</Wrapper>
+		));
+		return { client };
+	}
+
+	it("offers Move up/down on root tiles, disabled at the ends", async () => {
+		setupTwoRoots();
+		fireEvent.contextMenu(screen.getByRole("button", { name: "Alpha" }), {
+			clientX: 10,
+			clientY: 10,
+		});
+		const up = await screen.findByRole("menuitem", { name: "Move up" });
+		const down = screen.getByRole("menuitem", { name: "Move down" });
+		// Alpha is first: Move up disabled, Move down enabled.
+		expect(up.getAttribute("aria-disabled")).toBe("true");
+		expect(down.getAttribute("aria-disabled")).not.toBe("true");
+	});
+
+	it("Move down stamps m.space_order account data realizing the new order", async () => {
+		const { client } = setupTwoRoots();
+		fireEvent.contextMenu(screen.getByRole("button", { name: "Alpha" }), {
+			clientX: 10,
+			clientY: 10,
+		});
+		const down = await screen.findByRole("menuitem", { name: "Move down" });
+		fireEvent(down, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+
+		await waitFor(() =>
+			expect(client.setRoomAccountData).toHaveBeenCalledWith(
+				"!alpha:example.com",
+				SPACE_ORDER_TYPE,
+				{ order: expect.any(String) },
+			),
+		);
+		// Both previously-unordered roots get stamped; the resulting orders
+		// must realize Beta-before-Alpha (code-point compare).
+		const orders = new Map(
+			client.setRoomAccountData.mock.calls
+				.filter((c: unknown[]) => c[1] === SPACE_ORDER_TYPE)
+				.map((c: unknown[]) => [c[0], (c[2] as { order: string }).order]),
+		);
+		const alpha = orders.get("!alpha:example.com");
+		const beta = orders.get("!beta:example.com");
+		expect(typeof alpha).toBe("string");
+		expect(typeof beta).toBe("string");
+		expect((beta as string) < (alpha as string)).toBe(true);
+	});
+
+	it("does not offer Move up/down on nested subspace tiles", async () => {
+		const client = createMockClient();
+		const parent = makeSpaceSummary("!parent:example.com", "Parent");
+		parent.children = ["!child:example.com"];
+		render(() => (
+			<Wrapper
+				client={client}
+				seed={[parent, makeSpaceSummary("!child:example.com", "Child")]}
+			>
+				<SpacesSidebar onOpenSpaceSettings={vi.fn()} />
+			</Wrapper>
+		));
+		fireEvent.contextMenu(screen.getByRole("button", { name: "Child" }), {
+			clientX: 10,
+			clientY: 10,
+		});
+		// The menu itself opens (Space settings is wired)...
+		expect(
+			await screen.findByRole("menuitem", { name: "Space settings" }),
+		).toBeTruthy();
+		// ...but reorder items are root-only.
+		expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
+		expect(screen.queryByRole("menuitem", { name: "Move down" })).toBeNull();
 	});
 });

@@ -32,6 +32,7 @@ function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		spaceOrder: null,
 		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
@@ -501,6 +502,37 @@ describe("getSpaceTree (#443)", () => {
 		expect(root?.children.map((n) => n.space.roomId)).toEqual([
 			"!alpha",
 			"!zeta",
+		]);
+	});
+
+	it("orders roots by m.space_order before name; subspaces stay name-sorted (#449)", () => {
+		const s = store([
+			// Unordered roots fall back to name, after every ordered root.
+			room({ roomId: "!anna", isSpace: true, name: "Anna" }),
+			room({ roomId: "!zed", isSpace: true, name: "Zed", spaceOrder: "a" }),
+			room({
+				roomId: "!mid",
+				isSpace: true,
+				name: "Mid",
+				spaceOrder: "b",
+				// Child order is the parent's m.space.child state - a child's
+				// own spaceOrder must NOT reorder it within the parent.
+				children: ["!zeta-child", "!alpha-child"],
+			}),
+			room({
+				roomId: "!zeta-child",
+				isSpace: true,
+				name: "Zeta",
+				spaceOrder: "a",
+			}),
+			room({ roomId: "!alpha-child", isSpace: true, name: "Alpha" }),
+		]);
+		const tree = getSpaceTree(s);
+		expect(tree.map((n) => n.space.roomId)).toEqual(["!zed", "!mid", "!anna"]);
+		const mid = tree.find((n) => n.space.roomId === "!mid");
+		expect(mid?.children.map((n) => n.space.roomId)).toEqual([
+			"!alpha-child",
+			"!zeta-child",
 		]);
 	});
 

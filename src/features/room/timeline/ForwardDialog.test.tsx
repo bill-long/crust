@@ -44,6 +44,7 @@ function makeRoomSummary(
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		spaceOrder: null,
 		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
@@ -141,6 +142,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkLeft: vi.fn(),
 				optimisticallySetMarkedUnread: vi.fn(),
 				optimisticallySetRoomTag: vi.fn(),
+				optimisticallySetSpaceOrder: vi.fn(),
 				forgetRoomLocally: vi.fn(),
 			}}
 		>

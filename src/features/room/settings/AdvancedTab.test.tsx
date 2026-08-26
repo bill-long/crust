@@ -11,14 +11,17 @@ import {
 	JoinRule,
 	type MatrixClient,
 } from "matrix-js-sdk";
-import { createSignal } from "solid-js";
+import { createStore } from "solid-js/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SummariesStore } from "../../../client/summaries";
 import {
 	_resetActiveCallForTests,
 	activeCallRoomId,
 	setActiveCallRoomId,
 } from "../../../stores/activeCall";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { makeSummary } from "../../../test/summaryFixtures";
+import { TestClientProvider } from "../../../test/TimelineHarness";
 import {
 	_resetCallSessionForTests,
 	publishCallSession,
@@ -70,17 +73,25 @@ function setup(options?: {
 	const actionClient = client as unknown as ActionClient;
 	actionClient.leave = vi.fn().mockResolvedValue(undefined);
 	actionClient.forget = vi.fn().mockResolvedValue(undefined);
+	const [summaries, setSummaries] = createStore<SummariesStore>({
+		"!room:example.com": makeSummary("!room:example.com", {
+			name: "Alpha",
+			membership: options?.membership ?? "join",
+			isSpace: options?.isSpace ?? false,
+		}),
+	});
 	render(() => (
-		<AdvancedTab
-			client={client as unknown as MatrixClient}
-			roomId="!room:example.com"
-			onLeft={options?.onLeft}
-			onForgot={options?.onForgot}
-			membership={options?.membership}
-			isSpace={options?.isSpace}
-		/>
+		<TestClientProvider client={client} summaries={summaries}>
+			<AdvancedTab
+				client={client as unknown as MatrixClient}
+				roomId="!room:example.com"
+				onLeft={options?.onLeft}
+				onForgot={options?.onForgot}
+				isSpace={options?.isSpace}
+			/>
+		</TestClientProvider>
 	));
-	return { client: actionClient, room };
+	return { client: actionClient, room, setSummaries };
 }
 
 function button(name: string): HTMLButtonElement {
@@ -261,77 +272,51 @@ describe("AdvancedTab", () => {
 		expect(onForgot).toHaveBeenCalledWith("!room:example.com");
 	});
 
-	it("falls back to the SDK room's membership when the prop is absent", () => {
+	it("falls back to the SDK room's membership when the store has no entry", () => {
 		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
 		room.getMyMembership = () => "leave";
 		const client = createMockClient(new Map([["!room:example.com", room]]));
 		(client as unknown as ActionClient).leave = vi.fn();
 		(client as unknown as ActionClient).forget = vi.fn();
+		const [summaries] = createStore<SummariesStore>({});
 		render(() => (
-			<AdvancedTab
-				client={client as unknown as MatrixClient}
-				roomId="!room:example.com"
-			/>
+			<TestClientProvider client={client} summaries={summaries}>
+				<AdvancedTab
+					client={client as unknown as MatrixClient}
+					roomId="!room:example.com"
+				/>
+			</TestClientProvider>
 		));
 		expect(button("Forget room")).toBeTruthy();
 	});
 
 	it("closes an open confirm dialog when membership flips under it", async () => {
-		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
-		const client = createMockClient(new Map([["!room:example.com", room]]));
-		(client as unknown as ActionClient).leave = vi.fn();
-		(client as unknown as ActionClient).forget = vi.fn();
-		const [membership, setMembership] = createSignal<string | undefined>(
-			"join",
-		);
-		render(() => (
-			<AdvancedTab
-				client={client as unknown as MatrixClient}
-				roomId="!room:example.com"
-				membership={membership()}
-			/>
-		));
+		const { setSummaries } = setup();
 		fireEvent.click(button("Leave room"));
 		expect(screen.getByRole("dialog")).toBeTruthy();
 
-		setMembership("leave");
+		setSummaries("!room:example.com", "membership", "leave");
 
 		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 		expect(button("Forget room")).toBeTruthy();
 	});
 
 	it("keeps a pending confirm dialog mounted through a membership flip so its failure still renders", async () => {
-		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
-		const client = createMockClient(new Map([["!room:example.com", room]]));
+		const { client, setSummaries } = setup();
 		let rejectLeave!: (e: Error) => void;
-		(client as unknown as ActionClient).leave = vi.fn(
+		client.leave = vi.fn(
 			() =>
 				new Promise((_, reject) => {
 					rejectLeave = reject;
 				}),
 		);
-		(client as unknown as ActionClient).forget = vi.fn();
-		const [membership, setMembership] = createSignal<string | undefined>(
-			"join",
-		);
-		render(() => (
-			<AdvancedTab
-				client={client as unknown as MatrixClient}
-				roomId="!room:example.com"
-				membership={membership()}
-			/>
-		));
 		fireEvent.click(button("Leave room"));
 		fireEvent.click(button("Leave"));
-		await waitFor(() =>
-			expect((client as unknown as ActionClient).leave).toHaveBeenCalledTimes(
-				1,
-			),
-		);
+		await waitFor(() => expect(client.leave).toHaveBeenCalledTimes(1));
 
 		// The leave is in flight; a membership flip must not unmount the
 		// dialog (the failure below would otherwise vanish silently).
-		setMembership("leave");
+		setSummaries("!room:example.com", "membership", "leave");
 		expect(screen.getByRole("dialog")).toBeTruthy();
 
 		rejectLeave(new Error("kicked meanwhile"));

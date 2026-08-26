@@ -111,6 +111,13 @@ interface ClientContextValue {
 		value: boolean,
 	) => void;
 	/**
+	 * Optimistically set a space's `im.vector.web.space_order` string so
+	 * the rail re-sorts instantly on a manual move. The authoritative
+	 * account-data sync confirms or corrects it. Callers normally go
+	 * through `moveRootSpace` (see `client/spaceOrder.ts`).
+	 */
+	optimisticallySetSpaceOrder: (roomId: string, order: string | null) => void;
+	/**
 	 * Drop a forgotten room from the SDK store and the summary store.
 	 * Call only after `client.forget(roomId, false)` succeeded AND the
 	 * router has left the room, so a routed view never renders a
@@ -334,6 +341,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		optimisticallyMarkLeft,
 		optimisticallySetMarkedUnread,
 		optimisticallySetRoomTag,
+		optimisticallySetSpaceOrder,
 		forgetRoomLocally,
 	} = createSummariesStore(matrixClient);
 
@@ -492,6 +500,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				optimisticallyMarkLeft,
 				optimisticallySetMarkedUnread,
 				optimisticallySetRoomTag,
+				optimisticallySetSpaceOrder,
 				forgetRoomLocally,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,

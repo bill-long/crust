@@ -46,12 +46,6 @@ interface RoomSettingsOverlayProps {
 	/** Called when the Advanced tab finishes a Forget action. */
 	onForgot?: (roomId: string) => void;
 	/**
-	 * The user's membership in the target room, from the summaries store so
-	 * it stays reactive while the overlay is open. Drives the Advanced tab's
-	 * Leave-vs-Forget danger action.
-	 */
-	membership?: string;
-	/**
 	 * Hint from the caller that the target is a space. Used to switch
 	 * labels ("Room Settings" → "Space Settings", etc). When omitted,
 	 * we fall back to `room.isSpaceRoom()` which may report false during
@@ -245,7 +239,6 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 										client={props.client}
 										roomId={props.roomId}
 										isSpace={isSpace()}
-										membership={props.membership}
 										onLeft={(rid) => {
 											props.onLeft?.(rid);
 											props.onClose();

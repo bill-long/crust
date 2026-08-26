@@ -24,7 +24,7 @@ import {
 import { createStore, reconcile } from "solid-js/store";
 import type { AppSyncState, CryptoState } from "../client/client";
 import { ClientContext } from "../client/client";
-import { createSummariesStore } from "../client/summaries";
+import { createSummariesStore, type SummariesStore } from "../client/summaries";
 import type {
 	useTimeline as RealUseTimeline,
 	TimelineEvent,
@@ -205,11 +205,19 @@ export function installTimelineHarness(
 
 export const TestClientProvider: ParentComponent<{
 	client?: ReturnType<typeof createMockClient>;
+	/**
+	 * Pre-seeded summaries store for tests exercising summaries-backed
+	 * reads (e.g. the settings tabs' membership gate). When omitted, an
+	 * empty store is derived from the mock client.
+	 */
+	summaries?: SummariesStore;
 }> = (props) => {
 	const client = props.client ?? createMockClient();
 	const [syncState] = createSignal<AppSyncState>("live");
 	const [cryptoState] = createSignal<CryptoState>("ready");
-	const { summaries } = createSummariesStore(client as unknown as MatrixClient);
+	const summaries =
+		props.summaries ??
+		createSummariesStore(client as unknown as MatrixClient).summaries;
 	return (
 		<ClientContext.Provider
 			value={{
@@ -235,6 +243,7 @@ export const TestClientProvider: ParentComponent<{
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
 				optimisticallySetRoomTag: () => {},
+				optimisticallySetSpaceOrder: () => {},
 				forgetRoomLocally: () => {},
 			}}
 		>

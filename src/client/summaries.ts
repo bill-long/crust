@@ -32,6 +32,7 @@ import {
 	MATERIAL_OFFSET_CHANGE_MS,
 	type ServerTimeTracker,
 } from "./serverTime";
+import { getSpaceOrder, SPACE_ORDER_TYPE } from "./spaceOrder";
 
 export interface RoomSummary {
 	roomId: string;
@@ -46,6 +47,12 @@ export interface RoomSummary {
 	isFavourite: boolean;
 	/** Tagged `m.lowpriority` - sinks to the Home list's Low priority section. */
 	isLowPriority: boolean;
+	/**
+	 * Validated `im.vector.web.space_order` order string (MSC3230), or null
+	 * when absent/malformed. Only meaningful for spaces; drives the manual
+	 * ordering of root spaces in the sidebar rail.
+	 */
+	spaceOrder: string | null;
 	/**
 	 * A `crust.mute.<roomId>` dont-notify push-rule override is active for
 	 * this room. Kept on the summary so every consumer (row badge, name
@@ -305,6 +312,7 @@ function buildSummary(
 		markedUnread: getRoomMarkedUnread(room),
 		isFavourite: getRoomTagState(room).favourite,
 		isLowPriority: getRoomTagState(room).lowPriority,
+		spaceOrder: getSpaceOrder(room),
 		isMuted: mutedRoomIds.has(room.roomId),
 		membership: room.getMyMembership(),
 		isEncrypted: room.hasEncryptionStateEvent(),
@@ -443,6 +451,7 @@ export function createSummariesStore(client: MatrixClient): {
 		tag: SidebarRoomTag,
 		value: boolean,
 	) => void;
+	optimisticallySetSpaceOrder: (roomId: string, order: string | null) => void;
 	forgetRoomLocally: (roomId: string) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
@@ -548,6 +557,7 @@ export function createSummariesStore(client: MatrixClient): {
 					markedUnread: false,
 					isFavourite: false,
 					isLowPriority: false,
+					spaceOrder: null,
 					isMuted: false,
 					membership: "join",
 					isEncrypted: false,
@@ -599,6 +609,7 @@ export function createSummariesStore(client: MatrixClient): {
 					markedUnread: false,
 					isFavourite: false,
 					isLowPriority: false,
+					spaceOrder: null,
 					isMuted: false,
 					membership: "knock",
 					isEncrypted: false,
@@ -683,7 +694,28 @@ export function createSummariesStore(client: MatrixClient): {
 		client.emit(ClientEvent.DeleteRoom, roomId);
 	}
 
+	/**
+	 * Optimistically set a space's order string so the rail re-sorts the
+	 * moment the user moves it, without waiting for the account-data
+	 * round-trip. The authoritative update (`onRoomAccountData`) confirms
+	 * or corrects it. No-op when the room has no entry.
+	 */
+	function optimisticallySetSpaceOrder(
+		roomId: string,
+		order: string | null,
+	): void {
+		if (!summaries[roomId]) return;
+		setSummaries(roomId, "spaceOrder", order);
+	}
+
 	function upsertRoom(room: Room): void {
+		// A room absent from the SDK store is forgotten (forgetRoomLocally
+		// removed it): drop straggler events from the still-live Room
+		// object's re-emitters instead of resurrecting the entry the
+		// DeleteRoom purge just removed. The leave path never hits this
+		// (its entry persists with membership "leave"); only forget
+		// deletes entries for rooms that can still emit.
+		if (!client.getRoom(room.roomId)) return;
 		setSummaries(
 			produce((s) => {
 				s[room.roomId] = buildSummary(
@@ -841,6 +873,14 @@ export function createSummariesStore(client: MatrixClient): {
 	// rather than importing urlPreviewSync's echo-debounce machinery.
 	function onRoomAccountData(event: MatrixEvent, room: Room): void {
 		const type = event.getType();
+		if (type === SPACE_ORDER_TYPE) {
+			if (!summaries[room.roomId]) {
+				upsertRoom(room);
+				return;
+			}
+			setSummaries(room.roomId, "spaceOrder", getSpaceOrder(room));
+			return;
+		}
 		if (type !== MARKED_UNREAD_TYPE && type !== MARKED_UNREAD_TYPE_UNSTABLE)
 			return;
 		if (!summaries[room.roomId]) {
@@ -1013,6 +1053,7 @@ export function createSummariesStore(client: MatrixClient): {
 		optimisticallyMarkLeft,
 		optimisticallySetMarkedUnread,
 		optimisticallySetRoomTag,
+		optimisticallySetSpaceOrder,
 		forgetRoomLocally,
 	};
 }
