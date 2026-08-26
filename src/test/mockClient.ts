@@ -297,6 +297,9 @@ export function createMockRoom(
 	return {
 		roomId,
 		name: options?.name ?? roomId,
+		// Mirrors `Room.myUserId`, matching createMockClient's getUserId so
+		// own-vs-other checks (e.g. the legacy missed-call notice) resolve.
+		myUserId: "@test:example.com",
 		// Own membership; tests override per-case (e.g. "leave" for forget).
 		getMyMembership: () => "join",
 		// Mirrors `Room.tags` (m.tag account data); tests mutate directly.

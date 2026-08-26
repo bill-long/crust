@@ -31,7 +31,12 @@ import {
 	type TimelineSource,
 } from "../threads/timelineSource";
 import { eventToTimelineEvent } from "./eventProjection";
-import type { SyntheticCallLeave } from "./stateNotice";
+import {
+	buildLegacyCallNotice,
+	computeLegacyCallSuppressions,
+	isLegacyCallNoticeType,
+} from "./legacyCallNotice";
+import type { CallTimelineNotices, SyntheticCallLeave } from "./stateNotice";
 import {
 	buildStateNotice,
 	computeCallTimelineNotices,
@@ -140,6 +145,9 @@ function isDisplayable(
 ): boolean {
 	const type = event.getType();
 	const isStateNotice = isStateNoticeType(type);
+	// A legacy 1:1 call invite renders a missed-call notice (#529). It is not
+	// a state event, so it rides its own branch rather than STATE_NOTICE_TYPES.
+	const isLegacyCall = isLegacyCallNoticeType(type);
 	// Poll *start* events render as timeline rows. Poll responses and ends
 	// (`m.poll.response` / `m.poll.end`) are reference relations consumed by
 	// the SDK Poll model and stay excluded by this whitelist, mirroring how
@@ -150,7 +158,8 @@ function isDisplayable(
 		type !== "m.room.encrypted" &&
 		type !== "m.sticker" &&
 		!isPollStart &&
-		!isStateNotice
+		!isStateNotice &&
+		!isLegacyCall
 	) {
 		return false;
 	}
@@ -165,6 +174,13 @@ function isDisplayable(
 	// notice (filters out no-op transitions like join->join with no
 	// profile change). This keeps the invariant that every displayable
 	// state event has a renderable text.
+	// Same shape as the state-notice gate below: displayable only when there
+	// is something to render, and not when reconciled away as a repeat invite
+	// for a call already shown.
+	if (isLegacyCall) {
+		if (suppressedCallIds?.has(event.getId() ?? "") ?? false) return false;
+		return buildLegacyCallNotice(event, room) !== null;
+	}
 	if (isStateNotice) {
 		// A call-member event reconciled away as a per-device duplicate /
 		// premature leave carries no notice, so it isn't displayable (#215).
@@ -195,6 +211,22 @@ function isDisplayable(
 	// have anything to render; redacted or malformed ones are filtered out.
 	if (isPollStart) return parsePollStart(event) !== null;
 	return true;
+}
+
+/**
+ * Every call-notice reconciliation for one window: MatrixRTC membership
+ * (#215 / #219) plus repeat legacy invites (#529). Both produce event IDs
+ * whose call notice must not render, so they share one set.
+ */
+function callNoticeReconciliation(
+	events: readonly MatrixEvent[],
+	now: number,
+): CallTimelineNotices {
+	const notices = computeCallTimelineNotices(events, now);
+	for (const id of computeLegacyCallSuppressions(events)) {
+		notices.suppressed.add(id);
+	}
+	return notices;
 }
 
 const WINDOW_LIMIT = 2000;
@@ -476,7 +508,7 @@ export function useTimeline(
 		// "left the call" notice (#215 / #219).
 		const now = serverTime.now();
 		const { suppressed, syntheticLeaves, nextExpiry } =
-			computeCallTimelineNotices(matrixEvents, now);
+			callNoticeReconciliation(matrixEvents, now);
 		const displayable = matrixEvents
 			.filter((e) => isRowDisplayable(e, room, suppressed) && e.getId())
 			.map((e) => projectEvent(e, room, suppressed));
@@ -1272,7 +1304,7 @@ export function useTimeline(
 				const ordered = windowEvents.some((e) => e === event)
 					? windowEvents
 					: [...windowEvents, event];
-				suppressedCallIds = computeCallTimelineNotices(
+				suppressedCallIds = callNoticeReconciliation(
 					ordered,
 					serverTime.now(),
 				).suppressed;
