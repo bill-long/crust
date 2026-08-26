@@ -1031,9 +1031,12 @@ const Layout: Component = () => {
 											// deleting the routed room's store entries
 											// before leaving it would render the room
 											// view in a deleted state (see
-											// forgetRoomLocally).
+											// forgetRoomLocally). solid-router defers the
+											// route swap to a microtask (startTransition),
+											// so the purge is queued behind it rather than
+											// run synchronously.
 											handleRoomGone(forgotRid);
-											forgetRoomLocally(forgotRid);
+											queueMicrotask(() => forgetRoomLocally(forgotRid));
 										}}
 									/>
 								</Suspense>

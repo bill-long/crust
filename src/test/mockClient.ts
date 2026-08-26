@@ -540,6 +540,14 @@ export function createMockClient(
 				for (const handler of handlers) handler(...args);
 			}
 		},
+		// Public SDK emit (TypedEventEmitter); same dispatch as __emit.
+		emit: (event: string, ...args: unknown[]) => {
+			const handlers = listeners.get(event);
+			if (handlers) {
+				for (const handler of handlers) handler(...args);
+			}
+			return true;
+		},
 
 		// Test helper: update the rooms map
 		__setRooms: (newRooms: Map<string, ReturnType<typeof createMockRoom>>) => {

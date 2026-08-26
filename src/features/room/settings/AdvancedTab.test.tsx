@@ -300,6 +300,50 @@ describe("AdvancedTab", () => {
 		expect(button("Forget room")).toBeTruthy();
 	});
 
+	it("keeps a pending confirm dialog mounted through a membership flip so its failure still renders", async () => {
+		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
+		const client = createMockClient(new Map([["!room:example.com", room]]));
+		let rejectLeave!: (e: Error) => void;
+		(client as unknown as ActionClient).leave = vi.fn(
+			() =>
+				new Promise((_, reject) => {
+					rejectLeave = reject;
+				}),
+		);
+		(client as unknown as ActionClient).forget = vi.fn();
+		const [membership, setMembership] = createSignal<string | undefined>(
+			"join",
+		);
+		render(() => (
+			<AdvancedTab
+				client={client as unknown as MatrixClient}
+				roomId="!room:example.com"
+				membership={membership()}
+			/>
+		));
+		fireEvent.click(button("Leave room"));
+		fireEvent.click(button("Leave"));
+		await waitFor(() =>
+			expect(
+				(client as unknown as ActionClient).leave,
+			).toHaveBeenCalledTimes(1),
+		);
+
+		// The leave is in flight; a membership flip must not unmount the
+		// dialog (the failure below would otherwise vanish silently).
+		setMembership("leave");
+		expect(screen.getByRole("dialog")).toBeTruthy();
+
+		rejectLeave(new Error("kicked meanwhile"));
+
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain(
+				"kicked meanwhile",
+			),
+		);
+		expect(screen.getByRole("dialog")).toBeTruthy();
+	});
+
 	it("Forget failure stays in the dialog and does not call onForgot", async () => {
 		const onForgot = vi.fn();
 		const { client } = setup({ membership: "leave", onForgot });

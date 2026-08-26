@@ -30,8 +30,13 @@ interface AdvancedTabProps {
 
 const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	// ----- Leave / Forget -----
-	const [showLeave, setShowLeave] = createSignal(false);
-	const [showForget, setShowForget] = createSignal(false);
+	// One confirm dialog covers both danger actions (KickBanConfirm-style):
+	// which action it performs is fully derived from canForget().
+	const [showConfirm, setShowConfirm] = createSignal(false);
+	// True while a confirmed leave/forget request is in flight, so the
+	// membership-flip effect below doesn't unmount the dialog out from
+	// under a request whose failure still needs to render inline.
+	const [actionPending, setActionPending] = createSignal(false);
 
 	// Prefer the reactive summaries-backed prop; fall back to the SDK
 	// room's own membership so a call site that omits the prop (or a room
@@ -47,16 +52,17 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 		(): boolean => membership() === "leave" || membership() === "ban",
 	);
 
-	// If membership flips while a confirm dialog is open (leave/rejoin
-	// completed from another device), the open dialog's action is now the
-	// wrong one and the server would reject it - close it instead of
-	// letting the user confirm a stale action.
+	// If membership flips while the confirm dialog is open but idle
+	// (leave/rejoin completed from another device), the offered action is
+	// now the wrong one and the server would reject it - close the dialog
+	// instead of letting the user confirm a stale action. A dialog with a
+	// request in flight is left mounted so a failure can still render its
+	// inline error; the dialog's copy re-derives to the now-valid action.
 	createEffect(
 		on(
 			canForget,
 			() => {
-				setShowLeave(false);
-				setShowForget(false);
+				if (!actionPending()) setShowConfirm(false);
 			},
 			{ defer: true },
 		),
@@ -85,12 +91,17 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 		return n || props.roomId;
 	};
 
+	const noun = (): "space" | "room" => (props.isSpace ? "space" : "room");
+
 	return (
 		<div class="space-y-8">
 			{/* Join rule + history visibility live in Advanced for regular rooms.
 			    For spaces they move to the dedicated Visibility tab, so they are
-			    hidden here to avoid two UIs editing the same state. */}
-			<Show when={!props.isSpace}>
+			    hidden here to avoid two UIs editing the same state. Hidden too
+			    for a left/banned room: the power-level gate alone would still
+			    offer the controls to an ex-admin whose writes the server now
+			    rejects. */}
+			<Show when={!props.isSpace && !canForget()}>
 				<JoinRuleSection client={props.client} roomId={props.roomId} />
 				<HistoryVisibilitySection client={props.client} roomId={props.roomId} />
 			</Show>
@@ -102,48 +113,43 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				</h3>
 				<button
 					type="button"
-					onClick={() => (canForget() ? setShowForget : setShowLeave)(true)}
+					onClick={() => setShowConfirm(true)}
 					class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 				>
-					{`${canForget() ? "Forget" : "Leave"} ${props.isSpace ? "space" : "room"}`}
+					{`${canForget() ? "Forget" : "Leave"} ${noun()}`}
 				</button>
 			</section>
 
 			<ConfirmDialog
-				open={showLeave}
-				onClose={() => setShowLeave(false)}
-				title={`Leave ${roomName()}?`}
+				open={showConfirm}
+				onClose={() => setShowConfirm(false)}
+				title={`${canForget() ? "Forget" : "Leave"} ${roomName()}?`}
 				body={
 					<p>
-						{props.isSpace
-							? "You'll be removed from this space. You can rejoin if the space is public or someone re-invites you. Rooms you're a member of inside the space will not be affected."
-							: "You'll stop receiving messages in this room. You can rejoin if the room is public or someone re-invites you."}
+						{canForget()
+							? `This removes the ${noun()} from your account entirely, including the history you had access to. Rejoining later starts fresh.`
+							: props.isSpace
+								? "You'll be removed from this space. You can rejoin if the space is public or someone re-invites you. Rooms you're a member of inside the space will not be affected."
+								: "You'll stop receiving messages in this room. You can rejoin if the room is public or someone re-invites you."}
 					</p>
 				}
-				confirmLabel="Leave"
-				pendingLabel="Leaving…"
+				confirmLabel={canForget() ? "Forget" : "Leave"}
+				pendingLabel={canForget() ? "Forgetting…" : "Leaving…"}
 				destructive
 				onConfirm={async () => {
-					await handleLeave();
-					setShowLeave(false);
-				}}
-			/>
-
-			<ConfirmDialog
-				open={showForget}
-				onClose={() => setShowForget(false)}
-				title={`Forget ${roomName()}?`}
-				body={
-					<p>
-						{`This removes the ${props.isSpace ? "space" : "room"} from your account entirely, including the history you had access to. Rejoining later starts fresh.`}
-					</p>
-				}
-				confirmLabel="Forget"
-				pendingLabel="Forgetting…"
-				destructive
-				onConfirm={async () => {
-					await handleForget();
-					setShowForget(false);
+					setActionPending(true);
+					try {
+						// Re-derive at confirm time: the dialog can outlive a
+						// membership flip (see the effect above).
+						if (canForget()) {
+							await handleForget();
+						} else {
+							await handleLeave();
+						}
+					} finally {
+						setActionPending(false);
+					}
+					setShowConfirm(false);
 				}}
 			/>
 		</div>
