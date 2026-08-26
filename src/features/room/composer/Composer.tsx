@@ -39,6 +39,7 @@ import {
 	buildEditContent,
 	buildReplyFallback,
 	buildTextMessageContent,
+	type PrevMentions,
 } from "./buildMessageContent";
 import { ComposerActionStrip } from "./ComposerActionStrip";
 import { ComposerContextBanner } from "./ComposerContextBanner";
@@ -54,7 +55,11 @@ import {
 	isVoiceRecordingSupported,
 } from "./media/voiceRecorder";
 import { useAttachments } from "./useAttachments";
-import { isRoomMentionCandidate, useMentions } from "./useMentions";
+import {
+	hasRoomMentionToken,
+	isRoomMentionCandidate,
+	useMentions,
+} from "./useMentions";
 import { VoiceRecordingBar } from "./VoiceRecordingBar";
 
 const SHORTCODE_RE = /(?:^|[^:\w]):([a-zA-Z0-9_-]{2,50}):(?![\w:])/g;
@@ -125,6 +130,7 @@ const Composer: Component<{
 		setMentions,
 		roomMentionIntent,
 		setRoomMentionIntent,
+		resetMentionState,
 		mentionQuery,
 		setMentionQuery,
 		MentionPicker,
@@ -466,14 +472,34 @@ const Composer: Component<{
 		}
 	}
 
+	/**
+	 * The edit target's own m.mentions, read from the SDK event - which,
+	 * post-aggregation, reflects the latest replacement's new_content, i.e.
+	 * the mention state the message currently carries. Feeds the edit-mode
+	 * @room seeding and buildEditContent's newly-added top-level diff.
+	 */
+	const editTargetMentions = (eventId: string): PrevMentions => {
+		const content = client
+			.getRoom(props.roomId)
+			?.findEventById(eventId)
+			?.getContent() as
+			| { "m.mentions"?: { user_ids?: unknown; room?: unknown } }
+			| undefined;
+		const m = content?.["m.mentions"];
+		return {
+			userIds: Array.isArray(m?.user_ids)
+				? m.user_ids.filter((u): u is string => typeof u === "string")
+				: [],
+			room: m?.room === true,
+		};
+	};
+
 	// Pre-fill text when entering edit mode
 	createEffect(
 		on(
 			() => props.editingEvent,
 			(ev) => {
-				setMentions([]);
-				setRoomMentionIntent(false);
-				setMentionQuery(null);
+				resetMentionState();
 				setGifPickerOpen(false);
 				// Entering edit mode discards an active recording: the edit UI
 				// replaces the send affordances, and a voice send completing
@@ -487,6 +513,15 @@ const Composer: Component<{
 					// worse than a tray entry that waits out the edit.)
 					clearAttachments();
 					setText(ev.body);
+					// Seed the @room intent from the target's own m.mentions so an
+					// edit that keeps the "@room" token keeps room:true on
+					// m.new_content (and the newly-added diff in buildEditContent
+					// correctly treats it as NOT new). User mentions are not
+					// seeded - their tokens are display names the ids alone can't
+					// reconstruct - which is the pre-existing edit behavior.
+					setRoomMentionIntent(
+						editTargetMentions(ev.eventId).room && hasRoomMentionToken(ev.body),
+					);
 					requestAnimationFrame(() => {
 						autoResize();
 						textareaRef?.focus();
@@ -610,6 +645,7 @@ const Composer: Component<{
 				props.editingEvent.eventId,
 				props.editingEvent.msgtype === "m.emote" ? "m.emote" : "m.text",
 				currentRoomMention,
+				editTargetMentions(props.editingEvent.eventId),
 			);
 
 			const draft = text();
@@ -617,9 +653,7 @@ const Composer: Component<{
 			const draftRoomMention = roomMentionIntent();
 			setText("");
 			setError(null);
-			setMentions([]);
-			setRoomMentionIntent(false);
-			setMentionQuery(null);
+			resetMentionState();
 			setEmojiPickerOpen(false);
 			setSending(true);
 			stopTyping();
@@ -666,9 +700,7 @@ const Composer: Component<{
 		const draftRoomMention = roomMentionIntent();
 		setText("");
 		setError(null);
-		setMentions([]);
-		setRoomMentionIntent(false);
-		setMentionQuery(null);
+		resetMentionState();
 		setEmojiPickerOpen(false);
 		setGifPickerOpen(false);
 		requestAnimationFrame(autoResize);
@@ -782,9 +814,7 @@ const Composer: Component<{
 	const cancelEdit = (): void => {
 		stopTyping();
 		setText("");
-		setMentions([]);
-		setRoomMentionIntent(false);
-		setMentionQuery(null);
+		resetMentionState();
 		requestAnimationFrame(autoResize);
 		props.onCancelEdit?.();
 	};

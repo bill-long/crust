@@ -142,7 +142,7 @@ describe("markRoomUnread", () => {
 		expect(client.setRoomAccountData).not.toHaveBeenCalled();
 	});
 
-	it("rolls back the optimistic flag when the write fails", async () => {
+	it("rolls back to the authoritative value when the write fails", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const { client, ctx, optimisticallySetMarkedUnread } = makeCtx({
 			markedUnread: false,
@@ -150,10 +150,28 @@ describe("markRoomUnread", () => {
 		client.setRoomAccountData.mockRejectedValueOnce(new Error("nope"));
 		markRoomUnread(ctx, "!r:x");
 		await flush();
+		// No account data on the room: the failed PUT changed nothing, so
+		// the rollback converges to false.
 		expect(optimisticallySetMarkedUnread).toHaveBeenLastCalledWith(
 			"!r:x",
 			false,
 		);
+	});
+
+	it("does not clobber a mid-flight echo the server already confirmed", async () => {
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		const { room, client, ctx, summaries } = makeCtx({ markedUnread: false });
+		client.setRoomAccountData.mockRejectedValueOnce(new Error("timeout"));
+		markRoomUnread(ctx, "!r:x");
+		// Before the rejection lands, the server-side echo arrives (the PUT
+		// was applied despite the failed response, or another device wrote
+		// the same value): the SDK now holds true.
+		room.__setRoomAccountData(MARKED_UNREAD_TYPE, { unread: true });
+		await flush();
+		// Convergent rollback keeps the confirmed value instead of
+		// inverting it (an inverted write would stick - /sync never
+		// re-delivers unchanged account data).
+		expect(summaries["!r:x"].markedUnread).toBe(true);
 	});
 });
 
@@ -184,9 +202,11 @@ describe("clearRoomMarkedUnread", () => {
 		const consoleError = vi
 			.spyOn(console, "error")
 			.mockImplementation(() => {});
-		const { client, ctx, summaries, optimisticallySetMarkedUnread } = makeCtx({
-			markedUnread: true,
-		});
+		const { room, client, ctx, summaries, optimisticallySetMarkedUnread } =
+			makeCtx({ markedUnread: true });
+		// The authoritative SDK state the rollback converges to: the server
+		// still holds the flag (the failed PUT changed nothing).
+		room.__setRoomAccountData(MARKED_UNREAD_TYPE, { unread: true });
 		client.setRoomAccountData.mockRejectedValueOnce(new Error("nope"));
 		clearRoomMarkedUnread(ctx, "!r:x");
 		await flush();
@@ -361,8 +381,11 @@ describe("useMarkedUnreadConsumer", () => {
 	});
 
 	it("a remount with the same room open does not consume a mark made while open", () => {
-		// Simulates Layout being re-created on a route-definition boundary
-		// crossing (e.g. a settings round-trip) while the room stays open.
+		// Simulates Layout being re-created while the viewed room id stays
+		// DEFINED throughout. NOTE: a settings round-trip is NOT this case -
+		// /settings clears params.roomId, so the effect re-arms and the
+		// return consumes, which the hook docs declare deliberate
+		// (open-consumes semantics).
 		const harness = makeConsumerHarness({ markedUnread: false });
 		harness.setRoomId("!r:x");
 		markRoomUnread(harness.ctx, "!r:x");

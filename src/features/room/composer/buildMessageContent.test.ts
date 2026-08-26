@@ -251,8 +251,10 @@ describe("@room mention (#448)", () => {
 		expect(content.formatted_body).toBeUndefined();
 	});
 
-	it("buildEditContent carries the flag on m.new_content", () => {
-		const content = buildEditContent(
+	it("buildEditContent carries the full flag on m.new_content and the NEW one top-level", () => {
+		// @room newly added by this edit: both levels carry it (top level
+		// is what push rules evaluate, so this is what actually pings).
+		const added = buildEditContent(
 			"@room updated",
 			null,
 			[],
@@ -260,7 +262,45 @@ describe("@room mention (#448)", () => {
 			"m.text",
 			true,
 		);
-		const newContent = content["m.new_content"] as Record<string, unknown>;
-		expect(newContent["m.mentions"]).toEqual({ room: true });
+		expect(
+			(added["m.new_content"] as Record<string, unknown>)["m.mentions"],
+		).toEqual({ room: true });
+		expect(added["m.mentions"]).toEqual({ room: true });
+
+		// @room kept from the original: new_content keeps it, but the top
+		// level must NOT restate it - that would re-ping the room on a typo
+		// fix.
+		const kept = buildEditContent(
+			"@room updated",
+			null,
+			[],
+			"$target:example.com",
+			"m.text",
+			true,
+			{ userIds: [], room: true },
+		);
+		expect(
+			(kept["m.new_content"] as Record<string, unknown>)["m.mentions"],
+		).toEqual({ room: true });
+		expect(kept).not.toHaveProperty("m.mentions");
+	});
+
+	it("buildEditContent's top level carries only newly-added user mentions", () => {
+		const content = buildEditContent(
+			"hi @Old @New",
+			null,
+			[
+				{ userId: "@old:example.com", displayName: "Old" },
+				{ userId: "@new:example.com", displayName: "New" },
+			],
+			"$target:example.com",
+			"m.text",
+			false,
+			{ userIds: ["@old:example.com"], room: false },
+		);
+		expect(
+			(content["m.new_content"] as Record<string, unknown>)["m.mentions"],
+		).toEqual({ user_ids: ["@old:example.com", "@new:example.com"] });
+		expect(content["m.mentions"]).toEqual({ user_ids: ["@new:example.com"] });
 	});
 });

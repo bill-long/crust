@@ -76,6 +76,29 @@ function enqueueFlagWrite(
 }
 
 /**
+ * Failure rollback for an optimistic flag flip: converge the summary to
+ * the AUTHORITATIVE SDK account-data value rather than blindly inverting.
+ * Inverting can't distinguish "our pending flip" from a same-value sync
+ * echo that landed mid-flight (another device's write, or a PUT the
+ * server applied even though our response errored) - and clobbering the
+ * echo would stick, since /sync never re-delivers unchanged account
+ * data. Converging is always safe: if the failed PUT truly changed
+ * nothing, the SDK holds the pre-action value (a plain rollback); if the
+ * server did apply something, its echo either already updated the SDK or
+ * is about to, and onRoomAccountData will land on the same value.
+ */
+function rollBackToAuthoritative(
+	ctx: MarkedUnreadContext,
+	roomId: string,
+): void {
+	const room = ctx.client.getRoom(roomId);
+	ctx.optimisticallySetMarkedUnread(
+		roomId,
+		room ? getRoomMarkedUnread(room) : false,
+	);
+}
+
+/**
  * Mark `roomId` unread: flip the summary flag so the sidebar dot appears
  * instantly, then persist `m.marked_unread` account data. Rolled back with
  * an error toast if the write fails (the dot is the only feedback surface,
@@ -85,13 +108,7 @@ export function markRoomUnread(ctx: MarkedUnreadContext, roomId: string): void {
 	if (ctx.summaries[roomId]?.markedUnread) return;
 	ctx.optimisticallySetMarkedUnread(roomId, true);
 	enqueueFlagWrite(ctx.client, roomId, true).catch((err) => {
-		// Roll back only while the optimistic value is still what's showing:
-		// an authoritative echo that flipped the flag mid-flight (another
-		// device's write, delivered by onRoomAccountData) must not be
-		// clobbered by this failed request's cleanup.
-		if (ctx.summaries[roomId]?.markedUnread === true) {
-			ctx.optimisticallySetMarkedUnread(roomId, false);
-		}
+		rollBackToAuthoritative(ctx, roomId);
 		reportError(err, {
 			userMessage: "Couldn't mark the room as unread.",
 			logLabel: "Mark as unread failed",
@@ -117,11 +134,7 @@ export function clearRoomMarkedUnread(
 	if (!ctx.summaries[roomId]?.markedUnread) return;
 	ctx.optimisticallySetMarkedUnread(roomId, false);
 	enqueueFlagWrite(ctx.client, roomId, false).catch((err) => {
-		// Same echo-safe rollback as markRoomUnread: restore the dot only
-		// if nothing authoritative overwrote the optimistic clear meanwhile.
-		if (ctx.summaries[roomId]?.markedUnread === false) {
-			ctx.optimisticallySetMarkedUnread(roomId, true);
-		}
+		rollBackToAuthoritative(ctx, roomId);
 		reportError(err, { logLabel: "Clearing marked-unread failed" });
 	});
 }

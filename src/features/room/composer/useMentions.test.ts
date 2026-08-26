@@ -220,3 +220,65 @@ describe("useMentions @room candidate (#448)", () => {
 		}
 	});
 });
+
+describe("useMentions @room intent lifecycle", () => {
+	it("disarms on input once the picked token is deleted, so a re-typed @room does not ping", () => {
+		const h = setup([makeMember("@alice:example.com", "Alice")], {
+			canRoomMention: true,
+			textarea: true,
+		});
+		try {
+			h.type("@ro");
+			h.setCaret(3);
+			h.mentions.setMentionQuery("ro");
+			h.mentions.onMentionSelect(ROOM_MENTION_CANDIDATE);
+			expect(h.mentions.roomMentionIntent()).toBe(true);
+			// User deletes the token; the input handler re-detects.
+			h.type("quoting ");
+			h.setCaret(8);
+			h.mentions.detectMention();
+			expect(h.mentions.roomMentionIntent()).toBe(false);
+			// A later hand-typed @room must not ride the stale intent.
+			expect(h.mentions.reconcileRoomMention("quoting @room here")).toBe(false);
+		} finally {
+			h.dispose();
+		}
+	});
+
+	it("a member display-named 'room' inserts their user-id form, never the @room token", () => {
+		const evil = makeMember("@evil:example.com", "room");
+		const h = setup([evil], { canRoomMention: true, textarea: true });
+		try {
+			h.type("@ro");
+			h.setCaret(3);
+			h.mentions.setMentionQuery("ro");
+			h.mentions.onMentionSelect(evil);
+			expect(h.getText()).toBe("@evil:example.com ");
+			expect(h.mentions.roomMentionIntent()).toBe(false);
+			expect(h.mentions.mentions()).toEqual([
+				{ userId: "@evil:example.com", displayName: "evil:example.com" },
+			]);
+		} finally {
+			h.dispose();
+		}
+	});
+
+	it("resetMentionState clears mentions, intent, and query together", () => {
+		const h = setup([makeMember("@alice:example.com", "Alice")], {
+			canRoomMention: true,
+			textarea: true,
+		});
+		try {
+			h.type("@ro");
+			h.setCaret(3);
+			h.mentions.setMentionQuery("ro");
+			h.mentions.onMentionSelect(ROOM_MENTION_CANDIDATE);
+			h.mentions.resetMentionState();
+			expect(h.mentions.roomMentionIntent()).toBe(false);
+			expect(h.mentions.mentions()).toEqual([]);
+			expect(h.mentions.mentionQuery()).toBeNull();
+		} finally {
+			h.dispose();
+		}
+	});
+});

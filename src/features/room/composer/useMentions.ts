@@ -22,6 +22,39 @@ export function isRoomMentionCandidate(
 	return "roomMention" in candidate;
 }
 
+/** Strip code blocks and inline code so mentions inside code don't count. */
+function stripCode(msg: string): string {
+	return msg
+		.replace(/```(?:[^\n]*\n[\s\S]*?```|[\s\S]*?```)/g, "")
+		.replace(/`[^`]+`/g, "");
+}
+
+/** Whether `token` occurs in `stripped` with word boundaries on both sides. */
+function hasBoundedToken(stripped: string, token: string): boolean {
+	let searchFrom = 0;
+	while (searchFrom < stripped.length) {
+		const idx = stripped.indexOf(token, searchFrom);
+		if (idx < 0) return false;
+		const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
+		const afterIdx = idx + token.length;
+		const afterOk =
+			afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
+		if (beforeOk && afterOk) return true;
+		searchFrom = idx + 1;
+	}
+	return false;
+}
+
+/**
+ * Whether `msg` contains a boundary-checked `@room` token outside code -
+ * the same rule the reconcilers apply. Exported for the composer's
+ * edit-mode seeding (a kept token plus the target's `room:true` re-arms
+ * the intent).
+ */
+export function hasRoomMentionToken(msg: string): boolean {
+	return hasBoundedToken(stripCode(msg), "@room");
+}
+
 interface UseMentionsDeps {
 	client: MatrixClient;
 	roomId: Accessor<string>;
@@ -112,8 +145,9 @@ export function useMentions(deps: UseMentionsDeps) {
 	function detectMention(currentText?: string): void {
 		const el = deps.getTextarea();
 		if (!el) return;
+		const text = currentText ?? el.value;
 		const pos = el.selectionStart;
-		const before = (currentText ?? el.value).slice(0, pos);
+		const before = text.slice(0, pos);
 		// Look for @ at start or after non-word char, capture query after it
 		const match = before.match(/(^|[^\w])@(\S*)$/);
 		if (match) {
@@ -121,29 +155,15 @@ export function useMentions(deps: UseMentionsDeps) {
 		} else {
 			setMentionQuery(null);
 		}
-	}
-
-	/** Strip code blocks and inline code so mentions inside code don't count. */
-	function stripCode(msg: string): string {
-		return msg
-			.replace(/```(?:[^\n]*\n[\s\S]*?```|[\s\S]*?```)/g, "")
-			.replace(/`[^`]+`/g, "");
-	}
-
-	/** Whether `token` occurs in `stripped` with word boundaries on both sides. */
-	function hasBoundedToken(stripped: string, token: string): boolean {
-		let searchFrom = 0;
-		while (searchFrom < stripped.length) {
-			const idx = stripped.indexOf(token, searchFrom);
-			if (idx < 0) return false;
-			const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
-			const afterIdx = idx + token.length;
-			const afterOk =
-				afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
-			if (beforeOk && afterOk) return true;
-			searchFrom = idx + 1;
+		// Disarm a picked @room the moment its token leaves the text, not
+		// just at send: a LATER hand-typed @room in the same draft must not
+		// ride the stale intent into an everyone-ping (user mentions accept
+		// the analogous re-type - a re-typed @Name still denotes that
+		// person - but a re-typed @room is plausibly quotation, with
+		// room-wide blast radius).
+		if (roomMentionIntent() && !hasBoundedToken(stripCode(text), "@room")) {
+			setRoomMentionIntent(false);
 		}
-		return false;
 	}
 
 	/** Prune mentions whose @DisplayName is no longer in non-code text */
@@ -164,10 +184,14 @@ export function useMentions(deps: UseMentionsDeps) {
 	}
 
 	/** Normalize a display name for insertion: strip the leading @ of a
-	 *  userId-shaped fallback to avoid `@@user:server`. */
+	 *  userId-shaped fallback to avoid `@@user:server`. A member literally
+	 *  named "room" falls back to their user-id form - their token must
+	 *  never collide with the @room everyone-mention token (both
+	 *  reconcilers would match the same "@room" text and double-emit). */
 	function insertableName(rawName: string, userId: string): string {
 		const trimmed = rawName.trim() || userId;
-		return trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+		const name = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+		return name === "room" ? userId.replace(/^@/, "") : name;
 	}
 
 	/** Record a mention, deduped by userId. On a dedupe hit the stored
@@ -254,6 +278,18 @@ export function useMentions(deps: UseMentionsDeps) {
 		placeCaretAfter(pos + insertion.length);
 	}
 
+	/**
+	 * Clear every piece of mention state in one call. The reset sites in
+	 * the composer (send, edit entry/exit) must never clear the user
+	 * mentions but forget the @room intent - a stale intent leaking onto
+	 * an unrelated later message is this feature's worst failure mode.
+	 */
+	function resetMentionState(): void {
+		setMentions([]);
+		setRoomMentionIntent(false);
+		setMentionQuery(null);
+	}
+
 	return {
 		mentions,
 		setMentions,
@@ -261,6 +297,7 @@ export function useMentions(deps: UseMentionsDeps) {
 		setMentionQuery,
 		roomMentionIntent,
 		setRoomMentionIntent,
+		resetMentionState,
 		MentionPicker,
 		handlePickerKey,
 		getActiveDescendant,
