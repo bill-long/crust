@@ -114,6 +114,21 @@ describe("ClientProvider session wiring (#460)", () => {
 		expect(opts.tokenRefreshFunction).toBeTypeOf("function");
 	});
 
+	it("advertises only the verification methods Crust can complete (#452)", () => {
+		setup(PASSWORD_SESSION);
+
+		const opts = createClientMock.mock.calls[0][0];
+		// Locked here because the SDK default also advertises
+		// m.qr_code.scan.v1: with no camera capture path, letting the other
+		// device show us a code it expects us to read strands the flow with
+		// no way forward.
+		expect(opts.verificationMethods).toEqual([
+			"m.sas.v1",
+			"m.qr_code.show.v1",
+			"m.reciprocate.v1",
+		]);
+	});
+
 	it("leaves refresh options undefined for a password session", async () => {
 		setup(PASSWORD_SESSION);
 

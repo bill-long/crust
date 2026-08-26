@@ -9,6 +9,7 @@ import {
 	type SummariesStore,
 } from "../../client/summaries";
 import { createMockClient } from "../../test/mockClient";
+import type { VerificationHandle } from "./verification/useVerification";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -175,26 +176,30 @@ describe("lazy crypto dialog boundaries (#307)", () => {
 		);
 		// Minimal VerificationHandle stub in the "requested" state — enough for
 		// the dialog to render its waiting view through the lazy boundary.
-		const verificationStub = {
+		// Typed rather than cast, so a new handle member fails typecheck here
+		// instead of at runtime.
+		const verificationStub: VerificationHandle = {
 			state: () => "requested",
 			emoji: () => undefined,
+			qrBytes: () => undefined,
 			error: () => "",
 			isSelfVerification: () => true,
 			otherUserId: () => "",
 			requestSelfVerification: async () => {},
 			requestDeviceVerification: async () => {},
 			acceptIncoming: () => {},
+			startSas: async () => {},
 			confirmSas: async () => {},
 			rejectSas: () => {},
+			confirmQr: () => {},
+			rejectQr: () => {},
 			cancel: () => {},
 			reset: () => {},
 		};
 		render(() => (
 			<Suspense fallback={<div data-testid="fallback" />}>
 				<VerificationDialog
-					verification={
-						verificationStub as unknown as import("./verification/useVerification").VerificationHandle
-					}
+					verification={verificationStub}
 					onClose={() => {}}
 				/>
 			</Suspense>
