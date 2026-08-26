@@ -206,8 +206,6 @@ export function createMockRoom(
 	}));
 	// Configurable read receipt positions per user
 	const readUpTo = new Map<string, string | null>();
-	// Receipt send times, for the unread-divider snapshot (#446).
-	const readUpToTs = new Map<string, number>();
 
 	let baseIndex = 0;
 	let backwardPaginationToken: string | null = null;
@@ -327,11 +325,6 @@ export function createMockRoom(
 		getAccountData: (type: string) => roomAccountData.get(type),
 		getEventReadUpTo: (userId: string, _ignoreSynthesized?: boolean) =>
 			readUpTo.get(userId) ?? null,
-		getReadReceiptForUserId: (userId: string) => {
-			const eventId = readUpTo.get(userId);
-			if (!eventId) return null;
-			return { eventId, data: { ts: readUpToTs.get(userId) ?? 0 } };
-		},
 		getMember: (userId: string) => {
 			const m = memberState.find((m) => m.userId === userId);
 			return m ?? null;
@@ -376,9 +369,8 @@ export function createMockRoom(
 		__setMaySendRedaction: (value: boolean) => {
 			maySendRedactionFlag = value;
 		},
-		__setReadUpTo: (userId: string, eventId: string | null, ts = 0) => {
+		__setReadUpTo: (userId: string, eventId: string | null) => {
 			readUpTo.set(userId, eventId);
-			readUpToTs.set(userId, ts);
 		},
 		/** Test helper: set or remove per-room account data. */
 		__setRoomAccountData: (

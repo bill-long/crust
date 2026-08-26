@@ -210,7 +210,7 @@ const TimelineView: Component<{
 
 	// Where the user left off. Snapshotted per scope inside the hook, so the
 	// divider holds still while the receipts this view sends move on.
-	const { firstUnreadEventId, jumpTargetEventId } = useUnreadMarker(
+	const { firstUnreadEventId } = useUnreadMarker(
 		client,
 		() => props.roomId,
 		() => props.thread,
@@ -228,6 +228,17 @@ const TimelineView: Component<{
 	const markUnreadBoundarySeen = (): void => {
 		setUnreadBoundarySeen(true);
 	};
+	// The marker re-snapshots in place on a scope change, so this latch has
+	// to as well. Today Layout keys the room subtree and the thread panel
+	// unmounts on refetch, which would remount the whole component - but the
+	// invariant belongs next to the latch, not in another file's structure.
+	createEffect(
+		on(
+			() => [props.roomId, props.thread?.threadId],
+			() => setUnreadBoundarySeen(false),
+			{ defer: true },
+		),
+	);
 	// Offer the jump while there is somewhere to go and the user has not got
 	// there yet. Deliberately not keyed on the divider being *rendered*: the
 	// row it lives on is virtualized, so for any boundary further than the
@@ -238,26 +249,27 @@ const TimelineView: Component<{
 	// Suppressing that tick means asking whether an unrendered row is off
 	// screen, which has no answer - so this trade is deliberate.
 	const showJumpToUnread = (): boolean =>
-		!loading() && !unreadBoundarySeen() && jumpTargetEventId() !== null;
+		!loading() && !unreadBoundarySeen() && firstUnreadEventId() !== null;
 
 	const jumpToUnread = (): void => {
-		const target = jumpTargetEventId();
+		const target = firstUnreadEventId();
 		if (!target) return;
-		// Hand focus to the scroller first. This button unmounts the moment
-		// the divider is seen, and focus on a removed element falls to
-		// <body>, restarting a keyboard user's next Tab from the top of the
-		// document. It also lets the flash effect adopt the target row, which
-		// it refuses to do while focus sits outside the scroller.
+		// Cancel the bottom pin before jumping, as every other jump here
+		// does. `wantsBottom` defaults to true and only a deliberate upward
+		// gesture clears it; the programmatic scroll runs inside
+		// markProgrammaticScroll, so onScroll will not clear it either. Left
+		// set, the row-growth re-anchor snaps the view straight back to the
+		// live end as virtua measures the rows the jump just mounted - and
+		// since the divider was never seen, the button is still there to be
+		// clicked again.
+		setWantsBottom(false);
+		// Hand focus to the scroller too. This button unmounts the moment the
+		// divider is seen, and focus on a removed element falls to <body>,
+		// restarting a keyboard user's next Tab from the top of the document.
+		// It also lets the flash effect adopt the target row, which it
+		// refuses to do while focus sits outside the scroller.
 		scrollRef?.focus({ preventScroll: true });
-		void jumpToEvent(target).then(() => {
-			// The receipt can be an event this timeline never draws - a
-			// reaction sent from another client. Loading its context is what
-			// finally lets the divider be placed, so land on that row rather
-			// than on an id no row carries. Already-loaded targets take
-			// jumpToEvent's fast path, so this is a scroll, not a reload.
-			const settled = firstUnreadEventId();
-			if (settled && settled !== target) void jumpToEvent(settled);
-		});
+		void jumpToEvent(target);
 	};
 
 	// Reactive "now" that updates at local midnight so separator labels

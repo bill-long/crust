@@ -6,31 +6,26 @@ import { firstUnreadIndex } from "./unreadMarker";
 
 export interface UnreadMarker {
 	/**
-	 * The row the "New messages" divider goes above, or null when the
-	 * boundary is not in the loaded window (or there is nothing unread).
+	 * The row the "New messages" divider goes above, and the row the jump
+	 * affordance lands on. Null when there is nothing unread, or when the
+	 * boundary is not in the loaded window.
+	 *
+	 * That second case - more than a window's worth arrived since the last
+	 * read - is a deliberate gap rather than an oversight. Placing the
+	 * boundary needs the receipt to be *in* the window, and every signal
+	 * available for guessing at it from outside is wrong in an ordinary
+	 * situation: the receipt's send time misreads a partial catch-up in
+	 * another client, and the forward-pagination flag misreads a window whose
+	 * far end the SDK trimmed during deep scrollback. Offering nothing is
+	 * honest; offering a jump into a room the user has already read is not.
 	 */
 	firstUnreadEventId: Accessor<string | null>;
-	/**
-	 * Where "jump to where I left off" should land, or null when there is
-	 * nowhere to go. Falls back to the read receipt itself when the boundary
-	 * has been paginated out of the window: the divider cannot be drawn from
-	 * there, but `jumpToEvent` can still load that context, which is exactly
-	 * the case the user most needs help with.
-	 */
-	jumpTargetEventId: Accessor<string | null>;
 }
 
 interface UnreadMarkerDeps {
 	events: Accessor<readonly TimelineEvent[]>;
 	/** Raw SDK window, for resolving a receipt that points at a row we never draw. */
 	getWindowEvents: () => MatrixEvent[];
-}
-
-/** Our own receipt, snapshotted: which event, and when we sent it. */
-interface ReceiptSnapshot {
-	eventId: string;
-	/** Send time of the receipt, or null when the server did not give one. */
-	ts: number | null;
 }
 
 /**
@@ -50,8 +45,7 @@ function displayableIds(events: readonly TimelineEvent[]): Set<string> {
 }
 
 /**
- * Where the "New messages" divider goes, and where the jump affordance
- * should take the user.
+ * Where the "New messages" divider goes.
  *
  * The read receipt this derives from is a *snapshot*, taken when the timeline
  * scope changes rather than read live. That is the whole point: opening a room
@@ -78,7 +72,7 @@ export function useUnreadMarker(
 	// ever re-mount to fix it.
 	let capturedRoomId: string | null = null;
 	let capturedThreadId: string | undefined;
-	const receipt = createMemo<ReceiptSnapshot | null>((prev) => {
+	const readUpToId = createMemo<string | null>((prev) => {
 		const currentRoomId = roomId();
 		const currentThreadId = thread()?.threadId;
 		if (
@@ -86,6 +80,12 @@ export function useUnreadMarker(
 			capturedThreadId === currentThreadId
 		)
 			return prev ?? null;
+
+		// The scope changed, so the previous snapshot is not ours to keep:
+		// holding it would place this room's divider from another room's
+		// receipt while we wait for the store to catch up.
+		capturedRoomId = null;
+		capturedThreadId = undefined;
 
 		// `.length`, not the accessor alone: `events` is a Solid store proxy,
 		// and reading it without touching a property fires no get-trap and
@@ -95,25 +95,14 @@ export function useUnreadMarker(
 
 		const room = client.getRoom(currentRoomId);
 		const myUserId = client.getUserId();
-		if (!room || !myUserId) return prev ?? null;
+		if (!room || !myUserId) return null;
 		const scope = currentThreadId ? room.getThread(currentThreadId) : room;
-		if (!scope) return prev ?? null;
+		if (!scope) return null;
 
 		capturedRoomId = currentRoomId;
 		capturedThreadId = currentThreadId;
-
-		// The wrapped receipt carries the send time, which is what tells a
-		// genuine backlog apart from a trimmed window (see jumpTargetEventId).
-		// `getEventReadUpTo` is the fallback because it also considers private
-		// receipts, so it can know an id the wrapped read receipt does not.
-		const wrapped = scope.getReadReceiptForUserId(myUserId);
-		const eventId = wrapped?.eventId ?? scope.getEventReadUpTo(myUserId);
-		if (!eventId) return null;
-		const ts = wrapped?.eventId === eventId ? (wrapped.data?.ts ?? null) : null;
-		return { eventId, ts };
+		return scope.getEventReadUpTo(myUserId) ?? null;
 	});
-
-	const readUpToId = createMemo(() => receipt()?.eventId ?? null);
 
 	/**
 	 * The receipt resolved onto a row we actually draw. Reading a message
@@ -124,7 +113,18 @@ export function useUnreadMarker(
 	const resolvedReadUpToId = createMemo(() => {
 		const receiptId = readUpToId();
 		if (!receiptId) return null;
-		const displayable = displayableIds(deps.events());
+		const rows = deps.events();
+
+		// Fast path for the overwhelmingly common case. This memo re-runs on
+		// every per-row mutation - a reaction, an edit, a local echo settling
+		// - and building the id set plus copying the whole SDK window each
+		// time is work the walk-back rarely needs.
+		const row = rows.find((ev) => ev.eventId === receiptId);
+		if (row && !row.stateNotice) return receiptId;
+		// Not drawn (or drawn only as a notice): fall through to the
+		// walk-back, which is what finds the row it really marks.
+
+		const displayable = displayableIds(rows);
 		const resolve = createReceiptResolver(deps.getWindowEvents(), (id) =>
 			displayable.has(id),
 		);
@@ -139,28 +139,5 @@ export function useUnreadMarker(
 		return index === -1 ? null : rows[index].eventId;
 	});
 
-	const jumpTargetEventId = createMemo(() => {
-		const inWindow = firstUnreadEventId();
-		if (inWindow) return inWindow;
-
-		// Nothing to draw, but there may still be somewhere to go. Offering
-		// it turns on telling a genuine backlog - the boundary is older than
-		// everything loaded - apart from a window that simply does not reach
-		// it, which is what deep back-pagination produces in a room that is
-		// fully read. The receipt's send time answers that: we sent it when
-		// we last read, so a receipt newer than the oldest loaded row means
-		// the window is behind us, not ahead.
-		const snapshot = receipt();
-		if (!snapshot) return null;
-		if (resolvedReadUpToId()) return null;
-		const rows = deps.events();
-		if (rows.length === 0) return null;
-		// No timestamp means no way to tell the two apart; withhold rather
-		// than point the user at a room they have already read.
-		if (snapshot.ts === null) return null;
-		if (snapshot.ts >= rows[0].timestamp) return null;
-		return snapshot.eventId;
-	});
-
-	return { firstUnreadEventId, jumpTargetEventId };
+	return { firstUnreadEventId };
 }

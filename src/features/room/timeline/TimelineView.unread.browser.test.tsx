@@ -94,13 +94,9 @@ function groupedPair(): TimelineEvent[] {
 	];
 }
 
-function mountRoom(
-	events: TimelineEvent[],
-	readUpTo: string | null,
-	readUpToTs = 0,
-) {
+function mountRoom(events: TimelineEvent[], readUpTo: string | null) {
 	const room = createMockRoom(ROOM_ID, [], [{ userId: ALICE, name: "Alice" }]);
-	if (readUpTo) room.__setReadUpTo(ME, readUpTo, readUpToTs);
+	if (readUpTo) room.__setReadUpTo(ME, readUpTo);
 	const rooms = new Map([[ROOM_ID, room]]);
 	const client = createMockClient(rooms);
 
@@ -212,9 +208,7 @@ describe("unread divider (#446)", () => {
 				mkEvent(`$unread${i}`, `unread message ${i}`, 1700000060000 + i * 1000),
 			),
 		];
-		// Receipt sent before every loaded row: a real backlog, not a window
-		// whose forward end was trimmed by deep scrollback.
-		const { container } = mountRoom(events, "$read", 1);
+		const { container } = mountRoom(events, "$read");
 
 		await vi.waitFor(() => expect(findJumpButton(container)).toBeTruthy());
 		// And the divider itself is genuinely not rendered - otherwise this
@@ -241,6 +235,43 @@ describe("unread divider (#446)", () => {
 			...(unreadRow?.querySelectorAll<HTMLElement>("button") ?? []),
 		].filter((b) => b.textContent?.trim() === "Alice");
 		expect(nameButtons).toHaveLength(0);
+	});
+
+	it("stays at the boundary after the jump instead of snapping back", async () => {
+		// The bottom pin has to be released before jumping. Left set, the
+		// re-anchor that runs as virtua measures the newly mounted rows drags
+		// the view straight back to the live end - and because the divider
+		// was never seen, the button is still there to be clicked again.
+		const events = [
+			mkEvent("$read", "read message", 1700000000000),
+			...Array.from({ length: 60 }, (_, i) =>
+				mkEvent(`$unread${i}`, `unread message ${i}`, 1700000060000 + i * 1000),
+			),
+		];
+		const { container } = mountRoom(events, "$read");
+		const scroller = container.querySelector<HTMLElement>(
+			'[data-testid="timeline-scroller"]',
+		);
+		if (!scroller) throw new Error("scroller not found");
+
+		const button = await vi.waitFor(() => {
+			const b = findJumpButton(container);
+			if (!b) throw new Error("jump button not shown");
+			return b;
+		});
+		await vi.waitFor(() =>
+			expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight),
+		);
+		button.click();
+
+		await vi.waitFor(() => expect(findDivider(container)).toBeTruthy());
+		// Settle: this is exactly the window in which the re-anchor fires.
+		await new Promise((r) => setTimeout(r, 300));
+
+		const distFromBottom =
+			scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+		expect(distFromBottom).toBeGreaterThan(0);
+		expect(findDivider(container)).toBeTruthy();
 	});
 
 	it("draws no divider in a room we have read to the end", async () => {
