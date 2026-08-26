@@ -146,6 +146,33 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 	};
 
 	/**
+	 * Take whatever the active verifier is already holding.
+	 *
+	 * The SDK's `ShowSas` / `ShowReciprocateQr` events are not a reliable
+	 * one-shot: a rust verifier only emits them from inside `verify()`, and
+	 * only if its callbacks happen to be populated by then. The verifier and
+	 * the request register separate rust change callbacks, so the request's
+	 * can land first - `verify()` then emits nothing and no later event ever
+	 * re-emits it, which would strand the user on a code the other side has
+	 * already scanned. Reading the getters on every change closes that gap;
+	 * the events still arrive first in the usual ordering, and the `already
+	 * have it` checks keep this idempotent either way.
+	 */
+	const drainVerifierCallbacks = (): void => {
+		const verifier = activeVerifier;
+		if (!verifier) return;
+		if (!qrCallbacks) {
+			const qr = verifier.getReciprocateQrCodeCallbacks();
+			if (qr) onShowReciprocateQr(qr);
+		}
+		// Re-read: onShowReciprocateQr cannot detach us, but onShowSas can.
+		if (activeVerifier === verifier && !sasCallbacks) {
+			const sas = verifier.getShowSasCallbacks();
+			if (sas) onShowSas(sas);
+		}
+	};
+
+	/**
 	 * Attach to a verifier and drive it. Covers both the verifier we create
 	 * ourselves for SAS and the one the SDK creates when the other side sends
 	 * an `m.key.verification.start` - for `m.reciprocate.v1` after scanning
@@ -162,7 +189,14 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 			detachVerifier();
 		}
 		activeVerifier = verifier;
+
+		// A method has started, so the code is spent. Leave `qr-showing` in
+		// the same breath as clearing the bytes: the QR view has no empty
+		// state, so a gap here would blank a 256px box under a heading still
+		// telling the user to scan it. This also makes the state the single
+		// authority on whether a method has started - `startSas` relies on it.
 		setQrBytes(undefined);
+		if (state() === "qr-showing") setState("ready");
 
 		verifier.on(VerifierEvent.ShowSas, onShowSas);
 		verifier.on(VerifierEvent.ShowReciprocateQr, onShowReciprocateQr);
@@ -170,7 +204,9 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 
 		const gen = requestGeneration;
 		const bound = verifier;
-		verifier.verify().catch((e) => {
+		const verifying = verifier.verify();
+		drainVerifierCallbacks();
+		verifying.catch((e) => {
 			// A verifier we dropped is not ours to fail on. The SDK cancels
 			// the abandoned verification when it swaps QR for SAS, which
 			// rejects this promise while the replacement is running happily -
@@ -266,6 +302,9 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 				// SDK already has a verifier; we only have to drive it.
 				const verifier = activeRequest.verifier;
 				if (verifier) bindVerifier(verifier);
+				// Started re-fires as the verifier progresses; that is where
+				// callbacks the initial bind was too early to see turn up.
+				drainVerifierCallbacks();
 				break;
 			}
 			case VerificationPhase.Cancelled:
@@ -370,6 +409,10 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 	};
 
 	const startSas = async (): Promise<void> => {
+		// `qr-showing` is both the only view that offers this and, per
+		// `bindVerifier`, proof that no method has started yet - so this one
+		// check also guarantees `startSasVerification` will not no-op and
+		// leave the spinner up forever.
 		if (state() !== "qr-showing") return;
 		setQrBytes(undefined);
 		setState("ready");

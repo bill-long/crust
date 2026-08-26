@@ -24,10 +24,16 @@ const QrCodeDisplay: Component<QrCodeDisplayProps> = (props) => {
 
 	return (
 		<div class="rounded-lg bg-white p-3">
+			{/* shape-rendering: a ~53-module code scaled to 256px lands on
+			    ~4.8 px per module, so module edges fall between device
+			    pixels. Antialiasing them leaves grey seams between the
+			    per-row subpaths, which is what makes SVG QR codes read
+			    badly on a camera. */}
 			<svg
 				class="h-64 w-64"
 				viewBox={`0 0 ${code().size} ${code().size}`}
 				xmlns="http://www.w3.org/2000/svg"
+				shape-rendering="crispEdges"
 				role="img"
 				aria-label={props.label}
 			>

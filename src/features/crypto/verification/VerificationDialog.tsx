@@ -258,13 +258,15 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 								Waiting for the other device.
 							</p>
 							{/* Confirming a scan is fire-and-forget: the SDK's
-							    ShowQrCodeCallbacks.confirm() returns void and
-							    swallows a failed send, so unlike the emoji route
-							    there is no error to surface if our `done` never
-							    leaves. Without an exit this spinner is a dead end.
-							    Cancelling here is legitimate - the SDK deliberately
-							    keeps the request open until the other side's `done`
-							    arrives, precisely so the user can still back out. */}
+							    ShowQrCodeCallbacks.confirm() returns void and drops
+							    the promise its send runs on, so a failed `done`
+							    becomes an unhandled rejection rather than something
+							    the dialog can report. Unlike the emoji route there
+							    is no error to show, and without an exit this spinner
+							    is a dead end. Cancelling here is legitimate - the SDK
+							    deliberately keeps the request open until the other
+							    side's `done` arrives, precisely so the user can still
+							    back out. */}
 							<button
 								type="button"
 								onClick={() => v.cancel()}

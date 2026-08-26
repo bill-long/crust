@@ -229,6 +229,61 @@ describe("useVerification reciprocation (#452)", () => {
 		expect(handle.state()).toBe("done");
 	});
 
+	it("prompts even when the SDK never emits the reciprocate event", async () => {
+		// A rust QR verifier emits ShowReciprocateQr only from inside
+		// verify(), and only if its callbacks are already populated. The
+		// verifier and the request register separate rust change callbacks,
+		// so the request's can land first and verify() emits nothing - with
+		// no later event to make up for it.
+		const { handle, request } = await startVerification();
+		request.transition(VerificationPhase.Ready);
+		await waitFor(() => expect(handle.state()).toBe("qr-showing"));
+
+		const verifier = new FakeVerifier();
+		const callbacks = { confirm: vi.fn(), cancel: vi.fn() };
+		verifier.getReciprocateQrCodeCallbacks.mockReturnValue(callbacks);
+		request.incomingVerifier = verifier;
+		request.transition(VerificationPhase.Started);
+
+		await waitFor(() => expect(handle.state()).toBe("qr-reciprocate"));
+		handle.confirmQr();
+		expect(callbacks.confirm).toHaveBeenCalled();
+	});
+
+	it("shows the emoji when the SDK never emits the SAS event", async () => {
+		const { handle, request } = await startVerification();
+		request.otherPartySupportsMethod.mockReturnValue(false);
+		request.transition(VerificationPhase.Ready);
+		await waitFor(() => expect(request.startVerification).toHaveBeenCalled());
+
+		request.sasVerifier.getShowSasCallbacks.mockReturnValue({
+			sas: { emoji: [["A", "a"]] },
+			confirm: vi.fn(async () => {}),
+			mismatch: vi.fn(),
+			cancel: vi.fn(),
+		} as never);
+		request.transition(VerificationPhase.Started);
+
+		await waitFor(() => expect(handle.state()).toBe("sas-showing"));
+	});
+
+	it("never leaves a spent code under an instruction to scan it", async () => {
+		// The QR view has no empty state, so clearing the bytes without
+		// leaving qr-showing blanks a 256px box under the "Scan this code"
+		// heading - a dead end and a layout shift.
+		const { handle, request } = await startVerification();
+		request.transition(VerificationPhase.Ready);
+		await waitFor(() => expect(handle.state()).toBe("qr-showing"));
+
+		// A verifier holding nothing yet: the SDK has started a method but
+		// has not told us which.
+		request.incomingVerifier = new FakeVerifier();
+		request.transition(VerificationPhase.Started);
+
+		expect(handle.state()).not.toBe("qr-showing");
+		expect(handle.qrBytes()).toBeUndefined();
+	});
+
 	it("rejecting cancels the verification", async () => {
 		const { handle, callbacks } = await reachReciprocate();
 		handle.rejectQr();
