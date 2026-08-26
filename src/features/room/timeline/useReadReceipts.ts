@@ -8,6 +8,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { resolveReceiptToDisplayable } from "./receiptResolution";
 import type { TimelineEvent } from "./timelineTypes";
 
 interface ReadReceiptEntry {
@@ -74,36 +75,24 @@ export function useReadReceipts(
 		}
 
 		const timelineEvents = deps.getWindowEvents();
-		// Precompute eventId->index map for O(1) lookup
-		const idxById = Object.create(null) as Record<string, number>;
-		for (let i = 0; i < timelineEvents.length; i++) {
-			const id = timelineEvents[i].getId();
-			if (id) idxById[id] = i;
-		}
+		const isDisplayable = (id: string): boolean => displayableIds.has(id);
 
 		const members = room.getMembers();
 		for (const member of members) {
 			if (member.userId === deps.myUserId) continue;
-			let readUpToId = room.getEventReadUpTo(member.userId);
-			if (!readUpToId) continue;
+			const receiptId = room.getEventReadUpTo(member.userId);
+			if (!receiptId) continue;
 
-			// If the receipt points at a non-displayable event (e.g. an edit),
-			// walk backwards through the SDK timeline to find the nearest
-			// displayable event
-			if (!displayableIds.has(readUpToId)) {
-				const idx = idxById[readUpToId];
-				if (idx === undefined) continue;
-				let resolved: string | null = null;
-				for (let i = idx; i >= 0; i--) {
-					const id = timelineEvents[i].getId();
-					if (id && displayableIds.has(id)) {
-						resolved = id;
-						break;
-					}
-				}
-				if (!resolved) continue;
-				readUpToId = resolved;
-			}
+			// A receipt can point at an event we never render (an edit, a
+			// reaction); resolveReceiptToDisplayable walks back to the row it
+			// actually marks. Shared with the unread divider so the two
+			// cannot disagree about where a receipt lands.
+			const readUpToId = resolveReceiptToDisplayable(
+				receiptId,
+				isDisplayable,
+				timelineEvents,
+			);
+			if (!readUpToId) continue;
 
 			if (!map[readUpToId]) map[readUpToId] = [];
 			map[readUpToId].push({

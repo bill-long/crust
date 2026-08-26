@@ -41,17 +41,20 @@ import { ForwardDialog } from "./ForwardDialog";
 import { canForward } from "./forwardMessage";
 import { GroupedMembershipNotice } from "./GroupedMembershipNotice";
 import { ImageLightbox } from "./ImageLightbox";
+import { JumpToUnreadButton } from "./JumpToUnreadButton";
 import type { MembershipGroup } from "./membershipGrouping";
 import { NewerMessagesLoader } from "./NewerMessagesLoader";
 import { OlderMessagesLoader } from "./OlderMessagesLoader";
 import { ReportMessageDialog } from "./ReportMessageDialog";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
+import { UnreadDivider } from "./UnreadDivider";
 import { useImageLightbox } from "./useImageLightbox";
 import { useMembershipExpansion } from "./useMembershipExpansion";
 import { useMessageActions } from "./useMessageActions";
 import { useReadReceipts } from "./useReadReceipts";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
+import { useUnreadMarker } from "./useUnreadMarker";
 import { ViewSourceDialog } from "./ViewSourceDialog";
 
 const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
@@ -60,9 +63,15 @@ const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
 function shouldShowHeader(
 	events: readonly TimelineEvent[],
 	index: number,
+	firstUnreadEventId: string | null,
 ): boolean {
 	const curr = events[index];
 	if (!curr) return true;
+	// Break the group at the unread divider, for the same reason the day
+	// boundary breaks it: the divider lands between the two halves, and a
+	// headerless continuation row under it reads as an orphan - a red rule
+	// followed by a bare line with no avatar or name.
+	if (curr.eventId === firstUnreadEventId && !curr.stateNotice) return true;
 	// State notices render as a compact one-liner without an avatar or
 	// header — and a regular message immediately after a notice should
 	// always show its own header so the grouping doesn't span the
@@ -196,6 +205,47 @@ const TimelineView: Component<{
 		groupMembers,
 		expandedByIndex,
 	} = useMembershipExpansion(events);
+
+	// Where the user left off. Snapshotted per scope inside the hook, so the
+	// divider holds still while the receipts this view sends move on.
+	const { firstUnreadEventId, jumpTargetEventId } = useUnreadMarker(
+		client,
+		() => props.roomId,
+		() => props.thread,
+		{
+			events: () => events,
+			getWindowEvents,
+			canLoadNewer,
+		},
+	);
+	// Whether the divider is on screen, as reported by the divider itself.
+	// Undefined means "not known yet" and is distinct from false: the
+	// observer's first callback is asynchronous, so starting at false would
+	// flash the jump button over a divider in plain view for a frame. It also
+	// stays undefined where there is no IntersectionObserver, which withholds
+	// the button rather than pointing at something already visible.
+	const [unreadDividerVisible, setUnreadDividerVisible] = createSignal<
+		boolean | undefined
+	>(undefined);
+	// Latched once the user has actually laid eyes on the divider. After that
+	// the affordance retires for this visit - the snapshot deliberately pins
+	// the boundary for as long as the room is open, and without this the
+	// button would keep resurfacing to point at messages read minutes ago
+	// every time the divider scrolled out of view.
+	const [unreadBoundarySeen, setUnreadBoundarySeen] = createSignal(false);
+	const onUnreadDividerVisibility = (visible: boolean): void => {
+		setUnreadDividerVisible(visible);
+		if (visible) setUnreadBoundarySeen(true);
+	};
+	// Offer the jump when there is somewhere to go and the boundary is not
+	// already in front of the user. No divider row at all (the boundary is
+	// outside the loaded window) counts as off screen.
+	const showJumpToUnread = (): boolean => {
+		if (loading() || unreadBoundarySeen()) return false;
+		if (!jumpTargetEventId()) return false;
+		if (!firstUnreadEventId()) return true;
+		return unreadDividerVisible() === false;
+	};
 
 	// Reactive "now" that updates at local midnight so separator labels
 	// like "Today" / "Yesterday" stay accurate for sessions left open
@@ -1060,6 +1110,11 @@ const TimelineView: Component<{
 												)}
 											/>
 										</Show>
+										<Show when={event.eventId === firstUnreadEventId()}>
+											<UnreadDivider
+												onVisibilityChange={onUnreadDividerVisibility}
+											/>
+										</Show>
 										<Switch>
 											<Match when={mode() === "summary"}>
 												<GroupedMembershipNotice
@@ -1090,7 +1145,11 @@ const TimelineView: Component<{
 													event={event}
 													brokenAvatars={brokenAvatars}
 													onOpenProfile={onOpenProfile}
-													showHeader={shouldShowHeader(events, indexAcc())}
+													showHeader={shouldShowHeader(
+														events,
+														indexAcc(),
+														firstUnreadEventId(),
+													)}
 													isOwnMessage={event.senderId === myUserId}
 													canPin={props.canPin}
 													isPinned={props.isPinned?.(event.eventId) ?? false}
@@ -1215,6 +1274,16 @@ const TimelineView: Component<{
 						    keeps working unchanged. */}
 						<div class="h-2" aria-hidden="true" />
 					</div>
+
+					{/* Jump to where the user left off; see showJumpToUnread. */}
+					<Show when={showJumpToUnread()}>
+						<JumpToUnreadButton
+							onClick={() => {
+								const id = jumpTargetEventId();
+								if (id) void jumpToEvent(id);
+							}}
+						/>
+					</Show>
 
 					{/* Scroll-to-bottom / Jump to latest button.
 					     Show when scrolled up OR when behind live (even at
