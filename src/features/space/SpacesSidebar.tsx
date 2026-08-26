@@ -353,7 +353,14 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 
 	const onRowDragOver = (space: RoomSummary, e: DragEvent): void => {
 		const dragged = draggedSpaceId();
-		if (!dragged || dragged === space.roomId || !isRootId(space.roomId)) return;
+		if (!dragged) return;
+		if (dragged === space.roomId || !isRootId(space.roomId)) {
+			// Not a drop target (the dragged tile itself, or a nested
+			// subspace row): clear the indicator instead of leaving it
+			// stuck on the last root the pointer crossed.
+			setDropTarget(null);
+			return;
+		}
 		e.preventDefault();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -470,7 +477,15 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 								setDraggedSpaceId(space.roomId);
 								if (e.dataTransfer) {
 									e.dataTransfer.effectAllowed = "move";
-									e.dataTransfer.setData("text/plain", space.roomId);
+									// Custom type (drop logic reads the signal, not the
+									// payload): some engines need setData for the drag
+									// to start, but text/plain would paste the raw room
+									// id into any text-accepting surface the user
+									// overshoots (composer, inputs).
+									e.dataTransfer.setData(
+										"application/x-crust-space",
+										space.roomId,
+									);
 								}
 							}}
 							on:dragover={(e: DragEvent) => onRowDragOver(space, e)}

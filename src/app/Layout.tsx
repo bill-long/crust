@@ -1015,7 +1015,6 @@ const Layout: Component = () => {
 										client={client}
 										roomId={rid}
 										isSpace={isSpaceTarget}
-										membership={summaries[rid]?.membership}
 										activeTab={target().tab}
 										onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
 										onClose={() => setRoomSettings(null)}

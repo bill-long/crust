@@ -1,6 +1,7 @@
 import type { MatrixClient, Room } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../test/mockClient";
+import { makeSummary } from "../test/summaryFixtures";
 import {
 	compareSpaceOrder,
 	getSpaceOrder,
@@ -13,27 +14,7 @@ function spaceSummary(
 	roomId: string,
 	overrides: Partial<RoomSummary> = {},
 ): RoomSummary {
-	return {
-		roomId,
-		name: roomId,
-		avatarUrl: null,
-		lastMessage: null,
-		unreadCount: 0,
-		highlightCount: 0,
-		markedUnread: false,
-		isFavourite: false,
-		isLowPriority: false,
-		spaceOrder: null,
-		isMuted: false,
-		membership: "join",
-		isEncrypted: false,
-		isDirect: false,
-		isSpace: true,
-		kind: "text",
-		callActive: false,
-		children: [],
-		...overrides,
-	};
+	return makeSummary(roomId, { isSpace: true, ...overrides });
 }
 
 function makeCtx(roots: RoomSummary[]) {
@@ -80,11 +61,14 @@ describe("getSpaceOrder", () => {
 		expect(getSpaceOrder(roomWithOrder("aaa"))).toBe("aaa");
 	});
 
-	it("treats absent, non-string, empty, over-long, and non-ASCII as unordered", () => {
+	it("accepts the empty string (sorts first; Element's validOrder accepts it too)", () => {
+		expect(getSpaceOrder(roomWithOrder(""))).toBe("");
+	});
+
+	it("treats absent, non-string, over-long, and non-ASCII as unordered", () => {
 		expect(getSpaceOrder(createMockRoom("!s:x") as unknown as Room)).toBeNull();
 		expect(getSpaceOrder(roomWithOrder(undefined))).toBeNull();
 		expect(getSpaceOrder(roomWithOrder(42))).toBeNull();
-		expect(getSpaceOrder(roomWithOrder(""))).toBeNull();
 		expect(getSpaceOrder(roomWithOrder("x".repeat(51)))).toBeNull();
 		expect(getSpaceOrder(roomWithOrder("café"))).toBeNull();
 	});
@@ -109,6 +93,13 @@ describe("compareSpaceOrder", () => {
 		const upper = spaceSummary("!u:x", { spaceOrder: "B" });
 		const lower = spaceSummary("!l:x", { spaceOrder: "a" });
 		expect(compareSpaceOrder(upper, lower)).toBeLessThan(0);
+	});
+
+	it("ties on equal order AND equal name break by roomId, locale-independently", () => {
+		const a = spaceSummary("!a:x", { name: "Same", spaceOrder: "m" });
+		const b = spaceSummary("!b:x", { name: "Same", spaceOrder: "m" });
+		expect(compareSpaceOrder(a, b)).toBeLessThan(0);
+		expect(compareSpaceOrder(b, a)).toBeGreaterThan(0);
 	});
 });
 
@@ -173,5 +164,41 @@ describe("moveRootSpace", () => {
 		expect(summaries["!c:x"].spaceOrder).toBeNull();
 		// One batch failure -> one reportError console line, not one per write.
 		expect(errorSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not revert or toast a failed write superseded by a newer move", async () => {
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const roots = [
+			spaceSummary("!a:x", { spaceOrder: "a" }),
+			spaceSummary("!b:x", { spaceOrder: "c" }),
+			spaceSummary("!c:x", { spaceOrder: "e" }),
+		];
+		const { client, ctx, summaries } = makeCtx(roots);
+		// First move's write hangs, then fails, AFTER a second move has
+		// already re-stamped the same space with a newer optimistic order.
+		let rejectFirst: (e: Error) => void = () => {};
+		client.setRoomAccountData.mockImplementationOnce(
+			() =>
+				new Promise((_, reject) => {
+					rejectFirst = reject;
+				}),
+		);
+		moveRootSpace(ctx, roots, 2, 1); // stamps !c:x between a and c
+		const firstOrder = summaries["!c:x"].spaceOrder;
+		moveRootSpace(
+			ctx,
+			[...roots].sort(compareSpaceOrder),
+			1, // !c:x's new position
+			0,
+		); // stamps !c:x again, below "a"
+		const newerOrder = summaries["!c:x"].spaceOrder;
+		expect(newerOrder).not.toBe(firstOrder);
+
+		rejectFirst(new Error("late failure"));
+		await flush();
+
+		// The newer optimistic value survives; no misleading failure toast.
+		expect(summaries["!c:x"].spaceOrder).toBe(newerOrder);
+		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });

@@ -7,6 +7,7 @@ import {
 	on,
 	Show,
 } from "solid-js";
+import { useClient } from "../../../client/client";
 import { endCallForRoomLeave } from "../call/rtc/endCall";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HistoryVisibilitySection } from "./HistoryVisibilitySection";
@@ -18,14 +19,6 @@ interface AdvancedTabProps {
 	onLeft?: (roomId: string) => void;
 	/** Called when the Forget action completes (room purged server-side). */
 	onForgot?: (roomId: string) => void;
-	/**
-	 * The user's membership in the room ("join", "leave", "ban", ...),
-	 * preferably the reactive summaries-backed value. Drives the Danger
-	 * zone action: already-left/banned rooms offer Forget instead of
-	 * Leave. When omitted, the tab falls back to the SDK room's own
-	 * membership; a room unknown to both is treated as joined.
-	 */
-	membership?: string;
 	/** When true, label copy uses "space" instead of "room". */
 	isSpace?: boolean;
 }
@@ -40,12 +33,15 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	// under a request whose failure still needs to render inline.
 	const [actionPending, setActionPending] = createSignal(false);
 
-	// Prefer the reactive summaries-backed prop; fall back to the SDK
-	// room's own membership so a call site that omits the prop (or a room
-	// the summaries store never saw) still resolves an already-left room
-	// to Forget instead of failing open to a doomed Leave.
+	// Read membership from the summaries store at the leaf (like the
+	// sibling RoomsTab) so every mount is reactive to leave/rejoin from
+	// anywhere; the SDK room is only a mount-time fallback for a room the
+	// store never saw, so an already-left room still resolves to Forget
+	// instead of failing open to a doomed Leave.
+	const { summaries } = useClient();
 	const membership = (): string | undefined =>
-		props.membership ?? props.client.getRoom(props.roomId)?.getMyMembership();
+		summaries[props.roomId]?.membership ??
+		props.client.getRoom(props.roomId)?.getMyMembership();
 
 	// Forget is only valid (and only useful) once the user is out of the
 	// room: the server rejects /forget while joined (spec 10.2.3). Memoized

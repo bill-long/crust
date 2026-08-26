@@ -12,9 +12,14 @@ import type { RoomSummary, SummariesStore } from "./summaries";
  */
 export const SPACE_ORDER_TYPE = "im.vector.web.space_order";
 
-/** MSC1772 constraints Element also enforces: printable ASCII, <= 50 chars. */
+/**
+ * MSC1772 constraints Element also enforces: printable ASCII, <= 50 chars.
+ * The empty string is VALID (it sorts before every non-empty order) -
+ * Element's validOrder accepts it, and rejecting it here would make a
+ * third-party client's ""-ordered space sort first there and last here.
+ */
 const MAX_ORDER_LEN = 50;
-const VALID_ORDER = new RegExp(`^[\\x20-\\x7E]{1,${MAX_ORDER_LEN}}$`);
+const VALID_ORDER = new RegExp(`^[\\x20-\\x7E]{0,${MAX_ORDER_LEN}}$`);
 
 /**
  * The validated `order` string for a space, or null when absent/malformed
@@ -42,7 +47,12 @@ export function compareSpaceOrder(a: RoomSummary, b: RoomSummary): number {
 	} else if (b.spaceOrder !== null) {
 		return 1;
 	}
-	return a.name.localeCompare(b.name);
+	// Name first so the unordered tier keeps the pre-existing name-sorted
+	// rail; roomId last so equal orders AND equal names still sort the
+	// same in every session and locale (Element ties on roomId).
+	const byName = a.name.localeCompare(b.name);
+	if (byName !== 0) return byName;
+	return a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0;
 }
 
 /** The slice of `ClientContextValue` the move action needs. */
@@ -104,6 +114,11 @@ export function moveRootSpace(
 		const roomId = roots[index].roomId;
 		ctx.optimisticallySetSpaceOrder(roomId, order);
 		return enqueueOrderWrite(ctx.client, roomId, order).catch((err) => {
+			// A newer move already re-stamped this space: its own queued
+			// write owns the outcome now, so neither revert (that would
+			// clobber the newer optimistic value) nor count this toward
+			// the batch toast (the final order may well save fine).
+			if (ctx.summaries[roomId]?.spaceOrder !== order) return;
 			const room = ctx.client.getRoom(roomId);
 			ctx.optimisticallySetSpaceOrder(
 				roomId,
