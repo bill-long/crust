@@ -15,11 +15,13 @@ interface EventOptions {
 	callId?: string | null;
 	eventId?: string | null;
 	redacted?: boolean;
+	invitee?: string;
 }
 
 function mkEvent(options: EventOptions = {}): MatrixEvent {
 	const content: Record<string, unknown> = {};
 	if (options.callId !== null) content.call_id = options.callId ?? "call-1";
+	if (options.invitee !== undefined) content.invitee = options.invitee;
 	return {
 		getType: () => options.type ?? "m.call.invite",
 		getSender: () => (options.sender === undefined ? ALICE : options.sender),
@@ -79,6 +81,24 @@ describe("buildLegacyCallNotice", () => {
 		const notice = buildLegacyCallNotice(mkEvent({ sender: ME }), room);
 		expect(notice?.text).toBe(
 			"You started a call from another session (unsupported call type)",
+		);
+	});
+
+	it("does not claim a call placed to someone else was missed", () => {
+		// MSC2746 invites can name their target. In a room of three, telling
+		// the third person they missed a call they were never rung for is
+		// simply false.
+		const notice = buildLegacyCallNotice(
+			mkEvent({ invitee: "@bob:example.com" }),
+			room,
+		);
+		expect(notice?.text).toBe("Alice started a call (unsupported call type)");
+	});
+
+	it("still reads as missed when the invite names us", () => {
+		const notice = buildLegacyCallNotice(mkEvent({ invitee: ME }), room);
+		expect(notice?.text).toBe(
+			"Missed a call from Alice (unsupported call type)",
 		);
 	});
 

@@ -31,6 +31,15 @@ export function isLegacyCallNoticeType(type: string): boolean {
 	return type === LEGACY_CALL_INVITE_TYPE;
 }
 
+/**
+ * The user an MSC2746 invite was placed to, if it named one. Clients that are
+ * not the invitee are meant to ignore the ring entirely.
+ */
+function invitee(event: MatrixEvent): string | null {
+	const raw = (event.getContent() as Record<string, unknown>).invitee;
+	return typeof raw === "string" && raw.length > 0 ? raw : null;
+}
+
 /** The `call_id` that ties one call's signalling together, if it has one. */
 function callId(event: MatrixEvent): string | null {
 	const raw = (event.getContent() as Record<string, unknown>).call_id;
@@ -107,8 +116,22 @@ export function buildLegacyCallNotice(
 			icon: "info",
 		};
 	}
+
+	const actor = noticeActorName(event, room);
+	// An invite can name its target. In a room with more than two people,
+	// saying "you missed a call" to everyone who was not called states
+	// something untrue - they were never rung. Report the call without
+	// claiming it was theirs to answer.
+	const target = invitee(event);
+	if (target !== null && target !== room.myUserId) {
+		return {
+			text: `${actor} started a call (unsupported call type)`,
+			icon: "info",
+		};
+	}
+
 	return {
-		text: `Missed a call from ${noticeActorName(event, room)} (unsupported call type)`,
+		text: `Missed a call from ${actor} (unsupported call type)`,
 		icon: "info",
 	};
 }

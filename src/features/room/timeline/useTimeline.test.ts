@@ -4484,6 +4484,76 @@ describe("useTimeline legacy 1:1 call notices (#529)", () => {
 		});
 	});
 
+	it("does not duplicate a call when the retry arrives live", async () => {
+		// The incremental live path pushes one row without consulting the
+		// window, so a retry reusing the call_id would add a second row that
+		// then vanishes on the next rebuild - the view disagreeing with
+		// itself.
+		const room = createMockRoom(
+			ROOM,
+			[textMessage(ROOM, "$1", "@alice:test", "hi", 1000)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+
+			appendLive(client, room, liveInvite("$call", 2000));
+			await flushPromises();
+			appendLive(client, room, liveInvite("$call2", 2100));
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$1", "$call"]);
+		});
+	});
+
+	it("keeps the call visible when the shown invite is redacted", async () => {
+		// The suppressed sibling has to surface, or redacting the one visible
+		// invite erases the call from the timeline entirely - the same shape
+		// as the #215 call-member case the rebuild guard was added for.
+		const first = invite("$a", 1000);
+		const room = createMockRoom(
+			ROOM,
+			[first, invite("$b", 1100)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$a"]);
+
+			// The wrapper reads its MockEvent live, so flipping the flag is
+			// what the SDK does when the redaction lands.
+			(first as { redacted?: boolean }).redacted = true;
+			appendLive(
+				client,
+				room,
+				createMatrixEvent({
+					eventId: "$redact",
+					roomId: ROOM,
+					sender: "@alice:test",
+					type: "m.room.redaction",
+					content: {},
+					ts: 1200,
+					redacts: "$a",
+				}),
+			);
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$b"]);
+		});
+	});
+
 	it("shows a live invite that arrives while the room is open", async () => {
 		const room = createMockRoom(
 			ROOM,

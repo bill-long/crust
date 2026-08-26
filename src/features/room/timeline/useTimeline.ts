@@ -214,6 +214,17 @@ function isDisplayable(
 }
 
 /**
+ * Whether this event's notice is reconciled against the rest of the window
+ * rather than decided from the event alone - MatrixRTC membership (#215) and
+ * legacy call invites (#529). Every incremental path has to recompute
+ * suppression for these, because a single row cannot know about the sibling
+ * it duplicates or the one it was hiding.
+ */
+function isReconciledCallType(type: string): boolean {
+	return type === CALL_MEMBER_EVENT_TYPE || isLegacyCallNoticeType(type);
+}
+
+/**
  * Every call-notice reconciliation for one window: MatrixRTC membership
  * (#215 / #219) plus repeat legacy invites (#529). Both produce event IDs
  * whose call notice must not render, so they share one set.
@@ -1005,13 +1016,15 @@ export function useTimeline(
 	}
 
 	function handleRedaction(room: Room, redactedId: string): void {
-		// Redacting a call-member event can change per-user liveness (e.g. the
-		// only visible join is redacted, so a previously-suppressed sibling
-		// device's join should now surface). The incremental path below only
-		// touches existing rows and can't restore a hidden sibling, so rebuild
-		// the whole window to recompute suppression (#215).
+		// Redacting a reconciled call event can change what its siblings show:
+		// the only visible join is redacted so another device's join should
+		// surface (#215), or the shown invite is redacted so the next invite
+		// for that call must stop being suppressed or the call disappears
+		// entirely (#529). The incremental path below only touches existing
+		// rows and can't restore a hidden sibling, so rebuild the whole window
+		// to recompute suppression.
 		const redactedSource = findWindowEvent(redactedId);
-		if (redactedSource?.getType() === CALL_MEMBER_EVENT_TYPE) {
+		if (isReconciledCallType(redactedSource?.getType() ?? "")) {
 			rebuildEventsFromWindow(room);
 			return;
 		}
@@ -1283,13 +1296,14 @@ export function useTimeline(
 			return;
 		}
 
-		// A live MatrixRTC call-member event can change both per-user liveness
-		// (suppressed duplicate joins / premature leaves) and the set of
-		// synthesized expiry leaves, so recompute the whole window — rather
-		// than incrementally pushing a single row — to keep notices and the
-		// expiry timer consistent with the bulk rebuild (#215 / #219).
-		// Liveness is causal, so this never rewrites a correct earlier row.
-		if (event.getType() === CALL_MEMBER_EVENT_TYPE) {
+		// A live reconciled call event can change more than its own row: a
+		// membership event moves per-user liveness and the synthesized expiry
+		// leaves (#215 / #219), and an invite repeating a call_id must not add
+		// a second missed-call row (#529). Recompute the whole window rather
+		// than incrementally pushing one row, so the live view and the next
+		// bulk rebuild agree. Both are causal, so this never rewrites a
+		// correct earlier row.
+		if (isReconciledCallType(event.getType())) {
 			if (followingLive && currentTimelineWindow) {
 				rebuildEventsFromWindow(room);
 				return;
@@ -1443,6 +1457,21 @@ export function useTimeline(
 					}
 				}
 			}
+			return;
+		}
+
+		// A reconciled call event only reveals its type on decryption, so the
+		// window rebuild that computed suppression saw m.room.encrypted and
+		// skipped it. Legacy 1:1 calls happen mostly in encrypted DMs, so
+		// this is the ordinary path for them, not an edge: re-project in
+		// place and every invite for one call would get its own row. Rebuild
+		// instead, which recomputes suppression now that the type is visible.
+		if (
+			!event.isDecryptionFailure() &&
+			isReconciledCallType(event.getType()) &&
+			currentTimelineWindow
+		) {
+			rebuildEventsFromWindow(room);
 			return;
 		}
 
