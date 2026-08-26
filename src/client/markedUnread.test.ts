@@ -28,6 +28,7 @@ function summary(
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -118,6 +119,21 @@ describe("canMarkRoomUnread", () => {
 		expect(canMarkRoomUnread(summary("!r:x", { markedUnread: true }))).toBe(
 			false,
 		);
+	});
+
+	it("is false for a room the user is no longer joined to", () => {
+		expect(canMarkRoomUnread(summary("!r:x", { membership: "leave" }))).toBe(
+			false,
+		);
+	});
+
+	it("ignores a muted room's hidden count - the gate matches the badge", () => {
+		expect(
+			canMarkRoomUnread(summary("!r:x", { unreadCount: 5, isMuted: true })),
+		).toBe(true);
+		expect(
+			canMarkRoomUnread(summary("!r:x", { markedUnread: true, isMuted: true })),
+		).toBe(false);
 	});
 });
 
@@ -278,11 +294,12 @@ describe("useMarkedUnreadConsumer", () => {
 		return { ...base, setRoomId, dispose };
 	}
 
-	it("clears the flag when a marked room is opened", () => {
+	it("clears the flag when a marked room is opened", async () => {
 		const { client, summaries, setRoomId, dispose } = makeConsumerHarness({
 			markedUnread: true,
 		});
 		setRoomId("!r:x");
+		await flush(); // consumption runs on a microtask (mid-sync-batch guard)
 		expect(summaries["!r:x"].markedUnread).toBe(false);
 		expect(client.setRoomAccountData).toHaveBeenCalledWith(
 			"!r:x",
@@ -307,13 +324,15 @@ describe("useMarkedUnreadConsumer", () => {
 		harness.dispose();
 	});
 
-	it("consumes on reopen after leaving the room view", () => {
+	it("consumes on reopen after leaving the room view", async () => {
 		const harness = makeConsumerHarness({ markedUnread: false });
 		harness.setRoomId("!r:x");
+		await flush();
 		markRoomUnread(harness.ctx, "!r:x");
 		harness.setRoomId(undefined); // back to the list
 		expect(harness.summaries["!r:x"].markedUnread).toBe(true);
 		harness.setRoomId("!r:x"); // reopen
+		await flush();
 		expect(harness.summaries["!r:x"].markedUnread).toBe(false);
 		harness.dispose();
 	});
@@ -339,11 +358,13 @@ describe("useMarkedUnreadConsumer", () => {
 		return { client, summaries, setSummaries, setRoomId, dispose };
 	}
 
-	it("waits for the summary entry (cold-launch restore) and clears once it arrives", () => {
+	it("waits for the summary entry (cold-launch restore) and clears once it arrives", async () => {
 		const h = makeStoreHarness();
 		h.setRoomId("!r:x"); // route restored before the initial sync
+		await flush();
 		expect(h.client.setRoomAccountData).not.toHaveBeenCalled();
 		h.setSummaries("!r:x", summary("!r:x", { markedUnread: true }));
+		await flush();
 		expect(h.summaries["!r:x"].markedUnread).toBe(false);
 		expect(h.client.setRoomAccountData).toHaveBeenCalledWith(
 			"!r:x",
@@ -365,7 +386,7 @@ describe("useMarkedUnreadConsumer", () => {
 		h.dispose();
 	});
 
-	it("re-arms when switching to a room whose entry has not synced yet", () => {
+	it("re-arms when switching to a room whose entry has not synced yet", async () => {
 		const h = makeStoreHarness();
 		h.setSummaries("!r:x", summary("!r:x"));
 		h.setRoomId("!r:x"); // open (nothing to clear; latch set)
@@ -373,6 +394,7 @@ describe("useMarkedUnreadConsumer", () => {
 		// The first room gets marked (another device) while we are away.
 		h.setSummaries("!r:x", "markedUnread", true);
 		h.setRoomId("!r:x"); // return: a NEW open, so it must consume
+		await flush();
 		expect(h.summaries["!r:x"].markedUnread).toBe(false);
 		expect(h.client.setRoomAccountData).toHaveBeenCalledWith(
 			"!r:x",

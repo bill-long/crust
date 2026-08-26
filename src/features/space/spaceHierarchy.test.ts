@@ -40,6 +40,7 @@ function makeSummary(
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		isMuted: false,
 		membership,
 		isEncrypted: false,
 		isDirect: false,

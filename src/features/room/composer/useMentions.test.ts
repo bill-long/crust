@@ -152,11 +152,16 @@ describe("useMentions mentionCandidates", () => {
 describe("useMentions @room candidate (#448)", () => {
 	const alice = () => makeMember("@alice:example.com", "Alice");
 
-	it("leads the list when the query prefixes 'room' and the sender may notify", () => {
+	it("trails the member matches when the query prefixes 'room' and the sender may notify", () => {
 		const { mentions, dispose } = setup([alice()], { canRoomMention: true });
 		try {
+			// Trailing, never index 0: the picker's default Enter target is
+			// the first row, and the everyone-ping must not be one
+			// muscle-memory keystroke away from a member named "Ro...".
 			mentions.setMentionQuery("");
-			expect(mentions.mentionCandidates()[0]).toBe(ROOM_MENTION_CANDIDATE);
+			const all = mentions.mentionCandidates();
+			expect(all[all.length - 1]).toBe(ROOM_MENTION_CANDIDATE);
+			expect(all[0]).not.toBe(ROOM_MENTION_CANDIDATE);
 			mentions.setMentionQuery("ro");
 			expect(mentions.mentionCandidates()).toEqual([ROOM_MENTION_CANDIDATE]);
 			mentions.setMentionQuery("roomx");
@@ -206,6 +211,24 @@ describe("useMentions @room candidate (#448)", () => {
 			expect(h.mentions.reconcileRoomMention("no token any more")).toBe(false);
 			expect(h.mentions.reconcileRoomMention("`@room` in code")).toBe(false);
 			expect(h.mentions.reconcileRoomMention("mail@roomba")).toBe(false);
+		} finally {
+			h.dispose();
+		}
+	});
+
+	it("code spans strip to spaces, so spliced text cannot form a phantom @room", () => {
+		const h = setup([makeMember("@alice:example.com", "Alice")], {
+			canRoomMention: true,
+			textarea: true,
+		});
+		try {
+			h.type("@ro");
+			h.setCaret(3);
+			h.mentions.setMentionQuery("ro");
+			h.mentions.onMentionSelect(ROOM_MENTION_CANDIDATE);
+			// "@ro`x`om" must NOT read as "@room" after code stripping - an
+			// empty-string splice would fuse the halves into a phantom token.
+			expect(h.mentions.reconcileRoomMention("@ro`x`om")).toBe(false);
 		} finally {
 			h.dispose();
 		}

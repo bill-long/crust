@@ -1,11 +1,6 @@
 import { ContextMenu } from "@kobalte/core/context-menu";
 import { useNavigate } from "@solidjs/router";
 import {
-	ClientEvent,
-	type MatrixEvent,
-	PushRuleActionName,
-} from "matrix-js-sdk";
-import {
 	type Component,
 	createMemo,
 	createSignal,
@@ -214,7 +209,6 @@ const ActiveCallDot: Component = () => (
 const RoomEntry: Component<{
 	room: RoomSummary;
 	isSelected: boolean;
-	isMuted: boolean;
 	onClick: () => void;
 }> = (props) => {
 	return (
@@ -237,7 +231,7 @@ const RoomEntry: Component<{
 					<span
 						class="min-w-0 flex-1 truncate text-sm font-medium"
 						classList={{
-							"text-text-disabled": props.isMuted && !props.isSelected,
+							"text-text-disabled": props.room.isMuted && !props.isSelected,
 						}}
 					>
 						{props.room.name.trim() || "Unnamed room"}
@@ -248,7 +242,7 @@ const RoomEntry: Component<{
 					<Show when={props.room.callActive}>
 						<ActiveCallDot />
 					</Show>
-					<Show when={props.isMuted}>
+					<Show when={props.room.isMuted}>
 						<BellOffBadge />
 					</Show>
 				</div>
@@ -257,8 +251,8 @@ const RoomEntry: Component<{
 			{/* Numeric badge hidden when muted; the marked-unread dot still
 				shows - it's an explicit user action, not room noise. */}
 			<UnreadBadge
-				unread={props.isMuted ? 0 : props.room.unreadCount}
-				highlight={props.isMuted ? 0 : props.room.highlightCount}
+				unread={props.room.isMuted ? 0 : props.room.unreadCount}
+				highlight={props.room.isMuted ? 0 : props.room.highlightCount}
 				markedUnread={props.room.markedUnread}
 				class="shrink-0"
 			/>
@@ -394,40 +388,9 @@ const RoomList: Component<RoomListProps> = (props) => {
 	const params = useDecodedParams<{ spaceId?: string; roomId?: string }>();
 	const navigate = useNavigate();
 
-	// Tick signal that increments when push rules change, so mutedRooms recomputes
-	const [pushRulesTick, setPushRulesTick] = createSignal(0);
-	const onAccountData = (event: MatrixEvent): void => {
-		if (event.getType() === "m.push_rules") {
-			setPushRulesTick((n) => n + 1);
-		}
-	};
-	client.on(ClientEvent.AccountData, onAccountData);
-	onCleanup(() => {
-		client.off(ClientEvent.AccountData, onAccountData);
-	});
-
-	// Precompute muted room set for O(1) lookups per room entry
-	const mutedRooms = createMemo(() => {
-		pushRulesTick();
-		const muted = new Set<string>();
-		const rules = client.pushRules;
-		if (!rules) return muted;
-		const overrides = rules.global?.override;
-		if (overrides) {
-			for (const r of overrides) {
-				if (r.enabled === false) continue;
-				if (
-					r.rule_id.startsWith("crust.mute.") &&
-					r.actions.some((a) => a === PushRuleActionName.DontNotify)
-				) {
-					muted.add(r.rule_id.slice("crust.mute.".length));
-				}
-			}
-		}
-		return muted;
-	});
-
-	const isMuted = (roomId: string): boolean => mutedRooms().has(roomId);
+	// Muted state lives on RoomSummary (summaries store parses the
+	// crust.mute push rules once per change), so rows, badges, and the
+	// mark-as-unread gate share one definition.
 
 	const isHome = () => !params.spaceId;
 	const selectedRoomId = () => params.roomId;
@@ -647,7 +610,6 @@ const RoomList: Component<RoomListProps> = (props) => {
 		<RoomEntry
 			room={room}
 			isSelected={selectedRoomId() === room.roomId}
-			isMuted={isMuted(room.roomId)}
 			onClick={() => navigateToRoom(room.roomId)}
 		/>
 	);

@@ -23,6 +23,7 @@ function summary(
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,

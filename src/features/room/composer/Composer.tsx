@@ -478,6 +478,13 @@ const Composer: Component<{
 	 * the mention state the message currently carries. Feeds the edit-mode
 	 * @room seeding and buildEditContent's newly-added top-level diff.
 	 */
+	// Snapshot of the edit target's mentions, taken at edit ENTRY and
+	// reused at send: re-reading at send time could miss (a gappy /sync
+	// can evict the target from the MemoryStore-backed timeline), and an
+	// empty fallback would misclassify a KEPT @room as newly added -
+	// re-pinging the room on a typo fix.
+	let editPrevMentions: PrevMentions = { userIds: [], room: false };
+
 	const editTargetMentions = (eventId: string): PrevMentions => {
 		const content = client
 			.getRoom(props.roomId)
@@ -519,8 +526,14 @@ const Composer: Component<{
 					// correctly treats it as NOT new). User mentions are not
 					// seeded - their tokens are display names the ids alone can't
 					// reconstruct - which is the pre-existing edit behavior.
+					editPrevMentions = editTargetMentions(ev.eventId);
+					// Known edge, accepted: a message carrying room:true WITHOUT a
+					// bare "@room" body token (bot-sent, or token inside code)
+					// can't round-trip the flag through an edit - the intent model
+					// requires the token, so m.new_content loses room:true while
+					// the top-level diff stays correctly silent.
 					setRoomMentionIntent(
-						editTargetMentions(ev.eventId).room && hasRoomMentionToken(ev.body),
+						editPrevMentions.room && hasRoomMentionToken(ev.body),
 					);
 					requestAnimationFrame(() => {
 						autoResize();
@@ -645,7 +658,7 @@ const Composer: Component<{
 				props.editingEvent.eventId,
 				props.editingEvent.msgtype === "m.emote" ? "m.emote" : "m.text",
 				currentRoomMention,
-				editTargetMentions(props.editingEvent.eventId),
+				editPrevMentions,
 			);
 
 			const draft = text();

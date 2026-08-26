@@ -5,6 +5,7 @@ import {
 	type MatrixClient,
 	type MatrixEvent,
 	NotificationCountType,
+	PushRuleActionName,
 	type Room,
 	RoomEvent,
 	RoomStateEvent,
@@ -45,6 +46,12 @@ export interface RoomSummary {
 	isFavourite: boolean;
 	/** Tagged `m.lowpriority` - sinks to the Home list's Low priority section. */
 	isLowPriority: boolean;
+	/**
+	 * A `crust.mute.<roomId>` dont-notify push-rule override is active for
+	 * this room. Kept on the summary so every consumer (row badge, name
+	 * dimming, the mark-as-unread gate) shares one definition of "muted".
+	 */
+	isMuted: boolean;
 	membership: string;
 	isEncrypted: boolean;
 	isDirect: boolean;
@@ -267,6 +274,7 @@ function buildSummary(
 	room: Room,
 	baseUrl: string,
 	dmRoomIds: Set<string>,
+	mutedRoomIds: Set<string>,
 	now: number,
 ): RoomSummary {
 	// Find the most recent displayable event for the lastMessage preview
@@ -297,6 +305,7 @@ function buildSummary(
 		markedUnread: getRoomMarkedUnread(room),
 		isFavourite: getRoomTagState(room).favourite,
 		isLowPriority: getRoomTagState(room).lowPriority,
+		isMuted: mutedRoomIds.has(room.roomId),
 		membership: room.getMyMembership(),
 		isEncrypted: room.hasEncryptionStateEvent(),
 		isDirect: dmRoomIds.has(room.roomId),
@@ -305,6 +314,28 @@ function buildSummary(
 		callActive: isCallActive(room, now),
 		children: isSpace ? getSpaceChildren(room) : [],
 	};
+}
+
+/**
+ * Room ids with an active `crust.mute.<roomId>` dont-notify push-rule
+ * override - the app's mute mechanism (see RoomNotificationMenu). One
+ * parse per push-rules change; consumers read the per-room boolean off
+ * the summary.
+ */
+function getMutedRoomIds(client: MatrixClient): Set<string> {
+	const muted = new Set<string>();
+	const overrides = client.pushRules?.global?.override;
+	if (!overrides) return muted;
+	for (const r of overrides) {
+		if (r.enabled === false) continue;
+		if (
+			r.rule_id.startsWith("crust.mute.") &&
+			r.actions.some((a) => a === PushRuleActionName.DontNotify)
+		) {
+			muted.add(r.rule_id.slice("crust.mute.".length));
+		}
+	}
+	return muted;
 }
 
 function getDmRoomIds(client: MatrixClient): Set<string> {
@@ -418,6 +449,7 @@ export function createSummariesStore(client: MatrixClient): {
 	const serverTime: ServerTimeTracker = createServerTimeTracker();
 
 	let dmRoomIds = new Set<string>();
+	let mutedRoomIds = new Set<string>();
 
 	// Per-room expiry timers. When `callActive` is true for a room, we
 	// schedule a setTimeout that fires shortly after the earliest known
@@ -515,6 +547,7 @@ export function createSummariesStore(client: MatrixClient): {
 					markedUnread: false,
 					isFavourite: false,
 					isLowPriority: false,
+					isMuted: false,
 					membership: "join",
 					isEncrypted: false,
 					isDirect: info.isDirect === true,
@@ -565,6 +598,7 @@ export function createSummariesStore(client: MatrixClient): {
 					markedUnread: false,
 					isFavourite: false,
 					isLowPriority: false,
+					isMuted: false,
 					membership: "knock",
 					isEncrypted: false,
 					isDirect: false,
@@ -637,6 +671,7 @@ export function createSummariesStore(client: MatrixClient): {
 					room,
 					baseUrl,
 					dmRoomIds,
+					mutedRoomIds,
 					serverTime.now(),
 				);
 			}),
@@ -815,7 +850,19 @@ export function createSummariesStore(client: MatrixClient): {
 	}
 
 	function onAccountData(event: MatrixEvent): void {
-		if (event.getType() !== EventType.Direct) return;
+		const type = event.getType();
+		if (type === "m.push_rules") {
+			mutedRoomIds = getMutedRoomIds(client);
+			setSummaries(
+				produce((s) => {
+					for (const roomId of Object.keys(s)) {
+						s[roomId].isMuted = mutedRoomIds.has(roomId);
+					}
+				}),
+			);
+			return;
+		}
+		if (type !== EventType.Direct) return;
 		dmRoomIds = getDmRoomIds(client);
 		setSummaries(
 			produce((s) => {
@@ -883,6 +930,7 @@ export function createSummariesStore(client: MatrixClient): {
 
 	function init(): void {
 		dmRoomIds = getDmRoomIds(client);
+		mutedRoomIds = getMutedRoomIds(client);
 
 		// Seed the server-time tracker from existing room state before
 		// building any room summaries, so `callActive` is computed against

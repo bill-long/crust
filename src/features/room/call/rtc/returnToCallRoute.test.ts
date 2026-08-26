@@ -13,6 +13,7 @@ function makeSummary(overrides: Partial<RoomSummary>): RoomSummary {
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		isMuted: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,

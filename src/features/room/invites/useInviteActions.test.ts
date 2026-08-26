@@ -26,6 +26,7 @@ function makeSummary(partial: Partial<RoomSummary> = {}): RoomSummary {
 		markedUnread: false,
 		isFavourite: false,
 		isLowPriority: false,
+		isMuted: false,
 		membership: "invite",
 		isEncrypted: false,
 		isDirect: false,

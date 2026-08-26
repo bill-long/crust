@@ -1,6 +1,6 @@
 import type { MatrixClient, Room } from "matrix-js-sdk";
 import { reportError } from "../lib/reportError";
-import { enqueueKeyedWrite } from "../lib/writeQueue";
+import { enqueueOwnerKeyedWrite } from "../lib/writeQueue";
 import type { SummariesStore } from "./summaries";
 
 /** Spec room tags surfaced in the sidebar (m.tag account data, 11.19). */
@@ -52,16 +52,15 @@ function enqueueTagWrite(
 	tag: SidebarRoomTag,
 	value: boolean,
 ): Promise<void> {
-	let chains = tagWriteChains.get(client);
-	if (!chains) {
-		chains = new Map();
-		tagWriteChains.set(client, chains);
-	}
-	return enqueueKeyedWrite(chains, `${roomId}\n${tag}`, () =>
-		(value
-			? client.setRoomTag(roomId, tag, {})
-			: client.deleteRoomTag(roomId, tag)
-		).then(() => {}),
+	return enqueueOwnerKeyedWrite(
+		tagWriteChains,
+		client,
+		`${roomId}\n${tag}`,
+		() =>
+			(value
+				? client.setRoomTag(roomId, tag, {})
+				: client.deleteRoomTag(roomId, tag)
+			).then(() => {}),
 	);
 }
 

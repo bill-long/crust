@@ -1,6 +1,7 @@
 import type { MatrixClient, RoomMember } from "matrix-js-sdk";
 import { type Accessor, createMemo, createSignal } from "solid-js";
 import { createPicker } from "../../../components/picker/Picker";
+import { stripCodeRegions } from "../../../lib/extractUrls";
 import type { Mention } from "../../../lib/markdown";
 
 /**
@@ -20,13 +21,6 @@ export function isRoomMentionCandidate(
 	candidate: MentionCandidate,
 ): candidate is typeof ROOM_MENTION_CANDIDATE {
 	return candidate === ROOM_MENTION_CANDIDATE;
-}
-
-/** Strip code blocks and inline code so mentions inside code don't count. */
-function stripCode(msg: string): string {
-	return msg
-		.replace(/```(?:[^\n]*\n[\s\S]*?```|[\s\S]*?```)/g, "")
-		.replace(/`[^`]+`/g, "");
 }
 
 /** Whether `token` occurs in `stripped` with word boundaries on both sides. */
@@ -52,7 +46,7 @@ function hasBoundedToken(stripped: string, token: string): boolean {
  * the intent).
  */
 export function hasRoomMentionToken(msg: string): boolean {
-	return hasBoundedToken(stripCode(msg), "@room");
+	return hasBoundedToken(stripCodeRegions(msg), "@room");
 }
 
 interface UseMentionsDeps {
@@ -116,9 +110,13 @@ export function useMentions(deps: UseMentionsDeps) {
 	// over the member list.) Names are read live on purpose: the SDK mutates
 	// RoomMember.name in place on rename, so any search index cached against
 	// the (per-room stable) member-array identity would go stale.
-	// The `@room` entry leads the list when the query prefixes "room" and
-	// the sender may trigger room notifications; member rows keep their raw
-	// RoomMember references (see ROOM_MENTION_CANDIDATE).
+	// The `@room` entry is offered when the query prefixes "room" and the
+	// sender may trigger room notifications, but it TRAILS the member
+	// matches: the picker's default Enter target is index 0, and the
+	// highest-blast-radius candidate must never be one muscle-memory
+	// keystroke away when the user meant a member whose name starts with
+	// "ro". Member rows keep their raw RoomMember references (see
+	// ROOM_MENTION_CANDIDATE).
 	const mentionCandidates = createMemo<MentionCandidate[]>(() => {
 		const q = mentionQuery();
 		if (q === null) return [];
@@ -135,7 +133,7 @@ export function useMentions(deps: UseMentionsDeps) {
 							m.userId.toLowerCase().includes(lowerQ),
 					);
 		if ("room".startsWith(lowerQ) && canRoomMention()) {
-			return [ROOM_MENTION_CANDIDATE, ...members];
+			return [...members, ROOM_MENTION_CANDIDATE];
 		}
 		return members;
 	});
@@ -161,14 +159,17 @@ export function useMentions(deps: UseMentionsDeps) {
 		// the analogous re-type - a re-typed @Name still denotes that
 		// person - but a re-typed @room is plausibly quotation, with
 		// room-wide blast radius).
-		if (roomMentionIntent() && !hasBoundedToken(stripCode(text), "@room")) {
+		if (
+			roomMentionIntent() &&
+			!hasBoundedToken(stripCodeRegions(text), "@room")
+		) {
 			setRoomMentionIntent(false);
 		}
 	}
 
 	/** Prune mentions whose @DisplayName is no longer in non-code text */
 	function reconcileMentions(msg: string): Mention[] {
-		const stripped = stripCode(msg);
+		const stripped = stripCodeRegions(msg);
 		return mentions().filter((m) =>
 			hasBoundedToken(stripped, `@${m.displayName}`),
 		);
@@ -180,7 +181,9 @@ export function useMentions(deps: UseMentionsDeps) {
 	 * prune rule as user mentions).
 	 */
 	function reconcileRoomMention(msg: string): boolean {
-		return roomMentionIntent() && hasBoundedToken(stripCode(msg), "@room");
+		return (
+			roomMentionIntent() && hasBoundedToken(stripCodeRegions(msg), "@room")
+		);
 	}
 
 	/** Normalize a display name for insertion: strip the leading @ of a

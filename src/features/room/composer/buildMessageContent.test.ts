@@ -125,18 +125,18 @@ describe("applyMentions", () => {
 		expect(content["m.mentions"]).toEqual({ user_ids: ["@alice:example.com"] });
 	});
 
-	it("omits m.mentions entirely when there are none", () => {
+	it("attaches an EMPTY m.mentions when there are none (disables legacy body-match push rules)", () => {
 		const content: Record<string, unknown> = {};
 		applyMentions(content, [], null, ME);
-		expect(content).not.toHaveProperty("m.mentions");
+		expect(content["m.mentions"]).toEqual({});
 	});
 
-	it("clears a pre-existing m.mentions when there are none", () => {
+	it("replaces a pre-existing m.mentions with the empty object when there are none", () => {
 		const content: Record<string, unknown> = {
 			"m.mentions": { user_ids: ["@stale:example.com"] },
 		};
 		applyMentions(content, [], null, ME);
-		expect(content).not.toHaveProperty("m.mentions");
+		expect(content["m.mentions"]).toEqual({});
 	});
 });
 
@@ -176,9 +176,9 @@ describe("buildTextMessageContent with a reply", () => {
 		});
 	});
 
-	it("omits m.mentions entirely for a non-reply with no typed mentions", () => {
+	it("attaches the empty m.mentions for a non-reply with no typed mentions", () => {
 		const content = buildTextMessageContent("hi", null, [], null, ROOM, ME);
-		expect(content["m.mentions"]).toBeUndefined();
+		expect(content["m.mentions"]).toEqual({});
 	});
 });
 
@@ -229,10 +229,10 @@ describe("@room mention (#448)", () => {
 		});
 	});
 
-	it("never emits room:false", () => {
+	it("never emits room:false - the no-mention shape is the bare empty object", () => {
 		const content: Record<string, unknown> = {};
 		applyMentions(content, [], null, ME, false);
-		expect(content).not.toHaveProperty("m.mentions");
+		expect(content["m.mentions"]).toEqual({});
 	});
 
 	it("buildTextMessageContent threads the flag through", () => {
@@ -282,7 +282,10 @@ describe("@room mention (#448)", () => {
 		expect(
 			(kept["m.new_content"] as Record<string, unknown>)["m.mentions"],
 		).toEqual({ room: true });
-		expect(kept).not.toHaveProperty("m.mentions");
+		// Top level still attaches the EMPTY object: its presence is what
+		// keeps the legacy .m.rule.roomnotif body-match from firing on the
+		// "* @room ..." fallback body.
+		expect(kept["m.mentions"]).toEqual({});
 	});
 
 	it("buildEditContent's top level carries only newly-added user mentions", () => {
