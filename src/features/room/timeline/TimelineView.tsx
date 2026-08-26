@@ -41,17 +41,20 @@ import { ForwardDialog } from "./ForwardDialog";
 import { canForward } from "./forwardMessage";
 import { GroupedMembershipNotice } from "./GroupedMembershipNotice";
 import { ImageLightbox } from "./ImageLightbox";
+import { JumpToUnreadButton } from "./JumpToUnreadButton";
 import type { MembershipGroup } from "./membershipGrouping";
 import { NewerMessagesLoader } from "./NewerMessagesLoader";
 import { OlderMessagesLoader } from "./OlderMessagesLoader";
 import { ReportMessageDialog } from "./ReportMessageDialog";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
+import { UnreadDivider } from "./UnreadDivider";
 import { useImageLightbox } from "./useImageLightbox";
 import { useMembershipExpansion } from "./useMembershipExpansion";
 import { useMessageActions } from "./useMessageActions";
 import { useReadReceipts } from "./useReadReceipts";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
+import { useUnreadMarker } from "./useUnreadMarker";
 import { ViewSourceDialog } from "./ViewSourceDialog";
 
 const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
@@ -60,6 +63,7 @@ const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
 function shouldShowHeader(
 	events: readonly TimelineEvent[],
 	index: number,
+	firstUnreadEventId: string | null,
 ): boolean {
 	const curr = events[index];
 	if (!curr) return true;
@@ -73,6 +77,13 @@ function shouldShowHeader(
 	// the state-notice rule: the emote shows no header, and the message
 	// after it always reintroduces its own.
 	if (curr.msgtype === "m.emote") return false;
+	// Break the group at the unread divider, for the same reason the day
+	// boundary breaks it: the divider lands between the two halves, and a
+	// headerless continuation row under it reads as an orphan - a red rule
+	// followed by a bare line with no avatar or name. Below the notice and
+	// emote rules deliberately: those rows identify their own sender, so
+	// forcing a header on them would print the name twice.
+	if (curr.eventId === firstUnreadEventId) return true;
 	if (index === 0) return true;
 	const prev = events[index - 1];
 	if (!prev) return true;
@@ -196,6 +207,87 @@ const TimelineView: Component<{
 		groupMembers,
 		expandedByIndex,
 	} = useMembershipExpansion(events);
+
+	// Where the user left off. Snapshotted per scope inside the hook, so the
+	// divider holds still while the receipts this view sends move on.
+	const { firstUnreadEventId } = useUnreadMarker(
+		client,
+		() => props.roomId,
+		() => props.thread,
+		{
+			events: () => events,
+			getWindowEvents,
+		},
+	);
+	// Latched once the divider has actually been in the viewport, at which
+	// point the affordance has done its job and retires for this visit.
+	// Without the latch it would keep resurfacing to point at messages read
+	// minutes ago, because the snapshot deliberately pins the boundary for as
+	// long as the room is open.
+	const [unreadBoundarySeen, setUnreadBoundarySeen] = createSignal(false);
+	const markUnreadBoundarySeen = (): void => {
+		setUnreadBoundarySeen(true);
+	};
+	// The marker re-snapshots in place on a scope change, so this latch has
+	// to as well. Today Layout keys the room subtree and the thread panel
+	// unmounts on refetch, which would remount the whole component - but the
+	// invariant belongs next to the latch, not in another file's structure.
+	createEffect(
+		on(
+			() => [props.roomId, props.thread?.threadId],
+			() => setUnreadBoundarySeen(false),
+			{ defer: true },
+		),
+	);
+	// Offer the jump while there is somewhere to go and the user has not got
+	// there yet. Deliberately not keyed on the divider being *rendered*: the
+	// row it lives on is virtualized, so for any boundary further than the
+	// overscan above the viewport - the dominant case this exists for - it is
+	// not in the DOM to ask. The cost is that in a room short enough for the
+	// divider to be on screen from the start, the button can be up for the
+	// tick before the virtualizer renders its rows and the observer reports.
+	// Suppressing that tick means asking whether an unrendered row is off
+	// screen, which has no answer - so this trade is deliberate.
+	// The frozen boundary can stop being a row while the user is still here:
+	// redacting it, or ignoring its sender, drops it from the store while the
+	// SDK keeps it in the window. The divider then never mounts (so the
+	// affordance never retires) and the jump lands on an id no row carries
+	// (so it scrolls nowhere) - a button that sits there doing nothing on
+	// every click. Memoised, and short-circuited once retired, so the scan
+	// costs nothing in the common case.
+	const unreadBoundaryPresent = createMemo(() => {
+		if (unreadBoundarySeen()) return false;
+		const target = firstUnreadEventId();
+		if (!target) return false;
+		return events.some((ev) => ev.eventId === target);
+	});
+
+	const showJumpToUnread = (): boolean => !loading() && unreadBoundaryPresent();
+
+	const jumpToUnread = (): void => {
+		const target = firstUnreadEventId();
+		if (!target) return;
+		// Set the bottom pin to match where we are going, rather than always
+		// clearing it as the other jumps here do - theirs always target
+		// history, this one can target the newest row when a single message
+		// is unread. Left set for a historical target, the row-growth
+		// re-anchor drags the view back to the live end as virtua measures
+		// the rows the jump just mounted. Left clear for a live-end target,
+		// the timeline sits at the bottom without following it, and new
+		// arrivals pile up below the fold with no "Jump to latest" offered
+		// (that button is hidden while atBottom reads true).
+		const rows = events;
+		const targetIsLive =
+			rows.length > 0 && rows[rows.length - 1].eventId === target;
+		setWantsBottom(targetIsLive);
+		// Hand focus to the scroller too. This button unmounts the moment the
+		// divider is seen, and focus on a removed element falls to <body>,
+		// restarting a keyboard user's next Tab from the top of the document.
+		// It also lets the flash effect adopt the target row, which it
+		// refuses to do while focus sits outside the scroller.
+		scrollRef?.focus({ preventScroll: true });
+		void jumpToEvent(target);
+	};
 
 	// Reactive "now" that updates at local midnight so separator labels
 	// like "Today" / "Yesterday" stay accurate for sessions left open
@@ -1060,6 +1152,9 @@ const TimelineView: Component<{
 												)}
 											/>
 										</Show>
+										<Show when={event.eventId === firstUnreadEventId()}>
+											<UnreadDivider onSeen={markUnreadBoundarySeen} />
+										</Show>
 										<Switch>
 											<Match when={mode() === "summary"}>
 												<GroupedMembershipNotice
@@ -1090,7 +1185,11 @@ const TimelineView: Component<{
 													event={event}
 													brokenAvatars={brokenAvatars}
 													onOpenProfile={onOpenProfile}
-													showHeader={shouldShowHeader(events, indexAcc())}
+													showHeader={shouldShowHeader(
+														events,
+														indexAcc(),
+														firstUnreadEventId(),
+													)}
 													isOwnMessage={event.senderId === myUserId}
 													canPin={props.canPin}
 													isPinned={props.isPinned?.(event.eventId) ?? false}
@@ -1216,37 +1315,52 @@ const TimelineView: Component<{
 						<div class="h-2" aria-hidden="true" />
 					</div>
 
-					{/* Scroll-to-bottom / Jump to latest button.
-					     Show when scrolled up OR when behind live (even at
-					     bottom of current slice, so jump-to-live is reachable). */}
-					<Show when={!atBottom() || canLoadNewer()}>
-						<ScrollToBottomButton
-							behindLive={canLoadNewer()}
-							onClick={() => {
-								// User-initiated jump back to the live end re-arms
-								// `wantsBottom` so the settle loop + new-message
-								// effect resume pinning when fresh events arrive.
-								setWantsBottom(true);
-								if (canLoadNewer()) {
-									// Ensure atBottom is true so that when jumpToLive
-									// clears canLoadNewer, the followingLive effect
-									// sees [true, false] and confirms followingLive
-									// instead of seeing [false, false] and reverting it.
-									setAtBottom(true);
-									jumpToLive();
-								} else {
-									const el = scrollRef;
-									if (el) {
-										markProgrammaticScroll();
-										el.scrollTo({
-											top: el.scrollHeight,
-											behavior: "smooth",
-										});
-									}
-								}
-							}}
-						/>
-					</Show>
+					{/* Floating controls, stacked bottom-right. Owning the
+					     anchoring here rather than in each button keeps them
+					     from overlapping or leaving a gap when only one of
+					     them applies. */}
+					<div class="pointer-events-none absolute right-4 bottom-4 z-10 flex flex-col items-end gap-2">
+						{/* Jump to where the user left off; see showJumpToUnread. */}
+						<Show when={showJumpToUnread()}>
+							<div class="pointer-events-auto">
+								<JumpToUnreadButton onClick={jumpToUnread} />
+							</div>
+						</Show>
+
+						{/* Scroll-to-bottom / Jump to latest button.
+						     Show when scrolled up OR when behind live (even at
+						     bottom of current slice, so jump-to-live is reachable). */}
+						<Show when={!atBottom() || canLoadNewer()}>
+							<div class="pointer-events-auto">
+								<ScrollToBottomButton
+									behindLive={canLoadNewer()}
+									onClick={() => {
+										// User-initiated jump back to the live end re-arms
+										// `wantsBottom` so the settle loop + new-message
+										// effect resume pinning when fresh events arrive.
+										setWantsBottom(true);
+										if (canLoadNewer()) {
+											// Ensure atBottom is true so that when jumpToLive
+											// clears canLoadNewer, the followingLive effect
+											// sees [true, false] and confirms followingLive
+											// instead of seeing [false, false] and reverting it.
+											setAtBottom(true);
+											jumpToLive();
+										} else {
+											const el = scrollRef;
+											if (el) {
+												markProgrammaticScroll();
+												el.scrollTo({
+													top: el.scrollHeight,
+													behavior: "smooth",
+												});
+											}
+										}
+									}}
+								/>
+							</div>
+						</Show>
+					</div>
 				</div>
 			</Show>
 
