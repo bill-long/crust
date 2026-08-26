@@ -19,7 +19,7 @@ export type MentionCandidate = RoomMember | typeof ROOM_MENTION_CANDIDATE;
 export function isRoomMentionCandidate(
 	candidate: MentionCandidate,
 ): candidate is typeof ROOM_MENTION_CANDIDATE {
-	return "roomMention" in candidate;
+	return candidate === ROOM_MENTION_CANDIDATE;
 }
 
 /** Strip code blocks and inline code so mentions inside code don't count. */

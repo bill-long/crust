@@ -258,7 +258,6 @@ export function createMockRoom(
 
 	const canSendStateByType = new Map<string, boolean>();
 	let canInviteFlag = true;
-	let mayTriggerNotifFlag = false;
 	let isSpaceFlag = false;
 	let isEncryptedFlag = false;
 	let maySendRedactionFlag = false;
@@ -272,10 +271,10 @@ export function createMockRoom(
 		},
 		maySendStateEvent: (type: string, _userId: string) =>
 			canSendStateByType.has(type) ? !!canSendStateByType.get(type) : true,
-		// Power-level gate for @room notifications (useMentions). Defaults
-		// to false so the @room candidate never appears unless a test opts in.
-		mayTriggerNotifOfType: (_notifLevelKey: string, _userId: string) =>
-			mayTriggerNotifFlag,
+		// Power-level gate for @room notifications (useMentions). Constant
+		// false: the @room candidate never appears in mock-backed tests
+		// (useMentions' own tests use a local mock to exercise the true case).
+		mayTriggerNotifOfType: (_notifLevelKey: string, _userId: string) => false,
 		// Read by the SDK Poll model's validateEndEvent for non-creator
 		// poll-end events.
 		maySendRedactionForEvent: (_event: unknown, _userId: string) =>
@@ -356,9 +355,6 @@ export function createMockRoom(
 		},
 		__setCanInvite: (allowed: boolean) => {
 			canInviteFlag = allowed;
-		},
-		__setMayTriggerNotif: (allowed: boolean) => {
-			mayTriggerNotifFlag = allowed;
 		},
 		__setIsSpace: (value: boolean) => {
 			isSpaceFlag = value;
