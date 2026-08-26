@@ -38,6 +38,8 @@ function makeSummary(
 		unreadCount: 0,
 		highlightCount: 0,
 		markedUnread: false,
+		isFavourite: false,
+		isLowPriority: false,
 		membership,
 		isEncrypted: false,
 		isDirect: false,

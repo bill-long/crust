@@ -37,6 +37,7 @@ import {
 	runCryptoInit,
 } from "./cryptoRecovery";
 import { RecoveryKeyCancelledError } from "./recoveryKeyCancelled";
+import type { SidebarRoomTag } from "./roomTags";
 import {
 	canReuseCachedSecretStorageKey,
 	resolveSecretStorageKey,
@@ -98,6 +99,17 @@ interface ClientContextValue {
 	 * calling this directly.
 	 */
 	optimisticallySetMarkedUnread: (roomId: string, value: boolean) => void;
+	/**
+	 * Optimistically flip a sidebar tag flag (m.favourite / m.lowpriority)
+	 * so the row moves section instantly when the user toggles it. The
+	 * authoritative RoomEvent.Tags update confirms or corrects it. Callers
+	 * normally go through `toggleRoomTag` (see `client/roomTags.ts`).
+	 */
+	optimisticallySetRoomTag: (
+		roomId: string,
+		tag: SidebarRoomTag,
+		value: boolean,
+	) => void;
 	/**
 	 * Request the recovery key from the user. Components that show a
 	 * recovery key input dialog should call setRecoveryKeyResolver to
@@ -314,6 +326,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		optimisticallyMarkKnocked,
 		optimisticallyMarkLeft,
 		optimisticallySetMarkedUnread,
+		optimisticallySetRoomTag,
 	} = createSummariesStore(matrixClient);
 
 	// Keep the OS/taskbar app badge in sync with live unread state while this
@@ -470,6 +483,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				optimisticallyMarkKnocked,
 				optimisticallyMarkLeft,
 				optimisticallySetMarkedUnread,
+				optimisticallySetRoomTag,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,
 				clearSecretStorageCache,

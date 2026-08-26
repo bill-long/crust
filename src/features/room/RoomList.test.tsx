@@ -51,6 +51,8 @@ function makeRoomSummary(roomId: string, name: string): RoomSummary {
 		unreadCount: 0,
 		highlightCount: 0,
 		markedUnread: false,
+		isFavourite: false,
+		isLowPriority: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -103,6 +105,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
 				optimisticallySetMarkedUnread: vi.fn(),
+				optimisticallySetRoomTag: vi.fn(),
 			}}
 		>
 			{props.children}
@@ -362,5 +365,83 @@ describe("RoomList mark as unread (#446)", () => {
 		) as HTMLElement;
 		fireEvent.contextMenu(region, { clientX: 10, clientY: 400 });
 		expect(screen.queryByRole("menuitem")).toBeNull();
+	});
+});
+
+describe("RoomList tag sections and toggles (#449)", () => {
+	function renderTagList(
+		seed: RoomSummary[],
+	): ReturnType<typeof createMockClient> {
+		const client = createMockClient();
+		render(() => (
+			<Wrapper client={client} seed={seed}>
+				<RoomList />
+			</Wrapper>
+		));
+		return client;
+	}
+
+	it("renders Favorites above DMs/Rooms and Low priority at the bottom", () => {
+		const fav = makeRoomSummary("!fav:example.com", "starred");
+		fav.isFavourite = true;
+		const low = makeRoomSummary("!low:example.com", "background");
+		low.isLowPriority = true;
+		renderTagList([
+			fav,
+			low,
+			makeRoomSummary("!general:example.com", "general"),
+		]);
+
+		const labels = ["Favorites", "Rooms", "Low priority"].map(
+			(t) => screen.getByText(t) as HTMLElement,
+		);
+		expect(
+			labels[0].compareDocumentPosition(labels[1]) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(
+			labels[1].compareDocumentPosition(labels[2]) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		// The tagged rooms render once, in their sections, not under Rooms.
+		expect(screen.getAllByRole("button", { name: /starred/ })).toHaveLength(1);
+		expect(screen.getAllByRole("button", { name: /background/ })).toHaveLength(
+			1,
+		);
+	});
+
+	it("the context menu's Favorite toggle writes the m.favourite tag", async () => {
+		const client = renderTagList([
+			makeRoomSummary("!general:example.com", "general"),
+		]);
+		const row = screen.getByRole("button", { name: /general/ });
+		fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+		const item = await screen.findByRole("menuitemcheckbox", {
+			name: "Favorite",
+		});
+		expect(item.getAttribute("aria-checked")).toBe("false");
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(client.setRoomTag).toHaveBeenCalledWith(
+			"!general:example.com",
+			"m.favourite",
+			{},
+		);
+	});
+
+	it("the Low priority toggle deletes the tag when already set", async () => {
+		const low = makeRoomSummary("!general:example.com", "general");
+		low.isLowPriority = true;
+		const client = renderTagList([low]);
+		const row = screen.getByRole("button", { name: /general/ });
+		fireEvent.contextMenu(row, { clientX: 10, clientY: 10 });
+		const item = await screen.findByRole("menuitemcheckbox", {
+			name: "Low priority",
+		});
+		expect(item.getAttribute("aria-checked")).toBe("true");
+		fireEvent(item, new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+		expect(client.deleteRoomTag).toHaveBeenCalledWith(
+			"!general:example.com",
+			"m.lowpriority",
+		);
 	});
 });

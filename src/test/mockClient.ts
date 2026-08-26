@@ -297,6 +297,8 @@ export function createMockRoom(
 	return {
 		roomId,
 		name: options?.name ?? roomId,
+		// Mirrors `Room.tags` (m.tag account data); tests mutate directly.
+		tags: {} as Record<string, Record<string, unknown>>,
 		currentState,
 		/** SDK poll models keyed by poll (start event) id; tests insert real
 		 *  `Poll` instances via `room.polls.set(...)` and emit
@@ -510,6 +512,8 @@ export function createMockClient(
 		paginateEventTimeline: vi.fn().mockResolvedValue(false),
 		getAccountData: (type: string) => accountData.get(type) ?? null,
 		setRoomAccountData: vi.fn().mockResolvedValue({}),
+		setRoomTag: vi.fn().mockResolvedValue({}),
+		deleteRoomTag: vi.fn().mockResolvedValue({}),
 		getHomeserverUrl: () => "https://example.com",
 		on: (event: string, handler: (...args: unknown[]) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());

@@ -88,6 +88,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkKnocked: vi.fn(),
 				optimisticallyMarkLeft: vi.fn(),
 				optimisticallySetMarkedUnread: vi.fn(),
+				optimisticallySetRoomTag: vi.fn(),
 			}}
 		>
 			{props.children}
@@ -472,6 +473,8 @@ describe("ExploreDialog", () => {
 					unreadCount: 0,
 					highlightCount: 0,
 					markedUnread: false,
+					isFavourite: false,
+					isLowPriority: false,
 					membership: "join",
 					isEncrypted: false,
 					isDirect: false,

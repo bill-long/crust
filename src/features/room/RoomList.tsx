@@ -18,11 +18,18 @@ import {
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import { canMarkRoomUnread, markRoomUnread } from "../../client/markedUnread";
+import {
+	FAVOURITE_TAG,
+	LOW_PRIORITY_TAG,
+	toggleRoomTag,
+} from "../../client/roomTags";
 import type { RoomSummary } from "../../client/summaries";
 import {
 	getDmRooms,
+	getFavoriteRooms,
 	getInvitedRooms,
 	getKnockedRooms,
+	getLowPriorityHomeRooms,
 	getOrphanRooms,
 	getSpaceInvitedRooms,
 	getSpaceKnockedRooms,
@@ -173,6 +180,24 @@ const EncryptedBadge: Component = () => (
 	>
 		<rect x="3.5" y="7.5" width="9" height="6" rx="1" />
 		<path d="M5.5 7.5V5.5a2.5 2.5 0 0 1 5 0v2" />
+	</svg>
+);
+
+/** Check mark shown by the context menu's tag toggles when set. */
+const TagCheckIcon: Component = () => (
+	<svg
+		aria-hidden="true"
+		width="14"
+		height="14"
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2.5"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0 text-accent"
+	>
+		<polyline points="20 6 9 17 4 12" />
 	</svg>
 );
 
@@ -421,6 +446,8 @@ const RoomList: Component<RoomListProps> = (props) => {
 
 	const dmRooms = createMemo(() => getDmRooms(summaries));
 	const orphanRooms = createMemo(() => getOrphanRooms(summaries));
+	const favoriteRooms = createMemo(() => getFavoriteRooms(summaries));
+	const lowPriorityRooms = createMemo(() => getLowPriorityHomeRooms(summaries));
 	const invitedRooms = createMemo(() => getInvitedRooms(summaries));
 	const knockedRooms = createMemo(() => getKnockedRooms(summaries));
 	const spaceInvites = createMemo(() => {
@@ -497,8 +524,13 @@ const RoomList: Component<RoomListProps> = (props) => {
 	// must match its section.
 	const INVITES_HEADER: HomeItem = { type: "header", label: "Invites" };
 	const REQUESTS_HEADER: HomeItem = { type: "header", label: "Requests" };
+	const FAVORITES_HEADER: HomeItem = { type: "header", label: "Favorites" };
 	const DM_HEADER: HomeItem = { type: "header", label: "Direct Messages" };
 	const ROOMS_HEADER: HomeItem = { type: "header", label: "Rooms" };
+	const LOW_PRIORITY_HEADER: HomeItem = {
+		type: "header",
+		label: "Low priority",
+	};
 	const roomItems = new Map<string, { room: RoomSummary; item: HomeItem }>();
 	const roomItem = (
 		room: RoomSummary,
@@ -512,14 +544,17 @@ const RoomList: Component<RoomListProps> = (props) => {
 		return item;
 	};
 
-	// Flattened Home list: [Invites header?, ...invites, Requests header?,
-	// ...knocks, DM header?, ...dms, Rooms header?, ...orphans].
+	// Flattened Home list: [Invites?, Requests?, Favorites?, DMs?, Rooms?,
+	// Low priority?] - tagged rooms render in the Favorites / Low priority
+	// sections and are excluded from DMs / Rooms by the selectors (#449).
 	const homeItems = createMemo<HomeItem[]>(() => {
 		const out: HomeItem[] = [];
 		const invites = invitedRooms();
 		const knocks = knockedRooms();
+		const favorites = favoriteRooms();
 		const dms = dmRooms();
 		const orphans = orphanRooms();
+		const lowPriority = lowPriorityRooms();
 		if (invites.length > 0) {
 			out.push(INVITES_HEADER);
 			for (const room of invites) out.push(roomItem(room, "invite"));
@@ -527,6 +562,10 @@ const RoomList: Component<RoomListProps> = (props) => {
 		if (knocks.length > 0) {
 			out.push(REQUESTS_HEADER);
 			for (const room of knocks) out.push(roomItem(room, "knock"));
+		}
+		if (favorites.length > 0) {
+			out.push(FAVORITES_HEADER);
+			for (const room of favorites) out.push(roomItem(room, "room"));
 		}
 		if (dms.length > 0) {
 			out.push(DM_HEADER);
@@ -536,17 +575,27 @@ const RoomList: Component<RoomListProps> = (props) => {
 			out.push(ROOMS_HEADER);
 			for (const room of orphans) out.push(roomItem(room, "room"));
 		}
+		if (lowPriority.length > 0) {
+			out.push(LOW_PRIORITY_HEADER);
+			for (const room of lowPriority) out.push(roomItem(room, "room"));
+		}
 		// Drop cached wrappers for rows that are no longer present so the map
 		// doesn't retain every room ever seen this session.
-		if (
-			roomItems.size >
-			invites.length + knocks.length + dms.length + orphans.length
-		) {
+		const liveCount =
+			invites.length +
+			knocks.length +
+			favorites.length +
+			dms.length +
+			orphans.length +
+			lowPriority.length;
+		if (roomItems.size > liveCount) {
 			const live = new Set<string>();
 			for (const room of invites) live.add(`invite:${room.roomId}`);
 			for (const room of knocks) live.add(`knock:${room.roomId}`);
+			for (const room of favorites) live.add(`room:${room.roomId}`);
 			for (const room of dms) live.add(`room:${room.roomId}`);
 			for (const room of orphans) live.add(`room:${room.roomId}`);
+			for (const room of lowPriority) live.add(`room:${room.roomId}`);
 			for (const key of roomItems.keys()) {
 				if (!live.has(key)) roomItems.delete(key);
 			}
@@ -898,6 +947,43 @@ const RoomList: Component<RoomListProps> = (props) => {
 						>
 							Mark as unread
 						</ContextMenu.Item>
+						<ContextMenu.Separator class="mx-1 my-1 h-px bg-border-subtle" />
+						{/* closeOnSelect={false} would let the user toggle both tags
+							in one visit, but Kobalte re-anchors on the next open
+							anyway and single-toggle-and-close matches the Mark item
+							above - keep the default. */}
+						<ContextMenu.CheckboxItem
+							class={`${menuItemClass} justify-between gap-2`}
+							checked={(() => {
+								const target = menuTarget();
+								return !!target && summaries[target]?.isFavourite === true;
+							})()}
+							onChange={() => {
+								const target = menuTarget();
+								if (target) toggleRoomTag(clientCtx, target, FAVOURITE_TAG);
+							}}
+						>
+							Favorite
+							<ContextMenu.ItemIndicator>
+								<TagCheckIcon />
+							</ContextMenu.ItemIndicator>
+						</ContextMenu.CheckboxItem>
+						<ContextMenu.CheckboxItem
+							class={`${menuItemClass} justify-between gap-2`}
+							checked={(() => {
+								const target = menuTarget();
+								return !!target && summaries[target]?.isLowPriority === true;
+							})()}
+							onChange={() => {
+								const target = menuTarget();
+								if (target) toggleRoomTag(clientCtx, target, LOW_PRIORITY_TAG);
+							}}
+						>
+							Low priority
+							<ContextMenu.ItemIndicator>
+								<TagCheckIcon />
+							</ContextMenu.ItemIndicator>
+						</ContextMenu.CheckboxItem>
 					</ContextMenu.Content>
 				</ContextMenu.Portal>
 			</ContextMenu>

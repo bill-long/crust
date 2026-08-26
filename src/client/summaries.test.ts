@@ -1167,6 +1167,55 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 	});
 });
 
+describe("createSummariesStore room tags (#449)", () => {
+	function stubRoomForStore(room: ReturnType<typeof createMockRoom>) {
+		const r = room as unknown as Record<string, unknown>;
+		r.isCallRoom = () => false;
+		r.isElementVideoRoom = () => false;
+		r.getAvatarUrl = () => null;
+		r.getUnreadNotificationCount = () => 0;
+		r.getMyMembership = () => "join";
+		r.hasEncryptionStateEvent = () => false;
+		return room;
+	}
+
+	it("seeds the tag flags from room.tags on init and updates on RoomEvent.Tags", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		room.tags["m.favourite"] = {};
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+		expect(store.summaries["!r:x"].isFavourite).toBe(true);
+		expect(store.summaries["!r:x"].isLowPriority).toBe(false);
+
+		delete room.tags["m.favourite"];
+		room.tags["m.lowpriority"] = {};
+		client.__emit("Room.tags", { getType: () => "m.tag" }, room);
+		expect(store.summaries["!r:x"].isFavourite).toBe(false);
+		expect(store.summaries["!r:x"].isLowPriority).toBe(true);
+
+		store.cleanup();
+	});
+
+	it("optimisticallySetRoomTag flips the matching flag", () => {
+		const room = stubRoomForStore(createMockRoom("!r:x"));
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		store.optimisticallySetRoomTag("!r:x", "m.favourite", true);
+		expect(store.summaries["!r:x"].isFavourite).toBe(true);
+		store.optimisticallySetRoomTag("!r:x", "m.lowpriority", true);
+		expect(store.summaries["!r:x"].isLowPriority).toBe(true);
+		store.optimisticallySetRoomTag("!missing:x", "m.favourite", true);
+		expect(store.summaries["!missing:x"]).toBeUndefined();
+
+		store.cleanup();
+	});
+});
+
 describe("createSummariesStore poll previews", () => {
 	function stubRoomForStore(room: ReturnType<typeof createMockRoom>) {
 		const r = room as unknown as Record<string, unknown>;

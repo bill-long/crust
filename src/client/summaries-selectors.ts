@@ -325,41 +325,92 @@ export function getForwardableRooms(summaries: SummariesStore): RoomSummary[] {
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+const byActivity = (a: RoomSummary, b: RoomSummary): number =>
+	(b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0);
+
 /**
- * DM rooms the user has joined, sorted by recent activity.
+ * Rooms tagged `m.favourite` (#449): every joined non-space room, DMs and
+ * space children included - a favorite is pinned to the top of Home
+ * regardless of where it normally lives (it also stays in its space's own
+ * list). Sorted by recent activity. The favourite tag wins over
+ * `m.lowpriority` when a room carries both.
+ */
+export function getFavoriteRooms(summaries: SummariesStore): RoomSummary[] {
+	return Object.values(summaries)
+		.filter((s) => !s.isSpace && s.membership === "join" && s.isFavourite)
+		.sort(byActivity);
+}
+
+/**
+ * Home-visible rooms tagged `m.lowpriority` (#449): the DMs and orphan
+ * rooms that would otherwise sit in Home's regular sections, sunk to a
+ * bottom section instead. Space-child rooms are not included - they don't
+ * appear under Home to begin with, and their space list is untouched by
+ * the tag. Favourite wins when both tags are set.
+ */
+export function getLowPriorityHomeRooms(
+	summaries: SummariesStore,
+): RoomSummary[] {
+	const spacedRoomIds = collectSpacedRoomIds(summaries);
+	return Object.values(summaries)
+		.filter(
+			(s) =>
+				!s.isSpace &&
+				s.membership === "join" &&
+				s.isLowPriority &&
+				!s.isFavourite &&
+				(s.isDirect || !spacedRoomIds.has(s.roomId)),
+		)
+		.sort(byActivity);
+}
+
+/** Room ids claimed as a child by any joined space. */
+function collectSpacedRoomIds(summaries: SummariesStore): Set<string> {
+	const spacedRoomIds = new Set<string>();
+	for (const s of Object.values(summaries)) {
+		if (s.isSpace && s.membership === "join") {
+			for (const childId of s.children) spacedRoomIds.add(childId);
+		}
+	}
+	return spacedRoomIds;
+}
+
+/**
+ * DM rooms the user has joined, sorted by recent activity. Tagged rooms
+ * are excluded - they render in the Favorites / Low priority sections
+ * instead (#449).
  */
 export function getDmRooms(summaries: SummariesStore): RoomSummary[] {
 	return Object.values(summaries)
-		.filter((s) => s.isDirect && s.membership === "join" && !s.isSpace)
-		.sort(
-			(a, b) =>
-				(b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0),
-		);
+		.filter(
+			(s) =>
+				s.isDirect &&
+				s.membership === "join" &&
+				!s.isSpace &&
+				!s.isFavourite &&
+				!s.isLowPriority,
+		)
+		.sort(byActivity);
 }
 
 /**
  * Rooms not belonging to any space and not DMs, sorted by recent activity.
+ * Tagged rooms are excluded - they render in the Favorites / Low priority
+ * sections instead (#449).
  */
 export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
-	const spacedRoomIds = new Set<string>();
-	const candidates: RoomSummary[] = [];
-
-	for (const s of Object.values(summaries)) {
-		if (s.isSpace && s.membership === "join") {
-			for (const childId of s.children) {
-				spacedRoomIds.add(childId);
-			}
-		} else if (!s.isSpace && !s.isDirect && s.membership === "join") {
-			candidates.push(s);
-		}
-	}
-
-	return candidates
-		.filter((s) => !spacedRoomIds.has(s.roomId))
-		.sort(
-			(a, b) =>
-				(b.lastMessage?.timestamp ?? 0) - (a.lastMessage?.timestamp ?? 0),
-		);
+	const spacedRoomIds = collectSpacedRoomIds(summaries);
+	return Object.values(summaries)
+		.filter(
+			(s) =>
+				!s.isSpace &&
+				!s.isDirect &&
+				s.membership === "join" &&
+				!s.isFavourite &&
+				!s.isLowPriority &&
+				!spacedRoomIds.has(s.roomId),
+		)
+		.sort(byActivity);
 }
 
 /**
@@ -393,10 +444,14 @@ export function getTotalUnread(summaries: SummariesStore): number {
  * user's DMs plus orphan (non-space) rooms. Used to badge the Home button in
  * the spaces sidebar so unread DMs/rooms are visible while a space is selected.
  *
- * Counts exactly the rooms `getDmRooms` + `getOrphanRooms` return (joined DMs,
- * plus joined non-space rooms that aren't a child of any joined space), in
- * linear time (two passes over the store). Unlike those two selectors it does
- * not sort or build a result array, since only the totals are needed.
+ * Counts joined DMs plus joined non-space rooms that aren't a child of any
+ * joined space - i.e. Home's native population, regardless of which Home
+ * section (Favorites / DMs / Rooms / Low priority) a tag moves a room to.
+ * A FAVORITED SPACE-CHILD room is deliberately not counted even though it
+ * renders under Home too: its unread already rolls up under its space
+ * tile, and double-counting would inflate the Home badge. Linear time
+ * (two passes over the store); no sort or result array, since only the
+ * totals are needed.
  */
 export function getHomeUnreadRollup(summaries: SummariesStore): UnreadRollup {
 	const spacedRoomIds = new Set<string>();

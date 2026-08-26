@@ -109,6 +109,7 @@ function renderButton(opts: {
 				optimisticallyMarkKnocked: () => {},
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
+				optimisticallySetRoomTag: () => {},
 			}}
 		>
 			<CallButton
@@ -198,6 +199,8 @@ describe("CallButton visibility", () => {
 				unreadCount: 0,
 				highlightCount: 0,
 				markedUnread: false,
+				isFavourite: false,
+				isLowPriority: false,
 				membership: "join",
 				isEncrypted: false,
 				isDirect: false,
@@ -214,6 +217,8 @@ describe("CallButton visibility", () => {
 				unreadCount: 0,
 				highlightCount: 0,
 				markedUnread: false,
+				isFavourite: false,
+				isLowPriority: false,
 				membership: "join",
 				isEncrypted: false,
 				isDirect: false,
@@ -256,6 +261,8 @@ describe("CallButton visibility", () => {
 				unreadCount: 0,
 				highlightCount: 0,
 				markedUnread: false,
+				isFavourite: false,
+				isLowPriority: false,
 				membership: "join",
 				isEncrypted: false,
 				isDirect: false,
@@ -272,6 +279,8 @@ describe("CallButton visibility", () => {
 				unreadCount: 0,
 				highlightCount: 0,
 				markedUnread: false,
+				isFavourite: false,
+				isLowPriority: false,
 				membership: "join",
 				isEncrypted: false,
 				isDirect: false,

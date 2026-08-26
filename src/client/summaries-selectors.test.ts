@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "./summaries";
 import {
 	flattenSpaceTree,
+	getDmRooms,
+	getFavoriteRooms,
 	getForwardableRooms,
 	getHomeUnreadRollup,
 	getInvitedRoomCount,
@@ -9,6 +11,8 @@ import {
 	getInvitedSpaces,
 	getKnockedRooms,
 	getKnockedSpaces,
+	getLowPriorityHomeRooms,
+	getOrphanRooms,
 	getSpaceInvitedRooms,
 	getSpaceKnockedRooms,
 	getSpaceSubspaces,
@@ -26,6 +30,8 @@ function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 		unreadCount: 0,
 		highlightCount: 0,
 		markedUnread: false,
+		isFavourite: false,
+		isLowPriority: false,
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
@@ -695,5 +701,58 @@ describe("getForwardableRooms", () => {
 			room({ roomId: "!knock:x", name: "knocked", membership: "knock" }),
 		]);
 		expect(getForwardableRooms(s).map((r) => r.roomId)).toEqual(["!r:x"]);
+	});
+});
+
+describe("room tag sections (#449)", () => {
+	it("getFavoriteRooms includes DMs and space children, sorted by activity", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!child"] }),
+			room({
+				roomId: "!child",
+				isFavourite: true,
+				lastMessage: { body: "x", sender: "@a", timestamp: 2 },
+			}),
+			room({
+				roomId: "!dm",
+				isDirect: true,
+				isFavourite: true,
+				lastMessage: { body: "x", sender: "@a", timestamp: 5 },
+			}),
+			room({ roomId: "!plain" }),
+			room({ roomId: "!left", isFavourite: true, membership: "leave" }),
+		]);
+		expect(getFavoriteRooms(s).map((r) => r.roomId)).toEqual(["!dm", "!child"]);
+	});
+
+	it("tagged rooms leave the DM / Rooms sections", () => {
+		const s = store([
+			room({ roomId: "!dm", isDirect: true, isFavourite: true }),
+			room({ roomId: "!dm2", isDirect: true }),
+			room({ roomId: "!orphan", isLowPriority: true }),
+			room({ roomId: "!orphan2" }),
+		]);
+		expect(getDmRooms(s).map((r) => r.roomId)).toEqual(["!dm2"]);
+		expect(getOrphanRooms(s).map((r) => r.roomId)).toEqual(["!orphan2"]);
+	});
+
+	it("getLowPriorityHomeRooms sinks home rooms only, and favourite wins", () => {
+		const s = store([
+			room({ roomId: "!space", isSpace: true, children: ["!child"] }),
+			room({ roomId: "!child", isLowPriority: true }),
+			room({ roomId: "!dm", isDirect: true, isLowPriority: true }),
+			room({ roomId: "!orphan", isLowPriority: true }),
+			room({
+				roomId: "!both",
+				isLowPriority: true,
+				isFavourite: true,
+			}),
+		]);
+		expect(
+			getLowPriorityHomeRooms(s)
+				.map((r) => r.roomId)
+				.sort(),
+		).toEqual(["!dm", "!orphan"]);
+		expect(getFavoriteRooms(s).map((r) => r.roomId)).toEqual(["!both"]);
 	});
 });
