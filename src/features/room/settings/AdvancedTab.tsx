@@ -1,5 +1,12 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { type Component, createSignal, Show } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createMemo,
+	createSignal,
+	on,
+	Show,
+} from "solid-js";
 import { endCallForRoomLeave } from "../call/rtc/endCall";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HistoryVisibilitySection } from "./HistoryVisibilitySection";
@@ -26,10 +33,34 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	const [showLeave, setShowLeave] = createSignal(false);
 	const [showForget, setShowForget] = createSignal(false);
 
+	// Prefer the reactive summaries-backed prop; fall back to the SDK
+	// room's own membership so a call site that omits the prop (or a room
+	// the summaries store never saw) still resolves an already-left room
+	// to Forget instead of failing open to a doomed Leave.
+	const membership = (): string | undefined =>
+		props.membership ?? props.client.getRoom(props.roomId)?.getMyMembership();
+
 	// Forget is only valid (and only useful) once the user is out of the
-	// room: the server rejects /forget while joined (spec 10.2.3).
-	const canForget = (): boolean =>
-		props.membership === "leave" || props.membership === "ban";
+	// room: the server rejects /forget while joined (spec 10.2.3). Memoized
+	// so the dialog-closing effect below fires only on real flips.
+	const canForget = createMemo(
+		(): boolean => membership() === "leave" || membership() === "ban",
+	);
+
+	// If membership flips while a confirm dialog is open (leave/rejoin
+	// completed from another device), the open dialog's action is now the
+	// wrong one and the server would reject it - close it instead of
+	// letting the user confirm a stale action.
+	createEffect(
+		on(
+			canForget,
+			() => {
+				setShowLeave(false);
+				setShowForget(false);
+			},
+			{ defer: true },
+		),
+	);
 
 	const handleLeave = async (): Promise<void> => {
 		// Same teardown-before-leave rule the sidebar leave paths use: end a
@@ -41,10 +72,10 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	};
 
 	const handleForget = async (): Promise<void> => {
-		// The SDK's forget() removes the room from its store and emits
-		// ClientEvent.DeleteRoom on success, which the summaries store
-		// consumes to drop the entry - no optimistic step needed.
-		await props.client.forget(props.roomId);
+		// deleteRoom=false: local state is dropped by the onForgot chain
+		// (Layout's forgetRoomLocally) only AFTER navigating away, so the
+		// still-routed room view never renders in a deleted state.
+		await props.client.forget(props.roomId, false);
 		props.onForgot?.(props.roomId);
 	};
 
@@ -69,26 +100,13 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
 					Danger zone
 				</h3>
-				<Show
-					when={canForget()}
-					fallback={
-						<button
-							type="button"
-							onClick={() => setShowLeave(true)}
-							class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
-						>
-							{props.isSpace ? "Leave space" : "Leave room"}
-						</button>
-					}
+				<button
+					type="button"
+					onClick={() => (canForget() ? setShowForget : setShowLeave)(true)}
+					class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
 				>
-					<button
-						type="button"
-						onClick={() => setShowForget(true)}
-						class="rounded bg-danger-bg px-4 py-2 text-sm font-semibold text-danger-text transition-colors hover:bg-danger-bg/80 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-text"
-					>
-						{props.isSpace ? "Forget space" : "Forget room"}
-					</button>
-				</Show>
+					{`${canForget() ? "Forget" : "Leave"} ${props.isSpace ? "space" : "room"}`}
+				</button>
 			</section>
 
 			<ConfirmDialog
@@ -117,9 +135,7 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 				title={`Forget ${roomName()}?`}
 				body={
 					<p>
-						{props.isSpace
-							? "This removes the space from your account entirely, including the history you had access to. Rejoining later starts fresh."
-							: "This removes the room from your account entirely, including the history you had access to. Rejoining later starts fresh."}
+						{`This removes the ${props.isSpace ? "space" : "room"} from your account entirely, including the history you had access to. Rejoining later starts fresh.`}
 					</p>
 				}
 				confirmLabel="Forget"

@@ -173,8 +173,14 @@ const [loggingOut, setLoggingOut] = createSignal(false);
 
 const Layout: Component = () => {
 	const clientCtx = useClient();
-	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
-		clientCtx;
+	const {
+		client,
+		summaries,
+		cryptoStatus,
+		syncState,
+		optimisticallyMarkLeft,
+		forgetRoomLocally,
+	} = clientCtx;
 	// Mount the global PTT/PTM hotkey listener once at the app shell. The
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
@@ -1020,7 +1026,15 @@ const Layout: Component = () => {
 											optimisticallyMarkLeft(leftRid);
 											handleRoomGone(leftRid);
 										}}
-										onForgot={handleRoomGone}
+										onForgot={(forgotRid) => {
+											// Navigate away first, then drop local state:
+											// deleting the routed room's store entries
+											// before leaving it would render the room
+											// view in a deleted state (see
+											// forgetRoomLocally).
+											handleRoomGone(forgotRid);
+											forgetRoomLocally(forgotRid);
+										}}
 									/>
 								</Suspense>
 							);

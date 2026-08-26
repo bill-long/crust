@@ -11,6 +11,7 @@ import {
 	JoinRule,
 	type MatrixClient,
 } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	_resetActiveCallForTests,
@@ -253,9 +254,50 @@ describe("AdvancedTab", () => {
 		fireEvent.click(button("Forget"));
 
 		await waitFor(() =>
-			expect(client.forget).toHaveBeenCalledWith("!room:example.com"),
+			// deleteRoom=false: local state is dropped after navigation via
+			// the onForgot chain, not by the SDK call.
+			expect(client.forget).toHaveBeenCalledWith("!room:example.com", false),
 		);
 		expect(onForgot).toHaveBeenCalledWith("!room:example.com");
+	});
+
+	it("falls back to the SDK room's membership when the prop is absent", () => {
+		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
+		room.getMyMembership = () => "leave";
+		const client = createMockClient(new Map([["!room:example.com", room]]));
+		(client as unknown as ActionClient).leave = vi.fn();
+		(client as unknown as ActionClient).forget = vi.fn();
+		render(() => (
+			<AdvancedTab
+				client={client as unknown as MatrixClient}
+				roomId="!room:example.com"
+			/>
+		));
+		expect(button("Forget room")).toBeTruthy();
+	});
+
+	it("closes an open confirm dialog when membership flips under it", async () => {
+		const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
+		const client = createMockClient(new Map([["!room:example.com", room]]));
+		(client as unknown as ActionClient).leave = vi.fn();
+		(client as unknown as ActionClient).forget = vi.fn();
+		const [membership, setMembership] = createSignal<string | undefined>(
+			"join",
+		);
+		render(() => (
+			<AdvancedTab
+				client={client as unknown as MatrixClient}
+				roomId="!room:example.com"
+				membership={membership()}
+			/>
+		));
+		fireEvent.click(button("Leave room"));
+		expect(screen.getByRole("dialog")).toBeTruthy();
+
+		setMembership("leave");
+
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(button("Forget room")).toBeTruthy();
 	});
 
 	it("Forget failure stays in the dialog and does not call onForgot", async () => {
