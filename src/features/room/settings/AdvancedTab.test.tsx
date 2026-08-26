@@ -37,6 +37,7 @@ vi.mock("solid-refresh", () => ({
 interface ActionClient {
 	sendStateEvent: ReturnType<typeof vi.fn>;
 	leave: ReturnType<typeof vi.fn>;
+	forget: ReturnType<typeof vi.fn>;
 }
 
 function setup(options?: {
@@ -45,6 +46,9 @@ function setup(options?: {
 	canJoinRules?: boolean;
 	canHistory?: boolean;
 	onLeft?: (roomId: string) => void;
+	onForgot?: (roomId: string) => void;
+	membership?: string;
+	isSpace?: boolean;
 }) {
 	const room = createMockRoom("!room:example.com", [], [], { name: "Alpha" });
 	room.__setStateEvent("m.room.join_rules", "", {
@@ -64,11 +68,15 @@ function setup(options?: {
 	const client = createMockClient(new Map([["!room:example.com", room]]));
 	const actionClient = client as unknown as ActionClient;
 	actionClient.leave = vi.fn().mockResolvedValue(undefined);
+	actionClient.forget = vi.fn().mockResolvedValue(undefined);
 	render(() => (
 		<AdvancedTab
 			client={client as unknown as MatrixClient}
 			roomId="!room:example.com"
 			onLeft={options?.onLeft}
+			onForgot={options?.onForgot}
+			membership={options?.membership}
+			isSpace={options?.isSpace}
 		/>
 	));
 	return { client: actionClient, room };
@@ -211,6 +219,56 @@ describe("AdvancedTab", () => {
 			expect(screen.getByRole("alert").textContent).toContain("cannot leave"),
 		);
 		expect(onLeft).not.toHaveBeenCalled();
+		expect(screen.getByRole("dialog")).toBeTruthy();
+	});
+
+	it("offers Forget instead of Leave once the room is left", () => {
+		setup({ membership: "leave" });
+		expect(button("Forget room")).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "Leave room" })).toBeNull();
+	});
+
+	it("offers Forget for a banned room", () => {
+		setup({ membership: "ban" });
+		expect(button("Forget room")).toBeTruthy();
+	});
+
+	it("keeps Leave (no Forget) while still joined", () => {
+		setup({ membership: "join" });
+		expect(button("Leave room")).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "Forget room" })).toBeNull();
+	});
+
+	it("uses space copy for the Forget action", () => {
+		setup({ membership: "leave", isSpace: true });
+		expect(button("Forget space")).toBeTruthy();
+	});
+
+	it("Forget confirms, calls client.forget, and invokes onForgot on success", async () => {
+		const onForgot = vi.fn();
+		const { client } = setup({ membership: "leave", onForgot });
+		fireEvent.click(button("Forget room"));
+		expect(screen.getByRole("dialog").textContent).toContain("Forget Alpha?");
+
+		fireEvent.click(button("Forget"));
+
+		await waitFor(() =>
+			expect(client.forget).toHaveBeenCalledWith("!room:example.com"),
+		);
+		expect(onForgot).toHaveBeenCalledWith("!room:example.com");
+	});
+
+	it("Forget failure stays in the dialog and does not call onForgot", async () => {
+		const onForgot = vi.fn();
+		const { client } = setup({ membership: "leave", onForgot });
+		client.forget.mockRejectedValueOnce(new Error("cannot forget"));
+		fireEvent.click(button("Forget room"));
+		fireEvent.click(button("Forget"));
+
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain("cannot forget"),
+		);
+		expect(onForgot).not.toHaveBeenCalled();
 		expect(screen.getByRole("dialog")).toBeTruthy();
 	});
 

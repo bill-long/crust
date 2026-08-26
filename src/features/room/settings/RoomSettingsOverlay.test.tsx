@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +24,11 @@ import {
 	type RoomSettingsTab,
 } from "./RoomSettingsOverlay";
 
-function setup(active: RoomSettingsTab = "general", isSpace?: boolean) {
+function setup(
+	active: RoomSettingsTab = "general",
+	isSpace?: boolean,
+	options?: { membership?: string; onForgot?: (roomId: string) => void },
+) {
 	const room = createMockRoom("!room:example.com", [], [], {
 		name: "Test Room",
 	});
@@ -45,6 +55,8 @@ function setup(active: RoomSettingsTab = "general", isSpace?: boolean) {
 				onTabChange={onTabChange}
 				onClose={onClose}
 				isSpace={isSpace}
+				membership={options?.membership}
+				onForgot={options?.onForgot}
 			/>
 		);
 	});
@@ -162,5 +174,29 @@ describe("RoomSettingsOverlay", () => {
 	it("keeps Join rule on the Advanced tab for regular rooms", () => {
 		setup("advanced", false);
 		expect(screen.getByRole("heading", { name: "Join rule" })).toBeTruthy();
+	});
+
+	it("passes membership through: a left room's Advanced tab offers Forget", () => {
+		setup("advanced", false, { membership: "leave" });
+		expect(screen.getByRole("button", { name: "Forget room" })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "Leave room" })).toBeNull();
+	});
+
+	it("forwards onForgot and closes after a successful Forget", async () => {
+		const onForgot = vi.fn();
+		const { client, onClose } = setup("advanced", false, {
+			membership: "leave",
+			onForgot,
+		});
+		(client as unknown as { forget: ReturnType<typeof vi.fn> }).forget = vi
+			.fn()
+			.mockResolvedValue(undefined);
+		fireEvent.click(screen.getByRole("button", { name: "Forget room" }));
+		fireEvent.click(screen.getByRole("button", { name: "Forget" }));
+
+		await waitFor(() =>
+			expect(onForgot).toHaveBeenCalledWith("!room:example.com"),
+		);
+		expect(onClose).toHaveBeenCalled();
 	});
 });

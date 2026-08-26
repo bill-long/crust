@@ -980,6 +980,22 @@ const Layout: Component = () => {
 									client.getRoom(rid)?.isSpaceRoom() ??
 									false,
 							);
+							// Shared by Leave and Forget: the room is gone from the
+							// user's list either way, so close the overlay and
+							// navigate somewhere that still exists.
+							const handleRoomGone = (goneRid: string): void => {
+								setRoomSettings(null);
+								// If the user just left the space they were
+								// viewing, navigate to /home instead of trying
+								// to navigate back into the just-left space.
+								const leftCurrentSpace =
+									spaceIdAtOpen !== undefined && goneRid === spaceIdAtOpen;
+								if (spaceIdAtOpen && !leftCurrentSpace) {
+									navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
+								} else {
+									navigate("/home");
+								}
+							};
 							return (
 								// Fallback matches the overlay's outer box (fixed
 								// inset-0 with the same backdrop) so opening room
@@ -993,23 +1009,18 @@ const Layout: Component = () => {
 										client={client}
 										roomId={rid}
 										isSpace={isSpaceTarget}
+										membership={summaries[rid]?.membership}
 										activeTab={target().tab}
 										onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
 										onClose={() => setRoomSettings(null)}
 										onLeft={(leftRid) => {
-											setRoomSettings(null);
-											// If the user just left the space they were
-											// viewing, navigate to /home instead of trying
-											// to navigate back into the just-left space.
-											const leftCurrentSpace =
-												spaceIdAtOpen !== undefined &&
-												leftRid === spaceIdAtOpen;
-											if (spaceIdAtOpen && !leftCurrentSpace) {
-												navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
-											} else {
-												navigate("/home");
-											}
+											// Hide the room from all lists immediately, matching
+											// the header-leave path; idempotent with the eventual
+											// MyMembership sync event.
+											optimisticallyMarkLeft(leftRid);
+											handleRoomGone(leftRid);
 										}}
+										onForgot={handleRoomGone}
 									/>
 								</Suspense>
 							);
