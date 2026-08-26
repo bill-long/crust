@@ -474,8 +474,8 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 							Verify this session
 						</h2>
 						<p class="mb-6 text-sm text-text-muted">
-							Confirm from another session that's already verified by comparing
-							emoji, or enter your recovery key.
+							Confirm from another session that's already verified, or enter
+							your recovery key.
 						</p>
 						<div class="flex flex-col gap-2">
 							<button

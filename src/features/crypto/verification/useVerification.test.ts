@@ -292,6 +292,22 @@ describe("useVerification reciprocation (#452)", () => {
 		expect(handle.state()).toBe("cancelled");
 	});
 
+	it("takes down the confirm prompt when the SDK swaps the verifier under it", async () => {
+		const { handle, request, callbacks } = await reachReciprocate();
+
+		// The SDK replaces the QR verifier with a SAS one after the scan.
+		// ShowSas is several round-trips away, so this verifier holds
+		// nothing yet - and the confirm prompt must not survive the wait:
+		// its Yes calls callbacks that went with the old verifier, and its
+		// No would cancel the emoji exchange that is now the live flow.
+		request.incomingVerifier = new FakeVerifier();
+		request.transition(VerificationPhase.Started);
+
+		expect(handle.state()).not.toBe("qr-reciprocate");
+		handle.confirmQr();
+		expect(callbacks.confirm).not.toHaveBeenCalled();
+	});
+
 	it("binds a verifier the other side started for emoji instead", async () => {
 		const { handle, request } = await startVerification();
 		request.transition(VerificationPhase.Ready);

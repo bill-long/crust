@@ -28,6 +28,18 @@ export type VerificationState =
 	| "cancelled"
 	| "error";
 
+/**
+ * The states a QR verifier's callbacks drive. Named once, because
+ * `bindVerifier` has to unwind all of them together: every one of these
+ * views is meaningless the moment a different verifier takes over, since
+ * `detachVerifier` drops the callbacks their buttons call.
+ */
+const QR_STATES: readonly VerificationState[] = [
+	"qr-showing",
+	"qr-reciprocate",
+	"qr-confirmed",
+];
+
 export interface VerificationHandle {
 	state: Accessor<VerificationState>;
 	emoji: Accessor<EmojiMapping[] | undefined>;
@@ -190,13 +202,18 @@ export function useVerification(client: MatrixClient): VerificationHandle {
 		}
 		activeVerifier = verifier;
 
-		// A method has started, so the code is spent. Leave `qr-showing` in
-		// the same breath as clearing the bytes: the QR view has no empty
-		// state, so a gap here would blank a 256px box under a heading still
-		// telling the user to scan it. This also makes the state the single
-		// authority on whether a method has started - `startSas` relies on it.
+		// A method has started, so every QR view is spent - leave it in the
+		// same breath as clearing the bytes. `qr-showing` has no empty state,
+		// so a gap there blanks a 256px box under a heading still telling the
+		// user to scan it; `qr-reciprocate` is worse, offering a Yes that now
+		// does nothing (the callbacks went with the old verifier) over a No
+		// that cancels the flow which is actually live. The SDK swaps QR for
+		// SAS after a scan, and `ShowSas` is several round-trips away, so
+		// that window is not brief. Doing it here also leaves the state the
+		// single authority on whether a method has started, which `startSas`
+		// relies on.
 		setQrBytes(undefined);
-		if (state() === "qr-showing") setState("ready");
+		if (QR_STATES.includes(state())) setState("ready");
 
 		verifier.on(VerifierEvent.ShowSas, onShowSas);
 		verifier.on(VerifierEvent.ShowReciprocateQr, onShowReciprocateQr);
