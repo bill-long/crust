@@ -83,6 +83,7 @@ const Wrapper: ParentComponent<{
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
 				optimisticallySetRoomTag: () => {},
+				forgetRoomLocally: () => {},
 			}}
 		>
 			{props.children}

@@ -173,8 +173,14 @@ const [loggingOut, setLoggingOut] = createSignal(false);
 
 const Layout: Component = () => {
 	const clientCtx = useClient();
-	const { client, summaries, cryptoStatus, syncState, optimisticallyMarkLeft } =
-		clientCtx;
+	const {
+		client,
+		summaries,
+		cryptoStatus,
+		syncState,
+		optimisticallyMarkLeft,
+		forgetRoomLocally,
+	} = clientCtx;
 	// Mount the global PTT/PTM hotkey listener once at the app shell. The
 	// hook attaches no listeners until the user enables a non-default
 	// `micMode` AND binds a hotkey, so the default path stays zero-cost.
@@ -980,6 +986,22 @@ const Layout: Component = () => {
 									client.getRoom(rid)?.isSpaceRoom() ??
 									false,
 							);
+							// Shared by Leave and Forget: the room is gone from the
+							// user's list either way, so close the overlay and
+							// navigate somewhere that still exists.
+							const handleRoomGone = (goneRid: string): void => {
+								setRoomSettings(null);
+								// If the user just left the space they were
+								// viewing, navigate to /home instead of trying
+								// to navigate back into the just-left space.
+								const leftCurrentSpace =
+									spaceIdAtOpen !== undefined && goneRid === spaceIdAtOpen;
+								if (spaceIdAtOpen && !leftCurrentSpace) {
+									navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
+								} else {
+									navigate("/home");
+								}
+							};
 							return (
 								// Fallback matches the overlay's outer box (fixed
 								// inset-0 with the same backdrop) so opening room
@@ -993,22 +1015,28 @@ const Layout: Component = () => {
 										client={client}
 										roomId={rid}
 										isSpace={isSpaceTarget}
+										membership={summaries[rid]?.membership}
 										activeTab={target().tab}
 										onTabChange={(tab) => setRoomSettings({ roomId: rid, tab })}
 										onClose={() => setRoomSettings(null)}
 										onLeft={(leftRid) => {
-											setRoomSettings(null);
-											// If the user just left the space they were
-											// viewing, navigate to /home instead of trying
-											// to navigate back into the just-left space.
-											const leftCurrentSpace =
-												spaceIdAtOpen !== undefined &&
-												leftRid === spaceIdAtOpen;
-											if (spaceIdAtOpen && !leftCurrentSpace) {
-												navigate(`/space/${encodeURIComponent(spaceIdAtOpen)}`);
-											} else {
-												navigate("/home");
-											}
+											// Hide the room from all lists immediately, matching
+											// the header-leave path; idempotent with the eventual
+											// MyMembership sync event.
+											optimisticallyMarkLeft(leftRid);
+											handleRoomGone(leftRid);
+										}}
+										onForgot={(forgotRid) => {
+											// Navigate away first, then drop local state:
+											// deleting the routed room's store entries
+											// before leaving it would render the room
+											// view in a deleted state (see
+											// forgetRoomLocally). solid-router defers the
+											// route swap to a microtask (startTransition),
+											// so the purge is queued behind it rather than
+											// run synchronously.
+											handleRoomGone(forgotRid);
+											queueMicrotask(() => forgetRoomLocally(forgotRid));
 										}}
 									/>
 								</Suspense>

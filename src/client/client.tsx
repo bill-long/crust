@@ -111,6 +111,13 @@ interface ClientContextValue {
 		value: boolean,
 	) => void;
 	/**
+	 * Drop a forgotten room from the SDK store and the summary store.
+	 * Call only after `client.forget(roomId, false)` succeeded AND the
+	 * router has left the room, so a routed view never renders a
+	 * just-deleted room.
+	 */
+	forgetRoomLocally: (roomId: string) => void;
+	/**
 	 * Request the recovery key from the user. Components that show a
 	 * recovery key input dialog should call setRecoveryKeyResolver to
 	 * register themselves.
@@ -327,6 +334,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		optimisticallyMarkLeft,
 		optimisticallySetMarkedUnread,
 		optimisticallySetRoomTag,
+		forgetRoomLocally,
 	} = createSummariesStore(matrixClient);
 
 	// Keep the OS/taskbar app badge in sync with live unread state while this
@@ -484,6 +492,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				optimisticallyMarkLeft,
 				optimisticallySetMarkedUnread,
 				optimisticallySetRoomTag,
+				forgetRoomLocally,
 				requestRecoveryKey,
 				setRecoveryKeyResolver,
 				clearSecretStorageCache,

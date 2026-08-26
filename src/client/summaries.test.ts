@@ -632,6 +632,26 @@ describe("createSummariesStore call expiry timer", () => {
 		store.cleanup();
 	});
 
+	it("forgetRoomLocally removes the room from the SDK store and the summaries", () => {
+		const expiresAt = NOW + 60_000;
+		const room = makeRoomWithActiveCall("!r:x", expiresAt);
+		const rooms = new Map([[room.roomId, room]]);
+		const client = createMockClient(rooms);
+		const store = createSummariesStore(client as unknown as MatrixClient);
+		store.init();
+
+		expect(store.summaries[room.roomId]).toBeDefined();
+
+		store.forgetRoomLocally(room.roomId);
+
+		expect(client.store.removeRoom).toHaveBeenCalledWith(room.roomId);
+		expect(store.summaries[room.roomId]).toBeUndefined();
+		// Expiry timers are cleared with the entry (onDeleteRoom path).
+		expect(vi.getTimerCount()).toBe(0);
+
+		store.cleanup();
+	});
+
 	it("recomputes callActive when a live event reveals server clock skew", () => {
 		// Membership whose server-clock expiry is 1h30m before NOW.
 		// With offset 0 (default), the client thinks it's expired.

@@ -297,6 +297,8 @@ export function createMockRoom(
 	return {
 		roomId,
 		name: options?.name ?? roomId,
+		// Own membership; tests override per-case (e.g. "leave" for forget).
+		getMyMembership: () => "join",
 		// Mirrors `Room.tags` (m.tag account data); tests mutate directly.
 		tags: {} as Record<string, Record<string, unknown>>,
 		currentState,
@@ -514,6 +516,8 @@ export function createMockClient(
 		setRoomAccountData: vi.fn().mockResolvedValue({}),
 		setRoomTag: vi.fn().mockResolvedValue({}),
 		deleteRoomTag: vi.fn().mockResolvedValue({}),
+		// Minimal SDK store surface (summaries.forgetRoomLocally).
+		store: { removeRoom: vi.fn() },
 		getHomeserverUrl: () => "https://example.com",
 		on: (event: string, handler: (...args: unknown[]) => void) => {
 			if (!listeners.has(event)) listeners.set(event, new Set());
@@ -535,6 +539,14 @@ export function createMockClient(
 			if (handlers) {
 				for (const handler of handlers) handler(...args);
 			}
+		},
+		// Public SDK emit (TypedEventEmitter); same dispatch as __emit.
+		emit: (event: string, ...args: unknown[]) => {
+			const handlers = listeners.get(event);
+			if (handlers) {
+				for (const handler of handlers) handler(...args);
+			}
+			return true;
 		},
 
 		// Test helper: update the rooms map

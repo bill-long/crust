@@ -110,6 +110,7 @@ function renderButton(opts: {
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
 				optimisticallySetRoomTag: () => {},
+				forgetRoomLocally: () => {},
 			}}
 		>
 			<CallButton

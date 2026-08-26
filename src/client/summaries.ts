@@ -443,6 +443,7 @@ export function createSummariesStore(client: MatrixClient): {
 		tag: SidebarRoomTag,
 		value: boolean,
 	) => void;
+	forgetRoomLocally: (roomId: string) => void;
 } {
 	const [summaries, setSummaries] = createStore<SummariesStore>({});
 	const baseUrl = client.getHomeserverUrl();
@@ -662,6 +663,24 @@ export function createSummariesStore(client: MatrixClient): {
 			tag === FAVOURITE_TAG ? "isFavourite" : "isLowPriority",
 			value,
 		);
+	}
+
+	/**
+	 * Drop a forgotten room from both the SDK store and the summary store.
+	 * Called after `client.forget(roomId, false)` has confirmed server-side
+	 * AND the router has left the room: the forget call is asked not to
+	 * delete the room itself so the still-routed view never renders in a
+	 * deleted state (same order-of-operations rule as the decline/knock
+	 * paths, which navigate before flipping local membership).
+	 *
+	 * Mirrors the tail of the SDK's own forget(deleteRoom=true) - remove
+	 * from the store, then emit DeleteRoom - so every DeleteRoom
+	 * subscriber (this store's onDeleteRoom included) sees forgotten rooms
+	 * through the one event, not a side channel.
+	 */
+	function forgetRoomLocally(roomId: string): void {
+		client.store.removeRoom(roomId);
+		client.emit(ClientEvent.DeleteRoom, roomId);
 	}
 
 	function upsertRoom(room: Room): void {
@@ -994,5 +1013,6 @@ export function createSummariesStore(client: MatrixClient): {
 		optimisticallyMarkLeft,
 		optimisticallySetMarkedUnread,
 		optimisticallySetRoomTag,
+		forgetRoomLocally,
 	};
 }

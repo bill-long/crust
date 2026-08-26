@@ -235,6 +235,7 @@ export const TestClientProvider: ParentComponent<{
 				optimisticallyMarkLeft: () => {},
 				optimisticallySetMarkedUnread: () => {},
 				optimisticallySetRoomTag: () => {},
+				forgetRoomLocally: () => {},
 			}}
 		>
 			{props.children}
