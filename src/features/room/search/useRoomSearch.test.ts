@@ -1,12 +1,9 @@
 import type { MatrixEvent, Room, RoomMember } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
-import {
-	matchesAllTokens,
-	projectEvent,
-	splitQueryTokens,
-	useRoomSearch,
-} from "./useRoomSearch";
+import { projectEvent } from "../../../client/searchProjection";
+import { matchesAllTokens, splitQueryTokens } from "../../../lib/searchHit";
+import { useRoomSearch } from "./useRoomSearch";
 
 interface FakeEventInit {
 	id?: string | null;

@@ -1,6 +1,6 @@
 import type { Component } from "solid-js";
-import { buildSnippetHtml } from "./highlightSnippet";
-import type { SearchHit } from "./useRoomSearch";
+import { buildSnippetHtml } from "../lib/highlightSnippet";
+import type { SearchHit } from "../lib/searchHit";
 
 function formatHitTime(ts: number): string {
 	const d = new Date(ts);
@@ -24,9 +24,18 @@ const SearchResultRow: Component<{
 	terms: string[];
 	focused: boolean;
 	rowId: string;
-	onJump: () => void;
+	/** `true` when activated from the keyboard, so callers can decide
+	 *  whether focus needs to be placed somewhere afterwards. */
+	onJump: (viaKeyboard: boolean) => void;
 	onFocus: () => void;
 	rowRef?: (el: HTMLElement | null) => void;
+	/**
+	 * Extra context folded into the accessible name - the room, for global
+	 * results. A listbox may only contain options, so a visual grouping
+	 * heading is invisible to assistive tech; saying it per option is what
+	 * makes the grouping audible.
+	 */
+	contextLabel?: string;
 }> = (props) => {
 	return (
 		<div
@@ -35,19 +44,24 @@ const SearchResultRow: Component<{
 			aria-selected={props.focused}
 			tabIndex={props.focused ? 0 : -1}
 			ref={(el) => props.rowRef?.(el)}
-			onClick={() => props.onJump()}
+			onClick={() => props.onJump(false)}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {
 					e.preventDefault();
 					e.stopPropagation();
-					props.onJump();
+					props.onJump(true);
 				}
 			}}
 			onFocus={() => props.onFocus()}
 			class="group flex w-full cursor-pointer flex-col gap-1 rounded-md border border-transparent bg-surface-2/40 px-3 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 		>
+			{/* The hint names both keys the handler accepts. Saying only
+			    Enter told a screen-reader user that Space would not work,
+			    which is the one group that has nothing else to go on. */}
 			<span class="sr-only">
-				Search result, press Enter to jump to message:{" "}
+				Search result
+				{props.contextLabel ? ` in ${props.contextLabel}` : ""}, press Enter or
+				Space to jump to message:{" "}
 			</span>
 			<div class="flex items-baseline gap-2">
 				<span class="truncate text-xs font-semibold text-text-emphasis">

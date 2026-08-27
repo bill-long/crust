@@ -15,8 +15,13 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
-import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
-import { threadJumpTarget } from "../../../lib/threadEvents";
+import { projectEvent } from "../../../client/searchProjection";
+import {
+	MAX_QUERY_LEN,
+	matchesAllTokens,
+	type SearchHit,
+	splitQueryTokens,
+} from "../../../lib/searchHit";
 
 /**
  * Server search returns results across all the user's rooms by default;
@@ -26,18 +31,6 @@ import { threadJumpTarget } from "../../../lib/threadEvents";
  * server still honors it, so we widen the type locally.
  */
 type RoomScopedFilter = IRoomEventFilter & { rooms?: string[] };
-
-export interface SearchHit {
-	eventId: string;
-	sender: string;
-	senderName: string;
-	timestamp: number;
-	body: string;
-	/** Set when the hit is a thread reply: the root whose panel shows it.
-	 *  Jumps carry it so the room pane opens the thread panel instead of
-	 *  anchoring the main timeline (issue #334). */
-	threadRootId?: string;
-}
 
 export type SearchStatus = "idle" | "searching" | "results" | "empty" | "error";
 
@@ -61,58 +54,6 @@ export interface UseRoomSearch {
 }
 
 const LOCAL_PAGE_SIZE = 25;
-const MAX_QUERY_LEN = 256;
-
-export { MAX_QUERY_LEN };
-
-/** @internal Exported for tests. Splits a query into trimmed lowercase tokens. */
-export function splitQueryTokens(q: string): string[] {
-	return q
-		.toLowerCase()
-		.split(/\s+/)
-		.map((t) => t.trim())
-		.filter((t) => t.length > 0);
-}
-
-/** @internal Exported for tests. True iff `body` contains every token (case-insensitive). */
-export function matchesAllTokens(body: string, tokens: string[]): boolean {
-	if (tokens.length === 0) return false;
-	const haystack = body.toLowerCase();
-	return tokens.every((n) => haystack.includes(n));
-}
-
-/** @internal Exported for tests. */
-export function projectEvent(
-	room: Room | null,
-	ev: MatrixEvent,
-): SearchHit | null {
-	const id = ev.getId();
-	if (!id) return null;
-	if (ev.isRedacted()) return null;
-	const content = (ev.getContent?.() ?? {}) as Record<string, unknown>;
-	const relates = content["m.relates_to"] as { rel_type?: string } | undefined;
-	if (relates?.rel_type === "m.replace") return null;
-	// Thread replies aren't part of the main timeline, but they ARE
-	// searchable: carry the root id so the jump opens the thread panel
-	// instead of the (doomed) main-timeline anchor (issue #334).
-	const threadRootId = threadJumpTarget(ev);
-	const body = typeof content.body === "string" ? content.body : "";
-	if (!body) return null;
-	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
-	if (!TEXT_MSGTYPES.has(msgtype)) {
-		return null;
-	}
-	const sender = ev.getSender() ?? "";
-	const member = sender && room ? room.getMember(sender) : null;
-	return {
-		eventId: id,
-		sender,
-		senderName: member?.name ?? sender,
-		timestamp: ev.getTs?.() ?? 0,
-		body,
-		threadRootId,
-	};
-}
 
 function collectLocalEvents(room: Room): MatrixEvent[] {
 	const out: MatrixEvent[] = [];
@@ -368,3 +309,6 @@ export function useRoomSearch(
 		isEncrypted,
 	};
 }
+
+// Re-exported so the panel keeps one import for the whole concept.
+export { MAX_QUERY_LEN, type SearchHit };

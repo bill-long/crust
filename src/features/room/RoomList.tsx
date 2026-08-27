@@ -693,7 +693,10 @@ const RoomList: Component<RoomListProps> = (props) => {
 		);
 
 	return (
-		<aside class="flex h-full flex-col border-r border-border-subtle bg-surface-1/50">
+		// The pane's surface and right divider belong to the wrapper
+		// (`GlobalSearchPane`), which also hosts the search field above this
+		// list - painting them here would inset both behind that field.
+		<aside class="flex h-full flex-col">
 			<div class="flex items-center justify-between gap-2 border-b border-border-subtle px-4 py-3">
 				<span class="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
 					{spaceName()}

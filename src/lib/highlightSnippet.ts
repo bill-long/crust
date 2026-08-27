@@ -1,5 +1,5 @@
 import DOMPurify from "dompurify";
-import { stripReplyFallback } from "../../../lib/replyFallback";
+import { stripReplyFallback } from "./replyFallback";
 
 /** Half-window (in characters) on each side of the first match. */
 const WINDOW_BEFORE = 60;
@@ -62,38 +62,42 @@ export function buildSnippetHtml(body: string, terms: string[]): string {
 	const prefix = start > 0 ? "…" : "";
 	const suffix = end < stripped.length ? "…" : "";
 
-	let html = `${prefix}${escapeHtml(slice)}${suffix}`;
-
-	// Collect every term match against the escaped HTML, merge overlapping
-	// ranges, then splice <mark> tags right-to-left so earlier insertions
-	// don't shift later indices. This avoids the naive sequential-replace
-	// trap where shorter terms re-match inside an already-wrapped longer
-	// term and produce nested <mark><mark>...</mark></mark> tags.
+	// Match against the *plain* slice, then escape each piece as the HTML is
+	// assembled. Matching the escaped string instead let a term that is a
+	// substring of an entity land inside it - searching "amp" in "Tom & Jerry"
+	// wrapped the `amp` of `&amp;` and produced the literal text "Tom &amp;
+	// Jerry" - and the same for "39" against any apostrophe, or quot/lt/gt.
+	//
+	// Ranges are merged before splicing so that a shorter term matching
+	// inside a longer one cannot produce nested <mark> tags.
 	const ranges: Array<[number, number]> = [];
 	for (const term of cleanedTerms) {
-		const re = new RegExp(escapeRegex(escapeHtml(term)), "gi");
-		for (const m of html.matchAll(re)) {
+		const re = new RegExp(escapeRegex(term), "gi");
+		for (const m of slice.matchAll(re)) {
 			if (typeof m.index !== "number") continue;
 			ranges.push([m.index, m.index + m[0].length]);
 		}
 	}
-	if (ranges.length > 0) {
-		ranges.sort((a, b) => a[0] - b[0]);
-		const merged: Array<[number, number]> = [ranges[0]];
-		for (let i = 1; i < ranges.length; i++) {
-			const last = merged[merged.length - 1];
-			const cur = ranges[i];
-			if (cur[0] <= last[1]) {
-				last[1] = Math.max(last[1], cur[1]);
-			} else {
-				merged.push(cur);
-			}
-		}
-		for (let i = merged.length - 1; i >= 0; i--) {
-			const [s, e] = merged[i];
-			html = `${html.slice(0, s)}<mark>${html.slice(s, e)}</mark>${html.slice(e)}`;
+	ranges.sort((a, b) => a[0] - b[0]);
+	const merged: Array<[number, number]> = [];
+	for (const range of ranges) {
+		const last = merged[merged.length - 1];
+		if (last && range[0] <= last[1]) {
+			last[1] = Math.max(last[1], range[1]);
+		} else {
+			merged.push(range);
 		}
 	}
+
+	let marked = "";
+	let cursor = 0;
+	for (const [from, to] of merged) {
+		marked += escapeHtml(slice.slice(cursor, from));
+		marked += `<mark>${escapeHtml(slice.slice(from, to))}</mark>`;
+		cursor = to;
+	}
+	marked += escapeHtml(slice.slice(cursor));
+	const html = `${prefix}${marked}${suffix}`;
 
 	return DOMPurify.sanitize(html, {
 		ALLOWED_TAGS: ["mark"],

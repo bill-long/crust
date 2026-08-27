@@ -53,6 +53,7 @@ import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
 import type { RoomSettingsTab } from "../features/room/settings/RoomSettingsOverlay";
 import { createCopyLink } from "../features/room/useCopyLink";
 import { useNotifications } from "../features/room/useNotifications";
+import { GlobalSearchPane } from "../features/search/GlobalSearchPane";
 import { type SettingsTab, tabMeta } from "../features/settings/settingsTabs";
 import {
 	buildPartialLeaveMessage,
@@ -787,11 +788,16 @@ const Layout: Component = () => {
 					/>
 				}
 				roomList={
-					<RoomList
-						onOpenSpaceSettings={(sid) =>
-							setRoomSettings({ roomId: sid, tab: "general" })
-						}
-					/>
+					// The search pane wraps the list rather than sitting beside
+					// it: a query replaces the list with its results, and the
+					// list comes back when the search is cleared.
+					<GlobalSearchPane>
+						<RoomList
+							onOpenSpaceSettings={(sid) =>
+								setRoomSettings({ roomId: sid, tab: "general" })
+							}
+						/>
+					</GlobalSearchPane>
 				}
 				callStatus={<CallStatusPanel summaries={summaries} />}
 				userBar={

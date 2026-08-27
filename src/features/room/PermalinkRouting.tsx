@@ -2,9 +2,10 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, onCleanup, onMount } from "solid-js";
 import { basePrefix, stripBasePath } from "../../app/basePath";
-import { useDecodedParams } from "../../app/useDecodedParams";
+import { safeDecode, useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import { parseMatrixUri } from "../../lib/matrixUri";
+import { roomRoutePath } from "../../lib/roomRoute";
 import { requestJoinDialog } from "../../stores/joinDialog";
 import { openProfileCard } from "./profile/profileCard";
 
@@ -61,21 +62,20 @@ const PermalinkRouting: Component = () => {
 	const navigate = useNavigate();
 	const location = useLocation();
 
-	/** Route for a joined room: DMs go to `/dm/`, a child of the open space
-	 *  stays inside that space, everything else lands on `/home/`. */
+	/** Route for a joined room, shared with global search so the two cannot
+	 *  disagree about where a room lives - see `lib/roomRoute`. */
 	const roomPath = (roomId: string): string => {
-		const encoded = encodeURIComponent(roomId);
-		if (summaries[roomId]?.isDirect) return `/dm/${encoded}`;
 		const spaceMatch = /^\/space\/([^/]+)/.exec(
 			stripBasePath(location.pathname, basePrefix),
 		);
-		if (spaceMatch) {
-			const spaceId = decodeURIComponent(spaceMatch[1]);
-			if ((summaries[spaceId]?.children ?? []).includes(roomId)) {
-				return `/space/${encodeURIComponent(spaceId)}/${encoded}`;
-			}
-		}
-		return `/home/${encoded}`;
+		return roomRoutePath(
+			summaries,
+			roomId,
+			// `safeDecode`: this parses the path by hand, and a stray `%` in
+			// the address bar would otherwise throw a URIError out of a
+			// document-level click handler.
+			spaceMatch ? safeDecode(spaceMatch[1]) : undefined,
+		);
 	};
 
 	// Room the user is currently viewing (null on non-room routes), from

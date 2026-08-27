@@ -72,3 +72,31 @@ describe("buildSnippetHtml", () => {
 		expect(html).toContain("<mark>world</mark>");
 	});
 });
+
+describe("marks and HTML entities", () => {
+	it("does not wrap a mark inside an escaped entity", () => {
+		// Matching against the escaped string let a term that is a substring
+		// of an entity land inside it: "amp" wrapped the `amp` of `&amp;`,
+		// and the result rendered as the literal text "Tom &amp; Jerry".
+		const html = buildSnippetHtml("Tom & Jerry", ["amp"]);
+		expect(html).not.toContain("&<mark>amp</mark>;");
+		expect(html).toContain("&amp;");
+	});
+
+	it("does not wrap a mark inside a numeric entity", () => {
+		const html = buildSnippetHtml("Bob's car", ["39"]);
+		expect(html).toContain("&#39;");
+		expect(html).not.toContain("<mark>39</mark>;");
+	});
+
+	it("still marks a term that really is in the text", () => {
+		const html = buildSnippetHtml("Tom & Jerry", ["jerry"]);
+		expect(html).toContain("<mark>Jerry</mark>");
+		expect(html).toContain("&amp;");
+	});
+
+	it("escapes a term that is itself markup", () => {
+		const html = buildSnippetHtml("a <b> tag", ["<b>"]);
+		expect(html).toContain("<mark>&lt;b&gt;</mark>");
+	});
+});
