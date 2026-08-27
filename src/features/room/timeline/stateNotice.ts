@@ -84,11 +84,18 @@ export function isStateNoticeType(type: string): boolean {
 	return STATE_NOTICE_TYPES.has(type);
 }
 
-function actorName(event: MatrixEvent, room: Room): string {
+/**
+ * Display name of whoever sent a notice-bearing event, falling back to the
+ * bare matrix ID. Exported for the legacy-call notice path, which is not a
+ * state event but must resolve names identically.
+ */
+export function noticeActorName(event: MatrixEvent, room: Room): string {
 	const sender = event.getSender() ?? "";
 	const name = room.getMember(sender)?.name?.trim();
 	return name && name.length > 0 ? name : sender;
 }
+
+const actorName = noticeActorName;
 
 /**
  * Subject of an `m.room.member` event — the user the state refers to

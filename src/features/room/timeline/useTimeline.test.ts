@@ -4367,6 +4367,218 @@ describe("useTimeline", () => {
 	});
 });
 
+describe("useTimeline legacy 1:1 call notices (#529)", () => {
+	const ROOM = "!calls:test";
+	/** Raw MockEvent for the room's initial window (createMockRoom wraps it). */
+	const invite = (eventId: string, ts: number, callId = "call-1") =>
+		callEvent(eventId, ts, "m.call.invite", callId, "@alice:test");
+	const callEvent = (
+		eventId: string,
+		ts: number,
+		type: string,
+		callId: string,
+		sender: string,
+	) => ({
+		eventId,
+		roomId: ROOM,
+		sender,
+		type,
+		content: { call_id: callId, lifetime: 60000 },
+		ts,
+	});
+	/** Already-wrapped event, for the live-emission path. */
+	const liveInvite = (eventId: string, ts: number, callId = "call-1") =>
+		createFakeEvent(ROOM, eventId, "@alice:test", "", ts, "m.call.invite", {
+			call_id: callId,
+			lifetime: 60000,
+		});
+
+	it("shows exactly one missed-call row for a call that rang out", async () => {
+		// The whole point of #529: without this the timeline looks as though
+		// nobody ever called.
+		const room = createMockRoom(
+			ROOM,
+			[
+				textMessage(ROOM, "$1", "@alice:test", "before", 1000),
+				invite("$call", 2000),
+			],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+
+			expect(events.length).toBe(2);
+			expect(events[1].stateNotice?.text).toBe(
+				"Missed a call from Alice (unsupported call type)",
+			);
+		});
+	});
+
+	it("adds no rows for the rest of the legacy signalling", async () => {
+		// These describe a call this client can never join; one row per call
+		// is the contract.
+		const room = createMockRoom(
+			ROOM,
+			[
+				invite("$call", 1000),
+				callEvent("$c", 1100, "m.call.candidates", "call-1", "@alice:test"),
+				callEvent("$h", 1200, "m.call.hangup", "call-1", "@alice:test"),
+				callEvent("$r", 1300, "m.call.reject", "call-1", "@test:example.com"),
+			],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$call"]);
+		});
+	});
+
+	it("collapses a retried invite into the one call it is", async () => {
+		const room = createMockRoom(
+			ROOM,
+			[invite("$a", 1000), invite("$b", 1100), invite("$c", 1200)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$a"]);
+		});
+	});
+
+	it("keeps two genuinely separate calls separate", async () => {
+		const room = createMockRoom(
+			ROOM,
+			[invite("$a", 1000, "call-1"), invite("$b", 5000, "call-2")],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$a", "$b"]);
+		});
+	});
+
+	it("does not duplicate a call when the retry arrives live", async () => {
+		// The incremental live path pushes one row without consulting the
+		// window, so a retry reusing the call_id would add a second row that
+		// then vanishes on the next rebuild - the view disagreeing with
+		// itself.
+		const room = createMockRoom(
+			ROOM,
+			[textMessage(ROOM, "$1", "@alice:test", "hi", 1000)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+
+			appendLive(client, room, liveInvite("$call", 2000));
+			await flushPromises();
+			appendLive(client, room, liveInvite("$call2", 2100));
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$1", "$call"]);
+		});
+	});
+
+	it("keeps the call visible when the shown invite is redacted", async () => {
+		// The suppressed sibling has to surface, or redacting the one visible
+		// invite erases the call from the timeline entirely - the same shape
+		// as the #215 call-member case the rebuild guard was added for.
+		const first = invite("$a", 1000);
+		const room = createMockRoom(
+			ROOM,
+			[first, invite("$b", 1100)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+			expect(events.map((e) => e.eventId)).toEqual(["$a"]);
+
+			// The wrapper reads its MockEvent live, so flipping the flag is
+			// what the SDK does when the redaction lands.
+			(first as { redacted?: boolean }).redacted = true;
+			appendLive(
+				client,
+				room,
+				createMatrixEvent({
+					eventId: "$redact",
+					roomId: ROOM,
+					sender: "@alice:test",
+					type: "m.room.redaction",
+					content: {},
+					ts: 1200,
+					redacts: "$a",
+				}),
+			);
+			await flushPromises();
+
+			expect(events.map((e) => e.eventId)).toEqual(["$b"]);
+		});
+	});
+
+	it("shows a live invite that arrives while the room is open", async () => {
+		const room = createMockRoom(
+			ROOM,
+			[textMessage(ROOM, "$1", "@alice:test", "hi", 1000)],
+			[{ userId: "@alice:test", name: "Alice" }],
+		);
+		const client = createMockClient(new Map([[ROOM, room]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => ROOM,
+			);
+			await flushPromises();
+			expect(events.length).toBe(1);
+
+			appendLive(client, room, liveInvite("$call", 2000));
+			await flushPromises();
+
+			expect(events.length).toBe(2);
+			expect(events[1].stateNotice?.icon).toBe("info");
+		});
+	});
+});
+
 describe("useTimeline jumpToEvent anchored loads", () => {
 	/** Install a controllable getEventTimeline on the mock client (the mock
 	 *  has none; TimelineWindow.load(eventId) calls it for events outside

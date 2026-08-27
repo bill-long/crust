@@ -20,6 +20,10 @@ import {
 import type { PollWatcher } from "../poll/pollWatcher";
 import type { ThreadWatcher } from "../threads/threadWatcher";
 import {
+	buildLegacyCallNotice,
+	isLegacyCallNoticeType,
+} from "./legacyCallNotice";
+import {
 	buildMembershipTransition,
 	buildStateNotice,
 	isStateNoticeType,
@@ -394,13 +398,21 @@ export function eventToTimelineEvent(
 	// same display name and avatar). A call-member event reconciled
 	// away as a per-device duplicate / premature leave is treated like
 	// a no-op transition so it never renders a notice (see #215).
+	const noticeType = event.getType();
 	const isSuppressedCall =
-		event.getType() === CALL_MEMBER_EVENT_TYPE &&
+		(noticeType === CALL_MEMBER_EVENT_TYPE ||
+			isLegacyCallNoticeType(noticeType)) &&
 		(suppressedCallIds?.has(event.getId() ?? "") ?? false);
-	const stateNotice =
-		!isSuppressedCall && isStateNoticeType(event.getType())
+	// A legacy 1:1 call invite renders through the same compact notice row,
+	// but is not a state event, so it builds its notice on its own path
+	// (#529) rather than widening buildStateNotice's state semantics.
+	const stateNotice = isSuppressedCall
+		? null
+		: isStateNoticeType(noticeType)
 			? buildStateNotice(event, room)
-			: null;
+			: isLegacyCallNoticeType(noticeType)
+				? buildLegacyCallNotice(event, room)
+				: null;
 	const membershipTransition =
 		stateNotice !== null &&
 		(event.getType() === "m.room.member" ||
