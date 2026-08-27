@@ -15,7 +15,7 @@ import { SearchResultRow } from "../../components/SearchResultRow";
 import { avatarInitial } from "../../lib/avatar";
 import { createFailedImageUrls } from "../../lib/imageFallback";
 import { roomRoutePath } from "../../lib/roomRoute";
-import { coverageNote, type FlatRow, flattenGroups } from "./panelRows";
+import { type FlatRow, flattenGroups } from "./panelRows";
 import type { GlobalSearchHit, UseGlobalSearch } from "./useGlobalSearch";
 
 /**
@@ -94,16 +94,6 @@ const GlobalSearchPanel: Component<{
 		if (status === "searching") return "Searching…";
 		return null;
 	});
-
-	const _note = createMemo(() =>
-		coverageNote(
-			props.search.mode(),
-			props.search.locallyCovered(),
-			props.search.encryptedRoomCount(),
-			props.search.scanTruncated(),
-			props.search.serverUnsupported(),
-		),
-	);
 
 	// Roving tabindex over the hit rows: the focused row carries tabIndex 0
 	// and every other -1, which is what `SearchResultRow` already implements

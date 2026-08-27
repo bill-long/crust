@@ -58,15 +58,19 @@ function hit(id: string, roomId: string, body: string) {
 
 /** A stub hook: the panel is what is under test, not the search itself. */
 function stubSearch(over: Partial<UseGlobalSearch> = {}): UseGlobalSearch {
+	// `total` on both, matching the `RoomHitGroup` contract: it is what the
+	// room heading renders, so a stub that omits it hides exactly the bug
+	// the heading count exists to avoid.
 	const groups = [
 		{
 			roomId: "!a:x",
 			hits: [hit("$1", "!a:x", "one"), hit("$2", "!a:x", "two")],
+			total: 2,
 		},
 		{
 			roomId: "!b:x",
 			hits: [hit("$3", "!b:x", "three")],
-			total: [hit("$3", "!b:x", "three")].length,
+			total: 1,
 		},
 	];
 	return {
@@ -208,7 +212,7 @@ describe("GlobalSearchPanel", () => {
 			{
 				roomId: "!a:x",
 				hits: [hit("$1", "!a:x", "one")],
-				total: [hit("$1", "!a:x", "one")].length,
+				total: 1,
 			},
 		]);
 		const outside = document.createElement("input");
@@ -226,7 +230,7 @@ describe("GlobalSearchPanel", () => {
 								{
 									roomId: "!a:x",
 									hits: [hit("$2", "!a:x", "two")],
-									total: [hit("$2", "!a:x", "two")].length,
+									total: 1,
 								},
 							]),
 					})}
@@ -243,7 +247,7 @@ describe("GlobalSearchPanel", () => {
 			{
 				roomId: "!a:x",
 				hits: [hit("$3", "!a:x", "three")],
-				total: [hit("$3", "!a:x", "three")].length,
+				total: 1,
 			},
 		]);
 
