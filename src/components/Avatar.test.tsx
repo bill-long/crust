@@ -54,6 +54,37 @@ describe("Avatar", () => {
 		expect(getByText("Z")).toBeTruthy();
 	});
 
+	it("wraps the avatar once when a presence dot is wanted", () => {
+		// `inner()` is written twice - as the <Show> fallback and inside the
+		// wrapped branch - which reads like the avatar gets built both ways on
+		// every render. It does not: Solid compiles a call expression in a
+		// component prop to a getter, so <Show> reads `fallback` only when the
+		// condition is false. What this pins is the outcome that matters -
+		// one avatar, inside the wrapper, with the dot as its sibling.
+		const { container, getByLabelText } = render(() => (
+			<Avatar
+				url="https://example.com/a.png"
+				initial="A"
+				alt="Alice"
+				presence="online"
+			/>
+		));
+		expect(container.querySelectorAll("img")).toHaveLength(1);
+		const dot = getByLabelText("Online");
+		expect(img(container)?.parentElement).toBe(dot.parentElement);
+	});
+
+	it("adds no wrapper element when presence is omitted", () => {
+		// Every call site that predates #445 renders a bare avatar, and
+		// wrapping all of them would change flex/grid behaviour across the app
+		// for no reason - so the wrapper has to stay opt-in.
+		const { container, queryByLabelText } = render(() => (
+			<Avatar url="https://example.com/a.png" initial="A" alt="Alice" />
+		));
+		expect(queryByLabelText("Online")).toBeNull();
+		expect(img(container)?.parentElement).toBe(container);
+	});
+
 	it("recovers from a prior error when the url changes", () => {
 		const [url, setUrl] = createSignal<string | null>(
 			"https://example.com/broken.png",

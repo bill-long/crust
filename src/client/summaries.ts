@@ -62,6 +62,12 @@ export interface RoomSummary {
 	membership: string;
 	isEncrypted: boolean;
 	isDirect: boolean;
+	/**
+	 * The other person in a direct message, from `m.direct`. Null for
+	 * non-DMs, and for a DM whose peer we cannot name. Drives the presence
+	 * dot on a DM row (#445).
+	 */
+	dmUserId: string | null;
 	isSpace: boolean;
 	/** Whether this room is a voice/video room (MSC3401 or Element video) vs a text room. */
 	kind: "text" | "voice";
@@ -280,7 +286,7 @@ function getSpaceChildren(room: Room): string[] {
 function buildSummary(
 	room: Room,
 	baseUrl: string,
-	dmRoomIds: Set<string>,
+	dmPeers: Map<string, string>,
 	mutedRoomIds: Set<string>,
 	now: number,
 ): RoomSummary {
@@ -316,7 +322,8 @@ function buildSummary(
 		isMuted: mutedRoomIds.has(room.roomId),
 		membership: room.getMyMembership(),
 		isEncrypted: room.hasEncryptionStateEvent(),
-		isDirect: dmRoomIds.has(room.roomId),
+		isDirect: dmPeers.has(room.roomId),
+		dmUserId: dmPeers.get(room.roomId) ?? null,
 		isSpace,
 		kind,
 		callActive: isCallActive(room, now),
@@ -346,22 +353,31 @@ function getMutedRoomIds(client: MatrixClient): Set<string> {
 	return muted;
 }
 
-function getDmRoomIds(client: MatrixClient): Set<string> {
+/**
+ * Direct-message rooms mapped to the person on the other side, from
+ * `m.direct` (which is already keyed by user, so the peer is free).
+ *
+ * Membership in this map is what makes a room a DM, and the value is what
+ * lets a DM row show that person's presence (#445). A room listed under more
+ * than one user - possible, though not something clients produce - keeps the
+ * last one seen; there is no better answer, and the flag is unaffected.
+ */
+function getDmPeers(client: MatrixClient): Map<string, string> {
 	const dmEvent = client.getAccountData(EventType.Direct);
-	if (!dmEvent) return new Set();
+	if (!dmEvent) return new Map();
 	const content = dmEvent.getContent();
-	const ids = new Set<string>();
+	const peers = new Map<string, string>();
 	for (const userId of Object.keys(content)) {
 		const rooms = content[userId];
 		if (Array.isArray(rooms)) {
 			for (const roomId of rooms) {
 				if (typeof roomId === "string") {
-					ids.add(roomId);
+					peers.set(roomId, userId);
 				}
 			}
 		}
 	}
-	return ids;
+	return peers;
 }
 
 function isDisplayableMessage(event: MatrixEvent): boolean {
@@ -458,7 +474,7 @@ export function createSummariesStore(client: MatrixClient): {
 	const baseUrl = client.getHomeserverUrl();
 	const serverTime: ServerTimeTracker = createServerTimeTracker();
 
-	let dmRoomIds = new Set<string>();
+	let dmPeers = new Map<string, string>();
 	let mutedRoomIds = new Set<string>();
 
 	// Per-room expiry timers. When `callActive` is true for a room, we
@@ -542,6 +558,11 @@ export function createSummariesStore(client: MatrixClient): {
 			// we never demote an authoritative isDirect:true to false.
 			if (info.isDirect === true && existing.isDirect !== true) {
 				setSummaries(roomId, "isDirect", true);
+				// dmUserId travels with it. The two are one fact - `m.direct`
+				// keys rooms by user - and a row flipped to DM without its peer
+				// renders the person glyph with no presence until the next full
+				// rebuild, even though the peer is already in the store.
+				setSummaries(roomId, "dmUserId", dmPeers.get(roomId) ?? null);
 			}
 			return;
 		}
@@ -562,6 +583,9 @@ export function createSummariesStore(client: MatrixClient): {
 					membership: "join",
 					isEncrypted: false,
 					isDirect: info.isDirect === true,
+					// From `m.direct` when it already knows this room; the
+					// authoritative rebuild fills it in otherwise.
+					dmUserId: dmPeers.get(roomId) ?? null,
 					isSpace: info.isSpace === true,
 					kind: "text",
 					callActive: false,
@@ -614,6 +638,7 @@ export function createSummariesStore(client: MatrixClient): {
 					membership: "knock",
 					isEncrypted: false,
 					isDirect: false,
+					dmUserId: null,
 					isSpace: info.isSpace === true,
 					kind: "text",
 					callActive: false,
@@ -721,7 +746,7 @@ export function createSummariesStore(client: MatrixClient): {
 				s[room.roomId] = buildSummary(
 					room,
 					baseUrl,
-					dmRoomIds,
+					dmPeers,
 					mutedRoomIds,
 					serverTime.now(),
 				);
@@ -922,11 +947,12 @@ export function createSummariesStore(client: MatrixClient): {
 			return;
 		}
 		if (type !== EventType.Direct) return;
-		dmRoomIds = getDmRoomIds(client);
+		dmPeers = getDmPeers(client);
 		setSummaries(
 			produce((s) => {
 				for (const roomId of Object.keys(s)) {
-					s[roomId].isDirect = dmRoomIds.has(roomId);
+					s[roomId].isDirect = dmPeers.has(roomId);
+					s[roomId].dmUserId = dmPeers.get(roomId) ?? null;
 				}
 			}),
 		);
@@ -988,7 +1014,7 @@ export function createSummariesStore(client: MatrixClient): {
 	}
 
 	function init(): void {
-		dmRoomIds = getDmRoomIds(client);
+		dmPeers = getDmPeers(client);
 		mutedRoomIds = getMutedRoomIds(client);
 
 		// Seed the server-time tracker from existing room state before

@@ -45,6 +45,7 @@ function makeSummary(
 		membership,
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace,
 		kind: "text",
 		callActive: false,

@@ -21,6 +21,7 @@ function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace: false,
 		kind: "text",
 		callActive: false,

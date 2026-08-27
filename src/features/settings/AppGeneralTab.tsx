@@ -321,6 +321,12 @@ const AppGeneralTab: Component = () => {
 					checked={userSettings().inlineMediaPlayers}
 					onChange={(v) => updateSetting("inlineMediaPlayers", v)}
 				/>
+				<ToggleRow
+					label="Share my presence"
+					description="Let others see when you are online. Turning this off publishes you as offline; you still see everyone else."
+					checked={userSettings().sharePresence}
+					onChange={(v) => updateSetting("sharePresence", v)}
+				/>
 			</section>
 		</div>
 	);

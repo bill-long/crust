@@ -5,6 +5,10 @@ import {
 	type RoomMember,
 } from "matrix-js-sdk";
 import { avatarHttpUrl } from "../../../lib/avatar";
+import {
+	isControlCharCode,
+	stripControlChars,
+} from "../../../lib/controlChars";
 import { pollPreviewText } from "../../../lib/pollCopy";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import { isVoiceMessageContent } from "../../../lib/voiceMessage";
@@ -30,36 +34,10 @@ export function senderProfileFields(
 	};
 }
 
-// ASCII control character (C0 range 0x00–0x1F, plus DEL 0x7F) — the single
-// boundary both `hasControlChar` (reject) and `stripControlChars` (sanitize)
-// key off, so the policy can't drift between them.
-function isControlCharCode(c: number): boolean {
-	return c < 0x20 || c === 0x7f;
-}
-
-// Reject any ASCII control character. Used to guard user-controlled strings
-// that flow into UI labels (filenames, the lightbox header, download
-// attributes, etc.) so a CR/LF/NUL/etc. can't corrupt rendering or downstream
-// consumers.
-export function hasControlChar(s: string): boolean {
-	for (let i = 0; i < s.length; i++) {
-		if (isControlCharCode(s.charCodeAt(i))) return true;
-	}
-	return false;
-}
-
-// Strip ASCII control chars from a single-line string destined for a UI label,
-// leaving the rest intact. Unlike `hasControlChar` (which rejects wholesale),
-// this sanitizes a snippet so a stray control char can't corrupt rendering
-// while still showing the surrounding text. Newlines are control chars and so
-// are removed — callers that want multi-line text use `sanitizeMultiline`.
-function stripControlChars(s: string): string {
-	let out = "";
-	for (let i = 0; i < s.length; i++) {
-		if (!isControlCharCode(s.charCodeAt(i))) out += s[i];
-	}
-	return out;
-}
+// The control-character policy lives in lib/controlChars: the timeline, the
+// poll watcher, presence status messages and the login return-to path all key
+// off the same predicate, so it cannot drift between them.
+export { hasControlChar } from "../../../lib/controlChars";
 
 // Sanitize multi-line user text (an image caption) for display: normalize
 // CRLF/CR to LF and keep newlines (the caption renders with `whitespace-pre-wrap`)

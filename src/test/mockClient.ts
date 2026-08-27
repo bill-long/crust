@@ -333,6 +333,8 @@ export function createMockRoom(
 			return m ?? null;
 		},
 		getJoinedMembers: () => memberState.filter((m) => m.membership === "join"),
+		getJoinedMemberCount: () =>
+			memberState.filter((m) => m.membership === "join").length,
 		getMembers: () => [...memberState],
 		canInvite: (_userId: string) => canInviteFlag,
 		isSpaceRoom: () => isSpaceFlag,

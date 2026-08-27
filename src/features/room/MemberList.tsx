@@ -1,6 +1,7 @@
 import { type Component, createMemo, Match, Show, Switch } from "solid-js";
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
+import { presenceOf } from "../../client/presence";
 import { Avatar } from "../../components/Avatar";
 import { avatarInitial } from "../../lib/avatar";
 import {
@@ -8,7 +9,12 @@ import {
 	type FailedImageUrls,
 } from "../../lib/imageFallback";
 import { openProfileCard, profileAnchorKey } from "./profile/profileCard";
-import { type MemberEntry, useMemberList } from "./useMemberList";
+import {
+	type MemberEntry,
+	memberRowLabel,
+	partitionByPresence,
+	useMemberList,
+} from "./useMemberList";
 
 type FlatItem =
 	| { type: "header"; role: string; count: number }
@@ -26,10 +32,28 @@ const MemberRowContent: Component<{
 				initial={avatarInitial(props.member.displayName)}
 				loading="lazy"
 				broken={props.broken}
+				presence={presenceOf(props.member.userId).status}
+				// The panel is surface-1 at half alpha over the surface-0
+				// shell, so an opaque ring reads as a lighter halo against
+				// it. The avatar is circular and the dot sits at its
+				// bottom-right corner, so most of the ring is over the row
+				// rather than the picture - matching the row is what counts.
+				presenceRingClass="ring-surface-1/50"
 			/>
 			<div class="min-w-0 flex-1 text-left">
 				<div class="truncate text-sm">{props.member.displayName}</div>
-				<Show when={props.member.isTyping}>
+				{/* Typing wins the second line: it is the more immediate
+				    signal, and both at once would need a third row. */}
+				<Show
+					when={props.member.isTyping}
+					fallback={
+						<Show when={presenceOf(props.member.userId).statusMsg}>
+							{(msg) => (
+								<div class="truncate text-xs text-text-disabled">{msg()}</div>
+							)}
+						</Show>
+					}
+				>
 					<div class="text-xs text-text-disabled">typing…</div>
 				</Show>
 			</div>
@@ -48,7 +72,11 @@ const MemberRow: Component<{
 		<button
 			type="button"
 			class="flex w-full items-center gap-2 px-3 py-1.5 text-text-secondary hover:bg-surface-2/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
-			aria-label={`View profile of ${props.member.displayName}`}
+			// An aria-label replaces the button's contents for the accessible
+			// name, so the dot and the status line inside it would otherwise
+			// never be announced - and the whole point of the section split is
+			// inaudible. Fold them in.
+			aria-label={memberRowLabel(props.member, presenceOf(props.member.userId))}
 			// The open card re-resolves its anchor to the re-minted row by
 			// this key (typing/profile events re-mint entries constantly).
 			data-profile-anchor={profileAnchorKey(props.roomId, props.member.userId)}
@@ -89,7 +117,24 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 		const items: FlatItem[] = [];
 		const seenHeaders = new Set<string>();
 		const seenMembers = new Set<string>();
-		for (const group of groups()) {
+		// Presence is folded in here rather than in useMemberList's refresh,
+		// which only runs on member and typing events - a presence change
+		// would leave the sections stale. Reading it inside this memo is what
+		// makes the split track.
+		//
+		// Cost, knowingly: this subscribes to every member's presence key, so
+		// one person coming online re-runs the partition over the whole list.
+		// The caches below keep row identity stable so virtua does not remount
+		// anything, leaving an O(n) array rebuild. Membership and typing are
+		// rAF-coalesced upstream in useMemberList; presence writes are not, so
+		// a very large, very chatty room is where this would first show. Left
+		// uncoalesced until it does, rather than adding timing machinery on
+		// spec.
+		const sections = partitionByPresence(
+			groups(),
+			(userId) => presenceOf(userId).status,
+		);
+		for (const group of sections) {
 			seenHeaders.add(group.role);
 			let header = headerCache.get(group.role);
 			if (!header || header.count !== group.members.length) {

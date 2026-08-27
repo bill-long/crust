@@ -18,6 +18,7 @@ function makeSummary(overrides: Partial<RoomSummary>): RoomSummary {
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace: false,
 		kind: "text",
 		callActive: false,
@@ -32,6 +33,7 @@ describe("pickReturnToCallRoute", () => {
 			"!dm:example.org": makeSummary({
 				roomId: "!dm:example.org",
 				isDirect: true,
+				dmUserId: null,
 			}),
 			"!space:example.org": makeSummary({
 				roomId: "!space:example.org",

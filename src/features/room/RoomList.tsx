@@ -13,6 +13,7 @@ import {
 import { useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import { canMarkRoomUnread, markRoomUnread } from "../../client/markedUnread";
+import { type PresenceStatus, presenceOf } from "../../client/presence";
 import {
 	FAVOURITE_TAG,
 	LOW_PRIORITY_TAG,
@@ -135,11 +136,37 @@ const ChannelTypeIcon: Component<{ kind: "text" | "voice" }> = (props) => (
 	</Show>
 );
 
+/**
+ * Presence of the person on the other side of a DM, or `unknown` for a room
+ * that is not a DM or whose peer `m.direct` does not name.
+ */
+function dmPresence(room: { dmUserId: string | null }): PresenceStatus {
+	return room.dmUserId ? presenceOf(room.dmUserId).status : "unknown";
+}
+
+/** Presence colours for the DM glyph. The row's leading slot is 14px, too
+    small to carry a dot overlay legibly, so the person icon itself takes the
+    colour and the label carries the word. */
+const DM_PRESENCE_CLASS: Record<PresenceStatus, string> = {
+	online: "text-success-text",
+	idle: "text-warning-text",
+	offline: "text-text-muted",
+	unknown: "text-text-muted",
+};
+
+const DM_PRESENCE_LABEL: Record<PresenceStatus, string> = {
+	online: "Direct message, online",
+	idle: "Direct message, idle",
+	offline: "Direct message, offline",
+	// No claim: the server has never mentioned this person.
+	unknown: "Direct message",
+};
+
 /** Person icon used as the leading slot for direct-message rooms so DMs and
     channel rooms share a consistent name x-position. */
-const DmTypeIcon: Component = () => (
+const DmTypeIcon: Component<{ presence?: PresenceStatus }> = (props) => (
 	<svg
-		aria-label="Direct message"
+		aria-label={DM_PRESENCE_LABEL[props.presence ?? "unknown"]}
 		role="img"
 		width="14"
 		height="14"
@@ -149,7 +176,7 @@ const DmTypeIcon: Component = () => (
 		stroke-width="1.5"
 		stroke-linecap="round"
 		stroke-linejoin="round"
-		class="shrink-0 text-text-muted"
+		class={`shrink-0 ${DM_PRESENCE_CLASS[props.presence ?? "unknown"]}`}
 	>
 		<circle cx="8" cy="5.5" r="2.5" />
 		<path d="M3 13.5c0-2.5 2.5-4 5-4s5 1.5 5 4" />
@@ -225,7 +252,10 @@ const RoomEntry: Component<{
 		>
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-2">
-					<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
+					<Show
+						when={!props.room.isDirect}
+						fallback={<DmTypeIcon presence={dmPresence(props.room)} />}
+					>
 						<ChannelTypeIcon kind={props.room.kind} />
 					</Show>
 					<span
@@ -281,7 +311,10 @@ const InviteEntry: Component<{
 			aria-current={props.isSelected ? "true" : undefined}
 		>
 			<div class="flex min-w-0 flex-1 items-center gap-2">
-				<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
+				<Show
+					when={!props.room.isDirect}
+					fallback={<DmTypeIcon presence={dmPresence(props.room)} />}
+				>
 					<ChannelTypeIcon kind={props.room.kind} />
 				</Show>
 				<span class="min-w-0 flex-1 truncate text-sm font-medium">
@@ -320,7 +353,10 @@ const KnockEntry: Component<{
 			aria-current={props.isSelected ? "true" : undefined}
 		>
 			<div class="flex min-w-0 flex-1 items-center gap-2">
-				<Show when={!props.room.isDirect} fallback={<DmTypeIcon />}>
+				<Show
+					when={!props.room.isDirect}
+					fallback={<DmTypeIcon presence={dmPresence(props.room)} />}
+				>
 					<ChannelTypeIcon kind={props.room.kind} />
 				</Show>
 				<span class="min-w-0 flex-1 truncate text-sm font-medium">
