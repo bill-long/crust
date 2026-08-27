@@ -63,12 +63,15 @@ export interface UserSettings {
 	/**
 	 * Whether to publish our own presence to the homeserver (#445).
 	 *
-	 * Defaults on, matching Element. Turning it off both stops publishing and
-	 * tells the sync loop not to mark us online, so the account genuinely
-	 * looks offline to everyone rather than merely hiding other people's dots
-	 * from us. Reading other people's presence is unaffected - the server
-	 * sends it regardless, and suppressing the display without suppressing
-	 * the publish would be the privacy trade backwards.
+	 * Defaults on, matching Element. Off does not go quiet: it publishes
+	 * `offline` and pins the sync loop's `set_presence` to the same value,
+	 * because a server that stops hearing from us keeps reporting whatever it
+	 * was told last. So the account genuinely looks offline to everyone
+	 * rather than merely hiding other people's dots from us, which going
+	 * quiet would not achieve. Reading other people's presence is
+	 * unaffected - the server sends it regardless, and suppressing the
+	 * display without suppressing the publish would be the privacy trade
+	 * backwards.
 	 */
 	sharePresence: boolean;
 	/**
