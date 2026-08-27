@@ -212,6 +212,22 @@ describe("GlobalSearchPanel", () => {
 		expect(onNavigated).toHaveBeenCalledWith(false);
 	});
 
+	it("activates on Space, which its own hint promises", () => {
+		// The sr-only hint names Enter and Space; a handler that took only
+		// Enter would make the instruction wrong for the one group with
+		// nothing else to go on.
+		const onNavigated = vi.fn();
+		render(() => (
+			<Wrapper>
+				<GlobalSearchPanel search={stubSearch()} onNavigated={onNavigated} />
+			</Wrapper>
+		));
+
+		fireEvent.keyDown(screen.getAllByRole("option")[0], { key: " " });
+
+		expect(onNavigated).toHaveBeenCalledWith(true);
+	});
+
 	it("reports a keyboard activation as such", () => {
 		const onNavigated = vi.fn();
 		render(() => (
