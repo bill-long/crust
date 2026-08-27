@@ -256,12 +256,29 @@ const RoomPane: Component<{
 	const [searchParams, setSearchParams] = useSearchParams();
 	createEffect(() => {
 		const requested = searchParams.thread;
-		if (typeof requested === "string" && requested) {
+		const requestedEvent = searchParams.event;
+		const hasThread = typeof requested === "string" && requested;
+		const hasEvent = typeof requestedEvent === "string" && requestedEvent;
+		if (hasThread && hasEvent) {
+			// Both together mean "this event, inside that thread" - the shape
+			// global search uses for a thread reply. The event has to go into
+			// `threadPanel.open`, not to the main timeline: a reply does not
+			// live there, so a jump request for it would never resolve. Same
+			// pairing the in-room panel does through `requestJump`.
+			threadPanel.open(requested, requestedEvent);
+			setSearchParams(
+				{ thread: undefined, event: undefined },
+				{
+					replace: true,
+				},
+			);
+			return;
+		}
+		if (hasThread) {
 			threadPanel.open(requested);
 			setSearchParams({ thread: undefined }, { replace: true });
 		}
-		const requestedEvent = searchParams.event;
-		if (typeof requestedEvent === "string" && requestedEvent) {
+		if (hasEvent) {
 			setJumpRequest(requestedEvent);
 			setSearchParams({ event: undefined }, { replace: true });
 		}

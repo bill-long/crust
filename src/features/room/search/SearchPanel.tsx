@@ -12,8 +12,8 @@ import {
 	Show,
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
+import { SearchResultRow } from "../../../components/SearchResultRow";
 import { composerTextareaSelector } from "../composer/composerTextarea";
-import { SearchResultRow } from "./SearchResultRow";
 import { MAX_QUERY_LEN, useRoomSearch } from "./useRoomSearch";
 
 const VIRTUALIZE_THRESHOLD = 50;
