@@ -28,6 +28,7 @@ function summary(
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace: false,
 		kind: "text",
 		callActive: false,

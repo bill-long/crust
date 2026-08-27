@@ -10,6 +10,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { presenceOf } from "../../../client/presence";
 import { Avatar } from "../../../components/Avatar";
 import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
@@ -335,11 +336,24 @@ const ProfileCardPopover: Component<{
 							url={avatarUrl()}
 							initial={avatarInitial(displayName())}
 							size="xl"
+							presence={presenceOf(req.userId).status}
+							// The card sits on surface-2, not the list surface.
+							presenceRingClass="ring-surface-2"
 						/>
 						<div class="min-w-0">
 							<Popover.Title class="truncate text-base font-semibold text-text-emphasis">
 								{displayName()}
 							</Popover.Title>
+							{/* The card is opened from a row that was already
+							    showing this; dropping it here would read as the
+							    status having been withdrawn. */}
+							<Show when={presenceOf(req.userId).statusMsg}>
+								{(msg) => (
+									<div class="truncate text-xs text-text-secondary">
+										{msg()}
+									</div>
+								)}
+							</Show>
 							<div class="truncate font-mono text-xs text-text-muted">
 								{req.userId}
 							</div>

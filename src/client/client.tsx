@@ -25,6 +25,7 @@ import {
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
 import { loadSession, type Session } from "../stores/session";
+import { userSettings } from "../stores/settings";
 import { updateAppBadge } from "./appBadge";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
@@ -37,6 +38,12 @@ import {
 	recoveryIdentity,
 	runCryptoInit,
 } from "./cryptoRecovery";
+import { attachPresence, recordSelfPresence } from "./presence";
+import {
+	applySyncPresence,
+	attachPresencePublisher,
+	setPresenceSharing,
+} from "./presencePublish";
 import { RecoveryKeyCancelledError } from "./recoveryKeyCancelled";
 import type { SidebarRoomTag } from "./roomTags";
 import {
@@ -363,6 +370,24 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		forgetRoomLocally,
 	} = createSummariesStore(matrixClient);
 
+	// Presence lives in a module-level store rather than on this context, the
+	// same way activeCall does: every consumer (member list, DM list, profile
+	// card) wants it, and threading it through the context would widen a type
+	// that nineteen test files construct by hand.
+	attachPresence(matrixClient);
+	attachPresencePublisher(matrixClient);
+	// Publish on start and whenever the setting changes. An effect rather than
+	// a one-shot so toggling it mid-session takes effect immediately, which is
+	// the whole point of a privacy switch.
+	createEffect(() => {
+		const sharing = userSettings().sharePresence;
+		setPresenceSharing(sharing);
+		// Our own presence never arrives as an event (see recordSelfPresence),
+		// so the store learns it from the same place the server does.
+		const myUserId = matrixClient.getUserId();
+		if (myUserId) recordSelfPresence(myUserId, sharing);
+	});
+
 	// Keep the OS/taskbar app badge in sync with live unread state while this
 	// window is open, so it clears the moment a message is read rather than
 	// staying stale until the next push (see #269). The service worker handles
@@ -465,7 +490,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		if (result === "reloading" || result === "aborted") return;
 		setCryptoState(result === "ready" ? "ready" : "error");
 		if (disposed || syncState() === "logged-out") return;
-		matrixClient.startClient({
+		await matrixClient.startClient({
 			initialSyncLimit: 20,
 			// Partitions m.thread relations into per-thread timelines instead
 			// of the room's timeline sets (Room.eventShouldLiveIn). The
@@ -473,6 +498,21 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			// and additionally skip thread replies by shape (lib/threadEvents).
 			threadSupport: true,
 		});
+		// startClient is async and awaits /versions before it builds the sync
+		// API, so the value published during provider setup - and anything
+		// asserted synchronously here - reaches `syncApi?.` while it is still
+		// undefined. Await it, then re-assert (#445).
+		//
+		// This does not save the very first /sync: startClient kicks that off
+		// before it resolves, so one request can still carry the server's
+		// default of `online`. The explicit setPresence PUT already told the
+		// server the truth, and the next long poll carries the right
+		// set_presence, so the window is one sync cycle rather than the whole
+		// session. `disablePresence` would close it, but it wins over
+		// setSyncPresence inside SyncApi - so starting with sharing off would
+		// then make turning it back on mid-session silently do nothing, which
+		// is a worse failure than a brief blip.
+		applySyncPresence();
 	});
 
 	const cryptoStatus = useCryptoStatus(

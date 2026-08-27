@@ -37,6 +37,7 @@ function room(partial: Partial<RoomSummary> & { roomId: string }): RoomSummary {
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace: false,
 		kind: "text",
 		callActive: false,
@@ -65,6 +66,7 @@ describe("getHomeUnreadRollup", () => {
 			room({
 				roomId: "!dm1",
 				isDirect: true,
+				dmUserId: null,
 				unreadCount: 2,
 				highlightCount: 1,
 			}),
@@ -97,6 +99,7 @@ describe("getHomeUnreadRollup", () => {
 			room({
 				roomId: "!invited",
 				isDirect: true,
+				dmUserId: null,
 				membership: "invite",
 				unreadCount: 9,
 			}),
@@ -749,6 +752,7 @@ describe("room tag sections (#449)", () => {
 			room({
 				roomId: "!dm",
 				isDirect: true,
+				dmUserId: null,
 				isFavourite: true,
 				lastMessage: { body: "x", sender: "@a", timestamp: 5 },
 			}),

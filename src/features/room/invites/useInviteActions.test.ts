@@ -31,6 +31,7 @@ function makeSummary(partial: Partial<RoomSummary> = {}): RoomSummary {
 		membership: "invite",
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace: false,
 		kind: "text",
 		callActive: false,

@@ -58,6 +58,11 @@ const mockSdkClient = {
 	startClient: vi.fn(),
 	stopClient: vi.fn(),
 	getHomeserverUrl: () => "https://matrix.example.com",
+	// Presence (#445): the provider publishes the share-presence setting and
+	// records our own presence, which no event ever delivers.
+	getUserId: () => "@alice:example.com",
+	setPresence: vi.fn(async () => {}),
+	setSyncPresence: vi.fn(),
 };
 
 const PASSWORD_SESSION: Session = {
@@ -147,5 +152,19 @@ describe("ClientProvider session wiring (#460)", () => {
 				threadSupport: true,
 			}),
 		);
+	});
+});
+
+describe("presence wiring (#445)", () => {
+	it("publishes presence on start, per the share-presence setting", () => {
+		setup(PASSWORD_SESSION);
+
+		// Defaults on, matching Element - and both halves are needed: the
+		// state write, and the sync parameter that stops the next poll
+		// asserting the opposite.
+		expect(mockSdkClient.setPresence).toHaveBeenCalledWith({
+			presence: "online",
+		});
+		expect(mockSdkClient.setSyncPresence).toHaveBeenCalledWith("online");
 	});
 });

@@ -123,7 +123,22 @@ export function buildLegacyCallNotice(
 	// something untrue - they were never rung. Report the call without
 	// claiming it was theirs to answer.
 	const target = invitee(event);
-	if (target !== null && target !== room.myUserId) {
+	// An invite that names someone else is plainly not ours. One that names
+	// nobody is only ours if there is nobody else it could have been for -
+	// MSC2746 makes `invitee` optional, so in a room of three the unnamed
+	// case would otherwise tell the bystander they missed a call too.
+	//
+	// The count is the room's membership *now*, not at invite time, which the
+	// timeline does not carry. So an unaddressed invite from when the room was
+	// larger reads as missed once it shrinks to two, and vice versa. Both
+	// mis-readings need an unaddressed invite plus a membership change across
+	// it; naming the caller without claiming they rang you is the safer of the
+	// two wordings to land on by accident.
+	const notForUs =
+		target !== null
+			? target !== room.myUserId
+			: room.getJoinedMemberCount() > 2;
+	if (notForUs) {
 		return {
 			text: `${actor} started a call (unsupported call type)`,
 			icon: "info",

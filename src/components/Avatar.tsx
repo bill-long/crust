@@ -3,11 +3,21 @@ import {
 	createImageFallback,
 	type FailedImageUrls,
 } from "../lib/imageFallback";
+import type { PresenceStatus } from "../lib/presence";
+import { PresenceDot } from "./PresenceDot";
 
 interface AvatarProps {
 	url: string | null;
 	initial: string;
 	alt?: string;
+	/**
+	 * Presence indicator to overlay (#445). Omit where presence has no
+	 * meaning - a room avatar, a space tile - rather than passing "unknown",
+	 * so the extra wrapper element is not paid for at all.
+	 */
+	presence?: PresenceStatus;
+	/** Ring colour for the presence cut-out; see PresenceDot. */
+	presenceRingClass?: string;
 	/**
 	 * Box size: "md" is the 32px list/header avatar (default), "xl" the
 	 * 64px profile-card portrait. Both share the fail-closed behavior.
@@ -39,7 +49,15 @@ const Avatar: Component<AvatarProps> = (props) => {
 	const fallbackClass = () =>
 		`flex ${sizeClass()} shrink-0 items-center justify-center rounded-full bg-surface-3 font-semibold text-text-secondary`;
 
-	return (
+	// A function, not a value: as a bare identifier the compiler emits the
+	// same nodes into both <Show> branches, so a call site that ever toggled
+	// `presence` between undefined and set would move the avatar out from
+	// under the branch still holding it.
+	//
+	// Calling it in both places below is not double work. A call expression in
+	// a component prop compiles to a getter, so <Show> evaluates `fallback`
+	// only on the branch that uses it. Avatar.test.tsx pins the result.
+	const inner = () => (
 		<Show
 			when={!avatar.failed() && props.url}
 			fallback={
@@ -71,6 +89,22 @@ const Avatar: Component<AvatarProps> = (props) => {
 					onLoad={avatar.onLoad}
 				/>
 			)}
+		</Show>
+	);
+
+	// Only wrap when there is a dot to position. Every existing call site
+	// renders a bare avatar element today, and introducing a wrapper for all
+	// of them would change flex/grid behaviour across the app for no reason.
+	return (
+		<Show when={props.presence !== undefined} fallback={inner()}>
+			<span class={`relative inline-flex shrink-0 ${sizeClass()}`}>
+				{inner()}
+				<PresenceDot
+					status={props.presence ?? "unknown"}
+					size={props.size ?? "md"}
+					ringClass={props.presenceRingClass}
+				/>
+			</span>
 		</Show>
 	);
 };

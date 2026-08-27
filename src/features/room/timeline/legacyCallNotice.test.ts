@@ -31,10 +31,17 @@ function mkEvent(options: EventOptions = {}): MatrixEvent {
 	} as unknown as MatrixEvent;
 }
 
-const room = {
-	myUserId: ME,
-	getMember: (userId: string) => (userId === ALICE ? { name: "Alice" } : null),
-} as unknown as Room;
+/** A 1:1 room unless a test says otherwise - the DM case this feature is for. */
+function mkRoom(joinedMembers = 2): Room {
+	return {
+		myUserId: ME,
+		getMember: (userId: string) =>
+			userId === ALICE ? { name: "Alice" } : null,
+		getJoinedMemberCount: () => joinedMembers,
+	} as unknown as Room;
+}
+
+const room = mkRoom();
 
 describe("isLegacyCallNoticeType", () => {
 	it("matches only the invite", () => {
@@ -82,6 +89,13 @@ describe("buildLegacyCallNotice", () => {
 		expect(notice?.text).toBe(
 			"You started a call from another session (unsupported call type)",
 		);
+	});
+
+	it("does not claim a bystander missed an unaddressed call", () => {
+		// MSC2746 makes `invitee` optional, so in a room of three an unnamed
+		// invite would otherwise tell everyone they missed a call.
+		const notice = buildLegacyCallNotice(mkEvent(), mkRoom(3));
+		expect(notice?.text).toBe("Alice started a call (unsupported call type)");
 	});
 
 	it("does not claim a call placed to someone else was missed", () => {

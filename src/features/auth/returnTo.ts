@@ -1,4 +1,5 @@
 import { stripBasePath } from "../../app/basePath";
+import { hasControlChar } from "../../lib/controlChars";
 
 /**
  * Build a base-relative "returnTo" path from the current location.
@@ -18,15 +19,6 @@ export function toReturnToPath(
 		location.search +
 		location.hash
 	);
-}
-
-/** True if the string contains an ASCII control char (0x00-0x1f or 0x7f). */
-function hasControlChar(s: string): boolean {
-	for (let i = 0; i < s.length; i++) {
-		const c = s.charCodeAt(i);
-		if (c <= 0x1f || c === 0x7f) return true;
-	}
-	return false;
 }
 
 /**

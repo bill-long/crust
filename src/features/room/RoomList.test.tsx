@@ -58,6 +58,7 @@ function makeRoomSummary(roomId: string, name: string): RoomSummary {
 		membership: "join",
 		isEncrypted: false,
 		isDirect: false,
+		dmUserId: null,
 		isSpace: false,
 		kind: "text",
 		callActive: false,

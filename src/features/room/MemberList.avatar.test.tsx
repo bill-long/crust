@@ -119,7 +119,10 @@ function setup() {
 }
 
 function aliceRow(): HTMLElement {
-	return screen.getByLabelText("View profile of Alice");
+	// Prefix match: the row's accessible name also carries presence and, once
+	// she starts typing, that - and this suite is about the avatar fallback,
+	// not the label text.
+	return screen.getByLabelText(/^View profile of Alice/);
 }
 
 afterEach(() => {
@@ -165,5 +168,9 @@ describe("MemberList avatar fallback (#457)", () => {
 
 		expect(document.querySelector("img")).toBeNull();
 		expect(within(aliceRow()).getByText("A")).toBeTruthy();
+		// That the label follows the row is covered directly in
+		// memberRowLabel.test.ts, where a status message can be set to prove
+		// typing displaces it; here it is enough that the row still resolves.
+		expect(aliceRow().getAttribute("aria-label")).toContain("typing");
 	});
 });

@@ -7,6 +7,7 @@ import {
 	buildEntry,
 	groupMembers,
 	type MemberEntry,
+	partitionByPresence,
 	roleForPowerLevel,
 	useMemberList,
 } from "./useMemberList";
@@ -514,5 +515,87 @@ describe("useMemberList hook", () => {
 			globalThis.requestAnimationFrame = originalRAF;
 			globalThis.cancelAnimationFrame = originalCAF;
 		}
+	});
+});
+
+describe("buildEntry display names", () => {
+	const member = (name: string): RoomMember =>
+		({
+			userId: "@a:x",
+			name,
+			powerLevel: 0,
+			typing: false,
+			getMxcAvatarUrl: () => null,
+		}) as unknown as RoomMember;
+
+	it("falls back to the user ID for a name with control characters", () => {
+		// Rejected, not cleaned: the SDK disambiguates against the raw
+		// displayname map, so stripping could render an exact copy of
+		// someone else's name with no user-ID suffix to give it away.
+		const entry = buildEntry(
+			member("Ann\nSmith"),
+			createMockClient() as unknown as MatrixClient,
+		);
+		expect(entry.displayName).toBe("@a:x");
+	});
+
+	it("keeps an ordinary name", () => {
+		const entry = buildEntry(
+			member("  Ann Smith  "),
+			createMockClient() as unknown as MatrixClient,
+		);
+		expect(entry.displayName).toBe("Ann Smith");
+	});
+
+	it("falls back when nothing printable survives", () => {
+		const entry = buildEntry(
+			member("   "),
+			createMockClient() as unknown as MatrixClient,
+		);
+		expect(entry.displayName).toBe("@a:x");
+	});
+});
+
+describe("partitionByPresence ordering", () => {
+	const entry = (displayName: string): MemberEntry =>
+		({ userId: `@${displayName.toLowerCase()}:x`, displayName }) as MemberEntry;
+
+	it("interleaves the offline section across roles", () => {
+		// Filled role-by-role, so without the merge it reads
+		// admins-then-members - an order whose reason is off screen once
+		// they share one section.
+		const groups = [
+			{ role: "Admin" as const, members: [entry("Ana"), entry("Zoe")] },
+			{ role: "Member" as const, members: [entry("Bob"), entry("Yan")] },
+		];
+		const out = partitionByPresence(groups, () => "offline");
+
+		expect(out).toHaveLength(1);
+		expect(out[0].role).toBe("Offline");
+		expect(out[0].members.map((m) => m.displayName)).toEqual([
+			"Ana",
+			"Bob",
+			"Yan",
+			"Zoe",
+		]);
+	});
+
+	it("keeps every member when the runs are uneven", () => {
+		// A merge that drains one run early is the classic way to lose the
+		// tail of another.
+		const groups = [
+			{ role: "Admin" as const, members: [entry("Ann")] },
+			{
+				role: "Member" as const,
+				members: [entry("Bea"), entry("Cal"), entry("Dee")],
+			},
+		];
+		const out = partitionByPresence(groups, () => "offline");
+		expect(out[0].members.map((m) => m.displayName)).toEqual([
+			"Ann",
+			"Bea",
+			"Cal",
+			"Dee",
+		]);
 	});
 });

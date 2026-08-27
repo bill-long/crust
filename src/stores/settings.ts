@@ -61,6 +61,17 @@ export interface UserSettings {
 	 */
 	inlineMediaPlayers: boolean;
 	/**
+	 * Whether to publish our own presence to the homeserver (#445).
+	 *
+	 * Defaults on, matching Element. Turning it off both stops publishing and
+	 * tells the sync loop not to mark us online, so the account genuinely
+	 * looks offline to everyone rather than merely hiding other people's dots
+	 * from us. Reading other people's presence is unaffected - the server
+	 * sends it regardless, and suppressing the display without suppressing
+	 * the publish would be the privacy trade backwards.
+	 */
+	sharePresence: boolean;
+	/**
 	 * `MediaDeviceInfo.deviceId` to use as the native RTC microphone, or
 	 * empty string for the system default. Consumed by the Phase 2 LiveKit
 	 * room wrapper (#122).
@@ -129,6 +140,7 @@ const defaults: UserSettings = {
 	voiceJoinLeaveSound: true,
 	urlPreviews: true,
 	inlineMediaPlayers: true,
+	sharePresence: true,
 	rtcMicDeviceId: "",
 	rtcCamDeviceId: "",
 	rtcScreenShareQuality: DEFAULT_SCREEN_SHARE_QUALITY,
@@ -193,6 +205,7 @@ function parseSettings(parsed: unknown): UserSettings {
 			"inlineMediaPlayers",
 			defaults.inlineMediaPlayers,
 		),
+		sharePresence: loadBool(obj, "sharePresence", defaults.sharePresence),
 		rtcMicDeviceId:
 			typeof obj.rtcMicDeviceId === "string"
 				? obj.rtcMicDeviceId

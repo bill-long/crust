@@ -1475,6 +1475,13 @@ export function useTimeline(
 			return;
 		}
 
+		// No suppression is possible here. Reaching this line means there is
+		// no window to reconcile against, and both reconcilers only suppress
+		// an event once a *prior* element has established state - so handing
+		// them the single event would return an empty set and merely look
+		// like a guard. A duplicate call notice can therefore survive on this
+		// degraded path until the next full rebuild, which is the same trade
+		// the live-event path already makes.
 		setEvents(
 			produce((draft) => {
 				const idx = draft.findIndex((e) => e.eventId === eid);

@@ -94,6 +94,7 @@ function setupMockClient(overrides: Record<string, unknown> = {}) {
 				membership: "join",
 				isEncrypted: false,
 				isDirect: false,
+				dmUserId: null,
 				isSpace: info.isSpace === true,
 				kind: "text",
 				callActive: false,
