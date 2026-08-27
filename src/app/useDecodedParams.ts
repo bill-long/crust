@@ -1,6 +1,14 @@
 import { useParams } from "@solidjs/router";
 
-function safeDecode(value: string): string {
+/**
+ * `decodeURIComponent` that returns the input unchanged rather than throwing.
+ *
+ * A stray `%` in a path is a `URIError`, and route segments come from the
+ * address bar - so any hand-rolled decode of one is a crash waiting for a
+ * malformed link. Exported so callers that parse the path themselves do not
+ * grow their own try/catch.
+ */
+export function safeDecode(value: string): string {
 	try {
 		return decodeURIComponent(value);
 	} catch {

@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, onCleanup, onMount } from "solid-js";
 import { basePrefix, stripBasePath } from "../../app/basePath";
-import { useDecodedParams } from "../../app/useDecodedParams";
+import { safeDecode, useDecodedParams } from "../../app/useDecodedParams";
 import { useClient } from "../../client/client";
 import { parseMatrixUri } from "../../lib/matrixUri";
 import { roomRoutePath } from "../../lib/roomRoute";
@@ -71,7 +71,10 @@ const PermalinkRouting: Component = () => {
 		return roomRoutePath(
 			summaries,
 			roomId,
-			spaceMatch ? decodeURIComponent(spaceMatch[1]) : undefined,
+			// `safeDecode`: this parses the path by hand, and a stray `%` in
+			// the address bar would otherwise throw a URIError out of a
+			// document-level click handler.
+			spaceMatch ? safeDecode(spaceMatch[1]) : undefined,
 		);
 	};
 

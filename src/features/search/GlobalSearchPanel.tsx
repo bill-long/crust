@@ -49,8 +49,11 @@ const GlobalSearchPanel: Component<{
 	const rows = createMemo(() => flattenGroups(props.search.groups()));
 	const broken = createFailedImageUrls();
 
+	// Trimmed before the fallback, the way room names are read everywhere
+	// else here: a name of only spaces would otherwise render an empty
+	// heading and an empty accessible context label on every row under it.
 	const roomName = (roomId: string): string =>
-		summaries[roomId]?.name ?? roomId;
+		summaries[roomId]?.name?.trim() || roomId;
 
 	const jump = (hit: GlobalSearchHit, viaKeyboard: boolean): void => {
 		// `?event=` is the permalink param the room pane already honours

@@ -28,6 +28,7 @@ const Wrapper: ParentComponent = (props) => {
 	const summaries = {
 		"!a:x": { roomId: "!a:x", name: "Design", avatarUrl: null },
 		"!b:x": { roomId: "!b:x", name: "Backend", avatarUrl: null },
+		"!blank:x": { roomId: "!blank:x", name: "   ", avatarUrl: null },
 	} as unknown as SummariesStore;
 	return (
 		<ClientContext.Provider
@@ -117,6 +118,28 @@ describe("GlobalSearchPanel", () => {
 				</Wrapper>
 			)),
 		).not.toThrow();
+	});
+
+	it("falls back to the room id when a name is only whitespace", () => {
+		// A blank heading and, through `contextLabel`, a blank accessible
+		// name on every row beneath it.
+		render(() => (
+			<Wrapper>
+				<GlobalSearchPanel
+					search={stubSearch({
+						groups: () => [
+							{
+								roomId: "!blank:x",
+								hits: [hit("$1", "!blank:x", "one")],
+								total: 1,
+							},
+						],
+					})}
+				/>
+			</Wrapper>
+		));
+
+		expect(screen.getByText("!blank:x")).toBeTruthy();
 	});
 
 	it("groups results under a heading per room", () => {
