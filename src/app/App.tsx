@@ -3,6 +3,7 @@ import { Route, Router, useLocation, useNavigate } from "@solidjs/router";
 import {
 	type Component,
 	createEffect,
+	createSignal,
 	lazy,
 	Match,
 	onMount,
@@ -91,6 +92,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const params = useDecodedParams<{ roomId?: string }>();
+	const [forcingLogout, setForcingLogout] = createSignal(false);
 
 	const openDeviceSettings = (): void => {
 		navigate("/settings/devices", {
@@ -132,6 +134,20 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	});
 
 	const handleForceLogout = async (): Promise<void> => {
+		// Single-flight, for the reason `Layout.handleLogout` documents: the wipe
+		// below is awaited before this screen goes away, and two overlapping
+		// `clearCryptoStores` calls can block each other's `deleteDatabase`
+		// indefinitely. The button is disabled to match.
+		if (forcingLogout()) return;
+		setForcingLogout(true);
+		try {
+			await runForceLogout();
+		} finally {
+			setForcingLogout(false);
+		}
+	};
+
+	const runForceLogout = async (): Promise<void> => {
 		// Drop the active-call signal BEFORE stopping the client so the
 		// mini-widget / overlay never points at a stopped session.
 		//
@@ -146,10 +162,10 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		setActiveCallRoomId(null);
 		closeNotificationSound();
 		client.stopClient();
-		// finishAccountLogout owns the ordering: routing to /login happens before
-		// the wipe (so the user never sees the app UI in the "stopped" state
-		// while it awaits), and a reload into a remaining account happens after
-		// it (so replacing the document cannot abort the delete).
+		// finishAccountLogout owns the ordering: the (bounded) wipe finishes
+		// before anything navigates, so replacing the document cannot abort the
+		// delete. That is why this screen needs the single-flight guard above -
+		// it stays on screen while the wipe runs.
 		await finishAccountLogout(
 			() => clearSession(session.userId),
 			async () => {
@@ -188,9 +204,10 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleForceLogout}
-								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary"
+								disabled={forcingLogout()}
+								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-default disabled:opacity-60"
 							>
-								Log out
+								{forcingLogout() ? "Logging out…" : "Log out"}
 							</button>
 						</div>
 					</div>

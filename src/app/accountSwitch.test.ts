@@ -19,6 +19,7 @@ import {
 	loadSessions,
 	type Session,
 	saveSession,
+	subscribeAccountScope,
 	unfreezeAccountScope,
 } from "../stores/session";
 import { finishAccountLogout, switchToAccount } from "./accountSwitch";
@@ -283,9 +284,9 @@ describe("finishAccountLogout", () => {
 		expect(calls).toEqual(["wipe", "assign"]);
 	});
 
-	it("routes to the login page BEFORE the wipe when nothing is left", async () => {
-		// The document survives a route change, so the wipe still completes - and
-		// the user never watches the stopped app UI while it awaits.
+	it("finishes the wipe before routing to the login page too", async () => {
+		// One order for both exits: the wipe is bounded, so waiting for it can
+		// never strand the user, and a single order is one thing to reason about.
 		saveSession(ALICE);
 		const goToLogin = vi.fn(() => calls.push("login"));
 
@@ -295,7 +296,7 @@ describe("finishAccountLogout", () => {
 			goToLogin,
 		);
 
-		expect(calls).toEqual(["login", "wipe"]);
+		expect(calls).toEqual(["wipe", "login"]);
 		expect(assign).not.toHaveBeenCalled();
 	});
 
@@ -356,26 +357,33 @@ describe("finishAccountLogout", () => {
 		}
 	});
 
-	it("freezes account-scoped storage while the outgoing account is on screen", async () => {
-		// `clear` moves the pointer; until this document is replaced its stores
-		// must not rebind to the promoted account (a visible re-zoom, and writes
-		// filed under the wrong key).
+	it("never freezes the scope: the ordering carries that invariant", async () => {
+		// Clearing LAST keeps the pointer-moved-but-still-rendering window down
+		// to the call that leaves, so no freeze is needed - and the logout's
+		// scope-change notification reaches the stores, which a freeze would
+		// have swallowed (the login page would keep the departed account's zoom).
 		saveSession(ALICE);
 		addSession(BOB);
 
 		await finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn());
 
-		expect(isAccountScopeFrozen()).toBe(true);
+		expect(isAccountScopeFrozen()).toBe(false);
 	});
 
-	it("lifts the freeze when the document stays for the login page", async () => {
-		// A route to /login does not replace the document, and the next login
-		// happens in it - a freeze left on would strand that account's stores.
+	it("notifies the account-scoped stores that the account is gone", async () => {
 		saveSession(ALICE);
-
-		await finishAccountLogout(() => clearSession(ALICE.userId), wipe, vi.fn());
-
-		expect(isAccountScopeFrozen()).toBe(false);
+		const seen: Array<string | null> = [];
+		const unsubscribe = subscribeAccountScope((id) => seen.push(id));
+		try {
+			await finishAccountLogout(
+				() => clearSession(ALICE.userId),
+				wipe,
+				vi.fn(),
+			);
+			expect(seen).toEqual([null]);
+		} finally {
+			unsubscribe();
+		}
 	});
 
 	it("logs out the account it was given, not whoever storage calls active", async () => {

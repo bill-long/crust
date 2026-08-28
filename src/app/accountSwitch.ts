@@ -124,20 +124,23 @@ export async function switchToAccount(
 }
 
 /**
- * Finish logging the account on screen out: clear it, wipe its crypto store,
- * and leave - in the order those three have to happen in.
+ * Finish logging the account on screen out: wipe its crypto store, clear it,
+ * and leave - in that order, which is what makes the order safe.
  *
- * Where "leave" goes is the first rule. A route change is not enough when
+ * The wipe goes FIRST because leaving can mean replacing the document, and a
+ * reload aborts a delete mid-flight, stranding the departing account's
+ * IndexedDB data on disk. It is bounded because `deleteDatabase` BLOCKS while
+ * another window still has the store open and the SDK's handler only logs that,
+ * so the promise never settles - and leaving is what the user actually asked
+ * for. Clearing LAST keeps the window where the pointer has moved but this
+ * document still renders the outgoing account down to the call that leaves,
+ * so the account-scoped stores never rebind under a UI that is still on screen.
+ *
+ * Where "leave" goes is the other rule. A route change is not enough when
  * another account remains: `/login` renders outside the auth guard, so the user
  * would be looking at a login form with a perfectly good session live in
  * storage, and logging in there REPLACES, silently discarding that account's
  * unrevoked token. So a remaining account is reloaded into instead.
- *
- * When the leave happens is the second. A reload replaces the document and
- * would abort the wipe mid-delete, leaving the departing account's IndexedDB
- * data on disk - so the wipe is awaited first. A route to `/login` leaves this
- * document running, so it goes first and the wipe follows: the user never
- * watches the stopped app UI while a delete awaits.
  *
  * `clear` reporting false means the logout never reached storage. The account
  * still listed there is the one whose token was just revoked, so reloading
@@ -149,29 +152,16 @@ export async function finishAccountLogout(
 	wipe: () => Promise<void>,
 	goToLogin: () => void,
 ): Promise<void> {
-	// Freeze before clearing: `clear` moves the pointer, and the account-scoped
-	// stores must not follow it while the OUTGOING account is still the one on
-	// screen - that is a visible re-zoom, and any write in the meantime lands
-	// under the wrong account's key.
-	freezeAccountScope();
-	// Storage-backed: the logout that just ran wrote there, and another tab may
-	// have too - it is the authority on what is left.
-	const reloading = clear() && activeAccountId() !== null;
-	if (!reloading) {
-		// This document survives a route to `/login` and can host the next login,
-		// so the freeze must not outlive the exit.
-		unfreezeAccountScope();
-		goToLogin();
-	}
 	try {
-		// Bounded, because `deleteDatabase` BLOCKS while another window still has
-		// the store open and the SDK's handler only logs that - the promise never
-		// settles. Leaving is what the user asked for; an unbounded await would
-		// strand them on a stopped UI holding a revoked token, which is the
-		// failure `Layout.handleLogout`'s single-flight guard exists to prevent.
 		await withTimeout(wipe(), CRYPTO_INIT_TIMEOUT_MS, "Account store wipe");
 	} catch (e) {
 		reportError(e, { logLabel: "Failed to clear the account's stores" });
 	}
-	if (reloading) reloadIntoActiveAccount();
+	// Storage-backed: the logout just wrote there, and another tab may have too -
+	// it is the authority on what is left.
+	if (clear() && activeAccountId() !== null) {
+		reloadIntoActiveAccount();
+		return;
+	}
+	goToLogin();
 }
