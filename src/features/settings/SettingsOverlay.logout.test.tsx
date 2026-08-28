@@ -9,6 +9,7 @@ import {
 	type SummariesStore,
 } from "../../client/summaries";
 import { createMockClient } from "../../test/mockClient";
+import { TEST_SESSION } from "../../test/testSession";
 import { SettingsOverlay } from "./SettingsOverlay";
 
 vi.mock("solid-refresh", () => ({
@@ -42,6 +43,7 @@ const ClientWrapper: ParentComponent<{
 	return (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: props.client as unknown as MatrixClient,
 				syncState,
 				cryptoState,

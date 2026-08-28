@@ -9,6 +9,7 @@ import {
 	type SummariesStore,
 } from "../../client/summaries";
 import { createMockClient } from "../../test/mockClient";
+import { TEST_SESSION } from "../../test/testSession";
 import { CreateSpaceDialog } from "./CreateSpaceDialog";
 
 vi.mock("solid-refresh", () => ({
@@ -37,6 +38,7 @@ const Wrapper: ParentComponent<{
 	return (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: props.client as unknown as MatrixClient,
 				syncState,
 				cryptoState,

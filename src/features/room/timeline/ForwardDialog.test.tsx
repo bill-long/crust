@@ -18,6 +18,7 @@ import {
 import { clearNotices, notices } from "../../../stores/notices";
 import { createMockClient } from "../../../test/mockClient";
 import { stubViewport } from "../../../test/stubViewport";
+import { TEST_SESSION } from "../../../test/testSession";
 import { ForwardDialog } from "./ForwardDialog";
 import type { TimelineEvent } from "./timelineTypes";
 
@@ -121,6 +122,7 @@ const Wrapper: ParentComponent<{
 	return (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: props.client as unknown as MatrixClient,
 				syncState,
 				cryptoState,

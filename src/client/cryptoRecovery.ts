@@ -55,6 +55,7 @@
  */
 
 import type { MatrixClient } from "matrix-js-sdk";
+import type { Session } from "../stores/session";
 
 /**
  * The persisted recovery position. "module-reload" is the module load's own
@@ -65,14 +66,21 @@ export type CryptoRecoveryStage = "module-reload" | "reload" | "clear" | null;
 export const CRYPTO_RECOVERY_KEY = "crust:crypto-init-recovery";
 
 /**
- * IndexedDB database-name prefix for Crust's Rust crypto store, passed to both
- * `initRustCrypto` and `clearStores`. matrix-js-sdk defaults this to
- * "matrix-js-sdk", which other matrix-js-sdk apps on the same origin (e.g. a
- * co-hosted Cinny at the parent path) also use — so without a unique prefix the
- * two apps share the same `…::matrix-sdk-crypto` databases. That collision
- * corrupts each other's crypto state AND means Crust's recovery `clearStores`
- * would delete the neighbouring app's keys. The "crust" prefix isolates Crust
- * to `crust::matrix-sdk-crypto(-meta)`. See issue #202.
+ * IndexedDB database-name prefix for Crust's Rust crypto stores. matrix-js-sdk
+ * defaults this to "matrix-js-sdk", which other matrix-js-sdk apps on the same
+ * origin (e.g. a co-hosted Cinny at the parent path) also use — so without a
+ * unique prefix the two apps share the same `…::matrix-sdk-crypto` databases.
+ * That collision corrupts each other's crypto state AND means Crust's recovery
+ * `clearStores` would delete the neighbouring app's keys. See issue #202.
+ *
+ * This bare value is ALSO the literal prefix of the one account that predates
+ * multi-account support (#532): its store already exists as
+ * `crust::matrix-sdk-crypto(-meta)` and IndexedDB databases cannot be renamed,
+ * so the session migration pins that account to it. Every account added since
+ * gets its own {@link accountCryptoDbPrefix} instead, because `clearStores`
+ * wipes BY PREFIX: a shared prefix would mean logging out of one account
+ * destroys every other account's crypto state - unrecoverable without
+ * re-verification, and without key backup unrecoverable at all.
  *
  * Note: switching to this prefix intentionally orphans any crypto state Crust
  * previously wrote under the default "matrix-js-sdk" prefix — that store was
@@ -83,28 +91,60 @@ export const CRYPTO_RECOVERY_KEY = "crust:crypto-init-recovery";
 export const CRYPTO_DB_PREFIX = "crust";
 
 /**
- * Initialize Crust's Rust crypto store. Centralizes the `useIndexedDB` +
+ * The crypto database prefix for a newly added account. Matrix user IDs are
+ * globally unique and always start with "@", so this can never collide with
+ * {@link CRYPTO_DB_PREFIX} itself or with another account's prefix.
+ */
+export function accountCryptoDbPrefix(userId: string): string {
+	return `${CRYPTO_DB_PREFIX}:${userId}`;
+}
+
+/**
+ * The account whose crypto store an operation targets. Sessions persisted
+ * before #532 carry no `cryptoPrefix`; they are pinned to
+ * {@link CRYPTO_DB_PREFIX} by the session-store migration, so a session that
+ * reaches here without one is unmigrated or hand-edited. It falls back to a
+ * DERIVED prefix rather than the shared one: an account reading another
+ * account's store is the failure this scoping exists to prevent, and the cost
+ * of guessing wrong in this direction is only a re-verification.
+ */
+export type CryptoAccount = Pick<Session, "userId" | "cryptoPrefix">;
+
+/** The IndexedDB prefix holding `account`'s crypto store. */
+export function cryptoDbPrefixFor(account: CryptoAccount): string {
+	return account.cryptoPrefix ?? accountCryptoDbPrefix(account.userId);
+}
+
+/**
+ * Initialize an account's Rust crypto store. Centralizes the `useIndexedDB` +
  * `cryptoDatabasePrefix` options so every caller agrees on the same database.
  */
 export async function initCryptoStore(
 	client: Pick<MatrixClient, "initRustCrypto">,
+	account: CryptoAccount,
 ): Promise<void> {
 	await client.initRustCrypto({
 		useIndexedDB: true,
-		cryptoDatabasePrefix: CRYPTO_DB_PREFIX,
+		cryptoDatabasePrefix: cryptoDbPrefixFor(account),
 	});
 }
 
 /**
- * Clear Crust's stores, scoping the Rust crypto-store wipe to Crust's own
- * database prefix. ALL `clearStores` calls (logout, session expiry, recovery)
- * must go through this so they never delete a co-hosted app's crypto DBs and
- * always target the databases `initCryptoStore` actually created.
+ * Clear ONE account's stores, scoping the Rust crypto-store wipe to that
+ * account's database prefix. ALL `clearStores` calls (logout, session expiry,
+ * recovery, and Phase 2's remove-account) must go through this: an unscoped
+ * wipe deletes by prefix, so it would take out every other logged-in account's
+ * crypto state (#532) and, on a shared origin, a co-hosted app's (#202). The
+ * account is a required argument for exactly that reason - there is no
+ * "current account" default to get wrong.
  */
 export async function clearCryptoStores(
 	client: Pick<MatrixClient, "clearStores">,
+	account: CryptoAccount,
 ): Promise<void> {
-	await client.clearStores({ cryptoDatabasePrefix: CRYPTO_DB_PREFIX });
+	await client.clearStores({
+		cryptoDatabasePrefix: cryptoDbPrefixFor(account),
+	});
 }
 
 /**

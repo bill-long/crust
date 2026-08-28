@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+	accountCryptoDbPrefix,
 	CRYPTO_DB_PREFIX,
 	CRYPTO_RECOVERY_KEY,
 	type CryptoInitDeps,
 	type CryptoRecoveryStage,
 	clearCryptoStores,
 	clearRecoveryStage,
+	cryptoDbPrefixFor,
 	initCryptoStore,
 	nextCryptoRecoveryStage,
 	persistRecoveryStage,
@@ -27,25 +29,72 @@ const ID_B = recoveryIdentity({
 	deviceId: "DEVICE_B",
 });
 
+const LEGACY_ACCOUNT = { userId: "@amon:strange.pizza" };
+const ACCOUNT_A = {
+	userId: "@amon:strange.pizza",
+	cryptoPrefix: accountCryptoDbPrefix("@amon:strange.pizza"),
+};
+const ACCOUNT_B = {
+	userId: "@test:strange.pizza",
+	cryptoPrefix: accountCryptoDbPrefix("@test:strange.pizza"),
+};
+
 describe("crypto store helpers", () => {
 	it("uses a non-default prefix to avoid colliding with co-hosted apps", () => {
 		expect(CRYPTO_DB_PREFIX).toBe("crust");
 		expect(CRYPTO_DB_PREFIX).not.toBe("matrix-js-sdk");
 	});
 
-	it("initCryptoStore initializes with indexeddb + the Crust prefix", async () => {
+	it("gives every account a distinct prefix under the Crust namespace", () => {
+		expect(ACCOUNT_A.cryptoPrefix).not.toBe(ACCOUNT_B.cryptoPrefix);
+		// Still inside Crust's own namespace, so a co-hosted matrix-js-sdk app
+		// (#202) is untouched by any of them.
+		expect(ACCOUNT_A.cryptoPrefix.startsWith(`${CRYPTO_DB_PREFIX}:`)).toBe(
+			true,
+		);
+		// ...and never equal to the bare prefix, which belongs to the account
+		// that predates multi-account support.
+		expect(ACCOUNT_A.cryptoPrefix).not.toBe(CRYPTO_DB_PREFIX);
+	});
+
+	it("keeps the pre-multi-account prefix for a session pinned to it", () => {
+		expect(
+			cryptoDbPrefixFor({ ...LEGACY_ACCOUNT, cryptoPrefix: "crust" }),
+		).toBe(CRYPTO_DB_PREFIX);
+	});
+
+	it("derives rather than shares when a session carries no prefix", () => {
+		// Fail closed: an unmigrated/hand-edited session must not fall back to
+		// the shared prefix and read (or wipe) another account's store.
+		expect(cryptoDbPrefixFor(LEGACY_ACCOUNT)).toBe(
+			accountCryptoDbPrefix(LEGACY_ACCOUNT.userId),
+		);
+		expect(cryptoDbPrefixFor(LEGACY_ACCOUNT)).not.toBe(CRYPTO_DB_PREFIX);
+	});
+
+	it("initCryptoStore opens the account's own database", async () => {
 		const initRustCrypto = vi.fn(() => Promise.resolve());
-		await initCryptoStore({ initRustCrypto });
+		await initCryptoStore({ initRustCrypto }, ACCOUNT_A);
 		expect(initRustCrypto).toHaveBeenCalledWith({
 			useIndexedDB: true,
-			cryptoDatabasePrefix: CRYPTO_DB_PREFIX,
+			cryptoDatabasePrefix: ACCOUNT_A.cryptoPrefix,
 		});
 	});
 
-	it("clearCryptoStores scopes the wipe to the Crust prefix", async () => {
+	it("clearCryptoStores wipes ONLY the account it was called for", async () => {
+		// The isolation guard: clearStores deletes by prefix, so a wipe for
+		// account A that used any prefix but A's would destroy account B's
+		// crypto state (#532) - and the bare prefix would take a co-hosted
+		// app's with it (#202).
 		const clearStores = vi.fn(() => Promise.resolve());
-		await clearCryptoStores({ clearStores });
+		await clearCryptoStores({ clearStores }, ACCOUNT_A);
 		expect(clearStores).toHaveBeenCalledWith({
+			cryptoDatabasePrefix: ACCOUNT_A.cryptoPrefix,
+		});
+		expect(clearStores).not.toHaveBeenCalledWith({
+			cryptoDatabasePrefix: ACCOUNT_B.cryptoPrefix,
+		});
+		expect(clearStores).not.toHaveBeenCalledWith({
 			cryptoDatabasePrefix: CRYPTO_DB_PREFIX,
 		});
 	});

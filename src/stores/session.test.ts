@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+	accountCryptoDbPrefix,
+	CRYPTO_DB_PREFIX,
+} from "../client/cryptoRecovery";
 import { pushMediaAuthToSw } from "../lib/authedMedia";
 import {
+	activeAccountId,
 	clearSession,
 	loadSession,
+	loadSessions,
 	type Session,
 	saveSession,
+	subscribeAccountScope,
+	updateSession,
 } from "./session";
 
 // Keep the media-auth push observable without a service worker in jsdom.
@@ -24,6 +32,35 @@ const VALID: Session = {
 	deviceId: "DEVICE123",
 	homeserverUrl: "https://matrix.example.com",
 };
+
+const BOB: Session = {
+	accessToken: "syt_bob",
+	userId: "@bob:example.com",
+	deviceId: "DEVICE456",
+	homeserverUrl: "https://matrix.example.com",
+};
+
+/** What `VALID` looks like once the store has assigned its crypto prefix. */
+const SAVED: Session = {
+	...VALID,
+	cryptoPrefix: accountCryptoDbPrefix(VALID.userId),
+};
+
+/**
+ * Seed the store with several accounts. Phase 1's login path replaces rather
+ * than appends (see saveSession), so the multi-account states this store has to
+ * survive are written directly, the way #533's switcher will create them.
+ */
+const seedStore = (sessions: Session[], activeUserId: string): void => {
+	localStorage.setItem(SESSION_KEY, JSON.stringify({ activeUserId, sessions }));
+};
+
+/** The persisted multi-account value for a single, freshly added account. */
+const storeOf = (...sessions: Session[]): string =>
+	JSON.stringify({
+		activeUserId: sessions[sessions.length - 1]?.userId ?? null,
+		sessions,
+	});
 
 beforeEach(() => {
 	localStorage.clear();
@@ -61,7 +98,7 @@ describe("service-worker media auth push", () => {
 describe("saveSession / loadSession round-trip", () => {
 	it("persists a valid session and loads it back", () => {
 		saveSession(VALID);
-		expect(loadSession()).toEqual(VALID);
+		expect(loadSession()).toEqual(SAVED);
 	});
 
 	it("preserves extra unknown fields on the stored object", () => {
@@ -69,7 +106,12 @@ describe("saveSession / loadSession round-trip", () => {
 		// extra field survives the round-trip.
 		const withExtra = { ...VALID, futureField: "x" };
 		localStorage.setItem(SESSION_KEY, JSON.stringify(withExtra));
-		expect(loadSession()).toEqual(withExtra);
+		// Migrated from the pre-multi-account shape, so it is also pinned to the
+		// original crypto prefix.
+		expect(loadSession()).toEqual({
+			...withExtra,
+			cryptoPrefix: CRYPTO_DB_PREFIX,
+		});
 	});
 });
 
@@ -173,7 +215,10 @@ describe("loadSession", () => {
 			},
 		};
 		saveSession(oidcSession);
-		expect(loadSession()).toEqual(oidcSession);
+		expect(loadSession()).toEqual({
+			...oidcSession,
+			cryptoPrefix: accountCryptoDbPrefix(oidcSession.userId),
+		});
 	});
 
 	it("rejects an empty refreshToken", () => {
@@ -256,23 +301,27 @@ describe("clearSession", () => {
 	});
 });
 
+/** A migrated pre-multi-account session, pinned to the original prefix. */
+const LEGACY_SAVED: Session = { ...VALID, cryptoPrefix: CRYPTO_DB_PREFIX };
+
 describe("legacy key migration", () => {
 	it("migrates a legacy crust_session value to crust:session on load", () => {
 		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
-		expect(loadSession()).toEqual(VALID);
-		// The value now lives under the new key and the legacy key is dropped.
-		expect(localStorage.getItem(SESSION_KEY)).toBe(JSON.stringify(VALID));
+		expect(loadSession()).toEqual(LEGACY_SAVED);
+		// The value now lives under the new key, in the multi-account shape, and
+		// the legacy key is dropped.
+		expect(localStorage.getItem(SESSION_KEY)).toBe(storeOf(LEGACY_SAVED));
 		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
 	});
 
 	it("prefers the new key and drops a stale coexisting legacy token", () => {
 		const legacy = { ...VALID, deviceId: "OLD_DEVICE" };
-		localStorage.setItem(SESSION_KEY, JSON.stringify(VALID));
+		localStorage.setItem(SESSION_KEY, storeOf(SAVED));
 		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(legacy));
-		expect(loadSession()).toEqual(VALID);
+		expect(loadSession()).toEqual(SAVED);
 		// A still-valid legacy token must not linger once the new key is set.
 		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
-		expect(localStorage.getItem(SESSION_KEY)).toBe(JSON.stringify(VALID));
+		expect(localStorage.getItem(SESSION_KEY)).toBe(storeOf(SAVED));
 	});
 
 	it("recovers from a valid legacy token when the new key is unusable, then heals", () => {
@@ -280,10 +329,10 @@ describe("legacy key migration", () => {
 		// recovered rather than deleted, so the user isn't stranded logged out.
 		localStorage.setItem(SESSION_KEY, "not json {");
 		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
-		expect(loadSession()).toEqual(VALID);
+		expect(loadSession()).toEqual(LEGACY_SAVED);
 		// The recovered value is promoted to the new key (overwriting the corrupt
 		// one) and the legacy token is dropped, leaving a single clean copy.
-		expect(localStorage.getItem(SESSION_KEY)).toBe(JSON.stringify(VALID));
+		expect(localStorage.getItem(SESSION_KEY)).toBe(storeOf(LEGACY_SAVED));
 		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
 	});
 
@@ -294,10 +343,291 @@ describe("legacy key migration", () => {
 			throw new Error("QuotaExceeded");
 		});
 		// The session still loads from the legacy key this session...
-		expect(loadSession()).toEqual(VALID);
+		expect(loadSession()).toEqual(LEGACY_SAVED);
 		// ...and the legacy value is preserved rather than dropped.
 		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBe(
 			JSON.stringify(VALID),
 		);
+	});
+});
+
+describe("multi-account store", () => {
+	it("carries several accounts, keeping the active one addressable", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			VALID.userId,
+			BOB.userId,
+		]);
+		expect(loadSession()?.userId).toBe(BOB.userId);
+		expect(activeAccountId()).toBe(BOB.userId);
+	});
+
+	it("replaces the stored account on login rather than adding one", () => {
+		// `/login` renders outside the auth guard, so it is reachable while an
+		// account is logged in. Until the switcher ships an explicit add-account
+		// action (#533), logging in must not leave the previous account's live
+		// access token in storage with no UI to revoke it - nor let a logout drop
+		// the user back into it without re-authenticating.
+		saveSession(VALID);
+		saveSession(BOB);
+		expect(loadSessions().map((a) => a.userId)).toEqual([BOB.userId]);
+		expect(localStorage.getItem(SESSION_KEY)).not.toContain(VALID.accessToken);
+		clearSession();
+		expect(loadSession()).toBeNull();
+	});
+
+	it("replaces an account rather than duplicating it on re-login", () => {
+		saveSession(VALID);
+		saveSession({ ...VALID, accessToken: "syt_new", deviceId: "DEVICE999" });
+		expect(loadSessions()).toHaveLength(1);
+		expect(loadSession()?.deviceId).toBe("DEVICE999");
+	});
+
+	it("removes only the active account on clear, activating what is left", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		clearSession();
+		expect(loadSessions().map((a) => a.userId)).toEqual([VALID.userId]);
+		expect(loadSession()?.userId).toBe(VALID.userId);
+	});
+
+	it("leaves no session key behind once the last account is removed", () => {
+		saveSession(VALID);
+		clearSession();
+		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+		expect(activeAccountId()).toBeNull();
+	});
+
+	it("updateSession rewrites one account without changing the active one", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		expect(updateSession({ ...VALID, accessToken: "syt_rotated" })).toBe(true);
+		expect(
+			loadSessions().find((a) => a.userId === VALID.userId)?.accessToken,
+		).toBe("syt_rotated");
+		expect(loadSession()?.userId).toBe(BOB.userId);
+	});
+
+	it("updateSession refuses to resurrect a removed account", () => {
+		saveSession(VALID);
+		expect(updateSession(BOB)).toBe(false);
+		expect(loadSessions().map((a) => a.userId)).toEqual([VALID.userId]);
+	});
+
+	it("drops a corrupt account entry without logging the others out", () => {
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({
+				activeUserId: BOB.userId,
+				sessions: [{ ...VALID, accessToken: "" }, BOB],
+			}),
+		);
+		expect(loadSessions().map((a) => a.userId)).toEqual([BOB.userId]);
+		expect(loadSession()?.userId).toBe(BOB.userId);
+	});
+
+	it("deduplicates accounts sharing a user ID", () => {
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({
+				activeUserId: VALID.userId,
+				sessions: [VALID, { ...VALID, deviceId: "DUP" }],
+			}),
+		);
+		expect(loadSessions()).toHaveLength(1);
+		expect(loadSession()?.deviceId).toBe(VALID.deviceId);
+	});
+
+	it("heals an activeUserId that names no stored account", () => {
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({ activeUserId: "@ghost:example.com", sessions: [BOB] }),
+		);
+		expect(loadSession()?.userId).toBe(BOB.userId);
+	});
+
+	it("reads an empty account list as logged out", () => {
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({ activeUserId: null, sessions: [] }),
+		);
+		expect(loadSession()).toBeNull();
+		expect(activeAccountId()).toBeNull();
+	});
+});
+
+describe("crypto store prefixes", () => {
+	it("gives a newly added account its own prefix", () => {
+		saveSession(VALID);
+		expect(loadSession()?.cryptoPrefix).toBe(
+			accountCryptoDbPrefix(VALID.userId),
+		);
+		saveSession(BOB);
+		expect(loadSession()?.cryptoPrefix).toBe(accountCryptoDbPrefix(BOB.userId));
+		expect(accountCryptoDbPrefix(VALID.userId)).not.toBe(
+			accountCryptoDbPrefix(BOB.userId),
+		);
+	});
+
+	it("never lets a caller pick the prefix for an account being added", () => {
+		// Building a session by spreading another account's is a real pattern (the
+		// tests here do it). Honouring the carried prefix would point the new
+		// account at the old one's crypto store, and logging either out would wipe
+		// the other's keys.
+		saveSession({ ...SAVED, userId: BOB.userId, deviceId: BOB.deviceId });
+		expect(loadSession()?.cryptoPrefix).toBe(accountCryptoDbPrefix(BOB.userId));
+		expect(loadSession()?.cryptoPrefix).not.toBe(SAVED.cryptoPrefix);
+	});
+
+	it("pins a migrated pre-multi-account session to the original prefix", () => {
+		// Its IndexedDB store already exists under "crust" and cannot be renamed;
+		// a derived prefix here would orphan it and force re-verification.
+		localStorage.setItem(SESSION_KEY, JSON.stringify(VALID));
+		expect(loadSession()?.cryptoPrefix).toBe(CRYPTO_DB_PREFIX);
+	});
+
+	it("keeps an account's prefix across re-login and token rotation", () => {
+		localStorage.setItem(SESSION_KEY, JSON.stringify(VALID));
+		expect(loadSession()?.cryptoPrefix).toBe(CRYPTO_DB_PREFIX);
+		saveSession({ ...VALID, accessToken: "syt_relogin" });
+		expect(loadSession()?.cryptoPrefix).toBe(CRYPTO_DB_PREFIX);
+		updateSession({
+			...VALID,
+			accessToken: "syt_rotated",
+			cryptoPrefix: "hax",
+		});
+		expect(loadSession()?.cryptoPrefix).toBe(CRYPTO_DB_PREFIX);
+	});
+});
+
+describe("per-account storage keys", () => {
+	const SETTINGS_KEY = "crust:settings";
+	const LAST_ROOM_KEY = "crust:last-room";
+	const PANE_WIDTHS_KEY = "crust:pane-widths";
+
+	it("hands the pre-multi-account values to the migrated account", () => {
+		localStorage.setItem(SETTINGS_KEY, JSON.stringify({ zoomLevel: 150 }));
+		localStorage.setItem(PANE_WIDTHS_KEY, JSON.stringify({ rooms: 240 }));
+		localStorage.setItem(SESSION_KEY, JSON.stringify(VALID));
+
+		expect(loadSession()?.userId).toBe(VALID.userId);
+		expect(localStorage.getItem(`${SETTINGS_KEY}:${VALID.userId}`)).toBe(
+			JSON.stringify({ zoomLevel: 150 }),
+		);
+		// Adopted, not copied: the unscoped value is gone, so the NEXT account
+		// added cannot inherit it.
+		expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
+		// Install-global keys are untouched - pane widths belong to the browser
+		// profile, not to whoever is logged in.
+		expect(localStorage.getItem(PANE_WIDTHS_KEY)).toBe(
+			JSON.stringify({ rooms: 240 }),
+		);
+	});
+
+	it("hands them to the first account added on a logged-out install", () => {
+		localStorage.setItem(LAST_ROOM_KEY, JSON.stringify({ roomId: "!r:x.com" }));
+		saveSession(VALID);
+		expect(localStorage.getItem(`${LAST_ROOM_KEY}:${VALID.userId}`)).toBe(
+			JSON.stringify({ roomId: "!r:x.com" }),
+		);
+		saveSession(BOB);
+		expect(localStorage.getItem(`${LAST_ROOM_KEY}:${BOB.userId}`)).toBeNull();
+	});
+
+	it("never overwrites an account's own value with the unscoped one", () => {
+		localStorage.setItem(`${SETTINGS_KEY}:${VALID.userId}`, '{"zoomLevel":90}');
+		localStorage.setItem(SETTINGS_KEY, '{"zoomLevel":150}');
+		saveSession(VALID);
+		expect(localStorage.getItem(`${SETTINGS_KEY}:${VALID.userId}`)).toBe(
+			'{"zoomLevel":90}',
+		);
+		expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
+	});
+});
+
+describe("migration idempotence and tolerance", () => {
+	it("is idempotent across repeated loads", () => {
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		const first = loadSession();
+		const afterFirst = localStorage.getItem(SESSION_KEY);
+		expect(loadSession()).toEqual(first);
+		expect(loadSession()).toEqual(first);
+		expect(localStorage.getItem(SESSION_KEY)).toBe(afterFirst);
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
+	});
+
+	it("recovers a legacy token when every stored account is invalid", () => {
+		// The new key parses but yields no usable account, so it must not shadow
+		// (and delete) a legacy token that still works.
+		localStorage.setItem(
+			SESSION_KEY,
+			JSON.stringify({
+				activeUserId: VALID.userId,
+				sessions: [{ ...VALID, accessToken: "" }],
+			}),
+		);
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		expect(loadSession()).toEqual(LEGACY_SAVED);
+		expect(localStorage.getItem(SESSION_KEY)).toBe(storeOf(LEGACY_SAVED));
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
+	});
+
+	it("tolerates a corrupt value under both keys", () => {
+		localStorage.setItem(SESSION_KEY, "not json {");
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify({ nope: true }));
+		expect(loadSession()).toBeNull();
+		expect(loadSessions()).toEqual([]);
+		expect(activeAccountId()).toBeNull();
+	});
+
+	it("does not adopt per-account values when the migration write fails", () => {
+		localStorage.setItem("crust:settings", '{"zoomLevel":150}');
+		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
+		// Only the session write is rejected, so the per-account writes WOULD
+		// succeed: the values must stay put anyway. Moving them onto an account
+		// that did not persist would strand them under a key nothing reads.
+		const realSetItem = Storage.prototype.setItem;
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+			this: Storage,
+			key: string,
+			value: string,
+		) {
+			if (key === SESSION_KEY) throw new Error("QuotaExceeded");
+			realSetItem.call(this, key, value);
+		});
+		expect(loadSession()).toEqual(LEGACY_SAVED);
+		vi.restoreAllMocks();
+		// Nothing was moved, so the retry on the next load still finds both.
+		expect(localStorage.getItem("crust:settings")).toBe('{"zoomLevel":150}');
+		expect(localStorage.getItem(`crust:settings:${VALID.userId}`)).toBeNull();
+		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBe(
+			JSON.stringify(VALID),
+		);
+	});
+});
+
+describe("account scope notification", () => {
+	it("fires on login, logout and switch, but not on a token refresh", () => {
+		const seen: Array<string | null> = [];
+		const unsubscribe = subscribeAccountScope((id) => seen.push(id));
+		try {
+			saveSession(VALID);
+			// Neither a token rotation nor a re-login as the account already
+			// active changes what the per-account stores are bound to.
+			updateSession({ ...VALID, accessToken: "syt_rotated" });
+			saveSession({ ...VALID, accessToken: "syt_relogin" });
+			saveSession(BOB);
+			// A logout that leaves another account behind rebinds to it.
+			seedStore([SAVED, BOB], BOB.userId);
+			clearSession();
+			expect(seen).toEqual([VALID.userId, BOB.userId, VALID.userId]);
+		} finally {
+			unsubscribe();
+		}
+	});
+
+	it("stops notifying an unsubscribed listener", () => {
+		const seen: Array<string | null> = [];
+		subscribeAccountScope((id) => seen.push(id))();
+		saveSession(VALID);
+		expect(seen).toEqual([]);
 	});
 });

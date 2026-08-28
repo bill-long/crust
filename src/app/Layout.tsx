@@ -176,6 +176,7 @@ const Layout: Component = () => {
 	const clientCtx = useClient();
 	const {
 		client,
+		session,
 		summaries,
 		cryptoStatus,
 		syncState,
@@ -364,10 +365,11 @@ const Layout: Component = () => {
 			} catch {
 				// Non-fatal; proceed with logout regardless.
 			}
-			// Clear the per-device preference so the next account to log in on
-			// this browser doesn't silently inherit background push (settings
-			// are shared across accounts in localStorage). The new account must
-			// opt in explicitly.
+			// Clear this account's preference now that its pusher is gone, so a
+			// later login as the same account doesn't read "background push on"
+			// with no pusher registered. Settings are per-account (#532), so this
+			// write must happen BEFORE clearSession() below - once the account is
+			// gone there is no key left to file it under.
 			updateSetting("backgroundNotifications", false);
 		}
 		try {
@@ -376,7 +378,7 @@ const Layout: Component = () => {
 			client.stopClient();
 		}
 		try {
-			await clearCryptoStores(client);
+			await clearCryptoStores(client, session);
 		} catch (e) {
 			console.warn("Failed to clear stores on logout:", e);
 		}

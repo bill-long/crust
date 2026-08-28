@@ -1,6 +1,11 @@
 import { loadPersisted, savePersisted } from "../../lib/persistedSignal";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
+import { currentAccountKey } from "../../stores/accountScoped";
 
+// Per-account (#532): an emoji picker ordered by someone else's habits is a
+// small thing, but the recent list is also a fingerprint of what an account
+// sends. The key is resolved per call rather than cached, so it always follows
+// the active account.
 const STORAGE_KEY = STORAGE_KEYS.recentEmoji;
 const MAX_RECENT = 32;
 
@@ -12,8 +17,10 @@ interface RecentEntry {
 }
 
 function loadEntries(): RecentEntry[] {
+	const key = currentAccountKey(STORAGE_KEY);
+	if (key === null) return [];
 	return loadPersisted(
-		STORAGE_KEY,
+		key,
 		(raw): RecentEntry[] =>
 			Array.isArray(raw)
 				? raw.filter(
@@ -29,7 +36,9 @@ function loadEntries(): RecentEntry[] {
 }
 
 function saveEntries(entries: RecentEntry[]): void {
-	savePersisted(STORAGE_KEY, entries);
+	const key = currentAccountKey(STORAGE_KEY);
+	if (key === null) return;
+	savePersisted(key, entries);
 }
 
 /** Get recently used emoji keys (most recent first). */

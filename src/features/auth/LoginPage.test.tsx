@@ -60,6 +60,7 @@ vi.mock("./oidc", async (importOriginal) => {
 	};
 });
 
+import { loadSession } from "../../stores/session";
 import { LoginPage } from "./LoginPage";
 
 const METADATA = {
@@ -188,8 +189,7 @@ describe("LoginPage methods stage", () => {
 		await waitFor(() =>
 			expect(navigateMock).toHaveBeenCalledWith("/", { replace: true }),
 		);
-		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
-		expect(stored).toMatchObject({
+		expect(loadSession()).toMatchObject({
 			accessToken: "tok",
 			userId: "@alice:strange.pizza",
 			deviceId: "DEV1",
