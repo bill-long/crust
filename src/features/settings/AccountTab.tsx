@@ -1,13 +1,95 @@
 import { UserEvent } from "matrix-js-sdk";
-import { type Component, createSignal, For, onCleanup, Show } from "solid-js";
+import {
+	type Component,
+	createResource,
+	createSignal,
+	For,
+	onCleanup,
+	Show,
+	Suspense,
+} from "solid-js";
+import {
+	ACCOUNT_MANAGEMENT_ACTIONS,
+	accountManagementDeeplink,
+	fetchAccountManagement,
+} from "../../client/accountManagement";
+import { fetchThreePids } from "../../client/accountSecurity";
 import { useClient } from "../../client/client";
 import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
 import { createImageFallback } from "../../lib/imageFallback";
+import { loadSession } from "../../stores/session";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
+import { DeactivateAccountDialog } from "./DeactivateAccountDialog";
 import { SectionHeading } from "./SettingsControls";
 
-const AccountTab: Component = () => {
+interface AccountTabProps {
+	/** Signs this session out after a successful account deactivation
+	 *  (every token is already invalid server-side by then). */
+	onDeactivated: () => void;
+}
+
+const AccountTab: Component<AccountTabProps> = (props) => {
 	const { client } = useClient();
 	const userId = () => client.getUserId() ?? "";
+
+	// OAuth (MSC3861) sessions have no account password: the server refuses
+	// the password-UIA management endpoints outright and its own
+	// account-management page owns them (#451). Session type can't change
+	// without a full re-login, so one read at mount is enough. A password
+	// session can hit the same wall when the server disables password
+	// changes (the m.change_password capability), so that routes to the
+	// provider too.
+	const oidcSession = loadSession()?.oidc !== undefined;
+
+	const [security] = createResource(async () => {
+		let passwordDisabled = false;
+		if (!oidcSession) {
+			try {
+				const caps = await client.getCapabilities();
+				passwordDisabled =
+					(caps as { "m.change_password"?: { enabled?: boolean } })[
+						"m.change_password"
+					]?.enabled === false;
+			} catch {
+				// Capability probe failing must not hide the section; the
+				// submit path reports a server that refuses anyway.
+			}
+		}
+		// The capability governs only password changes: a password session
+		// on a server that disables them still deactivates in-app. OIDC
+		// sessions do neither in-app (the server refuses their password
+		// UIA outright).
+		const passwordViaProvider = oidcSession || passwordDisabled;
+		if (!passwordViaProvider && !oidcSession) {
+			return {
+				passwordViaProvider: false,
+				deactivateViaProvider: false,
+				manage: null,
+				deactivate: null,
+			};
+		}
+		// One metadata round-trip serves both links. Null entries render as
+		// plain explanatory text.
+		const mgmt = await fetchAccountManagement(client);
+		return {
+			passwordViaProvider,
+			deactivateViaProvider: oidcSession,
+			manage: mgmt && accountManagementDeeplink(mgmt),
+			deactivate:
+				mgmt &&
+				accountManagementDeeplink(
+					mgmt,
+					ACCOUNT_MANAGEMENT_ACTIONS.accountDeactivate,
+				),
+		};
+	});
+
+	// Bound third-party identifiers, read-only (the server's m.3pid_changes
+	// capability governs mutation, which Crust doesn't offer yet).
+	const [threePids] = createResource(() => fetchThreePids(client));
+
+	const [showChangePassword, setShowChangePassword] = createSignal(false);
+	const [showDeactivate, setShowDeactivate] = createSignal(false);
 
 	// Refresh counter — bump after profile mutations or SDK events to force re-read
 	const [profileVersion, setProfileVersion] = createSignal(0);
@@ -325,6 +407,103 @@ const AccountTab: Component = () => {
 				</div>
 			</section>
 
+			{/* Account security (#451) */}
+			<section>
+				<SectionHeading>Account Security</SectionHeading>
+				<Suspense fallback={null}>
+					<Show
+						when={security()?.passwordViaProvider === false}
+						fallback={
+							<div class="rounded-lg bg-surface-2/50 px-4 py-3">
+								<div class="text-sm font-medium text-text-primary">
+									Password managed outside Crust
+								</div>
+								<p class="mt-1 text-xs text-text-muted">
+									This account's password is managed by your account provider or
+									homeserver, not from this app.
+								</p>
+								<Show when={security()?.manage}>
+									{(url) => (
+										<a
+											href={url()}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="mt-2 inline-block rounded bg-surface-3 px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+										>
+											Open account settings
+										</a>
+									)}
+								</Show>
+							</div>
+						}
+					>
+						<div class="flex items-center justify-between rounded-lg bg-surface-2/50 px-4 py-3">
+							<div class="min-w-0">
+								<div class="text-sm font-medium text-text-primary">
+									Password
+								</div>
+								<div class="text-xs text-text-muted">
+									Change the password used to sign in.
+								</div>
+							</div>
+							<button
+								type="button"
+								onClick={() => setShowChangePassword(true)}
+								class="shrink-0 rounded bg-surface-3 px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-surface-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Change…
+							</button>
+						</div>
+					</Show>
+				</Suspense>
+
+				{/* Bound email addresses / phone numbers, read-only */}
+				<div class="mt-3">
+					<div class="mb-1 text-xs font-medium text-text-muted uppercase">
+						Email & phone
+					</div>
+					<Suspense fallback={null}>
+						<Show
+							when={!threePids.error}
+							fallback={
+								<div class="py-2 text-sm text-text-disabled">
+									Couldn't load the linked email addresses.
+								</div>
+							}
+						>
+							<Show
+								when={(threePids() ?? []).length > 0}
+								fallback={
+									<div class="py-2 text-sm text-text-disabled">
+										No email addresses or phone numbers are linked to this
+										account.
+									</div>
+								}
+							>
+								<div class="space-y-1">
+									<For each={threePids()}>
+										{(tp) => (
+											<div class="flex items-center justify-between rounded-lg bg-surface-2/50 px-4 py-2.5">
+												<span class="min-w-0 truncate text-sm text-text-secondary">
+													{tp.address}
+												</span>
+												<span class="shrink-0 text-xs text-text-muted">
+													{tp.medium === "email"
+														? "Email"
+														: tp.medium === "msisdn"
+															? "Phone"
+															: tp.medium}
+												</span>
+											</div>
+										)}
+									</For>
+								</div>
+							</Show>
+						</Show>
+					</Suspense>
+				</div>
+			</section>
+
 			{/* Blocked users */}
 			<section>
 				<SectionHeading>Blocked Users</SectionHeading>
@@ -402,6 +581,65 @@ const AccountTab: Component = () => {
 					</div>
 				</Show>
 			</section>
+
+			{/* Danger zone (#451) */}
+			<section>
+				<SectionHeading>Danger Zone</SectionHeading>
+				<div class="flex items-center justify-between rounded-lg bg-surface-2/50 px-4 py-3">
+					<div class="min-w-0">
+						<div class="text-sm font-medium text-text-primary">
+							Deactivate account
+						</div>
+						<div class="text-xs text-text-muted">
+							Permanently disable this account. This cannot be undone.
+						</div>
+					</div>
+					<Suspense fallback={null}>
+						<Show
+							when={security()?.deactivateViaProvider === false}
+							fallback={
+								<Show
+									when={security()?.deactivate}
+									fallback={
+										<span class="shrink-0 text-xs text-text-muted">
+											At your account provider
+										</span>
+									}
+								>
+									{(url) => (
+										<a
+											href={url()}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="shrink-0 rounded px-3 py-1.5 text-xs font-medium text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+										>
+											Deactivate…
+										</a>
+									)}
+								</Show>
+							}
+						>
+							<button
+								type="button"
+								onClick={() => setShowDeactivate(true)}
+								class="shrink-0 rounded px-3 py-1.5 text-xs font-medium text-danger-text transition-colors hover:bg-danger-bg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+							>
+								Deactivate…
+							</button>
+						</Show>
+					</Suspense>
+				</div>
+			</section>
+
+			<Show when={showChangePassword()}>
+				<ChangePasswordDialog onClose={() => setShowChangePassword(false)} />
+			</Show>
+			<Show when={showDeactivate()}>
+				<DeactivateAccountDialog
+					onClose={() => setShowDeactivate(false)}
+					onDeactivated={props.onDeactivated}
+				/>
+			</Show>
 		</div>
 	);
 };

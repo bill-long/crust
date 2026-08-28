@@ -1,3 +1,4 @@
+import { MatrixError } from "matrix-js-sdk";
 import { describe, expect, it } from "vitest";
 import { userFacingErrorMessage } from "./errorMessage";
 
@@ -27,6 +28,27 @@ describe("userFacingErrorMessage", () => {
 		// e.g. a MatrixError carrying the server's "Invalid password".
 		expect(userFacingErrorMessage(new Error("Invalid password"), "x")).toBe(
 			"Invalid password",
+		);
+	});
+
+	it("unwraps a MatrixError to the server's own error text", () => {
+		// The SDK's composed message is noise ("MatrixError: [401] Invalid
+		// identifier or password (https://hs/...)"); the body's `error`
+		// field is the text written for humans.
+		const err = new MatrixError(
+			{ errcode: "M_FORBIDDEN", error: "Invalid identifier or password" },
+			401,
+			"https://hs.example/_matrix/client/v3/account/deactivate",
+		);
+		expect(userFacingErrorMessage(err, "x")).toBe(
+			"Invalid identifier or password",
+		);
+	});
+
+	it("hides a bodyless MatrixError behind the fallback", () => {
+		const err = new MatrixError({ errcode: "M_UNKNOWN" }, 500);
+		expect(userFacingErrorMessage(err, "Something broke.")).toBe(
+			"Something broke.",
 		);
 	});
 

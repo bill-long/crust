@@ -13,6 +13,8 @@ interface UiaDialogProps {
 	/** Called with the password when user submits */
 	onSubmit: (password: string) => void;
 	onCancel: () => void;
+	/** Refusal from a previous attempt (e.g. wrong password). */
+	error?: string;
 }
 
 /**
@@ -66,7 +68,11 @@ const UiaDialog: Component<UiaDialogProps> = (props) => {
 					/>
 				</div>
 
-				{/* Error display reserved for future UIA retry flows */}
+				<Show when={props.error}>
+					<p role="alert" class="text-sm text-danger-text-bright">
+						{props.error}
+					</p>
+				</Show>
 
 				<div class="flex justify-end gap-2">
 					<button
@@ -192,13 +198,20 @@ const UiaPrompts: Component<UiaPromptsProps> = (props) => {
 		const p = props.flow.prompt();
 		return p?.kind === "oauth" ? p : null;
 	};
+	const passwordPrompt = () => {
+		const p = props.flow.prompt();
+		return p?.kind === "password" ? p : null;
+	};
 	return (
 		<Switch>
-			<Match when={props.flow.prompt()?.kind === "password"}>
-				<UiaDialog
-					onSubmit={props.flow.submitPassword}
-					onCancel={props.flow.cancel}
-				/>
+			<Match when={passwordPrompt()}>
+				{(prompt) => (
+					<UiaDialog
+						onSubmit={props.flow.submitPassword}
+						onCancel={props.flow.cancel}
+						error={prompt().error}
+					/>
+				)}
 			</Match>
 			<Match when={oauthPrompt()}>
 				{(oauth) => (

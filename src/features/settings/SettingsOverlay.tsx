@@ -232,7 +232,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 									<AppGeneralTab />
 								</Match>
 								<Match when={props.activeTab === "account"}>
-									<AccountTab />
+									<AccountTab onDeactivated={props.onLogout} />
 								</Match>
 								<Match when={props.activeTab === "notifications"}>
 									<NotificationsTab />
