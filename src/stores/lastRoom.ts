@@ -1,5 +1,5 @@
-import { createPersistedSignal } from "../lib/persistedSignal";
 import { STORAGE_KEYS } from "../lib/storageKeys";
+import { createAccountScopedSignal } from "./accountScoped";
 
 const STORAGE_KEY = STORAGE_KEYS.lastRoom;
 
@@ -7,8 +7,8 @@ const STORAGE_KEY = STORAGE_KEYS.lastRoom;
 // Stored structurally rather than as a raw route so the route can be rebuilt
 // and re-validated on launch: `roomId` is the room itself; `spaceId` is the
 // space it was viewed under, if any (undefined for home rooms and DMs). Unlike
-// the per-space `lastChannel` store this is a single global value — the most
-// recent room regardless of which section it lived in.
+// the per-space `lastChannel` store this is a single value per account - the
+// most recent room regardless of which section it lived in.
 export interface LastRoom {
 	roomId: string;
 	spaceId?: string;
@@ -26,7 +26,11 @@ function parse(raw: unknown): LastRoom | null {
 	return typeof spaceId === "string" ? { roomId, spaceId } : { roomId };
 }
 
-const store = createPersistedSignal<LastRoom | null>(STORAGE_KEY, parse, null);
+const store = createAccountScopedSignal<LastRoom | null>(
+	STORAGE_KEY,
+	parse,
+	null,
+);
 
 /** The room the user last had open, or null if none recorded. */
 export function getLastRoom(): LastRoom | null {

@@ -1,5 +1,5 @@
-import { createPersistedSignal } from "../lib/persistedSignal";
 import { STORAGE_KEYS } from "../lib/storageKeys";
+import { createAccountScopedSignal } from "./accountScoped";
 
 const STORAGE_KEY = STORAGE_KEYS.lastChannel;
 
@@ -22,7 +22,7 @@ function parse(raw: unknown): LastChannelMap {
 	return out;
 }
 
-const store = createPersistedSignal<LastChannelMap>(
+const store = createAccountScopedSignal<LastChannelMap>(
 	STORAGE_KEY,
 	parse,
 	emptyMap(),

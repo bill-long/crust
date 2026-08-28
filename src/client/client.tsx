@@ -70,6 +70,12 @@ export type CryptoState = "loading" | "ready" | "error";
 
 interface ClientContextValue {
 	client: MatrixClient;
+	/**
+	 * The account this provider was built for. Consumers that touch account-owned
+	 * storage (crypto stores) must pass THIS rather than re-reading the active
+	 * session, so a wipe can only ever hit the account on screen (#532).
+	 */
+	session: Session;
 	syncState: () => AppSyncState;
 	cryptoState: () => CryptoState;
 	summaries: SummariesStore;
@@ -480,8 +486,8 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			// No URL argument: the package's own default is the bundled wasm, the
 			// same one the SDK's internal initAsync call resolves to.
 			loadModule: () => loadCryptoModule(),
-			clearStores: () => clearCryptoStores(matrixClient),
-			initCrypto: () => initCryptoStore(matrixClient),
+			clearStores: () => clearCryptoStores(matrixClient, props.session),
+			initCrypto: () => initCryptoStore(matrixClient, props.session),
 			isAborted: () => disposed || syncState() === "logged-out",
 			reload: () => window.location.reload(),
 			timeoutMs: CRYPTO_INIT_TIMEOUT_MS,
@@ -549,6 +555,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		<ClientContext.Provider
 			value={{
 				client: matrixClient,
+				session: props.session,
 				syncState,
 				cryptoState,
 				summaries,

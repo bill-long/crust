@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppSyncState, CryptoState } from "../../../client/client";
 import { ClientContext } from "../../../client/client";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { TEST_SESSION } from "../../../test/testSession";
 import type { EventInfo } from "./eventBlock";
 import { PollMessage, VoterAvatar } from "./PollMessage";
 import type { PollSnapshot } from "./pollSnapshot";
@@ -362,6 +363,7 @@ describe("PollMessage event card (#418)", () => {
 		const Subject = () => (
 			<ClientContext.Provider
 				value={{
+					session: TEST_SESSION,
 					client: client as unknown as MatrixClient,
 					syncState,
 					cryptoState,

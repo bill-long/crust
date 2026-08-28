@@ -30,6 +30,7 @@ import type {
 	TimelineEvent,
 } from "../features/room/timeline/useTimeline";
 import { createMockClient } from "./mockClient";
+import { TEST_SESSION } from "./testSession";
 
 interface RoomSnapshot {
 	events: TimelineEvent[];
@@ -221,6 +222,7 @@ export const TestClientProvider: ParentComponent<{
 	return (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: client as unknown as MatrixClient,
 				syncState,
 				cryptoState,

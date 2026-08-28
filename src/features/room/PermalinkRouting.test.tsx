@@ -10,6 +10,7 @@ import {
 	joinDialogRequest,
 } from "../../stores/joinDialog";
 import { clearNotices } from "../../stores/notices";
+import { TEST_SESSION } from "../../test/testSession";
 import { findJoinedRoomId, PermalinkRouting } from "./PermalinkRouting";
 import { closeProfileCard, profileCardRequest } from "./profile/profileCard";
 
@@ -91,6 +92,7 @@ const Wrapper: ParentComponent<{
 	return (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: props.client,
 				syncState,
 				cryptoState,

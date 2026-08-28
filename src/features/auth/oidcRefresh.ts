@@ -23,10 +23,10 @@
 import { createClient, OAuth2, TokenRefresher } from "matrix-js-sdk";
 import type { TokenRefreshFunction } from "matrix-js-sdk/lib/http-api";
 import {
-	loadSession,
+	loadSessions,
 	type Session,
 	type SessionOidc,
-	saveSession,
+	updateSession,
 } from "../../stores/session";
 import { oidcRedirectUri } from "./oidc";
 
@@ -55,6 +55,12 @@ function identityOf(session: Session & { oidc: SessionOidc }): SessionIdentity {
  * Best-effort: a failed write leaves the in-memory client working at the
  * cost of a forced re-login after the next reload once the old refresh
  * token has been rotated out.
+ *
+ * The account is looked up by user ID rather than taken as "the active
+ * session": a refresh in flight across an account switch belongs to the
+ * account it was issued for, and `updateSession` writes it there without
+ * disturbing which account is active. An account removed meanwhile is not
+ * resurrected - `updateSession` only ever replaces an existing entry.
  */
 function persistRefreshedTokens(
 	identity: SessionIdentity,
@@ -63,20 +69,22 @@ function persistRefreshedTokens(
 	// Reload from storage rather than closing over the boot-time session:
 	// another tab may have rotated the refresh token since this window
 	// loaded, and we must not resurrect the stale one.
-	const session = loadSession();
+	const session = loadSessions().find((s) => s.userId === identity.userId);
 	if (!session?.oidc) return;
 	if (
-		session.userId !== identity.userId ||
 		session.deviceId !== identity.deviceId ||
 		session.oidc.issuer !== identity.issuer ||
 		session.oidc.clientId !== identity.clientId
 	) {
 		return;
 	}
-	session.accessToken = tokens.accessToken;
-	if (tokens.refreshToken) session.refreshToken = tokens.refreshToken;
+	const rotated: Session = { ...session, accessToken: tokens.accessToken };
+	// Truthiness, not `??`: an OP that answers with an EMPTY refresh_token has not
+	// rotated it, and storing "" would fail session validation - losing the new
+	// access token too, for a forced re-login on the next reload.
+	if (tokens.refreshToken) rotated.refreshToken = tokens.refreshToken;
 	try {
-		saveSession(session);
+		updateSession(rotated);
 	} catch (e) {
 		console.warn("Failed to persist refreshed OAuth2 tokens:", e);
 	}

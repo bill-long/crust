@@ -12,6 +12,7 @@ import {
 	_resetActiveCallForTests,
 	setActiveCallRoomId,
 } from "../../../stores/activeCall";
+import { TEST_SESSION } from "../../../test/testSession";
 import { CallButton } from "./CallButton";
 import {
 	_resetCallSessionForTests,
@@ -88,6 +89,7 @@ function renderButton(opts: {
 	const result = render(() => (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: client as unknown as MatrixClient,
 				syncState,
 				cryptoState,

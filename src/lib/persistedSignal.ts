@@ -105,6 +105,15 @@ export interface PersistedSignal<T> {
 	reset: () => void;
 }
 
+export interface RebindablePersistedSignal<T> extends PersistedSignal<T> {
+	/**
+	 * Re-resolve the storage key and re-read the value from it, notifying
+	 * subscribers. Used when the key itself changes under the signal - today
+	 * only when the active account changes (see `stores/accountScoped.ts`).
+	 */
+	reload: () => void;
+}
+
 /**
  * A module-level signal backed by localStorage under a single `crust:` key.
  *
@@ -127,9 +136,30 @@ export function createPersistedSignal<T>(
 	initial: T,
 	options?: { legacyKey?: string },
 ): PersistedSignal<T> {
+	return createPersistedSignalFor(() => key, parse, initial, options);
+}
+
+/**
+ * {@link createPersistedSignal} for a key that is not fixed for the life of the
+ * signal: `resolveKey` is consulted on every load and every save, and `reload()`
+ * re-reads through it after the key changes.
+ *
+ * `resolveKey` returning null means "there is nowhere to persist this right
+ * now" - reads fall back to `initial` and writes stay in memory. That is the
+ * logged-out state for an account-scoped store: the value belongs to an account
+ * and there is no account to file it under.
+ */
+export function createPersistedSignalFor<T>(
+	resolveKey: () => string | null,
+	parse: (raw: unknown) => T,
+	initial: T,
+	options?: { legacyKey?: string },
+): RebindablePersistedSignal<T> {
 	const legacyKey = options?.legacyKey;
 
 	const load = (): T => {
+		const key = resolveKey();
+		if (key === null) return initial;
 		const raw = readRawWithMigration(key, legacyKey);
 		if (raw === null) return initial;
 		try {
@@ -154,14 +184,20 @@ export function createPersistedSignal<T>(
 		// the redundant notify and storage write.
 		if (value === current) return;
 		setSignal(() => value);
-		savePersisted(key, value);
+		const key = resolveKey();
+		if (key !== null) savePersisted(key, value);
 	};
 
 	const reset = (): void => {
 		setSignal(() => initial);
-		safeLocalStorage.remove(key);
+		const key = resolveKey();
+		if (key !== null) safeLocalStorage.remove(key);
 		if (legacyKey) safeLocalStorage.remove(legacyKey);
 	};
 
-	return { get, set, reset };
+	const reload = (): void => {
+		setSignal(() => load());
+	};
+
+	return { get, set, reset, reload };
 }

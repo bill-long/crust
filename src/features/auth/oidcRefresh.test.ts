@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../stores/session";
-import { saveSession } from "../../stores/session";
+import { loadSession, loadSessions, saveSession } from "../../stores/session";
 
 // Mock the SDK boundary: a fake TokenRefresher that captures constructor
 // args and lets each test script what a refresh yields. What stays under
@@ -76,6 +76,10 @@ const OIDC_SESSION: Session = {
 	},
 };
 
+/** The account persisted for `userId`, or undefined if it is not stored. */
+const stored = (userId = PASSWORD_SESSION.userId): Session | undefined =>
+	loadSessions().find((session) => session.userId === userId);
+
 beforeEach(() => {
 	localStorage.clear();
 	oauth2Contexts.args.length = 0;
@@ -134,12 +138,11 @@ describe("createOidcTokenRefreshFn", () => {
 
 		await fn("refresh-old");
 
-		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
-		expect(stored.accessToken).toBe("new-access");
-		expect(stored.refreshToken).toBe("new-refresh");
+		expect(stored()?.accessToken).toBe("new-access");
+		expect(stored()?.refreshToken).toBe("new-refresh");
 		// Untouched fields survive the rotation.
-		expect(stored.userId).toBe("@alice:example.com");
-		expect(stored.oidc).toEqual(OIDC_SESSION.oidc);
+		expect(stored()?.userId).toBe("@alice:example.com");
+		expect(stored()?.oidc).toEqual(OIDC_SESSION.oidc);
 	});
 
 	it("keeps the stored refresh token when the OP does not rotate it", async () => {
@@ -150,9 +153,25 @@ describe("createOidcTokenRefreshFn", () => {
 
 		await fn("refresh-old");
 
-		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
-		expect(stored.accessToken).toBe("new-access");
-		expect(stored.refreshToken).toBe("refresh-old");
+		expect(stored()?.accessToken).toBe("new-access");
+		expect(stored()?.refreshToken).toBe("refresh-old");
+	});
+
+	it("keeps the stored refresh token when the OP rotates it to empty", async () => {
+		// An empty refresh_token is "not rotated", not a new value: storing "" would
+		// fail session validation and lose the new access token with it.
+		tokenRefresherInstances.nextTokens = {
+			accessToken: "new-access",
+			refreshToken: "",
+		};
+		saveSession(OIDC_SESSION);
+		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await fn("refresh-old");
+
+		expect(stored()?.accessToken).toBe("new-access");
+		expect(stored()?.refreshToken).toBe("refresh-old");
 	});
 
 	it("does not persist into a password session that replaced the OIDC one", async () => {
@@ -162,9 +181,8 @@ describe("createOidcTokenRefreshFn", () => {
 
 		await fn("refresh-old");
 
-		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
-		expect(stored.accessToken).toBe("access-old");
-		expect(stored.refreshToken).toBeUndefined();
+		expect(stored()?.accessToken).toBe("access-old");
+		expect(stored()?.refreshToken).toBeUndefined();
 	});
 
 	it("does not persist into a different account's OIDC session", async () => {
@@ -179,10 +197,41 @@ describe("createOidcTokenRefreshFn", () => {
 
 		await fn("refresh-old");
 
-		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
-		expect(stored.accessToken).toBe("access-old");
-		expect(stored.refreshToken).toBe("refresh-old");
-		expect(stored.userId).toBe("@bob:example.com");
+		// The refreshing account is not logged in at all any more, so nothing is
+		// written - and in particular the account that IS logged in keeps its own
+		// tokens rather than being handed another account's.
+		expect(stored()).toBeUndefined();
+		expect(stored("@bob:example.com")?.accessToken).toBe("access-old");
+		expect(stored("@bob:example.com")?.refreshToken).toBe("refresh-old");
+	});
+
+	it("persists into its own account while a different one is active", async () => {
+		// A refresh can land after the user switched accounts (#532). It belongs
+		// to the account it was issued for: that account's tokens are updated,
+		// and the active account is neither written to nor switched away from.
+		const other: Session = {
+			...PASSWORD_SESSION,
+			accessToken: "bob-access",
+			userId: "@bob:example.com",
+			deviceId: "DEVICE99",
+		};
+		// Two accounts is a state only the switcher (#533) creates, so seed it the
+		// way it will be persisted rather than through the single-account login path.
+		localStorage.setItem(
+			"crust:session",
+			JSON.stringify({
+				activeUserId: other.userId,
+				sessions: [OIDC_SESSION, other],
+			}),
+		);
+		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!fn) throw new Error("expected a refresh function");
+
+		await fn("refresh-old");
+
+		expect(stored()?.accessToken).toBe("new-access");
+		expect(stored("@bob:example.com")?.accessToken).toBe("bob-access");
+		expect(loadSession()?.userId).toBe("@bob:example.com");
 	});
 
 	it("does not throw when the session was cleared before a refresh lands", async () => {
@@ -192,6 +241,7 @@ describe("createOidcTokenRefreshFn", () => {
 
 		await expect(fn("refresh-old")).resolves.toBeDefined();
 		expect(localStorage.getItem("crust:session")).toBeNull();
+		expect(loadSession()).toBeNull();
 	});
 
 	it("propagates a metadata-fetch failure as a transient error", async () => {

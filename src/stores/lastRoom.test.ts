@@ -1,10 +1,34 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { _resetLastRoomForTests, getLastRoom, setLastRoom } from "./lastRoom";
+import { clearSession, type Session, saveSession } from "./session";
 
 const STORAGE_KEY = "crust:last-room";
 
+const ACCOUNT_A: Session = {
+	accessToken: "syt_a",
+	userId: "@alice:example.com",
+	deviceId: "DEV_A",
+	homeserverUrl: "https://matrix.example.com",
+};
+const ACCOUNT_B: Session = {
+	...ACCOUNT_A,
+	accessToken: "syt_b",
+	userId: "@bob:example.com",
+	deviceId: "DEV_B",
+};
+
+/** The key the store files values under while `userId` is the active account. */
+const keyFor = (userId: string): string => `${STORAGE_KEY}:${userId}`;
+
+beforeEach(() => {
+	localStorage.clear();
+	saveSession(ACCOUNT_A);
+});
+
 afterEach(() => {
 	_resetLastRoomForTests();
+	clearSession();
+	localStorage.clear();
 });
 
 describe("lastRoom store", () => {
@@ -31,9 +55,9 @@ describe("lastRoom store", () => {
 		expect(getLastRoom()).toEqual({ roomId: "!b:example.com" });
 	});
 
-	it("persists to localStorage", () => {
+	it("persists to localStorage under the active account's key", () => {
 		setLastRoom("!r:example.com", "!s:example.com");
-		const raw = localStorage.getItem(STORAGE_KEY);
+		const raw = localStorage.getItem(keyFor(ACCOUNT_A.userId));
 		expect(raw).not.toBeNull();
 		expect(JSON.parse(raw as string)).toEqual({
 			roomId: "!r:example.com",
@@ -63,6 +87,28 @@ describe("lastRoom store", () => {
 		setLastRoom("!r:example.com");
 		_resetLastRoomForTests();
 		expect(getLastRoom()).toBeNull();
+		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+	});
+});
+
+describe("account scoping", () => {
+	it("keeps each account's last room separate across a switch", () => {
+		setLastRoom("!a:example.com");
+		saveSession(ACCOUNT_B);
+		// B has never opened a room: it must not inherit A's.
+		expect(getLastRoom()).toBeNull();
+		setLastRoom("!b:example.com");
+		expect(localStorage.getItem(keyFor(ACCOUNT_A.userId))).toBe(
+			JSON.stringify({ roomId: "!a:example.com" }),
+		);
+		saveSession(ACCOUNT_A);
+		expect(getLastRoom()).toEqual({ roomId: "!a:example.com" });
+	});
+
+	it("keeps writes in memory while no account is active", () => {
+		clearSession();
+		setLastRoom("!r:example.com");
+		expect(getLastRoom()).toEqual({ roomId: "!r:example.com" });
 		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
 	});
 });

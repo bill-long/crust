@@ -86,7 +86,7 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 
 /** Loading gate — shows spinner until initial sync completes. */
 const SyncGate: Component<RouteSectionProps> = (props) => {
-	const { syncState, cryptoState, client } = useClient();
+	const { syncState, cryptoState, client, session } = useClient();
 	const navigate = useNavigate();
 	const location = useLocation();
 	const params = useDecodedParams<{ roomId?: string }>();
@@ -116,7 +116,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
 			// Clear stores (best-effort async) then redirect.
-			clearCryptoStores(client)
+			clearCryptoStores(client, session)
 				.catch((e: unknown) => {
 					console.warn("Failed to clear stores on session expiry:", e);
 				})
@@ -147,7 +147,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		clearSession();
 		navigate("/login", { replace: true });
 		try {
-			await clearCryptoStores(client);
+			await clearCryptoStores(client, session);
 		} catch {
 			// best-effort
 		}

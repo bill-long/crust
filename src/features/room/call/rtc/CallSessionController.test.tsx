@@ -128,6 +128,7 @@ vi.mock("./rtcE2EEBridge", () => ({
 		(hooksState.createE2EE as unknown as () => Promise<RtcE2EEContext>)(),
 }));
 
+import { TEST_SESSION } from "../../../../test/testSession";
 // Imported after vi.mock so the mocks are in place when the module loads.
 import { CallSessionController } from "./CallSessionController";
 
@@ -146,6 +147,7 @@ function renderController(opts?: { encrypted?: boolean }): {
 	const result = render(() => (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: {
 					// roomEncrypted() reads the authoritative room state, not
 					// the summaries store (which can be optimistically false).

@@ -6,6 +6,8 @@ import {
 	type ScreenShareQuality,
 } from "../lib/screenShareQuality";
 import { STORAGE_KEYS } from "../lib/storageKeys";
+import { currentAccountKey } from "./accountScoped";
+import { subscribeAccountScope } from "./session";
 
 const SETTINGS_KEY = STORAGE_KEYS.settings;
 
@@ -288,14 +290,35 @@ function applyZoom(level: number): void {
 	}
 }
 
+// Settings belong to the account, not the install (#532): notification
+// preferences, presence sharing and device choices are all things one user
+// picked. The key follows the active account, and the store rebinds when that
+// changes so a login never leaves the previous account's preferences on screen.
+function loadSettings(): UserSettings {
+	const key = currentAccountKey(SETTINGS_KEY);
+	if (key === null) return { ...defaults };
+	return loadPersisted(key, parseSettings, { ...defaults });
+}
+
 // Module-level singleton store - property-level reactivity so consumers
 // reading e.g. settings.timeFormat don't re-render on zoomLevel changes.
-const [settings, setSettings] = createStore<UserSettings>(
-	loadPersisted(SETTINGS_KEY, parseSettings, { ...defaults }),
-);
+const [settings, setSettings] = createStore<UserSettings>(loadSettings());
+
+subscribeAccountScope(() => {
+	// parseSettings always returns every field, so this replaces the whole
+	// object rather than merging the previous account's values under it.
+	setSettings(loadSettings());
+	// Unconditional, unlike initZoom: switching from a zoomed account to one at
+	// 100% has to actively undo the zoom, not just skip re-applying it.
+	applyZoom(settings.zoomLevel);
+});
 
 function save(): void {
-	savePersisted(SETTINGS_KEY, settings);
+	const key = currentAccountKey(SETTINGS_KEY);
+	// No active account means no settings to write - the logged-out app only
+	// ever shows defaults, so there is nothing worth filing.
+	if (key === null) return;
+	savePersisted(key, settings);
 }
 
 /** Apply persisted zoom level. Call once during app bootstrap. */

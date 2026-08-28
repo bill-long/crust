@@ -21,6 +21,7 @@ import {
 	setLastChannel,
 } from "../../stores/lastChannel";
 import { createMockClient, createMockRoom } from "../../test/mockClient";
+import { TEST_SESSION } from "../../test/testSession";
 import { SpacesSidebar } from "./SpacesSidebar";
 
 vi.mock("solid-refresh", () => ({
@@ -99,6 +100,7 @@ const Wrapper: ParentComponent<{
 	return (
 		<ClientContext.Provider
 			value={{
+				session: TEST_SESSION,
 				client: props.client as unknown as MatrixClient,
 				syncState,
 				cryptoState,

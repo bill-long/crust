@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { type MicHotkey, parseMicHotkey } from "./settings";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clearSession, type Session, saveSession } from "./session";
+import {
+	type MicHotkey,
+	parseMicHotkey,
+	updateSetting,
+	userSettings,
+} from "./settings";
 
 describe("parseMicHotkey", () => {
 	it("returns null for null/undefined/non-object input", () => {
@@ -127,5 +133,57 @@ describe("parseMicHotkey", () => {
 			meta: false,
 			code: "F13",
 		});
+	});
+});
+
+describe("account scoping", () => {
+	const SETTINGS_KEY = "crust:settings";
+	const ALICE: Session = {
+		accessToken: "syt_a",
+		userId: "@alice:example.com",
+		deviceId: "DEV_A",
+		homeserverUrl: "https://matrix.example.com",
+	};
+	const BOB: Session = {
+		...ALICE,
+		accessToken: "syt_b",
+		userId: "@bob:example.com",
+		deviceId: "DEV_B",
+	};
+
+	beforeEach(() => {
+		localStorage.clear();
+		saveSession(ALICE);
+	});
+	afterEach(() => {
+		clearSession();
+		localStorage.clear();
+	});
+
+	it("persists under the active account's key", () => {
+		updateSetting("timeFormat", "24h");
+		expect(
+			localStorage.getItem(`${SETTINGS_KEY}:${ALICE.userId}`),
+		).not.toBeNull();
+		expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
+	});
+
+	it("rebinds to the new account's settings on a switch", () => {
+		updateSetting("timeFormat", "24h");
+		updateSetting("zoomLevel", 150);
+		saveSession(BOB);
+		// Bob has never set anything: he gets the defaults, not Alice's choices.
+		expect(userSettings().timeFormat).toBe("12h");
+		expect(userSettings().zoomLevel).toBe(100);
+		updateSetting("timeFormat", "24h");
+		saveSession(ALICE);
+		expect(userSettings().zoomLevel).toBe(150);
+	});
+
+	it("keeps changes out of storage while logged out", () => {
+		clearSession();
+		updateSetting("timeFormat", "24h");
+		expect(userSettings().timeFormat).toBe("24h");
+		expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();
 	});
 });
