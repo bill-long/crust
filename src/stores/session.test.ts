@@ -5,13 +5,23 @@ import {
 } from "../client/cryptoRecovery";
 import { pushMediaAuthToSw } from "../lib/authedMedia";
 import {
+	accounts,
+	activeAccount,
 	activeAccountId,
+	addSession,
 	clearSession,
+	freezeAccountScope,
+	isAccountScopeFrozen,
 	loadSession,
 	loadSessions,
+	MAX_ACCOUNTS,
+	rememberAccountDisplayName,
+	removeAccount,
 	type Session,
 	saveSession,
+	setActiveAccount,
 	subscribeAccountScope,
+	unfreezeAccountScope,
 	updateSession,
 } from "./session";
 
@@ -390,6 +400,33 @@ describe("multi-account store", () => {
 		expect(loadSession()?.userId).toBe(VALID.userId);
 	});
 
+	it("takes the account's per-account data with it, like removeAccount", () => {
+		// "Log out of X" means the same thing wherever it is invoked from: the
+		// switcher's row for a background account and the settings logout for the
+		// active one must not leave different amounts of that account behind.
+		saveSession(VALID);
+		localStorage.setItem(`crust:settings:${VALID.userId}`, '{"zoomLevel":150}');
+		localStorage.setItem(
+			`crust:last-room:${VALID.userId}`,
+			'{"roomId":"!r:x"}',
+		);
+		clearSession();
+		expect(localStorage.getItem(`crust:settings:${VALID.userId}`)).toBeNull();
+		expect(localStorage.getItem(`crust:last-room:${VALID.userId}`)).toBeNull();
+	});
+
+	it("logging out one account keeps another account's data", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		localStorage.setItem(`crust:settings:${VALID.userId}`, '{"zoomLevel":90}');
+		localStorage.setItem(`crust:settings:${BOB.userId}`, '{"zoomLevel":150}');
+		clearSession();
+		expect(localStorage.getItem(`crust:settings:${BOB.userId}`)).toBeNull();
+		expect(localStorage.getItem(`crust:settings:${VALID.userId}`)).toBe(
+			'{"zoomLevel":90}',
+		);
+		expect(loadSession()?.userId).toBe(VALID.userId);
+	});
+
 	it("leaves no session key behind once the last account is removed", () => {
 		saveSession(VALID);
 		clearSession();
@@ -629,5 +666,228 @@ describe("account scope notification", () => {
 		subscribeAccountScope((id) => seen.push(id))();
 		saveSession(VALID);
 		expect(seen).toEqual([]);
+	});
+});
+
+describe("addSession", () => {
+	it("appends alongside the accounts already logged in and activates it", () => {
+		saveSession(VALID);
+		expect(addSession(BOB)).toBe(true);
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			VALID.userId,
+			BOB.userId,
+		]);
+		expect(loadSession()?.userId).toBe(BOB.userId);
+		// The account that was already here keeps its own token.
+		expect(
+			loadSessions().find((a) => a.userId === VALID.userId)?.accessToken,
+		).toBe(VALID.accessToken);
+	});
+
+	it("refuses to go past the cap instead of dropping an account", () => {
+		const filled = Array.from({ length: MAX_ACCOUNTS }, (_, i) => ({
+			...VALID,
+			userId: `@user${i}:example.com`,
+		}));
+		seedStore(filled, filled[0]?.userId ?? "");
+		expect(addSession(BOB)).toBe(false);
+		expect(loadSessions()).toHaveLength(MAX_ACCOUNTS);
+		expect(loadSessions().some((a) => a.userId === BOB.userId)).toBe(false);
+	});
+
+	it("re-adding a stored account replaces and activates it, not duplicates", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		expect(addSession({ ...VALID, deviceId: "DEVICE999" })).toBe(true);
+		expect(loadSessions()).toHaveLength(2);
+		expect(loadSession()?.userId).toBe(VALID.userId);
+		expect(loadSession()?.deviceId).toBe("DEVICE999");
+		// ...still on its own crypto store, not a freshly derived one.
+		expect(loadSession()?.cryptoPrefix).toBe(SAVED.cryptoPrefix);
+	});
+
+	it("derives the crypto prefix rather than taking the caller's", () => {
+		saveSession(VALID);
+		addSession({ ...SAVED, userId: BOB.userId, deviceId: BOB.deviceId });
+		expect(loadSession()?.cryptoPrefix).toBe(accountCryptoDbPrefix(BOB.userId));
+		expect(loadSession()?.cryptoPrefix).not.toBe(SAVED.cryptoPrefix);
+	});
+
+	it("still fills the cap slot an existing account already occupies", () => {
+		const filled = Array.from({ length: MAX_ACCOUNTS }, (_, i) => ({
+			...VALID,
+			userId: `@user${i}:example.com`,
+		}));
+		seedStore(filled, filled[0]?.userId ?? "");
+		// Re-adding one of them is a re-login, not a new account: the cap must
+		// not lock a user out of an account they are already logged into.
+		const existing = filled[2];
+		if (!existing) throw new Error("fixture");
+		expect(addSession({ ...existing, accessToken: "syt_new" })).toBe(true);
+		expect(loadSession()?.userId).toBe(existing.userId);
+	});
+});
+
+describe("setActiveAccount", () => {
+	it("flips the pointer without touching the stored accounts", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		expect(setActiveAccount(VALID.userId)).toBe(true);
+		expect(loadSession()?.userId).toBe(VALID.userId);
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			VALID.userId,
+			BOB.userId,
+		]);
+	});
+
+	it("refuses an account that is not stored", () => {
+		saveSession(VALID);
+		expect(setActiveAccount("@ghost:example.com")).toBe(false);
+		expect(loadSession()?.userId).toBe(VALID.userId);
+	});
+
+	it("is a no-op for the account already active", () => {
+		saveSession(VALID);
+		const seen: Array<string | null> = [];
+		const unsubscribe = subscribeAccountScope((id) => seen.push(id));
+		try {
+			expect(setActiveAccount(VALID.userId)).toBe(true);
+			expect(seen).toEqual([]);
+		} finally {
+			unsubscribe();
+		}
+	});
+});
+
+describe("removeAccount", () => {
+	const settingsKey = (userId: string): string => `crust:settings:${userId}`;
+
+	it("drops the account and every value filed under it", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		localStorage.setItem(settingsKey(BOB.userId), '{"zoomLevel":150}');
+		localStorage.setItem(settingsKey(VALID.userId), '{"zoomLevel":90}');
+		removeAccount(BOB.userId);
+		expect(loadSessions().map((a) => a.userId)).toEqual([VALID.userId]);
+		expect(localStorage.getItem(settingsKey(BOB.userId))).toBeNull();
+		// The account that stayed keeps its own data - the whole point of the
+		// per-account scoping (#532).
+		expect(localStorage.getItem(settingsKey(VALID.userId))).toBe(
+			'{"zoomLevel":90}',
+		);
+	});
+
+	it("activates a remaining account when the active one is removed", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		removeAccount(BOB.userId);
+		expect(loadSession()?.userId).toBe(VALID.userId);
+	});
+
+	it("leaves the active account alone when removing another", () => {
+		// Three accounts, and the active one is NOT the first survivor: removing
+		// someone else must not quietly move the user to a different account.
+		const CAROL: Session = {
+			...VALID,
+			userId: "@carol:example.com",
+			deviceId: "DEVICE_C",
+		};
+		seedStore([SAVED, BOB, CAROL], CAROL.userId);
+		removeAccount(VALID.userId);
+		expect(loadSession()?.userId).toBe(CAROL.userId);
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			BOB.userId,
+			CAROL.userId,
+		]);
+	});
+
+	it("removing the last account leaves the install logged out", () => {
+		saveSession(VALID);
+		removeAccount(VALID.userId);
+		expect(loadSession()).toBeNull();
+		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
+	});
+
+	it("ignores an account that is not stored", () => {
+		saveSession(VALID);
+		removeAccount("@ghost:example.com");
+		expect(loadSessions().map((a) => a.userId)).toEqual([VALID.userId]);
+	});
+});
+
+describe("rememberAccountDisplayName", () => {
+	it("records a name the switcher can label an idle account with", () => {
+		saveSession(VALID);
+		rememberAccountDisplayName(VALID.userId, "Alice");
+		expect(loadSession()?.displayName).toBe("Alice");
+	});
+
+	it("clears the name when the account has none", () => {
+		saveSession(VALID);
+		rememberAccountDisplayName(VALID.userId, "Alice");
+		rememberAccountDisplayName(VALID.userId, undefined);
+		expect(loadSession()?.displayName).toBeUndefined();
+		expect(localStorage.getItem(SESSION_KEY)).not.toContain("displayName");
+	});
+
+	it("ignores an unknown account", () => {
+		saveSession(VALID);
+		rememberAccountDisplayName("@ghost:example.com", "Ghost");
+		expect(localStorage.getItem(SESSION_KEY)).not.toContain("Ghost");
+	});
+
+	it("does not write when the name is unchanged", () => {
+		saveSession(VALID);
+		rememberAccountDisplayName(VALID.userId, "Alice");
+		const before = localStorage.getItem(SESSION_KEY);
+		const setItem = vi.spyOn(Storage.prototype, "setItem");
+		rememberAccountDisplayName(VALID.userId, "Alice");
+		expect(setItem).not.toHaveBeenCalled();
+		expect(localStorage.getItem(SESSION_KEY)).toBe(before);
+	});
+});
+
+describe("reactive mirrors", () => {
+	it("track every write path", () => {
+		saveSession(VALID);
+		expect(activeAccount()).toBe(VALID.userId);
+		expect(accounts().map((a) => a.userId)).toEqual([VALID.userId]);
+
+		addSession(BOB);
+		expect(activeAccount()).toBe(BOB.userId);
+		expect(accounts().map((a) => a.userId)).toEqual([VALID.userId, BOB.userId]);
+
+		setActiveAccount(VALID.userId);
+		expect(activeAccount()).toBe(VALID.userId);
+
+		removeAccount(BOB.userId);
+		expect(accounts().map((a) => a.userId)).toEqual([VALID.userId]);
+
+		clearSession();
+		expect(activeAccount()).toBeNull();
+		expect(accounts()).toEqual([]);
+	});
+});
+
+describe("account scope freeze", () => {
+	it("suppresses rebinding once a switch has committed", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		const seen: Array<string | null> = [];
+		const unsubscribe = subscribeAccountScope((id) => seen.push(id));
+		try {
+			freezeAccountScope();
+			setActiveAccount(VALID.userId);
+			// The pointer moved, but this document is still the outgoing account's:
+			// its scoped stores must not follow.
+			expect(loadSession()?.userId).toBe(VALID.userId);
+			expect(seen).toEqual([]);
+		} finally {
+			unsubscribe();
+			unfreezeAccountScope();
+		}
+	});
+
+	it("is reversible when the switch falls through", () => {
+		saveSession(VALID);
+		freezeAccountScope();
+		expect(isAccountScopeFrozen()).toBe(true);
+		unfreezeAccountScope();
+		expect(isAccountScopeFrozen()).toBe(false);
 	});
 });

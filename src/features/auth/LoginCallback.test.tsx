@@ -21,15 +21,24 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 const saveSessionMock = vi.fn();
+const addSessionMock = vi.fn((..._args: unknown[]) => true);
+const revokeAccountTokenMock = vi.fn(async (..._args: unknown[]) => {});
+vi.mock("../../client/accountLogout", () => ({
+	revokeAccountToken: (...args: unknown[]) => revokeAccountTokenMock(...args),
+}));
 vi.mock("../../stores/session", () => ({
 	saveSession: (...args: unknown[]) => saveSessionMock(...args),
+	addSession: (...args: unknown[]) => addSessionMock(...args),
+	MAX_ACCOUNTS: 5,
 }));
 
 const completeOidcLoginMock = vi.fn();
 const takeOidcReturnToMock = vi.fn();
+const takeOidcAddAccountMock = vi.fn(() => false);
 vi.mock("./oidc", () => ({
 	completeOidcLogin: (...args: unknown[]) => completeOidcLoginMock(...args),
 	takeOidcReturnTo: () => takeOidcReturnToMock(),
+	takeOidcAddAccount: () => takeOidcAddAccountMock(),
 }));
 
 import { LoginCallback } from "./LoginCallback";
@@ -109,5 +118,32 @@ describe("LoginCallback", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Back to log in" }));
 		expect(navigateMock).toHaveBeenCalledWith("/login", { replace: true });
+	});
+});
+
+describe("LoginCallback add-account mode", () => {
+	it("clears the add-account intent even when the exchange fails", async () => {
+		// A flag left armed would turn the NEXT plain OAuth login in this tab
+		// into an append, which only the switcher may ask for.
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		expect(takeOidcAddAccountMock).toHaveBeenCalledOnce();
+		expect(addSessionMock).not.toHaveBeenCalled();
+	});
+
+	it("revokes the new device when the account cap is reached", async () => {
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		addSessionMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockResolvedValueOnce(GRANT_RESULT);
+
+		render(() => <LoginCallback />);
+
+		await waitFor(() => expect(revokeAccountTokenMock).toHaveBeenCalledOnce());
+		// ...and the login is reported rather than silently swallowed.
+		await screen.findByText(/accounts at once/);
 	});
 });

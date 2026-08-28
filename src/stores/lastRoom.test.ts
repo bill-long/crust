@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { _resetLastRoomForTests, getLastRoom, setLastRoom } from "./lastRoom";
-import { clearSession, type Session, saveSession } from "./session";
+import {
+	clearSession,
+	freezeAccountScope,
+	type Session,
+	saveSession,
+	unfreezeAccountScope,
+} from "./session";
 
 const STORAGE_KEY = "crust:last-room";
 
@@ -103,6 +109,21 @@ describe("account scoping", () => {
 		);
 		saveSession(ACCOUNT_A);
 		expect(getLastRoom()).toEqual({ roomId: "!a:example.com" });
+	});
+
+	it("writes nowhere once a switch has committed", () => {
+		// The pointer has moved but this document still belongs to the outgoing
+		// account, so a write here would be filed under the incoming account.
+		setLastRoom("!before:example.com");
+		freezeAccountScope();
+		try {
+			setLastRoom("!during:example.com");
+			expect(localStorage.getItem(keyFor(ACCOUNT_A.userId))).toBe(
+				JSON.stringify({ roomId: "!before:example.com" }),
+			);
+		} finally {
+			unfreezeAccountScope();
+		}
 	});
 
 	it("keeps writes in memory while no account is active", () => {

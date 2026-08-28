@@ -6,12 +6,24 @@ import {
 	type ValidatedAuthMetadata,
 } from "matrix-js-sdk";
 import { type Component, createSignal, Match, Show, Switch } from "solid-js";
+import { basePrefix } from "../../app/basePath";
 import { useConfig } from "../../app/ConfigProvider";
+import { revokeAccountToken } from "../../client/accountLogout";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { saveSession } from "../../stores/session";
+import {
+	addSession,
+	MAX_ACCOUNTS,
+	type Session,
+	saveSession,
+} from "../../stores/session";
 import { discoverHomeserver } from "./discovery";
-import { probeDelegatedAuth, startOidcLogin, stashOidcReturnTo } from "./oidc";
-import { sanitizeReturnTo } from "./returnTo";
+import {
+	probeDelegatedAuth,
+	startOidcLogin,
+	stashOidcAddAccount,
+	stashOidcReturnTo,
+} from "./oidc";
+import { isAddAccountState, sanitizeReturnTo } from "./returnTo";
 
 /** What a homeserver supports, probed once before the user picks a method. */
 interface ServerCapabilities {
@@ -44,6 +56,39 @@ const LoginPage: Component = () => {
 		sanitizeReturnTo(
 			(location.state as { returnTo?: unknown } | null)?.returnTo,
 		);
+
+	// Add-account mode (#533): entered only from the switcher, via router state.
+	// A plain visit to /login stays a plain login, which REPLACES whatever is
+	// stored - appending on an unguarded route would leave the previous
+	// account's live token behind with no UI to revoke it.
+	const addingAccount = (): boolean => isAddAccountState(location.state);
+
+	/**
+	 * Persist a completed login. Adding returns false when the install is at the
+	 * account cap - the credential is then dropped rather than silently
+	 * replacing an account the user did not choose.
+	 */
+	const persistSession = (session: Session): boolean => {
+		if (addingAccount()) return addSession(session);
+		saveSession(session);
+		return true;
+	};
+
+	/**
+	 * Land in the app as the account that just logged in. Adding an account
+	 * reloads the document rather than navigating: the app is still mounted as
+	 * (or was just torn down from) another account, and a reload is what
+	 * guarantees no module-scope state crosses the boundary - the same reason
+	 * `app/accountSwitch.ts` reloads. `returnTo` belongs to the account that
+	 * sent us here, so an added account starts at its own root instead.
+	 */
+	const enterApp = (target: string): void => {
+		if (addingAccount()) {
+			window.location.assign(`${basePrefix}/`);
+			return;
+		}
+		navigate(target, { replace: true });
+	};
 
 	/** Stage 1: discover the homeserver and probe its login methods. */
 	const handleServerSubmit = async (e: Event): Promise<void> => {
@@ -101,6 +146,7 @@ const LoginPage: Component = () => {
 		setRedirecting(true);
 		try {
 			stashOidcReturnTo(returnTo());
+			if (addingAccount()) stashOidcAddAccount();
 			const authorizationUrl = await startOidcLogin(
 				caps.delegatedAuth,
 				caps.baseUrl,
@@ -156,14 +202,23 @@ const LoginPage: Component = () => {
 				}
 			}
 
-			saveSession({
+			const session: Session = {
 				accessToken: response.access_token,
 				userId: response.user_id,
 				deviceId: response.device_id,
 				homeserverUrl: resolvedUrl,
-			});
+			};
+			if (!persistSession(session)) {
+				// The login already minted a device on the homeserver. Revoke it
+				// rather than orphaning a token this app will never hold again.
+				await revokeAccountToken(session);
+				setError(
+					`You can be logged into ${MAX_ACCOUNTS} accounts at once. Log out of one first.`,
+				);
+				return;
+			}
 
-			navigate(returnTo(), { replace: true });
+			enterApp(returnTo());
 		} catch (err: unknown) {
 			setError(userFacingErrorMessage(err, "Login failed"));
 		} finally {
@@ -184,9 +239,26 @@ const LoginPage: Component = () => {
 	return (
 		<div class="flex h-full justify-center overflow-y-auto bg-surface-0 p-4">
 			<div class="my-auto w-full max-w-sm">
-				<h1 class="mb-8 text-center text-3xl font-bold text-text-primary">
+				<h1 class="mb-2 text-center text-3xl font-bold text-text-primary">
 					Crust
 				</h1>
+				<Show when={addingAccount()} fallback={<div class="mb-6" />}>
+					{/* Add-account mode has to be escapable: the app is not gone,
+					    it is just not rendered on this route, and a user who
+					    changes their mind must not have to log in to get back. */}
+					<p class="mb-2 text-center text-sm text-text-muted">
+						Adding another account
+					</p>
+					<div class="mb-6 text-center">
+						<button
+							type="button"
+							onClick={() => navigate("/", { replace: true })}
+							class="rounded px-2 py-1 text-sm text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+						>
+							Cancel and go back
+						</button>
+					</div>
+				</Show>
 
 				<Switch>
 					{/* Stage 1: which homeserver? */}

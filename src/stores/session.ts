@@ -14,6 +14,8 @@
  * (pre-#313). Both migrations are state-loss-safe - the old value is only
  * dropped once the new write has landed.
  */
+
+import { createSignal } from "solid-js";
 import {
 	accountCryptoDbPrefix,
 	CRYPTO_DB_PREFIX,
@@ -52,6 +54,14 @@ export interface Session {
 	 * (and Crust from a co-hosted matrix-js-sdk app, #202).
 	 */
 	cryptoPrefix?: string;
+	/**
+	 * The account's display name as of the last time it was active, kept only so
+	 * the switcher can label an account whose client is not running. Refreshed by
+	 * the shell while the account IS active; absent until then, and the switcher
+	 * falls back to the user ID. Never authoritative - the profile on the
+	 * homeserver is.
+	 */
+	displayName?: string;
 }
 
 export interface SessionOidc {
@@ -119,7 +129,9 @@ function isSession(value: unknown): value is Session {
 		isValidUrl(value.homeserverUrl) &&
 		(value.oidc === undefined || isSessionOidc(value.oidc)) &&
 		(value.cryptoPrefix === undefined ||
-			(typeof value.cryptoPrefix === "string" && value.cryptoPrefix.length > 0))
+			(typeof value.cryptoPrefix === "string" &&
+				value.cryptoPrefix.length > 0)) &&
+		(value.displayName === undefined || typeof value.displayName === "string")
 	);
 }
 
@@ -266,6 +278,45 @@ function migrateInto(store: SessionStore): boolean {
 	return true;
 }
 
+/**
+ * How many accounts may be logged in at once, matching Discord's switcher.
+ * The limit is a product decision, not a technical one: each account costs a
+ * persisted token and a crypto store on disk, and a list this size stays
+ * scannable in one glance.
+ */
+export const MAX_ACCOUNTS = 5;
+
+/**
+ * Reactive mirrors of the persisted store, for UI that has to re-render when
+ * accounts are added, removed or switched. The persisted value stays the source
+ * of truth - these are published on every write below, and seeded here so the
+ * migration in `readStore` runs before any account-scoped store reads its key.
+ */
+const initialStore = readStore();
+const [accountsSignal, setAccountsSignal] = createSignal<Session[]>(
+	initialStore.sessions,
+);
+const [activeAccountSignal, setActiveAccountSignal] = createSignal<
+	string | null
+>(initialStore.activeUserId);
+
+/** Every account logged in on this install (reactive), in add order. */
+export function accounts(): Session[] {
+	return accountsSignal();
+}
+
+/** The active account's user ID (reactive), or null when logged out. */
+export function activeAccount(): string | null {
+	return activeAccountSignal();
+}
+
+/** Publish a written store to the reactive mirrors and the service worker. */
+function publish(next: SessionStore): void {
+	setAccountsSignal(next.sessions);
+	setActiveAccountSignal(next.activeUserId);
+	pushActiveMediaAuth(next);
+}
+
 /** The active account, or null when no account is logged in. */
 export function loadSession(): Session | null {
 	const store = readStore();
@@ -304,8 +355,33 @@ export function subscribeAccountScope(
 	return () => scopeListeners.delete(listener);
 }
 
+/**
+ * True once a switch has committed but the replacement document has not loaded
+ * yet. `window.location.assign` only STARTS a navigation - this document keeps
+ * running, and its account-scoped stores must not follow the pointer in the
+ * meantime, or the outgoing UI visibly re-zooms to the incoming account's
+ * settings and any write in that window (a setting, the last room, a recent
+ * emoji) is filed under the wrong account.
+ */
+let scopeFrozen = false;
+
+/** Stop account-scoped state following the pointer; see {@link scopeFrozen}. */
+export function freezeAccountScope(): void {
+	scopeFrozen = true;
+}
+
+/** Undo {@link freezeAccountScope} when the switch it was armed for fell through. */
+export function unfreezeAccountScope(): void {
+	scopeFrozen = false;
+}
+
+/** Whether account-scoped storage is frozen for an in-flight switch. */
+export function isAccountScopeFrozen(): boolean {
+	return scopeFrozen;
+}
+
 function notifyScopeChange(previous: string | null, next: string | null): void {
-	if (previous === next) return;
+	if (previous === next || scopeFrozen) return;
 	for (const listener of scopeListeners) listener(next);
 }
 
@@ -349,14 +425,13 @@ export function saveSession(session: Session): void {
 		cryptoPrefix:
 			existing?.cryptoPrefix ?? accountCryptoDbPrefix(session.userId),
 	};
-	// Phase 1 REPLACES rather than appends. `/login` renders outside the auth
-	// guard, so it is reachable while an account is already logged in; appending
-	// there would silently keep the previous account's live access token in
-	// storage with no UI to see or revoke it, and logging out of the new account
-	// would drop the user back into the old one without re-authenticating. There
-	// is no add-account entry point until the switcher ships (#533), which adds
-	// one deliberately - and the crypto-store isolation this phase lands is
-	// exactly what makes that safe to do.
+	// A plain login REPLACES rather than appends. `/login` renders outside the
+	// auth guard, so it is reachable while an account is already logged in;
+	// appending there would silently keep the previous account's live access
+	// token in storage with no UI to see or revoke it, and logging out of the new
+	// account would drop the user back into the old one without re-authenticating.
+	// Adding an account is a deliberate act with its own entry point:
+	// {@link addSession}, reached only from the switcher's "Add account".
 	const next: SessionStore = { activeUserId: entry.userId, sessions: [entry] };
 	// Keep the raw write (not the best-effort helper): a failed session persist
 	// must surface at login rather than silently logging the user out on reload.
@@ -366,7 +441,7 @@ export function saveSession(session: Session): void {
 		// keys held while they were install-global.
 		adoptUnscopedAccountKeys(entry.userId);
 	}
-	pushActiveMediaAuth(next);
+	publish(next);
 	notifyScopeChange(previousActive, entry.userId);
 }
 
@@ -393,28 +468,138 @@ export function updateSession(session: Session): boolean {
 		),
 	};
 	localStorage.setItem(SESSION_KEY, JSON.stringify(next));
-	pushActiveMediaAuth(next);
+	publish(next);
 	return true;
 }
 
 /**
- * Remove the active account and activate the next remaining one (none, on a
- * single-account install - the logout path). The removed account's own stores
- * are NOT touched here; wiping them is the caller's job, and only ever for the
- * account being removed (see `clearCryptoStores`).
+ * Log the active account out of this install: the logout path, and exactly the
+ * same thing the switcher does to a background account - so it goes through
+ * {@link removeAccount} rather than growing a second, subtly different removal.
+ * "Log out" means the same thing wherever it is invoked from, including that
+ * the account's own per-account data leaves the device with it.
+ *
+ * The account's crypto store is NOT wiped here; that is the caller's job and
+ * only ever for the account being removed (see `clearCryptoStores`).
  */
 export function clearSession(): void {
+	const activeUserId = readStore().activeUserId;
+	if (activeUserId !== null) removeAccount(activeUserId);
+	// Also drop any un-migrated legacy value so logout leaves no stale token
+	// behind (e.g. if migration never ran or its write failed), even when there
+	// was no account under the new key to remove.
+	safeLocalStorage.remove(LEGACY_SESSION_KEY);
+	pushActiveMediaAuth(readStore());
+}
+
+/**
+ * Add an account alongside the ones already logged in and make it active - the
+ * switcher's add-account path, and the ONLY way a second account comes into
+ * being (a plain login replaces; see {@link saveSession}).
+ *
+ * Returns false when the install is already at {@link MAX_ACCOUNTS} and the
+ * account is not one of them, so the caller can say so rather than silently
+ * dropping the credential it just obtained. Re-adding an account that is
+ * already stored replaces its entry and activates it, exactly like logging back
+ * into it.
+ */
+export function addSession(session: Session): boolean {
+	if (!isSession(session)) {
+		throw new Error("Refusing to persist invalid session data");
+	}
 	const store = readStore();
 	const previousActive = store.activeUserId;
-	const sessions = store.sessions.filter((s) => s.userId !== previousActive);
+	const existing = store.sessions.find((s) => s.userId === session.userId);
+	if (!existing && store.sessions.length >= MAX_ACCOUNTS) return false;
+	const entry: Session = {
+		...session,
+		// Same rule as saveSession: derived, never caller-supplied, so a new
+		// account can never be pointed at another account's crypto store.
+		cryptoPrefix:
+			existing?.cryptoPrefix ?? accountCryptoDbPrefix(session.userId),
+	};
 	const next: SessionStore = {
-		activeUserId: sessions[0]?.userId ?? null,
+		activeUserId: entry.userId,
+		sessions: existing
+			? store.sessions.map((s) => (s.userId === entry.userId ? entry : s))
+			: [...store.sessions, entry],
+	};
+	// Raw write, like saveSession: a failed persist has to surface at login
+	// rather than losing the account on the next reload.
+	localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+	if (store.sessions.length === 0) adoptUnscopedAccountKeys(entry.userId);
+	publish(next);
+	notifyScopeChange(previousActive, entry.userId);
+	return true;
+}
+
+/**
+ * Make an already-stored account the active one. Returns false for an unknown
+ * account (a stale switcher row, or a menu left open while the account was
+ * removed in another tab) rather than leaving the store pointing at nothing.
+ *
+ * This ONLY flips the pointer. Tearing the outgoing client down and rebuilding
+ * against the new account is the shell's job - see `app/accountSwitch.ts`.
+ */
+export function setActiveAccount(userId: string): boolean {
+	const store = readStore();
+	if (!store.sessions.some((s) => s.userId === userId)) return false;
+	if (store.activeUserId === userId) return true;
+	const next: SessionStore = { activeUserId: userId, sessions: store.sessions };
+	if (!writeStore(next)) return false;
+	publish(next);
+	notifyScopeChange(store.activeUserId, userId);
+	return true;
+}
+
+/**
+ * Forget an account: drop its entry and every per-account value filed under it.
+ * The next account in the list becomes active if the removed one was.
+ *
+ * Storage only. Revoking the token and wiping that account's crypto store are
+ * the caller's job and must happen FIRST, while the credentials to do it are
+ * still here (see `client/accountLogout.ts`).
+ */
+export function removeAccount(userId: string): void {
+	const store = readStore();
+	const previousActive = store.activeUserId;
+	const sessions = store.sessions.filter((s) => s.userId !== userId);
+	if (sessions.length === store.sessions.length) return;
+	const next: SessionStore = {
+		activeUserId:
+			previousActive === userId
+				? (sessions[0]?.userId ?? null)
+				: previousActive,
 		sessions,
 	};
 	writeStore(next);
-	// Also drop any un-migrated legacy value so logout leaves no stale token
-	// behind (e.g. if migration never ran or its write failed).
-	safeLocalStorage.remove(LEGACY_SESSION_KEY);
-	pushActiveMediaAuth(next);
+	for (const base of ACCOUNT_SCOPED_KEYS) {
+		safeLocalStorage.remove(accountScopedKey(base, userId));
+	}
+	publish(next);
 	notifyScopeChange(previousActive, next.activeUserId);
+}
+
+/**
+ * Record the display name an account is currently known by, so the switcher can
+ * label it while its client is not running. A no-op when the account is gone or
+ * the name is unchanged, so the shell can call it from a profile effect without
+ * writing storage on every sync.
+ */
+export function rememberAccountDisplayName(
+	userId: string,
+	displayName: string | undefined,
+): void {
+	const store = readStore();
+	const existing = store.sessions.find((s) => s.userId === userId);
+	if (!existing || existing.displayName === displayName) return;
+	const entry: Session = { ...existing };
+	if (displayName === undefined) delete entry.displayName;
+	else entry.displayName = displayName;
+	const next: SessionStore = {
+		activeUserId: store.activeUserId,
+		sessions: store.sessions.map((s) => (s.userId === userId ? entry : s)),
+	};
+	if (!writeStore(next)) return;
+	publish(next);
 }

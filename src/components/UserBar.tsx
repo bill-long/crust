@@ -1,8 +1,10 @@
+import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { Popover } from "@kobalte/core/popover";
 import { type Component, createSignal, type JSX, Show } from "solid-js";
 import { HotkeyCaptureButton } from "../features/voice/HotkeyCaptureButton";
 import { updateSetting, userSettings } from "../stores/settings";
 import { micEnabled, toggleUserWantsMic, userWantsMic } from "../stores/voice";
+import { type AccountSummary, AccountSwitcher } from "./AccountSwitcher";
 import { Avatar } from "./Avatar";
 
 interface UserBarProps {
@@ -15,6 +17,15 @@ interface UserBarProps {
 	cryptoLabel: string;
 	onCryptoClick: () => void;
 	onSettingsClick: () => void;
+	/** Every account on this install, active one included (#533). */
+	accounts: AccountSummary[];
+	canAddAccount: boolean;
+	maxAccounts: number;
+	/** True while a switch or log-out is in flight. */
+	accountBusy: boolean;
+	onSwitchAccount: (userId: string) => void;
+	onAddAccount: () => void;
+	onLogOutAccount: (userId: string) => void;
 }
 
 // --- SVG icon helpers (inline, no deps) ---
@@ -268,55 +279,63 @@ const UserBar: Component<UserBarProps> = (props) => {
 
 	return (
 		<div class="flex h-[52px] shrink-0 items-center gap-1 border-t border-border-subtle bg-surface-1 px-2">
-			{/* Avatar + user info */}
-			<Show
-				when={props.needsCryptoAttention}
-				fallback={
-					<div class="flex min-w-0 flex-1 items-center gap-2 px-1 py-1">
-						<Avatar url={props.avatarUrl} initial={props.initial} />
-						<div class="min-w-0 flex-1">
-							<div class="truncate text-sm font-semibold leading-tight text-text-primary">
-								{props.displayName}
-							</div>
-							<SyncStatusLine
-								syncStatus={props.syncStatus}
-								userId={props.userId}
-							/>
-						</div>
-					</div>
+			{/* Avatar + user info: the account-switcher trigger (#533). The
+			    crypto-attention affordance moved into the menu with it, so the
+			    identity block has exactly one click target - opening the menu -
+			    rather than two meanings depending on crypto state. */}
+			<AccountSwitcher
+				accounts={props.accounts}
+				activeUserId={props.userId}
+				canAddAccount={props.canAddAccount}
+				maxAccounts={props.maxAccounts}
+				busy={props.accountBusy}
+				onSwitchAccount={props.onSwitchAccount}
+				onAddAccount={props.onAddAccount}
+				onLogOutAccount={props.onLogOutAccount}
+				triggerClass="group relative flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover"
+				triggerLabel={`${props.displayName} \u2014 switch account${props.needsCryptoAttention ? ` \u2014 ${props.cryptoLabel}` : ""}`}
+				triggerTitle={
+					props.syncStatus === "live"
+						? undefined
+						: props.syncStatus === "catching-up"
+							? "Reconnecting"
+							: "Disconnected"
+				}
+				leadingItem={
+					props.needsCryptoAttention ? (
+						<DropdownMenu.Item
+							class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-warning transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-hidden"
+							onSelect={props.onCryptoClick}
+						>
+							<span
+								class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-warning text-[9px] font-bold text-text-primary"
+								aria-hidden="true"
+							>
+								!
+							</span>
+							<span class="min-w-0 flex-1 truncate">{props.cryptoLabel}</span>
+						</DropdownMenu.Item>
+					) : undefined
 				}
 			>
-				<button
-					type="button"
-					onClick={props.onCryptoClick}
-					class="group relative flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1 transition-colors hover:bg-surface-2"
-					title={
-						props.syncStatus === "live"
-							? props.cryptoLabel
-							: `${props.syncStatus === "catching-up" ? "Reconnecting" : "Disconnected"} \u00b7 ${props.cryptoLabel}`
-					}
-					aria-label={`${props.displayName} \u2014 ${props.syncStatus !== "live" ? `${props.syncStatus === "catching-up" ? "Reconnecting" : "Disconnected"} \u2014 ` : ""}${props.cryptoLabel}`}
-				>
-					<div class="relative">
-						<Avatar url={props.avatarUrl} initial={props.initial} />
+				<div class="relative">
+					<Avatar url={props.avatarUrl} initial={props.initial} />
+					<Show when={props.needsCryptoAttention}>
 						<span
 							class="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-warning text-[8px] font-bold text-text-primary"
 							aria-hidden="true"
 						>
 							!
 						</span>
+					</Show>
+				</div>
+				<div class="min-w-0 flex-1">
+					<div class="truncate text-sm font-semibold leading-tight text-text-primary">
+						{props.displayName}
 					</div>
-					<div class="min-w-0 flex-1">
-						<div class="truncate text-sm font-semibold leading-tight text-text-primary">
-							{props.displayName}
-						</div>
-						<SyncStatusLine
-							syncStatus={props.syncStatus}
-							userId={props.userId}
-						/>
-					</div>
-				</button>
-			</Show>
+					<SyncStatusLine syncStatus={props.syncStatus} userId={props.userId} />
+				</div>
+			</AccountSwitcher>
 
 			{/* Mic split button */}
 			<SplitAudioButton

@@ -19,6 +19,7 @@ import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallS
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
+import { leaveLoggedOutAccount } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
@@ -122,7 +123,9 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				})
 				.finally(() => {
 					clearSession();
-					navigate("/login", { replace: true });
+					// Another account may still be logged in; land there rather than on
+					// a login form that would replace it (#533).
+					leaveLoggedOutAccount(() => navigate("/login", { replace: true }));
 				});
 		}
 	});
@@ -145,7 +148,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// Clear session and navigate immediately so the user never sees
 		// the main app UI in the "stopped" state while clearStores() awaits.
 		clearSession();
-		navigate("/login", { replace: true });
+		leaveLoggedOutAccount(() => navigate("/login", { replace: true }));
 		try {
 			await clearCryptoStores(client, session);
 		} catch {
