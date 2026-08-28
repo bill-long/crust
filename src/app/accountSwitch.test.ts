@@ -10,6 +10,24 @@ vi.mock("../features/room/notificationSound", () => ({
 	closeNotificationSound: () => closeNotificationSoundMock(),
 }));
 
+const releaseWebPushMock = vi.hoisted(() =>
+	vi.fn(async (_client: unknown, _cfg: unknown) => {}),
+);
+const restoreWebPushMock = vi.hoisted(() =>
+	vi.fn(async (_client: unknown, _cfg: unknown) => {}),
+);
+vi.mock("../features/notifications/accountPush", () => ({
+	releaseWebPush: (client: unknown, cfg: unknown) =>
+		releaseWebPushMock(client, cfg),
+	restoreWebPush: (client: unknown, cfg: unknown) =>
+		restoreWebPushMock(client, cfg),
+}));
+
+const releaseAppBadgeMock = vi.hoisted(() => vi.fn());
+vi.mock("../client/appBadge", () => ({
+	releaseAppBadge: () => releaseAppBadgeMock(),
+}));
+
 import { setActiveCallRoomId } from "../stores/activeCall";
 import {
 	addSession,
@@ -22,7 +40,24 @@ import {
 	subscribeAccountScope,
 	unfreezeAccountScope,
 } from "../stores/session";
-import { finishAccountLogout, switchToAccount } from "./accountSwitch";
+import type { PushConfig } from "../types/config";
+import {
+	type AccountExit,
+	endSessionForAccountExit,
+	finishAccountLogout,
+	switchToAccount,
+} from "./accountSwitch";
+
+/** The outgoing account's client and the operator push config, as the shell
+ *  hands them to an exit. Both are only ever forwarded, so stubs suffice. */
+const EXIT: AccountExit = {
+	client: {} as AccountExit["client"],
+	pushConfig: {
+		vapidPublicKey: "key",
+		gatewayUrl: "https://push.example.com/_matrix/push/v1/notify",
+		appId: "pizza.strange.crust",
+	} as PushConfig,
+};
 
 const ALICE: Session = {
 	accessToken: "syt_a",
@@ -64,6 +99,22 @@ beforeEach(() => {
 	closeNotificationSoundMock.mockImplementation(() => {
 		calls.push("closeNotificationSound");
 	});
+	releaseWebPushMock.mockClear();
+	releaseWebPushMock.mockImplementation(async () => {
+		// Later tick, like the call teardown: a release that is fired but not
+		// awaited records itself after the reload instead of before it.
+		await Promise.resolve();
+		await Promise.resolve();
+		calls.push("releaseWebPush");
+	});
+	restoreWebPushMock.mockClear();
+	restoreWebPushMock.mockImplementation(async () => {
+		calls.push("restoreWebPush");
+	});
+	releaseAppBadgeMock.mockClear();
+	releaseAppBadgeMock.mockImplementation(() => {
+		calls.push("badge:cleared");
+	});
 	vi.stubGlobal("location", { assign });
 	unfreezeAccountScope();
 });
@@ -81,7 +132,9 @@ describe("switchToAccount", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await expect(switchToAccount(ALICE.userId)).resolves.toBe("switching");
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe(
+			"switching",
+		);
 
 		expect(loadSession()?.userId).toBe(ALICE.userId);
 		expect(assign).toHaveBeenCalledOnce();
@@ -93,13 +146,59 @@ describe("switchToAccount", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await switchToAccount(ALICE.userId);
+		await switchToAccount(ALICE.userId, EXIT);
 
 		expect(calls).toEqual([
 			"closeNotificationSound",
 			"endActiveCall",
+			"releaseWebPush",
+			"badge:cleared",
 			"assign",
 		]);
+	});
+
+	it("hands the push registration back on the outgoing account's client", async () => {
+		// The pusher can only be removed with the credentials of the account that
+		// registered it, so it runs on the client this document is still holding.
+		// Left behind, it delivers that account's message previews onto a device
+		// now showing someone else's (#534).
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await switchToAccount(ALICE.userId, EXIT);
+
+		expect(releaseWebPushMock).toHaveBeenCalledWith(
+			EXIT.client,
+			EXIT.pushConfig,
+		);
+		expect(calls.indexOf("releaseWebPush")).toBeLessThan(
+			calls.indexOf("assign"),
+		);
+	});
+
+	it("clears the OS badge so the incoming account inherits no count", async () => {
+		// One badge for the whole install: the outgoing account's unread count
+		// would otherwise greet the incoming one until its first sync.
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await switchToAccount(ALICE.userId, EXIT);
+
+		expect(releaseAppBadgeMock).toHaveBeenCalledOnce();
+		expect(calls.indexOf("badge:cleared")).toBeLessThan(
+			calls.indexOf("assign"),
+		);
+	});
+
+	it("touches neither push nor the badge for a stale switcher row", async () => {
+		// Nothing is torn down before the row is validated - the account being
+		// left keeps its notifications for a switch that never happens.
+		saveSession(ALICE);
+
+		await switchToAccount("@ghost:example.com", EXIT);
+
+		expect(releaseWebPushMock).not.toHaveBeenCalled();
+		expect(releaseAppBadgeMock).not.toHaveBeenCalled();
 	});
 
 	it("keeps the outgoing account logged in", async () => {
@@ -108,7 +207,7 @@ describe("switchToAccount", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await switchToAccount(ALICE.userId);
+		await switchToAccount(ALICE.userId, EXIT);
 
 		const stored = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
 		expect(stored.sessions).toHaveLength(2);
@@ -124,7 +223,7 @@ describe("switchToAccount", () => {
 		// user their live call for a switch that then refuses to happen.
 		saveSession(ALICE);
 
-		await expect(switchToAccount("@ghost:example.com")).resolves.toBe(
+		await expect(switchToAccount("@ghost:example.com", EXIT)).resolves.toBe(
 			"unknown-account",
 		);
 
@@ -143,7 +242,7 @@ describe("switchToAccount", () => {
 		store.sessions.push({ ...BOB, cryptoPrefix: "crust:@bob:example.com" });
 		localStorage.setItem("crust:session", JSON.stringify(store));
 
-		await expect(switchToAccount(BOB.userId)).resolves.toBe("switching");
+		await expect(switchToAccount(BOB.userId, EXIT)).resolves.toBe("switching");
 
 		expect(assign).toHaveBeenCalledOnce();
 	});
@@ -158,7 +257,9 @@ describe("switchToAccount", () => {
 			JSON.stringify({ activeUserId: ALICE.userId, sessions: [ALICE] }),
 		);
 
-		await expect(switchToAccount(BOB.userId)).resolves.toBe("unknown-account");
+		await expect(switchToAccount(BOB.userId, EXIT)).resolves.toBe(
+			"unknown-account",
+		);
 
 		expect(endActiveCallMock).not.toHaveBeenCalled();
 		expect(assign).not.toHaveBeenCalled();
@@ -170,7 +271,9 @@ describe("switchToAccount", () => {
 		// click that did nothing.
 		saveSession(ALICE);
 
-		await expect(switchToAccount(ALICE.userId)).resolves.toBe("unchanged");
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe(
+			"unchanged",
+		);
 
 		expect(endActiveCallMock).not.toHaveBeenCalled();
 		expect(assign).not.toHaveBeenCalled();
@@ -184,7 +287,9 @@ describe("switchToAccount", () => {
 		addSession(BOB);
 		setActiveAccountForOtherTab(ALICE.userId);
 		// This tab is still running BOB (its mirror says so); storage says ALICE.
-		await expect(switchToAccount(ALICE.userId)).resolves.toBe("switching");
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe(
+			"switching",
+		);
 
 		expect(assign).toHaveBeenCalledOnce();
 	});
@@ -196,7 +301,7 @@ describe("switchToAccount", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await switchToAccount(ALICE.userId);
+		await switchToAccount(ALICE.userId, EXIT);
 
 		expect(isAccountScopeFrozen()).toBe(true);
 	});
@@ -208,11 +313,65 @@ describe("switchToAccount", () => {
 			throw new Error("QuotaExceeded");
 		});
 
-		await expect(switchToAccount(ALICE.userId)).resolves.toBe("failed");
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe("failed");
 
 		vi.restoreAllMocks();
 		expect(isAccountScopeFrozen()).toBe(false);
 		expect(assign).not.toHaveBeenCalled();
+	});
+
+	it("puts push back when the switch could not be persisted", async () => {
+		// The document stays, still running the outgoing account. Leaving its
+		// push registration handed back would strand it with background
+		// notifications unregistered while its own settings still say they are
+		// on, and nothing re-registers without a reload.
+		saveSession(ALICE);
+		addSession(BOB);
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("QuotaExceeded");
+		});
+
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe("failed");
+
+		vi.restoreAllMocks();
+		expect(restoreWebPushMock).toHaveBeenCalledWith(
+			EXIT.client,
+			EXIT.pushConfig,
+		);
+	});
+
+	it("keeps the badge when the switch could not be persisted", async () => {
+		// Nothing is leaving, so the count on screen is still this install's.
+		saveSession(ALICE);
+		addSession(BOB);
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("QuotaExceeded");
+		});
+
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe("failed");
+
+		vi.restoreAllMocks();
+		expect(releaseAppBadgeMock).not.toHaveBeenCalled();
+	});
+
+	it("does the network work BEFORE the pointer moves", async () => {
+		// Once the pointer has moved, the service worker holds the incoming
+		// account's media token and account-scoped writes are frozen out, while
+		// this document still renders the outgoing account - so a multi-second
+		// round trip there would show a UI fetching media it can no longer
+		// authenticate. Everything after the commit is synchronous.
+		saveSession(ALICE);
+		addSession(BOB);
+		let activeDuringRelease: string | undefined;
+		releaseWebPushMock.mockImplementation(async () => {
+			activeDuringRelease = loadSession()?.userId;
+			calls.push("releaseWebPush");
+		});
+
+		await switchToAccount(ALICE.userId, EXIT);
+
+		expect(activeDuringRelease).toBe(BOB.userId);
+		expect(restoreWebPushMock).not.toHaveBeenCalled();
 	});
 
 	it("switches anyway when the call teardown fails", async () => {
@@ -223,7 +382,9 @@ describe("switchToAccount", () => {
 		endActiveCallMock.mockRejectedValueOnce(new Error("network down"));
 		vi.spyOn(console, "error").mockImplementation(() => {});
 
-		await expect(switchToAccount(ALICE.userId)).resolves.toBe("switching");
+		await expect(switchToAccount(ALICE.userId, EXIT)).resolves.toBe(
+			"switching",
+		);
 
 		expect(loadSession()?.userId).toBe(ALICE.userId);
 		expect(assign).toHaveBeenCalledOnce();
@@ -241,10 +402,42 @@ describe("switchToAccount", () => {
 			setActiveCallRoomId("!late:example.com");
 		});
 
-		await switchToAccount(ALICE.userId);
+		await switchToAccount(ALICE.userId, EXIT);
 
 		const { activeCallRoomId } = await import("../stores/activeCall");
 		expect(activeCallRoomId()).toBeNull();
+	});
+});
+
+describe("endSessionForAccountExit", () => {
+	it("releases push but keeps the badge when there is nothing to commit", async () => {
+		// Leaving to add an account: no pointer moves and nothing is frozen, and
+		// this document goes on running - and syncing - the same account until
+		// `/login` unmounts it. Its push registration has to go (the next login
+		// may be someone else), but the count on screen is still that account's
+		// own, and a clear here would be both wrong and immediately undone.
+		saveSession(ALICE);
+
+		await expect(endSessionForAccountExit(EXIT)).resolves.toBe(true);
+
+		expect(calls).toEqual([
+			"closeNotificationSound",
+			"endActiveCall",
+			"releaseWebPush",
+		]);
+		expect(releaseAppBadgeMock).not.toHaveBeenCalled();
+		expect(restoreWebPushMock).not.toHaveBeenCalled();
+	});
+
+	it("puts push back and leaves the badge alone when the commit refuses", async () => {
+		saveSession(ALICE);
+
+		await expect(endSessionForAccountExit(EXIT, () => false)).resolves.toBe(
+			false,
+		);
+
+		expect(restoreWebPushMock).toHaveBeenCalledOnce();
+		expect(releaseAppBadgeMock).not.toHaveBeenCalled();
 	});
 });
 
@@ -266,7 +459,7 @@ describe("finishAccountLogout", () => {
 		addSession(BOB);
 		const goToLogin = vi.fn();
 
-		return finishAccountLogout(ALICE.userId, wipe, goToLogin).then(() => {
+		return finishAccountLogout(EXIT, ALICE.userId, wipe, goToLogin).then(() => {
 			expect(assign).toHaveBeenCalledOnce();
 			expect(goToLogin).not.toHaveBeenCalled();
 		});
@@ -278,9 +471,14 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await finishAccountLogout(ALICE.userId, wipe, vi.fn());
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
 
-		expect(calls).toEqual(["wipe", "assign"]);
+		expect(calls).toEqual([
+			"releaseWebPush",
+			"wipe",
+			"badge:cleared",
+			"assign",
+		]);
 	});
 
 	it("reports whether the document is being replaced", async () => {
@@ -289,14 +487,14 @@ describe("finishAccountLogout", () => {
 		// a guard there re-arms the action that is already on its way out.
 		saveSession(ALICE);
 		addSession(BOB);
-		await expect(finishAccountLogout(BOB.userId, wipe, vi.fn())).resolves.toBe(
-			"reloading",
-		);
+		await expect(
+			finishAccountLogout(EXIT, BOB.userId, wipe, vi.fn()),
+		).resolves.toBe("reloading");
 
 		localStorage.clear();
 		saveSession(ALICE);
 		await expect(
-			finishAccountLogout(ALICE.userId, wipe, vi.fn()),
+			finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn()),
 		).resolves.toBe("left");
 	});
 
@@ -306,9 +504,9 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn(() => calls.push("login"));
 
-		await finishAccountLogout(ALICE.userId, wipe, goToLogin);
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, goToLogin);
 
-		expect(calls).toEqual(["wipe", "login"]);
+		expect(calls).toEqual(["releaseWebPush", "wipe", "badge:cleared", "login"]);
 		expect(assign).not.toHaveBeenCalled();
 	});
 
@@ -326,7 +524,7 @@ describe("finishAccountLogout", () => {
 		const goToLogin = vi.fn();
 
 		// Logging out THIS document's account, which storage no longer lists.
-		await finishAccountLogout(ALICE.userId, wipe, goToLogin);
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, goToLogin);
 
 		expect(assign).toHaveBeenCalledOnce();
 		expect(goToLogin).not.toHaveBeenCalled();
@@ -348,7 +546,7 @@ describe("finishAccountLogout", () => {
 		});
 		const goToLogin = vi.fn();
 
-		await finishAccountLogout(BOB.userId, wipe, goToLogin);
+		await finishAccountLogout(EXIT, BOB.userId, wipe, goToLogin);
 
 		vi.restoreAllMocks();
 		expect(goToLogin).toHaveBeenCalledOnce();
@@ -369,7 +567,7 @@ describe("finishAccountLogout", () => {
 			const hangs = vi.fn(() => new Promise<void>(() => {}));
 			vi.spyOn(console, "error").mockImplementation(() => {});
 
-			const done = finishAccountLogout(BOB.userId, hangs, vi.fn());
+			const done = finishAccountLogout(EXIT, BOB.userId, hangs, vi.fn());
 			await vi.advanceTimersByTimeAsync(60_000);
 			await done;
 
@@ -386,7 +584,7 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await finishAccountLogout(BOB.userId, wipe, vi.fn());
+		await finishAccountLogout(EXIT, BOB.userId, wipe, vi.fn());
 
 		expect(assign).toHaveBeenCalledOnce();
 		expect(isAccountScopeFrozen()).toBe(true);
@@ -397,7 +595,7 @@ describe("finishAccountLogout", () => {
 		// stores must actually be told the account is gone.
 		saveSession(ALICE);
 
-		await finishAccountLogout(ALICE.userId, wipe, vi.fn());
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
 
 		expect(isAccountScopeFrozen()).toBe(false);
 	});
@@ -407,7 +605,7 @@ describe("finishAccountLogout", () => {
 		const seen: Array<string | null> = [];
 		const unsubscribe = subscribeAccountScope((id) => seen.push(id));
 		try {
-			await finishAccountLogout(ALICE.userId, wipe, vi.fn());
+			await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
 			expect(seen).toEqual([null]);
 		} finally {
 			unsubscribe();
@@ -421,16 +619,57 @@ describe("finishAccountLogout", () => {
 		addSession(BOB);
 		setActiveAccountForOtherTab(ALICE.userId);
 
-		await finishAccountLogout(BOB.userId, wipe, vi.fn());
+		await finishAccountLogout(EXIT, BOB.userId, wipe, vi.fn());
 
 		expect(loadSessions().map((a) => a.userId)).toEqual([ALICE.userId]);
+	});
+
+	it("hands the push registration back before the account leaves", async () => {
+		// Every logout comes through here - the foreground one and both
+		// force-logout paths - and clearing the account takes away the
+		// credentials the pusher removal needs (#534).
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await finishAccountLogout(EXIT, BOB.userId, wipe, vi.fn());
+
+		expect(releaseWebPushMock).toHaveBeenCalledWith(
+			EXIT.client,
+			EXIT.pushConfig,
+		);
+		expect(calls.indexOf("releaseWebPush")).toBeLessThan(calls.indexOf("wipe"));
+	});
+
+	it("hands it back on the way to the login page too", async () => {
+		// No account left to be pushed for, and no later boot that could clean
+		// up after this one.
+		saveSession(ALICE);
+
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
+
+		expect(releaseWebPushMock).toHaveBeenCalledOnce();
+	});
+
+	it("clears the OS badge for the account that just left", async () => {
+		// The departing account's unread count is not the promoted account's, and
+		// the unmount in client.tsx deliberately keeps the badge when an account
+		// remains - so the transition itself has to clear it (#534).
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await finishAccountLogout(EXIT, BOB.userId, wipe, vi.fn());
+
+		expect(releaseAppBadgeMock).toHaveBeenCalledOnce();
+		expect(calls.indexOf("badge:cleared")).toBeLessThan(
+			calls.indexOf("assign"),
+		);
 	});
 
 	it("hands back to the login page when no account is left", async () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn();
 
-		await finishAccountLogout(ALICE.userId, wipe, goToLogin);
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, goToLogin);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();

@@ -537,10 +537,13 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// account before this unmount, so loadSession() is null then unless
 		// another account was promoted; on a reload the session persists, so we
 		// leave the badge for the next load / other open windows rather than
-		// wiping a still-valid count. Logging out of one of several accounts
-		// therefore carries the departed account's count until the incoming
-		// account's first sync corrects it - per-account badge attribution is
-		// #534's job.
+		// wiping a still-valid count. A switch or a logout is already handled
+		// before this runs: the badge belongs to the active account, so the
+		// transition itself clears it (`app/accountSwitch.ts`, #534) and the
+		// incoming account's first sync sets the real count. The add-account
+		// detour does reach this cleanup - it navigates to `/login` - and
+		// deliberately clears nothing, here or there: that account is still
+		// signed in and the count on the badge is still its own.
 		if (loadSession() === null) {
 			updateAppBadge(0);
 		}

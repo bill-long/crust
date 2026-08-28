@@ -66,6 +66,33 @@ async function getReadyRegistration(): Promise<ServiceWorkerRegistration> {
 	}
 }
 
+/**
+ * The pushkey this device is currently reachable at - the subscription's p256dh
+ * key, which is what {@link buildPusher} registers as the pusher's `pushkey`
+ * (Sygnal's webpush pushkin reads the endpoint's public key from there).
+ *
+ * Null when the device has no subscription at all, which is the case that
+ * matters to callers: there is then no pushkey any account could still be
+ * pushing to, so there is nothing to remove. Never throws - an unsupported
+ * browser, a service worker that never becomes ready, and a rejected
+ * `getSubscription` are all "no pushkey".
+ */
+export async function currentPushKey(): Promise<string | null> {
+	if (!isPushSupported()) return null;
+	let registration: ServiceWorkerRegistration;
+	try {
+		registration = await getReadyRegistration();
+	} catch {
+		return null;
+	}
+	try {
+		const sub = await registration.pushManager.getSubscription();
+		return sub?.toJSON().keys?.p256dh ?? null;
+	} catch {
+		return null;
+	}
+}
+
 function buildPusher(cfg: PushConfig, sub: PushSubscription): IPusherRequest {
 	const json = sub.toJSON();
 	const p256dh = json.keys?.p256dh;
@@ -208,15 +235,40 @@ export async function enableWebPush(
 }
 
 /**
- * Remove the pusher from the homeserver and unsubscribe the browser from Web
- * Push. Best-effort: a failure to remove the server-side pusher still
- * unsubscribes locally.
+ * Unsubscribe the browser from Web Push and remove the pusher from the
+ * homeserver. Best-effort throughout: a failure at either step does not stop
+ * the other, and a device with no service worker registered - so nothing that
+ * could hold a subscription - returns at once rather than waiting on one.
+ *
+ * The LOCAL step goes first, and the order carries the guarantee. Callers reach
+ * this on paths where the server is expected to be unreachable or the token
+ * already dead - an expired session, the force-logout escape hatch, a switch
+ * made offline - and it is the unsubscribe that actually stops delivery to this
+ * device: nothing is pushed to a subscription the browser no longer holds. Doing
+ * the round trip first would let a hung or bounded call consume the whole budget
+ * and leave the device subscribed, which for an account that is leaving the
+ * install is the leak this exists to close (#534). The pushkey is read before
+ * either step, so the server-side removal still names the right pusher; if that
+ * call then fails, what is left behind points at a dead endpoint and the push
+ * service expires it (410, and the gateway drops the pusher).
  */
 export async function disableWebPush(
 	client: MatrixClient,
 	cfg: PushConfig,
 ): Promise<void> {
 	if (!isPushSupported()) return;
+	// A subscription can only exist behind a registered worker, and
+	// `navigator.serviceWorker.ready` never settles when there is none - the dev
+	// server registers no worker at all, and a production install can fail to.
+	// `getRegistration()` answers either way and immediately, so a device that
+	// cannot be subscribed costs nothing rather than the caller's whole timeout
+	// budget on every account exit.
+	try {
+		if (!(await navigator.serviceWorker.getRegistration())) return;
+	} catch {
+		// Restricted storage / disabled workers: same answer, nothing to release.
+		return;
+	}
 	let registration: ServiceWorkerRegistration;
 	try {
 		registration = await getReadyRegistration();
@@ -227,19 +279,21 @@ export async function disableWebPush(
 	if (!sub) return;
 
 	const p256dh = sub.toJSON().keys?.p256dh;
-	if (p256dh && cfg.appId) {
-		try {
-			await client.removePusher(p256dh, cfg.appId);
-		} catch {
-			// Pusher may already be gone (e.g. removed server-side after the
-			// subscription expired); proceed to unsubscribe regardless.
-		}
-	}
 	try {
 		await sub.unsubscribe();
 	} catch {
 		// Best-effort (per this function's contract): a rejecting unsubscribe
 		// (transient push-service error, pending unsubscribe) shouldn't surface
 		// a raw DOMException; the subscription self-heals on a later call.
+	}
+	if (p256dh && cfg.appId) {
+		try {
+			await client.removePusher(p256dh, cfg.appId);
+		} catch {
+			// Pusher may already be gone (e.g. removed server-side after the
+			// subscription expired), or the credentials are dead - which is the
+			// routine case on the paths above. The endpoint is already gone, so
+			// nothing is delivered either way.
+		}
 	}
 }

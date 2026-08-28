@@ -22,8 +22,18 @@ import {
 	withTimeout,
 } from "./cryptoRecovery";
 
-/** A throwaway client for `account`, never started. */
-function clientFor(account: Session): ReturnType<typeof createClient> {
+/**
+ * A throwaway client for `account`, never started.
+ *
+ * Exported because logging an account out is not the only thing this install
+ * owes a background account: it also has to take this device's push
+ * registration off it when the account stops being the active one
+ * (`features/notifications/accountPush.ts`, #534). Both need a client for an
+ * account whose own client is not running, built the same way.
+ */
+export function createAccountClient(
+	account: Session,
+): ReturnType<typeof createClient> {
 	return createClient({
 		baseUrl: account.homeserverUrl,
 		accessToken: account.accessToken,
@@ -48,7 +58,7 @@ function clientFor(account: Session): ReturnType<typeof createClient> {
  */
 export async function revokeAccountToken(account: Session): Promise<void> {
 	try {
-		await clientFor(account).logout(true);
+		await createAccountClient(account).logout(true);
 	} catch (e) {
 		reportError(e, {
 			logLabel: `Failed to revoke the token for ${account.userId}`,
@@ -66,7 +76,7 @@ export async function revokeAccountToken(account: Session): Promise<void> {
  * token has been revoked, so the caller must not route back into it.
  */
 export async function logOutAccount(account: Session): Promise<boolean> {
-	const client = clientFor(account);
+	const client = createAccountClient(account);
 	try {
 		await client.logout(true);
 	} catch (e) {

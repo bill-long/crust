@@ -22,7 +22,7 @@ import { setActiveCallRoomId } from "../stores/activeCall";
 import { loadSession } from "../stores/session";
 import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
-import { ConfigProvider } from "./ConfigProvider";
+import { ConfigProvider, useConfig } from "./ConfigProvider";
 import { Layout } from "./Layout";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
@@ -89,6 +89,7 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 /** Loading gate — shows spinner until initial sync completes. */
 const SyncGate: Component<RouteSectionProps> = (props) => {
 	const { syncState, cryptoState, client, session } = useClient();
+	const pushConfig = useConfig().push;
 	const navigate = useNavigate();
 	const location = useLocation();
 	const params = useDecodedParams<{ roomId?: string }>();
@@ -122,6 +123,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// Another account may still be logged in; land there rather than on a
 			// login form that would replace it (#533).
 			void finishAccountLogout(
+				{ client, pushConfig },
 				// This document's own account; another tab may have switched.
 				session.userId,
 				() =>
@@ -171,6 +173,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// delete. That is why this screen needs the single-flight guard above -
 		// it stays on screen while the wipe runs.
 		return await finishAccountLogout(
+			{ client, pushConfig },
 			session.userId,
 			async () => {
 				try {

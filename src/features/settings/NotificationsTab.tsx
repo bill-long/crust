@@ -13,13 +13,11 @@ import {
 } from "solid-js";
 import { useConfig } from "../../app/ConfigProvider";
 import { useClient } from "../../client/client";
+import { accounts } from "../../stores/session";
 import { updateSetting, userSettings } from "../../stores/settings";
 import { isPushConfigured } from "../../types/config";
-import {
-	disableWebPush,
-	enableWebPush,
-	isPushSupported,
-} from "../notifications/webPush";
+import { releaseWebPush } from "../notifications/accountPush";
+import { enableWebPush, isPushSupported } from "../notifications/webPush";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
 const NotificationsTab: Component = () => {
@@ -65,12 +63,15 @@ const NotificationsTab: Component = () => {
 		setPushError(null);
 		if (!checked) {
 			setPushBusy(true);
-			disableWebPush(client, config.push)
-				.catch(() => {})
-				.finally(() => {
-					updateSetting("backgroundNotifications", false);
-					setPushBusy(false);
-				});
+			// The bounded release rather than `disableWebPush` directly: it drops
+			// the browser's subscription first and gives up on the server round
+			// trip after a timeout, so a homeserver that never answers cannot
+			// leave this toggle disabled and showing "on" for the rest of the
+			// session while background push is in fact already dead.
+			releaseWebPush(client, config.push).finally(() => {
+				updateSetting("backgroundNotifications", false);
+				setPushBusy(false);
+			});
 			return;
 		}
 		setPushBusy(true);
@@ -95,6 +96,14 @@ const NotificationsTab: Component = () => {
 		}
 		if (!isPushConfigured(config.push)) {
 			return "Background notifications are not configured by this server";
+		}
+		// Background notifications follow the active account (#534): only one
+		// account can be pushed to a device at a time, and switching moves them.
+		// Say so where the toggle is, but only once there is a second account to
+		// make the distinction meaningful. Reads the same reactive mirror the
+		// switcher's own list does, so it tracks adding and removing accounts.
+		if (accounts().length > 1) {
+			return "Receive notifications even when Crust is closed, for the account you are signed in as";
 		}
 		return "Receive notifications even when Crust is closed";
 	};

@@ -33,8 +33,8 @@ import {
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
 import type { LoginState } from "../features/auth/returnTo";
+import { releaseWebPush } from "../features/notifications/accountPush";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
-import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
 import {
@@ -376,7 +376,10 @@ const Layout: Component = () => {
 		if (accountTransitionInFlight()) return;
 		setAccountBusy(true);
 		try {
-			const result = await switchToAccount(targetUserId);
+			const result = await switchToAccount(targetUserId, {
+				client,
+				pushConfig,
+			});
 			if (result === "switching") {
 				// The document is being replaced. Releasing the guard here would
 				// re-enable the menu for the whole window before it actually is.
@@ -408,7 +411,7 @@ const Layout: Component = () => {
 			// flow ends in a reload, either of which would kill a MatrixRTC
 			// withdrawal in flight. This is a third exit from a live session and
 			// owes the server the same teardown as a switch or a logout (#474).
-			await endSessionForAccountExit();
+			await endSessionForAccountExit({ client, pushConfig });
 			// Router state, not a query param: a crafted link must not be able to
 			// put the login page into add-account mode and quietly append a second
 			// token.
@@ -477,15 +480,16 @@ const Layout: Component = () => {
 		// be picked up by the NEXT account to log in on this tab —
 		// `activeCallRoomId` is module-global and never reset on login.
 		setActiveCallRoomId(null);
-		// Best-effort: remove this account's Web Push pusher and unsubscribe
-		// before the session is invalidated, so a logged-out (or switched)
-		// account doesn't keep receiving background notifications.
+		// Hand this device's push registration back before the session is
+		// invalidated, so a logged-out account doesn't keep receiving background
+		// notifications, and while the token is still valid, so the pusher can
+		// actually be removed server-side and not just unsubscribed here. The same
+		// call every other account exit makes (#534) - the switch and the
+		// add-account detour in this file, and, through finishAccountLogout, both
+		// force-logout paths in App.tsx. Whether there is anything to hand back is
+		// the device's answer, not this account's setting.
+		await releaseWebPush(client, pushConfig);
 		if (userSettings().backgroundNotifications) {
-			try {
-				await disableWebPush(client, pushConfig);
-			} catch {
-				// Non-fatal; proceed with logout regardless.
-			}
 			// Clear this account's preference now that its pusher is gone, so a
 			// later login as the same account doesn't read "background push on"
 			// with no pusher registered. Settings are per-account (#532), so this
@@ -499,6 +503,7 @@ const Layout: Component = () => {
 			client.stopClient();
 		}
 		return await finishAccountLogout(
+			{ client, pushConfig },
 			// This document's own account, not whoever storage currently calls
 			// active: another tab may have switched since we booted.
 			session.userId,
