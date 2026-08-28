@@ -6,6 +6,7 @@ import { userFacingErrorMessage } from "../../lib/errorMessage";
 import {
 	addSession,
 	freezeAccountScope,
+	loadSessions,
 	MAX_ACCOUNTS,
 	saveSession,
 	unfreezeAccountScope,
@@ -25,11 +26,22 @@ import { sanitizeReturnTo } from "./returnTo";
 const LoginCallback: Component = () => {
 	const navigate = useNavigate();
 	const [error, setError] = createSignal("");
-	// Whether this callback was adding an account rather than logging in fresh.
-	// It decides where the error state's way out goes: an add-account failure
-	// happened WITH an account still logged in, and `/login` is unguarded, so
-	// sending the user there invites a plain login that would replace it (#549).
-	const [adding, setAdding] = createSignal(false);
+	// Whether an account is still signed in on this device, read when the
+	// callback lands. It decides where the error state's way out goes: with an
+	// account still live, `/login` is not it - the guard there turns a
+	// signed-in visitor around anyway (#549), and a plain login there REPLACES.
+	// Adding an account is the usual way to be in that position but not the only
+	// one, so this asks storage rather than asking whether we were adding: a
+	// plain login that failed while another tab signed in belongs back in the
+	// app too.
+	//
+	// It deliberately does NOT gate the persist below. Refusing a login because
+	// storage lists an account would trap the case that most needs to get
+	// through: an account a logout revoked but could not remove, where replacing
+	// it IS the way out. Closing the window where a successful plain login
+	// replaces a LIVE account needs to tell those two apart, which nothing here
+	// can - see LoginGate's docblock, and #551.
+	const [signedIn, setSignedIn] = createSignal(false);
 
 	onMount(async () => {
 		// Taken BEFORE the exchange, which throws on an OP error, a replayed state
@@ -38,7 +50,9 @@ const LoginCallback: Component = () => {
 		// OAuth login in this tab into an append, which is the behaviour reserved
 		// for the switcher's explicit entry point (#533).
 		const isAdding = takeOidcAddAccount();
-		setAdding(isAdding);
+		// Before the exchange, so it describes the device as the user left it
+		// rather than as this callback has since changed it.
+		setSignedIn(loadSessions().length > 0);
 		try {
 			const result = await completeOidcLogin(window.location.search);
 			// The stashed target was sanitized before stashing; sanitize again
@@ -103,8 +117,14 @@ const LoginCallback: Component = () => {
 						{error()}
 					</p>
 					<Show
-						when={adding()}
+						when={signedIn()}
 						fallback={
+							// No logout waiver is armed for this navigation, deliberately.
+							// A failed callback is not a logout, and letting one wave the
+							// login guard aside would hand any bad exchange the ability to
+							// reach a replacing login. With logout residue in storage that
+							// costs one self-healing round trip through the dead session;
+							// the alternative costs the guard.
 							<button
 								type="button"
 								onClick={() => navigate("/login", { replace: true })}
@@ -115,8 +135,7 @@ const LoginCallback: Component = () => {
 						}
 					>
 						{/* A reload, not a route: the app is not mounted on this route,
-						    and the account that was already logged in is the one to
-						    return to. */}
+						    and the account still signed in is the one to return to. */}
 						<button
 							type="button"
 							onClick={() => window.location.assign(`${basePrefix}/`)}
