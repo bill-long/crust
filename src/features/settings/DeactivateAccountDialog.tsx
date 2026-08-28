@@ -171,7 +171,11 @@ const DeactivateAccountDialog: Component<DeactivateAccountDialogProps> = (
 				</div>
 
 				<Show when={error()}>
-					<p role="alert" class="mt-3 text-sm text-danger-text-bright">
+					<p
+						id="da-error"
+						role="alert"
+						class="mt-3 text-sm text-danger-text-bright"
+					>
 						{error()}
 					</p>
 				</Show>
@@ -187,6 +191,7 @@ const DeactivateAccountDialog: Component<DeactivateAccountDialogProps> = (
 					</button>
 					<button
 						type="submit"
+						aria-describedby={error() ? "da-error" : undefined}
 						disabled={!ready()}
 						class="rounded bg-danger px-4 py-2 text-sm font-semibold text-danger-foreground transition-colors hover:bg-danger/90 disabled:opacity-50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 					>

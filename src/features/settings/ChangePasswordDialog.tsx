@@ -199,7 +199,11 @@ const ChangePasswordDialog: Component<ChangePasswordDialogProps> = (props) => {
 						</div>
 
 						<Show when={error()}>
-							<p role="alert" class="mt-3 text-sm text-danger-text-bright">
+							<p
+								id="cp-error"
+								role="alert"
+								class="mt-3 text-sm text-danger-text-bright"
+							>
 								{error()}
 							</p>
 						</Show>
@@ -215,6 +219,7 @@ const ChangePasswordDialog: Component<ChangePasswordDialogProps> = (props) => {
 							</button>
 							<button
 								type="submit"
+								aria-describedby={error() ? "cp-error" : undefined}
 								disabled={
 									step() === "working" ||
 									current().length === 0 ||

@@ -79,7 +79,7 @@ describe("AccountTab account security (#451)", () => {
 		expect(
 			await screen.findByRole("button", { name: "Deactivate…" }),
 		).toBeTruthy();
-		expect(screen.queryByText("Managed by your account provider")).toBeNull();
+		expect(screen.queryByText("Password managed outside Crust")).toBeNull();
 
 		// The bound email renders read-only.
 		expect(await screen.findByText("me@example.com")).toBeTruthy();
