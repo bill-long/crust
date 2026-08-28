@@ -33,7 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	_resetLastRoomForTests();
-	clearSession();
+	clearSession(ACCOUNT_A.userId);
 	localStorage.clear();
 });
 
@@ -127,7 +127,7 @@ describe("account scoping", () => {
 	});
 
 	it("keeps writes in memory while no account is active", () => {
-		clearSession();
+		clearSession(ACCOUNT_A.userId);
 		setLastRoom("!r:example.com");
 		expect(getLastRoom()).toEqual({ roomId: "!r:example.com" });
 		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();

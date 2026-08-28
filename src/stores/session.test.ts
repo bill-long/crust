@@ -65,6 +65,16 @@ const seedStore = (sessions: Session[], activeUserId: string): void => {
 	localStorage.setItem(SESSION_KEY, JSON.stringify({ activeUserId, sessions }));
 };
 
+/**
+ * Log out whoever is currently active. The production API names its account on
+ * purpose (another tab may have switched); tests that just want "log out" go
+ * through this so each one still says which account it meant.
+ */
+const clearActiveSession = (): boolean => {
+	const active = activeAccountId();
+	return active === null || clearSession(active);
+};
+
 /** The persisted multi-account value for a single, freshly added account. */
 const storeOf = (...sessions: Session[]): string =>
 	JSON.stringify({
@@ -93,7 +103,7 @@ describe("service-worker media auth push", () => {
 	it("clears the worker's media auth on clear", () => {
 		saveSession(VALID);
 		vi.mocked(pushMediaAuthToSw).mockClear();
-		clearSession();
+		clearActiveSession();
 		expect(pushMediaAuthToSw).toHaveBeenCalledWith(null);
 	});
 
@@ -293,19 +303,19 @@ describe("clearSession", () => {
 	it("removes a persisted session", () => {
 		saveSession(VALID);
 		expect(loadSession()).not.toBeNull();
-		clearSession();
+		clearActiveSession();
 		expect(loadSession()).toBeNull();
 		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
 	});
 
 	it("is a no-op when nothing is stored", () => {
-		expect(() => clearSession()).not.toThrow();
+		expect(() => clearActiveSession()).not.toThrow();
 		expect(loadSession()).toBeNull();
 	});
 
 	it("also clears an un-migrated legacy session (no stale token left behind)", () => {
 		localStorage.setItem(LEGACY_SESSION_KEY, JSON.stringify(VALID));
-		clearSession();
+		clearActiveSession();
 		expect(localStorage.getItem(LEGACY_SESSION_KEY)).toBeNull();
 		expect(loadSession()).toBeNull();
 	});
@@ -382,7 +392,7 @@ describe("multi-account store", () => {
 		saveSession(BOB);
 		expect(loadSessions().map((a) => a.userId)).toEqual([BOB.userId]);
 		expect(localStorage.getItem(SESSION_KEY)).not.toContain(VALID.accessToken);
-		clearSession();
+		clearActiveSession();
 		expect(loadSession()).toBeNull();
 	});
 
@@ -395,7 +405,7 @@ describe("multi-account store", () => {
 
 	it("removes only the active account on clear, activating what is left", () => {
 		seedStore([SAVED, BOB], BOB.userId);
-		clearSession();
+		clearActiveSession();
 		expect(loadSessions().map((a) => a.userId)).toEqual([VALID.userId]);
 		expect(loadSession()?.userId).toBe(VALID.userId);
 	});
@@ -410,7 +420,7 @@ describe("multi-account store", () => {
 			`crust:last-room:${VALID.userId}`,
 			'{"roomId":"!r:x"}',
 		);
-		clearSession();
+		clearActiveSession();
 		expect(localStorage.getItem(`crust:settings:${VALID.userId}`)).toBeNull();
 		expect(localStorage.getItem(`crust:last-room:${VALID.userId}`)).toBeNull();
 	});
@@ -419,7 +429,7 @@ describe("multi-account store", () => {
 		seedStore([SAVED, BOB], BOB.userId);
 		localStorage.setItem(`crust:settings:${VALID.userId}`, '{"zoomLevel":90}');
 		localStorage.setItem(`crust:settings:${BOB.userId}`, '{"zoomLevel":150}');
-		clearSession();
+		clearActiveSession();
 		expect(localStorage.getItem(`crust:settings:${BOB.userId}`)).toBeNull();
 		expect(localStorage.getItem(`crust:settings:${VALID.userId}`)).toBe(
 			'{"zoomLevel":90}',
@@ -429,7 +439,7 @@ describe("multi-account store", () => {
 
 	it("leaves no session key behind once the last account is removed", () => {
 		saveSession(VALID);
-		clearSession();
+		clearActiveSession();
 		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
 		expect(activeAccountId()).toBeNull();
 	});
@@ -654,7 +664,7 @@ describe("account scope notification", () => {
 			saveSession(BOB);
 			// A logout that leaves another account behind rebinds to it.
 			seedStore([SAVED, BOB], BOB.userId);
-			clearSession();
+			clearActiveSession();
 			expect(seen).toEqual([VALID.userId, BOB.userId, VALID.userId]);
 		} finally {
 			unsubscribe();
@@ -861,7 +871,7 @@ describe("removeAccount", () => {
 			realSetItem.call(this, key, value);
 		});
 
-		expect(clearSession()).toBe(false);
+		expect(clearActiveSession()).toBe(false);
 
 		vi.restoreAllMocks();
 		expect(loadSessions().map((a) => a.userId)).toEqual([
@@ -872,7 +882,7 @@ describe("removeAccount", () => {
 
 	it("clearSession reports success when the account is gone", () => {
 		saveSession(VALID);
-		expect(clearSession()).toBe(true);
+		expect(clearActiveSession()).toBe(true);
 	});
 });
 
@@ -924,7 +934,7 @@ describe("reactive mirrors", () => {
 		removeAccount(BOB.userId);
 		expect(accounts().map((a) => a.userId)).toEqual([VALID.userId]);
 
-		clearSession();
+		clearActiveSession();
 		expect(activeAccount()).toBeNull();
 		expect(accounts()).toEqual([]);
 	});

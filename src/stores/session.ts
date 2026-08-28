@@ -473,11 +473,16 @@ export function updateSession(session: Session): boolean {
 }
 
 /**
- * Log the active account out of this install: the logout path, and exactly the
- * same thing the switcher does to a background account - so it goes through
+ * Log `userId` out of this install: the logout path, and exactly the same thing
+ * the switcher does to a background account - so it goes through
  * {@link removeAccount} rather than growing a second, subtly different removal.
  * "Log out" means the same thing wherever it is invoked from, including that
  * the account's own per-account data leaves the device with it.
+ *
+ * The account is NAMED rather than taken to be "whoever storage calls active":
+ * another tab may have switched since this document booted, and logging out
+ * would then sign out an account the user never touched - without revoking its
+ * token, since the caller revokes the one it is actually running.
  *
  * The account's crypto store is NOT wiped here; that is the caller's job and
  * only ever for the account being removed (see `clearCryptoStores`).
@@ -485,9 +490,8 @@ export function updateSession(session: Session): boolean {
  * Returns whether the account is gone from storage; see {@link removeAccount}
  * for why a caller has to care.
  */
-export function clearSession(): boolean {
-	const activeUserId = readStore().activeUserId;
-	const removed = activeUserId === null || removeAccount(activeUserId);
+export function clearSession(userId: string): boolean {
+	const removed = removeAccount(userId);
 	// Also drop any un-migrated legacy value so logout leaves no stale token
 	// behind (e.g. if migration never ran or its write failed), even when there
 	// was no account under the new key to remove.

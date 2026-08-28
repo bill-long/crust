@@ -120,7 +120,8 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// Another account may still be logged in; land there rather than on a
 			// login form that would replace it (#533).
 			void finishAccountLogout(
-				clearSession,
+				// This document's own account; another tab may have switched.
+				() => clearSession(session.userId),
 				() =>
 					clearCryptoStores(client, session).catch((e: unknown) => {
 						console.warn("Failed to clear stores on session expiry:", e);
@@ -150,7 +151,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// while it awaits), and a reload into a remaining account happens after
 		// it (so replacing the document cannot abort the delete).
 		await finishAccountLogout(
-			clearSession,
+			() => clearSession(session.userId),
 			async () => {
 				try {
 					await clearCryptoStores(client, session);

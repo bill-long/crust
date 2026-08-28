@@ -16,6 +16,7 @@ import {
 	clearSession,
 	isAccountScopeFrozen,
 	loadSession,
+	loadSessions,
 	type Session,
 	saveSession,
 	unfreezeAccountScope,
@@ -261,7 +262,11 @@ describe("finishAccountLogout", () => {
 		addSession(BOB);
 		const goToLogin = vi.fn();
 
-		return finishAccountLogout(clearSession, wipe, goToLogin).then(() => {
+		return finishAccountLogout(
+			() => clearSession(ALICE.userId),
+			wipe,
+			goToLogin,
+		).then(() => {
 			expect(assign).toHaveBeenCalledOnce();
 			expect(goToLogin).not.toHaveBeenCalled();
 		});
@@ -273,7 +278,7 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await finishAccountLogout(clearSession, wipe, vi.fn());
+		await finishAccountLogout(() => clearSession(ALICE.userId), wipe, vi.fn());
 
 		expect(calls).toEqual(["wipe", "assign"]);
 	});
@@ -284,7 +289,11 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn(() => calls.push("login"));
 
-		await finishAccountLogout(clearSession, wipe, goToLogin);
+		await finishAccountLogout(
+			() => clearSession(ALICE.userId),
+			wipe,
+			goToLogin,
+		);
 
 		expect(calls).toEqual(["login", "wipe"]);
 		expect(assign).not.toHaveBeenCalled();
@@ -296,7 +305,7 @@ describe("finishAccountLogout", () => {
 		// otherwise. Storage is the authority, or the user is dumped on a login
 		// form with a live session behind it.
 		saveSession(ALICE);
-		clearSession();
+		clearSession(ALICE.userId);
 		localStorage.setItem(
 			"crust:session",
 			JSON.stringify({ activeUserId: BOB.userId, sessions: [BOB] }),
@@ -322,11 +331,74 @@ describe("finishAccountLogout", () => {
 		expect(assign).not.toHaveBeenCalled();
 	});
 
+	it("leaves anyway when the wipe never settles", async () => {
+		// `deleteDatabase` BLOCKS while another window holds the store open, and
+		// the SDK only logs that - the promise never resolves. Waiting forever
+		// would strand the user on a stopped UI holding a revoked token.
+		vi.useFakeTimers();
+		try {
+			saveSession(ALICE);
+			addSession(BOB);
+			const hangs = vi.fn(() => new Promise<void>(() => {}));
+			vi.spyOn(console, "error").mockImplementation(() => {});
+
+			const done = finishAccountLogout(
+				() => clearSession(BOB.userId),
+				hangs,
+				vi.fn(),
+			);
+			await vi.advanceTimersByTimeAsync(60_000);
+			await done;
+
+			expect(assign).toHaveBeenCalledOnce();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("freezes account-scoped storage while the outgoing account is on screen", async () => {
+		// `clear` moves the pointer; until this document is replaced its stores
+		// must not rebind to the promoted account (a visible re-zoom, and writes
+		// filed under the wrong key).
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn());
+
+		expect(isAccountScopeFrozen()).toBe(true);
+	});
+
+	it("lifts the freeze when the document stays for the login page", async () => {
+		// A route to /login does not replace the document, and the next login
+		// happens in it - a freeze left on would strand that account's stores.
+		saveSession(ALICE);
+
+		await finishAccountLogout(() => clearSession(ALICE.userId), wipe, vi.fn());
+
+		expect(isAccountScopeFrozen()).toBe(false);
+	});
+
+	it("logs out the account it was given, not whoever storage calls active", async () => {
+		// Another tab switched since this document booted. Logging out here must
+		// not sign out the account the user never touched.
+		saveSession(ALICE);
+		addSession(BOB);
+		setActiveAccountForOtherTab(ALICE.userId);
+
+		await finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn());
+
+		expect(loadSessions().map((a) => a.userId)).toEqual([ALICE.userId]);
+	});
+
 	it("hands back to the login page when no account is left", async () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn();
 
-		await finishAccountLogout(clearSession, wipe, goToLogin);
+		await finishAccountLogout(
+			() => clearSession(ALICE.userId),
+			wipe,
+			goToLogin,
+		);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();

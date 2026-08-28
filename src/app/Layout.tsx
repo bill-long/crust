@@ -476,7 +476,9 @@ const Layout: Component = () => {
 			client.stopClient();
 		}
 		await finishAccountLogout(
-			clearSession,
+			// This document's own account, not whoever storage currently calls
+			// active: another tab may have switched since we booted.
+			() => clearSession(session.userId),
 			async () => {
 				try {
 					await clearCryptoStores(client, session);

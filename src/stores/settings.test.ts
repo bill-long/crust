@@ -156,7 +156,7 @@ describe("account scoping", () => {
 		saveSession(ALICE);
 	});
 	afterEach(() => {
-		clearSession();
+		clearSession(ALICE.userId);
 		localStorage.clear();
 	});
 
@@ -181,7 +181,7 @@ describe("account scoping", () => {
 	});
 
 	it("keeps changes out of storage while logged out", () => {
-		clearSession();
+		clearSession(ALICE.userId);
 		updateSetting("timeFormat", "24h");
 		expect(userSettings().timeFormat).toBe("24h");
 		expect(localStorage.getItem(SETTINGS_KEY)).toBeNull();

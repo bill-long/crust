@@ -22,7 +22,7 @@ beforeEach(() => {
 	saveSession(ALICE);
 });
 afterEach(() => {
-	clearSession();
+	clearSession(ALICE.userId);
 	localStorage.clear();
 });
 
@@ -65,7 +65,7 @@ describe("recentEmoji", () => {
 	});
 
 	it("reads empty and writes nothing while logged out", () => {
-		clearSession();
+		clearSession(ALICE.userId);
 		addRecentEmoji("😀");
 		expect(getRecentEmoji()).toEqual([]);
 		expect(localStorage.getItem(STORAGE_KEY)).toBeNull();

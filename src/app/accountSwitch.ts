@@ -29,6 +29,7 @@
  * The new account lands on its own last room because `lastRoom` is per-account
  * (#532) and the shell restores it on boot - no route needs carrying across.
  */
+import { CRYPTO_INIT_TIMEOUT_MS, withTimeout } from "../client/cryptoRecovery";
 import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
@@ -148,10 +149,29 @@ export async function finishAccountLogout(
 	wipe: () => Promise<void>,
 	goToLogin: () => void,
 ): Promise<void> {
+	// Freeze before clearing: `clear` moves the pointer, and the account-scoped
+	// stores must not follow it while the OUTGOING account is still the one on
+	// screen - that is a visible re-zoom, and any write in the meantime lands
+	// under the wrong account's key.
+	freezeAccountScope();
 	// Storage-backed: the logout that just ran wrote there, and another tab may
 	// have too - it is the authority on what is left.
 	const reloading = clear() && activeAccountId() !== null;
-	if (!reloading) goToLogin();
-	await wipe();
+	if (!reloading) {
+		// This document survives a route to `/login` and can host the next login,
+		// so the freeze must not outlive the exit.
+		unfreezeAccountScope();
+		goToLogin();
+	}
+	try {
+		// Bounded, because `deleteDatabase` BLOCKS while another window still has
+		// the store open and the SDK's handler only logs that - the promise never
+		// settles. Leaving is what the user asked for; an unbounded await would
+		// strand them on a stopped UI holding a revoked token, which is the
+		// failure `Layout.handleLogout`'s single-flight guard exists to prevent.
+		await withTimeout(wipe(), CRYPTO_INIT_TIMEOUT_MS, "Account store wipe");
+	} catch (e) {
+		reportError(e, { logLabel: "Failed to clear the account's stores" });
+	}
 	if (reloading) reloadIntoActiveAccount();
 }
