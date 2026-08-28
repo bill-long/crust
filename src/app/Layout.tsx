@@ -347,6 +347,7 @@ const Layout: Component = () => {
 		if (target) navigate(target, { replace: true });
 	});
 
+	/** True once a logout has committed to replacing the document. */
 	const handleLogout = async (): Promise<void> => {
 		// Single-flight. The call teardown below makes logout a multi-second
 		// operation (bounded, but not instant), so without this a second
@@ -358,10 +359,17 @@ const Layout: Component = () => {
 		if (accountTransitionInFlight()) return;
 		setLoggingOut(true);
 		try {
-			await runLogout();
-		} finally {
-			setLoggingOut(false);
+			// A logout that ends in a reload keeps the guard set: this document
+			// keeps running until the replacement takes over, and releasing it
+			// would re-arm the button that is already on its way out.
+			if ((await runLogout()) === "reloading") return;
+		} catch (e) {
+			reportError(e, {
+				userMessage: "Could not log out.",
+				logLabel: "Logout failed",
+			});
 		}
+		setLoggingOut(false);
 	};
 
 	/** Switch to another account: reloads the app, so nothing after it runs. */
@@ -370,11 +378,16 @@ const Layout: Component = () => {
 		setAccountBusy(true);
 		try {
 			const result = await switchToAccount(targetUserId);
+			if (result === "switching") {
+				// The document is being replaced. Releasing the guard here would
+				// re-enable the menu for the whole window before it actually is.
+				return;
+			}
 			if (result === "unknown-account") {
 				// The row was stale (the account was removed elsewhere). Say so rather
 				// than leaving a menu that silently does nothing.
 				pushNotice("That account is no longer signed in.", "error");
-			} else if (result === "failed") {
+			} else {
 				pushNotice("Could not switch accounts.", "error");
 			}
 		} catch (e) {
@@ -382,9 +395,8 @@ const Layout: Component = () => {
 				userMessage: "Could not switch accounts.",
 				logLabel: "Account switch failed",
 			});
-		} finally {
-			setAccountBusy(false);
 		}
+		setAccountBusy(false);
 	};
 
 	const handleAddAccount = async (): Promise<void> => {
@@ -421,7 +433,12 @@ const Layout: Component = () => {
 		// and back in, the mirror holds the dead token and the revoke below would
 		// 401 while the live session survives on the server.
 		const target = loadSessions().find((a) => a.userId === targetUserId);
-		if (!target) return;
+		if (!target) {
+			// Stale row, same as a stale switch row: say so rather than leaving a
+			// menu item that looks clickable and does nothing.
+			pushNotice("That account is no longer signed in.", "error");
+			return;
+		}
 		setAccountBusy(true);
 		try {
 			await logOutAccount(target);
@@ -435,7 +452,7 @@ const Layout: Component = () => {
 		}
 	};
 
-	const runLogout = async (): Promise<void> => {
+	const runLogout = async (): Promise<"reloading" | "left"> => {
 		// Stop the chime first, as this did before the teardown await was
 		// introduced. It is not a mute: `playNotificationSound` builds a fresh
 		// AudioContext on demand, so a message arriving during the teardown
@@ -475,7 +492,7 @@ const Layout: Component = () => {
 		} catch {
 			client.stopClient();
 		}
-		await finishAccountLogout(
+		return await finishAccountLogout(
 			// This document's own account, not whoever storage currently calls
 			// active: another tab may have switched since we booted.
 			() => clearSession(session.userId),
@@ -549,9 +566,11 @@ const Layout: Component = () => {
 			const isActive = account.userId === userId();
 			const name = isActive
 				? displayName()
-				: (account.displayName?.trim() ??
-					(account.userId.split(":")[0]?.replace("@", "").trim() ||
-						account.userId));
+				: // `||`, not `??`: a stored name that trims to empty is no name at
+					// all, and would render a blank row with a "?" avatar.
+					account.displayName?.trim() ||
+					account.userId.split(":")[0]?.replace("@", "").trim() ||
+					account.userId;
 			return {
 				userId: account.userId,
 				displayName: name,

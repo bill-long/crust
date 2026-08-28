@@ -27,9 +27,11 @@ function clientFor(account: Session): ReturnType<typeof createClient> {
 		deviceId: account.deviceId,
 		// An account that has not been running has, by definition, a stale access
 		// token - which for an OAuth2 (MSC3861) session is the routine case, and
-		// the reason its refresh token is persisted at all. Without this the
+		// the reason its refresh token is persisted at all. Without these the
 		// revoke below 401s and the device survives on the server, still listed
 		// and still push-capable, after Crust has thrown the credentials away.
+		// BOTH are needed: the function has nothing to present without the token.
+		refreshToken: account.refreshToken,
 		tokenRefreshFunction: createOidcTokenRefreshFn(account),
 	});
 }

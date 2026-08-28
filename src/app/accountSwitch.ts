@@ -146,12 +146,17 @@ export async function switchToAccount(
  * still listed there is the one whose token was just revoked, so reloading
  * would boot it, fail on the dead token, log out again, and loop; the login
  * page is the only safe destination then.
+ *
+ * Returns "reloading" when the document is being replaced. `location.assign`
+ * only STARTS that, so this document keeps running: a caller that clears a
+ * single-flight guard afterwards would re-enable the very action it is
+ * guarding, for the whole window before the new document takes over.
  */
 export async function finishAccountLogout(
 	clear: () => boolean,
 	wipe: () => Promise<void>,
 	goToLogin: () => void,
-): Promise<void> {
+): Promise<"reloading" | "left"> {
 	try {
 		await withTimeout(wipe(), CRYPTO_INIT_TIMEOUT_MS, "Account store wipe");
 	} catch (e) {
@@ -161,7 +166,8 @@ export async function finishAccountLogout(
 	// it is the authority on what is left.
 	if (clear() && activeAccountId() !== null) {
 		reloadIntoActiveAccount();
-		return;
+		return "reloading";
 	}
 	goToLogin();
+	return "left";
 }

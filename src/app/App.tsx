@@ -141,13 +141,17 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		if (forcingLogout()) return;
 		setForcingLogout(true);
 		try {
-			await runForceLogout();
-		} finally {
-			setForcingLogout(false);
+			// A logout that ends in a reload keeps the guard set; this document
+			// keeps running until the replacement takes over, and a second click
+			// would start an overlapping `clearCryptoStores`.
+			if ((await runForceLogout()) === "reloading") return;
+		} catch (e) {
+			console.error("Force logout failed:", e);
 		}
+		setForcingLogout(false);
 	};
 
-	const runForceLogout = async (): Promise<void> => {
+	const runForceLogout = async (): Promise<"reloading" | "left"> => {
 		// Drop the active-call signal BEFORE stopping the client so the
 		// mini-widget / overlay never points at a stopped session.
 		//
@@ -166,7 +170,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// before anything navigates, so replacing the document cannot abort the
 		// delete. That is why this screen needs the single-flight guard above -
 		// it stays on screen while the wipe runs.
-		await finishAccountLogout(
+		return await finishAccountLogout(
 			() => clearSession(session.userId),
 			async () => {
 				try {

@@ -284,6 +284,23 @@ describe("finishAccountLogout", () => {
 		expect(calls).toEqual(["wipe", "assign"]);
 	});
 
+	it("reports whether the document is being replaced", async () => {
+		// Callers hold single-flight guards across the reload window: this
+		// document keeps running until the replacement takes over, and releasing
+		// a guard there re-arms the action that is already on its way out.
+		saveSession(ALICE);
+		addSession(BOB);
+		await expect(
+			finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn()),
+		).resolves.toBe("reloading");
+
+		localStorage.clear();
+		saveSession(ALICE);
+		await expect(
+			finishAccountLogout(() => clearSession(ALICE.userId), wipe, vi.fn()),
+		).resolves.toBe("left");
+	});
+
 	it("finishes the wipe before routing to the login page too", async () => {
 		// One order for both exits: the wipe is bounded, so waiting for it can
 		// never strand the user, and a single order is one thing to reason about.

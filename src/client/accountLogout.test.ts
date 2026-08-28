@@ -65,13 +65,14 @@ describe("logOutAccount", () => {
 		expect(createClientMock.mock.calls[0]?.[0]).toMatchObject({
 			accessToken: oidc.accessToken,
 		});
-		expect(
-			(
-				createClientMock.mock.calls[0]?.[0] as {
-					tokenRefreshFunction?: unknown;
-				}
-			)?.tokenRefreshFunction,
-		).toBeTypeOf("function");
+		const opts = createClientMock.mock.calls[0]?.[0] as {
+			tokenRefreshFunction?: unknown;
+			refreshToken?: unknown;
+		};
+		expect(opts?.tokenRefreshFunction).toBeTypeOf("function");
+		// Both halves are needed: the function has nothing to present without
+		// the token, so omitting it makes the refresher dead weight.
+		expect(opts?.refreshToken).toBe(oidc.refreshToken);
 	});
 
 	it("revokes the token with that account's own credentials", async () => {
