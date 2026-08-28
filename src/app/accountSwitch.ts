@@ -29,7 +29,14 @@
  * The new account lands on its own last room because `lastRoom` is per-account
  * (#532) and the shell restores it on boot - no route needs carrying across.
  */
+import type { MatrixClient } from "matrix-js-sdk";
+import { releaseAppBadge } from "../client/appBadge";
 import { CRYPTO_INIT_TIMEOUT_MS, withTimeout } from "../client/cryptoRecovery";
+import {
+	disableBackgroundNotifications,
+	releaseWebPush,
+	restoreWebPush,
+} from "../features/notifications/accountPush";
 import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
@@ -43,6 +50,7 @@ import {
 	setActiveAccount,
 	unfreezeAccountScope,
 } from "../stores/session";
+import type { PushConfig } from "../types/config";
 import { basePrefix } from "./basePath";
 
 /** Reload into whatever account is active, at the app root. */
@@ -53,14 +61,51 @@ function reloadIntoActiveAccount(): void {
 }
 
 /**
- * What the outgoing account owes the server before this document stops being
- * its client: a MatrixRTC withdrawal for any live call, sent while its token is
- * still the one in the client (#474). Shared by every exit from a running
- * session that is not the full logout - switching, and leaving to add an
- * account (which unmounts the provider and then reloads, either of which would
- * kill an unawaited withdrawal in flight).
+ * What the account being left needs from this document while it is still its
+ * client - both items need the outgoing account's token, so neither can be
+ * deferred to the incoming one.
  */
-export async function endSessionForAccountExit(): Promise<void> {
+export interface AccountExit {
+	/** The running client, still holding the outgoing account's token. */
+	client: MatrixClient;
+	/** Operator push config, for handing back the device's push registration. */
+	pushConfig: PushConfig;
+}
+
+/**
+ * What the outgoing account owes the server before this document stops being
+ * its client: a MatrixRTC withdrawal for any live call (#474) and this device's
+ * push registration (#534), both sent while its token is still the one in the
+ * client. Shared by every exit from a running session that is not the full
+ * logout - switching, and leaving to add an account (which unmounts the
+ * provider and then reloads, either of which would kill an unawaited withdrawal
+ * in flight).
+ *
+ * `commit` is the caller's point of no return - for a switch, freezing the
+ * account scope and moving the stored pointer - and everything is arranged
+ * around it. The network work happens BEFORE it, while this document is still
+ * wholly the outgoing account: once the pointer moves, the service worker holds
+ * the incoming account's media token and account-scoped writes are frozen out,
+ * so a multi-second round trip there would leave a still-visible UI fetching
+ * media it can no longer authenticate. What follows the commit is synchronous
+ * and immediately precedes the reload.
+ *
+ * The price is that a commit which FAILS has already given the registration
+ * back, on a document that goes on running that account - so the failure path
+ * puts it back ({@link restoreWebPush}); left alone, the account would sit there
+ * with background notifications unregistered while its own settings still say
+ * they are on, and nothing re-registers without a reload. On a deployment that
+ * has retired push the restore cannot run - registering needs a VAPID key and a
+ * gateway, releasing does not - and that is the right way round: the operator
+ * has already withdrawn the thing being restored.
+ *
+ * Returns whether the commit succeeded; a caller with nothing to commit (leaving
+ * to add an account) omits it and gets `true`.
+ */
+export async function endSessionForAccountExit(
+	exit: AccountExit,
+	commit?: () => boolean,
+): Promise<boolean> {
 	// Stop the chime first, matching `runLogout`: a message arriving mid-exit
 	// must not chime into the account being left.
 	closeNotificationSound();
@@ -77,6 +122,34 @@ export async function endSessionForAccountExit(): Promise<void> {
 	// module-global, so a call started during the teardown would otherwise be
 	// inherited by the next account.
 	setActiveCallRoomId(null);
+	// Background notifications follow the active account, so the one being left
+	// gives the device's push registration back - a pusher left behind delivers
+	// ITS message previews onto a device that is about to be showing someone
+	// else's account. Bounded and non-throwing (`releaseWebPush`): giving up early
+	// leaves at worst a pusher pointing at an endpoint this device has already
+	// dropped.
+	await releaseWebPush(exit.client, exit.pushConfig);
+	if (commit) {
+		if (!commit()) {
+			await restoreWebPush(exit.client, exit.pushConfig);
+			return false;
+		}
+		// The OS badge is one number for the whole install, so the outgoing
+		// account's unread count must not greet the incoming one. Clearing rather
+		// than recomputing is the honest state: this document is on its way out
+		// and the only authority on the incoming count is that account's first
+		// sync, which sets the badge from `client/client.tsx`. Synchronous, and
+		// after a commit that has frozen the scope, so nothing can put the old
+		// count back between here and the reload.
+		//
+		// Only an exit that HAS committed: leaving to add an account moves no
+		// pointer and freezes nothing, and this document goes on running - and
+		// syncing - the same account until `/login` unmounts it. That account is
+		// still logged in and those unreads are still its own, so a clear there
+		// would be both wrong and immediately undone.
+		releaseAppBadge();
+	}
+	return true;
 }
 
 /** Why a switch did not happen. */
@@ -100,14 +173,19 @@ export type SwitchResult = "switching" | "unchanged" | SwitchFailure;
  * (removed in another tab, or while the menu was open) and is validated BEFORE
  * the teardown, so it can never cost the user their live call. `"failed"` means
  * storage refused the pointer write, which is only discoverable after the
- * teardown - the call has already ended by then.
+ * teardown - the call has already ended by then, and the push registration has
+ * been given back and put again (see {@link endSessionForAccountExit}), so the
+ * account this document goes on running is left as it was.
  *
- * The outgoing account's Web Push registration is deliberately left alone here;
- * re-pointing the pusher at the incoming account is #534's job, and it is
- * tracked there because a stale pusher leaks the other account's message
- * previews onto this device.
+ * The outgoing account's Web Push registration goes back with the switch
+ * (#534): background notifications belong to the account on screen, and a
+ * pusher left behind would deliver the other account's message previews onto
+ * this device.
  */
-export async function switchToAccount(userId: string): Promise<SwitchResult> {
+export async function switchToAccount(
+	userId: string,
+	exit: AccountExit,
+): Promise<SwitchResult> {
 	// "Already the active account" is a property of THIS document's running
 	// client, so it reads the per-tab mirror. Storage may name a different
 	// account entirely - another tab switched - and this tab would then decline
@@ -120,14 +198,17 @@ export async function switchToAccount(userId: string): Promise<SwitchResult> {
 	if (!loadSessions().some((account) => account.userId === userId)) {
 		return "unknown-account";
 	}
-	await endSessionForAccountExit();
-	// Freeze BEFORE the pointer moves: the account-scoped stores must not rebind
-	// to the incoming account while the outgoing one is still on screen.
-	freezeAccountScope();
-	if (!setActiveAccount(userId)) {
+	const committed = await endSessionForAccountExit(exit, () => {
+		// Freeze BEFORE the pointer moves: the account-scoped stores must not
+		// rebind to the incoming account while the outgoing one is still on
+		// screen. It also silences this document's badge writes, so the clear
+		// that follows the commit is not undone by its next sync update.
+		freezeAccountScope();
+		if (setActiveAccount(userId)) return true;
 		unfreezeAccountScope();
-		return "failed";
-	}
+		return false;
+	});
+	if (!committed) return "failed";
 	reloadIntoActiveAccount();
 	return "switching";
 }
@@ -162,15 +243,31 @@ export async function switchToAccount(userId: string): Promise<SwitchResult> {
  * guarding, for the whole window before the new document takes over.
  */
 export async function finishAccountLogout(
+	exit: AccountExit,
 	userId: string,
 	wipe: () => Promise<void>,
 	goToLogin: () => void,
 ): Promise<"reloading" | "left"> {
+	// Before anything else, because clearing the account takes away both the
+	// credentials the pusher removal needs and the key its preference is filed
+	// under (#532). This is the choke point every logout
+	// goes through - the one in `Layout`, and both force-logout paths in `App` -
+	// so no exit can forget it (#534). The foreground logout releases earlier as
+	// well, while its token is still valid and the pusher can actually be removed
+	// server-side; if that got as far as unsubscribing, this second call finds no
+	// subscription and returns, and if it did not, this is the one that closes
+	// the leak.
+	await disableBackgroundNotifications(exit.client, exit.pushConfig);
 	try {
 		await withTimeout(wipe(), CRYPTO_INIT_TIMEOUT_MS, "Account store wipe");
 	} catch (e) {
 		reportError(e, { logLabel: "Failed to clear the account's stores" });
 	}
+	// Same rule as an account exit: the departing account's unread count is not
+	// the promoted account's, and the OS badge is one number for the install. The
+	// promoted account's first sync sets it (`client/client.tsx`); on the way to
+	// `/login` there is nothing left to count.
+	releaseAppBadge();
 	// Storage-backed: another tab may have written it since this document booted,
 	// and it is the authority on what will be left.
 	const remaining = loadSessions().some((a) => a.userId !== userId);
