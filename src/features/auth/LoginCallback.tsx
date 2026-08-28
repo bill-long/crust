@@ -3,7 +3,13 @@ import { type Component, createSignal, onMount, Show } from "solid-js";
 import { basePrefix } from "../../app/basePath";
 import { revokeAccountToken } from "../../client/accountLogout";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { addSession, MAX_ACCOUNTS, saveSession } from "../../stores/session";
+import {
+	addSession,
+	freezeAccountScope,
+	MAX_ACCOUNTS,
+	saveSession,
+	unfreezeAccountScope,
+} from "../../stores/session";
 import {
 	completeOidcLogin,
 	takeOidcAddAccount,
@@ -47,7 +53,12 @@ const LoginCallback: Component = () => {
 				oidc: result.oidc,
 			};
 			if (isAdding) {
+				// Same as the password path: the pointer moves and a reload follows,
+				// so the account-scoped stores must not rebind in the window before
+				// the replacement document takes over.
+				freezeAccountScope();
 				if (!addSession(session)) {
+					unfreezeAccountScope();
 					// The login already minted a device on the homeserver. Revoke it
 					// rather than orphaning a token this app will never hold again.
 					await revokeAccountToken(session);

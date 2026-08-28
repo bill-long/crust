@@ -340,6 +340,21 @@ describe("LoginPage add-account mode", () => {
 		expect(loadSession()?.userId).toBe("@alice:strange.pizza");
 	});
 
+	it("freezes account-scoped storage across the add-account reload", async () => {
+		// The pointer moves and a reload follows; `location.assign` only starts
+		// that, so the stores must not rebind to the new account in between.
+		const { isAccountScopeFrozen, unfreezeAccountScope } = await import(
+			"../../stores/session"
+		);
+		saveSession(EXISTING);
+		locationState.value = { addAccount: true };
+
+		await logInAsAlice();
+
+		await waitFor(() => expect(isAccountScopeFrozen()).toBe(true));
+		unfreezeAccountScope();
+	});
+
 	it("reloads into the added account instead of routing there", async () => {
 		// The app is mid-teardown from another account; only a fresh document
 		// guarantees no module-scope state crosses the boundary.
@@ -389,6 +404,10 @@ describe("LoginPage add-account mode", () => {
 		);
 		expect(loadSessions()).toHaveLength(MAX_ACCOUNTS);
 		expect(assignMock).not.toHaveBeenCalled();
+		// No reload is coming, so the freeze armed for one must be lifted or this
+		// document can never persist account-scoped state again.
+		const { isAccountScopeFrozen } = await import("../../stores/session");
+		expect(isAccountScopeFrozen()).toBe(false);
 		// The login already minted a device; leaving it alive would orphan a
 		// token this app never stored and the user cannot revoke from here.
 		expect(revokeAccountTokenMock).toHaveBeenCalledOnce();

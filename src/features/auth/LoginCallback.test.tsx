@@ -22,6 +22,8 @@ vi.mock("@solidjs/router", () => ({
 
 const saveSessionMock = vi.fn();
 const addSessionMock = vi.fn((..._args: unknown[]) => true);
+const freezeMock = vi.fn();
+const unfreezeMock = vi.fn();
 const revokeAccountTokenMock = vi.fn(async (..._args: unknown[]) => {});
 vi.mock("../../client/accountLogout", () => ({
 	revokeAccountToken: (...args: unknown[]) => revokeAccountTokenMock(...args),
@@ -30,6 +32,8 @@ vi.mock("../../stores/session", () => ({
 	saveSession: (...args: unknown[]) => saveSessionMock(...args),
 	addSession: (...args: unknown[]) => addSessionMock(...args),
 	MAX_ACCOUNTS: 5,
+	freezeAccountScope: () => freezeMock(),
+	unfreezeAccountScope: () => unfreezeMock(),
 }));
 
 const completeOidcLoginMock = vi.fn();
@@ -133,6 +137,25 @@ describe("LoginCallback add-account mode", () => {
 		await screen.findByText("bad state");
 		expect(takeOidcAddAccountMock).toHaveBeenCalledOnce();
 		expect(addSessionMock).not.toHaveBeenCalled();
+	});
+
+	it("freezes account-scoped storage across the reload, and lifts it on refusal", async () => {
+		// The pointer moves and a reload follows; `location.assign` only starts
+		// that, so the stores must not rebind in the meantime - and must be able
+		// to persist again if the add is refused and this document stays.
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		completeOidcLoginMock.mockResolvedValueOnce(GRANT_RESULT);
+		render(() => <LoginCallback />);
+		await waitFor(() => expect(freezeMock).toHaveBeenCalledOnce());
+		expect(unfreezeMock).not.toHaveBeenCalled();
+
+		cleanup();
+		freezeMock.mockClear();
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		addSessionMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockResolvedValueOnce(GRANT_RESULT);
+		render(() => <LoginCallback />);
+		await waitFor(() => expect(unfreezeMock).toHaveBeenCalledOnce());
 	});
 
 	it("offers a way back to the app, not to the unguarded login page", async () => {

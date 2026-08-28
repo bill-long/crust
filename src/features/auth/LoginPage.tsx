@@ -12,9 +12,11 @@ import { revokeAccountToken } from "../../client/accountLogout";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import {
 	addSession,
+	freezeAccountScope,
 	MAX_ACCOUNTS,
 	type Session,
 	saveSession,
+	unfreezeAccountScope,
 } from "../../stores/session";
 import { discoverHomeserver } from "./discovery";
 import {
@@ -69,9 +71,19 @@ const LoginPage: Component = () => {
 	 * replacing an account the user did not choose.
 	 */
 	const persistSession = (session: Session): boolean => {
-		if (addingAccount()) return addSession(session);
-		saveSession(session);
-		return true;
+		if (!addingAccount()) {
+			saveSession(session);
+			return true;
+		}
+		// Adding flips the active-account pointer and then RELOADS, and
+		// `location.assign` only starts that - so the account-scoped stores must
+		// not rebind to the new account in the meantime, exactly as on a switch
+		// (see `app/accountSwitch.ts`). Lifted again if the add is refused,
+		// because this document then stays on the login page.
+		freezeAccountScope();
+		if (addSession(session)) return true;
+		unfreezeAccountScope();
+		return false;
 	};
 
 	/**
