@@ -19,6 +19,11 @@ import { sanitizeReturnTo } from "./returnTo";
 const LoginCallback: Component = () => {
 	const navigate = useNavigate();
 	const [error, setError] = createSignal("");
+	// Whether this callback was adding an account rather than logging in fresh.
+	// It decides where the error state's way out goes: an add-account failure
+	// happened WITH an account still logged in, and `/login` is unguarded, so
+	// sending the user there invites a plain login that would replace it (#549).
+	const [adding, setAdding] = createSignal(false);
 
 	onMount(async () => {
 		// Taken BEFORE the exchange, which throws on an OP error, a replayed state
@@ -26,7 +31,8 @@ const LoginCallback: Component = () => {
 		// abandons the flow at the OP. A flag left armed would turn the next plain
 		// OAuth login in this tab into an append, which is the behaviour reserved
 		// for the switcher's explicit entry point (#533).
-		const adding = takeOidcAddAccount();
+		const isAdding = takeOidcAddAccount();
+		setAdding(isAdding);
 		try {
 			const result = await completeOidcLogin(window.location.search);
 			// The stashed target was sanitized before stashing; sanitize again
@@ -40,7 +46,7 @@ const LoginCallback: Component = () => {
 				homeserverUrl: result.homeserverUrl,
 				oidc: result.oidc,
 			};
-			if (adding) {
+			if (isAdding) {
 				if (!addSession(session)) {
 					// The login already minted a device on the homeserver. Revoke it
 					// rather than orphaning a token this app will never hold again.
@@ -78,13 +84,29 @@ const LoginCallback: Component = () => {
 					<p class="rounded bg-danger-bg/50 px-3 py-2 text-sm text-danger-text-bright">
 						{error()}
 					</p>
-					<button
-						type="button"
-						onClick={() => navigate("/login", { replace: true })}
-						class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+					<Show
+						when={adding()}
+						fallback={
+							<button
+								type="button"
+								onClick={() => navigate("/login", { replace: true })}
+								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+							>
+								Back to log in
+							</button>
+						}
 					>
-						Back to log in
-					</button>
+						{/* A reload, not a route: the app is not mounted on this route,
+						    and the account that was already logged in is the one to
+						    return to. */}
+						<button
+							type="button"
+							onClick={() => window.location.assign(`${basePrefix}/`)}
+							class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+						>
+							Back to app
+						</button>
+					</Show>
 				</Show>
 			</div>
 		</div>

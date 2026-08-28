@@ -135,6 +135,34 @@ describe("LoginCallback add-account mode", () => {
 		expect(addSessionMock).not.toHaveBeenCalled();
 	});
 
+	it("offers a way back to the app, not to the unguarded login page", async () => {
+		// The failure happened WITH an account still logged in. /login replaces
+		// on a plain login, so routing there invites destroying it (#549).
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+		const assign = vi.fn();
+		vi.stubGlobal("location", { ...window.location, assign });
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		fireEvent.click(screen.getByRole("button", { name: "Back to app" }));
+		expect(assign).toHaveBeenCalledOnce();
+		expect(navigateMock).not.toHaveBeenCalled();
+		vi.unstubAllGlobals();
+	});
+
+	it("still offers the login page for a plain login failure", async () => {
+		takeOidcAddAccountMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		fireEvent.click(screen.getByRole("button", { name: "Back to log in" }));
+		expect(navigateMock).toHaveBeenCalledWith("/login", { replace: true });
+	});
+
 	it("revokes the new device when the account cap is reached", async () => {
 		takeOidcAddAccountMock.mockReturnValueOnce(true);
 		addSessionMock.mockReturnValueOnce(false);
