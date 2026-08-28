@@ -34,9 +34,10 @@ import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import {
-	accounts,
 	activeAccount,
+	activeAccountId,
 	freezeAccountScope,
+	loadSessions,
 	setActiveAccount,
 	unfreezeAccountScope,
 } from "../stores/session";
@@ -97,8 +98,16 @@ export type SwitchFailure = "unknown-account" | "failed";
 export async function switchToAccount(
 	userId: string,
 ): Promise<"switching" | SwitchFailure> {
+	// "Already the active account" is a property of THIS document's running
+	// client, so it reads the per-tab mirror. Storage may name a different
+	// account entirely - another tab switched - and this tab would then decline
+	// a switch it has never actually made, silently doing nothing.
 	if (userId === activeAccount()) return "switching";
-	if (!accounts().some((account) => account.userId === userId)) {
+	// Membership, on the other hand, is storage's to answer: the row being
+	// validated went stale precisely because another tab (or another window of
+	// the desktop shell) removed the account, which the mirror cannot see.
+	// Reading through means a stale row is refused before anything is torn down.
+	if (!loadSessions().some((account) => account.userId === userId)) {
 		return "unknown-account";
 	}
 	await endSessionForAccountExit();
@@ -122,9 +131,19 @@ export async function switchToAccount(
  * outside the auth guard, so the user would be looking at a login form with a
  * perfectly good session live in storage - and logging in there REPLACES,
  * silently discarding the remaining account's unrevoked token.
+ *
+ * `cleared` is whether the logout actually reached storage. When it did not,
+ * the account still listed there is the one whose token was just revoked:
+ * reloading would boot it, fail on the dead token, log out again, and loop. The
+ * login page is the only safe destination then.
  */
-export function leaveLoggedOutAccount(goToLogin: () => void): void {
-	if (activeAccount() !== null) {
+export function leaveLoggedOutAccount(
+	cleared: boolean,
+	goToLogin: () => void,
+): void {
+	// Storage-backed: the logout that just ran wrote there, and another tab may
+	// have too - it is the authority on what is left.
+	if (cleared && activeAccountId() !== null) {
 		reloadIntoActiveAccount();
 		return;
 	}

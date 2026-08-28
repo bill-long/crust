@@ -35,6 +35,13 @@ const BOB: Session = {
 	deviceId: "DEV_B",
 };
 
+/** Move the persisted pointer the way another tab would, behind this tab's back. */
+function setActiveAccountForOtherTab(userId: string): void {
+	const store = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+	store.activeUserId = userId;
+	localStorage.setItem("crust:session", JSON.stringify(store));
+}
+
 /** Calls in the order they happened, so ordering can be asserted. */
 const calls: string[] = [];
 const assign = vi.fn(() => calls.push("assign"));
@@ -125,6 +132,36 @@ describe("switchToAccount", () => {
 		expect(loadSession()?.userId).toBe(ALICE.userId);
 	});
 
+	it("accepts an account another tab added, which this tab never saw", async () => {
+		// The reactive mirrors only reflect THIS tab's writes. Validating against
+		// them would refuse a perfectly good account and, worse, trust a row for
+		// one that another tab has already removed.
+		saveSession(ALICE);
+		const store = JSON.parse(localStorage.getItem("crust:session") ?? "{}");
+		store.sessions.push({ ...BOB, cryptoPrefix: "crust:@bob:example.com" });
+		localStorage.setItem("crust:session", JSON.stringify(store));
+
+		await expect(switchToAccount(BOB.userId)).resolves.toBe("switching");
+
+		expect(assign).toHaveBeenCalledOnce();
+	});
+
+	it("refuses a row for an account another tab removed, before any teardown", async () => {
+		// This tab runs ALICE and its switcher still lists BOB...
+		saveSession(BOB);
+		addSession(ALICE);
+		// ...but another tab has logged BOB out since.
+		localStorage.setItem(
+			"crust:session",
+			JSON.stringify({ activeUserId: ALICE.userId, sessions: [ALICE] }),
+		);
+
+		await expect(switchToAccount(BOB.userId)).resolves.toBe("unknown-account");
+
+		expect(endActiveCallMock).not.toHaveBeenCalled();
+		expect(assign).not.toHaveBeenCalled();
+	});
+
 	it("is a no-op for the account already active", async () => {
 		saveSession(ALICE);
 
@@ -132,6 +169,19 @@ describe("switchToAccount", () => {
 
 		expect(endActiveCallMock).not.toHaveBeenCalled();
 		expect(assign).not.toHaveBeenCalled();
+	});
+
+	it("still switches to the account ANOTHER tab made active", async () => {
+		// "Already active" is a property of the client THIS document runs, not of
+		// the persisted pointer. Reading storage here would make a tab that is
+		// still running Alice decline a switch to Bob - silently, forever.
+		saveSession(ALICE);
+		addSession(BOB);
+		setActiveAccountForOtherTab(ALICE.userId);
+		// This tab is still running BOB (its mirror says so); storage says ALICE.
+		await expect(switchToAccount(ALICE.userId)).resolves.toBe("switching");
+
+		expect(assign).toHaveBeenCalledOnce();
 	});
 
 	it("freezes account-scoped storage before the pointer moves", async () => {
@@ -202,10 +252,42 @@ describe("leaveLoggedOutAccount", () => {
 		clearSession();
 		const goToLogin = vi.fn();
 
-		leaveLoggedOutAccount(goToLogin);
+		leaveLoggedOutAccount(true, goToLogin);
 
 		expect(assign).toHaveBeenCalledOnce();
 		expect(goToLogin).not.toHaveBeenCalled();
+	});
+
+	it("reloads into an account another tab left behind", () => {
+		// This tab's mirror says "nobody is logged in"; storage - which the
+		// logout just wrote, and which another tab may also have written - says
+		// otherwise. Storage is the authority, or the user is dumped on a login
+		// form with a live session behind it.
+		saveSession(ALICE);
+		clearSession();
+		localStorage.setItem(
+			"crust:session",
+			JSON.stringify({ activeUserId: BOB.userId, sessions: [BOB] }),
+		);
+		const goToLogin = vi.fn();
+
+		leaveLoggedOutAccount(true, goToLogin);
+
+		expect(assign).toHaveBeenCalledOnce();
+		expect(goToLogin).not.toHaveBeenCalled();
+	});
+
+	it("hands back to the login page when the logout could not be persisted", () => {
+		// Storage still names the account whose token was just revoked. Reloading
+		// into it would boot a dead session, log out again, and loop.
+		saveSession(ALICE);
+		addSession(BOB);
+		const goToLogin = vi.fn();
+
+		leaveLoggedOutAccount(false, goToLogin);
+
+		expect(goToLogin).toHaveBeenCalledOnce();
+		expect(assign).not.toHaveBeenCalled();
 	});
 
 	it("hands back to the login page when no account is left", () => {
@@ -213,7 +295,7 @@ describe("leaveLoggedOutAccount", () => {
 		clearSession();
 		const goToLogin = vi.fn();
 
-		leaveLoggedOutAccount(goToLogin);
+		leaveLoggedOutAccount(true, goToLogin);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();

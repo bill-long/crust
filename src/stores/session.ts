@@ -481,15 +481,19 @@ export function updateSession(session: Session): boolean {
  *
  * The account's crypto store is NOT wiped here; that is the caller's job and
  * only ever for the account being removed (see `clearCryptoStores`).
+ *
+ * Returns whether the account is gone from storage; see {@link removeAccount}
+ * for why a caller has to care.
  */
-export function clearSession(): void {
+export function clearSession(): boolean {
 	const activeUserId = readStore().activeUserId;
-	if (activeUserId !== null) removeAccount(activeUserId);
+	const removed = activeUserId === null || removeAccount(activeUserId);
 	// Also drop any un-migrated legacy value so logout leaves no stale token
 	// behind (e.g. if migration never ran or its write failed), even when there
 	// was no account under the new key to remove.
 	safeLocalStorage.remove(LEGACY_SESSION_KEY);
 	pushActiveMediaAuth(readStore());
+	return removed;
 }
 
 /**
@@ -559,12 +563,17 @@ export function setActiveAccount(userId: string): boolean {
  * Storage only. Revoking the token and wiping that account's crypto store are
  * the caller's job and must happen FIRST, while the credentials to do it are
  * still here (see `client/accountLogout.ts`).
+ *
+ * Returns whether the account is gone from storage afterwards - true also for
+ * an account that was not there to begin with. FALSE means storage rejected the
+ * write and the account is still listed, which matters to callers that have
+ * already revoked its token: routing back into it would loop.
  */
-export function removeAccount(userId: string): void {
+export function removeAccount(userId: string): boolean {
 	const store = readStore();
 	const previousActive = store.activeUserId;
 	const sessions = store.sessions.filter((s) => s.userId !== userId);
-	if (sessions.length === store.sessions.length) return;
+	if (sessions.length === store.sessions.length) return true;
 	const next: SessionStore = {
 		activeUserId:
 			previousActive === userId
@@ -572,12 +581,17 @@ export function removeAccount(userId: string): void {
 				: previousActive,
 		sessions,
 	};
-	writeStore(next);
+	// Everything below is destructive and unrecoverable, so it only happens once
+	// the account is actually gone from storage. A rejected write (quota,
+	// disabled storage) would otherwise delete the account's data while a
+	// reload brings the account itself back - emptied.
+	if (!writeStore(next)) return false;
 	for (const base of ACCOUNT_SCOPED_KEYS) {
 		safeLocalStorage.remove(accountScopedKey(base, userId));
 	}
 	publish(next);
 	notifyScopeChange(previousActive, next.activeUserId);
+	return true;
 }
 
 /**

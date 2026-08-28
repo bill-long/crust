@@ -80,6 +80,7 @@ import { pushNotice } from "../stores/notices";
 import {
 	accounts,
 	clearSession,
+	loadSessions,
 	MAX_ACCOUNTS,
 	rememberAccountDisplayName,
 } from "../stores/session";
@@ -416,7 +417,10 @@ const Layout: Component = () => {
 			await handleLogout();
 			return;
 		}
-		const target = accounts().find((a) => a.userId === targetUserId);
+		// Storage, not the per-tab mirror: if another tab logged this account out
+		// and back in, the mirror holds the dead token and the revoke below would
+		// 401 while the live session survives on the server.
+		const target = loadSessions().find((a) => a.userId === targetUserId);
 		if (!target) return;
 		setAccountBusy(true);
 		try {
@@ -476,11 +480,12 @@ const Layout: Component = () => {
 		} catch (e) {
 			console.warn("Failed to clear stores on logout:", e);
 		}
-		clearSession();
 		// With another account still logged in, /login is the wrong destination:
 		// the user would be staring at a login form with a live session in
 		// storage, and logging in there would replace it (see accountSwitch).
-		leaveLoggedOutAccount(() => navigate("/login", { replace: true }));
+		leaveLoggedOutAccount(clearSession(), () =>
+			navigate("/login", { replace: true }),
+		);
 	};
 
 	const userId = () => client.getUserId() ?? "";

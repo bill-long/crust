@@ -122,10 +122,11 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 					console.warn("Failed to clear stores on session expiry:", e);
 				})
 				.finally(() => {
-					clearSession();
 					// Another account may still be logged in; land there rather than on
 					// a login form that would replace it (#533).
-					leaveLoggedOutAccount(() => navigate("/login", { replace: true }));
+					leaveLoggedOutAccount(clearSession(), () =>
+						navigate("/login", { replace: true }),
+					);
 				});
 		}
 	});
@@ -147,8 +148,9 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		client.stopClient();
 		// Clear session and navigate immediately so the user never sees
 		// the main app UI in the "stopped" state while clearStores() awaits.
-		clearSession();
-		leaveLoggedOutAccount(() => navigate("/login", { replace: true }));
+		leaveLoggedOutAccount(clearSession(), () =>
+			navigate("/login", { replace: true }),
+		);
 		try {
 			await clearCryptoStores(client, session);
 		} catch {

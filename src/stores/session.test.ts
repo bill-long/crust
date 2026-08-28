@@ -804,10 +804,75 @@ describe("removeAccount", () => {
 		expect(localStorage.getItem(SESSION_KEY)).toBeNull();
 	});
 
+	it("deletes nothing when the store write is rejected", () => {
+		// Otherwise the account's data is destroyed while the account itself
+		// comes back on the next load, emptied.
+		seedStore([SAVED, BOB], BOB.userId);
+		localStorage.setItem(settingsKey(BOB.userId), '{"zoomLevel":150}');
+		const mirrorBefore = accounts();
+		const realSetItem = Storage.prototype.setItem;
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+			this: Storage,
+			key: string,
+			value: string,
+		) {
+			if (key === SESSION_KEY) throw new Error("QuotaExceeded");
+			realSetItem.call(this, key, value);
+		});
+
+		expect(removeAccount(BOB.userId)).toBe(false);
+
+		vi.restoreAllMocks();
+		expect(localStorage.getItem(settingsKey(BOB.userId))).toBe(
+			'{"zoomLevel":150}',
+		);
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			VALID.userId,
+			BOB.userId,
+		]);
+		// The reactive mirror is not published either, so nothing downstream
+		// renders a removal that did not happen.
+		expect(accounts()).toBe(mirrorBefore);
+	});
+
 	it("ignores an account that is not stored", () => {
 		saveSession(VALID);
-		removeAccount("@ghost:example.com");
+		// Already absent counts as removed: the caller's goal is met.
+		expect(removeAccount("@ghost:example.com")).toBe(true);
 		expect(loadSessions().map((a) => a.userId)).toEqual([VALID.userId]);
+	});
+
+	it("reports success when the account is gone", () => {
+		seedStore([SAVED, BOB], BOB.userId);
+		expect(removeAccount(BOB.userId)).toBe(true);
+	});
+
+	it("clearSession reports a logout that never reached storage", () => {
+		// The caller has already revoked the token by then; it must not route
+		// back into an account storage still lists.
+		seedStore([SAVED, BOB], BOB.userId);
+		const realSetItem = Storage.prototype.setItem;
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+			this: Storage,
+			key: string,
+			value: string,
+		) {
+			if (key === SESSION_KEY) throw new Error("QuotaExceeded");
+			realSetItem.call(this, key, value);
+		});
+
+		expect(clearSession()).toBe(false);
+
+		vi.restoreAllMocks();
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			VALID.userId,
+			BOB.userId,
+		]);
+	});
+
+	it("clearSession reports success when the account is gone", () => {
+		saveSession(VALID);
+		expect(clearSession()).toBe(true);
 	});
 });
 

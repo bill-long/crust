@@ -55,10 +55,11 @@ export async function revokeAccountToken(account: Session): Promise<void> {
  *
  * Best-effort on the network half, for the reason above: the user asked for the
  * account to be gone and retrying would need credentials we are about to
- * discard. The local half always runs, so the account and its data leave this
- * device either way.
+ * discard. Returns whether the account actually left this device - false only
+ * when storage refused the write, in which case it is still listed but its
+ * token has been revoked, so the caller must not route back into it.
  */
-export async function logOutAccount(account: Session): Promise<void> {
+export async function logOutAccount(account: Session): Promise<boolean> {
 	const client = clientFor(account);
 	try {
 		await client.logout(true);
@@ -74,5 +75,5 @@ export async function logOutAccount(account: Session): Promise<void> {
 			logLabel: `Failed to clear the crypto store for ${account.userId}`,
 		});
 	}
-	removeAccount(account.userId);
+	return removeAccount(account.userId);
 }
