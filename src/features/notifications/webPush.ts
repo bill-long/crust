@@ -1,4 +1,5 @@
 import type { IPusher, IPusherRequest, MatrixClient } from "matrix-js-sdk";
+import { reportError } from "../../lib/reportError";
 import { isPushConfigured, type PushConfig } from "../../types/config";
 
 /** Web Push fields Sygnal's webpush pushkin reads from the pusher `data`.
@@ -186,7 +187,18 @@ export async function enableWebPush(
 		);
 	}
 
-	let sub = await registration.pushManager.getSubscription();
+	let sub: PushSubscription | null;
+	try {
+		sub = await registration.pushManager.getSubscription();
+	} catch (err) {
+		// Rejecting is right here - unlike the disable path this cannot proceed
+		// without knowing - but the raw DOMException would go straight into the
+		// settings error text, so map it like the other failures in this function.
+		throw new Error(
+			"Could not read this browser's push subscription. Check that this site is allowed to store data.",
+			{ cause: err },
+		);
+	}
 	if (sub) {
 		const existingKey = sub.options.applicationServerKey;
 		if (!bytesEqual(existingKey, appServerKey)) {
@@ -236,9 +248,14 @@ export async function enableWebPush(
 
 /**
  * Unsubscribe the browser from Web Push and remove the pusher from the
- * homeserver. Best-effort throughout: a failure at either step does not stop
- * the other, and a device with no service worker registered - so nothing that
- * could hold a subscription - returns at once rather than waiting on one.
+ * homeserver.
+ *
+ * Never throws. A failure at either step does not stop the other, an
+ * unsupported browser, a worker that never becomes ready and a subscription
+ * that cannot be read are all "nothing to disable", and a device with no
+ * service worker registered - so nothing that could hold a subscription -
+ * returns at once rather than waiting on one. Every caller is on its way out of
+ * an account and none of them should have to wrap this.
  *
  * The LOCAL step goes first, and the order carries the guarantee. Callers reach
  * this on paths where the server is expected to be unreachable or the token
@@ -275,10 +292,34 @@ export async function disableWebPush(
 	} catch {
 		return;
 	}
-	const sub = await registration.pushManager.getSubscription();
+	// Reading the subscription can reject on its own (restricted storage, a
+	// push-service error). A device whose subscription cannot even be read has
+	// nothing this can hand back, same as one that holds none - but unlike that
+	// case it means the release did NOT happen, so it is worth a line: on a
+	// logout the account is about to leave storage, taking with it any later
+	// chance to remove its pusher (#534), and the previews keep arriving with
+	// nothing to explain why.
+	let sub: PushSubscription | null;
+	try {
+		sub = await registration.pushManager.getSubscription();
+	} catch (e) {
+		reportError(e, {
+			logLabel: "Could not read this device's push subscription",
+		});
+		return;
+	}
 	if (!sub) return;
 
-	const p256dh = sub.toJSON().keys?.p256dh;
+	// Read separately from the unsubscribe below, and tolerated when it fails:
+	// the pushkey only decides whether the SERVER-side pusher can be named, and
+	// losing it must not skip the unsubscribe, which is the step that actually
+	// stops delivery to this device.
+	let p256dh: string | undefined;
+	try {
+		p256dh = sub.toJSON().keys?.p256dh;
+	} catch {
+		p256dh = undefined;
+	}
 	try {
 		await sub.unsubscribe();
 	} catch {

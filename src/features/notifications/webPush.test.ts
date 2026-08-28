@@ -161,6 +161,59 @@ describe("disableWebPush", () => {
 		expect(removePusher).toHaveBeenCalledWith("P256DH", CONFIG.appId);
 	});
 
+	it("does not throw when the subscription cannot be read", async () => {
+		// Best-effort throughout: every caller is on its way out of an account and
+		// none of them should have to wrap this.
+		stubPushEnvironment(async () => {
+			throw new Error("storage is restricted");
+		});
+		const removePusher = vi.fn(async () => ({}));
+
+		await expect(
+			disableWebPush({ removePusher } as unknown as MatrixClient, CONFIG),
+		).resolves.toBeUndefined();
+
+		expect(removePusher).not.toHaveBeenCalled();
+	});
+
+	it("still unsubscribes when the pushkey cannot be read", async () => {
+		// The pushkey only decides whether the server-side pusher can be named;
+		// losing it must not cost the unsubscribe, which is what actually stops
+		// delivery to this device.
+		const unsubscribe = vi.fn(async () => true);
+		const sub = {
+			toJSON: () => {
+				throw new Error("storage is restricted");
+			},
+			unsubscribe,
+		} as unknown as PushSubscription;
+		stubPushEnvironment(async () => sub);
+		const removePusher = vi.fn(async () => ({}));
+
+		await expect(
+			disableWebPush({ removePusher } as unknown as MatrixClient, CONFIG),
+		).resolves.toBeUndefined();
+
+		expect(unsubscribe).toHaveBeenCalledOnce();
+		expect(removePusher).not.toHaveBeenCalled();
+	});
+
+	it("says so when the subscription cannot be read at all", async () => {
+		// Unlike a device that simply holds none, this one means the release did
+		// not happen - and on a logout there is no later chance to notice.
+		const reported = vi.spyOn(console, "error");
+		stubPushEnvironment(async () => {
+			throw new Error("storage is restricted");
+		});
+
+		await disableWebPush(
+			{ removePusher: vi.fn() } as unknown as MatrixClient,
+			CONFIG,
+		);
+
+		expect(reported).toHaveBeenCalled();
+	});
+
 	it("unsubscribes even when the server-side removal fails", async () => {
 		const unsubscribe = vi.fn(async () => true);
 		const sub = {
