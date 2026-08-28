@@ -50,13 +50,17 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 	// finish cleanly — the new key is still shown, flagged as incomplete.
 	const [partial, setPartial] = createSignal(false);
 	let disposed = false;
+	// Which half of the flow is in flight: the non-destructive preflight
+	// (dismissal stays allowed - nothing has happened yet) or the
+	// destructive operation (dismissal blocked).
+	let phase: "preflight" | "op" | null = null;
 
 	// Interactive UIA: the server decides whether the user re-enters a
 	// password or approves at the account-management page (#467). The
-	// preflight collects that BEFORE crypto.resetEncryption runs, because
-	// the reset destroys server-side backups and secret storage ahead of
-	// its UIA-gated key upload - a cancel at the first prompt must leave
-	// the account untouched.
+	// preflight collects AND verifies that BEFORE crypto.resetEncryption
+	// runs, because the reset destroys server-side backups and secret
+	// storage ahead of its UIA-gated key upload - a cancel or typo at the
+	// first prompt must leave the account untouched.
 	const uia = createUiaFlow(client);
 
 	onCleanup(() => {
@@ -87,11 +91,14 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		setErrorMessage("");
 		setPartial(false);
 
-		// Learn and collect the identity confirmation before anything
-		// destructive: cancelling here steps back with the account intact.
+		// Learn, collect, and verify the identity confirmation before
+		// anything destructive: cancelling here steps back with the account
+		// intact.
+		phase = "preflight";
 		try {
 			await uia.preflight();
 		} catch (e) {
+			phase = null;
 			if (disposed) return;
 			if (e instanceof UiaCancelledError) {
 				setStep("intro");
@@ -103,10 +110,10 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 			setStep("error");
 			return;
 		}
-
-		// Unmounted while the probe was in flight (external removal - Escape
-		// and backdrop are blocked, a route change is not): the destructive
-		// reset must not run headless with nobody to show the new key to.
+		phase = "op";
+		// Unmounted or dismissed while the probe was in flight: the
+		// destructive reset must not run headless with nobody to show the
+		// new key to.
 		if (disposed) return;
 
 		// Declared outside the try so a minted key is still shown if a later
@@ -148,13 +155,15 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				setStep("done");
 			}
 		} catch (e) {
+			// The cached 4S key may be stale after any mid-reset failure -
+			// drop it even when the dialog is already gone.
+			clearSecretStorageCache();
 			if (disposed) return;
 			if (e instanceof UiaCancelledError) {
 				// A cancel here is the mid-operation approval loop (the OP
 				// ticket was never granted or expired), and the reset already
 				// tore down backups and secret storage - surface it as an
 				// interrupted reset, never as a silent step back.
-				clearSecretStorageCache();
 				setErrorMessage(
 					"The reset was interrupted before the server confirmed your identity. Run it again to finish setting up a new identity.",
 				);
@@ -162,7 +171,6 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				return;
 			}
 			console.error("Encryption reset failed:", e);
-			clearSecretStorageCache();
 			if (generatedKey?.encodedPrivateKey) {
 				setRecoveryKey(generatedKey.encodedPrivateKey);
 				setPartial(true);
@@ -177,15 +185,30 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 	};
 
 	// A pending identity prompt steps back to the intro (via the flow's
-	// cancel rejection); the working and show-key states block dismissal.
-	const handleBackdropClick = (e: MouseEvent): void => {
-		if (e.target !== e.currentTarget) return;
+	// cancel rejection). The destructive phase and the show-key state block
+	// dismissal; a preflight still probing the network does not - nothing
+	// has happened yet, so a hung request must not trap the user (closing
+	// aborts the flow and the post-preflight disposed guard stops the
+	// reset from starting headless).
+	const dismiss = (): void => {
 		if (uia.prompt()) {
 			uia.cancel();
 			return;
 		}
-		if (step() === "working" || step() === "show-key") return;
+		if (step() === "working") {
+			if (phase === "preflight") {
+				uia.cancel();
+				props.onClose();
+			}
+			return;
+		}
+		if (step() === "show-key") return;
 		props.onClose();
+	};
+
+	const handleBackdropClick = (e: MouseEvent): void => {
+		if (e.target !== e.currentTarget) return;
+		dismiss();
 	};
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
@@ -194,12 +217,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 			return;
 		}
 		if (e.key !== "Escape") return;
-		if (uia.prompt()) {
-			uia.cancel();
-			return;
-		}
-		if (step() === "working" || step() === "show-key") return;
-		props.onClose();
+		dismiss();
 	};
 
 	return (

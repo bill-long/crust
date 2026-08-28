@@ -34,6 +34,9 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 	// at a prompt backs out with the account untouched.
 	const uia = createUiaFlow(client);
 	let disposed = false;
+	// Non-destructive preflight vs the actual bootstrap (see the same
+	// split in ResetEncryptionDialog).
+	let phase: "preflight" | "op" | null = null;
 	onCleanup(() => {
 		disposed = true;
 		uia.cancel();
@@ -56,11 +59,29 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 		setErrorMessage("");
 		setStep("working");
 
+		phase = "preflight";
 		try {
 			await uia.preflight();
-			// Unmounted while the probe was in flight: don't start a bootstrap
-			// nobody is watching.
+		} catch (e) {
+			phase = null;
 			if (disposed) return;
+			if (e instanceof UiaCancelledError) {
+				setStep("intro");
+				return;
+			}
+			console.error("Cross-signing preflight failed:", e);
+			setErrorMessage(
+				userFacingErrorMessage(e, "Setup failed. Please try again."),
+			);
+			setStep("error");
+			return;
+		}
+		phase = "op";
+		// Unmounted or dismissed while the probe was in flight: don't start
+		// a bootstrap nobody is watching.
+		if (disposed) return;
+
+		try {
 			await crypto.bootstrapCrossSigning({
 				authUploadDeviceSigningKeys: uia.uiaCallback,
 			});
@@ -69,22 +90,29 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			if (disposed) return;
 			setStep("done");
 		} catch (e) {
+			// A partial bootstrap may already have minted local keys and
+			// cached 4S material - drop the cache on every failure path,
+			// including after an unmount.
+			clearSecretStorageCache();
 			if (disposed) return;
 			if (e instanceof UiaCancelledError) {
-				// Nothing was uploaded - backing out is safe. A cancel in the
-				// mid-operation approval loop still aborts a bootstrap that may
-				// have cached 4S keys before the refused upload, so drop the
-				// cache like the error path does (harmless when nothing ran).
-				clearSecretStorageCache();
-				setStep("intro");
+				// The bootstrap has already minted new local signing keys by
+				// the time its upload is refused, and a bare retry would not
+				// re-upload them (SDK quirk) - surface the interruption
+				// instead of silently stepping back as if nothing ran.
+				setErrorMessage(
+					"Setup was interrupted before the server confirmed your identity. Run it again to finish.",
+				);
+				setStep("error");
 				return;
 			}
 			console.error("Cross-signing bootstrap failed:", e);
-			clearSecretStorageCache();
 			setErrorMessage(
 				userFacingErrorMessage(e, "Setup failed. Please try again."),
 			);
 			setStep("error");
+		} finally {
+			phase = null;
 		}
 	};
 
@@ -99,14 +127,21 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 	createUiaOverlayFocus({ flow: uia, overlay: () => overlayEl, step });
 
 	// Backdrop click / Escape: a pending identity prompt steps back to the
-	// intro (via the flow's cancel rejection); mid-operation dismissal is
-	// blocked; otherwise the dialog closes.
+	// intro (via the flow's cancel rejection); the destructive phase blocks
+	// dismissal, but a preflight still probing the network does not (see
+	// ResetEncryptionDialog's dismiss for the reasoning).
 	const onDismiss = (): void => {
 		if (uia.prompt()) {
 			uia.cancel();
 			return;
 		}
-		if (step() === "working") return;
+		if (step() === "working") {
+			if (phase === "preflight") {
+				uia.cancel();
+				props.onClose();
+			}
+			return;
+		}
 		props.onClose();
 	};
 

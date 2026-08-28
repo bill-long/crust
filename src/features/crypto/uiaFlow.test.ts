@@ -3,15 +3,32 @@ import { describe, expect, it, vi } from "vitest";
 import { uia401 } from "../../test/uiaFixtures";
 import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
-function fakeClient(overrides?: Record<string, unknown>): MatrixClient {
+interface FakeClientOverrides {
+	/** Preflight probe behaviour, given the request's auth dict (if any).
+	 *  Defaults to a server that needs no auth. */
+	probe?: (auth?: unknown) => Promise<unknown>;
+	getAuthMetadata?: () => Promise<unknown>;
+}
+
+function fakeClient(overrides?: FakeClientOverrides): MatrixClient {
+	const probe = overrides?.probe ?? (async () => ({}));
 	return {
 		getUserId: () => "@u:example.com",
-		getAuthMetadata: vi.fn(async () => {
-			throw new Error("no oauth metadata");
-		}),
-		// Preflight probe: default to a server that needs no auth.
-		uploadDeviceSigningKeys: vi.fn(async () => ({})),
-		...overrides,
+		getAuthMetadata:
+			overrides?.getAuthMetadata ??
+			(async () => {
+				throw new Error("no oauth metadata");
+			}),
+		http: {
+			authedRequest: vi.fn(
+				async (
+					_method: unknown,
+					_path: unknown,
+					_qs: unknown,
+					body?: { auth?: unknown },
+				) => probe(body?.auth),
+			),
+		},
 	} as unknown as MatrixClient;
 }
 
@@ -28,9 +45,9 @@ describe("createUiaFlow preflight", () => {
 	it("resolves without prompting when the probe fails with a non-UIA error", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
+				probe: async () => {
 					throw Object.assign(new Error("nope"), { httpStatus: 404 });
-				}),
+				},
 			}),
 		);
 		await flow.preflight();
@@ -40,9 +57,9 @@ describe("createUiaFlow preflight", () => {
 	it("collects the password when the server offers m.login.password", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
-					throw uia401("probe-sess", PASSWORD_FLOW);
-				}),
+				probe: async (auth) => {
+					if (!auth) throw uia401("probe-sess", PASSWORD_FLOW);
+				},
 			}),
 		);
 		const done = flow.preflight();
@@ -55,11 +72,12 @@ describe("createUiaFlow preflight", () => {
 	it("collects the approval when the server offers m.oauth", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
-					throw uia401("probe-sess", OAUTH_FLOW, {
-						"m.oauth": { url: "https://op.example/approve" },
-					});
-				}),
+				probe: async (auth) => {
+					if (!auth)
+						throw uia401("probe-sess", OAUTH_FLOW, {
+							"m.oauth": { url: "https://op.example/approve" },
+						});
+				},
 			}),
 		);
 		const done = flow.preflight();
@@ -74,12 +92,38 @@ describe("createUiaFlow preflight", () => {
 		await done;
 	});
 
+	it("re-prompts with an error until the password verifies against the probe", async () => {
+		let attempts = 0;
+		const flow = createUiaFlow(
+			fakeClient({
+				probe: async (auth) => {
+					if (!auth) throw uia401("probe-sess", PASSWORD_FLOW);
+					attempts += 1;
+					// First entry is wrong: the server refuses the stage.
+					if (attempts === 1) throw uia401("probe-sess-2", PASSWORD_FLOW);
+				},
+			}),
+		);
+		const done = flow.preflight();
+		await vi.waitFor(() => expect(flow.prompt()).toEqual({ kind: "password" }));
+		flow.submitPassword("wrong");
+		await vi.waitFor(() =>
+			expect(flow.prompt()).toEqual({
+				kind: "password",
+				error: "Incorrect password. Try again.",
+			}),
+		);
+		flow.submitPassword("right");
+		await done;
+		expect(flow.prompt()).toBeNull();
+	});
+
 	it("rejects with UiaCancelledError on a prompt cancel, account untouched", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
-					throw uia401("probe-sess", PASSWORD_FLOW);
-				}),
+				probe: async (auth) => {
+					if (!auth) throw uia401("probe-sess", PASSWORD_FLOW);
+				},
 			}),
 		);
 		const done = flow.preflight();
@@ -92,14 +136,14 @@ describe("createUiaFlow preflight", () => {
 	it("fails when no advertised flow is a supported single stage", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
+				probe: async () => {
 					// A multi-stage flow this client cannot chain, plus an
 					// unsupported single stage.
 					throw uia401("probe-sess", [
 						["m.login.password", "m.login.terms"],
 						["m.login.sso"],
 					]);
-				}),
+				},
 			}),
 		);
 		await expect(flow.preflight()).rejects.toThrow(/no way to confirm/);
@@ -117,9 +161,9 @@ describe("createUiaFlow uiaCallback", () => {
 	): Promise<ReturnType<typeof createUiaFlow>> {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
-					throw uia401("probe-sess", flows, params);
-				}),
+				probe: async (auth) => {
+					if (!auth) throw uia401("probe-sess", flows, params);
+				},
 			}),
 		);
 		const done = flow.preflight();
@@ -284,11 +328,12 @@ describe("createUiaFlow uiaCallback", () => {
 	it("refuses a non-web url from the 401 params", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
-					throw uia401("probe-sess", OAUTH_FLOW, {
-						"m.oauth": { url: "javascript:alert(1)" },
-					});
-				}),
+				probe: async (auth) => {
+					if (!auth)
+						throw uia401("probe-sess", OAUTH_FLOW, {
+							"m.oauth": { url: "javascript:alert(1)" },
+						});
+				},
 			}),
 		);
 		const done = flow.preflight();
@@ -308,9 +353,9 @@ describe("createUiaFlow uiaCallback", () => {
 	it("falls back to the account-management deeplink when the 401 has no url", async () => {
 		const flow = createUiaFlow(
 			fakeClient({
-				uploadDeviceSigningKeys: vi.fn(async () => {
-					throw uia401("probe-sess", OAUTH_FLOW);
-				}),
+				probe: async (auth) => {
+					if (!auth) throw uia401("probe-sess", OAUTH_FLOW);
+				},
 				getAuthMetadata: vi.fn(async () => ({
 					account_management_uri: "https://op.example/account",
 					account_management_actions_supported: [
@@ -339,11 +384,11 @@ describe("createUiaFlow uiaCallback", () => {
 		const flow = createUiaFlow(
 			fakeClient({
 				getAuthMetadata,
-				uploadDeviceSigningKeys: vi.fn(async () => {
+				probe: async () => {
 					// No url in the 401 params: preflight resolves the link from
 					// the auth metadata.
 					throw uia401("probe-sess", OAUTH_FLOW);
-				}),
+				},
 			}),
 		);
 		const preflightDone = flow.preflight();

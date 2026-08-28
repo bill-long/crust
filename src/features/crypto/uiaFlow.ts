@@ -1,17 +1,29 @@
-import { AuthType, type MatrixClient } from "matrix-js-sdk";
+import { AuthType, type MatrixClient, Method } from "matrix-js-sdk";
 import type { UIAuthCallback } from "matrix-js-sdk/lib/interactive-auth";
 import { type Accessor, createSignal } from "solid-js";
 import {
 	ACCOUNT_MANAGEMENT_ACTIONS,
 	fetchAccountManagementUrl,
 } from "../../client/accountManagement";
+import {
+	OAUTH_STAGE_ALIAS,
+	parseUia401,
+	passwordAuthDict,
+	pickUiaRoute,
+	type Uia401,
+	webUrlOrNull,
+} from "../../lib/uia";
 
 /**
  * What the user must be asked for so the current UIA dance can continue.
  * Null between prompts (the dialog shows its own working state).
  */
 export type UiaPrompt =
-	| { kind: "password" }
+	| {
+			kind: "password";
+			/** Set when a previous attempt was refused (wrong password). */
+			error?: string;
+	  }
 	| {
 			/**
 			 * The server wants out-of-band approval at its account-management
@@ -39,72 +51,6 @@ export class UiaCancelledError extends Error {
 	}
 }
 
-/** Pre-MSC4312 name for the `m.oauth` stage, still sent by some servers. */
-const OAUTH_STAGE_ALIAS = "org.matrix.cross_signing_reset";
-
-/** The fields of a UIA 401 body this flow reads. */
-interface Uia401 {
-	session: string;
-	/** Each entry is one flow's ordered stage list. */
-	flows: string[][];
-	params: Record<string, unknown>;
-}
-
-/**
- * Parse an SDK request error as a UIA challenge. Null for anything that
- * isn't a 401 carrying a UIA session - those are real failures the caller
- * rethrows.
- */
-function parseUia401(e: unknown): Uia401 | null {
-	const err = e as {
-		httpStatus?: number;
-		data?: { session?: unknown; flows?: unknown; params?: unknown };
-	};
-	if (err?.httpStatus !== 401 || typeof err.data?.session !== "string") {
-		return null;
-	}
-	const flows: string[][] = [];
-	if (Array.isArray(err.data.flows)) {
-		for (const flow of err.data.flows) {
-			const flowStages = (flow as { stages?: unknown })?.stages;
-			if (Array.isArray(flowStages)) {
-				flows.push(
-					flowStages.filter((s): s is string => typeof s === "string"),
-				);
-			}
-		}
-	}
-	const params =
-		typeof err.data.params === "object" && err.data.params !== null
-			? (err.data.params as Record<string, unknown>)
-			: {};
-	return { session: err.data.session, flows, params };
-}
-
-type UiaRoute =
-	| { kind: "password" }
-	| {
-			kind: "oauth";
-			/** The stage name the server advertised - echoed back on submit,
-			 *  so a pre-MSC4312 server isn't sent a name it doesn't know. */
-			stage: string;
-	  };
-
-/**
- * Which advertised flow this client can complete. Only single-stage flows
- * are completable (there is no UI for chaining stages); password wins when
- * both are offered because it stays in-app.
- */
-function pickRoute(flows: string[][]): UiaRoute | null {
-	const single = flows.filter((f) => f.length === 1).map((f) => f[0]);
-	if (single.includes(AuthType.Password)) return { kind: "password" };
-	const oauthStage = single.find(
-		(s) => s === (AuthType.OAuth as string) || s === OAUTH_STAGE_ALIAS,
-	);
-	if (oauthStage) return { kind: "oauth", stage: oauthStage };
-	return null;
-}
-
 /**
  * The approval-page URL the server put in the 401's stage params
  * (`params["m.oauth"].url`, or the pre-MSC4312 alias). Scheme-pinned to
@@ -112,16 +58,10 @@ function pickRoute(flows: string[][]): UiaRoute | null {
  */
 function oauthUrlFromParams(params: Record<string, unknown>): string | null {
 	for (const stage of [AuthType.OAuth as string, OAUTH_STAGE_ALIAS]) {
-		const url = (params[stage] as { url?: unknown } | undefined)?.url;
-		if (typeof url !== "string") continue;
-		try {
-			const parsed = new URL(url);
-			if (parsed.protocol === "https:" || parsed.protocol === "http:") {
-				return url;
-			}
-		} catch {
-			// Fall through to the next candidate / metadata fallback.
-		}
+		const url = webUrlOrNull(
+			(params[stage] as { url?: unknown } | undefined)?.url,
+		);
+		if (url) return url;
 	}
 	return null;
 }
@@ -149,6 +89,14 @@ export interface UiaFlow {
 	 * a prompt nothing will answer). Rejections carry
 	 * {@link UiaCancelledError}. Call from the dialog's cancel affordances
 	 * and its onCleanup; the next preflight() starts a fresh attempt.
+	 *
+	 * Deliberately scoped to waiting-for-input states: an operation whose
+	 * challenge preflight already collected finishes even if the dialog
+	 * goes away mid-flight. Aborting it at the UIA stage instead would
+	 * strand `resetEncryption` half-done AFTER its teardown of backups and
+	 * secret storage - completing user-confirmed destructive work beats
+	 * abandoning it partway. The dialogs' disposed guard is what prevents
+	 * an operation from ever STARTING without a UI.
 	 */
 	cancel: () => void;
 	/**
@@ -162,6 +110,13 @@ export interface UiaFlow {
 	 * resolves without prompting; a probe failure that isn't a UIA
 	 * challenge also resolves (the real operation surfaces real errors).
 	 * Throws when no advertised flow is one this app can complete.
+	 *
+	 * Known limit: a server that skips UIA for the no-op empty upload but
+	 * challenges the real key-replacing one (possible under MSC3967
+	 * semantics) defeats the early collection - the flow then degrades to
+	 * the interactive mid-operation prompt in {@link uiaCallback}, honest
+	 * but after resetEncryption's teardown. Continuwuity, the target
+	 * server, challenges the empty upload too (wire-verified).
 	 */
 	preflight: () => Promise<void>;
 	/**
@@ -226,10 +181,34 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 	 * dialogs: MSC2965 defines no setup action, and the server gates any
 	 * signing-key upload behind this same approval.
 	 */
-	const metadataDeeplink = (): Promise<string | null> =>
-		fetchAccountManagementUrl(
-			client,
-			ACCOUNT_MANAGEMENT_ACTIONS.crossSigningReset,
+	// Fetched at most once per flow - a server without an
+	// account-management page must not pay a guaranteed-null round-trip on
+	// every refusal re-prompt.
+	let metadataUrl: Promise<string | null> | null = null;
+	const metadataDeeplink = (): Promise<string | null> => {
+		metadataUrl =
+			metadataUrl ??
+			fetchAccountManagementUrl(
+				client,
+				ACCOUNT_MANAGEMENT_ACTIONS.crossSigningReset,
+			);
+		return metadataUrl;
+	};
+
+	/**
+	 * Empty upload to the signing-key endpoint: a no-op on servers that
+	 * allow it, the UIA challenge teller on servers that don't, and (with
+	 * `auth`) a non-destructive way to verify a collected password. Posted
+	 * to the same v3 route the SDK's real upload uses - the SDK's
+	 * uploadDeviceSigningKeys helper still posts to the unstable prefix,
+	 * whose UIA policy could differ.
+	 */
+	const probe = (auth?: object): Promise<unknown> =>
+		client.http.authedRequest(
+			Method.Post,
+			"/keys/device_signing/upload",
+			undefined,
+			auth ? { auth } : {},
 		);
 
 	const preflight = async (): Promise<void> => {
@@ -237,9 +216,7 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 		learned = null;
 		let uia: Uia401;
 		try {
-			// Empty unauthenticated upload: a no-op on servers that allow it,
-			// and the UIA challenge teller on servers that don't.
-			await client.uploadDeviceSigningKeys();
+			await probe();
 			learned = { kind: "none" };
 			return;
 		} catch (e) {
@@ -252,13 +229,34 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 			}
 			uia = parsed;
 		}
-		const route = pickRoute(uia.flows);
+		const route = pickUiaRoute(uia.flows);
 		if (!route) throw new Error(NO_SUPPORTED_FLOW_MESSAGE);
 		if (route.kind === "password") {
-			const password = await ask({ kind: "password" });
-			learned = { kind: "password", password: password ?? "" };
-			return;
+			// Verify the password against the probe's session before the
+			// operation runs: a typo must fail HERE, while the account is
+			// still untouched, not after a destructive teardown. Wrong
+			// entries re-prompt.
+			let error: string | undefined;
+			for (;;) {
+				const password = (await ask({ kind: "password", error })) ?? "";
+				try {
+					await probe(
+						passwordAuthDict(client.getUserId() ?? "", password, uia.session),
+					);
+					learned = { kind: "password", password };
+					return;
+				} catch (e) {
+					const retry = parseUia401(e);
+					if (!retry) throw e;
+					uia.session = retry.session;
+					error = "Incorrect password. Try again.";
+				}
+			}
 		}
+		// The oauth approval is NOT verified here: the server's ticket is
+		// one-consume, and spending it on the probe would leave none for
+		// the operation itself. The callback's refusal loop covers a
+		// not-actually-approved confirmation.
 		const url = oauthUrlFromParams(uia.params) ?? (await metadataDeeplink());
 		await ask({ kind: "oauth", url, notYetApproved: false });
 		learned = { kind: "oauth", url };
@@ -278,7 +276,7 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 			uia = parsed;
 		}
 
-		const route = pickRoute(uia.flows);
+		const route = pickUiaRoute(uia.flows);
 		if (!route) throw new Error(NO_SUPPORTED_FLOW_MESSAGE);
 
 		if (route.kind === "password") {
@@ -290,12 +288,9 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 					: ((await ask({ kind: "password" })) ?? "");
 			// Single attempt, like the pre-#467 flow: a wrong password is a
 			// real failure the dialog's error step reports.
-			await makeRequest({
-				type: AuthType.Password,
-				identifier: { type: "m.id.user", user: client.getUserId() ?? "" },
-				password,
-				session: uia.session,
-			});
+			await makeRequest(
+				passwordAuthDict(client.getUserId() ?? "", password, uia.session),
+			);
 			return;
 		}
 

@@ -21,8 +21,9 @@ vi.mock("solid-refresh", () => ({
 const bootstrapCrossSigning = vi.fn();
 const clearSecretStorageCache = vi.fn();
 const refresh = vi.fn(async () => undefined);
-// The UIA preflight probe (client.uploadDeviceSigningKeys).
-const uploadDeviceSigningKeys = vi.fn();
+// The UIA preflight probe (the empty signing-key upload), given the
+// request's auth dict (if any).
+const probe = vi.fn();
 
 vi.mock("../../client/client", () => ({
 	useClient: () => ({
@@ -32,8 +33,14 @@ vi.mock("../../client/client", () => ({
 			getAuthMetadata: async () => {
 				throw new Error("no oauth metadata");
 			},
-			uploadDeviceSigningKeys: (...args: unknown[]) =>
-				uploadDeviceSigningKeys(...args),
+			http: {
+				authedRequest: (
+					_method: unknown,
+					_path: unknown,
+					_qs: unknown,
+					body?: { auth?: unknown },
+				) => probe(body?.auth),
+			},
 		},
 		cryptoStatus: { refresh },
 		clearSecretStorageCache,
@@ -51,7 +58,7 @@ const OAUTH_PARAMS = { "m.oauth": { url: "https://hs.example/account/reset" } };
 
 /** Server that never challenges: probe 200s, upload succeeds unauthed. */
 function mockBootstrapNoUia(): void {
-	uploadDeviceSigningKeys.mockResolvedValue({});
+	probe.mockResolvedValue({});
 	bootstrapCrossSigning.mockImplementation(
 		async (opts: { authUploadDeviceSigningKeys: UiaCallback }) => {
 			await opts.authUploadDeviceSigningKeys(async () => {});
@@ -60,9 +67,9 @@ function mockBootstrapNoUia(): void {
 }
 
 function mockBootstrapPasswordUia(): void {
-	uploadDeviceSigningKeys.mockRejectedValue(
-		uia401("probe-sess", PASSWORD_FLOW),
-	);
+	probe.mockImplementation(async (auth) => {
+		if (!auth) throw uia401("probe-sess", PASSWORD_FLOW);
+	});
 	bootstrapCrossSigning.mockImplementation(
 		async (opts: { authUploadDeviceSigningKeys: UiaCallback }) => {
 			await opts.authUploadDeviceSigningKeys(async (authData) => {
@@ -75,9 +82,9 @@ function mockBootstrapPasswordUia(): void {
 }
 
 function mockBootstrapOauthUia(): void {
-	uploadDeviceSigningKeys.mockRejectedValue(
-		uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS),
-	);
+	probe.mockImplementation(async (auth) => {
+		if (!auth) throw uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS);
+	});
 	bootstrapCrossSigning.mockImplementation(
 		async (opts: { authUploadDeviceSigningKeys: UiaCallback }) => {
 			await opts.authUploadDeviceSigningKeys(async (authData) => {
@@ -159,9 +166,9 @@ describe("CrossSigningSetup", () => {
 	it("unmounting mid-prompt aborts the flow without leaving a suspended op", async () => {
 		// The bootstrap only starts after preflight; capture its promise via
 		// a wrapper so the unmount-cancel can be observed settling it.
-		uploadDeviceSigningKeys.mockRejectedValue(
-			uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS),
-		);
+		probe.mockImplementation(async (auth) => {
+			if (!auth) throw uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS);
+		});
 		let bootstrapPromise: Promise<void> | undefined;
 		bootstrapCrossSigning.mockImplementation(
 			(opts: { authUploadDeviceSigningKeys: UiaCallback }) => {
@@ -189,11 +196,13 @@ describe("CrossSigningSetup", () => {
 
 		cleanup();
 		await expect(bootstrapPromise).rejects.toBeInstanceOf(UiaCancelledError);
+		// Even with the dialog gone, the stale 4S cache must be dropped.
+		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
 	});
 
 	it("unmounting during the preflight probe never starts the bootstrap", async () => {
 		let resolveProbe: ((v: unknown) => void) | undefined;
-		uploadDeviceSigningKeys.mockReturnValue(
+		probe.mockReturnValue(
 			new Promise((r) => {
 				resolveProbe = r;
 			}),
@@ -206,12 +215,13 @@ describe("CrossSigningSetup", () => {
 		expect(bootstrapCrossSigning).not.toHaveBeenCalled();
 	});
 
-	it("a mid-operation cancel drops the cached 4S key on the way back", async () => {
-		// The refused-upload re-prompt comes after bootstrap may have cached
-		// secret-storage keys; backing out there must not leave them cached.
-		uploadDeviceSigningKeys.mockRejectedValue(
-			uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS),
-		);
+	it("a mid-operation cancel surfaces as interrupted and drops the cached 4S key", async () => {
+		// The refused-upload re-prompt comes after bootstrap has already
+		// minted local keys (and may have cached secret-storage material) -
+		// backing out is not a clean no-op and must say so.
+		probe.mockImplementation(async (auth) => {
+			if (!auth) throw uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS);
+		});
 		bootstrapCrossSigning.mockImplementation(
 			async (opts: { authUploadDeviceSigningKeys: UiaCallback }) => {
 				await opts.authUploadDeviceSigningKeys(async () => {
@@ -232,9 +242,7 @@ describe("CrossSigningSetup", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
 		await waitFor(() =>
-			expect(
-				screen.getByText(/Cross-signing lets you verify your devices/),
-			).toBeTruthy(),
+			expect(screen.getByText(/Setup was interrupted/)).toBeTruthy(),
 		);
 		expect(clearSecretStorageCache).toHaveBeenCalled();
 	});
