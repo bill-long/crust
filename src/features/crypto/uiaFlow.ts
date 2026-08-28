@@ -1,4 +1,9 @@
-import { AuthType, type MatrixClient, Method } from "matrix-js-sdk";
+import {
+	AuthType,
+	ClientPrefix,
+	type MatrixClient,
+	Method,
+} from "matrix-js-sdk";
 import type { UIAuthCallback } from "matrix-js-sdk/lib/interactive-auth";
 import { type Accessor, createSignal } from "solid-js";
 import {
@@ -209,6 +214,7 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 			"/keys/device_signing/upload",
 			undefined,
 			auth ? { auth } : {},
+			{ prefix: ClientPrefix.V3 },
 		);
 
 	const preflight = async (): Promise<void> => {
