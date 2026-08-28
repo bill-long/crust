@@ -126,6 +126,8 @@ describe("CrossSigningSetup", () => {
 		await screen.findByText("Approve in your account settings");
 		const link = screen.getByRole("link", { name: "Open account settings" });
 		expect(link.getAttribute("href")).toBe("https://hs.example/account/reset");
+		// The panel owns focus while it shows.
+		await waitFor(() => expect(document.activeElement).toBe(link));
 
 		fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
 		await waitFor(() =>
@@ -146,6 +148,12 @@ describe("CrossSigningSetup", () => {
 		);
 		expect(screen.queryByText("Setup failed")).toBeNull();
 		expect(bootstrapCrossSigning).not.toHaveBeenCalled();
+		// The cancelled prompt unmounted what held focus - the overlay
+		// reclaims it so Escape keeps working.
+		const overlay = screen.getByRole("dialog", {
+			name: "Set up secure messaging",
+		});
+		await waitFor(() => expect(document.activeElement).toBe(overlay));
 	});
 
 	it("unmounting mid-prompt aborts the flow without leaving a suspended op", async () => {

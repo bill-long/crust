@@ -280,6 +280,21 @@ describe("ResetEncryptionDialog", () => {
 		);
 	});
 
+	it("focuses the approval deeplink while the oauth prompt shows, the overlay after", async () => {
+		mockResetOauthUia();
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+
+		await screen.findByText("Approve in your account settings");
+		const link = screen.getByRole("link", { name: "Open account settings" });
+		// The panel owns focus; the overlay must not steal it back.
+		await waitFor(() => expect(document.activeElement).toBe(link));
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
+		await waitFor(() => expect(document.activeElement).toBe(overlay));
+	});
+
 	it("routes an m.oauth challenge to the account-approval prompt before the reset", async () => {
 		mockResetOauthUia();
 		ensureKeyBackup.mockImplementation(
@@ -415,6 +430,51 @@ describe("ResetEncryptionDialog", () => {
 		expect(screen.getByRole("alert").textContent).toBe(
 			"Reset failed. Please try again.",
 		);
+	});
+
+	it("reclaims focus for the overlay across promptless step transitions", async () => {
+		// No-UIA path: the intro button unmounts on click with no prompt
+		// ever showing; focus falls to the body and Escape would die with
+		// it unless the overlay reclaims it (review round 3 on #543).
+		resetEncryption.mockReturnValue(new Promise(() => {}));
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		const button = screen.getByRole("button", { name: "Reset encryption" });
+		button.focus();
+		fireEvent.click(button);
+		await waitFor(() =>
+			expect(screen.getByText("Resetting encryption…")).toBeTruthy(),
+		);
+
+		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
+		await waitFor(() => expect(document.activeElement).toBe(overlay));
+	});
+
+	it("keeps Tab cycling inside the dialog", async () => {
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
+		// jsdom has no layout engine, so offsetParent is always null and
+		// trapTabKey's visibility filter would drop every candidate. Force
+		// the dialog's focusable elements visible (same trick as
+		// JoinRoomDialog.test.tsx / focusTrap.test.ts).
+		for (const el of overlay.querySelectorAll("button")) {
+			Object.defineProperty(el, "offsetParent", {
+				configurable: true,
+				get: () => document.body,
+			});
+		}
+
+		// Intro order: Cancel -> Reset encryption. Tab on the last wraps to
+		// the first; Shift+Tab on the first wraps back.
+		const resetButton = screen.getByRole("button", {
+			name: "Reset encryption",
+		});
+		const cancelButton = screen.getByRole("button", { name: "Cancel" });
+		resetButton.focus();
+		fireEvent.keyDown(overlay, { key: "Tab" });
+		expect(document.activeElement).toBe(cancelButton);
+		fireEvent.keyDown(overlay, { key: "Tab", shiftKey: true });
+		expect(document.activeElement).toBe(resetButton);
 	});
 
 	it("ignores Escape and backdrop clicks while the reset is in flight", async () => {

@@ -1,7 +1,6 @@
 import type { GeneratedSecretStorageKey } from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Component,
-	createEffect,
 	createSignal,
 	Match,
 	onCleanup,
@@ -10,9 +9,10 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
+import { trapTabKey } from "../../lib/focusTrap";
 import { ensureKeyBackup, fetchServerKeyBackup } from "./backup/keyBackupSetup";
 import { RecoveryKeyDisplay } from "./backup/RecoveryKeyDisplay";
-import { UiaPrompts } from "./UiaDialog";
+import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
 import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
 type ResetStep = "intro" | "working" | "show-key" | "done" | "error";
@@ -64,19 +64,11 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		uia.cancel();
 	});
 
-	// Focus follows the UI: the password prompt's primary control is its
-	// input; every other state keeps focus on the overlay so Escape/backdrop
-	// handling works from anywhere.
+	// Focus contract: identity prompts focus their own primary control;
+	// the overlay reclaims focus lost to promptless view swaps (see
+	// createUiaOverlayFocus).
 	let overlayEl!: HTMLDivElement;
-	createEffect(() => {
-		if (uia.prompt()?.kind === "password") {
-			overlayEl
-				.querySelector<HTMLInputElement>("input[type=password]")
-				?.focus();
-		} else {
-			overlayEl.focus();
-		}
-	});
+	createUiaOverlayFocus({ flow: uia, overlay: () => overlayEl, step });
 
 	const doReset = async (): Promise<void> => {
 		const crypto = client.getCrypto();
@@ -198,6 +190,10 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 	};
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
+		if (e.key === "Tab") {
+			trapTabKey(overlayEl, e);
+			return;
+		}
 		if (e.key !== "Escape") return;
 		if (uia.prompt()) {
 			uia.cancel();

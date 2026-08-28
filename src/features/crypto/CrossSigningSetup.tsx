@@ -7,7 +7,8 @@ import {
 } from "solid-js";
 import { useClient } from "../../client/client";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { UiaPrompts } from "./UiaDialog";
+import { trapTabKey } from "../../lib/focusTrap";
+import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
 import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
 type SetupStep = "intro" | "working" | "done" | "error";
@@ -92,6 +93,12 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 		void doBootstrap();
 	};
 
+	// Focus contract: identity prompts focus their own primary control;
+	// the overlay reclaims focus lost to promptless view swaps (see
+	// createUiaOverlayFocus).
+	let overlayEl!: HTMLDivElement;
+	createUiaOverlayFocus({ flow: uia, overlay: () => overlayEl, step });
+
 	// Backdrop click / Escape: a pending identity prompt steps back to the
 	// intro (via the flow's cancel rejection); mid-operation dismissal is
 	// blocked; otherwise the dialog closes.
@@ -111,11 +118,15 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			aria-modal="true"
 			aria-label="Set up secure messaging"
 			tabIndex={-1}
-			ref={(el) => el.focus()}
+			ref={overlayEl}
 			onClick={(e) => {
 				if (e.target === e.currentTarget) onDismiss();
 			}}
 			onKeyDown={(e) => {
+				if (e.key === "Tab") {
+					trapTabKey(overlayEl, e);
+					return;
+				}
 				if (e.key === "Escape") onDismiss();
 			}}
 		>
