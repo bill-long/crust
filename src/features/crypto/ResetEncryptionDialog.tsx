@@ -12,10 +12,10 @@ import { useClient } from "../../client/client";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { ensureKeyBackup, fetchServerKeyBackup } from "./backup/keyBackupSetup";
 import { RecoveryKeyDisplay } from "./backup/RecoveryKeyDisplay";
-import { UiaDialog } from "./UiaDialog";
-import { passwordUiaCallback } from "./uiaPassword";
+import { UiaPrompts } from "./UiaDialog";
+import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
-type ResetStep = "intro" | "uia" | "working" | "show-key" | "done" | "error";
+type ResetStep = "intro" | "working" | "show-key" | "done" | "error";
 
 interface ResetEncryptionDialogProps {
 	onClose: () => void;
@@ -51,16 +51,25 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 	const [partial, setPartial] = createSignal(false);
 	let disposed = false;
 
+	// Interactive UIA: the server decides whether the user re-enters a
+	// password or approves at the account-management page (#467). The
+	// preflight collects that BEFORE crypto.resetEncryption runs, because
+	// the reset destroys server-side backups and secret storage ahead of
+	// its UIA-gated key upload - a cancel at the first prompt must leave
+	// the account untouched.
+	const uia = createUiaFlow(client);
+
 	onCleanup(() => {
 		disposed = true;
+		uia.cancel();
 	});
 
-	// Focus follows the step: the password step's primary control is its
-	// input; every other step keeps focus on the overlay so Escape/backdrop
+	// Focus follows the UI: the password prompt's primary control is its
+	// input; every other state keeps focus on the overlay so Escape/backdrop
 	// handling works from anywhere.
 	let overlayEl!: HTMLDivElement;
 	createEffect(() => {
-		if (step() === "uia") {
+		if (uia.prompt()?.kind === "password") {
 			overlayEl
 				.querySelector<HTMLInputElement>("input[type=password]")
 				?.focus();
@@ -69,7 +78,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		}
 	});
 
-	const doReset = async (password: string): Promise<void> => {
+	const doReset = async (): Promise<void> => {
 		const crypto = client.getCrypto();
 		if (!crypto) {
 			setErrorMessage("Encryption is not available.");
@@ -87,6 +96,28 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		setErrorMessage("");
 		setPartial(false);
 
+		// Learn and collect the identity confirmation before anything
+		// destructive: cancelling here steps back with the account intact.
+		try {
+			await uia.preflight();
+		} catch (e) {
+			if (disposed) return;
+			if (e instanceof UiaCancelledError) {
+				setStep("intro");
+				return;
+			}
+			setErrorMessage(
+				userFacingErrorMessage(e, "Reset failed. Please try again."),
+			);
+			setStep("error");
+			return;
+		}
+
+		// Unmounted while the probe was in flight (external removal - Escape
+		// and backdrop are blocked, a route change is not): the destructive
+		// reset must not run headless with nobody to show the new key to.
+		if (disposed) return;
+
 		// Declared outside the try so a minted key is still shown if a later
 		// step fails (it may already be the account's default).
 		let generatedKey: GeneratedSecretStorageKey | undefined;
@@ -95,7 +126,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 			// Rotate the identity, delete all server-side backups, wipe 4S,
 			// and create a fresh empty backup (SDK resetEncryption does all of
 			// this in one call).
-			await crypto.resetEncryption(passwordUiaCallback(userId, password));
+			await crypto.resetEncryption(uia.uiaCallback);
 			if (disposed) return;
 
 			// Re-establish secret storage under a fresh recovery key and
@@ -127,6 +158,18 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 			}
 		} catch (e) {
 			if (disposed) return;
+			if (e instanceof UiaCancelledError) {
+				// A cancel here is the mid-operation approval loop (the OP
+				// ticket was never granted or expired), and the reset already
+				// tore down backups and secret storage - surface it as an
+				// interrupted reset, never as a silent step back.
+				clearSecretStorageCache();
+				setErrorMessage(
+					"The reset was interrupted before the server confirmed your identity. Run it again to finish setting up a new identity.",
+				);
+				setStep("error");
+				return;
+			}
 			console.error("Encryption reset failed:", e);
 			clearSecretStorageCache();
 			if (generatedKey?.encodedPrivateKey) {
@@ -142,25 +185,26 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		}
 	};
 
+	// A pending identity prompt steps back to the intro (via the flow's
+	// cancel rejection); the working and show-key states block dismissal.
 	const handleBackdropClick = (e: MouseEvent): void => {
-		if (e.target === e.currentTarget && step() !== "working") {
-			if (step() === "show-key") return; // Don't dismiss while showing key
-			if (step() === "uia") {
-				setStep("intro");
-				return;
-			}
-			props.onClose();
+		if (e.target !== e.currentTarget) return;
+		if (uia.prompt()) {
+			uia.cancel();
+			return;
 		}
+		if (step() === "working" || step() === "show-key") return;
+		props.onClose();
 	};
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape" && step() !== "working" && step() !== "show-key") {
-			if (step() === "uia") {
-				setStep("intro");
-				return;
-			}
-			props.onClose();
+		if (e.key !== "Escape") return;
+		if (uia.prompt()) {
+			uia.cancel();
+			return;
 		}
+		if (step() === "working" || step() === "show-key") return;
+		props.onClose();
 	};
 
 	return (
@@ -206,7 +250,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 							</button>
 							<button
 								type="button"
-								onClick={() => setStep("uia")}
+								onClick={() => void doReset()}
 								class="rounded bg-danger px-4 py-2 text-sm font-semibold text-danger-foreground transition-colors hover:bg-danger/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Reset encryption
@@ -215,12 +259,11 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 					</div>
 				</Match>
 
-				{/* Password (UIA) */}
-				<Match when={step() === "uia"}>
-					<UiaDialog
-						onSubmit={(password) => void doReset(password)}
-						onCancel={() => setStep("intro")}
-					/>
+				{/* Identity prompts: rendered while step() is "working" (the
+				    flow suspends in preflight or mid-reset), so they shadow
+				    the spinner. */}
+				<Match when={uia.prompt()}>
+					<UiaPrompts flow={uia} />
 				</Match>
 
 				{/* Working */}

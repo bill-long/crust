@@ -1,9 +1,16 @@
-import { type Component, createSignal, Match, Switch } from "solid-js";
+import {
+	type Component,
+	createSignal,
+	Match,
+	onCleanup,
+	Switch,
+} from "solid-js";
 import { useClient } from "../../client/client";
-import { UiaDialog } from "./UiaDialog";
-import { passwordUiaCallback } from "./uiaPassword";
+import { userFacingErrorMessage } from "../../lib/errorMessage";
+import { UiaPrompts } from "./UiaDialog";
+import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
-type SetupStep = "intro" | "uia" | "working" | "done" | "error";
+type SetupStep = "intro" | "working" | "done" | "error";
 
 interface CrossSigningSetupProps {
 	onClose: () => void;
@@ -20,14 +27,28 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 	const [step, setStep] = createSignal<SetupStep>("intro");
 	const [errorMessage, setErrorMessage] = createSignal("");
 
-	const startSetup = (): void => {
-		setStep("uia");
-	};
+	// Interactive UIA: the server decides whether the user re-enters a
+	// password or approves at the account-management page (#467). The
+	// preflight collects that before the bootstrap starts, so cancelling
+	// at a prompt backs out with the account untouched.
+	const uia = createUiaFlow(client);
+	let disposed = false;
+	onCleanup(() => {
+		disposed = true;
+		uia.cancel();
+	});
 
-	const doBootstrap = async (password: string): Promise<void> => {
+	const doBootstrap = async (): Promise<void> => {
 		const crypto = client.getCrypto();
 		if (!crypto) {
 			setErrorMessage("Encryption is not available.");
+			setStep("error");
+			return;
+		}
+
+		const userId = client.getUserId();
+		if (!userId) {
+			setErrorMessage("Unable to determine user ID.");
 			setStep("error");
 			return;
 		}
@@ -36,35 +57,51 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 		setStep("working");
 
 		try {
-			const userId = client.getUserId();
-			if (!userId) {
-				setErrorMessage("Unable to determine user ID.");
-				setStep("error");
-				return;
-			}
-
+			await uia.preflight();
+			// Unmounted while the probe was in flight: don't start a bootstrap
+			// nobody is watching.
+			if (disposed) return;
 			await crypto.bootstrapCrossSigning({
-				authUploadDeviceSigningKeys: passwordUiaCallback(userId, password),
+				authUploadDeviceSigningKeys: uia.uiaCallback,
 			});
 
 			await cryptoStatus.refresh();
+			if (disposed) return;
 			setStep("done");
 		} catch (e) {
+			if (disposed) return;
+			if (e instanceof UiaCancelledError) {
+				// Nothing was uploaded - backing out is safe. A cancel in the
+				// mid-operation approval loop still aborts a bootstrap that may
+				// have cached 4S keys before the refused upload, so drop the
+				// cache like the error path does (harmless when nothing ran).
+				clearSecretStorageCache();
+				setStep("intro");
+				return;
+			}
 			console.error("Cross-signing bootstrap failed:", e);
 			clearSecretStorageCache();
 			setErrorMessage(
-				e instanceof Error ? e.message : "Setup failed. Please try again.",
+				userFacingErrorMessage(e, "Setup failed. Please try again."),
 			);
 			setStep("error");
 		}
 	};
 
-	const onUiaPassword = (password: string): void => {
-		doBootstrap(password);
+	const startSetup = (): void => {
+		void doBootstrap();
 	};
 
-	const onUiaCancel = (): void => {
-		setStep("intro");
+	// Backdrop click / Escape: a pending identity prompt steps back to the
+	// intro (via the flow's cancel rejection); mid-operation dismissal is
+	// blocked; otherwise the dialog closes.
+	const onDismiss = (): void => {
+		if (uia.prompt()) {
+			uia.cancel();
+			return;
+		}
+		if (step() === "working") return;
+		props.onClose();
 	};
 
 	return (
@@ -76,24 +113,15 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			tabIndex={-1}
 			ref={(el) => el.focus()}
 			onClick={(e) => {
-				if (e.target === e.currentTarget && step() !== "working") {
-					if (step() === "uia") {
-						onUiaCancel();
-					} else {
-						props.onClose();
-					}
-				}
+				if (e.target === e.currentTarget) onDismiss();
 			}}
 			onKeyDown={(e) => {
-				if (e.key === "Escape" && step() !== "working") {
-					if (step() === "uia") {
-						onUiaCancel();
-					} else {
-						props.onClose();
-					}
-				}
+				if (e.key === "Escape") onDismiss();
 			}}
 		>
+			{/* The identity prompts render while step() is "working" - the
+			    flow suspends mid-bootstrap - so their matches shadow the
+			    spinner while a prompt is pending. */}
 			<Switch>
 				<Match when={step() === "intro"}>
 					<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
@@ -106,7 +134,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 							encrypted messages across all your sessions.
 						</p>
 						<p class="mb-6 text-sm text-text-muted">
-							You'll be asked to re-enter your password to confirm this action.
+							You may be asked to confirm your identity to complete this step.
 						</p>
 						<div class="flex justify-end gap-2">
 							<button
@@ -127,8 +155,8 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 					</div>
 				</Match>
 
-				<Match when={step() === "uia"}>
-					<UiaDialog onSubmit={onUiaPassword} onCancel={onUiaCancel} />
+				<Match when={uia.prompt()}>
+					<UiaPrompts flow={uia} />
 				</Match>
 
 				<Match when={step() === "working"}>

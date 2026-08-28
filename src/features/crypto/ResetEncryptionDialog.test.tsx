@@ -6,7 +6,9 @@ import {
 	waitFor,
 } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type UiaCallback, uia401 } from "../../test/uiaFixtures";
 import { ResetEncryptionDialog } from "./ResetEncryptionDialog";
+import { UiaCancelledError } from "./uiaFlow";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -27,6 +29,8 @@ vi.mock("./backup/keyBackupSetup", () => ({
 const resetEncryption = vi.fn();
 const clearSecretStorageCache = vi.fn();
 const refresh = vi.fn(async () => undefined);
+// The UIA preflight probe (client.uploadDeviceSigningKeys).
+const uploadDeviceSigningKeys = vi.fn();
 
 // Mutable so individual tests can simulate missing crypto / missing user.
 const clientState: {
@@ -46,6 +50,7 @@ function resetClientState(): void {
 			encodedPrivateKey: "brand-new-key",
 		})),
 	};
+	uploadDeviceSigningKeys.mockResolvedValue({});
 }
 resetClientState();
 
@@ -54,6 +59,11 @@ vi.mock("../../client/client", () => ({
 		client: {
 			getUserId: () => clientState.userId,
 			getCrypto: () => clientState.crypto,
+			getAuthMetadata: async () => {
+				throw new Error("no oauth metadata");
+			},
+			uploadDeviceSigningKeys: (...args: unknown[]) =>
+				uploadDeviceSigningKeys(...args),
 		},
 		cryptoStatus: { refresh },
 		clearSecretStorageCache,
@@ -65,6 +75,54 @@ afterEach(() => {
 	vi.clearAllMocks();
 	resetClientState();
 });
+
+const PASSWORD_FLOW = [["m.login.password"]];
+const OAUTH_FLOW = [["m.oauth"]];
+const OAUTH_PARAMS = { "m.oauth": { url: "https://hs.example/account/reset" } };
+
+/**
+ * Server challenges with `m.login.password`: the preflight probe 401s, and
+ * `resetEncryption` runs its UIA callback against a server that accepts
+ * any password, then optionally fails the reset itself with `failWith`.
+ */
+function mockResetPasswordUia(failWith?: Error): void {
+	uploadDeviceSigningKeys.mockRejectedValue(
+		uia401("probe-sess", PASSWORD_FLOW),
+	);
+	resetEncryption.mockImplementation(async (cb: UiaCallback) => {
+		await cb(async (authData) => {
+			if (authData === null) {
+				throw uia401("op-sess", PASSWORD_FLOW);
+			}
+			// Password accepted.
+		});
+		if (failWith) throw failWith;
+	});
+}
+
+/**
+ * Server challenges with the `m.oauth` stage: the first `refusals` auth
+ * submissions are refused (approval not granted at the OP yet), then the
+ * stage passes.
+ */
+function mockResetOauthUia(refusals = 0): void {
+	uploadDeviceSigningKeys.mockRejectedValue(
+		uia401("probe-sess", OAUTH_FLOW, OAUTH_PARAMS),
+	);
+	let refused = 0;
+	resetEncryption.mockImplementation(async (cb: UiaCallback) => {
+		await cb(async (authData) => {
+			if (authData === null) {
+				throw uia401("op-sess", OAUTH_FLOW, OAUTH_PARAMS);
+			}
+			if (refused < refusals) {
+				refused += 1;
+				throw uia401("op-sess", OAUTH_FLOW, OAUTH_PARAMS);
+			}
+			// Approval ticket consumed.
+		});
+	});
+}
 
 async function runThroughPassword(
 	onClose: () => void = () => {},
@@ -79,7 +137,7 @@ async function runThroughPassword(
 
 describe("ResetEncryptionDialog", () => {
 	it("resets, re-establishes 4S, and shows the freshly minted recovery key", async () => {
-		resetEncryption.mockResolvedValue(undefined);
+		mockResetPasswordUia();
 		ensureKeyBackup.mockImplementation(
 			async (
 				_crypto: unknown,
@@ -101,7 +159,7 @@ describe("ResetEncryptionDialog", () => {
 	});
 
 	it("reaches done without a key step when no new key was minted", async () => {
-		resetEncryption.mockResolvedValue(undefined);
+		mockResetPasswordUia();
 		ensureKeyBackup.mockResolvedValue({ outcome: "reused" });
 
 		await runThroughPassword();
@@ -113,7 +171,7 @@ describe("ResetEncryptionDialog", () => {
 	it("warns of an incomplete setup when the backup reports needs-restore", async () => {
 		// Non-exception partial path: a key was minted but the new backup
 		// still needs a restore before it fully protects history.
-		resetEncryption.mockResolvedValue(undefined);
+		mockResetPasswordUia();
 		ensureKeyBackup.mockImplementation(
 			async (
 				_crypto: unknown,
@@ -135,7 +193,7 @@ describe("ResetEncryptionDialog", () => {
 	});
 
 	it("surfaces a reset failure and clears the cached 4S key", async () => {
-		resetEncryption.mockRejectedValue(new Error("UIA failed"));
+		mockResetPasswordUia(new Error("UIA failed"));
 
 		await runThroughPassword();
 		await waitFor(() => expect(screen.getByText("Reset failed")).toBeTruthy());
@@ -145,7 +203,7 @@ describe("ResetEncryptionDialog", () => {
 	});
 
 	it("shows the minted key with an incomplete warning when post-reset setup fails", async () => {
-		resetEncryption.mockResolvedValue(undefined);
+		mockResetPasswordUia();
 		ensureKeyBackup.mockImplementation(
 			async (
 				_crypto: unknown,
@@ -170,10 +228,6 @@ describe("ResetEncryptionDialog", () => {
 		clientState.crypto = undefined;
 		render(() => <ResetEncryptionDialog onClose={() => {}} />);
 		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
-		fireEvent.input(await screen.findByLabelText("Password"), {
-			target: { value: "hunter2" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
 		await waitFor(() => expect(screen.getByText("Reset failed")).toBeTruthy());
 		expect(screen.getByRole("alert").textContent).toContain(
@@ -186,10 +240,6 @@ describe("ResetEncryptionDialog", () => {
 		clientState.userId = null;
 		render(() => <ResetEncryptionDialog onClose={() => {}} />);
 		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
-		fireEvent.input(await screen.findByLabelText("Password"), {
-			target: { value: "hunter2" },
-		});
-		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
 		await waitFor(() => expect(screen.getByText("Reset failed")).toBeTruthy());
 		expect(screen.getByRole("alert").textContent).toContain(
@@ -198,7 +248,8 @@ describe("ResetEncryptionDialog", () => {
 		expect(resetEncryption).not.toHaveBeenCalled();
 	});
 
-	it("cancelling the password step returns to the intro", async () => {
+	it("cancelling the password prompt backs out before anything runs", async () => {
+		mockResetPasswordUia();
 		render(() => <ResetEncryptionDialog onClose={() => {}} />);
 		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
 		await screen.findByLabelText("Password");
@@ -211,10 +262,14 @@ describe("ResetEncryptionDialog", () => {
 				),
 			).toBeTruthy(),
 		);
+		// The prompt is a preflight: nothing destructive ran, so backing out
+		// must not have started the reset (or cleared anything).
 		expect(resetEncryption).not.toHaveBeenCalled();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
 	});
 
-	it("moves focus to the password input on the UIA step", async () => {
+	it("moves focus to the password input when the server asks for one", async () => {
+		mockResetPasswordUia();
 		render(() => <ResetEncryptionDialog onClose={() => {}} />);
 		const overlay = screen.getByRole("dialog", { name: "Reset encryption" });
 		expect(document.activeElement).toBe(overlay);
@@ -225,10 +280,129 @@ describe("ResetEncryptionDialog", () => {
 		);
 	});
 
+	it("routes an m.oauth challenge to the account-approval prompt before the reset", async () => {
+		mockResetOauthUia();
+		ensureKeyBackup.mockImplementation(
+			async (
+				_crypto: unknown,
+				createKey: () => Promise<unknown>,
+			): Promise<{ outcome: string }> => {
+				await createKey();
+				return { outcome: "reused" };
+			},
+		);
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+
+		await screen.findByText("Approve in your account settings");
+		// Nothing destructive may run while the approval prompt is up.
+		expect(resetEncryption).not.toHaveBeenCalled();
+		const link = screen.getByRole("link", { name: "Open account settings" });
+		expect(link.getAttribute("href")).toBe("https://hs.example/account/reset");
+
+		fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+		await waitFor(() =>
+			expect(screen.getByText("Save your new recovery key")).toBeTruthy(),
+		);
+	});
+
+	it("re-prompts with a notice while the approval hasn't been granted", async () => {
+		mockResetOauthUia(1);
+		ensureKeyBackup.mockResolvedValue({ outcome: "reused" });
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+
+		await screen.findByText("Approve in your account settings");
+		fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain(
+				"hasn't seen an approval yet",
+			),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+		await waitFor(() =>
+			expect(screen.getByText("Encryption was reset")).toBeTruthy(),
+		);
+	});
+
+	it("surfaces a mid-operation cancel as an interrupted reset, not a silent step back", async () => {
+		// Once the reset is running, its teardown has already happened - a
+		// cancel in the refusal loop must not pretend nothing did.
+		mockResetOauthUia(Number.POSITIVE_INFINITY);
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+		await screen.findByText("Approve in your account settings");
+		fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+
+		// The refused submission re-prompts mid-operation; cancel there.
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain(
+				"hasn't seen an approval yet",
+			),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await waitFor(() => expect(screen.getByText("Reset failed")).toBeTruthy());
+		expect(screen.getByRole("alert").textContent).toContain("interrupted");
+		expect(clearSecretStorageCache).toHaveBeenCalled();
+	});
+
+	it("unmounting during the preflight probe never starts the reset", async () => {
+		// On a no-auth server the probe resolves with no prompt to cancel;
+		// the disposed guard is what keeps the destructive reset from
+		// running headless after the dialog is externally removed.
+		let resolveProbe: ((v: unknown) => void) | undefined;
+		uploadDeviceSigningKeys.mockReturnValue(
+			new Promise((r) => {
+				resolveProbe = r;
+			}),
+		);
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+		cleanup();
+		resolveProbe?.({});
+		// Give the resolved preflight a macrotask to (wrongly) continue.
+		await new Promise((r) => setTimeout(r, 0));
+		expect(resetEncryption).not.toHaveBeenCalled();
+	});
+
+	it("unmounting mid-operation aborts the suspended reset", async () => {
+		// The dialog's onCleanup cancels the flow so the SDK operation is
+		// not left suspended forever on a prompt nothing will answer.
+		mockResetOauthUia(Number.POSITIVE_INFINITY);
+		let resetPromise: Promise<void> | undefined;
+		const impl = resetEncryption.getMockImplementation() as (
+			cb: UiaCallback,
+		) => Promise<void>;
+		resetEncryption.mockImplementation((cb: UiaCallback) => {
+			resetPromise = impl(cb);
+			return resetPromise;
+		});
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+		await screen.findByText("Approve in your account settings");
+		fireEvent.click(screen.getByRole("button", { name: "I've approved it" }));
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain(
+				"hasn't seen an approval yet",
+			),
+		);
+
+		cleanup();
+		await expect(resetPromise).rejects.toBeInstanceOf(UiaCancelledError);
+	});
+
 	it("shows the curated fallback for raw platform exceptions", async () => {
 		// A WebCrypto DOMException carries browser jargon — the user gets the
 		// fallback, the console keeps the detail.
-		resetEncryption.mockRejectedValue(
+		mockResetPasswordUia(
 			new DOMException(
 				"The operation failed for some reason",
 				"OperationError",
@@ -248,7 +422,8 @@ describe("ResetEncryptionDialog", () => {
 		const onClose = vi.fn();
 		resetEncryption.mockReturnValue(new Promise(() => {}));
 
-		await runThroughPassword(onClose);
+		render(() => <ResetEncryptionDialog onClose={onClose} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
 		await waitFor(() =>
 			expect(screen.getByText("Resetting encryption…")).toBeTruthy(),
 		);
@@ -264,7 +439,7 @@ describe("ResetEncryptionDialog", () => {
 	it("ignores Escape and backdrop clicks while the new key is shown", async () => {
 		// Dismissing before the user saves the key could lock them out.
 		const onClose = vi.fn();
-		resetEncryption.mockResolvedValue(undefined);
+		mockResetPasswordUia();
 		ensureKeyBackup.mockImplementation(
 			async (
 				_crypto: unknown,
