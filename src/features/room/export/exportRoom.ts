@@ -318,8 +318,9 @@ async function runExport(
 	zip.addEntry(`export.${extension}`, new TextEncoder().encode(text));
 	for (const attachment of attachments) {
 		if (isCancelled()) return null;
-		// CRC the attachment in slices off the main thread; a whole-buffer
-		// pass over a large video would freeze the UI for seconds.
+		// CRC the attachment in main-thread slices with yields between them;
+		// a single whole-buffer pass over a large video would freeze the UI
+		// for seconds.
 		const crc = await crc32Chunked(attachment.data, yieldToMain);
 		zip.addEntry(attachment.path, attachment.data, crc);
 	}
@@ -344,7 +345,9 @@ async function fetchAttachment(
 		if (!file) return null;
 	}
 	try {
-		const res = await fetch(url, { credentials: "omit", signal });
+		const init: RequestInit = { credentials: "omit" };
+		if (signal) init.signal = signal;
+		const res = await fetch(url, init);
 		if (!res.ok) return null;
 		const bytes = await res.arrayBuffer();
 		if (!file) return new Uint8Array(bytes);

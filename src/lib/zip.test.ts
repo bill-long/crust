@@ -94,6 +94,13 @@ describe("ZipWriter", () => {
 		expect(yields).toBeGreaterThan(0);
 	});
 
+	it("refuses entries after the archive is finalized", () => {
+		const zip = new ZipWriter();
+		zip.addEntry("a", new Uint8Array([1]));
+		zip.toBytes();
+		expect(() => zip.addEntry("b", new Uint8Array([2]))).toThrow(/finalized/);
+	});
+
 	it("handles an empty archive", async () => {
 		const zip = new ZipWriter();
 		const entries = readZip(zip.toBytes());

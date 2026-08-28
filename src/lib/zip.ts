@@ -90,6 +90,11 @@ export class ZipWriter {
 	 * responsible for uniqueness.
 	 */
 	addEntry(name: string, data: Uint8Array, precomputedCrc?: number): void {
+		if (this.finished) {
+			// Appending after the central directory/EOCD would corrupt the
+			// archive - the writer is single-use by contract.
+			throw new Error("ZIP archive already finalized");
+		}
 		const nameBytes = new TextEncoder().encode(name);
 		if (nameBytes.length > 0xffff) {
 			throw new Error("ZIP entry name too long");
