@@ -16,7 +16,7 @@ import { useClient } from "../../client/client";
 import { accounts } from "../../stores/session";
 import { updateSetting, userSettings } from "../../stores/settings";
 import { isPushConfigured } from "../../types/config";
-import { releaseWebPush } from "../notifications/accountPush";
+import { disableBackgroundNotifications } from "../notifications/accountPush";
 import { enableWebPush, isPushSupported } from "../notifications/webPush";
 import { SectionHeading, ToggleRow } from "./SettingsControls";
 
@@ -63,15 +63,13 @@ const NotificationsTab: Component = () => {
 		setPushError(null);
 		if (!checked) {
 			setPushBusy(true);
-			// The bounded release rather than `disableWebPush` directly: it drops
-			// the browser's subscription first and gives up on the server round
-			// trip after a timeout, so a homeserver that never answers cannot
-			// leave this toggle disabled and showing "on" for the rest of the
-			// session while background push is in fact already dead.
-			releaseWebPush(client, config.push).finally(() => {
-				updateSetting("backgroundNotifications", false);
-				setPushBusy(false);
-			});
+			// Records the preference first and only then hands the registration
+			// back - the shared order, and the reason for it, live in
+			// `disableBackgroundNotifications`. Bounded, so a homeserver that never
+			// answers cannot leave this toggle disabled for the rest of the session.
+			disableBackgroundNotifications(client, config.push).finally(() =>
+				setPushBusy(false),
+			);
 			return;
 		}
 		setPushBusy(true);

@@ -31,9 +31,10 @@ import {
 	saveSession,
 	setActiveAccount,
 } from "../../stores/session";
-import { updateSetting } from "../../stores/settings";
+import { updateSetting, userSettings } from "../../stores/settings";
 import type { PushConfig } from "../../types/config";
 import {
+	disableBackgroundNotifications,
 	releaseWebPush,
 	removeOtherAccountPushers,
 	restoreWebPush,
@@ -116,13 +117,18 @@ describe("releaseWebPush", () => {
 		expect(disableWebPushMock).toHaveBeenCalledWith(CLIENT, CONFIG);
 	});
 
-	it("does nothing when the deployment has no push gateway", async () => {
+	it("releases even when the deployment no longer configures push", async () => {
+		// A subscription outlives the config that created it. An operator
+		// dropping the gateway would otherwise strand every device that had one -
+		// still subscribed, still being pushed to - while the UI calls push
+		// unavailable. `disableWebPush` unsubscribes regardless and simply cannot
+		// name the server-side pusher without an app id.
 		saveSession(ALICE);
 		updateSetting("backgroundNotifications", true);
 
-		await releaseWebPush(CLIENT, { ...CONFIG, gatewayUrl: "" });
+		await releaseWebPush(CLIENT, { ...CONFIG, gatewayUrl: "", appId: "" });
 
-		expect(disableWebPushMock).not.toHaveBeenCalled();
+		expect(disableWebPushMock).toHaveBeenCalledOnce();
 	});
 
 	it("gives up rather than blocking the exit when the removal hangs", async () => {
@@ -150,6 +156,60 @@ describe("releaseWebPush", () => {
 		disableWebPushMock.mockRejectedValue(new Error("network down"));
 
 		await expect(releaseWebPush(CLIENT, CONFIG)).resolves.toBeUndefined();
+	});
+});
+
+describe("disableBackgroundNotifications", () => {
+	it("records the preference before waiting on the cleanup", async () => {
+		// The release is bounded but can take seconds, and it no longer gates on
+		// the setting - so anything reading it meanwhile (`useWebPushSync`'s
+		// refresh, coming out of its sweep) would see background push as still
+		// wanted and register a pusher for an account that just turned it off, or
+		// is halfway out the door.
+		saveSession(ALICE);
+		updateSetting("backgroundNotifications", true);
+		let enabledDuringRelease: boolean | undefined;
+		disableWebPushMock.mockImplementation(async () => {
+			enabledDuringRelease = userSettings().backgroundNotifications;
+		});
+
+		await disableBackgroundNotifications(CLIENT, CONFIG);
+
+		expect(enabledDuringRelease).toBe(false);
+		expect(userSettings().backgroundNotifications).toBe(false);
+		expect(disableWebPushMock).toHaveBeenCalledOnce();
+	});
+
+	it("forgets the preference even when THIS tab thinks it already is off", async () => {
+		// The mirror is per-tab and no storage event refreshes it (#533,
+		// invariant 2): a second tab that switched background notifications on
+		// wrote `true` to the persisted value this tab is about to abandon. A
+		// gated write would skip it and leave the next login reading "on" with
+		// nothing registered.
+		saveSession(ALICE);
+		updateSetting("backgroundNotifications", false);
+		const key = `crust:settings:${ALICE.userId}`;
+		const persisted = JSON.parse(localStorage.getItem(key) ?? "{}");
+		localStorage.setItem(
+			key,
+			JSON.stringify({ ...persisted, backgroundNotifications: true }),
+		);
+
+		await disableBackgroundNotifications(CLIENT, CONFIG);
+
+		expect(
+			JSON.parse(localStorage.getItem(key) ?? "{}").backgroundNotifications,
+		).toBe(false);
+	});
+
+	it("hands the registration back even with the preference already off", async () => {
+		// The preference is this tab's view; the subscription is the device's.
+		saveSession(ALICE);
+		updateSetting("backgroundNotifications", false);
+
+		await disableBackgroundNotifications(CLIENT, CONFIG);
+
+		expect(disableWebPushMock).toHaveBeenCalledOnce();
 	});
 });
 
@@ -287,7 +347,7 @@ describe("removeOtherAccountPushers", () => {
 		expect(createClientMock).not.toHaveBeenCalled();
 	});
 
-	it("does nothing when the deployment has no push gateway", async () => {
+	it("does nothing without an app id to name the pusher with", async () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
@@ -295,6 +355,23 @@ describe("removeOtherAccountPushers", () => {
 
 		expect(currentPushKeyMock).not.toHaveBeenCalled();
 		expect(createClientMock).not.toHaveBeenCalled();
+	});
+
+	it("still sweeps a deployment that has retired push", async () => {
+		// Naming a pusher takes an app id and a pushkey - not the VAPID key or
+		// the gateway that registering one needs. A pusher outlives the config
+		// that created it, so an operator retiring push must not strand the
+		// devices that still have one pointing at them.
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await removeOtherAccountPushers(BOB.userId, {
+			...CONFIG,
+			vapidPublicKey: "",
+			gatewayUrl: "",
+		});
+
+		expect(sweptAccounts()).toEqual([ALICE.userId]);
 	});
 
 	it("gives up on an account whose homeserver never answers", async () => {

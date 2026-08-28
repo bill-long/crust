@@ -50,7 +50,7 @@ import { createAccountClient } from "../../client/accountLogout";
 import { withTimeout } from "../../client/cryptoRecovery";
 import { reportError } from "../../lib/reportError";
 import { loadSessions } from "../../stores/session";
-import { userSettings } from "../../stores/settings";
+import { updateSetting, userSettings } from "../../stores/settings";
 import { isPushConfigured, type PushConfig } from "../../types/config";
 import {
 	currentPushKey,
@@ -75,22 +75,31 @@ import {
 const PUSH_REQUEST_TIMEOUT_MS = 5_000;
 
 /**
- * Hand this device's push registration back for the account that is leaving -
- * and for the settings toggle, which is the same act for a different reason.
+ * Hand this device's push registration back for the account that is leaving.
  *
- * Every exit out of a running session reaches it (switching, leaving to add an
- * account, and every logout, through `finishAccountLogout`), and it must run
+ * Every exit out of a running session reaches it - switching, leaving to add an
+ * account, and every logout, through `finishAccountLogout`; the settings toggle
+ * and the logout come via {@link disableBackgroundNotifications}, which pairs it
+ * with forgetting the preference. It must run
  * while the outgoing account's token is still the one in `client`, which is why
  * it is part of the account-exit teardown rather than something the incoming
  * document does.
  *
- * Gated on the DEVICE, not on the account's `backgroundNotifications`: whether
- * there is anything to hand back is answered by whether this device holds a push
- * subscription, which `disableWebPush` checks and which is true of the whole
- * install. The setting is a per-tab signal that no `storage` event refreshes
- * (#533, invariant 2) - a second tab enabling background notifications is
- * invisible here, and gating on it would skip the release for the account that
- * has a live pusher, on the one path where nothing can clean up afterwards.
+ * Gated on the DEVICE and nothing else: whether there is anything to hand back
+ * is answered by whether this device holds a push subscription, which
+ * `disableWebPush` checks and which is true of the whole install.
+ *
+ * Not on the account's `backgroundNotifications`, a per-tab signal that no
+ * `storage` event refreshes (#533, invariant 2) - a second tab enabling
+ * background notifications is invisible here, and gating on it would skip the
+ * release for the account that has a live pusher, on the one path where nothing
+ * can clean up afterwards. Nor on the deployment still having push CONFIGURED:
+ * a subscription outlives the config that created it, so an operator dropping
+ * the gateway would otherwise strand every device that had one - subscribed,
+ * still being pushed to, with the UI calling push unavailable. Without an
+ * `appId` the server-side pusher cannot be named, which `disableWebPush`
+ * handles; the unsubscribe still lands, and that is the half that stops
+ * delivery.
  *
  * Never throws and never blocks for longer than {@link PUSH_REQUEST_TIMEOUT_MS}.
  * An exit the user is waiting on must not hang on notification cleanup, and
@@ -102,7 +111,6 @@ export async function releaseWebPush(
 	client: MatrixClient,
 	cfg: PushConfig,
 ): Promise<void> {
-	if (!isPushConfigured(cfg)) return;
 	try {
 		await withTimeout(
 			disableWebPush(client, cfg),
@@ -114,6 +122,39 @@ export async function releaseWebPush(
 			logLabel: "Failed to release the push registration on account exit",
 		});
 	}
+}
+
+/**
+ * Turn background notifications off for the account on screen: record the
+ * preference, then hand the device's registration back. Every place that means
+ * it goes through here - the settings toggle, and every logout, through
+ * `finishAccountLogout`, so the force-logout paths forget the preference too
+ * rather than leaving the next login reading "on" with nothing registered.
+ *
+ * The order is the point. The release is bounded but can take seconds, and it no
+ * longer gates on the setting - so anything that reads the setting in the
+ * meantime (`useWebPushSync`'s refresh, coming out of its sweep) would see
+ * background push as still wanted and register a pusher for an account that just
+ * turned it off, or is halfway out the door. Off is the answer either way:
+ * whether the cleanup lands does not change what the user asked for.
+ *
+ * Writing first narrows that window but cannot close it: a refresh that has
+ * ALREADY read the setting goes on to subscribe, and would land a pusher on a
+ * live endpoint behind this. `useWebPushSync` re-reads the setting after its
+ * refresh resolves and releases again if it changed, which is where that half
+ * is handled.
+ */
+export async function disableBackgroundNotifications(
+	client: MatrixClient,
+	cfg: PushConfig,
+): Promise<void> {
+	// Unconditional, not "only if this tab thinks it is on": the setting is the
+	// per-tab mirror this file's release deliberately does not trust (#533,
+	// invariant 2), and a stale `false` here would skip the write and leave the
+	// persisted value reading `true` for the next login - the exact state the
+	// write exists to prevent.
+	updateSetting("backgroundNotifications", false);
+	await releaseWebPush(client, cfg);
 }
 
 /**
@@ -186,7 +227,12 @@ export async function removeOtherAccountPushers(
 	activeUserId: string,
 	cfg: PushConfig,
 ): Promise<void> {
-	if (!isPushConfigured(cfg)) return;
+	// The app id, not the whole push config: naming a pusher takes an app id and
+	// a pushkey, and nothing here needs the VAPID key or the gateway URL. Same
+	// argument as the release above - a pusher outlives the config that created
+	// it, and an operator retiring push must not strand the devices that still
+	// have one.
+	if (!cfg.appId) return;
 	// Storage, not the reactive mirror: an account added or removed in another
 	// tab is exactly the kind this sweep exists to catch, and the mirror cannot
 	// see it (#533, invariant 2).

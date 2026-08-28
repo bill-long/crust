@@ -277,9 +277,10 @@ export async function disableWebPush(
 	// A subscription can only exist behind a registered worker, and
 	// `navigator.serviceWorker.ready` never settles when there is none - the dev
 	// server registers no worker at all, and a production install can fail to.
-	// `getRegistration()` answers either way and immediately, so a device that
-	// cannot be subscribed costs nothing rather than the caller's whole timeout
-	// budget on every account exit.
+	// `getRegistration()` answers either way and immediately, so a device with no
+	// worker at all costs nothing rather than the caller's whole timeout budget on
+	// every account exit. (A registration whose worker is not active yet - a first
+	// visit still precaching - does still wait, bounded by the caller.)
 	try {
 		if (!(await navigator.serviceWorker.getRegistration())) return;
 	} catch {

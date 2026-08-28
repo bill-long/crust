@@ -33,6 +33,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { releaseAppBadge } from "../client/appBadge";
 import { CRYPTO_INIT_TIMEOUT_MS, withTimeout } from "../client/cryptoRecovery";
 import {
+	disableBackgroundNotifications,
 	releaseWebPush,
 	restoreWebPush,
 } from "../features/notifications/accountPush";
@@ -93,7 +94,10 @@ export interface AccountExit {
  * back, on a document that goes on running that account - so the failure path
  * puts it back ({@link restoreWebPush}); left alone, the account would sit there
  * with background notifications unregistered while its own settings still say
- * they are on, and nothing re-registers without a reload.
+ * they are on, and nothing re-registers without a reload. On a deployment that
+ * has retired push the restore cannot run - registering needs a VAPID key and a
+ * gateway, releasing does not - and that is the right way round: the operator
+ * has already withdrawn the thing being restored.
  *
  * Returns whether the commit succeeded; a caller with nothing to commit (leaving
  * to add an account) omits it and gets `true`.
@@ -244,15 +248,16 @@ export async function finishAccountLogout(
 	wipe: () => Promise<void>,
 	goToLogin: () => void,
 ): Promise<"reloading" | "left"> {
-	// Before anything else, because clearing the account takes away the
-	// credentials the pusher removal needs. This is the choke point every logout
+	// Before anything else, because clearing the account takes away both the
+	// credentials the pusher removal needs and the key its preference is filed
+	// under (#532). This is the choke point every logout
 	// goes through - the one in `Layout`, and both force-logout paths in `App` -
 	// so no exit can forget it (#534). The foreground logout releases earlier as
 	// well, while its token is still valid and the pusher can actually be removed
 	// server-side; if that got as far as unsubscribing, this second call finds no
 	// subscription and returns, and if it did not, this is the one that closes
 	// the leak.
-	await releaseWebPush(exit.client, exit.pushConfig);
+	await disableBackgroundNotifications(exit.client, exit.pushConfig);
 	try {
 		await withTimeout(wipe(), CRYPTO_INIT_TIMEOUT_MS, "Account store wipe");
 	} catch (e) {

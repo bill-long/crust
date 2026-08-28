@@ -2,7 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { onMount } from "solid-js";
 import { userSettings } from "../../stores/settings";
 import { isPushConfigured, type PushConfig } from "../../types/config";
-import { removeOtherAccountPushers } from "./accountPush";
+import { releaseWebPush, removeOtherAccountPushers } from "./accountPush";
 import { enableWebPush, isPushSupported } from "./webPush";
 
 /**
@@ -36,7 +36,7 @@ export function useWebPushSync(
 ): void {
 	onMount(() => {
 		if (typeof window === "undefined") return;
-		if (!isPushSupported() || !isPushConfigured(pushConfig)) return;
+		if (!isPushSupported()) return;
 		void (async () => {
 			// The RUNNING account, never the persisted pointer (another tab may have
 			// moved it). With no user id there is nothing to hold the sweep's list
@@ -44,6 +44,10 @@ export function useWebPushSync(
 			// - so it waits for the next boot instead.
 			const userId = client.getUserId();
 			if (userId) await removeOtherAccountPushers(userId, pushConfig);
+			// Only the refresh needs the deployment to still configure push: it
+			// registers a pusher, which takes a VAPID key and a gateway. The sweep
+			// above only removes them, and has its own, narrower requirement.
+			if (!isPushConfigured(pushConfig)) return;
 			// Read after the sweep, not before: the settings toggle can run during
 			// it, and the fresher answer is the right one either way - it registers
 			// its own pusher when switched on, and this must not re-register one it
@@ -53,6 +57,15 @@ export function useWebPushSync(
 			await enableWebPush(client, pushConfig).catch(() => {
 				// Best-effort refresh; the settings toggle surfaces actionable errors.
 			});
+			// The read above is already stale: `enableWebPush` awaits the service
+			// worker and can SUBSCRIBE afresh, so a toggle-off or a logout that
+			// started in the meantime would find nothing to release and this would
+			// then register a pusher on a live endpoint - for an account that is on
+			// its way out of storage, where nothing can ever remove it (#534). Ask
+			// again, and hand straight back what nobody wants.
+			if (!userSettings().backgroundNotifications) {
+				await releaseWebPush(client, pushConfig);
+			}
 		})();
 	});
 }

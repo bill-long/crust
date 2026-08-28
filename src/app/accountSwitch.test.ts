@@ -16,9 +16,14 @@ const releaseWebPushMock = vi.hoisted(() =>
 const restoreWebPushMock = vi.hoisted(() =>
 	vi.fn(async (_client: unknown, _cfg: unknown) => {}),
 );
+const disableBackgroundNotificationsMock = vi.hoisted(() =>
+	vi.fn(async (_client: unknown, _cfg: unknown) => {}),
+);
 vi.mock("../features/notifications/accountPush", () => ({
 	releaseWebPush: (client: unknown, cfg: unknown) =>
 		releaseWebPushMock(client, cfg),
+	disableBackgroundNotifications: (client: unknown, cfg: unknown) =>
+		disableBackgroundNotificationsMock(client, cfg),
 	restoreWebPush: (client: unknown, cfg: unknown) =>
 		restoreWebPushMock(client, cfg),
 }));
@@ -105,6 +110,10 @@ beforeEach(() => {
 		// awaited records itself after the reload instead of before it.
 		await Promise.resolve();
 		await Promise.resolve();
+		calls.push("releaseWebPush");
+	});
+	disableBackgroundNotificationsMock.mockClear();
+	disableBackgroundNotificationsMock.mockImplementation(async () => {
 		calls.push("releaseWebPush");
 	});
 	restoreWebPushMock.mockClear();
@@ -624,16 +633,19 @@ describe("finishAccountLogout", () => {
 		expect(loadSessions().map((a) => a.userId)).toEqual([ALICE.userId]);
 	});
 
-	it("hands the push registration back before the account leaves", async () => {
+	it("forgets the preference and hands the registration back first", async () => {
 		// Every logout comes through here - the foreground one and both
-		// force-logout paths - and clearing the account takes away the
-		// credentials the pusher removal needs (#534).
+		// force-logout paths - and clearing the account takes away both the
+		// credentials the pusher removal needs and the key its preference is
+		// filed under (#534). Going through the shared disable is what makes the
+		// force-logout paths forget the preference too, rather than leaving the
+		// next login reading "on" with nothing registered.
 		saveSession(ALICE);
 		addSession(BOB);
 
 		await finishAccountLogout(EXIT, BOB.userId, wipe, vi.fn());
 
-		expect(releaseWebPushMock).toHaveBeenCalledWith(
+		expect(disableBackgroundNotificationsMock).toHaveBeenCalledWith(
 			EXIT.client,
 			EXIT.pushConfig,
 		);
@@ -647,7 +659,7 @@ describe("finishAccountLogout", () => {
 
 		await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
 
-		expect(releaseWebPushMock).toHaveBeenCalledOnce();
+		expect(disableBackgroundNotificationsMock).toHaveBeenCalledOnce();
 	});
 
 	it("clears the OS badge for the account that just left", async () => {

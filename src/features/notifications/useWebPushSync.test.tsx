@@ -3,9 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const removeOtherAccountPushersMock = vi.hoisted(() =>
 	vi.fn(async (_userId: string, _cfg: unknown) => {}),
 );
+const releaseWebPushMock = vi.hoisted(() =>
+	vi.fn(async (_client: unknown, _cfg: unknown) => {}),
+);
 vi.mock("./accountPush", () => ({
 	removeOtherAccountPushers: (userId: string, cfg: unknown) =>
 		removeOtherAccountPushersMock(userId, cfg),
+	releaseWebPush: (client: unknown, cfg: unknown) =>
+		releaseWebPushMock(client, cfg),
 }));
 
 const enableWebPushMock = vi.hoisted(() =>
@@ -45,7 +50,12 @@ function mount(pushConfig: PushConfig = CONFIG): void {
 beforeEach(() => {
 	localStorage.clear();
 	removeOtherAccountPushersMock.mockClear();
+	releaseWebPushMock.mockClear();
 	enableWebPushMock.mockClear();
+	// The implementation too, not just the calls: a test that makes the refresh
+	// change the setting under itself would otherwise do so in every test after
+	// it (`vi.restoreAllMocks` leaves a `vi.fn()`'s implementation alone).
+	enableWebPushMock.mockImplementation(async () => {});
 	isPushSupportedMock.mockReturnValue(true);
 	vi.stubGlobal("Notification", { permission: "granted" });
 	updateSetting("backgroundNotifications", true);
@@ -59,6 +69,31 @@ afterEach(() => {
 });
 
 describe("useWebPushSync", () => {
+	it("hands back a pusher the user turned off while it was registering", async () => {
+		// The setting is read before `enableWebPush`, which awaits the service
+		// worker and can subscribe afresh - so a toggle-off or a logout that
+		// started in between would find nothing to release, and this would then
+		// register a pusher on a live endpoint for an account on its way out of
+		// storage, where nothing can ever remove it.
+		enableWebPushMock.mockImplementation(async () => {
+			updateSetting("backgroundNotifications", false);
+		});
+
+		mount();
+
+		await vi.waitFor(() =>
+			expect(releaseWebPushMock).toHaveBeenCalledWith(client, CONFIG),
+		);
+		expect(enableWebPushMock).toHaveBeenCalledOnce();
+	});
+
+	it("leaves the pusher alone when nothing changed under it", async () => {
+		mount();
+
+		await vi.waitFor(() => expect(enableWebPushMock).toHaveBeenCalledOnce());
+		expect(releaseWebPushMock).not.toHaveBeenCalled();
+	});
+
 	it("refreshes this account's pusher", async () => {
 		mount();
 		await Promise.resolve();
@@ -145,10 +180,15 @@ describe("useWebPushSync", () => {
 		expect(enableWebPushMock).not.toHaveBeenCalled();
 	});
 
-	it("does nothing when the deployment has no push gateway", async () => {
+	it("still sweeps, but registers nothing, once push is unconfigured", async () => {
+		// The refresh registers a pusher and so needs the deployment's VAPID key
+		// and gateway; the sweep only removes pushers, and the ones left pointing
+		// at this device outlive the config that created them.
 		mount({ ...CONFIG, vapidPublicKey: "" });
+		await Promise.resolve();
+		await Promise.resolve();
 
-		expect(removeOtherAccountPushersMock).not.toHaveBeenCalled();
+		expect(removeOtherAccountPushersMock).toHaveBeenCalledOnce();
 		expect(enableWebPushMock).not.toHaveBeenCalled();
 	});
 });

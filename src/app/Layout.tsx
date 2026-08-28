@@ -33,7 +33,7 @@ import {
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
 import type { LoginState } from "../features/auth/returnTo";
-import { releaseWebPush } from "../features/notifications/accountPush";
+import { disableBackgroundNotifications } from "../features/notifications/accountPush";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
@@ -83,7 +83,6 @@ import {
 	MAX_ACCOUNTS,
 	rememberAccountDisplayName,
 } from "../stores/session";
-import { updateSetting, userSettings } from "../stores/settings";
 import { isMobile } from "../stores/viewport";
 import type { CryptoAction } from "../types/crypto";
 import {
@@ -480,23 +479,15 @@ const Layout: Component = () => {
 		// be picked up by the NEXT account to log in on this tab —
 		// `activeCallRoomId` is module-global and never reset on login.
 		setActiveCallRoomId(null);
-		// Hand this device's push registration back before the session is
-		// invalidated, so a logged-out account doesn't keep receiving background
-		// notifications, and while the token is still valid, so the pusher can
-		// actually be removed server-side and not just unsubscribed here. The same
-		// call every other account exit makes (#534) - the switch and the
-		// add-account detour in this file, and, through finishAccountLogout, both
-		// force-logout paths in App.tsx. Whether there is anything to hand back is
-		// the device's answer, not this account's setting.
-		await releaseWebPush(client, pushConfig);
-		if (userSettings().backgroundNotifications) {
-			// Clear this account's preference now that its pusher is gone, so a
-			// later login as the same account doesn't read "background push on"
-			// with no pusher registered. Settings are per-account (#532), so this
-			// write must happen BEFORE clearSession() below - once the account is
-			// gone there is no key left to file it under.
-			updateSetting("backgroundNotifications", false);
-		}
+		// Forget the preference and hand this device's push registration back
+		// before the session is invalidated - while the token is still valid, so
+		// the pusher can actually be removed server-side and not just
+		// unsubscribed here, and before clearSession() below, since settings are
+		// per-account (#532) and once the account is gone there is no key left to
+		// file the preference under. Every other account exit releases too (#534):
+		// the switch and the add-account detour in this file, and, through
+		// finishAccountLogout, both force-logout paths in App.tsx.
+		await disableBackgroundNotifications(client, pushConfig);
 		try {
 			await client.logout(true);
 		} catch {
