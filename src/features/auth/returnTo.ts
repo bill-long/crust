@@ -9,6 +9,10 @@ import { hasControlChar } from "../../lib/controlChars";
  * (#533). It travels as router state rather than a query param on purpose - a
  * crafted link must not be able to turn a plain login into one that quietly
  * leaves another account's token in storage.
+ *
+ * The login route's OTHER waiver, the one for a logout landing, deliberately
+ * does not live here: router state is persisted into `history.state` and would
+ * outlive the navigation it describes. See `logoutLanding.ts`.
  */
 export interface LoginState {
 	returnTo?: string;

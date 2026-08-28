@@ -209,6 +209,41 @@ describe("LoginPage methods stage", () => {
 		});
 	});
 
+	it("password login lands on the deep-linked target, not the app root", async () => {
+		// The auth guard hands the login route the path the user was turned away
+		// from (#338). `/login`'s guard reads that same state to decide whether the
+		// visitor is already signed in (#549), so it is worth pinning that the
+		// deep link still survives an actual login.
+		stubProbe({ password: true });
+		loginRequestMock.mockResolvedValue({
+			access_token: "tok",
+			user_id: "@alice:strange.pizza",
+			device_id: "DEV1",
+		});
+		locationState.value = {
+			returnTo: "/space/!s:strange.pizza/!r:strange.pizza",
+		};
+		await renderAndProbe();
+		await screen.findByLabelText("Username");
+
+		fireEvent.input(screen.getByLabelText("Username"), {
+			target: { value: "alice" },
+		});
+		fireEvent.input(screen.getByLabelText("Password"), {
+			target: { value: "hunter2" },
+		});
+		fireEvent.submit(
+			screen.getByRole("button", { name: "Log in with password" }),
+		);
+
+		await waitFor(() =>
+			expect(navigateMock).toHaveBeenCalledWith(
+				"/space/!s:strange.pizza/!r:strange.pizza",
+				{ replace: true },
+			),
+		);
+	});
+
 	it("OAuth-only server: shows the OAuth button, no password form, and redirects on click", async () => {
 		stubProbe({ delegated: true });
 		startOidcLoginMock.mockResolvedValue(

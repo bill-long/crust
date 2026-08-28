@@ -32,6 +32,7 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { releaseAppBadge } from "../client/appBadge";
 import { CRYPTO_INIT_TIMEOUT_MS, withTimeout } from "../client/cryptoRecovery";
+import { markLogoutLanding } from "../features/auth/logoutLanding";
 import {
 	disableBackgroundNotifications,
 	releaseWebPush,
@@ -41,6 +42,7 @@ import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
 import { setActiveCallRoomId } from "../stores/activeCall";
+import { clearNotices } from "../stores/notices";
 import {
 	activeAccount,
 	activeAccountId,
@@ -237,6 +239,21 @@ export async function switchToAccount(
  * would boot it, fail on the dead token, log out again, and loop; the login
  * page is the only safe destination then.
  *
+ * `/login` turns an already-signed-in visitor away (#549), and this is the one
+ * arrival that must be let through with accounts still in storage, so it arms
+ * the waiver on the way out ({@link markLogoutLanding}). Unconditionally, which
+ * also covers the benign race where another tab adds an account between the
+ * clear and the navigation.
+ *
+ * The waiver is blunt: in the rejected-write case storage may ALSO hold a
+ * perfectly healthy sibling account, and a plain login on the page this opens
+ * replaces that one too, unrevoked. Promoting the sibling instead is the
+ * obvious tighter answer and does not work - `setActiveAccount` writes through
+ * the same `writeStore` that just refused, with a LARGER payload (it keeps
+ * every account, where the removal dropped one), so it fails wherever this
+ * branch is reached. Storage is refusing writes; there is no state to move to.
+ * So the loop is what gets avoided, and #551 is where doing better belongs.
+ *
  * Returns "reloading" when the document is being replaced. `location.assign`
  * only STARTS that, so this document keeps running: a caller that clears a
  * single-flight guard afterwards would re-enable the very action it is
@@ -268,6 +285,13 @@ export async function finishAccountLogout(
 	// promoted account's first sync sets it (`client/client.tsx`); on the way to
 	// `/login` there is nothing left to count.
 	releaseAppBadge();
+	// And the same for anything it had to say. A toast belongs to the session
+	// that raised it, and on the way to `/login` there is no session left to read
+	// it - notably the login route's own "you're already signed in" (#549), which
+	// would otherwise still be on screen while the form contradicts it. The app
+	// root drops stale notices as it mounts, but that only helps a session that
+	// starts; this covers the exit that ends on the login page.
+	clearNotices();
 	// Storage-backed: another tab may have written it since this document booted,
 	// and it is the authority on what will be left.
 	const remaining = loadSessions().some((a) => a.userId !== userId);
@@ -283,6 +307,7 @@ export async function finishAccountLogout(
 		return "reloading";
 	}
 	if (remaining) unfreezeAccountScope();
+	markLogoutLanding();
 	goToLogin();
 	return "left";
 }

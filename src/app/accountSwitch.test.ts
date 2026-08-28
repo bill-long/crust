@@ -33,7 +33,9 @@ vi.mock("../client/appBadge", () => ({
 	releaseAppBadge: () => releaseAppBadgeMock(),
 }));
 
+import { takeLogoutLanding } from "../features/auth/logoutLanding";
 import { setActiveCallRoomId } from "../stores/activeCall";
+import { clearNotices, notices, pushNotice } from "../stores/notices";
 import {
 	addSession,
 	clearSession,
@@ -89,6 +91,9 @@ const calls: string[] = [];
 const assign = vi.fn(() => calls.push("assign"));
 
 beforeEach(() => {
+	clearNotices();
+	// One-shot and module-scoped: drain it so each test starts unarmed.
+	takeLogoutLanding();
 	localStorage.clear();
 	calls.length = 0;
 	assign.mockClear();
@@ -519,6 +524,18 @@ describe("finishAccountLogout", () => {
 		expect(assign).not.toHaveBeenCalled();
 	});
 
+	it("arms no waiver when it reloads instead of routing to login", async () => {
+		// The waiver waves `/login`'s guard aside. A logout that never goes there
+		// must not leave one primed for whatever visits that route next.
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
+
+		expect(assign).toHaveBeenCalledOnce();
+		expect(takeLogoutLanding()).toBe(false);
+	});
+
 	it("reloads into an account another tab left behind", async () => {
 		// This tab's mirror says "nobody is logged in"; storage - which the
 		// logout just wrote, and which another tab may also have written - says
@@ -559,6 +576,10 @@ describe("finishAccountLogout", () => {
 
 		vi.restoreAllMocks();
 		expect(goToLogin).toHaveBeenCalledOnce();
+		// The accounts are still in storage, so `/login` would turn this visitor
+		// away and back into the dead session (#549). The waiver is what breaks
+		// that loop, and this is the path that needs it.
+		expect(takeLogoutLanding()).toBe(true);
 		expect(assign).not.toHaveBeenCalled();
 		// The freeze was armed for a reload that never happened; this document
 		// stays and must be able to persist again.
@@ -677,6 +698,19 @@ describe("finishAccountLogout", () => {
 		);
 	});
 
+	it("takes the departing session's notices with it", async () => {
+		// A toast belongs to the session that raised it. The one that matters is
+		// the login route's own "you're already signed in" (#549): the guard
+		// carries it into a session that then turns out to be dead, and without
+		// this it would still be on screen while the login form contradicts it.
+		saveSession(ALICE);
+		pushNotice("something the old session had to say");
+
+		await finishAccountLogout(EXIT, ALICE.userId, wipe, vi.fn());
+
+		expect(notices()).toEqual([]);
+	});
+
 	it("hands back to the login page when no account is left", async () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn();
@@ -684,6 +718,10 @@ describe("finishAccountLogout", () => {
 		await finishAccountLogout(EXIT, ALICE.userId, wipe, goToLogin);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
+		// Armed even with nothing left in storage: another tab can add an account
+		// between the clear above and the navigation, and the login page the user
+		// was just sent to must not vanish under them (#549).
+		expect(takeLogoutLanding()).toBe(true);
 		expect(assign).not.toHaveBeenCalled();
 	});
 });

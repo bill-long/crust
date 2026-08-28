@@ -14,6 +14,7 @@ import {
 import { ClientProvider, useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
 import { NoticeToasts } from "../components/NoticeToasts";
+import { LoginGate } from "../features/auth/LoginGate";
 import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
@@ -267,15 +268,20 @@ const App: Component = () => {
 	return (
 		<ConfigProvider>
 			<Router base={basePrefix}>
+				{/* LoginGate turns an already-signed-in visitor away (#549);
+				    everything inside it, the chunk's Suspense boundary included,
+				    is only created for a visitor it lets through. */}
 				<Route
 					path="/login"
 					component={() => (
-						// Full-viewport fallback in the page background color: the
-						// login chunk is small and local, so this paints once and
-						// swaps to the form with no visible shift.
-						<Suspense fallback={<div class="h-full bg-surface-0" />}>
-							<LoginPage />
-						</Suspense>
+						<LoginGate>
+							{/* Full-viewport fallback in the page background color: the
+							    login chunk is small and local, so this paints once and
+							    swaps to the form with no visible shift. */}
+							<Suspense fallback={<div class="h-full bg-surface-0" />}>
+								<LoginPage />
+							</Suspense>
+						</LoginGate>
 					)}
 				/>
 				{/* OIDC redirect landing (MSC3861). Outside the auth guard - the

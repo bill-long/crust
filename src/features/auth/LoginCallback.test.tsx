@@ -25,6 +25,8 @@ const addSessionMock = vi.fn((..._args: unknown[]) => true);
 const freezeMock = vi.fn();
 const unfreezeMock = vi.fn();
 const revokeAccountTokenMock = vi.fn(async (..._args: unknown[]) => {});
+// What storage says is signed in on this device when the callback lands.
+const loadSessionsMock = vi.fn((): unknown[] => []);
 vi.mock("../../client/accountLogout", () => ({
 	revokeAccountToken: (...args: unknown[]) => revokeAccountTokenMock(...args),
 }));
@@ -34,6 +36,7 @@ vi.mock("../../stores/session", () => ({
 	MAX_ACCOUNTS: 5,
 	freezeAccountScope: () => freezeMock(),
 	unfreezeAccountScope: () => unfreezeMock(),
+	loadSessions: () => loadSessionsMock(),
 }));
 
 const completeOidcLoginMock = vi.fn();
@@ -65,6 +68,11 @@ beforeEach(() => {
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
+	// Not in the test bodies that stub `location`: a failed assertion would skip
+	// it, and the stub (`{ ...window.location }`, whose members live on jsdom's
+	// prototype) spreads to nothing - so every later test would read
+	// `location.search` as undefined and fail for the wrong reason.
+	vi.unstubAllGlobals();
 });
 
 describe("LoginCallback", () => {
@@ -160,7 +168,9 @@ describe("LoginCallback add-account mode", () => {
 
 	it("offers a way back to the app, not to the unguarded login page", async () => {
 		// The failure happened WITH an account still logged in. /login replaces
-		// on a plain login, so routing there invites destroying it (#549).
+		// on a plain login, so routing there invites destroying it (#549) - and
+		// its guard would turn the visitor around anyway.
+		loadSessionsMock.mockReturnValueOnce([{ userId: "@alice:strange.pizza" }]);
 		takeOidcAddAccountMock.mockReturnValueOnce(true);
 		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
 		const assign = vi.fn();
@@ -172,10 +182,11 @@ describe("LoginCallback add-account mode", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Back to app" }));
 		expect(assign).toHaveBeenCalledOnce();
 		expect(navigateMock).not.toHaveBeenCalled();
-		vi.unstubAllGlobals();
 	});
 
 	it("still offers the login page for a plain login failure", async () => {
+		// Nobody signed in, so the login page is a place the guard will let them
+		// reach and a plain login there replaces nothing.
 		takeOidcAddAccountMock.mockReturnValueOnce(false);
 		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
 
@@ -184,6 +195,25 @@ describe("LoginCallback add-account mode", () => {
 		await screen.findByText("bad state");
 		fireEvent.click(screen.getByRole("button", { name: "Back to log in" }));
 		expect(navigateMock).toHaveBeenCalledWith("/login", { replace: true });
+	});
+
+	it("sends a failed PLAIN login back to the app when one is signed in", async () => {
+		// Not an add-account flow: another tab signed in while this one was away
+		// at the OP, or a logout left an account storage could not remove. Either
+		// way `/login` would bounce this visitor straight back (#549), so offer
+		// the app directly rather than routing them through it.
+		loadSessionsMock.mockReturnValueOnce([{ userId: "@alice:strange.pizza" }]);
+		takeOidcAddAccountMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+		const assign = vi.fn();
+		vi.stubGlobal("location", { ...window.location, assign });
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		fireEvent.click(screen.getByRole("button", { name: "Back to app" }));
+		expect(assign).toHaveBeenCalledOnce();
+		expect(navigateMock).not.toHaveBeenCalled();
 	});
 
 	it("revokes the new device when the account cap is reached", async () => {

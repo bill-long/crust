@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeReturnTo, toReturnToPath } from "./returnTo";
+import {
+	isAddAccountState,
+	sanitizeReturnTo,
+	toReturnToPath,
+} from "./returnTo";
 
 describe("toReturnToPath", () => {
 	const loc = (pathname: string, search = "", hash = "") => ({
@@ -75,5 +79,23 @@ describe("sanitizeReturnTo", () => {
 	it("does not over-reject paths that merely start with 'login'", () => {
 		// A room/path whose name starts with "login" is a legitimate in-app path.
 		expect(sanitizeReturnTo("/loginhelp")).toBe("/loginhelp");
+	});
+});
+
+describe("login-route state flags", () => {
+	// The flag waives a rule that protects an account already in storage, so it
+	// is read strictly: only the literal `true` a caller in this app writes.
+	it("reads addAccount only from an explicit true", () => {
+		expect(isAddAccountState({ addAccount: true })).toBe(true);
+		expect(isAddAccountState({ addAccount: false })).toBe(false);
+		expect(isAddAccountState({ addAccount: "true" })).toBe(false);
+		expect(isAddAccountState({ addAccount: 1 })).toBe(false);
+		expect(isAddAccountState({ returnTo: "/home" })).toBe(false);
+	});
+
+	it("tolerates the shapes a real location.state can hold", () => {
+		expect(isAddAccountState(null)).toBe(false);
+		expect(isAddAccountState(undefined)).toBe(false);
+		expect(isAddAccountState("addAccount")).toBe(false);
 	});
 });

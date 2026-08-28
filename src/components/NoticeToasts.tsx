@@ -4,6 +4,8 @@ import {
 	dismissNotice,
 	type Notice,
 	notices,
+	pushNotice,
+	takeCarriedNotice,
 } from "../stores/notices";
 
 /** How long a notice stays (while the tab is visible) before auto-dismissing. */
@@ -83,11 +85,29 @@ const NoticeToast: Component<{ notice: Notice }> = (props) => {
  * to avoid a double screen-reader announcement).
  */
 export const NoticeToasts: Component = () => {
-	// Drop any notice left over from a previous session: this renderer mounts
-	// once per authenticated session, and a notice pushed while it was unmounted
-	// (e.g. a send that rejected after logout) has no timer and would otherwise
-	// resurface stale on the next login.
-	onMount(() => clearNotices());
+	// This renderer mounts once per authenticated session, so mounting IS the
+	// session boundary: drop any notice left over from the previous one (pushed
+	// while this was unmounted, e.g. a send that rejected after logout - it has
+	// no timer and would otherwise resurface stale on the next login), and take
+	// delivery of anything queued for THIS one on the way in.
+	onMount(() => {
+		const carried = takeCarriedNotice();
+		// Synchronously, so a stale notice never paints even for a frame.
+		clearNotices();
+		if (carried === null) return;
+		// A task later, though. The live region below and this notice would
+		// otherwise be inserted in the same flush, and assistive tech announces
+		// mutations to a region that already exists - not content that was there
+		// when it was registered. Every other notice is pushed long after this
+		// container is in the DOM; a carried one is the only path that would be
+		// painted and never announced, and it is the only feedback a redirected
+		// visitor gets (#549).
+		const timer = setTimeout(
+			() => pushNotice(carried.message, carried.tone),
+			0,
+		);
+		onCleanup(() => clearTimeout(timer));
+	});
 
 	return (
 		<div
