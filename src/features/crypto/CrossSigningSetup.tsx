@@ -47,8 +47,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 			return;
 		}
 
-		const userId = client.getUserId();
-		if (!userId) {
+		if (!client.getUserId()) {
 			setErrorMessage("Unable to determine user ID.");
 			setStep("error");
 			return;
@@ -151,14 +150,14 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Later
 							</button>
 							<button
 								type="button"
 								onClick={startSetup}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Continue
 							</button>
@@ -199,7 +198,7 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Done
 							</button>
@@ -217,14 +216,14 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Close
 							</button>
 							<button
 								type="button"
 								onClick={startSetup}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Try again
 							</button>

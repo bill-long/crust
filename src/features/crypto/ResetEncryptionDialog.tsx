@@ -77,8 +77,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 			setStep("error");
 			return;
 		}
-		const userId = client.getUserId();
-		if (!userId) {
+		if (!client.getUserId()) {
 			setErrorMessage("Unable to determine user ID.");
 			setStep("error");
 			return;
@@ -240,7 +239,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Cancel
 							</button>
@@ -300,7 +299,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								I've saved my key
 							</button>
@@ -339,7 +338,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Done
 							</button>
@@ -360,14 +359,14 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 							<button
 								type="button"
 								onClick={props.onClose}
-								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+								class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Close
 							</button>
 							<button
 								type="button"
 								onClick={() => setStep("intro")}
-								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 							>
 								Try again
 							</button>
