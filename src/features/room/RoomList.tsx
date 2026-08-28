@@ -47,6 +47,7 @@ import { requestExploreDialog } from "../../stores/exploreDialog";
 import { requestJoinDialog } from "../../stores/joinDialog";
 import { SpaceDiscoverList } from "../space/SpaceDiscoverList";
 import { CreateRoomDialog } from "./CreateRoomDialog";
+import { ExportDialog } from "./export/ExportDialog";
 import { SpaceInvitePanel } from "./invites/SpaceInvitePanel";
 import { NewDmDialog } from "./NewDmDialog";
 
@@ -612,6 +613,9 @@ const RoomList: Component<RoomListProps> = (props) => {
 	// grayed-out treatment), which keeps the trigger logic item-agnostic
 	// as more row actions arrive.
 	const [menuTarget, setMenuTarget] = createSignal<string | null>(null);
+	// Room being exported via the context menu's "Export chat…" (#530);
+	// null = dialog closed.
+	const [exportTarget, setExportTarget] = createSignal<string | null>(null);
 	const menuDisabled = (): boolean => menuTarget() === null;
 	// One capture-phase listener aims the menu: it runs before Kobalte's
 	// trigger logic reads `disabled`, and covers every path that can open
@@ -985,6 +989,14 @@ const RoomList: Component<RoomListProps> = (props) => {
 								<TagCheckIcon />
 							</ContextMenu.ItemIndicator>
 						</ContextMenu.CheckboxItem>
+						<ContextMenu.Separator class="mx-1 my-1 h-px bg-border-subtle" />
+						<ContextMenu.Item
+							class={`${menuItemClass} ${menuItemDisabledClass}`}
+							disabled={menuDisabled()}
+							onSelect={() => setExportTarget(menuTarget())}
+						>
+							Export chat…
+						</ContextMenu.Item>
 					</ContextMenu.Content>
 				</ContextMenu.Portal>
 			</ContextMenu>
@@ -996,6 +1008,15 @@ const RoomList: Component<RoomListProps> = (props) => {
 				spaceId={params.spaceId}
 			/>
 			<NewDmDialog client={client} open={newDmOpen} onClose={closeNewDm} />
+			<Show when={exportTarget()} keyed>
+				{(roomId) => (
+					<ExportDialog
+						client={client}
+						roomId={roomId}
+						onClose={() => setExportTarget(null)}
+					/>
+				)}
+			</Show>
 		</aside>
 	);
 };

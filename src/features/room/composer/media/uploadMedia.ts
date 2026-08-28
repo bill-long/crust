@@ -1,9 +1,9 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
+import { sanitizeFilename } from "../../../../lib/filename";
 import { formatBytes } from "../../../../lib/formatBytes";
 import type { TimelineEvent } from "../../timeline/useTimeline";
 import { type EncryptedFile, encryptAttachment } from "./attachmentCrypto";
-import { sanitizeFilename } from "./filename";
 import { inspectImage, type Thumbnail } from "./imageProcessing";
 import { buildMediaContent, classifyFile } from "./mediaContent";
 import type { PendingAttachment } from "./types";

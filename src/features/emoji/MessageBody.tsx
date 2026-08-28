@@ -1,4 +1,3 @@
-import DOMPurify from "dompurify";
 import type { MatrixClient } from "matrix-js-sdk";
 import {
 	type Component,
@@ -10,79 +9,9 @@ import {
 import { canonicalizeUrl, trimUrlTail, urlRegex } from "../../lib/extractUrls";
 import { escapeAttr, escapeHtml } from "../../lib/htmlEscape";
 import { linkifyTextNodes } from "../../lib/linkify";
+import { sanitizeMatrixHtmlToDiv } from "../../lib/matrixHtml";
 import { stripReplyFallback } from "../../lib/replyFallback";
 import type { ResolvedEmote } from "./types";
-
-// Configure DOMPurify once with Matrix-safe allowlist
-const ALLOWED_TAGS = [
-	"font",
-	"del",
-	"h1",
-	"h2",
-	"h3",
-	"h4",
-	"h5",
-	"h6",
-	"blockquote",
-	"p",
-	"a",
-	"ul",
-	"ol",
-	"sup",
-	"sub",
-	"li",
-	"b",
-	"i",
-	"u",
-	"strong",
-	"em",
-	"strike",
-	"s",
-	"code",
-	"hr",
-	"br",
-	"div",
-	"table",
-	"thead",
-	"tbody",
-	"tr",
-	"th",
-	"td",
-	"caption",
-	"pre",
-	"span",
-	"img",
-	"details",
-	"summary",
-	"mx-reply",
-];
-
-const ALLOWED_ATTR = [
-	"data-mx-bg-color",
-	"data-mx-color",
-	"data-mx-emoticon",
-	"data-mx-maths",
-	"data-mx-spoiler",
-	"color",
-	"name",
-	"target",
-	"href",
-	"src",
-	"alt",
-	"title",
-	"width",
-	"height",
-	"data-mx-pill",
-	"start",
-	"colspan",
-	"rowspan",
-];
-
-// Allow mxc:// scheme in URI attributes so DOMPurify doesn't strip img src,
-// and matrix: so in-spec `matrix:u/...` permalinks survive to the click
-// router (see PermalinkRouting, issue #441).
-const ALLOWED_URI_REGEXP =
-	/^(?:(?:https?|mxc|mailto|tel|xmpp|geo|magnet|matrix):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
 
 /** Build a shortcode regex (Safari-safe, no lookbehind). */
 function shortcodeRegex(): RegExp {
@@ -90,56 +19,21 @@ function shortcodeRegex(): RegExp {
 }
 
 /**
- * Sanitize Matrix HTML formatted_body, rewrite mxc:// URLs to HTTP,
- * and replace :shortcode: in text nodes with custom emoji images.
+ * Sanitize Matrix HTML formatted_body (via the shared allowlist core in
+ * lib/matrixHtml.ts), rewrite mxc:// URLs to HTTP, and replace
+ * :shortcode: in text nodes with custom emoji images.
  */
 function sanitizeMatrixHtml(
 	html: string,
 	client: MatrixClient,
 	shortcodeLookup: Map<string, ResolvedEmote>,
 ): string {
-	const clean = DOMPurify.sanitize(html, {
-		ALLOWED_TAGS,
-		ALLOWED_ATTR,
-		ALLOW_DATA_ATTR: false,
-		ADD_ATTR: [
-			"data-mx-emoticon",
-			"data-mx-bg-color",
-			"data-mx-color",
-			"data-mx-pill",
-			"data-mx-maths",
-			"data-mx-spoiler",
-		],
-		ALLOWED_URI_REGEXP,
-	});
+	const div = sanitizeMatrixHtmlToDiv(html, (mxcUrl) =>
+		client.mxcUrlToHttp(mxcUrl, 64, 64, "scale"),
+	);
 
-	const div = document.createElement("div");
-	div.innerHTML = clean;
-
-	// Strip the legacy in-band rich-reply fallback. The `m.in_reply_to` relation
-	// now drives the quoted reply context (see `ReplyContext` in TimelineItem),
-	// so rendering the `<mx-reply>` block here too would show the quote twice.
-	// Mirrors how the plain-text `> ` fallback is stripped in `plainTextToHtml`.
-	// Remove the whole node (with its blockquote children), not just the tag.
-	for (const reply of div.querySelectorAll("mx-reply")) {
-		reply.remove();
-	}
-
-	// Process images: only keep data-mx-emoticon with mxc:// src (strip tracking pixels)
+	// The surviving images are custom emoticons - size them inline.
 	for (const img of div.querySelectorAll("img")) {
-		const src = img.getAttribute("src");
-		const isEmoticon = img.hasAttribute("data-mx-emoticon");
-		if (!isEmoticon || !src?.startsWith("mxc://")) {
-			img.remove();
-			continue;
-		}
-		const httpUrl = client.mxcUrlToHttp(src, 64, 64, "scale");
-		if (httpUrl) {
-			img.setAttribute("src", httpUrl);
-		} else {
-			img.remove();
-			continue;
-		}
 		img.classList.add("emoji-inline");
 	}
 

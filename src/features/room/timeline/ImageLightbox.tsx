@@ -11,6 +11,7 @@ import {
 	Switch,
 } from "solid-js";
 import { formatBytes } from "../../../lib/formatBytes";
+import { saveBlobToDisk } from "../../../lib/saveBlob";
 import { trackAppModalOpen } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
@@ -559,16 +560,10 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				blob = await res.blob();
 			}
-			// Fresh object URL for the download anchor, independent of the hook's
-			// managed URL so it can't be revoked out from under the download.
-			const objUrl = URL.createObjectURL(blob);
-			const a = document.createElement("a");
-			a.href = objUrl;
-			a.download = filename;
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			setTimeout(() => URL.revokeObjectURL(objUrl), 0);
+			// saveBlobToDisk mints its own object URL, independent of the
+			// hook's managed one, so it can't be revoked out from under the
+			// download.
+			saveBlobToDisk(blob, filename);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			setDownloadError(`Download failed: ${msg}`);

@@ -8,6 +8,7 @@ import {
 } from "solid-js";
 import { useClient } from "../../../client/client";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
+import { saveBlobToDisk } from "../../../lib/saveBlob";
 import { encryptMegolmKeyFile } from "./megolmKeyFile";
 
 type ExportStep = "intro" | "working" | "done" | "error";
@@ -62,19 +63,7 @@ const ExportKeysDialog: Component<ExportKeysDialogProps> = (props) => {
 
 			const stamp = new Date().toISOString().slice(0, 10);
 			const name = `crust-message-keys-${stamp}.txt`;
-			const url = URL.createObjectURL(
-				new Blob([encrypted], { type: "text/plain" }),
-			);
-			const a = document.createElement("a");
-			a.href = url;
-			a.download = name;
-			// Clicks on detached anchors are ignored by some browsers — attach,
-			// click, detach. Revocation is deferred because revoking in the
-			// same task as click() can cancel the download in Firefox.
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			setTimeout(() => URL.revokeObjectURL(url), 0);
+			saveBlobToDisk(new Blob([encrypted], { type: "text/plain" }), name);
 
 			setFileName(name);
 			setStep("done");
