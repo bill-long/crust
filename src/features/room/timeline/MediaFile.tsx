@@ -1,10 +1,11 @@
 import { type Component, createSignal, Show } from "solid-js";
+import { sanitizeFilename } from "../../../lib/filename";
 import { formatBytes } from "../../../lib/formatBytes";
+import { saveBlobToDisk } from "../../../lib/saveBlob";
 import {
 	decryptAttachment,
 	type EncryptedFileInfo,
 } from "../composer/media/attachmentCrypto";
-import { sanitizeFilename } from "../composer/media/filename";
 
 /**
  * Timeline render of a received `m.file` attachment: a download chip showing
@@ -37,18 +38,10 @@ export const MediaFile: Component<{
 	const sizeLabel = (): string =>
 		props.size !== null ? formatBytes(props.size) : "";
 
-	const triggerSave = (blob: Blob, filename: string): void => {
-		const objUrl = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = objUrl;
-		// `filename` comes from untrusted event content — strip path separators
-		// and control chars before using it as the saved name.
-		a.download = sanitizeFilename(filename);
-		document.body.appendChild(a);
-		a.click();
-		a.remove();
-		setTimeout(() => URL.revokeObjectURL(objUrl), 0);
-	};
+	// `filename` comes from untrusted event content; saveBlobToDisk
+	// sanitizes it before use.
+	const triggerSave = (blob: Blob, filename: string): void =>
+		saveBlobToDisk(blob, filename);
 
 	// Encrypted download: fetch ciphertext → verify+decrypt → save the
 	// plaintext blob. Fail closed (inline error) on a missing descriptor,

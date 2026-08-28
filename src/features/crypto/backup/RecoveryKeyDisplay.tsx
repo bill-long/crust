@@ -1,4 +1,5 @@
 import { type Component, createSignal, onCleanup } from "solid-js";
+import { saveBlobToDisk } from "../../../lib/saveBlob";
 
 interface RecoveryKeyDisplayProps {
 	recoveryKey: string;
@@ -39,14 +40,7 @@ export const RecoveryKeyDisplay: Component<RecoveryKeyDisplayProps> = (
 		const blob = new Blob([`Recovery Key\n\n${props.recoveryKey}\n`], {
 			type: "text/plain",
 		});
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement("a");
-		a.href = url;
-		a.download = "crust-recovery-key.txt";
-		document.body.appendChild(a);
-		a.click();
-		a.remove();
-		setTimeout(() => URL.revokeObjectURL(url), 0);
+		saveBlobToDisk(blob, "crust-recovery-key.txt");
 	};
 
 	return (

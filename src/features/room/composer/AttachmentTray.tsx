@@ -1,6 +1,6 @@
 import { type Component, For, Show } from "solid-js";
+import { sanitizeFilename } from "../../../lib/filename";
 import { formatBytes } from "../../../lib/formatBytes";
-import { sanitizeFilename } from "./media/filename";
 import type { PendingAttachment } from "./media/types";
 
 function kindIcon(kind: PendingAttachment["kind"]): string {

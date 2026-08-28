@@ -24,6 +24,7 @@ import {
 	useImagePacks,
 } from "../features/emoji/useImagePacks";
 import { CallButton } from "../features/room/call/CallButton";
+import { ExportDialog } from "../features/room/export/ExportDialog";
 import { MemberList } from "../features/room/MemberList";
 import { PinnedMessagesPanel } from "../features/room/pinned/PinnedMessagesPanel";
 import { usePinnedEvents } from "../features/room/pinned/usePinnedEvents";
@@ -45,6 +46,7 @@ const RoomOverflowMenu: Component<{
 	onCopyLink: () => void;
 	onMarkUnread: () => void;
 	canMarkUnread: () => boolean;
+	onExport: () => void;
 	leaving: () => boolean;
 	onLeave: () => void;
 }> = (props) => {
@@ -153,6 +155,23 @@ const RoomOverflowMenu: Component<{
 						</svg>
 						Mark as unread
 					</DropdownMenu.Item>
+					<DropdownMenu.Item class={itemClass} onSelect={props.onExport}>
+						<svg
+							class="h-4 w-4 shrink-0 text-text-muted"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+							<polyline points="7 10 12 15 17 10" />
+							<line x1="12" y1="15" x2="12" y2="3" />
+						</svg>
+						Export chat…
+					</DropdownMenu.Item>
 					<DropdownMenu.Item
 						class={`${itemClass} text-danger-text hover:bg-danger-bg/20 focus-visible:bg-danger-bg/20`}
 						disabled={props.leaving()}
@@ -205,6 +224,9 @@ const RoomPane: Component<{
 	onThreadWidthCommit: () => void;
 }> = (props) => {
 	const pins = usePinnedEvents(props.client, () => props.rid);
+	// Chat export dialog (#530), opened from the mobile overflow menu (the
+	// desktop entry point is the room list's context menu).
+	const [showExport, setShowExport] = createSignal(false);
 	const packs = useImagePacks(props.client, () => props.rid);
 	const shortcodeLookup = createMemo(() => buildShortcodeLookup(packs()));
 
@@ -549,6 +571,7 @@ const RoomPane: Component<{
 							onCopyLink={props.onCopyLink}
 							onMarkUnread={props.onMarkUnread}
 							canMarkUnread={props.canMarkUnread}
+							onExport={() => setShowExport(true)}
 							leaving={props.leaving}
 							onLeave={props.onLeave}
 						/>
@@ -695,6 +718,14 @@ const RoomPane: Component<{
 					</Dialog.Content>
 				</Dialog.Portal>
 			</Dialog>
+
+			<Show when={showExport()}>
+				<ExportDialog
+					client={props.client}
+					roomId={props.rid}
+					onClose={() => setShowExport(false)}
+				/>
+			</Show>
 		</div>
 	);
 };
