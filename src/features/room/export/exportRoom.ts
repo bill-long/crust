@@ -257,7 +257,7 @@ async function runExport(
 
 	const bundle: ExportBundle = {
 		roomId: room.roomId,
-		roomName: room.name || room.roomId,
+		roomName: room.name?.trim() || room.roomId,
 		exportedAt: new Date(),
 		rangeLabel:
 			opts.limit === null ? "entire history" : `last ${opts.limit} messages`,
