@@ -1,8 +1,20 @@
 import { useNavigate } from "@solidjs/router";
 import { type Component, createSignal, onMount, Show } from "solid-js";
+import { basePrefix } from "../../app/basePath";
+import { revokeAccountToken } from "../../client/accountLogout";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { saveSession } from "../../stores/session";
-import { completeOidcLogin, takeOidcReturnTo } from "./oidc";
+import {
+	addSession,
+	freezeAccountScope,
+	MAX_ACCOUNTS,
+	saveSession,
+	unfreezeAccountScope,
+} from "../../stores/session";
+import {
+	completeOidcLogin,
+	takeOidcAddAccount,
+	takeOidcReturnTo,
+} from "./oidc";
 import { sanitizeReturnTo } from "./returnTo";
 
 /**
@@ -13,21 +25,63 @@ import { sanitizeReturnTo } from "./returnTo";
 const LoginCallback: Component = () => {
 	const navigate = useNavigate();
 	const [error, setError] = createSignal("");
+	// Whether this callback was adding an account rather than logging in fresh.
+	// It decides where the error state's way out goes: an add-account failure
+	// happened WITH an account still logged in, and `/login` is unguarded, so
+	// sending the user there invites a plain login that would replace it (#549).
+	const [adding, setAdding] = createSignal(false);
 
 	onMount(async () => {
+		// Taken BEFORE the exchange, which throws on an OP error, a replayed state
+		// or a failed token request - and never resolves at all if the user
+		// abandons the flow at the OP. A flag left armed would turn the next plain
+		// OAuth login in this tab into an append, which is the behaviour reserved
+		// for the switcher's explicit entry point (#533).
+		const isAdding = takeOidcAddAccount();
+		setAdding(isAdding);
 		try {
 			const result = await completeOidcLogin(window.location.search);
-			saveSession({
+			// The stashed target was sanitized before stashing; sanitize again
+			// here so a tampered sessionStorage value can't redirect us.
+			const target = sanitizeReturnTo(takeOidcReturnTo());
+			const session = {
 				accessToken: result.accessToken,
 				refreshToken: result.refreshToken,
 				userId: result.userId,
 				deviceId: result.deviceId,
 				homeserverUrl: result.homeserverUrl,
 				oidc: result.oidc,
-			});
-			// The stashed target was sanitized before stashing; sanitize again
-			// here so a tampered sessionStorage value can't redirect us.
-			navigate(sanitizeReturnTo(takeOidcReturnTo()), { replace: true });
+			};
+			if (isAdding) {
+				// Same as the password path: the pointer moves and a reload follows,
+				// so the account-scoped stores must not rebind in the window before
+				// the replacement document takes over.
+				freezeAccountScope();
+				let added = false;
+				try {
+					added = addSession(session);
+				} finally {
+					// `finally`: addSession persists with a RAW setItem and can throw,
+					// which would leave this document frozen on the error screen.
+					if (!added) unfreezeAccountScope();
+				}
+				if (!added) {
+					// The login already minted a device on the homeserver. Revoke it
+					// rather than orphaning a token this app will never hold again.
+					await revokeAccountToken(session);
+					setError(
+						`You can be logged into ${MAX_ACCOUNTS} accounts at once. Log out of one first.`,
+					);
+					return;
+				}
+				// Reload rather than navigate: the added account starts at its own
+				// root with no module-scope state carried over, exactly as a switch
+				// does (see `app/accountSwitch.ts`).
+				window.location.assign(`${basePrefix}/`);
+				return;
+			}
+			saveSession(session);
+			navigate(target, { replace: true });
 		} catch (err: unknown) {
 			setError(userFacingErrorMessage(err, "Login failed"));
 		}
@@ -48,13 +102,29 @@ const LoginCallback: Component = () => {
 					<p class="rounded bg-danger-bg/50 px-3 py-2 text-sm text-danger-text-bright">
 						{error()}
 					</p>
-					<button
-						type="button"
-						onClick={() => navigate("/login", { replace: true })}
-						class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+					<Show
+						when={adding()}
+						fallback={
+							<button
+								type="button"
+								onClick={() => navigate("/login", { replace: true })}
+								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+							>
+								Back to log in
+							</button>
+						}
 					>
-						Back to log in
-					</button>
+						{/* A reload, not a route: the app is not mounted on this route,
+						    and the account that was already logged in is the one to
+						    return to. */}
+						<button
+							type="button"
+							onClick={() => window.location.assign(`${basePrefix}/`)}
+							class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+						>
+							Back to app
+						</button>
+					</Show>
 				</Show>
 			</div>
 		</div>

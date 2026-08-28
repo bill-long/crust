@@ -51,16 +51,28 @@ vi.mock("matrix-js-sdk", () => ({
 // entry points that would navigate the page or hit the OP.
 const startOidcLoginMock = vi.fn();
 const stashOidcReturnToMock = vi.fn();
+const stashOidcAddAccountMock = vi.fn();
+const revokeAccountTokenMock = vi.fn(async (..._args: unknown[]) => {});
+vi.mock("../../client/accountLogout", () => ({
+	revokeAccountToken: (...args: unknown[]) => revokeAccountTokenMock(...args),
+}));
 vi.mock("./oidc", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("./oidc")>();
 	return {
 		...actual,
 		startOidcLogin: (...args: unknown[]) => startOidcLoginMock(...args),
 		stashOidcReturnTo: (...args: unknown[]) => stashOidcReturnToMock(...args),
+		stashOidcAddAccount: () => stashOidcAddAccountMock(),
 	};
 });
 
-import { loadSession } from "../../stores/session";
+import {
+	loadSession,
+	loadSessions,
+	MAX_ACCOUNTS,
+	type Session,
+	saveSession,
+} from "../../stores/session";
 import { LoginPage } from "./LoginPage";
 
 const METADATA = {
@@ -282,5 +294,184 @@ describe("LoginPage methods stage", () => {
 		expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe(
 			"",
 		);
+	});
+});
+
+describe("LoginPage add-account mode", () => {
+	const EXISTING: Session = {
+		accessToken: "syt_existing",
+		userId: "@bob:strange.pizza",
+		deviceId: "DEV_BOB",
+		homeserverUrl: "https://strange.pizza",
+	};
+
+	/** Drive the password form to a successful login. */
+	async function logInAsAlice(): Promise<void> {
+		stubProbe({ password: true });
+		loginRequestMock.mockResolvedValue({
+			access_token: "tok",
+			user_id: "@alice:strange.pizza",
+			device_id: "DEV1",
+		});
+		await renderAndProbe();
+		await screen.findByLabelText("Username");
+		fireEvent.input(screen.getByLabelText("Username"), {
+			target: { value: "alice" },
+		});
+		fireEvent.input(screen.getByLabelText("Password"), {
+			target: { value: "hunter2" },
+		});
+		fireEvent.submit(
+			screen.getByRole("button", { name: "Log in with password" }),
+		);
+	}
+
+	it("appends the new account and keeps the one already logged in", async () => {
+		saveSession(EXISTING);
+		locationState.value = { addAccount: true };
+
+		await logInAsAlice();
+
+		await waitFor(() => expect(loadSessions()).toHaveLength(2));
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			EXISTING.userId,
+			"@alice:strange.pizza",
+		]);
+		expect(loadSession()?.userId).toBe("@alice:strange.pizza");
+	});
+
+	it("freezes account-scoped storage across the add-account reload", async () => {
+		// The pointer moves and a reload follows; `location.assign` only starts
+		// that, so the stores must not rebind to the new account in between.
+		const { isAccountScopeFrozen, unfreezeAccountScope } = await import(
+			"../../stores/session"
+		);
+		saveSession(EXISTING);
+		locationState.value = { addAccount: true };
+
+		await logInAsAlice();
+
+		await waitFor(() => expect(isAccountScopeFrozen()).toBe(true));
+		unfreezeAccountScope();
+	});
+
+	it("lifts the freeze when persisting the added account throws", async () => {
+		// addSession persists with a RAW setItem so a failed login write surfaces;
+		// a throw must not leave this document unable to persist anything.
+		const { isAccountScopeFrozen } = await import("../../stores/session");
+		saveSession(EXISTING);
+		locationState.value = { addAccount: true };
+		const realSetItem = Storage.prototype.setItem;
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+			this: Storage,
+			key: string,
+			value: string,
+		) {
+			if (key === "crust:session") throw new Error("QuotaExceeded");
+			realSetItem.call(this, key, value);
+		});
+
+		await logInAsAlice();
+
+		await screen.findByText("QuotaExceeded");
+		vi.restoreAllMocks();
+		expect(isAccountScopeFrozen()).toBe(false);
+	});
+
+	it("reloads into the added account instead of routing there", async () => {
+		// The app is mid-teardown from another account; only a fresh document
+		// guarantees no module-scope state crosses the boundary.
+		saveSession(EXISTING);
+		locationState.value = { addAccount: true };
+
+		await logInAsAlice();
+
+		await waitFor(() => expect(assignMock).toHaveBeenCalled());
+		expect(navigateMock).not.toHaveBeenCalled();
+	});
+
+	it("replaces, and routes, for a plain login on the same page", async () => {
+		// A bare visit to /login must NOT append: the route is outside the auth
+		// guard, so appending would strand the previous account's live token.
+		saveSession(EXISTING);
+		locationState.value = null;
+
+		await logInAsAlice();
+
+		await waitFor(() =>
+			expect(navigateMock).toHaveBeenCalledWith("/", { replace: true }),
+		);
+		expect(loadSessions().map((a) => a.userId)).toEqual([
+			"@alice:strange.pizza",
+		]);
+	});
+
+	it("says so rather than dropping the credential at the account cap", async () => {
+		const filled = Array.from({ length: MAX_ACCOUNTS }, (_, i) => ({
+			...EXISTING,
+			userId: `@user${i}:strange.pizza`,
+		}));
+		localStorage.setItem(
+			"crust:session",
+			JSON.stringify({
+				activeUserId: filled[0]?.userId,
+				sessions: filled,
+			}),
+		);
+		locationState.value = { addAccount: true };
+
+		await logInAsAlice();
+
+		await screen.findByText(
+			`You can be logged into ${MAX_ACCOUNTS} accounts at once. Log out of one first.`,
+		);
+		expect(loadSessions()).toHaveLength(MAX_ACCOUNTS);
+		expect(assignMock).not.toHaveBeenCalled();
+		// No reload is coming, so the freeze armed for one must be lifted or this
+		// document can never persist account-scoped state again.
+		const { isAccountScopeFrozen } = await import("../../stores/session");
+		expect(isAccountScopeFrozen()).toBe(false);
+		// The login already minted a device; leaving it alive would orphan a
+		// token this app never stored and the user cannot revoke from here.
+		expect(revokeAccountTokenMock).toHaveBeenCalledOnce();
+	});
+
+	it("carries the add-account intent across the OAuth redirect", async () => {
+		// Router state does not survive the full-page trip to the OP, so the
+		// intent has to be stashed alongside the returnTo.
+		locationState.value = { addAccount: true };
+		stubProbe({ delegated: true });
+		startOidcLoginMock.mockResolvedValue("https://strange.pizza/authorize?x=1");
+		await renderAndProbe();
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: /Continue with/ }),
+		);
+
+		await waitFor(() => expect(stashOidcAddAccountMock).toHaveBeenCalledOnce());
+	});
+
+	it("does not stash the intent for a plain OAuth login", async () => {
+		locationState.value = null;
+		stubProbe({ delegated: true });
+		startOidcLoginMock.mockResolvedValue("https://strange.pizza/authorize?x=1");
+		await renderAndProbe();
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: /Continue with/ }),
+		);
+
+		await waitFor(() => expect(startOidcLoginMock).toHaveBeenCalled());
+		expect(stashOidcAddAccountMock).not.toHaveBeenCalled();
+	});
+
+	it("offers a way back out of add-account mode", async () => {
+		locationState.value = { addAccount: true };
+		stubProbe({ password: true });
+		await renderAndProbe();
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel and go back" }));
+
+		expect(navigateMock).toHaveBeenCalledWith("/", { replace: true });
 	});
 });

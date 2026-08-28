@@ -31,7 +31,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	_resetLastChannelsForTests();
-	clearSession();
+	clearSession(ACCOUNT_A.userId);
 	localStorage.clear();
 });
 

@@ -18,10 +18,18 @@ import {
 	type PersistedSignal,
 } from "../lib/persistedSignal";
 import { accountScopedKey } from "../lib/storageKeys";
-import { activeAccountId, subscribeAccountScope } from "./session";
+import {
+	activeAccountId,
+	isAccountScopeFrozen,
+	subscribeAccountScope,
+} from "./session";
 
 /** The storage key `base`'s value lives under right now, or null if logged out. */
 export function currentAccountKey(base: string): string | null {
+	// A committed switch freezes the scope: the pointer has already moved but
+	// this document is still the OUTGOING account's, so there is nowhere it may
+	// legitimately write until the replacement document loads.
+	if (isAccountScopeFrozen()) return null;
 	const userId = activeAccountId();
 	return userId === null ? null : accountScopedKey(base, userId);
 }

@@ -3,6 +3,7 @@ import { Route, Router, useLocation, useNavigate } from "@solidjs/router";
 import {
 	type Component,
 	createEffect,
+	createSignal,
 	lazy,
 	Match,
 	onMount,
@@ -18,7 +19,8 @@ import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
-import { clearSession, loadSession } from "../stores/session";
+import { loadSession } from "../stores/session";
+import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
@@ -90,6 +92,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const params = useDecodedParams<{ roomId?: string }>();
+	const [forcingLogout, setForcingLogout] = createSignal(false);
 
 	const openDeviceSettings = (): void => {
 		navigate("/settings/devices", {
@@ -116,18 +119,39 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
 			// Clear stores (best-effort async) then redirect.
-			clearCryptoStores(client, session)
-				.catch((e: unknown) => {
-					console.warn("Failed to clear stores on session expiry:", e);
-				})
-				.finally(() => {
-					clearSession();
-					navigate("/login", { replace: true });
-				});
+			// Another account may still be logged in; land there rather than on a
+			// login form that would replace it (#533).
+			void finishAccountLogout(
+				// This document's own account; another tab may have switched.
+				session.userId,
+				() =>
+					clearCryptoStores(client, session).catch((e: unknown) => {
+						console.warn("Failed to clear stores on session expiry:", e);
+					}),
+				() => navigate("/login", { replace: true }),
+			);
 		}
 	});
 
 	const handleForceLogout = async (): Promise<void> => {
+		// Single-flight, for the reason `Layout.handleLogout` documents: the wipe
+		// below is awaited before this screen goes away, and two overlapping
+		// `clearCryptoStores` calls can block each other's `deleteDatabase`
+		// indefinitely. The button is disabled to match.
+		if (forcingLogout()) return;
+		setForcingLogout(true);
+		try {
+			// A logout that ends in a reload keeps the guard set; this document
+			// keeps running until the replacement takes over, and a second click
+			// would start an overlapping `clearCryptoStores`.
+			if ((await runForceLogout()) === "reloading") return;
+		} catch (e) {
+			console.error("Force logout failed:", e);
+		}
+		setForcingLogout(false);
+	};
+
+	const runForceLogout = async (): Promise<"reloading" | "left"> => {
 		// Drop the active-call signal BEFORE stopping the client so the
 		// mini-widget / overlay never points at a stopped session.
 		//
@@ -142,15 +166,21 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		setActiveCallRoomId(null);
 		closeNotificationSound();
 		client.stopClient();
-		// Clear session and navigate immediately so the user never sees
-		// the main app UI in the "stopped" state while clearStores() awaits.
-		clearSession();
-		navigate("/login", { replace: true });
-		try {
-			await clearCryptoStores(client, session);
-		} catch {
-			// best-effort
-		}
+		// finishAccountLogout owns the ordering: the (bounded) wipe finishes
+		// before anything navigates, so replacing the document cannot abort the
+		// delete. That is why this screen needs the single-flight guard above -
+		// it stays on screen while the wipe runs.
+		return await finishAccountLogout(
+			session.userId,
+			async () => {
+				try {
+					await clearCryptoStores(client, session);
+				} catch {
+					// best-effort
+				}
+			},
+			() => navigate("/login", { replace: true }),
+		);
 	};
 
 	return (
@@ -178,9 +208,10 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 							<button
 								type="button"
 								onClick={handleForceLogout}
-								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary"
+								disabled={forcingLogout()}
+								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-default disabled:opacity-60"
 							>
-								Log out
+								{forcingLogout() ? "Logging out…" : "Log out"}
 							</button>
 						</div>
 					</div>

@@ -12,6 +12,7 @@ import {
 	Suspense,
 	untrack,
 } from "solid-js";
+import { logOutAccount } from "../client/accountLogout";
 import { useClient } from "../client/client";
 import { clearCryptoStores } from "../client/cryptoRecovery";
 import {
@@ -31,6 +32,7 @@ import {
 	ResizableLayout,
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
+import type { LoginState } from "../features/auth/returnTo";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { disableWebPush } from "../features/notifications/webPush";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
@@ -65,6 +67,7 @@ import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
 import { avatarHttpUrl, avatarInitial } from "../lib/avatar";
 import { cryptoActionLabel, deriveCryptoAction } from "../lib/cryptoAction";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
+import { reportError } from "../lib/reportError";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
 import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
@@ -73,10 +76,21 @@ import { cleanupIgnoredUsers, initIgnoredUsers } from "../stores/ignoredUsers";
 import { setLastChannel } from "../stores/lastChannel";
 import { getLastRoom, setLastRoom } from "../stores/lastRoom";
 import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
-import { clearSession } from "../stores/session";
+import { pushNotice } from "../stores/notices";
+import {
+	accounts,
+	loadSessions,
+	MAX_ACCOUNTS,
+	rememberAccountDisplayName,
+} from "../stores/session";
 import { updateSetting, userSettings } from "../stores/settings";
 import { isMobile } from "../stores/viewport";
 import type { CryptoAction } from "../types/crypto";
+import {
+	endSessionForAccountExit,
+	finishAccountLogout,
+	switchToAccount,
+} from "./accountSwitch";
 import { basePrefix, stripBasePath } from "./basePath";
 import { useConfig } from "./ConfigProvider";
 import { dmCanonicalTarget } from "./dmRoute";
@@ -171,6 +185,18 @@ function saveThreadWidth(w: number): void {
  * component for the same reason `activeCallRoomId` does.
  */
 const [loggingOut, setLoggingOut] = createSignal(false);
+
+/**
+ * True while an account switch or a background account log-out is running,
+ * module scope for the same reason as {@link loggingOut}. The two interlock:
+ * either one running blocks the other, so a switch can never race a logout for
+ * the same client (two `endActiveCall` teardowns, or a reload landing on top of
+ * a half-finished logout).
+ */
+const [accountBusy, setAccountBusy] = createSignal(false);
+
+/** True while ANY account transition is in flight. */
+const accountTransitionInFlight = (): boolean => loggingOut() || accountBusy();
 
 const Layout: Component = () => {
 	const clientCtx = useClient();
@@ -320,6 +346,7 @@ const Layout: Component = () => {
 		if (target) navigate(target, { replace: true });
 	});
 
+	/** True once a logout has committed to replacing the document. */
 	const handleLogout = async (): Promise<void> => {
 		// Single-flight. The call teardown below makes logout a multi-second
 		// operation (bounded, but not instant), so without this a second
@@ -328,16 +355,110 @@ const Layout: Component = () => {
 		// `clearCryptoStores`, whose `deleteDatabase` can be blocked by the
 		// other's open connection. That await has no timeout, so the user
 		// would be stranded on the app UI holding an invalidated token.
-		if (loggingOut()) return;
+		if (accountTransitionInFlight()) return;
 		setLoggingOut(true);
 		try {
-			await runLogout();
+			// A logout that ends in a reload keeps the guard set: this document
+			// keeps running until the replacement takes over, and releasing it
+			// would re-arm the button that is already on its way out.
+			if ((await runLogout()) === "reloading") return;
+		} catch (e) {
+			reportError(e, {
+				userMessage: "Could not log out.",
+				logLabel: "Logout failed",
+			});
+		}
+		setLoggingOut(false);
+	};
+
+	/** Switch to another account: reloads the app, so nothing after it runs. */
+	const handleSwitchAccount = async (targetUserId: string): Promise<void> => {
+		if (accountTransitionInFlight()) return;
+		setAccountBusy(true);
+		try {
+			const result = await switchToAccount(targetUserId);
+			if (result === "switching") {
+				// The document is being replaced. Releasing the guard here would
+				// re-enable the menu for the whole window before it actually is.
+				return;
+			}
+			if (result === "unknown-account") {
+				// The row was stale (the account was removed elsewhere). Say so rather
+				// than leaving a menu that silently does nothing.
+				pushNotice("That account is no longer signed in.", "error");
+			} else if (result === "failed") {
+				pushNotice("Could not switch accounts.", "error");
+			}
+			// "unchanged" is a click on the account already running: nothing to
+			// say, and nothing to undo beyond releasing the guard below.
+		} catch (e) {
+			reportError(e, {
+				userMessage: "Could not switch accounts.",
+				logLabel: "Account switch failed",
+			});
+		}
+		setAccountBusy(false);
+	};
+
+	const handleAddAccount = async (): Promise<void> => {
+		if (accountTransitionInFlight()) return;
+		setAccountBusy(true);
+		try {
+			// Leaving for /login unmounts the provider (stopping the client) and the
+			// flow ends in a reload, either of which would kill a MatrixRTC
+			// withdrawal in flight. This is a third exit from a live session and
+			// owes the server the same teardown as a switch or a logout (#474).
+			await endSessionForAccountExit();
+			// Router state, not a query param: a crafted link must not be able to
+			// put the login page into add-account mode and quietly append a second
+			// token.
+			navigate("/login", { state: { addAccount: true } satisfies LoginState });
 		} finally {
-			setLoggingOut(false);
+			setAccountBusy(false);
 		}
 	};
 
-	const runLogout = async (): Promise<void> => {
+	/**
+	 * Log an account out from the switcher. The active account goes through the
+	 * full teardown (its client is running and owes the server a call withdrawal
+	 * and a pusher removal); any other account is revoked with a throwaway client
+	 * so the one on screen is never disturbed.
+	 */
+	const handleLogOutAccount = async (targetUserId: string): Promise<void> => {
+		if (accountTransitionInFlight()) return;
+		if (targetUserId === userId()) {
+			await handleLogout();
+			return;
+		}
+		// Storage, not the per-tab mirror: if another tab logged this account out
+		// and back in, the mirror holds the dead token and the revoke below would
+		// 401 while the live session survives on the server.
+		const target = loadSessions().find((a) => a.userId === targetUserId);
+		if (!target) {
+			// Stale row, same as a stale switch row: say so rather than leaving a
+			// menu item that looks clickable and does nothing.
+			pushNotice("That account is no longer signed in.", "error");
+			return;
+		}
+		setAccountBusy(true);
+		try {
+			if (!(await logOutAccount(target))) {
+				// The token is revoked but storage refused to forget the account, so
+				// it is still listed with a credential that no longer works. Say so:
+				// switching to it from here would boot a dead session.
+				pushNotice("Logged out, but this device could not forget it.", "error");
+			}
+		} catch (e) {
+			reportError(e, {
+				userMessage: "Could not log that account out.",
+				logLabel: "Background account logout failed",
+			});
+		} finally {
+			setAccountBusy(false);
+		}
+	};
+
+	const runLogout = async (): Promise<"reloading" | "left"> => {
 		// Stop the chime first, as this did before the teardown await was
 		// introduced. It is not a mute: `playNotificationSound` builds a fresh
 		// AudioContext on demand, so a message arriving during the teardown
@@ -377,13 +498,19 @@ const Layout: Component = () => {
 		} catch {
 			client.stopClient();
 		}
-		try {
-			await clearCryptoStores(client, session);
-		} catch (e) {
-			console.warn("Failed to clear stores on logout:", e);
-		}
-		clearSession();
-		navigate("/login", { replace: true });
+		return await finishAccountLogout(
+			// This document's own account, not whoever storage currently calls
+			// active: another tab may have switched since we booted.
+			session.userId,
+			async () => {
+				try {
+					await clearCryptoStores(client, session);
+				} catch (e) {
+					console.warn("Failed to clear stores on logout:", e);
+				}
+			},
+			() => navigate("/login", { replace: true }),
+		);
 	};
 
 	const userId = () => client.getUserId() ?? "";
@@ -436,6 +563,41 @@ const Layout: Component = () => {
 
 	const avatarUrl = (): string | null =>
 		avatarHttpUrl(client, profileAvatarMxc(), 80);
+
+	// Rows for the switcher. Only the ACTIVE account gets an avatar URL:
+	// authenticated media is fetched with the owning account's token and only one
+	// account's token is live, so the others show their initial (#533).
+	const accountSummaries = createMemo(() =>
+		accounts().map((account) => {
+			const isActive = account.userId === userId();
+			const name = isActive
+				? displayName()
+				: // `||`, not `??`: a stored name that trims to empty is no name at
+					// all, and would render a blank row with a "?" avatar.
+					account.displayName?.trim() ||
+					account.userId.split(":")[0]?.replace("@", "").trim() ||
+					account.userId;
+			return {
+				userId: account.userId,
+				displayName: name,
+				initial: avatarInitial(name),
+				avatarUrl: isActive ? avatarUrl() : null,
+			};
+		}),
+	);
+
+	// Keep the switcher's label for THIS account current while it is the one
+	// running: an account whose client is not started has no profile to read, so
+	// the last name it was seen under is all a row can show (#533). The store
+	// ignores an unchanged value, so this does not write on every sync.
+	createEffect(() => {
+		const uid = userId();
+		if (!uid) return;
+		// Forwarded as-is: `profileName` is undefined until the profile loads,
+		// which the store reads as "not known yet" and leaves the remembered
+		// label alone (see rememberAccountDisplayName).
+		rememberAccountDisplayName(uid, profileName());
+	});
 
 	const cryptoAction = createMemo(
 		(): CryptoAction =>
@@ -815,6 +977,13 @@ const Layout: Component = () => {
 						needsCryptoAttention={needsCryptoAttention()}
 						cryptoLabel={cryptoActionLabel(cryptoAction())}
 						onCryptoClick={handleCryptoClick}
+						accounts={accountSummaries()}
+						canAddAccount={accounts().length < MAX_ACCOUNTS}
+						maxAccounts={MAX_ACCOUNTS}
+						accountBusy={accountTransitionInFlight()}
+						onSwitchAccount={handleSwitchAccount}
+						onAddAccount={handleAddAccount}
+						onLogOutAccount={handleLogOutAccount}
 						onSettingsClick={() =>
 							navigate("/settings", {
 								state: {

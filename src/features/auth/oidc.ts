@@ -225,6 +225,36 @@ export function takeOidcReturnTo(): string | null {
 	}
 }
 
+const ADD_ACCOUNT_KEY = "crust:oidc-add-account";
+
+/**
+ * Remember that this OAuth login is adding an account rather than replacing the
+ * current one (#533). Same reason as the returnTo stash: router state does not
+ * survive the full-page redirect to the OP. Written only by our own
+ * "Add account" action, immediately before the redirect.
+ */
+export function stashOidcAddAccount(): void {
+	try {
+		sessionStorage.setItem(ADD_ACCOUNT_KEY, "1");
+	} catch {
+		// Storage denied - the callback then treats it as a plain login, which
+		// replaces rather than appends. Failing this way round is deliberate:
+		// the worst case is the user has to log the other account back in, not a
+		// stray token left behind by an append nobody asked for.
+	}
+}
+
+/** Read and clear the add-account intent for a completing OAuth login. */
+export function takeOidcAddAccount(): boolean {
+	try {
+		const value = sessionStorage.getItem(ADD_ACCOUNT_KEY);
+		sessionStorage.removeItem(ADD_ACCOUNT_KEY);
+		return value === "1";
+	} catch {
+		return false;
+	}
+}
+
 // --- Signin state (sessionStorage; survives the OP round trip) ---
 //
 // One shared key means only one OAuth login can be in flight per tab

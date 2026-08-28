@@ -21,15 +21,28 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 const saveSessionMock = vi.fn();
+const addSessionMock = vi.fn((..._args: unknown[]) => true);
+const freezeMock = vi.fn();
+const unfreezeMock = vi.fn();
+const revokeAccountTokenMock = vi.fn(async (..._args: unknown[]) => {});
+vi.mock("../../client/accountLogout", () => ({
+	revokeAccountToken: (...args: unknown[]) => revokeAccountTokenMock(...args),
+}));
 vi.mock("../../stores/session", () => ({
 	saveSession: (...args: unknown[]) => saveSessionMock(...args),
+	addSession: (...args: unknown[]) => addSessionMock(...args),
+	MAX_ACCOUNTS: 5,
+	freezeAccountScope: () => freezeMock(),
+	unfreezeAccountScope: () => unfreezeMock(),
 }));
 
 const completeOidcLoginMock = vi.fn();
 const takeOidcReturnToMock = vi.fn();
+const takeOidcAddAccountMock = vi.fn(() => false);
 vi.mock("./oidc", () => ({
 	completeOidcLogin: (...args: unknown[]) => completeOidcLoginMock(...args),
 	takeOidcReturnTo: () => takeOidcReturnToMock(),
+	takeOidcAddAccount: () => takeOidcAddAccountMock(),
 }));
 
 import { LoginCallback } from "./LoginCallback";
@@ -109,5 +122,79 @@ describe("LoginCallback", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Back to log in" }));
 		expect(navigateMock).toHaveBeenCalledWith("/login", { replace: true });
+	});
+});
+
+describe("LoginCallback add-account mode", () => {
+	it("clears the add-account intent even when the exchange fails", async () => {
+		// A flag left armed would turn the NEXT plain OAuth login in this tab
+		// into an append, which only the switcher may ask for.
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		expect(takeOidcAddAccountMock).toHaveBeenCalledOnce();
+		expect(addSessionMock).not.toHaveBeenCalled();
+	});
+
+	it("freezes account-scoped storage across the reload, and lifts it on refusal", async () => {
+		// The pointer moves and a reload follows; `location.assign` only starts
+		// that, so the stores must not rebind in the meantime - and must be able
+		// to persist again if the add is refused and this document stays.
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		completeOidcLoginMock.mockResolvedValueOnce(GRANT_RESULT);
+		render(() => <LoginCallback />);
+		await waitFor(() => expect(freezeMock).toHaveBeenCalledOnce());
+		expect(unfreezeMock).not.toHaveBeenCalled();
+
+		cleanup();
+		freezeMock.mockClear();
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		addSessionMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockResolvedValueOnce(GRANT_RESULT);
+		render(() => <LoginCallback />);
+		await waitFor(() => expect(unfreezeMock).toHaveBeenCalledOnce());
+	});
+
+	it("offers a way back to the app, not to the unguarded login page", async () => {
+		// The failure happened WITH an account still logged in. /login replaces
+		// on a plain login, so routing there invites destroying it (#549).
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+		const assign = vi.fn();
+		vi.stubGlobal("location", { ...window.location, assign });
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		fireEvent.click(screen.getByRole("button", { name: "Back to app" }));
+		expect(assign).toHaveBeenCalledOnce();
+		expect(navigateMock).not.toHaveBeenCalled();
+		vi.unstubAllGlobals();
+	});
+
+	it("still offers the login page for a plain login failure", async () => {
+		takeOidcAddAccountMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
+
+		render(() => <LoginCallback />);
+
+		await screen.findByText("bad state");
+		fireEvent.click(screen.getByRole("button", { name: "Back to log in" }));
+		expect(navigateMock).toHaveBeenCalledWith("/login", { replace: true });
+	});
+
+	it("revokes the new device when the account cap is reached", async () => {
+		takeOidcAddAccountMock.mockReturnValueOnce(true);
+		addSessionMock.mockReturnValueOnce(false);
+		completeOidcLoginMock.mockResolvedValueOnce(GRANT_RESULT);
+
+		render(() => <LoginCallback />);
+
+		await waitFor(() => expect(revokeAccountTokenMock).toHaveBeenCalledOnce());
+		// ...and the login is reported rather than silently swallowed.
+		await screen.findByText(/accounts at once/);
 	});
 });
