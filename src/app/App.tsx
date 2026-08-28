@@ -19,7 +19,7 @@ import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallS
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearSession, loadSession } from "../stores/session";
-import { leaveLoggedOutAccount } from "./accountSwitch";
+import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { ConfigProvider } from "./ConfigProvider";
 import { Layout } from "./Layout";
@@ -117,17 +117,16 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
 			// Clear stores (best-effort async) then redirect.
-			clearCryptoStores(client, session)
-				.catch((e: unknown) => {
-					console.warn("Failed to clear stores on session expiry:", e);
-				})
-				.finally(() => {
-					// Another account may still be logged in; land there rather than on
-					// a login form that would replace it (#533).
-					leaveLoggedOutAccount(clearSession(), () =>
-						navigate("/login", { replace: true }),
-					);
-				});
+			// Another account may still be logged in; land there rather than on a
+			// login form that would replace it (#533).
+			void finishAccountLogout(
+				clearSession,
+				() =>
+					clearCryptoStores(client, session).catch((e: unknown) => {
+						console.warn("Failed to clear stores on session expiry:", e);
+					}),
+				() => navigate("/login", { replace: true }),
+			);
 		}
 	});
 
@@ -146,16 +145,21 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		setActiveCallRoomId(null);
 		closeNotificationSound();
 		client.stopClient();
-		// Clear session and navigate immediately so the user never sees
-		// the main app UI in the "stopped" state while clearStores() awaits.
-		leaveLoggedOutAccount(clearSession(), () =>
-			navigate("/login", { replace: true }),
+		// finishAccountLogout owns the ordering: routing to /login happens before
+		// the wipe (so the user never sees the app UI in the "stopped" state
+		// while it awaits), and a reload into a remaining account happens after
+		// it (so replacing the document cannot abort the delete).
+		await finishAccountLogout(
+			clearSession,
+			async () => {
+				try {
+					await clearCryptoStores(client, session);
+				} catch {
+					// best-effort
+				}
+			},
+			() => navigate("/login", { replace: true }),
 		);
-		try {
-			await clearCryptoStores(client, session);
-		} catch {
-			// best-effort
-		}
 	};
 
 	return (

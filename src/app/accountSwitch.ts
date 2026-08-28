@@ -123,29 +123,35 @@ export async function switchToAccount(
 }
 
 /**
- * Leave the account that was on screen after it has been logged out: reload
- * into whichever account was promoted in its place, or hand back to the login
- * page when none is left.
+ * Finish logging the account on screen out: clear it, wipe its crypto store,
+ * and leave - in the order those three have to happen in.
  *
- * A route change is not enough when an account remains. `/login` renders
- * outside the auth guard, so the user would be looking at a login form with a
- * perfectly good session live in storage - and logging in there REPLACES,
- * silently discarding the remaining account's unrevoked token.
+ * Where "leave" goes is the first rule. A route change is not enough when
+ * another account remains: `/login` renders outside the auth guard, so the user
+ * would be looking at a login form with a perfectly good session live in
+ * storage, and logging in there REPLACES, silently discarding that account's
+ * unrevoked token. So a remaining account is reloaded into instead.
  *
- * `cleared` is whether the logout actually reached storage. When it did not,
- * the account still listed there is the one whose token was just revoked:
- * reloading would boot it, fail on the dead token, log out again, and loop. The
- * login page is the only safe destination then.
+ * When the leave happens is the second. A reload replaces the document and
+ * would abort the wipe mid-delete, leaving the departing account's IndexedDB
+ * data on disk - so the wipe is awaited first. A route to `/login` leaves this
+ * document running, so it goes first and the wipe follows: the user never
+ * watches the stopped app UI while a delete awaits.
+ *
+ * `clear` reporting false means the logout never reached storage. The account
+ * still listed there is the one whose token was just revoked, so reloading
+ * would boot it, fail on the dead token, log out again, and loop; the login
+ * page is the only safe destination then.
  */
-export function leaveLoggedOutAccount(
-	cleared: boolean,
+export async function finishAccountLogout(
+	clear: () => boolean,
+	wipe: () => Promise<void>,
 	goToLogin: () => void,
-): void {
+): Promise<void> {
 	// Storage-backed: the logout that just ran wrote there, and another tab may
 	// have too - it is the authority on what is left.
-	if (cleared && activeAccountId() !== null) {
-		reloadIntoActiveAccount();
-		return;
-	}
-	goToLogin();
+	const reloading = clear() && activeAccountId() !== null;
+	if (!reloading) goToLogin();
+	await wipe();
+	if (reloading) reloadIntoActiveAccount();
 }

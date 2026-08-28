@@ -20,7 +20,7 @@ import {
 	saveSession,
 	unfreezeAccountScope,
 } from "../stores/session";
-import { leaveLoggedOutAccount, switchToAccount } from "./accountSwitch";
+import { finishAccountLogout, switchToAccount } from "./accountSwitch";
 
 const ALICE: Session = {
 	accessToken: "syt_a",
@@ -243,22 +243,54 @@ describe("switchToAccount", () => {
 	});
 });
 
-describe("leaveLoggedOutAccount", () => {
+describe("finishAccountLogout", () => {
+	/** A wipe that records when it ran, relative to leaving. */
+	const wipe = vi.fn(async () => {
+		await Promise.resolve();
+		calls.push("wipe");
+	});
+
+	beforeEach(() => {
+		wipe.mockClear();
+	});
+
 	it("reloads into the account promoted by the logout", () => {
 		// /login would be wrong here: the promoted account is live in storage,
 		// and logging in on that page REPLACES it, discarding its token unrevoked.
 		saveSession(ALICE);
 		addSession(BOB);
-		clearSession();
 		const goToLogin = vi.fn();
 
-		leaveLoggedOutAccount(true, goToLogin);
-
-		expect(assign).toHaveBeenCalledOnce();
-		expect(goToLogin).not.toHaveBeenCalled();
+		return finishAccountLogout(clearSession, wipe, goToLogin).then(() => {
+			expect(assign).toHaveBeenCalledOnce();
+			expect(goToLogin).not.toHaveBeenCalled();
+		});
 	});
 
-	it("reloads into an account another tab left behind", () => {
+	it("finishes the wipe BEFORE replacing the document", async () => {
+		// A reload aborts a delete in flight, leaving the departing account's
+		// IndexedDB data on disk.
+		saveSession(ALICE);
+		addSession(BOB);
+
+		await finishAccountLogout(clearSession, wipe, vi.fn());
+
+		expect(calls).toEqual(["wipe", "assign"]);
+	});
+
+	it("routes to the login page BEFORE the wipe when nothing is left", async () => {
+		// The document survives a route change, so the wipe still completes - and
+		// the user never watches the stopped app UI while it awaits.
+		saveSession(ALICE);
+		const goToLogin = vi.fn(() => calls.push("login"));
+
+		await finishAccountLogout(clearSession, wipe, goToLogin);
+
+		expect(calls).toEqual(["login", "wipe"]);
+		expect(assign).not.toHaveBeenCalled();
+	});
+
+	it("reloads into an account another tab left behind", async () => {
 		// This tab's mirror says "nobody is logged in"; storage - which the
 		// logout just wrote, and which another tab may also have written - says
 		// otherwise. Storage is the authority, or the user is dumped on a login
@@ -271,31 +303,30 @@ describe("leaveLoggedOutAccount", () => {
 		);
 		const goToLogin = vi.fn();
 
-		leaveLoggedOutAccount(true, goToLogin);
+		await finishAccountLogout(() => true, wipe, goToLogin);
 
 		expect(assign).toHaveBeenCalledOnce();
 		expect(goToLogin).not.toHaveBeenCalled();
 	});
 
-	it("hands back to the login page when the logout could not be persisted", () => {
+	it("hands back to the login page when the logout could not be persisted", async () => {
 		// Storage still names the account whose token was just revoked. Reloading
 		// into it would boot a dead session, log out again, and loop.
 		saveSession(ALICE);
 		addSession(BOB);
 		const goToLogin = vi.fn();
 
-		leaveLoggedOutAccount(false, goToLogin);
+		await finishAccountLogout(() => false, wipe, goToLogin);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();
 	});
 
-	it("hands back to the login page when no account is left", () => {
+	it("hands back to the login page when no account is left", async () => {
 		saveSession(ALICE);
-		clearSession();
 		const goToLogin = vi.fn();
 
-		leaveLoggedOutAccount(true, goToLogin);
+		await finishAccountLogout(clearSession, wipe, goToLogin);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();

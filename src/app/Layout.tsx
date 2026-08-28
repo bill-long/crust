@@ -89,7 +89,7 @@ import { isMobile } from "../stores/viewport";
 import type { CryptoAction } from "../types/crypto";
 import {
 	endSessionForAccountExit,
-	leaveLoggedOutAccount,
+	finishAccountLogout,
 	switchToAccount,
 } from "./accountSwitch";
 import { basePrefix, stripBasePath } from "./basePath";
@@ -475,16 +475,16 @@ const Layout: Component = () => {
 		} catch {
 			client.stopClient();
 		}
-		try {
-			await clearCryptoStores(client, session);
-		} catch (e) {
-			console.warn("Failed to clear stores on logout:", e);
-		}
-		// With another account still logged in, /login is the wrong destination:
-		// the user would be staring at a login form with a live session in
-		// storage, and logging in there would replace it (see accountSwitch).
-		leaveLoggedOutAccount(clearSession(), () =>
-			navigate("/login", { replace: true }),
+		await finishAccountLogout(
+			clearSession,
+			async () => {
+				try {
+					await clearCryptoStores(client, session);
+				} catch (e) {
+					console.warn("Failed to clear stores on logout:", e);
+				}
+			},
+			() => navigate("/login", { replace: true }),
 		);
 	};
 
