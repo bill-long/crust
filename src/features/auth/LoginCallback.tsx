@@ -57,8 +57,15 @@ const LoginCallback: Component = () => {
 				// so the account-scoped stores must not rebind in the window before
 				// the replacement document takes over.
 				freezeAccountScope();
-				if (!addSession(session)) {
-					unfreezeAccountScope();
+				let added = false;
+				try {
+					added = addSession(session);
+				} finally {
+					// `finally`: addSession persists with a RAW setItem and can throw,
+					// which would leave this document frozen on the error screen.
+					if (!added) unfreezeAccountScope();
+				}
+				if (!added) {
 					// The login already minted a device on the homeserver. Revoke it
 					// rather than orphaning a token this app will never hold again.
 					await revokeAccountToken(session);

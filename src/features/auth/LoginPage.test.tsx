@@ -355,6 +355,29 @@ describe("LoginPage add-account mode", () => {
 		unfreezeAccountScope();
 	});
 
+	it("lifts the freeze when persisting the added account throws", async () => {
+		// addSession persists with a RAW setItem so a failed login write surfaces;
+		// a throw must not leave this document unable to persist anything.
+		const { isAccountScopeFrozen } = await import("../../stores/session");
+		saveSession(EXISTING);
+		locationState.value = { addAccount: true };
+		const realSetItem = Storage.prototype.setItem;
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+			this: Storage,
+			key: string,
+			value: string,
+		) {
+			if (key === "crust:session") throw new Error("QuotaExceeded");
+			realSetItem.call(this, key, value);
+		});
+
+		await logInAsAlice();
+
+		await screen.findByText("QuotaExceeded");
+		vi.restoreAllMocks();
+		expect(isAccountScopeFrozen()).toBe(false);
+	});
+
 	it("reloads into the added account instead of routing there", async () => {
 		// The app is mid-teardown from another account; only a fresh document
 		// guarantees no module-scope state crosses the boundary.

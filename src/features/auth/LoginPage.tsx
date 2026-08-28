@@ -81,9 +81,17 @@ const LoginPage: Component = () => {
 		// (see `app/accountSwitch.ts`). Lifted again if the add is refused,
 		// because this document then stays on the login page.
 		freezeAccountScope();
-		if (addSession(session)) return true;
-		unfreezeAccountScope();
-		return false;
+		let added = false;
+		try {
+			added = addSession(session);
+		} finally {
+			// `finally`, not just the false branch: addSession persists with a RAW
+			// setItem so a failed login write surfaces, and a throw would otherwise
+			// leave this document frozen - unable to persist any account-scoped
+			// state - while it stays on the login page.
+			if (!added) unfreezeAccountScope();
+		}
+		return added;
 	};
 
 	/**

@@ -23,6 +23,7 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
+import { DropdownMenu } from "@kobalte/core/dropdown-menu";
 import { type AccountSummary, AccountSwitcher } from "./AccountSwitcher";
 
 const ALICE: AccountSummary = {
@@ -180,6 +181,38 @@ describe("AccountSwitcher", () => {
 		// Kobalte renders separators as <hr> (implicit separator role).
 		const menu = screen.getByText("Accounts").closest('[role="menu"]');
 		expect(menu?.querySelectorAll("hr").length).toBe(1);
+	});
+
+	it("a leading DropdownMenu.Item built by the CALLER still works as a menu item", async () => {
+		// It is created outside this component's <DropdownMenu>, so it only gets
+		// the menu context if the prop getter is evaluated inside Content - which
+		// is what the <Show> below Content does. Assert the item actually selects,
+		// not merely that its text renders.
+		const onSelect = vi.fn();
+		render(() => (
+			<AccountSwitcher
+				accounts={[ALICE]}
+				activeUserId={ALICE.userId}
+				canAddAccount
+				maxAccounts={5}
+				busy={false}
+				onSwitchAccount={vi.fn()}
+				onAddAccount={vi.fn()}
+				onLogOutAccount={vi.fn()}
+				triggerClass="trigger"
+				triggerLabel="Alice — switch account"
+				leadingItem={
+					<DropdownMenu.Item onSelect={onSelect}>
+						Verify this session
+					</DropdownMenu.Item>
+				}
+			>
+				<span>Alice</span>
+			</AccountSwitcher>
+		));
+		await openMenu();
+		press(screen.getByText("Verify this session"));
+		await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());
 	});
 
 	it("renders a leading item above the accounts when given one", async () => {
