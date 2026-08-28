@@ -531,12 +531,16 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		if (typeof document !== "undefined") {
 			document.removeEventListener("visibilitychange", reassertBadgeOnVisible);
 		}
-		// Clear the badge only when the session has actually ended, not on a
-		// plain reload or window close. Every logout path (Layout.handleLogout,
-		// App.handleForceLogout, and the expired-session effect) calls
-		// clearSession() before this unmount, so loadSession() is null then; on a
-		// reload the session persists, so we leave the badge for the next load /
-		// other open windows rather than wiping a still-valid count.
+		// Clear the badge only when NO account is left, not on a plain reload or
+		// window close. Every logout path (Layout.handleLogout,
+		// App.handleForceLogout, and the expired-session effect) clears its
+		// account before this unmount, so loadSession() is null then unless
+		// another account was promoted; on a reload the session persists, so we
+		// leave the badge for the next load / other open windows rather than
+		// wiping a still-valid count. Logging out of one of several accounts
+		// therefore carries the departed account's count until the incoming
+		// account's first sync corrects it - per-account badge attribution is
+		// #534's job.
 		if (loadSession() === null) {
 			updateAppBadge(0);
 		}

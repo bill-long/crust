@@ -893,12 +893,30 @@ describe("rememberAccountDisplayName", () => {
 		expect(loadSession()?.displayName).toBe("Alice");
 	});
 
-	it("clears the name when the account has none", () => {
+	it("clears the name when the account genuinely has none", () => {
+		saveSession(VALID);
+		rememberAccountDisplayName(VALID.userId, "Alice");
+		rememberAccountDisplayName(VALID.userId, "");
+		expect(loadSession()?.displayName).toBeUndefined();
+		expect(localStorage.getItem(SESSION_KEY)).not.toContain("displayName");
+	});
+
+	it("keeps the remembered name while the profile has not loaded", () => {
+		// A caller wired to a profile signal runs first with undefined. Treating
+		// that as "no name" would erase the label for an account switched away
+		// from before its first sync - the case the field exists for.
 		saveSession(VALID);
 		rememberAccountDisplayName(VALID.userId, "Alice");
 		rememberAccountDisplayName(VALID.userId, undefined);
+		expect(loadSession()?.displayName).toBe("Alice");
+	});
+
+	it("trims, and treats whitespace as no name at all", () => {
+		saveSession(VALID);
+		rememberAccountDisplayName(VALID.userId, "  Alice  ");
+		expect(loadSession()?.displayName).toBe("Alice");
+		rememberAccountDisplayName(VALID.userId, "   ");
 		expect(loadSession()?.displayName).toBeUndefined();
-		expect(localStorage.getItem(SESSION_KEY)).not.toContain("displayName");
 	});
 
 	it("ignores an unknown account", () => {

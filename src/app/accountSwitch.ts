@@ -37,6 +37,7 @@ import { setActiveCallRoomId } from "../stores/activeCall";
 import {
 	activeAccount,
 	activeAccountId,
+	clearSession,
 	freezeAccountScope,
 	loadSessions,
 	setActiveAccount,
@@ -82,28 +83,36 @@ export async function endSessionForAccountExit(): Promise<void> {
 export type SwitchFailure = "unknown-account" | "failed";
 
 /**
+ * The outcome of a switch. "unchanged" is the no-op - this document already
+ * runs that account - and is kept distinct from "switching" precisely because
+ * callers hold a single-flight guard across the latter: conflating them wedges
+ * the UI busy forever on a click that did nothing.
+ */
+export type SwitchResult = "switching" | "unchanged" | SwitchFailure;
+
+/**
  * Tear the outgoing account down and reload as `userId`.
  *
  * `"switching"` means the document is already being replaced, so nothing the
- * caller does afterwards is guaranteed to run. `"unknown-account"` means the
- * switcher row was stale (removed in another tab, or while the menu was open);
- * `"failed"` means storage refused the write. Neither failure touches the live
- * session - the target is validated BEFORE the teardown, so a stale row can
- * never cost the user their call.
+ * caller does afterwards is guaranteed to run - a caller holding a guard must
+ * KEEP it set. `"unchanged"` means this document already runs that account, so
+ * nothing happened at all. `"unknown-account"` means the switcher row was stale
+ * (removed in another tab, or while the menu was open) and is validated BEFORE
+ * the teardown, so it can never cost the user their live call. `"failed"` means
+ * storage refused the pointer write, which is only discoverable after the
+ * teardown - the call has already ended by then.
  *
  * The outgoing account's Web Push registration is deliberately left alone here;
  * re-pointing the pusher at the incoming account is #534's job, and it is
  * tracked there because a stale pusher leaks the other account's message
  * previews onto this device.
  */
-export async function switchToAccount(
-	userId: string,
-): Promise<"switching" | SwitchFailure> {
+export async function switchToAccount(userId: string): Promise<SwitchResult> {
 	// "Already the active account" is a property of THIS document's running
 	// client, so it reads the per-tab mirror. Storage may name a different
 	// account entirely - another tab switched - and this tab would then decline
 	// a switch it has never actually made, silently doing nothing.
-	if (userId === activeAccount()) return "switching";
+	if (userId === activeAccount()) return "unchanged";
 	// Membership, on the other hand, is storage's to answer: the row being
 	// validated went stale precisely because another tab (or another window of
 	// the desktop shell) removed the account, which the mirror cannot see.
@@ -142,8 +151,8 @@ export async function switchToAccount(
  * storage, and logging in there REPLACES, silently discarding that account's
  * unrevoked token. So a remaining account is reloaded into instead.
  *
- * `clear` reporting false means the logout never reached storage. The account
- * still listed there is the one whose token was just revoked, so reloading
+ * A logout that never reaches storage leaves the account still listed. The
+ * account still there is the one whose token was just revoked, so reloading
  * would boot it, fail on the dead token, log out again, and loop; the login
  * page is the only safe destination then.
  *
@@ -153,7 +162,7 @@ export async function switchToAccount(
  * guarding, for the whole window before the new document takes over.
  */
 export async function finishAccountLogout(
-	clear: () => boolean,
+	userId: string,
 	wipe: () => Promise<void>,
 	goToLogin: () => void,
 ): Promise<"reloading" | "left"> {
@@ -162,12 +171,21 @@ export async function finishAccountLogout(
 	} catch (e) {
 		reportError(e, { logLabel: "Failed to clear the account's stores" });
 	}
-	// Storage-backed: the logout just wrote there, and another tab may have too -
-	// it is the authority on what is left.
-	if (clear() && activeAccountId() !== null) {
+	// Storage-backed: another tab may have written it since this document booted,
+	// and it is the authority on what will be left.
+	const remaining = loadSessions().some((a) => a.userId !== userId);
+	// Freeze only when a reload is coming: `reloadIntoActiveAccount` merely
+	// STARTS the navigation, so the account-scoped stores would otherwise rebind
+	// to the promoted account - re-zooming a UI that is still on screen - and any
+	// write until unload would be filed under it. On the way to `/login` the
+	// notification has to reach them instead: this document survives, and the
+	// stores must actually let go of the account that just left.
+	if (remaining) freezeAccountScope();
+	if (clearSession(userId) && activeAccountId() !== null) {
 		reloadIntoActiveAccount();
 		return "reloading";
 	}
+	if (remaining) unfreezeAccountScope();
 	goToLogin();
 	return "left";
 }

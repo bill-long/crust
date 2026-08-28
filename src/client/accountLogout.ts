@@ -16,7 +16,11 @@ import { createClient } from "matrix-js-sdk";
 import { createOidcTokenRefreshFn } from "../features/auth/oidcRefresh";
 import { reportError } from "../lib/reportError";
 import { removeAccount, type Session } from "../stores/session";
-import { clearCryptoStores } from "./cryptoRecovery";
+import {
+	CRYPTO_INIT_TIMEOUT_MS,
+	clearCryptoStores,
+	withTimeout,
+} from "./cryptoRecovery";
 
 /** A throwaway client for `account`, never started. */
 function clientFor(account: Session): ReturnType<typeof createClient> {
@@ -71,7 +75,16 @@ export async function logOutAccount(account: Session): Promise<boolean> {
 		});
 	}
 	try {
-		await clearCryptoStores(client, account);
+		// Bounded, like the foreground logout's wipe: `deleteDatabase` BLOCKS
+		// while another window still has that account's store open and the SDK's
+		// handler only logs it, so the promise never settles - and this runs
+		// under the switcher's single-flight guard, which would then stay set for
+		// the life of the module and lock out switching, adding and logging out.
+		await withTimeout(
+			clearCryptoStores(client, account),
+			CRYPTO_INIT_TIMEOUT_MS,
+			"Account store wipe",
+		);
 	} catch (e) {
 		reportError(e, {
 			logLabel: `Failed to clear the crypto store for ${account.userId}`,

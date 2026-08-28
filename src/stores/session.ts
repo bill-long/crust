@@ -603,17 +603,26 @@ export function removeAccount(userId: string): boolean {
  * label it while its client is not running. A no-op when the account is gone or
  * the name is unchanged, so the shell can call it from a profile effect without
  * writing storage on every sync.
+ *
+ * Three-state on purpose. `undefined` means "not known yet" - the profile has
+ * not loaded - and leaves whatever is remembered alone; a caller wired to a
+ * profile signal runs first with exactly that, and treating it as "no name"
+ * would erase the label for an account switched away from before its first
+ * sync, which is the case the field exists for. An empty string is the account
+ * genuinely having no display name, and forgets the remembered one.
  */
 export function rememberAccountDisplayName(
 	userId: string,
 	displayName: string | undefined,
 ): void {
+	if (displayName === undefined) return;
+	const name = displayName.trim() || undefined;
 	const store = readStore();
 	const existing = store.sessions.find((s) => s.userId === userId);
-	if (!existing || existing.displayName === displayName) return;
+	if (!existing || existing.displayName === name) return;
 	const entry: Session = { ...existing };
-	if (displayName === undefined) delete entry.displayName;
-	else entry.displayName = displayName;
+	if (name === undefined) delete entry.displayName;
+	else entry.displayName = name;
 	const next: SessionStore = {
 		activeUserId: store.activeUserId,
 		sessions: store.sessions.map((s) => (s.userId === userId ? entry : s)),

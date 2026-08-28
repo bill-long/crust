@@ -19,7 +19,7 @@ import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { setActiveCallRoomId } from "../stores/activeCall";
-import { clearSession, loadSession } from "../stores/session";
+import { loadSession } from "../stores/session";
 import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { ConfigProvider } from "./ConfigProvider";
@@ -123,7 +123,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// login form that would replace it (#533).
 			void finishAccountLogout(
 				// This document's own account; another tab may have switched.
-				() => clearSession(session.userId),
+				session.userId,
 				() =>
 					clearCryptoStores(client, session).catch((e: unknown) => {
 						console.warn("Failed to clear stores on session expiry:", e);
@@ -171,7 +171,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// delete. That is why this screen needs the single-flight guard above -
 		// it stays on screen while the wipe runs.
 		return await finishAccountLogout(
-			() => clearSession(session.userId),
+			session.userId,
 			async () => {
 				try {
 					await clearCryptoStores(client, session);

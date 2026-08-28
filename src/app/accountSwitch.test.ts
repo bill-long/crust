@@ -165,9 +165,12 @@ describe("switchToAccount", () => {
 	});
 
 	it("is a no-op for the account already active", async () => {
+		// Distinct from "switching": callers hold a single-flight guard across
+		// the latter, so conflating them would wedge the menu busy forever on a
+		// click that did nothing.
 		saveSession(ALICE);
 
-		await expect(switchToAccount(ALICE.userId)).resolves.toBe("switching");
+		await expect(switchToAccount(ALICE.userId)).resolves.toBe("unchanged");
 
 		expect(endActiveCallMock).not.toHaveBeenCalled();
 		expect(assign).not.toHaveBeenCalled();
@@ -263,11 +266,7 @@ describe("finishAccountLogout", () => {
 		addSession(BOB);
 		const goToLogin = vi.fn();
 
-		return finishAccountLogout(
-			() => clearSession(ALICE.userId),
-			wipe,
-			goToLogin,
-		).then(() => {
+		return finishAccountLogout(ALICE.userId, wipe, goToLogin).then(() => {
 			expect(assign).toHaveBeenCalledOnce();
 			expect(goToLogin).not.toHaveBeenCalled();
 		});
@@ -279,7 +278,7 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await finishAccountLogout(() => clearSession(ALICE.userId), wipe, vi.fn());
+		await finishAccountLogout(ALICE.userId, wipe, vi.fn());
 
 		expect(calls).toEqual(["wipe", "assign"]);
 	});
@@ -290,14 +289,14 @@ describe("finishAccountLogout", () => {
 		// a guard there re-arms the action that is already on its way out.
 		saveSession(ALICE);
 		addSession(BOB);
-		await expect(
-			finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn()),
-		).resolves.toBe("reloading");
+		await expect(finishAccountLogout(BOB.userId, wipe, vi.fn())).resolves.toBe(
+			"reloading",
+		);
 
 		localStorage.clear();
 		saveSession(ALICE);
 		await expect(
-			finishAccountLogout(() => clearSession(ALICE.userId), wipe, vi.fn()),
+			finishAccountLogout(ALICE.userId, wipe, vi.fn()),
 		).resolves.toBe("left");
 	});
 
@@ -307,11 +306,7 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn(() => calls.push("login"));
 
-		await finishAccountLogout(
-			() => clearSession(ALICE.userId),
-			wipe,
-			goToLogin,
-		);
+		await finishAccountLogout(ALICE.userId, wipe, goToLogin);
 
 		expect(calls).toEqual(["wipe", "login"]);
 		expect(assign).not.toHaveBeenCalled();
@@ -330,7 +325,8 @@ describe("finishAccountLogout", () => {
 		);
 		const goToLogin = vi.fn();
 
-		await finishAccountLogout(() => true, wipe, goToLogin);
+		// Logging out THIS document's account, which storage no longer lists.
+		await finishAccountLogout(ALICE.userId, wipe, goToLogin);
 
 		expect(assign).toHaveBeenCalledOnce();
 		expect(goToLogin).not.toHaveBeenCalled();
@@ -341,12 +337,25 @@ describe("finishAccountLogout", () => {
 		// into it would boot a dead session, log out again, and loop.
 		saveSession(ALICE);
 		addSession(BOB);
+		const realSetItem = Storage.prototype.setItem;
+		vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+			this: Storage,
+			key: string,
+			value: string,
+		) {
+			if (key === "crust:session") throw new Error("QuotaExceeded");
+			realSetItem.call(this, key, value);
+		});
 		const goToLogin = vi.fn();
 
-		await finishAccountLogout(() => false, wipe, goToLogin);
+		await finishAccountLogout(BOB.userId, wipe, goToLogin);
 
+		vi.restoreAllMocks();
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();
+		// The freeze was armed for a reload that never happened; this document
+		// stays and must be able to persist again.
+		expect(isAccountScopeFrozen()).toBe(false);
 	});
 
 	it("leaves anyway when the wipe never settles", async () => {
@@ -360,11 +369,7 @@ describe("finishAccountLogout", () => {
 			const hangs = vi.fn(() => new Promise<void>(() => {}));
 			vi.spyOn(console, "error").mockImplementation(() => {});
 
-			const done = finishAccountLogout(
-				() => clearSession(BOB.userId),
-				hangs,
-				vi.fn(),
-			);
+			const done = finishAccountLogout(BOB.userId, hangs, vi.fn());
 			await vi.advanceTimersByTimeAsync(60_000);
 			await done;
 
@@ -374,29 +379,35 @@ describe("finishAccountLogout", () => {
 		}
 	});
 
-	it("never freezes the scope: the ordering carries that invariant", async () => {
-		// Clearing LAST keeps the pointer-moved-but-still-rendering window down
-		// to the call that leaves, so no freeze is needed - and the logout's
-		// scope-change notification reaches the stores, which a freeze would
-		// have swallowed (the login page would keep the departed account's zoom).
+	it("freezes the scope when it is about to reload", async () => {
+		// `reloadIntoActiveAccount` only STARTS the navigation, so without this
+		// the stores rebind to the promoted account under a UI that is still on
+		// screen - a visible re-zoom - and writes until unload land under it.
 		saveSession(ALICE);
 		addSession(BOB);
 
-		await finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn());
+		await finishAccountLogout(BOB.userId, wipe, vi.fn());
+
+		expect(assign).toHaveBeenCalledOnce();
+		expect(isAccountScopeFrozen()).toBe(true);
+	});
+
+	it("does NOT freeze on the way to the login page", async () => {
+		// This document survives the route and hosts the next login, so the
+		// stores must actually be told the account is gone.
+		saveSession(ALICE);
+
+		await finishAccountLogout(ALICE.userId, wipe, vi.fn());
 
 		expect(isAccountScopeFrozen()).toBe(false);
 	});
 
-	it("notifies the account-scoped stores that the account is gone", async () => {
+	it("notifies the account-scoped stores when the document stays", async () => {
 		saveSession(ALICE);
 		const seen: Array<string | null> = [];
 		const unsubscribe = subscribeAccountScope((id) => seen.push(id));
 		try {
-			await finishAccountLogout(
-				() => clearSession(ALICE.userId),
-				wipe,
-				vi.fn(),
-			);
+			await finishAccountLogout(ALICE.userId, wipe, vi.fn());
 			expect(seen).toEqual([null]);
 		} finally {
 			unsubscribe();
@@ -410,7 +421,7 @@ describe("finishAccountLogout", () => {
 		addSession(BOB);
 		setActiveAccountForOtherTab(ALICE.userId);
 
-		await finishAccountLogout(() => clearSession(BOB.userId), wipe, vi.fn());
+		await finishAccountLogout(BOB.userId, wipe, vi.fn());
 
 		expect(loadSessions().map((a) => a.userId)).toEqual([ALICE.userId]);
 	});
@@ -419,11 +430,7 @@ describe("finishAccountLogout", () => {
 		saveSession(ALICE);
 		const goToLogin = vi.fn();
 
-		await finishAccountLogout(
-			() => clearSession(ALICE.userId),
-			wipe,
-			goToLogin,
-		);
+		await finishAccountLogout(ALICE.userId, wipe, goToLogin);
 
 		expect(goToLogin).toHaveBeenCalledOnce();
 		expect(assign).not.toHaveBeenCalled();

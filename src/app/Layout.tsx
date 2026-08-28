@@ -79,7 +79,6 @@ import { membersPaneVisible, toggleMembersPane } from "../stores/layout";
 import { pushNotice } from "../stores/notices";
 import {
 	accounts,
-	clearSession,
 	loadSessions,
 	MAX_ACCOUNTS,
 	rememberAccountDisplayName,
@@ -387,9 +386,11 @@ const Layout: Component = () => {
 				// The row was stale (the account was removed elsewhere). Say so rather
 				// than leaving a menu that silently does nothing.
 				pushNotice("That account is no longer signed in.", "error");
-			} else {
+			} else if (result === "failed") {
 				pushNotice("Could not switch accounts.", "error");
 			}
+			// "unchanged" is a click on the account already running: nothing to
+			// say, and nothing to undo beyond releasing the guard below.
 		} catch (e) {
 			reportError(e, {
 				userMessage: "Could not switch accounts.",
@@ -441,7 +442,12 @@ const Layout: Component = () => {
 		}
 		setAccountBusy(true);
 		try {
-			await logOutAccount(target);
+			if (!(await logOutAccount(target))) {
+				// The token is revoked but storage refused to forget the account, so
+				// it is still listed with a credential that no longer works. Say so:
+				// switching to it from here would boot a dead session.
+				pushNotice("Logged out, but this device could not forget it.", "error");
+			}
 		} catch (e) {
 			reportError(e, {
 				userMessage: "Could not log that account out.",
@@ -495,7 +501,7 @@ const Layout: Component = () => {
 		return await finishAccountLogout(
 			// This document's own account, not whoever storage currently calls
 			// active: another tab may have switched since we booted.
-			() => clearSession(session.userId),
+			session.userId,
 			async () => {
 				try {
 					await clearCryptoStores(client, session);
@@ -587,7 +593,10 @@ const Layout: Component = () => {
 	createEffect(() => {
 		const uid = userId();
 		if (!uid) return;
-		rememberAccountDisplayName(uid, profileName()?.trim() || undefined);
+		// Forwarded as-is: `profileName` is undefined until the profile loads,
+		// which the store reads as "not known yet" and leaves the remembered
+		// label alone (see rememberAccountDisplayName).
+		rememberAccountDisplayName(uid, profileName());
 	});
 
 	const cryptoAction = createMemo(

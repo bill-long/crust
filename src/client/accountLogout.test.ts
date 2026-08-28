@@ -141,6 +141,27 @@ describe("logOutAccount", () => {
 		expect(stored(ALICE.userId)).toBeUndefined();
 	});
 
+	it("gives up on a wipe that never settles", async () => {
+		// `deleteDatabase` BLOCKS while another window holds that account's store
+		// open and the SDK only logs it. This runs under the switcher's
+		// single-flight guard, which would otherwise stay set for the life of the
+		// module and lock out switching, adding and logging out.
+		vi.useFakeTimers();
+		try {
+			saveSession(ALICE);
+			addSession(BOB);
+			clearStores.mockImplementation(() => new Promise<void>(() => {}));
+
+			const done = logOutAccount(ALICE);
+			await vi.advanceTimersByTimeAsync(60_000);
+
+			await expect(done).resolves.toBe(true);
+			expect(stored(ALICE.userId)).toBeUndefined();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("never starts the throwaway client", async () => {
 		// clearStores refuses to run on a running client, and a second syncing
 		// client is exactly what the switch-only design avoids.
