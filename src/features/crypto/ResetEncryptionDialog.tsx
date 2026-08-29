@@ -1,19 +1,12 @@
 import type { GeneratedSecretStorageKey } from "matrix-js-sdk/lib/crypto-api";
-import {
-	type Component,
-	createSignal,
-	Match,
-	onCleanup,
-	Show,
-	Switch,
-} from "solid-js";
+import { type Component, createSignal, Match, Show, Switch } from "solid-js";
 import { useClient } from "../../client/client";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { trapTabKey } from "../../lib/focusTrap";
 import { ensureKeyBackup, fetchServerKeyBackup } from "./backup/keyBackupSetup";
 import { RecoveryKeyDisplay } from "./backup/RecoveryKeyDisplay";
 import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
-import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
+import { createUiaDialogFlow } from "./uiaDialogFlow";
 
 type ResetStep = "intro" | "working" | "show-key" | "done" | "error";
 
@@ -49,30 +42,22 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 	// Set when the reset succeeded but re-establishing secret storage didn't
 	// finish cleanly — the new key is still shown, flagged as incomplete.
 	const [partial, setPartial] = createSignal(false);
-	let disposed = false;
-	// Which half of the flow is in flight: the non-destructive preflight
-	// (dismissal stays allowed - nothing has happened yet) or the
-	// destructive operation (dismissal blocked).
-	let phase: "preflight" | "op" | null = null;
 
 	// Interactive UIA: the server decides whether the user re-enters a
 	// password or approves at the account-management page (#467). The
 	// preflight collects AND verifies that BEFORE crypto.resetEncryption
 	// runs, because the reset destroys server-side backups and secret
 	// storage ahead of its UIA-gated key upload - a cancel or typo at the
-	// first prompt must leave the account untouched.
-	const uia = createUiaFlow(client);
-
-	onCleanup(() => {
-		disposed = true;
-		uia.cancel();
-	});
+	// first prompt must leave the account untouched. The dialog lifecycle
+	// around it - unmount tracking, which half is in flight, the
+	// dismissal policy - lives in createUiaDialogFlow (#545).
+	const uia = createUiaDialogFlow(client);
 
 	// Focus contract: identity prompts focus their own primary control;
 	// the overlay reclaims focus lost to promptless view swaps (see
 	// createUiaOverlayFocus).
 	let overlayEl!: HTMLDivElement;
-	createUiaOverlayFocus({ flow: uia, overlay: () => overlayEl, step });
+	createUiaOverlayFocus({ flow: uia.flow, overlay: () => overlayEl, step });
 
 	const doReset = async (): Promise<void> => {
 		const crypto = client.getCrypto();
@@ -94,38 +79,43 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		// Learn, collect, and verify the identity confirmation before
 		// anything destructive: cancelling here steps back with the account
 		// intact.
-		phase = "preflight";
-		try {
-			await uia.preflight();
-		} catch (e) {
-			phase = null;
-			if (disposed) return;
-			if (e instanceof UiaCancelledError) {
-				setStep("intro");
-				return;
-			}
+		const preflight = await uia.preflight();
+		// Unmounted or dismissed while the probe was in flight: don't touch
+		// the UI, and don't let the destructive reset run headless with
+		// nobody to show the new key to. Nothing between here and `run`
+		// awaits, so this one check covers both.
+		if (uia.disposed()) return;
+		if (preflight.status === "cancelled") {
+			setStep("intro");
+			return;
+		}
+		if (preflight.status === "failed") {
+			// Logged like the operation's own failures: the two dialogs had
+			// drifted on this, and a probe that fails for a reason the
+			// curated copy hides is exactly what a console needs (#545).
+			console.error("Encryption reset preflight failed:", preflight.error);
 			setErrorMessage(
-				userFacingErrorMessage(e, "Reset failed. Please try again."),
+				userFacingErrorMessage(
+					preflight.error,
+					"Reset failed. Please try again.",
+				),
 			);
 			setStep("error");
 			return;
 		}
-		phase = "op";
-		// Unmounted or dismissed while the probe was in flight: the
-		// destructive reset must not run headless with nobody to show the
-		// new key to.
-		if (disposed) return;
-
-		// Declared outside the try so a minted key is still shown if a later
-		// step fails (it may already be the account's default).
+		// Both of these are read after the operation settles, so they live
+		// outside it: a minted key is still shown if a later step fails (it
+		// may already be the account's default), and the backup outcome
+		// decides the warning on the success path.
 		let generatedKey: GeneratedSecretStorageKey | undefined;
+		let needsRestore = false;
 
-		try {
+		const done = await uia.run(async () => {
 			// Rotate the identity, delete all server-side backups, wipe 4S,
 			// and create a fresh empty backup (SDK resetEncryption does all of
 			// this in one call).
-			await crypto.resetEncryption(uia.uiaCallback);
-			if (disposed) return;
+			await crypto.resetEncryption(uia.flow.uiaCallback);
+			if (uia.disposed()) return;
 
 			// Re-establish secret storage under a fresh recovery key and
 			// connect to the backup resetEncryption just created.
@@ -138,72 +128,69 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				},
 				() => fetchServerKeyBackup(client),
 			);
-			if (disposed) return;
+			if (uia.disposed()) return;
+			needsRestore = result.outcome === "needs-restore";
 
 			await cryptoStatus.refresh();
-			if (disposed) return;
+		});
+		if (done.status !== "ok") {
+			// The cached 4S key may be stale after any mid-reset failure -
+			// drop it even when the dialog is already gone. Not every such
+			// path reaches here: a reset that got past `resetEncryption` and
+			// then unmounted returns through the `ok` branch, so a key stays
+			// cached for the secret storage the reset already wiped. That is
+			// the behaviour this extraction preserved, not one it added -
+			// the early return inside the run body used to skip the `catch`
+			// the same way.
+			clearSecretStorageCache();
+		}
+		if (uia.disposed()) return;
 
+		if (done.status === "ok") {
 			if (generatedKey?.encodedPrivateKey) {
 				setRecoveryKey(generatedKey.encodedPrivateKey);
 				// The backup was just created locally, so needs-restore would be
 				// unexpected — flag it rather than claim full success.
-				setPartial(result.outcome === "needs-restore");
+				setPartial(needsRestore);
 				setStep("show-key");
 			} else {
 				// No new key minted means secret storage was somehow already set
 				// up; the reset itself still succeeded.
 				setStep("done");
 			}
-		} catch (e) {
-			// The cached 4S key may be stale after any mid-reset failure -
-			// drop it even when the dialog is already gone.
-			clearSecretStorageCache();
-			if (disposed) return;
-			if (e instanceof UiaCancelledError) {
-				// A cancel here is the mid-operation approval loop (the OP
-				// ticket was never granted or expired), and the reset already
-				// tore down backups and secret storage - surface it as an
-				// interrupted reset, never as a silent step back.
-				setErrorMessage(
-					"The reset was interrupted before the server confirmed your identity. Run it again to finish setting up a new identity.",
-				);
-				setStep("error");
-				return;
-			}
-			console.error("Encryption reset failed:", e);
-			if (generatedKey?.encodedPrivateKey) {
-				setRecoveryKey(generatedKey.encodedPrivateKey);
-				setPartial(true);
-				setStep("show-key");
-			} else {
-				setErrorMessage(
-					userFacingErrorMessage(e, "Reset failed. Please try again."),
-				);
-				setStep("error");
-			}
+			return;
+		}
+		if (done.status === "cancelled") {
+			// A cancel here is the mid-operation approval loop (the OP
+			// ticket was never granted or expired), and the reset already
+			// tore down backups and secret storage - surface it as an
+			// interrupted reset, never as a silent step back.
+			setErrorMessage(
+				"The reset was interrupted before the server confirmed your identity. Run it again to finish setting up a new identity.",
+			);
+			setStep("error");
+			return;
+		}
+		console.error("Encryption reset failed:", done.error);
+		if (generatedKey?.encodedPrivateKey) {
+			setRecoveryKey(generatedKey.encodedPrivateKey);
+			setPartial(true);
+			setStep("show-key");
+		} else {
+			setErrorMessage(
+				userFacingErrorMessage(done.error, "Reset failed. Please try again."),
+			);
+			setStep("error");
 		}
 	};
 
-	// A pending identity prompt steps back to the intro (via the flow's
-	// cancel rejection). The destructive phase and the show-key state block
-	// dismissal; a preflight still probing the network does not - nothing
-	// has happened yet, so a hung request must not trap the user (closing
-	// aborts the flow and the post-preflight disposed guard stops the
-	// reset from starting headless).
+	// The shared policy (see UiaDialogFlow.dismiss), plus the one state
+	// only this dialog has: the recovery key is shown exactly once, so
+	// nothing dismisses past it. Checked first because show-key cannot
+	// coexist with a pending prompt or an in-flight half.
 	const dismiss = (): void => {
-		if (uia.prompt()) {
-			uia.cancel();
-			return;
-		}
-		if (step() === "working") {
-			if (phase === "preflight") {
-				uia.cancel();
-				props.onClose();
-			}
-			return;
-		}
 		if (step() === "show-key") return;
-		props.onClose();
+		uia.dismiss(props.onClose);
 	};
 
 	const handleBackdropClick = (e: MouseEvent): void => {
@@ -275,8 +262,8 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				{/* Identity prompts: rendered while step() is "working" (the
 				    flow suspends in preflight or mid-reset), so they shadow
 				    the spinner. */}
-				<Match when={uia.prompt()}>
-					<UiaPrompts flow={uia} />
+				<Match when={uia.flow.prompt()}>
+					<UiaPrompts flow={uia.flow} />
 				</Match>
 
 				{/* Working */}

@@ -1,11 +1,4 @@
-import {
-	type Component,
-	createSignal,
-	Match,
-	onCleanup,
-	Show,
-	Switch,
-} from "solid-js";
+import { type Component, createSignal, Match, Show, Switch } from "solid-js";
 import {
 	ACCOUNT_MANAGEMENT_ACTIONS,
 	type AccountManagementAction,
@@ -19,7 +12,7 @@ import {
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { trapTabKey } from "../../lib/focusTrap";
 import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
-import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
+import { createUiaDialogFlow } from "./uiaDialogFlow";
 
 type SignOutStep = "confirm" | "working" | "error";
 
@@ -83,7 +76,6 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 
 	const [step, setStep] = createSignal<SignOutStep>("confirm");
 	const [errorMessage, setErrorMessage] = createSignal("");
-	let disposed = false;
 
 	// The metadata fallback deeplink must point at what this dialog is
 	// actually revoking, not at the cross-signing reset the signing-key
@@ -100,15 +92,13 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 				}
 			: { action: ACCOUNT_MANAGEMENT_ACTIONS.devicesList };
 
-	const uia = createUiaFlow(client, { deeplink });
-
-	onCleanup(() => {
-		disposed = true;
-		uia.cancel();
-	});
+	// No preflight half here: neither route destroys anything before its
+	// UIA, so the unauthenticated attempt IS the challenge discovery and
+	// `run` is called alone (see UiaDialogFlow).
+	const uia = createUiaDialogFlow(client, { deeplink });
 
 	let overlayEl!: HTMLDivElement;
-	createUiaOverlayFocus({ flow: uia, overlay: () => overlayEl, step });
+	createUiaOverlayFocus({ flow: uia.flow, overlay: () => overlayEl, step });
 
 	/** The target when it names one session, else undefined. Narrowing
 	 *  does not survive into a JSX callback, so hand the narrowed value
@@ -127,61 +117,58 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 			: "Sign out other sessions";
 
 	const doSignOut = async (): Promise<void> => {
-		// Read once, before the first await, because the catch below reads
-		// it again after several: the flow suspends on a password prompt in
-		// between. The list mounts this dialog `keyed`, so the prop cannot
-		// actually change identity underneath - this keeps that from being
-		// something the error copy silently depends on.
+		// Read once, before the first await, because the failure branch
+		// reads it again after several: the flow suspends on a password
+		// prompt in between. The list mounts this dialog `keyed`, so the
+		// prop cannot actually change identity underneath - this keeps that
+		// from being something the error copy silently depends on.
 		const target = props.target;
 		setStep("working");
 		setErrorMessage("");
-		try {
+		const done = await uia.run(async () => {
 			if (target.kind === "device") {
-				await signOutDevice(client, target.deviceId, uia.uiaCallback);
+				await signOutDevice(client, target.deviceId, uia.flow.uiaCallback);
 			} else {
-				await signOutOtherDevices(client, target.deviceIds, uia.uiaCallback);
+				await signOutOtherDevices(
+					client,
+					target.deviceIds,
+					uia.flow.uiaCallback,
+				);
 			}
-			if (disposed) return;
+		});
+		if (uia.disposed()) return;
+		if (done.status === "ok") {
 			props.onSignedOut();
 			props.onClose();
-		} catch (e) {
-			if (disposed) return;
-			if (e instanceof UiaCancelledError) {
-				// Nothing happened - the request was never authorised - so
-				// this is not a failure to report. Close rather than step
-				// back: a cancelled flow is aborted for good (only preflight
-				// clears that, and this operation has none), so a second
-				// attempt on the same flow could never prompt again. Reopening
-				// builds a fresh one.
-				props.onClose();
-				return;
-			}
-			console.error("Signing sessions out failed:", e);
-			setErrorMessage(
-				userFacingErrorMessage(
-					e,
-					target.kind === "device"
-						? "Couldn't sign this session out."
-						: "Couldn't sign those sessions out.",
-				),
-			);
-			setStep("error");
-		}
-	};
-
-	// Cancelling a pending identity prompt abandons the sign-out: the flow
-	// rejects, and doSignOut's cancel branch is the single place that
-	// closes. The in-flight request is not interruptible from here - the
-	// sign-out either completed server-side or it did not, and dismissing
-	// the UI would not change which.
-	const dismiss = (): void => {
-		if (uia.prompt()) {
-			uia.cancel();
 			return;
 		}
-		if (step() === "working") return;
-		props.onClose();
+		if (done.status === "cancelled") {
+			// Nothing happened - the request was never authorised - so this
+			// is not a failure to report. Close rather than step back: a
+			// cancelled flow is aborted for good (only preflight clears that,
+			// and this operation has none), so a second attempt on the same
+			// flow could never prompt again. Reopening builds a fresh one.
+			props.onClose();
+			return;
+		}
+		console.error("Signing sessions out failed:", done.error);
+		setErrorMessage(
+			userFacingErrorMessage(
+				done.error,
+				target.kind === "device"
+					? "Couldn't sign this session out."
+					: "Couldn't sign those sessions out.",
+			),
+		);
+		setStep("error");
 	};
+
+	// The shared policy (see UiaDialogFlow.dismiss). Cancelling a pending
+	// identity prompt abandons the sign-out: the flow rejects, and
+	// doSignOut's cancel branch is the single place that closes. With no
+	// preflight half, the only in-flight state here is the revoke itself,
+	// which the policy refuses to dismiss.
+	const dismiss = (): void => uia.dismiss(props.onClose);
 
 	const handleBackdropClick = (e: MouseEvent): void => {
 		if (e.target !== e.currentTarget) return;
@@ -219,8 +206,8 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 			<Switch>
 				{/* Identity prompts shadow the working state while the flow
 				    suspends waiting on the user. */}
-				<Match when={uia.prompt()}>
-					<UiaPrompts flow={uia} />
+				<Match when={uia.flow.prompt()}>
+					<UiaPrompts flow={uia.flow} />
 				</Match>
 
 				<Match when={step() === "confirm"}>
