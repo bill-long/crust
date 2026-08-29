@@ -9,6 +9,16 @@ import { webUrlOrNull } from "../lib/uia";
 export const ACCOUNT_MANAGEMENT_ACTIONS = {
 	crossSigningReset: "org.matrix.cross_signing_reset",
 	accountDeactivate: "org.matrix.account_deactivate",
+	/**
+	 * Sign one device out. Takes a `device_id` (#556, MSC4191). Verified
+	 * advertised by both server families Crust cares about: Continuwuity
+	 * (the target) and MAS/matrix.org, which lists it alongside the older
+	 * `org.matrix.session_end` spelling it kept for compatibility - so
+	 * asking for the current name alone reaches both. A server offering
+	 * only the legacy name falls back to the page's base URL, which still
+	 * lands the user on their own account page.
+	 */
+	deviceDelete: "org.matrix.device_delete",
 } as const;
 
 export type AccountManagementAction =
@@ -30,9 +40,10 @@ export type AccountManagementAction =
 export async function fetchAccountManagementUrl(
 	client: MatrixClient,
 	action?: AccountManagementAction,
+	opts?: AccountManagementDeeplinkOptions,
 ): Promise<string | null> {
 	const mgmt = await fetchAccountManagement(client);
-	return mgmt && accountManagementDeeplink(mgmt, action);
+	return mgmt && accountManagementDeeplink(mgmt, action, opts);
 }
 
 /** What the auth metadata says about the account-management page. */
@@ -67,18 +78,30 @@ export async function fetchAccountManagement(
 	}
 }
 
+/** Extra parameters some MSC2965 actions take. */
+export interface AccountManagementDeeplinkOptions {
+	/** The device `action` applies to (`org.matrix.device_delete`). */
+	deviceId?: string;
+}
+
 /**
  * Deeplink into the account-management page for `action` when the server
  * advertises it (MSC2965), else the page's base URL - also the right
  * target for tasks MSC2965 defines no action for (e.g. password changes).
+ *
+ * `opts.deviceId` rides along only when the action was actually applied:
+ * a bare `device_id` on the page's base URL targets nothing, and pointing
+ * a user at the whole account portal is a weaker but honest fallback.
  */
 export function accountManagementDeeplink(
 	mgmt: AccountManagement,
 	action?: AccountManagementAction,
+	opts?: AccountManagementDeeplinkOptions,
 ): string {
 	const url = new URL(mgmt.uri);
 	if (action && mgmt.actions.includes(action)) {
 		url.searchParams.set("action", action);
+		if (opts?.deviceId) url.searchParams.set("device_id", opts.deviceId);
 	}
 	return url.toString();
 }

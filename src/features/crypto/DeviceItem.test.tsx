@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type DeviceInfo, DeviceItem } from "./DeviceItem";
+import { type DeviceInfo, DeviceItem, SIGN_OUT_ATTR } from "./DeviceItem";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -73,5 +73,67 @@ describe("DeviceItem", () => {
 		));
 		expect(screen.getByText("Verify from another session")).toBeTruthy();
 		expect(screen.queryByRole("button", { name: "Verify" })).toBeNull();
+	});
+
+	// #556
+	it("offers Sign out for another session, named so rows stay distinguishable", () => {
+		const onSignOut = vi.fn();
+		render(() => (
+			<DeviceItem
+				device={makeDevice({ displayName: "Old laptop" })}
+				onSignOut={onSignOut}
+			/>
+		));
+		const signOut = screen.getByRole("button", {
+			name: "Sign out Old laptop",
+		});
+		signOut.click();
+		expect(onSignOut).toHaveBeenCalledWith("DEVICEID");
+	});
+
+	it("falls back to the device id in the sign-out label when unnamed", () => {
+		render(() => (
+			<DeviceItem
+				device={makeDevice({ displayName: "" })}
+				onSignOut={vi.fn()}
+			/>
+		));
+		expect(
+			screen.getByRole("button", { name: "Sign out DEVICEID" }),
+		).toBeTruthy();
+	});
+
+	it("offers Sign out regardless of verification status", () => {
+		render(() => (
+			<DeviceItem
+				device={makeDevice({ verification: "verified" })}
+				onSignOut={vi.fn()}
+			/>
+		));
+		expect(
+			screen.getByRole("button", { name: "Sign out Test device" }),
+		).toBeTruthy();
+	});
+
+	it("never offers Sign out for the current device", () => {
+		// Signing THIS session out is logging out, which the app already has.
+		render(() => (
+			<DeviceItem
+				device={makeDevice({ isCurrentDevice: true })}
+				onSignOut={vi.fn()}
+			/>
+		));
+		expect(screen.queryByRole("button", { name: /^Sign out/ })).toBeNull();
+	});
+
+	it("omits the sign-out control when no handler is given", () => {
+		render(() => <DeviceItem device={makeDevice()} />);
+		expect(screen.queryByRole("button", { name: /^Sign out/ })).toBeNull();
+	});
+
+	it("tags the sign-out control with the device id for focus lookup", () => {
+		render(() => <DeviceItem device={makeDevice()} onSignOut={vi.fn()} />);
+		const btn = screen.getByRole("button", { name: /^Sign out/ });
+		expect(btn.getAttribute(SIGN_OUT_ATTR)).toBe("DEVICEID");
 	});
 });

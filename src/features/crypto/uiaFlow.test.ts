@@ -1,5 +1,6 @@
 import { AuthType, type MatrixClient } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
+import { ACCOUNT_MANAGEMENT_ACTIONS } from "../../client/accountManagement";
 import { uia401 } from "../../test/uiaFixtures";
 import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
@@ -414,6 +415,120 @@ describe("createUiaFlow uiaCallback", () => {
 		flow.confirmOauthApproved();
 		await done;
 		expect(getAuthMetadata).toHaveBeenCalledTimes(1);
+	});
+
+	// #556: an operation with no destructive window before its UIA (a
+	// device sign-out) runs the callback WITHOUT preflight, so the callback
+	// is where the password is collected - and therefore where a typo
+	// re-prompts, exactly as preflight does when it collects.
+	describe("without a preflight", () => {
+		it("collects the password itself", async () => {
+			const flow = createUiaFlow(fakeClient());
+			const makeRequest = vi
+				.fn()
+				.mockRejectedValueOnce(uia401("op-sess", PASSWORD_FLOW))
+				.mockResolvedValueOnce(undefined);
+			const done = flow.uiaCallback(makeRequest);
+			await vi.waitFor(() =>
+				expect(flow.prompt()).toEqual({ kind: "password", error: undefined }),
+			);
+			flow.submitPassword("hunter2");
+			await done;
+			expect(makeRequest).toHaveBeenLastCalledWith({
+				type: AuthType.Password,
+				identifier: { type: "m.id.user", user: "@u:example.com" },
+				password: "hunter2",
+				session: "op-sess",
+			});
+			expect(flow.prompt()).toBeNull();
+		});
+
+		it("re-prompts against the refusal's rotated session", async () => {
+			const flow = createUiaFlow(fakeClient());
+			const makeRequest = vi
+				.fn()
+				.mockRejectedValueOnce(uia401("op-sess", PASSWORD_FLOW))
+				// Continuwuity rotates the UIA session on a wrong password
+				// (wire-verified), so the retry must not reuse "op-sess".
+				.mockRejectedValueOnce(uia401("op-sess-2", PASSWORD_FLOW))
+				.mockResolvedValueOnce(undefined);
+			const done = flow.uiaCallback(makeRequest);
+			await vi.waitFor(() => expect(flow.prompt()?.kind).toBe("password"));
+			flow.submitPassword("wrong");
+			await vi.waitFor(() =>
+				expect(flow.prompt()).toEqual({
+					kind: "password",
+					error: "Incorrect password. Try again.",
+				}),
+			);
+			flow.submitPassword("right");
+			await done;
+			expect(makeRequest).toHaveBeenLastCalledWith(
+				expect.objectContaining({ password: "right", session: "op-sess-2" }),
+			);
+		});
+
+		it("rethrows a non-401 refusal instead of looping", async () => {
+			const flow = createUiaFlow(fakeClient());
+			const boom = Object.assign(new Error("server down"), {
+				httpStatus: 500,
+			});
+			const makeRequest = vi
+				.fn()
+				.mockRejectedValueOnce(uia401("op-sess", PASSWORD_FLOW))
+				.mockRejectedValueOnce(boom);
+			const done = flow.uiaCallback(makeRequest);
+			await vi.waitFor(() => expect(flow.prompt()?.kind).toBe("password"));
+			flow.submitPassword("pw");
+			await expect(done).rejects.toBe(boom);
+		});
+
+		it("cancelling the collected-password prompt aborts the operation", async () => {
+			const flow = createUiaFlow(fakeClient());
+			const makeRequest = vi
+				.fn()
+				.mockRejectedValueOnce(uia401("op-sess", PASSWORD_FLOW));
+			const done = flow.uiaCallback(makeRequest);
+			await vi.waitFor(() => expect(flow.prompt()?.kind).toBe("password"));
+			flow.cancel();
+			await expect(done).rejects.toBeInstanceOf(UiaCancelledError);
+			// Only the unauthenticated discovery attempt was ever sent.
+			expect(makeRequest).toHaveBeenCalledTimes(1);
+		});
+
+		it("points the metadata deeplink at the configured action and device", async () => {
+			const flow = createUiaFlow(
+				fakeClient({
+					getAuthMetadata: async () => ({
+						account_management_uri: "https://op.example/account",
+						account_management_actions_supported: [
+							"org.matrix.cross_signing_reset",
+							"org.matrix.device_delete",
+						],
+					}),
+				}),
+				{
+					deeplink: {
+						action: ACCOUNT_MANAGEMENT_ACTIONS.deviceDelete,
+						deviceId: "OTHERDEV",
+					},
+				},
+			);
+			const makeRequest = vi
+				.fn()
+				.mockRejectedValueOnce(uia401("op-sess", OAUTH_FLOW))
+				.mockResolvedValueOnce(undefined);
+			const done = flow.uiaCallback(makeRequest);
+			await vi.waitFor(() =>
+				expect(flow.prompt()).toEqual({
+					kind: "oauth",
+					url: "https://op.example/account?action=org.matrix.device_delete&device_id=OTHERDEV",
+					notYetApproved: false,
+				}),
+			);
+			flow.confirmOauthApproved();
+			await done;
+		});
 	});
 
 	it("settles the operation when cancel lands while no prompt is pending", async () => {

@@ -8,6 +8,8 @@ import type { UIAuthCallback } from "matrix-js-sdk/lib/interactive-auth";
 import { type Accessor, createSignal } from "solid-js";
 import {
 	ACCOUNT_MANAGEMENT_ACTIONS,
+	type AccountManagementAction,
+	type AccountManagementDeeplinkOptions,
 	fetchAccountManagementUrl,
 } from "../../client/accountManagement";
 import {
@@ -93,7 +95,10 @@ export interface UiaFlow {
 	 * request when the dialog unmounts still settles instead of waiting on
 	 * a prompt nothing will answer). Rejections carry
 	 * {@link UiaCancelledError}. Call from the dialog's cancel affordances
-	 * and its onCleanup; the next preflight() starts a fresh attempt.
+	 * and its onCleanup. The abort is sticky for the rest of the flow's
+	 * life: preflight() clears it to start a fresh attempt, so a flow used
+	 * WITHOUT preflight has no way back and its dialog must treat a cancel
+	 * as terminal (close, and build a new flow if reopened).
 	 *
 	 * Deliberately scoped to waiting-for-input states: an operation whose
 	 * challenge preflight already collected finishes even if the dialog
@@ -126,25 +131,51 @@ export interface UiaFlow {
 	preflight: () => Promise<void>;
 	/**
 	 * Pass as `authUploadDeviceSigningKeys` (or any UIAuthCallback slot).
-	 * Tries the request unauthenticated first, then satisfies the 401 with
-	 * what preflight collected: the password (one attempt, failures
-	 * propagate), or an `m.oauth` submission - re-prompting only when the
-	 * server still refuses the approval (not granted yet, or expired).
+	 * Tries the request unauthenticated first, then satisfies the 401.
+	 *
+	 * A password preflight already collected and verified is submitted
+	 * once, and a refusal propagates - it cannot be a typo, so re-asking
+	 * would only obscure the real failure. A password this callback has to
+	 * collect itself (no preflight ran) re-prompts on refusal instead,
+	 * exactly as preflight does when IT collects. An `m.oauth` stage
+	 * re-prompts only while the server still refuses the approval (not
+	 * granted yet, or expired).
 	 */
 	uiaCallback: UIAuthCallback<void>;
 }
 
+/** Tuning for one {@link createUiaFlow} instance. */
+export interface UiaFlowOptions {
+	/**
+	 * Which account-management action the approval deeplink points at when
+	 * a 401 carries no URL of its own. Defaults to the cross-signing reset
+	 * the signing-key operations need; a device sign-out passes
+	 * `deviceDelete` plus the device it is revoking (#556). Sending the
+	 * user to the wrong action's page is a real dead end, so any operation
+	 * that isn't a signing-key upload must set this.
+	 */
+	deeplink?: {
+		action: AccountManagementAction;
+	} & AccountManagementDeeplinkOptions;
+}
+
 /**
- * Interactive UIA driver shared by the cross-signing bootstrap and
- * encryption-reset dialogs (#467). The server decides which confirmation
- * UI the user sees - password sessions get the password prompt as before,
- * OAuth sessions (whose 401 advertises the `m.oauth` stage instead) get a
- * deeplink to the account-management page. Both operations this drives
- * upload device-signing keys, so the preflight probe targets that
- * endpoint and the metadata-deeplink fallback is pinned to the
- * cross-signing-reset action.
+ * Interactive UIA driver (#467). The server decides which confirmation UI
+ * the user sees - password sessions get the password prompt, OAuth
+ * sessions (whose 401 advertises the `m.oauth` stage instead) get a
+ * deeplink to the account-management page.
+ *
+ * Two halves that are used independently. {@link UiaFlow.preflight} is
+ * only for operations that destroy something BEFORE their UIA-gated
+ * request (`resetEncryption`); its probe posts to the signing-key
+ * endpoint, so an operation with no such window - a device sign-out,
+ * whose unauthenticated attempt IS the discovery - uses
+ * {@link UiaFlow.uiaCallback} alone and must not call it.
  */
-export function createUiaFlow(client: MatrixClient): UiaFlow {
+export function createUiaFlow(
+	client: MatrixClient,
+	options?: UiaFlowOptions,
+): UiaFlow {
 	const [prompt, setPrompt] = createSignal<UiaPrompt | null>(null);
 
 	let pending: {
@@ -182,21 +213,21 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 
 	/**
 	 * Metadata fallback for the approval deeplink when a 401 carries no
-	 * URL of its own. Pinned to the cross-signing-reset action for both
-	 * dialogs: MSC2965 defines no setup action, and the server gates any
-	 * signing-key upload behind this same approval.
+	 * URL of its own. Defaults to the cross-signing-reset action, which is
+	 * right for both signing-key dialogs: MSC2965 defines no setup action,
+	 * and the server gates any signing-key upload behind this same
+	 * approval. Other operations override it via {@link UiaFlowOptions}.
 	 */
 	// Fetched at most once per flow - a server without an
 	// account-management page must not pay a guaranteed-null round-trip on
 	// every refusal re-prompt.
 	let metadataUrl: Promise<string | null> | null = null;
 	const metadataDeeplink = (): Promise<string | null> => {
+		const { action, ...opts } = options?.deeplink ?? {
+			action: ACCOUNT_MANAGEMENT_ACTIONS.crossSigningReset,
+		};
 		metadataUrl =
-			metadataUrl ??
-			fetchAccountManagementUrl(
-				client,
-				ACCOUNT_MANAGEMENT_ACTIONS.crossSigningReset,
-			);
+			metadataUrl ?? fetchAccountManagementUrl(client, action, opts);
 		return metadataUrl;
 	};
 
@@ -286,18 +317,42 @@ export function createUiaFlow(client: MatrixClient): UiaFlow {
 		if (!route) throw new Error(NO_SUPPORTED_FLOW_MESSAGE);
 
 		if (route.kind === "password") {
-			// Normally collected by preflight before the operation started;
-			// ask now only if the server switched flows on us since.
-			const password =
-				learned?.kind === "password"
-					? learned.password
-					: ((await ask({ kind: "password" })) ?? "");
-			// Single attempt, like the pre-#467 flow: a wrong password is a
-			// real failure the dialog's error step reports.
-			await makeRequest(
-				passwordAuthDict(client.getUserId() ?? "", password, uia.session),
-			);
-			return;
+			if (learned?.kind === "password") {
+				// preflight already collected AND verified this password against
+				// a probe session, so a refusal here is not a typo - it is a
+				// real failure the dialog's error step must report, not
+				// something to re-ask about.
+				await makeRequest(
+					passwordAuthDict(
+						client.getUserId() ?? "",
+						learned.password,
+						uia.session,
+					),
+				);
+				return;
+			}
+			// No preflight (an operation with no destructive window before
+			// its UIA, e.g. a device sign-out): this callback is where the
+			// password is collected, so it is also where a typo re-prompts -
+			// the same loop preflight runs when IT does the collecting.
+			let error: string | undefined;
+			for (;;) {
+				const password = (await ask({ kind: "password", error })) ?? "";
+				try {
+					await makeRequest(
+						passwordAuthDict(client.getUserId() ?? "", password, uia.session),
+					);
+					return;
+				} catch (e) {
+					const retry = parseUia401(e);
+					if (!retry) throw e;
+					// The refusal rotates the session (wire-verified on
+					// Continuwuity) - a resubmit against the stale one is a
+					// different failure.
+					uia.session = retry.session;
+					error = "Incorrect password. Try again.";
+				}
+			}
 		}
 
 		// Approval granted during preflight: submit straight away. Re-prompt

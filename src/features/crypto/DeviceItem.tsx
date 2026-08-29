@@ -3,6 +3,14 @@ import { Tooltip } from "../../components/Tooltip";
 import type { DeviceVerification } from "../../lib/deviceVerification";
 import { formatRelativeTime } from "../../lib/relativeTime";
 
+/**
+ * Marks the row's sign-out control with its device id, so the list can put
+ * focus back on it when the dialog closes. A data attribute rather than
+ * the accessible name: label copy is user-facing and changes, and focus
+ * behaviour must not break when it does.
+ */
+export const SIGN_OUT_ATTR = "data-sign-out-device";
+
 export interface DeviceInfo {
 	deviceId: string;
 	displayName: string;
@@ -14,6 +22,12 @@ export interface DeviceInfo {
 interface DeviceItemProps {
 	device: DeviceInfo;
 	onVerify?: (deviceId: string) => void;
+	/**
+	 * Revoke this session (#556). Never offered for the current device -
+	 * signing THAT out is logging out, which the app already has - so the
+	 * row hides the control rather than relying on the caller to omit it.
+	 */
+	onSignOut?: (deviceId: string) => void;
 }
 
 function formatLastSeen(ts: number | undefined): string {
@@ -24,6 +38,9 @@ function formatLastSeen(ts: number | undefined): string {
 }
 
 const DeviceItem: Component<DeviceItemProps> = (props) => {
+	const deviceLabel = (): string =>
+		props.device.displayName || props.device.deviceId;
+
 	const unverifiedExplanation = (): string =>
 		props.device.isCurrentDevice
 			? "This session hasn't been verified. Verify it from another signed-in session so its messages can be cryptographically trusted."
@@ -34,7 +51,7 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-2">
 					<span class="truncate text-sm font-medium text-text-primary">
-						{props.device.displayName || props.device.deviceId}
+						{deviceLabel()}
 					</span>
 					<Show when={props.device.isCurrentDevice}>
 						<span class="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-xs text-text-secondary">
@@ -102,6 +119,23 @@ const DeviceItem: Component<DeviceItemProps> = (props) => {
 						</Show>
 					</Match>
 				</Switch>
+
+				{/* Independent of verification status: any other session can be
+				    revoked, verified or not. The list renders one of these per
+				    row, so the accessible name has to name the device - the
+				    visible "Sign out" alone would be ambiguous to a screen
+				    reader walking the list. */}
+				<Show when={!props.device.isCurrentDevice && props.onSignOut}>
+					<button
+						type="button"
+						onClick={() => props.onSignOut?.(props.device.deviceId)}
+						aria-label={`Sign out ${deviceLabel()}`}
+						{...{ [SIGN_OUT_ATTR]: props.device.deviceId }}
+						class="rounded bg-surface-3 px-2 py-1 text-xs text-danger-text-bright transition-colors hover:bg-danger hover:text-danger-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+					>
+						Sign out
+					</button>
+				</Show>
 			</div>
 		</div>
 	);
