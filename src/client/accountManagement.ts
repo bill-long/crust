@@ -19,6 +19,17 @@ export const ACCOUNT_MANAGEMENT_ACTIONS = {
 	 * lands the user on their own account page.
 	 */
 	deviceDelete: "org.matrix.device_delete",
+	/**
+	 * Show the whole session list. The bulk sign-out's portal target
+	 * (#557): MSC4191 defines no "delete these devices" action, so a
+	 * session managed at the provider is sent to the list to work through
+	 * rather than to one device's removal page. Verified advertised by
+	 * both server families, same as {@link deviceDelete}: Continuwuity
+	 * (which 303s it to the account page's devices section) and
+	 * MAS/matrix.org, which also lists the legacy `org.matrix.sessions_list`
+	 * spelling - so asking for the current name alone reaches both.
+	 */
+	devicesList: "org.matrix.devices_list",
 } as const;
 
 export type AccountManagementAction =

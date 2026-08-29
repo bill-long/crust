@@ -1,7 +1,7 @@
 import type { AuthDict, MatrixClient } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { uia401 } from "../test/uiaFixtures";
-import { signOutDevice } from "./deviceManagement";
+import { signOutDevice, signOutOtherDevices } from "./deviceManagement";
 
 /** A UIA callback that answers a password challenge with `password`. */
 function passwordCallback(password: string) {
@@ -57,6 +57,108 @@ describe("signOutDevice", () => {
 
 		await expect(
 			signOutDevice(client, "OTHERDEV", async (makeRequest) => {
+				await makeRequest(null);
+			}),
+		).rejects.toBe(boom);
+	});
+});
+
+describe("signOutOtherDevices", () => {
+	/** A client whose current device is THISDEV. */
+	function clientWith(deleteMultipleDevices: ReturnType<typeof vi.fn>) {
+		return {
+			getDeviceId: () => "THISDEV",
+			deleteMultipleDevices,
+		} as unknown as MatrixClient;
+	}
+
+	it("revokes the whole set in one request, after one challenge", async () => {
+		const deleteMultipleDevices = vi
+			.fn()
+			.mockRejectedValueOnce(uia401("sess", [["m.login.password"]]))
+			.mockResolvedValueOnce({});
+
+		await signOutOtherDevices(
+			clientWith(deleteMultipleDevices),
+			["DEV_A", "DEV_B"],
+			passwordCallback("hunter2"),
+		);
+
+		expect(deleteMultipleDevices).toHaveBeenNthCalledWith(
+			1,
+			["DEV_A", "DEV_B"],
+			undefined,
+		);
+		expect(deleteMultipleDevices).toHaveBeenNthCalledWith(
+			2,
+			["DEV_A", "DEV_B"],
+			expect.objectContaining({ password: "hunter2" }),
+		);
+	});
+
+	// The UI hides the control for the current row, but that flag is not
+	// the enforcement: revoking this session's own device is logging out,
+	// which has its own teardown, and reaching it through here would leave
+	// the app holding a dead token with none of it done.
+	it("never revokes the device this session is running on", async () => {
+		const deleteMultipleDevices = vi.fn().mockResolvedValue({});
+
+		await signOutOtherDevices(
+			clientWith(deleteMultipleDevices),
+			["DEV_A", "THISDEV", "DEV_B"],
+			passwordCallback("unused"),
+		);
+
+		expect(deleteMultipleDevices).toHaveBeenCalledWith(
+			["DEV_A", "DEV_B"],
+			undefined,
+		);
+	});
+
+	it("sends nothing when only the current device was asked for", async () => {
+		const deleteMultipleDevices = vi.fn().mockResolvedValue({});
+
+		await signOutOtherDevices(
+			clientWith(deleteMultipleDevices),
+			["THISDEV"],
+			passwordCallback("unused"),
+		);
+
+		expect(deleteMultipleDevices).not.toHaveBeenCalled();
+	});
+
+	// An empty request would still make the user answer a UIA challenge -
+	// Continuwuity challenges an empty device list too (wire-verified).
+	it("sends nothing for an empty set", async () => {
+		const deleteMultipleDevices = vi.fn().mockResolvedValue({});
+
+		await signOutOtherDevices(
+			clientWith(deleteMultipleDevices),
+			[],
+			passwordCallback("unused"),
+		);
+
+		expect(deleteMultipleDevices).not.toHaveBeenCalled();
+	});
+
+	it("drops an id the server reported empty rather than sending it", async () => {
+		const deleteMultipleDevices = vi.fn().mockResolvedValue({});
+
+		await signOutOtherDevices(
+			clientWith(deleteMultipleDevices),
+			["", "DEV_A"],
+			passwordCallback("unused"),
+		);
+
+		expect(deleteMultipleDevices).toHaveBeenCalledWith(["DEV_A"], undefined);
+	});
+
+	it("propagates a failure the callback rethrows", async () => {
+		const boom = Object.assign(new Error("server down"), { httpStatus: 500 });
+		const client = clientWith(vi.fn().mockRejectedValue(boom));
+
+		await expect(
+			signOutOtherDevices(client, ["DEV_A"], async (makeRequest) => {
 				await makeRequest(null);
 			}),
 		).rejects.toBe(boom);

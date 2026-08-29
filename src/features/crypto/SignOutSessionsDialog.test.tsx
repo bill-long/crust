@@ -7,7 +7,10 @@ import {
 } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { uia401 } from "../../test/uiaFixtures";
-import { SignOutDeviceDialog } from "./SignOutDeviceDialog";
+import {
+	SignOutSessionsDialog,
+	type SignOutTarget,
+} from "./SignOutSessionsDialog";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -18,13 +21,17 @@ vi.mock("solid-refresh", () => ({
 }));
 
 const deleteDevice = vi.fn();
+const deleteMultipleDevices = vi.fn();
 
 vi.mock("../../client/client", () => ({
 	useClient: () => ({
 		client: {
 			getUserId: () => "@test:example.com",
+			getDeviceId: () => "THISDEV",
 			deleteDevice: (deviceId: string, auth?: unknown) =>
 				deleteDevice(deviceId, auth),
+			deleteMultipleDevices: (deviceIds: string[], auth?: unknown) =>
+				deleteMultipleDevices(deviceIds, auth),
 			getAuthMetadata: async () => {
 				throw new Error("no oauth metadata");
 			},
@@ -39,8 +46,15 @@ afterEach(() => {
 
 const PASSWORD_FLOW = [["m.login.password"]];
 
+const ONE_DEVICE: SignOutTarget = {
+	kind: "device",
+	deviceId: "OTHERDEV",
+	deviceName: "Old laptop",
+};
+
 function renderDialog(
 	overrides: Partial<{
+		target: SignOutTarget;
 		portalUrl: string | null;
 		viaPortal: boolean;
 		onClose: () => void;
@@ -50,9 +64,8 @@ function renderDialog(
 	const onClose = overrides.onClose ?? vi.fn();
 	const onSignedOut = overrides.onSignedOut ?? vi.fn();
 	render(() => (
-		<SignOutDeviceDialog
-			deviceId="OTHERDEV"
-			deviceName="Old laptop"
+		<SignOutSessionsDialog
+			target={overrides.target ?? ONE_DEVICE}
 			portalUrl={overrides.portalUrl ?? null}
 			viaPortal={overrides.viaPortal ?? false}
 			onClose={onClose}
@@ -69,7 +82,7 @@ async function submitPassword(password: string): Promise<void> {
 	fireEvent.submit(input.closest("form") as HTMLFormElement);
 }
 
-describe("SignOutDeviceDialog", () => {
+describe("SignOutSessionsDialog", () => {
 	it("names the device in the confirmation", () => {
 		renderDialog();
 		expect(screen.getByText("Old laptop")).toBeTruthy();
@@ -182,9 +195,8 @@ describe("SignOutDeviceDialog", () => {
 			// provide a link" here is false on the one path where that link is
 			// the user's only affordance.
 			render(() => (
-				<SignOutDeviceDialog
-					deviceId="OTHERDEV"
-					deviceName="Old laptop"
+				<SignOutSessionsDialog
+					target={ONE_DEVICE}
 					viaPortal={true}
 					onClose={vi.fn()}
 					onSignedOut={vi.fn()}
@@ -194,6 +206,81 @@ describe("SignOutDeviceDialog", () => {
 				screen.queryByText(/did not provide a link to its account settings/),
 			).toBeNull();
 			expect(screen.getByText(/Finding your account settings/)).toBeTruthy();
+		});
+	});
+
+	describe("signing every other session out", () => {
+		const OTHERS: SignOutTarget = {
+			kind: "others",
+			deviceIds: ["DEV_A", "DEV_B", "DEV_C"],
+		};
+
+		it("counts the sessions it is about to revoke", () => {
+			renderDialog({ target: OTHERS });
+			expect(screen.getByText("Sign out all other sessions?")).toBeTruthy();
+			expect(screen.getByText("3 other sessions")).toBeTruthy();
+			// The one thing the user must not misread: this session survives.
+			expect(screen.getByText(/This session stays signed in/)).toBeTruthy();
+		});
+
+		it("says what signing back in costs", () => {
+			renderDialog({ target: OTHERS });
+			expect(screen.getByText(/start out unverified/)).toBeTruthy();
+		});
+
+		it("keeps the count singular for one other session", () => {
+			renderDialog({
+				target: { kind: "others", deviceIds: ["DEV_A"] },
+			});
+			expect(screen.getByText("1 other session")).toBeTruthy();
+		});
+
+		it("revokes them in ONE request, not one per device", async () => {
+			deleteMultipleDevices
+				.mockRejectedValueOnce(uia401("sess", PASSWORD_FLOW))
+				.mockResolvedValueOnce({});
+			const { onClose, onSignedOut } = renderDialog({ target: OTHERS });
+
+			fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+			await submitPassword("hunter2");
+
+			await waitFor(() => expect(onSignedOut).toHaveBeenCalledTimes(1));
+			expect(onClose).toHaveBeenCalledTimes(1);
+			expect(deleteDevice).not.toHaveBeenCalled();
+			expect(deleteMultipleDevices).toHaveBeenCalledTimes(2);
+			expect(deleteMultipleDevices).toHaveBeenLastCalledWith(
+				["DEV_A", "DEV_B", "DEV_C"],
+				expect.objectContaining({ password: "hunter2", session: "sess" }),
+			);
+		});
+
+		it("reports a bulk failure in the plural", async () => {
+			deleteMultipleDevices.mockRejectedValue(
+				Object.assign(new TypeError("Failed to fetch"), {}),
+			);
+			renderDialog({ target: OTHERS });
+
+			fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+			await screen.findByText("Sign-out failed");
+			expect(
+				screen.getByText("Couldn't sign those sessions out."),
+			).toBeTruthy();
+		});
+
+		it("sends a provider-managed session to the portal's session list", () => {
+			renderDialog({
+				target: OTHERS,
+				viaPortal: true,
+				portalUrl: "https://hs.example/account?action=org.matrix.devices_list",
+			});
+			expect(
+				screen
+					.getByRole("link", { name: "Open account settings" })
+					.getAttribute("href"),
+			).toBe("https://hs.example/account?action=org.matrix.devices_list");
+			expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+			expect(deleteMultipleDevices).not.toHaveBeenCalled();
 		});
 	});
 
@@ -216,9 +303,8 @@ describe("SignOutDeviceDialog", () => {
 					tabIndex={-1}
 					onKeyDown={outerEscape}
 				>
-					<SignOutDeviceDialog
-						deviceId="OTHERDEV"
-						deviceName="Old laptop"
+					<SignOutSessionsDialog
+						target={ONE_DEVICE}
 						portalUrl={null}
 						onClose={onClose}
 						onSignedOut={vi.fn()}
@@ -228,6 +314,36 @@ describe("SignOutDeviceDialog", () => {
 
 			fireEvent.keyDown(
 				screen.getByRole("dialog", { name: "Sign out session" }),
+				{ key: "Escape" },
+			);
+
+			await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+			expect(outerEscape).not.toHaveBeenCalled();
+		});
+
+		it("keeps Escape from reaching an enclosing overlay for the bulk dialog", async () => {
+			// Same guard, second dialog shape: the label differs, so a test
+			// pinned to the device wording would not cover it.
+			const onClose = vi.fn();
+			const outerEscape = vi.fn();
+			render(() => (
+				<div
+					role="dialog"
+					aria-label="Settings"
+					tabIndex={-1}
+					onKeyDown={outerEscape}
+				>
+					<SignOutSessionsDialog
+						target={{ kind: "others", deviceIds: ["DEV_A"] }}
+						portalUrl={null}
+						onClose={onClose}
+						onSignedOut={vi.fn()}
+					/>
+				</div>
+			));
+
+			fireEvent.keyDown(
+				screen.getByRole("dialog", { name: "Sign out other sessions" }),
 				{ key: "Escape" },
 			);
 
