@@ -145,6 +145,8 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 
 	// Auto-redirect to login when session is expired
 	let cleaningUp = false;
+	/** Whether this document's own logout ever made this effect stand down. */
+	let stoodDownForOwner = false;
 	createEffect(() => {
 		// `forcingLogout()` as well as the local flag: the escape below runs this
 		// same tail, and its own revoke is one of the requests whose 401 lands
@@ -164,17 +166,32 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// tail that just failed is not the answer - its own failure screen, which
 		// renders ahead of every state arm below, is.
 		if (syncState() === "logged-out" && !cleaningUp && !forcingLogout()) {
-			// Another transition owns this session's end. Stand down while it runs -
-			// and this read is deliberately reactive, because what happens when it
-			// releases is the whole question.
-			if (accountTransitionInFlight()) return;
-			// It has released, so ask storage what it actually achieved. An owner
-			// that finished took the account off the device AND navigated, so
-			// repeating the tail here would run a second `clearCryptoStores` over
-			// the first - the overlapping `deleteDatabase` this guard exists to
-			// prevent - and navigate again on top of it. An owner that FAILED left
-			// the account listed, and then this cleanup is the only one coming.
-			if (!loadSessions().some((a) => a.userId === session.userId)) return;
+			// Another transition in THIS document owns this session's end. Stand
+			// down while it runs - the read is deliberately reactive, because what
+			// happens when it releases is the whole question - and remember that we
+			// did, because the answer below is only ever about our own owner.
+			if (accountTransitionInFlight()) {
+				stoodDownForOwner = true;
+				return;
+			}
+			// Our owner has released: ask storage what it achieved. Gone means it
+			// finished, which means it also navigated, so repeating the tail would
+			// run a second `clearCryptoStores` over the first - the overlapping
+			// `deleteDatabase` this guard exists to prevent - and navigate again on
+			// top of it. Still listed means it FAILED, and then this cleanup is the
+			// only one coming.
+			//
+			// Gated on having stood down at all, because storage is shared across
+			// tabs and this document is not the only thing that can empty it.
+			// Another tab logging the account out leaves it absent here with no
+			// owner of ours ever having run - and returning on that would strand
+			// this tab on the redirect notice below, which has no way out.
+			if (
+				stoodDownForOwner &&
+				!loadSessions().some((a) => a.userId === session.userId)
+			) {
+				return;
+			}
 			cleaningUp = true;
 			// Tear down any active call surface so the controller unmounts
 			// and its onCleanup chain runs. The client is already stopped
