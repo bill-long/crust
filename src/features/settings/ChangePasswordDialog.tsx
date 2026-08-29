@@ -24,6 +24,15 @@ type Step = "form" | "working" | "done";
  * answer, so there is no separate confirmation prompt. OIDC sessions
  * never reach this dialog (AccountTab links them to the server's
  * account-management page instead).
+ *
+ * The "sign out my other sessions" checkbox stays even though the Devices
+ * tab now has its own bulk sign-out (#557): the two are not the same
+ * operation. `logout_devices` rides along in `POST /account/password`, so
+ * the old sessions die in the same request that changes the password -
+ * the property you want when the reason for changing it is that it may be
+ * known. Doing it as two operations leaves a window in which the password
+ * is new and the old tokens are still live, and the second half can fail
+ * on its own.
  */
 const ChangePasswordDialog: Component<ChangePasswordDialogProps> = (props) => {
 	const { client } = useClient();

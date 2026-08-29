@@ -346,9 +346,11 @@ export function createUiaFlow(
 				} catch (e) {
 					const retry = parseUia401(e);
 					if (!retry) throw e;
-					// The refusal rotates the session (wire-verified on
-					// Continuwuity) - a resubmit against the stale one is a
-					// different failure.
+					// Retry against whatever session the refusal names rather
+					// than the one we sent: Continuwuity echoes the same one
+					// (wire-verified on both device routes), but a server that
+					// rotates it would turn a resubmit against the stale one
+					// into a different, confusing failure.
 					uia.session = retry.session;
 					error = "Incorrect password. Try again.";
 				}

@@ -6,9 +6,16 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
-import { ACCOUNT_MANAGEMENT_ACTIONS } from "../../client/accountManagement";
+import {
+	ACCOUNT_MANAGEMENT_ACTIONS,
+	type AccountManagementAction,
+	type AccountManagementDeeplinkOptions,
+} from "../../client/accountManagement";
 import { useClient } from "../../client/client";
-import { signOutDevice } from "../../client/deviceManagement";
+import {
+	signOutDevice,
+	signOutOtherDevices,
+} from "../../client/deviceManagement";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { trapTabKey } from "../../lib/focusTrap";
 import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
@@ -16,12 +23,24 @@ import { createUiaFlow, UiaCancelledError } from "./uiaFlow";
 
 type SignOutStep = "confirm" | "working" | "error";
 
-interface SignOutDeviceDialogProps {
-	deviceId: string;
-	/** What the list shows for this device, for the confirmation copy. */
-	deviceName: string;
+/**
+ * What a sign-out is about to revoke: one named session (#556), or the
+ * whole set of other sessions in one request (#557).
+ *
+ * `others` carries the ids rather than recomputing them when the user
+ * confirms, so what is revoked is exactly the set the confirmation
+ * counted. A session that signs in while this dialog is open is not
+ * silently swept up in a number the user never saw; it shows up in the
+ * refetched list afterwards.
+ */
+export type SignOutTarget =
+	| { kind: "device"; deviceId: string; deviceName: string }
+	| { kind: "others"; deviceIds: string[] };
+
+interface SignOutSessionsDialogProps {
+	target: SignOutTarget;
 	/**
-	 * Portal link for this exact device, when the session's management
+	 * Portal link for this exact target, when the session's management
 	 * lives at the provider rather than in-app. Three states, and the
 	 * middle one matters: `undefined` while the lookup is still in flight,
 	 * `null` once it has come back with no account-management page, a
@@ -33,42 +52,55 @@ interface SignOutDeviceDialogProps {
 	/** True for a session the server won't let confirm this in-app (OIDC). */
 	viaPortal?: boolean;
 	onClose: () => void;
-	/** The device is gone server-side - the list must refetch. */
+	/** The devices are gone server-side - the list must refetch. */
 	onSignedOut: () => void;
 }
 
 /**
- * Confirm-and-revoke for one other session (#556). Two completion paths,
- * chosen by session type rather than by interpreting a failure:
+ * Confirm-and-revoke for other sessions - one of them (#556) or all of
+ * them (#557). Two completion paths, chosen by session type rather than
+ * by interpreting a failure:
  *
- * - Password sessions run `DELETE /devices/{id}` through the UIA flow,
- *   which prompts for the password the server challenges for. Nothing is
- *   destroyed before that dict lands, so there is no preflight here (see
- *   `signOutDevice`).
+ * - Password sessions run `DELETE /devices/{id}` or `POST /delete_devices`
+ *   through the UIA flow, which prompts for the password the server
+ *   challenges for. Neither destroys anything before that dict lands, so
+ *   there is no preflight here (see `client/deviceManagement.ts`).
  * - OIDC sessions never attempt it: the server refuses password-UIA
  *   management routes for them outright (#451), which is the whole of
- *   cinnyapp/cinny#2376. They get a deeplink to this device's own removal
- *   page instead - MSC2965's account-management URL carrying MSC4191's
- *   `org.matrix.device_delete` action and a `device_id`.
+ *   cinnyapp/cinny#2376. They get a deeplink instead - MSC2965's
+ *   account-management URL carrying an MSC4191 action: this device's own
+ *   removal page (`org.matrix.device_delete` plus a `device_id`) for one
+ *   session, the session list (`org.matrix.devices_list`) for the bulk
+ *   case, which MSC4191 gives no single "delete these" action for.
  *
  * A password session whose server refuses in some way we can't answer
  * falls back to that same deeplink rather than a dead end.
  */
-const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
+const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
+	props,
+) => {
 	const { client } = useClient();
 
 	const [step, setStep] = createSignal<SignOutStep>("confirm");
 	const [errorMessage, setErrorMessage] = createSignal("");
 	let disposed = false;
 
-	// The metadata fallback deeplink must point at THIS device's removal,
-	// not at the cross-signing reset the signing-key dialogs use.
-	const uia = createUiaFlow(client, {
-		deeplink: {
-			action: ACCOUNT_MANAGEMENT_ACTIONS.deviceDelete,
-			deviceId: props.deviceId,
-		},
-	});
+	// The metadata fallback deeplink must point at what this dialog is
+	// actually revoking, not at the cross-signing reset the signing-key
+	// dialogs use. Read once: the flow is built at mount and the list
+	// mounts this component `keyed`, so a different target is a different
+	// instance rather than a prop swap under a running flow.
+	const deeplink: {
+		action: AccountManagementAction;
+	} & AccountManagementDeeplinkOptions =
+		props.target.kind === "device"
+			? {
+					action: ACCOUNT_MANAGEMENT_ACTIONS.deviceDelete,
+					deviceId: props.target.deviceId,
+				}
+			: { action: ACCOUNT_MANAGEMENT_ACTIONS.devicesList };
+
+	const uia = createUiaFlow(client, { deeplink });
 
 	onCleanup(() => {
 		disposed = true;
@@ -78,11 +110,37 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 	let overlayEl!: HTMLDivElement;
 	createUiaOverlayFocus({ flow: uia, overlay: () => overlayEl, step });
 
+	/** The target when it names one session, else undefined. Narrowing
+	 *  does not survive into a JSX callback, so hand the narrowed value
+	 *  through `<Show>` rather than re-testing `kind` inside it. */
+	const deviceTarget = ():
+		| Extract<SignOutTarget, { kind: "device" }>
+		| undefined => (props.target.kind === "device" ? props.target : undefined);
+
+	/** How many sessions the `others` target covers. */
+	const otherCount = (): number =>
+		props.target.kind === "others" ? props.target.deviceIds.length : 0;
+
+	const dialogLabel = (): string =>
+		props.target.kind === "device"
+			? "Sign out session"
+			: "Sign out other sessions";
+
 	const doSignOut = async (): Promise<void> => {
+		// Read once, before the first await, because the catch below reads
+		// it again after several: the flow suspends on a password prompt in
+		// between. The list mounts this dialog `keyed`, so the prop cannot
+		// actually change identity underneath - this keeps that from being
+		// something the error copy silently depends on.
+		const target = props.target;
 		setStep("working");
 		setErrorMessage("");
 		try {
-			await signOutDevice(client, props.deviceId, uia.uiaCallback);
+			if (target.kind === "device") {
+				await signOutDevice(client, target.deviceId, uia.uiaCallback);
+			} else {
+				await signOutOtherDevices(client, target.deviceIds, uia.uiaCallback);
+			}
 			if (disposed) return;
 			props.onSignedOut();
 			props.onClose();
@@ -98,9 +156,14 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 				props.onClose();
 				return;
 			}
-			console.error("Signing out a device failed:", e);
+			console.error("Signing sessions out failed:", e);
 			setErrorMessage(
-				userFacingErrorMessage(e, "Couldn't sign this session out."),
+				userFacingErrorMessage(
+					e,
+					target.kind === "device"
+						? "Couldn't sign this session out."
+						: "Couldn't sign those sessions out.",
+				),
 			);
 			setStep("error");
 		}
@@ -147,7 +210,7 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
 			role="dialog"
 			aria-modal="true"
-			aria-label="Sign out session"
+			aria-label={dialogLabel()}
 			tabIndex={-1}
 			ref={overlayEl}
 			onClick={handleBackdropClick}
@@ -163,22 +226,54 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 				<Match when={step() === "confirm"}>
 					<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 						<h2 class="mb-3 text-lg font-semibold text-text-primary">
-							Sign out this session?
+							<Show
+								when={deviceTarget()}
+								fallback="Sign out all other sessions?"
+							>
+								Sign out this session?
+							</Show>
 						</h2>
-						<p class="mb-2 text-sm text-text-secondary">
-							{/* break-words, not truncate: the name is the whole point
-							    of the sentence. displayNameOr caps absurd lengths, but
-							    a long unbroken name under that cap would still push the
-							    Cancel / Sign out buttons out of this max-w-md box. */}
-							<span class="font-medium break-words text-text-primary">
-								{props.deviceName}
-							</span>{" "}
-							will be signed out and will need to sign in again.
-						</p>
-						<p class="mb-6 text-sm text-text-muted">
-							Encrypted messages it holds keys for may become unreadable on that
-							device.
-						</p>
+						<Show
+							when={deviceTarget()}
+							fallback={
+								<>
+									<p class="mb-2 text-sm text-text-secondary">
+										<span class="font-medium text-text-primary">
+											{otherCount()} other session
+											{otherCount() === 1 ? "" : "s"}
+										</span>{" "}
+										will be signed out. This session stays signed in.
+									</p>
+									<p class="mb-2 text-sm text-text-muted">
+										Signing back in on those devices creates new sessions, which
+										start out unverified until you verify each one.
+									</p>
+									<p class="mb-6 text-sm text-text-muted">
+										Encrypted messages they hold keys for may become unreadable
+										on those devices.
+									</p>
+								</>
+							}
+						>
+							{(target) => (
+								<>
+									<p class="mb-2 text-sm text-text-secondary">
+										{/* break-words, not truncate: the name is the whole point
+										    of the sentence. displayNameOr caps absurd lengths, but
+										    a long unbroken name under that cap would still push the
+										    Cancel / Sign out buttons out of this max-w-md box. */}
+										<span class="font-medium break-words text-text-primary">
+											{target().deviceName}
+										</span>{" "}
+										will be signed out and will need to sign in again.
+									</p>
+									<p class="mb-6 text-sm text-text-muted">
+										Encrypted messages it holds keys for may become unreadable
+										on that device.
+									</p>
+								</>
+							)}
+						</Show>
 
 						<Show
 							when={props.viaPortal}
@@ -201,9 +296,18 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 								</div>
 							}
 						>
+							{/* "you sign … out there", not "… is signed out there":
+							    nothing has happened yet, and the passive reads as a
+							    report of a revoke this dialog cannot perform. The
+							    only thing past this point is a link. */}
 							<p class="mb-4 text-sm text-text-muted">
-								Your account provider manages your sessions, so this one is
-								signed out there.
+								<Show
+									when={deviceTarget()}
+									fallback="Your account provider manages your sessions, so you sign them out there - one at a time, from its session list."
+								>
+									Your account provider manages your sessions, so you sign this
+									one out there.
+								</Show>
 							</p>
 							<Switch>
 								<Match when={props.portalUrl}>
@@ -273,8 +377,13 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 							{(url) => (
 								<div class="mb-4">
 									<p class="mb-2 text-sm text-text-muted">
-										You can sign this session out in your account settings
-										instead.
+										<Show
+											when={deviceTarget()}
+											fallback="You can sign those sessions out in your account settings instead."
+										>
+											You can sign this session out in your account settings
+											instead.
+										</Show>
 									</p>
 									<a
 										href={url()}
@@ -310,4 +419,4 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 	);
 };
 
-export { SignOutDeviceDialog };
+export { SignOutSessionsDialog };
