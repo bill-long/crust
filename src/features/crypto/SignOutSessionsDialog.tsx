@@ -296,13 +296,17 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 								</div>
 							}
 						>
+							{/* "you sign … out there", not "… is signed out there":
+							    nothing has happened yet, and the passive reads as a
+							    report of a revoke this dialog cannot perform. The
+							    only thing past this point is a link. */}
 							<p class="mb-4 text-sm text-text-muted">
 								<Show
 									when={deviceTarget()}
-									fallback="Your account provider manages your sessions, so they are signed out there - one at a time, from its session list."
+									fallback="Your account provider manages your sessions, so you sign them out there - one at a time, from its session list."
 								>
-									Your account provider manages your sessions, so this one is
-									signed out there.
+									Your account provider manages your sessions, so you sign this
+									one out there.
 								</Show>
 							</p>
 							<Switch>
