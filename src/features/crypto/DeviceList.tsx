@@ -18,7 +18,12 @@ import {
 import { useClient } from "../../client/client";
 import { fetchDeviceVerification } from "../../lib/deviceVerification";
 import { loadSession } from "../../stores/session";
-import { type DeviceInfo, DeviceItem, SIGN_OUT_ATTR } from "./DeviceItem";
+import {
+	type DeviceInfo,
+	DeviceItem,
+	deviceLabel,
+	SIGN_OUT_ATTR,
+} from "./DeviceItem";
 import { SignOutDeviceDialog } from "./SignOutDeviceDialog";
 
 interface DeviceListProps {
@@ -230,7 +235,7 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 				{(target) => (
 					<SignOutDeviceDialog
 						deviceId={target.deviceId}
-						deviceName={target.displayName || target.deviceId}
+						deviceName={deviceLabel(target)}
 						viaPortal={viaPortal}
 						portalUrl={portalUrlFor(target.deviceId)}
 						onClose={closeSignOut}

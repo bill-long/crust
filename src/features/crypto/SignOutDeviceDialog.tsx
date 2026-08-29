@@ -47,8 +47,9 @@ interface SignOutDeviceDialogProps {
  *   `signOutDevice`).
  * - OIDC sessions never attempt it: the server refuses password-UIA
  *   management routes for them outright (#451), which is the whole of
- *   cinnyapp/cinny#2376. They get the MSC2965 deeplink to this device's
- *   own removal page instead.
+ *   cinnyapp/cinny#2376. They get a deeplink to this device's own removal
+ *   page instead - MSC2965's account-management URL carrying MSC4191's
+ *   `org.matrix.device_delete` action and a `device_id`.
  *
  * A password session whose server refuses in some way we can't answer
  * falls back to that same deeplink rather than a dead end.
@@ -165,7 +166,11 @@ const SignOutDeviceDialog: Component<SignOutDeviceDialogProps> = (props) => {
 							Sign out this session?
 						</h2>
 						<p class="mb-2 text-sm text-text-secondary">
-							<span class="font-medium text-text-primary">
+							{/* break-words, not truncate: the name is the whole point
+							    of the sentence. displayNameOr caps absurd lengths, but
+							    a long unbroken name under that cap would still push the
+							    Cancel / Sign out buttons out of this max-w-md box. */}
+							<span class="font-medium break-words text-text-primary">
 								{props.deviceName}
 							</span>{" "}
 							will be signed out and will need to sign in again.

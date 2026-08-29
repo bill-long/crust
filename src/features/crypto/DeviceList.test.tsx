@@ -44,10 +44,15 @@ vi.mock("../../client/accountManagement", async (importOriginal) => {
 vi.mock("./SignOutDeviceDialog", () => ({
 	SignOutDeviceDialog: (props: {
 		deviceId: string;
+		deviceName: string;
 		portalUrl?: string | null;
 		onClose: () => void;
 	}) => (
-		<div data-testid="dialog" data-device={props.deviceId}>
+		<div
+			data-testid="dialog"
+			data-device={props.deviceId}
+			data-name={props.deviceName}
+		>
 			<span data-testid="portal">
 				{props.portalUrl === undefined
 					? "resolving"
@@ -88,6 +93,20 @@ const closeDialog = (): void => {
 };
 
 describe("DeviceList sign-out", () => {
+	it("names a whitespace-only device by its id in the confirmation", async () => {
+		getDevices.mockResolvedValue({
+			devices: [
+				{ device_id: "THISDEV", display_name: "This one" },
+				{ device_id: "DEV_A", display_name: "   ", last_seen_ts: 2 },
+			],
+		});
+		render(() => <DeviceList />);
+		fireEvent.click(await screen.findByRole("button", { name: /DEV_A/ }));
+		expect(screen.getByTestId("dialog").getAttribute("data-name")).toBe(
+			"DEV_A",
+		);
+	});
+
 	it("opens a dialog for the row's own device", async () => {
 		render(() => <DeviceList />);
 		fireEvent.click(await screen.findByRole("button", { name: /Laptop A/ }));
