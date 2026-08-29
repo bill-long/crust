@@ -53,6 +53,15 @@ import { finishAccountLogout } from "./accountSwitch";
  * Each wait is there because skipping it strands something on the server, and
  * an escape that finishes slowly is still an escape; one that leaves a live
  * device behind is the bug this replaced.
+ *
+ * The bound leaves one residual, and it is worth naming rather than implying
+ * the revoke closes the hole unconditionally: when it expires, the `POST
+ * /logout` is still in flight, and if another account remains the tail reloads
+ * the document - which kills that request. So a revoke that would have landed a
+ * second later is lost, and the device survives after all. Narrowing it means
+ * either waiting longer on a server that is already failing to answer, or
+ * issuing the revoke in a way that outlives the document; neither belongs in
+ * the escape's critical path today.
  */
 export const FORCE_LOGOUT_REVOKE_TIMEOUT_MS = 5_000;
 
@@ -152,8 +161,17 @@ export async function runForceLogout(
 		});
 		// Idempotent, and normally already done: `logout(true)` stops the client
 		// and aborts its in-flight requests before it asks. This covers the case
-		// where it never got that far.
-		client.stopClient();
+		// where it never got that far - and is caught like every other step,
+		// because the likeliest reason to be on this path is that the stop inside
+		// `logout(true)` is what threw, which would throw again here and take the
+		// wipe and the clear down with it.
+		try {
+			client.stopClient();
+		} catch (stopError) {
+			reportError(stopError, {
+				logLabel: "Could not stop the client on the way out",
+			});
+		}
 	}
 	// `finishAccountLogout` owns the tail: the (bounded) wipe finishes before
 	// anything navigates, so replacing the document cannot abort the delete. That

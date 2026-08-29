@@ -71,8 +71,13 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  * would not help: the rejection path has already awaited one `rtc.leave()` that
  * failed, and a second attempt would only delay the leave the user asked for.
  *
- * Resolves (never rejects) once the call is torn down, or immediately when
- * `roomId` does not host the active call.
+ * Resolves once the call is torn down, or immediately when `roomId` does not
+ * host the active call. It rejects only through `setActiveCallRoomId`, which
+ * runs its Solid subscribers synchronously: the stale-signal branch below writes
+ * it outside the try, and the failure/timeout branch writes it from inside the
+ * catch, so a throwing subscriber on either surfaces at the call site. Every
+ * account-exit caller catches this for that reason; a teardown that has already
+ * ended the user's call must not then abort the exit it was for.
  */
 export async function endCallForRoomLeave(roomId: string): Promise<void> {
 	if (activeCallRoomId() !== roomId) return;

@@ -222,6 +222,27 @@ describe("runForceLogout (#551)", () => {
 		expect(order).toContain("finishAccountLogout");
 	});
 
+	it("still leaves the account when the recovery stop also throws", async () => {
+		// The likeliest reason to be on this path is that the stop inside
+		// `logout(true)` is what threw - so the recovery stop is the call most
+		// likely to throw again, and it sits after the point where giving up
+		// would leave the account fully alive on the device.
+		const client = {
+			logout: vi.fn(async () => {
+				order.push("logout");
+				throw new Error("stop failed inside logout");
+			}),
+			stopClient: vi.fn(() => {
+				order.push("stopClient");
+				throw new Error("and again here");
+			}),
+		};
+
+		await expect(run(client)).resolves.toBe("left");
+		expect(order).toContain("clearCryptoStores");
+		expect(order).toContain("finishAccountLogout");
+	});
+
 	it("stops the client itself when the revoke fails outright", async () => {
 		const client = makeClient(async () => {
 			order.push("logout");

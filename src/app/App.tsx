@@ -27,7 +27,7 @@ import { basePrefix } from "./basePath";
 import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
 import { runForceLogout } from "./forceLogout";
-import { Layout } from "./Layout";
+import { accountTransitionInFlight, Layout } from "./Layout";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
 
@@ -126,6 +126,14 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		() => syncState() === "initial" && cryptoState() !== "loading",
 	);
 
+	/** What the escape is doing, for a reader who cannot see the screen swap. */
+	const escapeStatus = (): string => {
+		if (logoutFailed()) {
+			return "Couldn't finish logging out. Reload the app and try again.";
+		}
+		return forcingLogout() ? "Logging out…" : "";
+	};
+
 	const openDeviceSettings = (): void => {
 		navigate("/settings/devices", {
 			state: {
@@ -145,12 +153,21 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// escape's single-flight guard exists for - and it has to hold across
 		// both entry points, not just one.
 		//
+		// `accountTransitionInFlight()` covers the same hazard for a logout started
+		// from the app itself: it revokes the token and goes on making authed
+		// requests, and their 401 arrives here while that logout is still running.
+		//
 		// The escape never gives the flag back, so this stays suppressed for the
 		// rest of the document's life. That is deliberate: it has taken ownership
 		// of the same tail this effect would run, and if it FAILS, re-running the
 		// tail that just failed is not the answer - its own failure screen, which
 		// renders ahead of every state arm below, is.
-		if (syncState() === "logged-out" && !cleaningUp && !forcingLogout()) {
+		if (
+			syncState() === "logged-out" &&
+			!cleaningUp &&
+			!forcingLogout() &&
+			!accountTransitionInFlight()
+		) {
 			cleaningUp = true;
 			// Tear down any active call surface so the controller unmounts
 			// and its onCleanup chain runs. The client is already stopped
@@ -158,7 +175,19 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// in-flight `leaveRoomSession` will no-op — but we still need
 			// to drop the global signal so a stale mini-widget / overlay
 			// never outlives the session.
-			setActiveCallRoomId(null);
+			//
+			// Caught, like the same write on every other exit: a Solid setter runs
+			// its subscribers synchronously, and a throwing effect here would
+			// abort this cleanup before `finishAccountLogout` - leaving an expired
+			// session with its stores unwiped, its account still in storage, and
+			// no redirect.
+			try {
+				setActiveCallRoomId(null);
+			} catch (e) {
+				reportError(e, {
+					logLabel: "Failed to clear the active call on session expiry",
+				});
+			}
 			closeNotificationSound();
 			// Client is already stopped by onSessionLoggedOut handler
 			// (stopClient runs before setSyncState triggers this effect).
@@ -341,6 +370,13 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			{/* App-root transient notices (toasts). A sibling of <Switch> so a
 				notice survives room/route changes and a disposed emitter. */}
 			<NoticeToasts />
+			{/* The escape's own screens are created together with their text, and a
+				live region does not announce content inserted in the same flush that
+				creates it (#549) - so they cannot announce themselves. This one is
+				mounted for the life of the gate and only its contents change. */}
+			<div aria-live="polite" role="status" class="sr-only">
+				{escapeStatus()}
+			</div>
 		</>
 	);
 };

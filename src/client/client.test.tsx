@@ -183,6 +183,84 @@ describe("ClientProvider session wiring (#460)", () => {
 		await waitFor(() => expect(effectiveStops).toBe(2));
 	});
 
+	it("puts clientRunning back even when the mid-start stop throws (#551)", async () => {
+		// `stopClient` clears the flag itself, but only AFTER `cryptoBackend.stop()`
+		// (client.js:696), which runs first and can throw. Left stuck on, the flag
+		// makes `clearStores` throw synchronously for the life of the document -
+		// so the account wipe this escape depends on would fail permanently.
+		let finishStart!: () => void;
+		let stopCalls = 0;
+		const throwingClient = {
+			...mockSdkClient,
+			clientRunning: false,
+			startClient: vi.fn(() => {
+				throwingClient.clientRunning = true;
+				return new Promise<void>((resolve) => {
+					finishStart = resolve;
+				});
+			}),
+			// Throws on the mid-start stop only; the unmount's stop has to work, or
+			// the failure would be the harness's rather than the code's.
+			stopClient: vi.fn(() => {
+				stopCalls += 1;
+				if (stopCalls === 1) throw new Error("cryptoBackend.stop() failed");
+			}),
+		};
+		createClientMock.mockReturnValue(throwingClient);
+		render(() => (
+			<ClientProvider session={PASSWORD_SESSION}>
+				<div>provider-child</div>
+			</ClientProvider>
+		));
+		await waitFor(() => expect(throwingClient.startClient).toHaveBeenCalled());
+
+		throwingClient.clientRunning = false; // the stop that landed mid-start
+		finishStart();
+
+		// Retried, not abandoned: the first attempt threw before it could reach
+		// the sync API it had just built, and the flag is about to be cleared -
+		// which would make every later stop early-return and leave that loop
+		// running for the life of the document.
+		await waitFor(() =>
+			expect(throwingClient.stopClient).toHaveBeenCalledTimes(2),
+		);
+		expect(throwingClient.clientRunning).toBe(false);
+	});
+
+	it("still reports the session as logged out when the stop throws (#551)", async () => {
+		// `setSyncState("logged-out")` is what `SyncGate`'s expired-session
+		// cleanup keys on. If the stop can take it down, a revoked session is
+		// never wiped, never cleared and never redirected away from.
+		const handlers = new Map<string, (...args: unknown[]) => void>();
+		let throwOnStop = true;
+		const revokedClient = {
+			...mockSdkClient,
+			on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+				handlers.set(String(event), handler);
+			}),
+			startClient: vi.fn(async () => {}),
+			stopClient: vi.fn(() => {
+				if (throwOnStop) throw new Error("cryptoBackend.stop() failed");
+			}),
+		};
+		createClientMock.mockReturnValue(revokedClient);
+		render(() => (
+			<ClientProvider session={PASSWORD_SESSION}>
+				<div>provider-child</div>
+			</ClientProvider>
+		));
+		await screen.findByText("provider-child");
+
+		const onLoggedOut = handlers.get("Session.logged_out");
+		expect(onLoggedOut).toBeTypeOf("function");
+		// The SDK emits this from its own error handling, so a throw would land
+		// back inside `HttpApi` rather than anywhere that could recover.
+		expect(() => onLoggedOut?.()).not.toThrow();
+		// Only the call under test throws; the unmount's stop must succeed, or the
+		// failure would be the harness's rather than the code's.
+		throwOnStop = false;
+	});
+
 	it("starts the client once crypto init resolves", async () => {
 		setup(OIDC_SESSION);
 

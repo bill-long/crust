@@ -194,8 +194,21 @@ const [loggingOut, setLoggingOut] = createSignal(false);
  */
 const [accountBusy, setAccountBusy] = createSignal(false);
 
-/** True while ANY account transition is in flight. */
-const accountTransitionInFlight = (): boolean => loggingOut() || accountBusy();
+/**
+ * True while ANY account transition is in flight.
+ *
+ * Exported because the expired-session cleanup in `App.tsx` has to stand down
+ * for it: a logout revokes the token and then keeps making authed requests
+ * (`finishAccountLogout`'s second push release, a background refresh), whose
+ * 401 flips `syncState` to "logged-out" while this logout is still running. The
+ * cleanup would then start a SECOND `finishAccountLogout` and a second
+ * `clearCryptoStores` over the first, and two `deleteDatabase` calls on one
+ * store block each other until the bound expires. Module scope is what makes it
+ * usable there - the guard has to outlive the component, which the `logged-out`
+ * arm is about to unmount.
+ */
+export const accountTransitionInFlight = (): boolean =>
+	loggingOut() || accountBusy();
 
 const Layout: Component = () => {
 	const clientCtx = useClient();
@@ -515,8 +528,21 @@ const Layout: Component = () => {
 		}
 		try {
 			await client.logout(true);
-		} catch {
-			client.stopClient();
+		} catch (e) {
+			reportError(e, {
+				logLabel: "Could not revoke this session while logging out",
+			});
+			// Guarded like the same recovery stop in `app/forceLogout.ts`: the
+			// likeliest reason to be here is that the stop inside `logout(true)`
+			// threw, which would throw again and take the wipe and the clear with
+			// it.
+			try {
+				client.stopClient();
+			} catch (stopError) {
+				reportError(stopError, {
+					logLabel: "Could not stop the client while logging out",
+				});
+			}
 		}
 		return await finishAccountLogout(
 			{ client, pushConfig },

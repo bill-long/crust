@@ -24,6 +24,7 @@ import {
 	type CryptoStatus,
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
+import { reportError } from "../lib/reportError";
 import { loadSession, type Session } from "../stores/session";
 import { userSettings } from "../stores/settings";
 import { updateAppBadge } from "./appBadge";
@@ -430,6 +431,41 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		document.addEventListener("visibilitychange", reassertBadgeOnVisible);
 	}
 
+	/**
+	 * Stop the client so that it is really stopped, whatever `stopClient` does on
+	 * the way (#551).
+	 *
+	 * Two SDK details make the plain call unreliable, and both bite on the paths
+	 * this app stops a client from. `stopClient` runs `cryptoBackend?.stop()`
+	 * BEFORE it clears `clientRunning` and before it touches the sync API, so a
+	 * throw there stops nothing and leaves the flag set - and `clearStores`
+	 * throws synchronously on that flag, so the account wipe every logout depends
+	 * on would fail for the life of the document. The retry is what gets past it:
+	 * `RustCrypto.stop()` sets its own `stopped` flag before the calls that can
+	 * throw, so a second attempt returns from it immediately and goes on to reach
+	 * the sync API the first never did.
+	 *
+	 * The `finally` is the last resort for a client that refuses to stop twice: a
+	 * flag left set fails every later wipe, which is worse than the sync loop it
+	 * would otherwise keep stoppable.
+	 */
+	const stopClientFully = (): void => {
+		try {
+			matrixClient.stopClient();
+		} catch (e) {
+			reportError(e, { logLabel: "Failed to stop the client" });
+			try {
+				matrixClient.stopClient();
+			} catch (retryError) {
+				reportError(retryError, {
+					logLabel: "Failed to stop the client on the second attempt",
+				});
+			}
+		} finally {
+			matrixClient.clientRunning = false;
+		}
+	};
+
 	const onSync = (state: SyncState): void => {
 		// "logged-out" is terminal — don't let later sync events overwrite it
 		if (syncState() === "logged-out") return;
@@ -472,7 +508,14 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	matrixClient.on(ClientEvent.Sync, onSync);
 
 	const onSessionLoggedOut = (): void => {
-		matrixClient.stopClient();
+		// The stop is caught so the state flip below always happens: it is what
+		// `SyncGate`'s expired-session cleanup keys on, so losing it means the
+		// account is never wiped, never cleared and never redirected away from -
+		// and `stopClient` can throw before its own early return, because
+		// `cryptoBackend?.stop()` runs ahead of it. Reported, not rethrown: this
+		// is an SDK emitter callback, and a throw here re-enters `HttpApi`'s
+		// error handling.
+		stopClientFully();
 		setSyncState("logged-out");
 	};
 	matrixClient.on(HttpApiEvent.SessionLoggedOut, onSessionLoggedOut);
@@ -531,8 +574,10 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// called it synchronously from one of those events would break that, and
 		// would show up as an aborted account wipe on the escape path (#551).
 		if (!matrixClient.clientRunning) {
+			// Set so the stop is not turned away at `stopClient`'s own early
+			// return; `stopClientFully` puts it back.
 			matrixClient.clientRunning = true;
-			matrixClient.stopClient();
+			stopClientFully();
 			return;
 		}
 		// startClient is async and awaits /versions before it builds the sync
@@ -586,7 +631,10 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			HttpApiEvent.SessionLoggedOut,
 			onSessionLoggedOut,
 		);
-		matrixClient.stopClient();
+		// Never throws, which matters here beyond the usual reason: this runs
+		// inside Solid's cleanup chain, so an escaping error would abort the
+		// disposal of everything after it in the tree.
+		stopClientFully();
 	});
 
 	return (
