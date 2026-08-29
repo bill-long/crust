@@ -21,7 +21,7 @@ import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallS
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
 import { setActiveCallRoomId } from "../stores/activeCall";
-import { loadSession } from "../stores/session";
+import { loadSession, loadSessions } from "../stores/session";
 import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { createBootStall } from "./bootStall";
@@ -153,21 +153,28 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// escape's single-flight guard exists for - and it has to hold across
 		// both entry points, not just one.
 		//
-		// `accountTransitionInFlight()` covers the same hazard for a logout started
-		// from the app itself: it revokes the token and goes on making authed
-		// requests, and their 401 arrives here while that logout is still running.
+		// A logout started from the app itself has the same hazard: it revokes the
+		// token and goes on making authed requests, and their 401 arrives here
+		// while that logout is still running. That one cannot be settled by a flag
+		// alone - see the two checks below.
 		//
 		// The escape never gives the flag back, so this stays suppressed for the
 		// rest of the document's life. That is deliberate: it has taken ownership
 		// of the same tail this effect would run, and if it FAILS, re-running the
 		// tail that just failed is not the answer - its own failure screen, which
 		// renders ahead of every state arm below, is.
-		if (
-			syncState() === "logged-out" &&
-			!cleaningUp &&
-			!forcingLogout() &&
-			!accountTransitionInFlight()
-		) {
+		if (syncState() === "logged-out" && !cleaningUp && !forcingLogout()) {
+			// Another transition owns this session's end. Stand down while it runs -
+			// and this read is deliberately reactive, because what happens when it
+			// releases is the whole question.
+			if (accountTransitionInFlight()) return;
+			// It has released, so ask storage what it actually achieved. An owner
+			// that finished took the account off the device AND navigated, so
+			// repeating the tail here would run a second `clearCryptoStores` over
+			// the first - the overlapping `deleteDatabase` this guard exists to
+			// prevent - and navigate again on top of it. An owner that FAILED left
+			// the account listed, and then this cleanup is the only one coming.
+			if (!loadSessions().some((a) => a.userId === session.userId)) return;
 			cleaningUp = true;
 			// Tear down any active call surface so the controller unmounts
 			// and its onCleanup chain runs. The client is already stopped
