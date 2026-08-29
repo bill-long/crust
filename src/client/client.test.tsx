@@ -143,6 +143,46 @@ describe("ClientProvider session wiring (#460)", () => {
 		expect(opts.tokenRefreshFunction).toBeUndefined();
 	});
 
+	it("stops a client that was stopped while it was still starting (#551)", async () => {
+		// The SDK's own shape, which is the whole reason the guard exists:
+		// `startClient` flips `clientRunning` on before it awaits `/versions`
+		// (client.js:586) and never re-checks it, and `stopClient` early-returns
+		// on that same flag (client.js:668). So a stop that lands mid-start is
+		// silently a no-op, and every later stop is too.
+		let effectiveStops = 0;
+		let finishStart!: () => void;
+		const racyClient = {
+			...mockSdkClient,
+			clientRunning: false,
+			startClient: vi.fn(() => {
+				racyClient.clientRunning = true;
+				return new Promise<void>((resolve) => {
+					finishStart = resolve;
+				});
+			}),
+			stopClient: vi.fn(() => {
+				if (!racyClient.clientRunning) return;
+				racyClient.clientRunning = false;
+				effectiveStops += 1;
+			}),
+		};
+		createClientMock.mockReturnValue(racyClient);
+		render(() => (
+			<ClientProvider session={PASSWORD_SESSION}>
+				<div>provider-child</div>
+			</ClientProvider>
+		));
+		await waitFor(() => expect(racyClient.startClient).toHaveBeenCalled());
+
+		// The boot escape: stop the client while `/versions` is still pending.
+		racyClient.stopClient();
+		expect(effectiveStops).toBe(1);
+
+		// `/versions` finally answers and `startClient` builds its sync API.
+		finishStart();
+		await waitFor(() => expect(effectiveStops).toBe(2));
+	});
+
 	it("starts the client once crypto init resolves", async () => {
 		setup(OIDC_SESSION);
 

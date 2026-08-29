@@ -12,17 +12,21 @@ import {
 	Switch,
 } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
-import { clearCryptoStores } from "../client/cryptoRecovery";
+import { clearCryptoStores, withTimeout } from "../client/cryptoRecovery";
 import { NoticeToasts } from "../components/NoticeToasts";
 import { LoginGate } from "../features/auth/LoginGate";
 import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
+import { disableBackgroundNotifications } from "../features/notifications/accountPush";
+import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
+import { reportError } from "../lib/reportError";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import { loadSession } from "../stores/session";
 import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
+import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
 import { Layout } from "./Layout";
 import { UpdatePrompt } from "./UpdatePrompt";
@@ -87,6 +91,30 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 	return <ClientProvider session={session}>{props.children}</ClientProvider>;
 };
 
+/**
+ * How long the escape waits for each thing it owes the server on the way out -
+ * the MatrixRTC withdrawal, then the token revoke. Long enough for a server
+ * that is merely stalled on one endpoint to answer, short enough that the way
+ * out of a hang is never itself a hang.
+ */
+const FORCE_LOGOUT_STEP_TIMEOUT_MS = 5_000;
+
+/**
+ * The way out of a boot or a sync this app cannot finish: stop the client, wipe
+ * this account's stores, and leave - to a remaining account if there is one,
+ * and to the login page otherwise. Offered on the sync-error screen, and on the
+ * still-syncing screen once that has stalled (#551).
+ */
+const ForceLogoutButton: Component<{ onLogOut: () => void }> = (props) => (
+	<button
+		type="button"
+		onClick={props.onLogOut}
+		class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+	>
+		Log out
+	</button>
+);
+
 /** Loading gate — shows spinner until initial sync completes. */
 const SyncGate: Component<RouteSectionProps> = (props) => {
 	const { syncState, cryptoState, client, session } = useClient();
@@ -95,6 +123,17 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	const location = useLocation();
 	const params = useDecodedParams<{ roomId?: string }>();
 	const [forcingLogout, setForcingLogout] = createSignal(false);
+	const [logoutFailed, setLogoutFailed] = createSignal(false);
+	// A boot that never finishes has to offer a way out, or the only one left is
+	// the one #549 closed - typing `/login`, which replaced the stored account
+	// and orphaned its device. The phase this watches deliberately excludes
+	// crypto initialization: that is bounded on both branches and can spend
+	// minutes legitimately downloading the WASM module on a first visit, whereas
+	// what follows it - `startClient` awaiting `/versions`, then the first
+	// `/sync` - has no bound at all (#551).
+	const bootStalled = createBootStall(
+		() => syncState() === "initial" && cryptoState() !== "loading",
+	);
 
 	const openDeviceSettings = (): void => {
 		navigate("/settings/devices", {
@@ -108,7 +147,19 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	// Auto-redirect to login when session is expired
 	let cleaningUp = false;
 	createEffect(() => {
-		if (syncState() === "logged-out" && !cleaningUp) {
+		// `forcingLogout()` as well as the local flag: the escape below runs this
+		// same tail, and its own revoke is one of the requests whose 401 lands
+		// here. Two overlapping `clearCryptoStores` calls can block each other's
+		// `deleteDatabase` until the bound expires, which is the hazard the
+		// escape's single-flight guard exists for - and it has to hold across
+		// both entry points, not just one.
+		//
+		// The escape never gives the flag back, so this stays suppressed for the
+		// rest of the document's life. That is deliberate: it has taken ownership
+		// of the same tail this effect would run, and if it FAILS, re-running the
+		// tail that just failed is not the answer - its own failure screen, which
+		// renders ahead of every state arm below, is.
+		if (syncState() === "logged-out" && !cleaningUp && !forcingLogout()) {
 			cleaningUp = true;
 			// Tear down any active call surface so the controller unmounts
 			// and its onCleanup chain runs. The client is already stopped
@@ -140,8 +191,10 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// Single-flight, for the reason `Layout.handleLogout` documents: the wipe
 		// below is awaited before this screen goes away, and two overlapping
 		// `clearCryptoStores` calls can block each other's `deleteDatabase`
-		// indefinitely. The button is disabled to match.
-		if (forcingLogout()) return;
+		// indefinitely. The button is disabled to match. `cleaningUp` counts too:
+		// the expired-session effect above runs the same tail, and a 401 from
+		// this very logout is one of the ways it starts.
+		if (forcingLogout() || cleaningUp) return;
 		setForcingLogout(true);
 		try {
 			// A logout that ends in a reload keeps the guard set; this document
@@ -150,25 +203,73 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			if ((await runForceLogout()) === "reloading") return;
 		} catch (e) {
 			console.error("Force logout failed:", e);
+			// The guard STAYS set. The client is stopped by now, so there is no
+			// app to fall back into: releasing it would drop the switch below
+			// through to the full layout, against a stopped client and a
+			// `summaries` store the first sync never populated. Say so instead,
+			// and offer the one action left that is not destructive.
+			setLogoutFailed(true);
 		}
-		setForcingLogout(false);
 	};
 
 	const runForceLogout = async (): Promise<"reloading" | "left"> => {
-		// Drop the active-call signal BEFORE stopping the client so the
-		// mini-widget / overlay never points at a stopped session.
-		//
-		// Deliberately does NOT await the MatrixRTC withdrawal the way
-		// `Layout.handleLogout` does (#474): this is the escape hatch offered
-		// on a sync error, so the connection is already broken — that is why
-		// the user is reaching for it — and waiting on a write that cannot
-		// land would only wedge the way out. The membership expires on its
-		// own. Nothing is revoked here either; this stops the client rather
-		// than logging out, so the unmount's best-effort withdrawal may still
-		// get through if the network recovers.
-		setActiveCallRoomId(null);
 		closeNotificationSound();
-		client.stopClient();
+		// A call can be live behind either of these screens: `PersistentCallSurface`
+		// is a sibling of the switch below, so a sync error does not end one. The
+		// MatrixRTC withdrawal has to reach the server while this token still
+		// works (#474), and the revoke below is about to invalidate it - dropping
+		// the signal alone only SCHEDULES the withdrawal on unmount, which
+		// `logout(true)`'s `http.abort()` would then cancel, leaving the user a
+		// ghost participant until the membership expires.
+		//
+		// This escape used to skip the wait, on the grounds that waiting on a
+		// write that cannot land would wedge the way out. That reasoning survives
+		// as the bound, not as the skip: a stall is one endpoint hanging, not a
+		// server that is gone.
+		try {
+			await withTimeout(
+				endActiveCall(),
+				FORCE_LOGOUT_STEP_TIMEOUT_MS,
+				"Call withdrawal",
+			);
+		} catch (e) {
+			reportError(e, {
+				logLabel: "Could not end the call on the way out",
+			});
+		}
+		// `endActiveCall` clears the signal only for the room it tore down, and it
+		// is module-global: a call started during the teardown would otherwise
+		// outlive this session, and the mini-widget / overlay would point at a
+		// client that is about to stop.
+		setActiveCallRoomId(null);
+		// While the token is still valid, and before `finishAccountLogout` clears
+		// the account the preference is filed under (#534): the pusher can only
+		// be removed server-side by a credential that still works. Bounded and
+		// non-throwing in its own right.
+		await disableBackgroundNotifications(client, pushConfig);
+		try {
+			// Bounded, best-effort revoke. This escape used to skip revoking, on
+			// the grounds that the connection was already broken - but a stall is
+			// one endpoint hanging, not a server that is gone, so the revoke
+			// usually lands. Skipping it leaves precisely what #549 exists to
+			// prevent: a device still alive and push-capable on the homeserver
+			// with no UI left to reach it, told to the user as "signed out". What
+			// must not happen is the way out hanging on the very server that hung
+			// the boot, so the wait is capped and a failure just moves on.
+			await withTimeout(
+				client.logout(true),
+				FORCE_LOGOUT_STEP_TIMEOUT_MS,
+				"Force logout revoke",
+			);
+		} catch (e) {
+			reportError(e, {
+				logLabel: "Could not revoke this session on the way out",
+			});
+			// Idempotent, and normally already done: `logout(true)` stops the
+			// client and aborts its in-flight requests before it asks. This covers
+			// the case where it never got that far.
+			client.stopClient();
+		}
 		// finishAccountLogout owns the ordering: the (bounded) wipe finishes
 		// before anything navigates, so replacing the document cannot abort the
 		// delete. That is why this screen needs the single-flight guard above -
@@ -190,6 +291,48 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 	return (
 		<>
 			<Switch>
+				{/* FIRST, ahead of every state arm. Once the escape is running it
+				    owns the screen: the sync states it is invoked from do not
+				    reliably change (a sync error parked on its keep-alive emits
+				    nothing when the client stops, and a boot stalled on `/versions`
+				    never built a sync API to emit anything at all), so an arm placed
+				    below them would never be reached - and its failure state, the only
+				    way out left if the escape itself fails, would be unreachable with
+				    it. Placed here it also covers the state that DOES change: stopping
+				    a running sync reports `Stopped`, which matches no arm below, so
+				    the switch would otherwise fall through and mount the whole app -
+				    against a `summaries` store the first sync never populated - for as
+				    long as the wipe takes. */}
+				<Match when={forcingLogout()}>
+					<div class="flex h-full items-center justify-center bg-surface-0">
+						<div class="text-center">
+							<Show
+								when={logoutFailed()}
+								fallback={
+									<>
+										<div class="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+										<p class="text-text-muted">Logging out…</p>
+									</>
+								}
+							>
+								<p class="text-danger-text">Couldn't finish logging out</p>
+								{/* A reload is the only thing left that costs nothing: the
+								    client is stopped, so there is no session to return to, and
+								    a fresh document retries the whole boot. */}
+								<p class="mx-auto mt-1 max-w-xs text-sm text-text-disabled">
+									Reload the app and try again.
+								</p>
+								<button
+									type="button"
+									onClick={() => window.location.reload()}
+									class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+								>
+									Reload
+								</button>
+							</Show>
+						</div>
+					</div>
+				</Match>
 				<Match when={syncState() === "initial"}>
 					<div class="flex h-full items-center justify-center bg-surface-0">
 						<div class="text-center">
@@ -199,6 +342,22 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 									? "Initializing encryption…"
 									: "Syncing…"}
 							</p>
+							{/* Empty and already mounted, not created with its content: a
+							    live region does not announce what is inserted in the same
+							    flush that creates the region (#549). */}
+							<div aria-live="polite">
+								<Show when={bootStalled()}>
+									{/* Waiting first, and the cost of not waiting named: this
+									    control is offered 30 seconds into a boot that may only be
+									    slow, and it takes this device's encryption keys with it. */}
+									<p class="mx-auto mt-4 max-w-xs text-sm text-text-disabled">
+										This is taking longer than usual. You can keep waiting.
+										Logging out signs this device out and clears its encryption
+										keys.
+									</p>
+									<ForceLogoutButton onLogOut={handleForceLogout} />
+								</Show>
+							</div>
 						</div>
 					</div>
 				</Match>
@@ -209,14 +368,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 							<p class="mt-1 text-sm text-text-disabled">
 								Check your connection and try refreshing.
 							</p>
-							<button
-								type="button"
-								onClick={handleForceLogout}
-								disabled={forcingLogout()}
-								class="mt-4 rounded-lg bg-surface-3 px-4 py-2 text-sm text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus disabled:cursor-default disabled:opacity-60"
-							>
-								{forcingLogout() ? "Logging out…" : "Log out"}
-							</button>
+							<ForceLogoutButton onLogOut={handleForceLogout} />
 						</div>
 					</div>
 				</Match>

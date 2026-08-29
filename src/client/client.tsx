@@ -504,6 +504,32 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			// and additionally skip thread replies by shape (lib/threadEvents).
 			threadSupport: true,
 		});
+		// A stop that arrived while the client was still starting stopped
+		// nothing, and this is where that gets undone (#551). `startClient` sets
+		// `clientRunning` before it awaits `/versions` - an unbounded request -
+		// and never re-checks it, so a `stopClient()` in that window finds no
+		// sync API to stop and only clears the flag. This then resumes and builds
+		// a live sync API anyway, for an account the app has already left: the
+		// boot escape wipes that account's stores and clears its session, and a
+		// sync loop starts against it a `/versions` timeout later. Nothing can
+		// stop it afterwards either, because `stopClient` early-returns on the
+		// very flag that is now false. Putting the flag back is what lets the
+		// public stop path reach the sync API that was just built.
+		//
+		// This covers the other two stops that can land mid-start for the same
+		// reason: an unmount, and a session that logged out during the boot.
+		//
+		// It rests on `stopClient` being synchronous, which it is: the flag is
+		// true only within this statement pair, so nothing else can observe it.
+		// That matters because the caller's `clearStores` may be in flight, and
+		// it throws "Cannot clear stores while client is running" if it ever
+		// sampled the flag as true - aborting the account wipe on the very
+		// escape path this exists to serve.
+		if (!matrixClient.clientRunning) {
+			matrixClient.clientRunning = true;
+			matrixClient.stopClient();
+			return;
+		}
 		// startClient is async and awaits /versions before it builds the sync
 		// API, so the value published during provider setup - and anything
 		// asserted synchronously here - reaches `syncApi?.` while it is still
