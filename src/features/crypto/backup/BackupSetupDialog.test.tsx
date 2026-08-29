@@ -113,4 +113,98 @@ describe("BackupSetupDialog", () => {
 		// After saving the key, the user is routed to unlock — not a false done.
 		expect(screen.getByText("Unlock your key backup")).toBeTruthy();
 	});
+
+	it("drops the 4S cache when setup fails after the dialog is gone", async () => {
+		// ensureKeyBackup can cache a recovery key before it fails, and it can
+		// settle long after a logout or route change has unmounted the dialog.
+		// Clearing the cache touches no UI, so the drop must not sit behind
+		// the mount check (#564).
+		let failSetup: ((e: Error) => void) | undefined;
+		ensureKeyBackup.mockReturnValue(
+			new Promise((_resolve, reject) => {
+				failSetup = reject;
+			}),
+		);
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await vi.waitFor(() => expect(ensureKeyBackup).toHaveBeenCalled());
+
+		cleanup();
+		failSetup?.(new Error("network died"));
+		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
+	});
+
+	it("drops the 4S cache when an unlock is refused after the dialog is gone", async () => {
+		// A backup that stays inactive resolves `false` rather than throwing,
+		// so this is a separate site from the catch above.
+		ensureKeyBackup.mockResolvedValue({ outcome: "needs-restore" });
+		let finishActivate: ((activated: boolean) => void) | undefined;
+		activateExistingKeyBackup.mockReturnValue(
+			new Promise((resolve) => {
+				finishActivate = resolve;
+			}),
+		);
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await flush();
+		fireEvent.click(screen.getByText("Unlock backup"));
+		await vi.waitFor(() =>
+			expect(activateExistingKeyBackup).toHaveBeenCalled(),
+		);
+
+		cleanup();
+		finishActivate?.(false);
+		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
+	});
+
+	it("drops the 4S cache when an unlock throws after the dialog is gone", async () => {
+		ensureKeyBackup.mockResolvedValue({ outcome: "needs-restore" });
+		let failActivate: ((e: Error) => void) | undefined;
+		activateExistingKeyBackup.mockReturnValue(
+			new Promise((_resolve, reject) => {
+				failActivate = reject;
+			}),
+		);
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await flush();
+		fireEvent.click(screen.getByText("Unlock backup"));
+		await vi.waitFor(() =>
+			expect(activateExistingKeyBackup).toHaveBeenCalled(),
+		);
+
+		cleanup();
+		failActivate?.(new Error("network died"));
+		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
+	});
+
+	it("keeps the cache when an unlock succeeds after the dialog is gone", async () => {
+		// The mirror of the two cases above, and why the drop is keyed on the
+		// outcome rather than on the dialog being gone: an activated backup
+		// means the cached key is the working one.
+		ensureKeyBackup.mockResolvedValue({ outcome: "needs-restore" });
+		let finishActivate: ((activated: boolean) => void) | undefined;
+		activateExistingKeyBackup.mockReturnValue(
+			new Promise((resolve) => {
+				finishActivate = resolve;
+			}),
+		);
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await flush();
+		fireEvent.click(screen.getByText("Unlock backup"));
+		await vi.waitFor(() =>
+			expect(activateExistingKeyBackup).toHaveBeenCalled(),
+		);
+
+		cleanup();
+		finishActivate?.(true);
+		// Give the settled restore a macrotask to (wrongly) clear.
+		await flush();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+	});
 });
