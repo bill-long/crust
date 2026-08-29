@@ -104,7 +104,13 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 				if (e.target === e.currentTarget && !isBusy()) props.onClose();
 			}}
 			onKeyDown={(e) => {
-				if (e.key === "Escape" && !isBusy()) props.onClose();
+				if (e.key !== "Escape") return;
+				// Rendered inside SettingsOverlay, whose root also closes on a
+				// delegated Escape - without this the whole Settings modal
+				// would close too (and, while busy, close behind a running
+				// export/import).
+				e.stopPropagation();
+				if (!isBusy()) props.onClose();
 			}}
 		>
 			<Switch>

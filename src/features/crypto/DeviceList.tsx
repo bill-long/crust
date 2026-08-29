@@ -2,15 +2,29 @@ import { CryptoEvent } from "matrix-js-sdk/lib/crypto-api";
 import {
 	type Component,
 	createResource,
+	createSignal,
 	For,
 	Match,
 	onCleanup,
 	Show,
 	Switch,
 } from "solid-js";
+import {
+	ACCOUNT_MANAGEMENT_ACTIONS,
+	type AccountManagement,
+	accountManagementDeeplink,
+	fetchAccountManagement,
+} from "../../client/accountManagement";
 import { useClient } from "../../client/client";
 import { fetchDeviceVerification } from "../../lib/deviceVerification";
-import { type DeviceInfo, DeviceItem } from "./DeviceItem";
+import { loadSession } from "../../stores/session";
+import {
+	type DeviceInfo,
+	DeviceItem,
+	deviceLabel,
+	SIGN_OUT_ATTR,
+} from "./DeviceItem";
+import { SignOutDeviceDialog } from "./SignOutDeviceDialog";
 
 interface DeviceListProps {
 	onVerifyDevice?: (deviceId: string) => void;
@@ -78,6 +92,80 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 		});
 	};
 
+	// --- Signing another session out (#556) ---
+
+	// OIDC sessions can't complete classic UIA on the management routes -
+	// the server refuses them outright (#451), which is cinnyapp/cinny#2376.
+	// Their sign-out happens at the account portal instead. Session type
+	// can't change without a full re-login, so one read at mount is enough
+	// (same rule AccountTab applies to password/deactivate).
+	const viaPortal = loadSession()?.oidc !== undefined;
+
+	const [signOutTarget, setSignOutTarget] = createSignal<DeviceInfo | null>(
+		null,
+	);
+
+	// Fetched only once a sign-out is actually started: getAuthMetadata is a
+	// real round-trip with no SDK-side cache, and most visits to this tab
+	// never revoke anything. Cached for the life of the list so opening a
+	// second dialog costs nothing.
+	let managementRequest: Promise<AccountManagement | null> | null = null;
+
+	// Carries the device id it was resolved FOR: createResource keeps the
+	// previous value while refetching, so a dialog opened for a second
+	// device would otherwise render the first device's deeplink for a tick -
+	// and this link's whole job is to name one exact device.
+	const [portal] = createResource(signOutTarget, async (target: DeviceInfo) => {
+		managementRequest = managementRequest ?? fetchAccountManagement(client);
+		const mgmt = await managementRequest;
+		return {
+			deviceId: target.deviceId,
+			url:
+				mgmt &&
+				accountManagementDeeplink(
+					mgmt,
+					ACCOUNT_MANAGEMENT_ACTIONS.deviceDelete,
+					{ deviceId: target.deviceId },
+				),
+		};
+	});
+
+	// undefined while the lookup for THIS device is still in flight (which
+	// includes the window where the resource still holds the previous
+	// device's value), null/string once it has resolved for this one.
+	const portalUrlFor = (deviceId: string): string | null | undefined => {
+		const resolved = portal();
+		return resolved?.deviceId === deviceId ? resolved.url : undefined;
+	};
+
+	// Focus restoration, deliberately local rather than the shared
+	// setCryptoTriggerElement/restoreCryptoTriggerFocus pair. Two reasons:
+	// that pair captures document.activeElement, which is only the row's
+	// button if the click focused it; and on the SUCCESS path the row is
+	// gone (we just revoked it), where the helper can only no-op - leaving
+	// focus on <body>, and SettingsOverlay binds its Escape and Tab
+	// handling to its own root, so both silently stop working there.
+	//
+	// Look the row up by id instead, and fall back to the list when it has
+	// been revoked away, so the keyboard always stays inside the overlay.
+	let listEl!: HTMLDivElement;
+
+	const closeSignOut = (): void => {
+		const deviceId = signOutTarget()?.deviceId;
+		setSignOutTarget(null);
+		// Matched by reading the attribute rather than interpolating the id
+		// into a selector: device ids come from the server, so a selector
+		// would need CSS.escape - which is absent in some environments (the
+		// unit suite's jsdom among them) and would throw here, silently
+		// stranding focus on <body>, the exact failure this exists to stop.
+		const row = deviceId
+			? Array.from(
+					listEl.querySelectorAll<HTMLElement>(`[${SIGN_OUT_ATTR}]`),
+				).find((el) => el.getAttribute(SIGN_OUT_ATTR) === deviceId)
+			: undefined;
+		(row ?? listEl).focus();
+	};
+
 	const currentUserId = client.getUserId();
 
 	const onUserTrustChanged = (changedUserId: string): void => {
@@ -104,7 +192,9 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 	});
 
 	return (
-		<div class="space-y-2">
+		// tabIndex -1 so it can take focus when the row that opened the
+		// sign-out dialog is gone by the time the dialog closes.
+		<div class="space-y-2" ref={listEl} tabIndex={-1}>
 			<h3 class="text-sm font-medium text-text-secondary">Your devices</h3>
 			<Switch>
 				<Match when={devices.loading}>
@@ -121,7 +211,11 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 					<div class="space-y-1">
 						<For each={devices()}>
 							{(device) => (
-								<DeviceItem device={device} onVerify={props.onVerifyDevice} />
+								<DeviceItem
+									device={device}
+									onVerify={props.onVerifyDevice}
+									onSignOut={() => setSignOutTarget(device)}
+								/>
 							)}
 						</For>
 					</div>
@@ -132,6 +226,25 @@ const DeviceList: Component<DeviceListProps> = (props) => {
 					</Show>
 				</Match>
 			</Switch>
+
+			{/* Keyed so a different device always gets a fresh dialog: the
+			    dialog builds its UIA flow (and its device-pinned deeplink) at
+			    mount, and an unkeyed Show would swap the props underneath a
+			    flow still bound to the previous device. */}
+			<Show when={signOutTarget()} keyed>
+				{(target) => (
+					<SignOutDeviceDialog
+						deviceId={target.deviceId}
+						deviceName={deviceLabel(target)}
+						viaPortal={viaPortal}
+						portalUrl={portalUrlFor(target.deviceId)}
+						onClose={closeSignOut}
+						onSignedOut={() => {
+							void refetch();
+						}}
+					/>
+				)}
+			</Show>
 		</div>
 	);
 };

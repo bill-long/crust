@@ -15,6 +15,7 @@ function clientWithMetadata(metadata: unknown): MatrixClient {
 }
 
 const RESET = ACCOUNT_MANAGEMENT_ACTIONS.crossSigningReset;
+const DEVICE_DELETE = ACCOUNT_MANAGEMENT_ACTIONS.deviceDelete;
 
 describe("fetchAccountManagementUrl", () => {
 	it("deeplinks the action when the server advertises it", async () => {
@@ -83,5 +84,48 @@ describe("fetchAccountManagementUrl", () => {
 			account_management_actions_supported: [RESET],
 		});
 		await expect(fetchAccountManagementUrl(client, RESET)).resolves.toBeNull();
+	});
+
+	// #556: the device actions take a device_id alongside the action.
+	it("carries the device id when the device action is advertised", async () => {
+		const client = clientWithMetadata({
+			account_management_uri: "https://hs.example/account",
+			account_management_actions_supported: [DEVICE_DELETE],
+		});
+		await expect(
+			fetchAccountManagementUrl(client, DEVICE_DELETE, {
+				deviceId: "ABCDEF",
+			}),
+		).resolves.toBe(
+			"https://hs.example/account?action=org.matrix.device_delete&device_id=ABCDEF",
+		);
+	});
+
+	it("drops the device id when the action isn't advertised", async () => {
+		// The base URL targets no device, so a device_id riding along on it
+		// would be a parameter the page has no action to apply it to.
+		const client = clientWithMetadata({
+			account_management_uri: "https://hs.example/account",
+			account_management_actions_supported: ["org.matrix.profile"],
+		});
+		await expect(
+			fetchAccountManagementUrl(client, DEVICE_DELETE, {
+				deviceId: "ABCDEF",
+			}),
+		).resolves.toBe("https://hs.example/account");
+	});
+
+	it("percent-encodes a device id with URL-significant characters", async () => {
+		const client = clientWithMetadata({
+			account_management_uri: "https://hs.example/account",
+			account_management_actions_supported: [DEVICE_DELETE],
+		});
+		await expect(
+			fetchAccountManagementUrl(client, DEVICE_DELETE, {
+				deviceId: "a&b=c d",
+			}),
+		).resolves.toBe(
+			"https://hs.example/account?action=org.matrix.device_delete&device_id=a%26b%3Dc+d",
+		);
 	});
 });
