@@ -160,9 +160,19 @@ export async function restartForUpdate(): Promise<void> {
 	// for the webview), so it belongs in the shell's exit path rather than here;
 	// tracked separately.
 	//
-	// Not wrapped: endCall swallows its own failures and timeouts and documents
-	// that it never rejects, so a catch here could not fire.
-	await endActiveCall();
+	// Wrapped, like every other caller: `endCall` swallows its own failures and
+	// timeouts, but it writes `activeCallRoomId` outside them and a Solid setter
+	// runs its subscribers synchronously, so a throwing subscriber surfaces here
+	// (#551). Unguarded it would abort the restart before `restart_for_update`,
+	// leaving the watchdog armed and the button stuck restarting while nothing
+	// restarts.
+	try {
+		await endActiveCall();
+	} catch (e) {
+		reportError(e, {
+			logLabel: "Failed to end the call before restarting for an update",
+		});
+	}
 	// Nothing clears the flag on the success path: `restart_for_update` is
 	// `app.exit(0)`, which only REQUESTS the exit, so the promise resolves while
 	// the app is still tearing down. Clearing it there re-enabled the button

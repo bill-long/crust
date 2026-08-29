@@ -194,8 +194,21 @@ const [loggingOut, setLoggingOut] = createSignal(false);
  */
 const [accountBusy, setAccountBusy] = createSignal(false);
 
-/** True while ANY account transition is in flight. */
-const accountTransitionInFlight = (): boolean => loggingOut() || accountBusy();
+/**
+ * True while ANY account transition is in flight.
+ *
+ * Exported because the expired-session cleanup in `App.tsx` has to stand down
+ * for it: a logout revokes the token and then keeps making authed requests
+ * (`finishAccountLogout`'s second push release, a background refresh), whose
+ * 401 flips `syncState` to "logged-out" while this logout is still running. The
+ * cleanup would then start a SECOND `finishAccountLogout` and a second
+ * `clearCryptoStores` over the first, and two `deleteDatabase` calls on one
+ * store block each other until the bound expires. Module scope is what makes it
+ * usable there - the guard has to outlive the component, which the `logged-out`
+ * arm is about to unmount.
+ */
+export const accountTransitionInFlight = (): boolean =>
+	loggingOut() || accountBusy();
 
 const Layout: Component = () => {
 	const clientCtx = useClient();
@@ -471,14 +484,27 @@ const Layout: Component = () => {
 		// still valid, exactly as for a room leave (#474). Dropping the
 		// signal alone only *schedules* the withdrawal, which then races
 		// `client.logout()` and 401s whenever it loses.
-		await endActiveCall();
+		//
+		// Caught for the reason `app/forceLogout.ts` documents: a teardown that
+		// has already ended the user's call must not then abort the logout they
+		// asked for and leave them signed in.
+		try {
+			await endActiveCall();
+		} catch (e) {
+			reportError(e, { logLabel: "Failed to end the call before logging out" });
+		}
 		// Restore the unconditional guarantee the plain `setActiveCallRoomId`
 		// used to give: `endActiveCall` clears the signal only for
 		// the room it tore down, so a call started (or switched to) during
 		// the teardown would otherwise survive into the logged-out state and
 		// be picked up by the NEXT account to log in on this tab —
-		// `activeCallRoomId` is module-global and never reset on login.
-		setActiveCallRoomId(null);
+		// `activeCallRoomId` is module-global and never reset on login. Caught
+		// too: this write runs its Solid subscribers synchronously.
+		try {
+			setActiveCallRoomId(null);
+		} catch (e) {
+			reportError(e, { logLabel: "Failed to clear the active call on logout" });
+		}
 		// Forget the preference and hand this device's push registration back
 		// before the session is invalidated - while the token is still valid, so
 		// the pusher can actually be removed server-side and not just
@@ -486,12 +512,37 @@ const Layout: Component = () => {
 		// per-account (#532) and once the account is gone there is no key left to
 		// file the preference under. Every other account exit releases too (#534):
 		// the switch and the add-account detour in this file, and, through
-		// finishAccountLogout, both force-logout paths in App.tsx.
-		await disableBackgroundNotifications(client, pushConfig);
+		// finishAccountLogout, the escape hatch in `app/forceLogout.ts` and the
+		// expired-session effect in `App`.
+		//
+		// Caught like every other step in this teardown: it writes a Solid
+		// setting before its own release, and those subscribers run
+		// synchronously. A throw here would abort the logout before the revoke
+		// and leave the user signed in holding a token they asked to end.
+		try {
+			await disableBackgroundNotifications(client, pushConfig);
+		} catch (e) {
+			reportError(e, {
+				logLabel: "Failed to release background notifications on logout",
+			});
+		}
 		try {
 			await client.logout(true);
-		} catch {
-			client.stopClient();
+		} catch (e) {
+			reportError(e, {
+				logLabel: "Could not revoke this session while logging out",
+			});
+			// Guarded like the same recovery stop in `app/forceLogout.ts`: the
+			// likeliest reason to be here is that the stop inside `logout(true)`
+			// threw, which would throw again and take the wipe and the clear with
+			// it.
+			try {
+				client.stopClient();
+			} catch (stopError) {
+				reportError(stopError, {
+					logLabel: "Could not stop the client while logging out",
+				});
+			}
 		}
 		return await finishAccountLogout(
 			{ client, pushConfig },

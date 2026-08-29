@@ -71,8 +71,13 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  * would not help: the rejection path has already awaited one `rtc.leave()` that
  * failed, and a second attempt would only delay the leave the user asked for.
  *
- * Resolves (never rejects) once the call is torn down, or immediately when
- * `roomId` does not host the active call.
+ * Resolves once the call is torn down, or immediately when `roomId` does not
+ * host the active call. It rejects only through `setActiveCallRoomId`, which
+ * runs its Solid subscribers synchronously: the stale-signal branch below writes
+ * it outside the try, and the failure/timeout branch writes it from inside the
+ * catch, so a throwing subscriber on either surfaces at the call site. Every
+ * account-exit caller catches this for that reason; a teardown that has already
+ * ended the user's call must not then abort the exit it was for.
  */
 export async function endCallForRoomLeave(roomId: string): Promise<void> {
 	if (activeCallRoomId() !== roomId) return;
@@ -88,9 +93,16 @@ export async function endCallForRoomLeave(roomId: string): Promise<void> {
  * shell quitting to apply an update. See the module rationale above for why the
  * wait is what makes the withdrawal land.
  *
- * NOT for the forced-logout escape hatch on a sync error: there the connection
- * is already broken (which is why the user is reaching for it) and the client is
- * stopped rather than logged out, so waiting would only wedge the way out.
+ * The forced-logout escape hatch (`app/forceLogout.ts`) is one of those callers
+ * as of #551, having previously been the documented exception: it stopped the
+ * client rather than logging out, so there was no revoking request to lose the
+ * race to, and waiting looked like it could only wedge the way out. Both halves
+ * of that changed. It now revokes, so it has a revoking request like everyone
+ * else - and `logout(true)` aborts the client's in-flight requests before it
+ * asks, so an unawaited withdrawal is not merely likely to lose that race, it is
+ * cancelled outright. The wedge it worried about is answered by the bound above,
+ * which is this module's to own: a caller that adds a second, shorter one is
+ * back to stranding the membership.
  */
 export async function endActiveCall(): Promise<void> {
 	const roomId = activeCallRoomId();
