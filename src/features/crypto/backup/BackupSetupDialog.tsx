@@ -105,9 +105,14 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 				setStep("done");
 			}
 		} catch (e) {
+			// Every failed setup drops the cache, whether or not a key was
+			// cached before the failure: the cost of a needless drop is one
+			// re-prompt, not a loss. What matters here is that it runs ahead
+			// of the mount check - clearing touches no UI, and ensureKeyBackup
+			// can settle after a logout or route change unmounted us (#564).
+			clearSecretStorageCache();
 			if (disposed) return;
 			console.error("Key backup setup failed:", e);
-			clearSecretStorageCache();
 			setErrorMessage(
 				e instanceof Error ? e.message : "Setup failed. Please try again.",
 			);
@@ -128,6 +133,14 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 
 		try {
 			const activated = await activateExistingKeyBackup(crypto);
+			if (!activated) {
+				// Not a mistyped key - that is rejected by checkKey before it is
+				// ever cached. The backup key held in 4S doesn't match the
+				// server's current backup version, so the cached key can't
+				// unlock it and the next attempt should re-prompt. Ahead of the
+				// mount check: this can settle after the dialog is gone (#564).
+				clearSecretStorageCache();
+			}
 			if (disposed) return;
 
 			await cryptoStatus.refresh();
@@ -137,16 +150,18 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 				setRestorePending(false);
 				setStep("done");
 			} else {
-				clearSecretStorageCache();
 				setErrorMessage(
 					"Couldn't unlock the existing key backup. Check your recovery key and try again.",
 				);
 				setStep("restore-needed");
 			}
 		} catch (e) {
+			// Same as the unlock-failed branch, and ahead of the mount check
+			// for the same reason: a restore can settle after the dialog is
+			// gone, and clearing touches no UI (#564).
+			clearSecretStorageCache();
 			if (disposed) return;
 			console.error("Key backup restore failed:", e);
-			clearSecretStorageCache();
 			setErrorMessage(
 				e instanceof Error ? e.message : "Restore failed. Please try again.",
 			);

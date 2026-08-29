@@ -102,9 +102,17 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 				setStep("error");
 			}
 		} catch (e) {
+			// bootstrapSecretStorage caches the new key as it writes it, so a
+			// failure part-way through can leave a key for storage that was
+			// never finished. The drop stays unconditional on failure even
+			// though a late failure (getSecretStorageStatus) can discard a
+			// perfectly good new default key - that costs one re-prompt, and
+			// narrowing the window would need state this dialog doesn't keep.
+			// Ahead of the mount check: clearing touches no UI, and the reset
+			// can settle after the dialog is gone (#564).
+			clearSecretStorageCache();
 			if (disposed) return;
 			console.error("Recovery key reset failed:", e);
-			clearSecretStorageCache();
 			if (generatedKey?.encodedPrivateKey) {
 				// A new key was generated and may already be the account default;
 				// show it so the user can save it, flagged as incomplete.
