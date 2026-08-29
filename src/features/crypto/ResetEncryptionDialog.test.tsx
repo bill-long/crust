@@ -423,6 +423,52 @@ describe("ResetEncryptionDialog", () => {
 		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
 	});
 
+	it("drops the 4S cache when unmounted between the wipe and its replacement", async () => {
+		// resetEncryption has already deleted the backups and wiped secret
+		// storage; unmounting here returns before ensureKeyBackup mints a
+		// replacement, so a key cached for the wiped storage would survive
+		// an operation that settles as `ok` (#562).
+		let finishReset: (() => void) | undefined;
+		resetEncryption.mockReturnValue(
+			new Promise<void>((r) => {
+				finishReset = () => r();
+			}),
+		);
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+		await vi.waitFor(() => expect(resetEncryption).toHaveBeenCalled());
+
+		cleanup();
+		finishReset?.();
+		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
+		expect(ensureKeyBackup).not.toHaveBeenCalled();
+	});
+
+	it("keeps the cache when storage is re-established after the unmount", async () => {
+		// The mirror of the case above, and the reason the fix is not
+		// `|| uia.disposed()`: ensureKeyBackup finished, so the cached key is
+		// the NEW one the SDK just wrote. Dropping it would force a pointless
+		// recovery-key prompt on the next crypto operation.
+		let finishBackup: ((v: { outcome: string }) => void) | undefined;
+		resetEncryption.mockResolvedValue(undefined);
+		ensureKeyBackup.mockReturnValue(
+			new Promise((r) => {
+				finishBackup = r;
+			}),
+		);
+
+		render(() => <ResetEncryptionDialog onClose={() => {}} />);
+		fireEvent.click(screen.getByRole("button", { name: "Reset encryption" }));
+		await vi.waitFor(() => expect(ensureKeyBackup).toHaveBeenCalled());
+
+		cleanup();
+		finishBackup?.({ outcome: "reused" });
+		// Give the settled operation a macrotask to (wrongly) clear.
+		await new Promise((r) => setTimeout(r, 0));
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+	});
+
 	it("shows the curated fallback for raw platform exceptions", async () => {
 		// A WebCrypto DOMException carries browser jargon — the user gets the
 		// fallback, the console keeps the detail.

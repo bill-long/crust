@@ -109,12 +109,19 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		// decides the warning on the success path.
 		let generatedKey: GeneratedSecretStorageKey | undefined;
 		let needsRestore = false;
+		// True only while the account has no secret storage: the reset wiped
+		// it and its replacement has not been minted yet. Any key cached in
+		// that window is for storage that no longer exists. Tracked rather
+		// than derived from the outcome, because an unmount inside the window
+		// returns early and settles the operation as `ok` (#562).
+		let secretStorageGone = false;
 
 		const done = await uia.run(async () => {
 			// Rotate the identity, delete all server-side backups, wipe 4S,
 			// and create a fresh empty backup (SDK resetEncryption does all of
 			// this in one call).
 			await crypto.resetEncryption(uia.flow.uiaCallback);
+			secretStorageGone = true;
 			if (uia.disposed()) return;
 
 			// Re-establish secret storage under a fresh recovery key and
@@ -128,20 +135,19 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 				},
 				() => fetchServerKeyBackup(client),
 			);
+			// The SDK caches the new key as it writes it (cacheSecretStorageKey
+			// from bootstrapSecretStorage), so the cache is current again from
+			// here and a later unmount must NOT drop it.
+			secretStorageGone = false;
 			if (uia.disposed()) return;
 			needsRestore = result.outcome === "needs-restore";
 
 			await cryptoStatus.refresh();
 		});
-		if (done.status !== "ok") {
-			// The cached 4S key may be stale after any mid-reset failure -
-			// drop it even when the dialog is already gone. Not every such
-			// path reaches here: a reset that got past `resetEncryption` and
-			// then unmounted returns through the `ok` branch, so a key stays
-			// cached for the secret storage the reset already wiped. That is
-			// the behaviour this extraction preserved, not one it added -
-			// the early return inside the run body used to skip the `catch`
-			// the same way.
+		if (done.status !== "ok" || secretStorageGone) {
+			// The cached 4S key is stale after any mid-reset failure, and
+			// after an unmount that stopped the run between the teardown and
+			// its replacement - drop it even when the dialog is already gone.
 			clearSecretStorageCache();
 		}
 		if (uia.disposed()) return;
