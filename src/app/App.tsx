@@ -12,13 +12,11 @@ import {
 	Switch,
 } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
-import { clearCryptoStores, withTimeout } from "../client/cryptoRecovery";
+import { clearCryptoStores } from "../client/cryptoRecovery";
 import { NoticeToasts } from "../components/NoticeToasts";
 import { LoginGate } from "../features/auth/LoginGate";
 import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
-import { disableBackgroundNotifications } from "../features/notifications/accountPush";
-import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
@@ -28,6 +26,7 @@ import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
+import { runForceLogout } from "./forceLogout";
 import { Layout } from "./Layout";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
@@ -90,14 +89,6 @@ const AuthGuard: Component<RouteSectionProps> = (props) => {
 
 	return <ClientProvider session={session}>{props.children}</ClientProvider>;
 };
-
-/**
- * How long the escape waits for each thing it owes the server on the way out -
- * the MatrixRTC withdrawal, then the token revoke. Long enough for a server
- * that is merely stalled on one endpoint to answer, short enough that the way
- * out of a hang is never itself a hang.
- */
-const FORCE_LOGOUT_STEP_TIMEOUT_MS = 5_000;
 
 /**
  * The way out of a boot or a sync this app cannot finish: stop the client, wipe
@@ -191,18 +182,38 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 		// Single-flight, for the reason `Layout.handleLogout` documents: the wipe
 		// below is awaited before this screen goes away, and two overlapping
 		// `clearCryptoStores` calls can block each other's `deleteDatabase`
-		// indefinitely. The button is disabled to match. `cleaningUp` counts too:
-		// the expired-session effect above runs the same tail, and a 401 from
-		// this very logout is one of the ways it starts.
+		// indefinitely. A second CLICK cannot get here - the escape's own screen
+		// replaces the button the moment the flag is set - but a second entry
+		// can: `cleaningUp` counts too, because the expired-session effect above
+		// runs the same tail, and a 401 from this very logout is one of the ways
+		// it starts.
 		if (forcingLogout() || cleaningUp) return;
 		setForcingLogout(true);
 		try {
 			// A logout that ends in a reload keeps the guard set; this document
 			// keeps running until the replacement takes over, and a second click
 			// would start an overlapping `clearCryptoStores`.
-			if ((await runForceLogout()) === "reloading") return;
+			if (
+				(await runForceLogout({
+					client,
+					pushConfig,
+					session,
+					goToLogin: () => navigate("/login", { replace: true }),
+				})) === "reloading"
+			) {
+				return;
+			}
 		} catch (e) {
-			console.error("Force logout failed:", e);
+			// A narrow net on purpose, and not the only one. `runForceLogout`
+			// swallows each step's own failure - that is its contract, since no
+			// step may abort the ones that follow - so what reaches here is the
+			// residue: a throw from something expected not to throw. The other
+			// failure mode, a step that never finishes, is answered by that step's
+			// own bound rather than here, which is why every one of them has one.
+			//
+			// Console-only: the failure screen below is the user-visible surface,
+			// and a toast on top of it would be the second one (AGENTS.md).
+			reportError(e, { logLabel: "Force logout failed" });
 			// The guard STAYS set. The client is stopped by now, so there is no
 			// app to fall back into: releasing it would drop the switch below
 			// through to the full layout, against a stopped client and a
@@ -210,82 +221,6 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// and offer the one action left that is not destructive.
 			setLogoutFailed(true);
 		}
-	};
-
-	const runForceLogout = async (): Promise<"reloading" | "left"> => {
-		closeNotificationSound();
-		// A call can be live behind either of these screens: `PersistentCallSurface`
-		// is a sibling of the switch below, so a sync error does not end one. The
-		// MatrixRTC withdrawal has to reach the server while this token still
-		// works (#474), and the revoke below is about to invalidate it - dropping
-		// the signal alone only SCHEDULES the withdrawal on unmount, which
-		// `logout(true)`'s `http.abort()` would then cancel, leaving the user a
-		// ghost participant until the membership expires.
-		//
-		// This escape used to skip the wait, on the grounds that waiting on a
-		// write that cannot land would wedge the way out. That reasoning survives
-		// as the bound, not as the skip: a stall is one endpoint hanging, not a
-		// server that is gone.
-		try {
-			await withTimeout(
-				endActiveCall(),
-				FORCE_LOGOUT_STEP_TIMEOUT_MS,
-				"Call withdrawal",
-			);
-		} catch (e) {
-			reportError(e, {
-				logLabel: "Could not end the call on the way out",
-			});
-		}
-		// `endActiveCall` clears the signal only for the room it tore down, and it
-		// is module-global: a call started during the teardown would otherwise
-		// outlive this session, and the mini-widget / overlay would point at a
-		// client that is about to stop.
-		setActiveCallRoomId(null);
-		// While the token is still valid, and before `finishAccountLogout` clears
-		// the account the preference is filed under (#534): the pusher can only
-		// be removed server-side by a credential that still works. Bounded and
-		// non-throwing in its own right.
-		await disableBackgroundNotifications(client, pushConfig);
-		try {
-			// Bounded, best-effort revoke. This escape used to skip revoking, on
-			// the grounds that the connection was already broken - but a stall is
-			// one endpoint hanging, not a server that is gone, so the revoke
-			// usually lands. Skipping it leaves precisely what #549 exists to
-			// prevent: a device still alive and push-capable on the homeserver
-			// with no UI left to reach it, told to the user as "signed out". What
-			// must not happen is the way out hanging on the very server that hung
-			// the boot, so the wait is capped and a failure just moves on.
-			await withTimeout(
-				client.logout(true),
-				FORCE_LOGOUT_STEP_TIMEOUT_MS,
-				"Force logout revoke",
-			);
-		} catch (e) {
-			reportError(e, {
-				logLabel: "Could not revoke this session on the way out",
-			});
-			// Idempotent, and normally already done: `logout(true)` stops the
-			// client and aborts its in-flight requests before it asks. This covers
-			// the case where it never got that far.
-			client.stopClient();
-		}
-		// finishAccountLogout owns the ordering: the (bounded) wipe finishes
-		// before anything navigates, so replacing the document cannot abort the
-		// delete. That is why this screen needs the single-flight guard above -
-		// it stays on screen while the wipe runs.
-		return await finishAccountLogout(
-			{ client, pushConfig },
-			session.userId,
-			async () => {
-				try {
-					await clearCryptoStores(client, session);
-				} catch {
-					// best-effort
-				}
-			},
-			() => navigate("/login", { replace: true }),
-		);
 	};
 
 	return (

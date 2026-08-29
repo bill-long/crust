@@ -25,10 +25,16 @@ import { createEffect, createMemo, createSignal, onCleanup } from "solid-js";
  * Generous on purpose: Crust uses `MemoryStore`, so every load is a full
  * initial sync (#324) rather than an incremental one, and the control this
  * gates logs the account out - showing it during a boot that was merely slow
- * invites a user to throw away a session that was about to arrive. A healthy
- * initial sync is seconds even on a large account, so this only trips on a
- * server that has stopped answering, in the same spirit as
- * `CRYPTO_INIT_TIMEOUT_MS`.
+ * invites a user to throw away a session that was about to arrive.
+ *
+ * It does not remove that risk, and no wall-clock number can: a full initial
+ * sync for a large account on a slow link can outrun any threshold short enough
+ * to be useful to someone genuinely stuck, and the boot offers no progress
+ * signal to gate on instead - `syncState` goes from "initial" straight to
+ * "live", with nothing in between to observe. So the delay buys the common case
+ * and the copy carries the rest: it leads with waiting, and names what logging
+ * out costs, because the control is a deliberate click and not an automatic
+ * action.
  */
 export const BOOT_STALL_MS = 30_000;
 

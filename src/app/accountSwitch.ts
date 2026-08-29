@@ -122,8 +122,16 @@ export async function endSessionForAccountExit(
 	}
 	// `endActiveCall` clears the signal only for the room it tore down, and it is
 	// module-global, so a call started during the teardown would otherwise be
-	// inherited by the next account.
-	setActiveCallRoomId(null);
+	// inherited by the next account. Caught like the teardown above: this write
+	// runs its subscribers synchronously, and a throwing effect must not abort
+	// an exit that has already ended the user's call.
+	try {
+		setActiveCallRoomId(null);
+	} catch (e) {
+		reportError(e, {
+			logLabel: "Failed to clear the active call while leaving the account",
+		});
+	}
 	// Background notifications follow the active account, so the one being left
 	// gives the device's push registration back - a pusher left behind delivers
 	// ITS message previews onto a device that is about to be showing someone
@@ -268,13 +276,24 @@ export async function finishAccountLogout(
 	// Before anything else, because clearing the account takes away both the
 	// credentials the pusher removal needs and the key its preference is filed
 	// under (#532). This is the choke point every logout
-	// goes through - the one in `Layout`, and both force-logout paths in `App` -
+	// goes through - the one in `Layout`, the escape hatch in `app/forceLogout.ts`
+	// and the expired-session effect in `App` -
 	// so no exit can forget it (#534). The foreground logout releases earlier as
 	// well, while its token is still valid and the pusher can actually be removed
 	// server-side; if that got as far as unsubscribing, this second call finds no
 	// subscription and returns, and if it did not, this is the one that closes
 	// the leak.
-	await disableBackgroundNotifications(exit.client, exit.pushConfig);
+	//
+	// Caught, like every other step here: this is the tail EVERY logout goes
+	// through, and a throw at its first await would skip the wipe and the clear
+	// and leave the account on the device.
+	try {
+		await disableBackgroundNotifications(exit.client, exit.pushConfig);
+	} catch (e) {
+		reportError(e, {
+			logLabel: "Failed to release background notifications on logout",
+		});
+	}
 	try {
 		await withTimeout(wipe(), CRYPTO_INIT_TIMEOUT_MS, "Account store wipe");
 	} catch (e) {

@@ -519,12 +519,17 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// This covers the other two stops that can land mid-start for the same
 		// reason: an unmount, and a session that logged out during the boot.
 		//
-		// It rests on `stopClient` being synchronous, which it is: the flag is
-		// true only within this statement pair, so nothing else can observe it.
-		// That matters because the caller's `clearStores` may be in flight, and
-		// it throws "Cannot clear stores while client is running" if it ever
-		// sampled the flag as true - aborting the account wipe on the very
-		// escape path this exists to serve.
+		// The flag is restored for exactly one synchronous statement, but that is
+		// not the same as unobservable: `stopClient` emits as it goes (the sync
+		// API, MatrixRTC, the crypto backend), `onSync` writes `syncState`, and
+		// Solid runs subscribers synchronously - so app code does execute inside
+		// the window. What makes it safe is narrower and worth stating exactly:
+		// `clearStores` is the only thing that reads this flag and objects
+		// ("Cannot clear stores while client is running"), it throws
+		// SYNCHRONOUSLY, and every call site reaches it behind an await - so none
+		// can sample the flag from inside this window. A future effect that
+		// called it synchronously from one of those events would break that, and
+		// would show up as an aborted account wipe on the escape path (#551).
 		if (!matrixClient.clientRunning) {
 			matrixClient.clientRunning = true;
 			matrixClient.stopClient();
