@@ -41,6 +41,36 @@ export function stripControlChars(s: string): string {
 }
 
 /**
+ * Mandatory line breaks that are not C0 control characters.
+ *
+ * U+0085 NEL, U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are UAX #14
+ * class BK/NL - hard breaks in a browser, exactly like U+000A - but they sit
+ * above DEL, so {@link isControlCharCode} does not see them.
+ */
+const HARD_BREAK_CHARS = /[\u0085\u2028\u2029]/g;
+
+/** Whether a string contains a mandatory line break of any kind. */
+export function hasLineBreaker(s: string): boolean {
+	HARD_BREAK_CHARS.lastIndex = 0;
+	return hasControlChar(s) || HARD_BREAK_CHARS.test(s);
+}
+
+/**
+ * Remove everything that can force a line break: control characters, DEL, and
+ * the three hard breaks above DEL.
+ *
+ * The escape for single-line sinks that must keep the text rather than hide
+ * it - a plain-text export header, an OS notification title. Distinct from
+ * {@link stripControlChars}, which is the filename-shaped rule and stops at
+ * DEL: a filename with U+2028 in it is odd but harmless, whereas a heading
+ * with one in it silently becomes two lines, the second reading as its own
+ * claim.
+ */
+export function stripLineBreakers(s: string): string {
+	return stripControlChars(s).replace(HARD_BREAK_CHARS, "");
+}
+
+/**
  * Replace control characters with `replacement`.
  *
  * Dropping them outright is right for a filename, and wrong for prose: a
@@ -54,52 +84,6 @@ export function replaceControlChars(s: string, replacement: string): string {
 		out += isControlCharCode(s.charCodeAt(i)) ? replacement : s[i];
 	}
 	return out;
-}
-
-/**
- * Longest display name worth rendering.
- *
- * `displayname` is server-controlled and unbounded on the wire - Synapse caps
- * it at 256 characters, but a federated or self-hosted server need not - and
- * names are re-checked for every member on every membership or typing event.
- * Far past any name worth showing in a row that truncates anyway.
- */
-const MAX_NAME_LENGTH = 1024;
-
-/**
- * A display name to render, or `fallback` when the supplied one would corrupt
- * the line it is rendered on.
- *
- * Rejects wholesale rather than cleaning up, which is the rule the timeline
- * and the poll watcher already follow. Cleaning is not safe here:
- * `RoomMember.name` is disambiguated by the SDK against the *raw* displayname
- * map, so a member calling themselves `A<NUL>dmin` is not seen as a duplicate
- * of the real `Admin` and gets no user-ID suffix - and stripping the control
- * character would then render exactly `Admin`. Falling back to the user ID
- * fails closed.
- *
- * Trimmed before it is judged, because `String.trim` removes tab, newline and
- * friends, which are themselves control characters: testing first would
- * reject a pasted `"Ann Smith` + `\n"` outright and show the bare MXID for a
- * name that is perfectly good once trimmed. The impersonation case is about
- * *interior* characters and survives the reordering.
- *
- * This covers what corrupts *rendering*, and is not a general defence against
- * names that merely look alike - Cyrillic `A` is a different character that
- * renders identically, which no character filter resolves. Invisible and
- * bidirectional characters are a real gap here and are tracked separately;
- * this matches the policy already in the codebase rather than adding a
- * second one.
- */
-export function displayNameOr(
-	raw: string | null | undefined,
-	fallback: string,
-): string {
-	if (!raw) return fallback;
-	if (raw.length > MAX_NAME_LENGTH) return fallback;
-	const name = raw.trim();
-	if (!name) return fallback;
-	return hasControlChar(name) ? fallback : name;
 }
 
 export { isControlCharCode };

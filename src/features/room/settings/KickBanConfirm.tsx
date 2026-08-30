@@ -23,11 +23,27 @@ const KickBanConfirm: Component<{
 					: `Kick ${props.action()?.displayName}?`
 			}
 			body={
-				<p>
-					{props.action()?.kind === "ban"
-						? "They won't be able to rejoin unless unbanned."
-						: "They can rejoin if the room is public or someone re-invites them."}
-				</p>
+				<>
+					{/* The MXID, because this is the last screen before an
+					    irreversible moderation action and a display name is
+					    not an identity - the character policy cannot close
+					    impersonation, so the identifier has to be visible.
+					    In the body rather than the title: a title long enough
+					    to wrap would truncate the identifier, which defeats
+					    the point. Note the name in the title is a plain
+					    concatenated string, so a bidi embedding the policy
+					    left in it can still reorder the surrounding text -
+					    that gap is #575, and CSS cannot reach inside a
+					    string. */}
+					<p class="mb-2 font-mono text-xs text-text-muted">
+						{props.action()?.userId}
+					</p>
+					<p>
+						{props.action()?.kind === "ban"
+							? "They won't be able to rejoin unless unbanned."
+							: "They can rejoin if the room is public or someone re-invites them."}
+					</p>
+				</>
 			}
 			confirmLabel={props.action()?.kind === "ban" ? "Ban" : "Kick"}
 			destructive

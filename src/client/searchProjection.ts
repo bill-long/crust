@@ -1,4 +1,5 @@
 import type { MatrixEvent, Room } from "matrix-js-sdk";
+import { displayNameOr } from "../lib/displayName";
 import { TEXT_MSGTYPES } from "../lib/msgtypes";
 import type { SearchHit } from "../lib/searchHit";
 import { threadJumpTarget } from "../lib/threadEvents";
@@ -40,7 +41,7 @@ export function projectEvent(
 	return {
 		eventId: id,
 		sender,
-		senderName: member?.name ?? sender,
+		senderName: displayNameOr(member?.name, sender),
 		timestamp: ev.getTs?.() ?? 0,
 		body,
 		threadRootId,

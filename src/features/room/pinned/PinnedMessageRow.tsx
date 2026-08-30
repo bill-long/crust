@@ -14,6 +14,7 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { displayNameOr } from "../../../lib/displayName";
 import { reportError } from "../../../lib/reportError";
 import { threadJumpTarget } from "../../../lib/threadEvents";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -69,7 +70,7 @@ function projectEvent(room: Room, ev: MatrixEvent): ResolvedPinnedEvent {
 	return {
 		event: ev,
 		sender,
-		senderName: member?.name ?? sender,
+		senderName: displayNameOr(member?.name, sender),
 		timestamp: ev.getTs?.() ?? 0,
 		body,
 		format,

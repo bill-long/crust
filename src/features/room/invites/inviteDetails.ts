@@ -1,4 +1,5 @@
 import type { Room } from "matrix-js-sdk";
+import { displayNameOr } from "../../../lib/displayName";
 
 /** Display data for a pending invite, derived from the invited user's own
  *  m.room.member event (delivered in the invite's stripped state). */
@@ -27,7 +28,7 @@ export function getInviteDetails(room: Room, myUserId: string): InviteDetails {
 			? content.reason
 			: null;
 	const inviterName = inviterId
-		? (room.getMember(inviterId)?.name ?? inviterId)
+		? displayNameOr(room.getMember(inviterId)?.name, inviterId)
 		: null;
 	return {
 		inviterId,

@@ -9,8 +9,8 @@ import {
 	type Room,
 } from "matrix-js-sdk";
 import { avatarHttpUrl } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 import { threadJumpTarget } from "../../../lib/threadEvents";
-import { hasControlChar } from "../timeline/timelineHelpers";
 import { type EventInfo, parseEventBlock } from "./eventBlock";
 import {
 	PollEndEvent,
@@ -204,19 +204,24 @@ export function createPollWatcher(
 			: !entry.fetchFailed;
 		// Resolve voter ids to display names/avatars from the watched room's
 		// membership (the watcher is the SDK seam; the snapshot stays plain
-		// data). Same name policy as the reaction aggregation: trimmed
-		// display name, control chars rejected, user id as fallback; wire
-		// names are additionally length-capped so a 10-name tooltip label
-		// stays bounded. Results are cached per voter (see
-		// WatchedPoll.voterCache) so a recompute is tally + sort only.
+		// data). One shared policy with every other name surface, via
+		// `displayNameOr`, plus a cap so a 10-name tooltip label stays
+		// bounded. Results are cached per voter (see WatchedPoll.voterCache)
+		// so a recompute is tally + sort only.
 		const resolveVoter = (userId: string): PollVoter => {
 			const cached = entry.voterCache.get(userId);
 			if (cached) return cached;
 			const member = watchedRoom?.getMember(userId);
-			const rawName = member?.name?.trim().slice(0, MAX_VOTER_NAME_LENGTH);
+			// Falls back rather than slicing. `calculateDisplayName` appends its
+			// `(@user:server)` to the END of a name, so truncating cut off exactly
+			// the signal that exposes an impersonation attempt: `Admin` plus 95
+			// zero-width spaces collides with the real Admin under the SDK's
+			// normalization, earns the suffix, and sliced back to a bare `Admin`
+			// in this tooltip.
+			const resolved = displayNameOr(member?.name, userId);
 			const voter: PollVoter = {
 				userId,
-				name: rawName && !hasControlChar(rawName) ? rawName : userId,
+				name: resolved.length <= MAX_VOTER_NAME_LENGTH ? resolved : userId,
 				avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl(), 32),
 			};
 			entry.voterCache.set(userId, voter);

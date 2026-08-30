@@ -1,6 +1,7 @@
 import type { MatrixClient, RoomMember } from "matrix-js-sdk";
 import { type Accessor, createMemo, createSignal } from "solid-js";
 import { createPicker } from "../../../components/picker/Picker";
+import { displayNameOr } from "../../../lib/displayName";
 import { stripCodeRegions } from "../../../lib/extractUrls";
 import type { Mention } from "../../../lib/markdown";
 
@@ -129,7 +130,11 @@ export function useMentions(deps: UseMentionsDeps) {
 				? roomMembers()
 				: roomMembers().filter(
 						(m) =>
-							(m.name ?? "").toLowerCase().includes(lowerQ) ||
+							// Match what the row SHOWS, not the raw name: the picker
+							// renders `displayNameOr(...)`, so filtering on the raw
+							// value made a row with a stripped direction override
+							// vanish as the user typed the characters they could see.
+							displayNameOr(m.name, m.userId).toLowerCase().includes(lowerQ) ||
 							m.userId.toLowerCase().includes(lowerQ),
 					);
 		if ("room".startsWith(lowerQ) && canRoomMention()) {
@@ -192,8 +197,12 @@ export function useMentions(deps: UseMentionsDeps) {
 	 *  never collide with the @room everyone-mention token (both
 	 *  reconcilers would match the same "@room" text and double-emit). */
 	function insertableName(rawName: string, userId: string): string {
-		const trimmed = rawName.trim() || userId;
-		const name = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+		// Through the policy first: this string is spliced into the message
+		// body, so a newline would split the body and `reconcileMentions`
+		// could no longer match the token - the mention would send unpilled,
+		// with no push for the person named.
+		const resolved = displayNameOr(rawName, userId);
+		const name = resolved.startsWith("@") ? resolved.slice(1) : resolved;
 		return name === "room" ? userId.replace(/^@/, "") : name;
 	}
 

@@ -5,6 +5,8 @@
  * src/features/room/useNotifications.ts.
  */
 
+import { stripLineBreakers } from "../../lib/controlChars";
+import { displayNameOr } from "../../lib/displayName";
 import { isPollStartType, pollNotificationBody } from "../../lib/pollCopy";
 import { isVoiceMessageContent } from "../../lib/voiceMessage";
 
@@ -27,9 +29,27 @@ export interface PushPayload {
 
 /** Trim a push-payload field, tolerating non-string values: the payload is
  *  user-influenced JSON, so a non-string (number, object, …) must not reach
- *  `.trim()` (which would throw). Returns "" for any non-string. */
+ *  `.trim()` (which would throw). Returns "" for any non-string.
+ *
+ *  For identifiers - `room_id`, `event_id` in the service worker - where
+ *  surrounding whitespace is never meaningful. Names use {@link stringField}
+ *  instead, because trimming them early defeats a length bound measured on
+ *  the raw string. */
 export function trimmedField(value: unknown): string {
 	return typeof value === "string" ? value.trim() : "";
+}
+
+/** A push-payload field as a string, tolerating non-string values: the
+ *  payload is user-influenced JSON, so a number or object must not reach
+ *  `displayNameOr` (or `.trim()`, which would throw). Returns "" for any
+ *  non-string.
+ *
+ *  Deliberately does NOT trim. `displayNameOr` tests its length bound against
+ *  the RAW string before trimming, so pre-trimming would let a name behind
+ *  2000 spaces past a bound the member list applies - the same user rendering
+ *  two ways in two surfaces, which is the whole point of one policy. */
+export function stringField(value: unknown): string {
+	return typeof value === "string" ? value : "";
 }
 
 /** Describe an event's content for a notification. `isText` distinguishes a
@@ -83,12 +103,28 @@ export function buildNotificationCopy(payload: PushPayload): {
 	title: string;
 	body: string;
 } {
+	// `sender_display_name` is homeserver/Sygnal-supplied and no `RoomMember`
+	// has normalized it - and this renders in an OS notification, outside the
+	// page, where nothing can contain a stray formatting character. The
+	// `trimmedField` guard stays in front: the payload is untyped JSON, so a
+	// non-string must not reach the policy.
+	// Every field here is from the same untrusted payload, so all of them go
+	// through the policy - wrapping only `sender_display_name` would just move
+	// the character one field over, and a homeserver that controls one
+	// controls all three.
 	const sender =
-		trimmedField(payload.sender_display_name) ||
-		trimmedField(payload.sender) ||
+		displayNameOr(stringField(payload.sender_display_name), "") ||
+		displayNameOr(stringField(payload.sender), "") ||
 		"Someone";
+	// Room names are escaped at the sink, not run through the display-name
+	// policy - the same choice `summaries` and `useNotifications` make, and
+	// for the same reason: applying a person-name policy (its length bound
+	// included) to a room name would show the same room under two names in
+	// two places. Sygnal does derive this from the peer's member name for an
+	// unnamed DM, which is why it needs escaping at all.
 	const room =
-		trimmedField(payload.room_name) || trimmedField(payload.room_alias);
+		stripLineBreakers(stringField(payload.room_name)).trim() ||
+		stripLineBreakers(stringField(payload.room_alias)).trim();
 	const { isText, text } = describeContent(payload);
 	const inRoom = room !== "" && room !== sender;
 	// Thread framing matches the in-app copy (notificationCopy.ts) so the two

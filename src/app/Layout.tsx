@@ -66,6 +66,7 @@ import { useGlobalMicHotkey } from "../features/voice/useGlobalMicHotkey";
 import { useNativeMicHotkey } from "../features/voice/useNativeMicHotkey";
 import { avatarHttpUrl, avatarInitial } from "../lib/avatar";
 import { cryptoActionLabel, deriveCryptoAction } from "../lib/cryptoAction";
+import { displayNameOr } from "../lib/displayName";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { reportError } from "../lib/reportError";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
@@ -600,11 +601,12 @@ const Layout: Component = () => {
 	});
 
 	const displayName = () => {
-		const name = profileName();
-		if (name?.trim()) return name.trim();
+		// `User.displayName` is raw profile data - no RoomMember normalizes
+		// it. The fallback stays the localpart rather than the full MXID:
+		// this is your own account, and the localpart is the established copy.
 		const uid = userId();
 		const localpart = uid.split(":")[0]?.replace("@", "").trim();
-		return localpart || uid || "User";
+		return displayNameOr(profileName(), localpart || uid || "User");
 	};
 	const initial = () => avatarInitial(displayName());
 
@@ -619,11 +621,13 @@ const Layout: Component = () => {
 			const isActive = account.userId === userId();
 			const name = isActive
 				? displayName()
-				: // `||`, not `??`: a stored name that trims to empty is no name at
-					// all, and would render a blank row with a "?" avatar.
-					account.displayName?.trim() ||
-					account.userId.split(":")[0]?.replace("@", "").trim() ||
-					account.userId;
+				: // Persisted from a previous session's profile fetch, so just as
+					// server-controlled as any other name and never normalized.
+					displayNameOr(
+						account.displayName,
+						account.userId.split(":")[0]?.replace("@", "").trim() ||
+							account.userId,
+					);
 			return {
 				userId: account.userId,
 				displayName: name,

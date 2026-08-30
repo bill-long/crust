@@ -10,6 +10,8 @@ import {
 import { onCleanup } from "solid-js";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
+import { stripLineBreakers } from "../../lib/controlChars";
+import { displayNameOr } from "../../lib/displayName";
 import {
 	type CanNotifyInput,
 	computeCanNotify,
@@ -122,19 +124,28 @@ export function useNotifications(
 
 	function buildBody(event: MatrixEvent, room: Room): string {
 		const senderId = event.getSender();
-		const memberName = senderId
-			? room.getMember(senderId)?.name?.trim()
-			: undefined;
-		const sender = memberName || senderId || "Someone";
+		const sender = senderId
+			? displayNameOr(room.getMember(senderId)?.name, senderId)
+			: "Someone";
 		return buildNotificationBody(event, sender);
 	}
 
 	function showNotification(event: MatrixEvent, room: Room): boolean {
 		try {
-			const notif = new Notification(room.name?.trim() || "Room", {
-				body: buildBody(event, room),
-				tag: room.roomId,
-			});
+			// Escaped at the sink, not run through the display-name policy -
+			// same choice as the export, and for the same reason: `room.name`
+			// is a room name, and applying a name policy (including its length
+			// bound) here would show a long room under two different names in
+			// two panels. Stripping is what an OS title actually needs, since
+			// for an unnamed DM the SDK derives this from the peer's member
+			// name and does not remove C0.
+			const notif = new Notification(
+				stripLineBreakers(room.name ?? "").trim() || "Room",
+				{
+					body: buildBody(event, room),
+					tag: room.roomId,
+				},
+			);
 
 			activeNotifications.add(notif);
 			notif.onclose = () => activeNotifications.delete(notif);

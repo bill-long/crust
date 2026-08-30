@@ -9,6 +9,7 @@ import {
 	isControlCharCode,
 	stripControlChars,
 } from "../../../lib/controlChars";
+import { displayNameOr } from "../../../lib/displayName";
 import { pollPreviewText } from "../../../lib/pollCopy";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import { isVoiceMessageContent } from "../../../lib/voiceMessage";
@@ -29,15 +30,10 @@ export function senderProfileFields(
 	senderId: string,
 ): { name: string; avatarUrl: string | null } {
 	return {
-		name: member?.name ?? senderId,
+		name: displayNameOr(member?.name, senderId),
 		avatarUrl: avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48),
 	};
 }
-
-// The control-character policy lives in lib/controlChars: the timeline, the
-// poll watcher, presence status messages and the login return-to path all key
-// off the same predicate, so it cannot drift between them.
-export { hasControlChar } from "../../../lib/controlChars";
 
 // Sanitize multi-line user text (an image caption) for display: normalize
 // CRLF/CR to LF and keep newlines (the caption renders with `whitespace-pre-wrap`)

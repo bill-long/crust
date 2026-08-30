@@ -285,6 +285,125 @@ describe("stateNotice", () => {
 			expect(setAvatar?.text).toBe("Bob set their avatar");
 		});
 
+		it("does not announce a change the reader cannot see", () => {
+			// Removing a direction override changes the raw value but not the
+			// rendered one. Compared on raw, this produced "AnnSmith changed
+			// their name to AnnSmith" - a notice about nothing.
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: { membership: "join", displayname: "AnnSmith" },
+					prevContent: {
+						membership: "join",
+						displayname: `Ann${String.fromCharCode(0x202e)}Smith`,
+					},
+				}),
+				makeRoom(),
+			);
+			// Suppressed entirely, which is the right outcome: with nothing
+			// else changed on the event there is no notice to render.
+			expect(notice).toBeNull();
+		});
+
+		it("stays silent when a whitespace-only name replaces no name", () => {
+			// Both sides resolve to nothing, so there is no visible change -
+			// the escape hatch compares trimmed raws precisely so this does
+			// not announce.
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: { membership: "join", displayname: "   " },
+					prevContent: { membership: "join" },
+				}),
+				makeRoom(),
+			);
+			expect(notice).toBeNull();
+		});
+
+		it("calls a first unusable name 'set', not 'changed'", () => {
+			// With no previous name there is nothing to have changed from, and
+			// the sibling branches already make that distinction.
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: {
+						membership: "join",
+						displayname: `Rob${String.fromCharCode(0x0000)}ert`,
+					},
+					prevContent: { membership: "join" },
+				}),
+				makeRoom(),
+			);
+			expect(notice?.text).toBe("@bob:test set their display name");
+		});
+
+		it("applies the length bound to the untrimmed wire value", () => {
+			// Pre-trimming here let a padded name past a bound the member list
+			// applies, so the same user rendered two ways in two panels.
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: {
+						membership: "join",
+						displayname: `${" ".repeat(2000)}Ann`,
+					},
+					prevContent: { membership: "join", displayname: "Bob" },
+				}),
+				makeRoom(),
+			);
+			// Named by the name everyone knows them by. The rule is never to
+			// QUOTE an unusable name; using the old one as the actor does not.
+			expect(notice?.text).toBe("Bob changed their display name");
+		});
+
+		it("never quotes an unusable new name back", () => {
+			// There is no honest MXID substitution here: rendering "Bob
+			// changed their name to @mallory:evil" would assert something
+			// false. The change is still detected on the raw values, so the
+			// notice appears - it just carries no quoted value.
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: {
+						membership: "join",
+						displayname: `Rob${String.fromCharCode(0x0000)}ert`,
+					},
+					prevContent: { membership: "join", displayname: "Bob" },
+				}),
+				makeRoom(),
+			);
+			// Named by the name everyone knows them by. The rule is never to
+			// QUOTE an unusable name; using the old one as the actor does not.
+			expect(notice?.text).toBe("Bob changed their display name");
+		});
+
+		it("falls back for an unusable OLD name rather than dropping the notice", () => {
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: { membership: "join", displayname: "Robert" },
+					prevContent: {
+						membership: "join",
+						displayname: String.fromCharCode(0x3164).repeat(2),
+					},
+				}),
+				makeRoom(),
+			);
+			expect(notice?.text).toBe("@bob:test set their display name to Robert");
+		});
+
 		it("uses the matrix ID when first setting a display name (avoids 'Robert set their display name to Robert')", () => {
 			const setName = buildStateNotice(
 				makeEvent({

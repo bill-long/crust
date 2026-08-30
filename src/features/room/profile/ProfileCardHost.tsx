@@ -13,6 +13,7 @@ import { useClient } from "../../../client/client";
 import { presenceOf } from "../../../client/presence";
 import { Avatar } from "../../../components/Avatar";
 import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { reportError } from "../../../lib/reportError";
 import { requestMention } from "../../../stores/composerIntents";
@@ -148,9 +149,12 @@ const ProfileCardPopover: Component<{
 	);
 
 	const displayName = createMemo(() => {
+		// Both branches, not just the member one: a fetched profile is raw
+		// wire data for someone who is not in the room - the stranger case
+		// this card exists to help judge.
 		const m = member();
-		if (m?.name?.trim()) return m.name.trim();
-		return fetchedProfile()?.displayname?.trim() || req.userId;
+		if (m) return displayNameOr(m.name, req.userId);
+		return displayNameOr(fetchedProfile()?.displayname, req.userId);
 	});
 	const avatarUrl = createMemo(() => {
 		const mxc = member()?.getMxcAvatarUrl() ?? fetchedProfile()?.avatar_url;

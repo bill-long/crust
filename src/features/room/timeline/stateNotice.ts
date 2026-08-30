@@ -4,6 +4,7 @@ import {
 	callMembershipExpiresAt,
 } from "../../../client/summaries";
 import { avatarHttpUrl } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 import { roomTopicText } from "../../../lib/roomTopic";
 
 /**
@@ -91,8 +92,7 @@ export function isStateNoticeType(type: string): boolean {
  */
 export function noticeActorName(event: MatrixEvent, room: Room): string {
 	const sender = event.getSender() ?? "";
-	const name = room.getMember(sender)?.name?.trim();
-	return name && name.length > 0 ? name : sender;
+	return displayNameOr(room.getMember(sender)?.name, sender);
 }
 
 const actorName = noticeActorName;
@@ -111,16 +111,20 @@ function memberSubjectName(
 	content: Record<string, unknown>,
 	prevContent: Record<string, unknown>,
 ): string {
+	// Every candidate goes through the policy, not just the last: the first
+	// two are raw `displayname` off the wire, which no `RoomMember` has
+	// normalized.
 	const fromContent =
-		typeof content.displayname === "string" && content.displayname.trim();
-	if (fromContent) return fromContent;
+		typeof content.displayname === "string" ? content.displayname : null;
+	const resolvedContent = displayNameOr(fromContent, "");
+	if (resolvedContent) return resolvedContent;
 	const fromPrev =
-		typeof prevContent.displayname === "string" &&
-		prevContent.displayname.trim();
-	if (fromPrev) return fromPrev;
-	const member = room.getMember(stateKey)?.name?.trim();
-	if (member && member.length > 0) return member;
-	return stateKey;
+		typeof prevContent.displayname === "string"
+			? prevContent.displayname
+			: null;
+	const resolvedPrev = displayNameOr(fromPrev, "");
+	if (resolvedPrev) return resolvedPrev;
+	return displayNameOr(room.getMember(stateKey)?.name, stateKey);
 }
 
 function getPrevContent(event: MatrixEvent): Record<string, unknown> {
@@ -451,31 +455,80 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 
 	// Profile-only update (display name or avatar change) while joined.
 	if (membership === "join" && prevMembership === "join") {
-		const oldName =
-			typeof prev.displayname === "string" ? prev.displayname.trim() : "";
-		const newName =
-			typeof content.displayname === "string" ? content.displayname.trim() : "";
-		if (oldName !== newName) {
-			if (oldName && newName) {
+		// Untrimmed: `displayNameOr` tests its length bound against the RAW
+		// string before trimming, so pre-trimming here would let a name behind
+		// 2000 spaces past a bound the member list applies - the same user
+		// rendering two ways in two panels.
+		const oldRaw = typeof prev.displayname === "string" ? prev.displayname : "";
+		const newRaw =
+			typeof content.displayname === "string" ? content.displayname : "";
+		// Compared on the RESOLVED values, not the raw ones. Comparing raw
+		// meant that merely removing a direction override counted as a change
+		// and rendered "AnnSmith changed their name to AnnSmith" - a notice
+		// about nothing the reader can see.
+		const oldShown = displayNameOr(oldRaw, "");
+		const newShown = displayNameOr(newRaw, "");
+		// The escape hatch compares TRIMMED raws, so a transition between two
+		// unusable names still announces, while one from absent to
+		// whitespace-only - which renders identically either way - does not.
+		// Untrimmed, "" to "   " emitted "set their display name" for a change
+		// nobody can see, which is what comparing resolved values was meant to
+		// stop.
+		if (
+			oldShown !== newShown ||
+			(!oldShown && !newShown && oldRaw.trim() !== newRaw.trim())
+		) {
+			// Nothing unusable is ever quoted back as if it were a name: there
+			// is no honest MXID substitution here, since rendering "Ann
+			// changed their name to @mallory:evil" would assert something
+			// false.
+			// `newRaw.trim()`, not `newRaw`: a whitespace-only new name is a
+			// removal, and testing the untrimmed value routed it here and
+			// announced "changed their display name" for someone who had
+			// cleared theirs - leaving the removal wording below unreachable.
+			if (newRaw.trim() && !newShown) {
+				// Distinguish set from changed the way the sibling branches do:
+				// with no previous name this is a first one, and calling it a
+				// change describes something that never happened.
 				return {
-					text: `${oldName} changed their name to ${newName}`,
+					// On oldRaw, not oldShown: renaming between two names the
+					// policy refuses is still a change, and reporting it as a
+					// first-time set describes something that never happened -
+					// the very thing this branch exists to avoid.
+					// Named by the name everyone knows them by when there is
+					// one - the rule is never to QUOTE an unusable name, and
+					// using the old one as the actor does not quote it. The
+					// sibling branches below read "Bob changed their name
+					// to...", so this should not suddenly switch to an MXID.
+					text: oldShown
+						? `${oldShown} changed their display name`
+						: oldRaw
+							? `${stateKey} changed their display name`
+							: `${stateKey} set their display name`,
 					icon: "info",
 				};
 			}
-			if (newName) {
+			if (oldShown && newShown) {
+				return {
+					text: `${oldShown} changed their name to ${newShown}`,
+					icon: "info",
+				};
+			}
+			if (newShown) {
 				// Subject derives from content.displayname for most cases,
 				// but here that would produce "Robert set their display
 				// name to Robert" since the new name *is* the new subject.
 				// Fall back to the matrix ID (stateKey) so the notice
 				// reads "@robert:test set their display name to Robert".
 				return {
-					text: `${stateKey} set their display name to ${newName}`,
+					text: `${stateKey} set their display name to ${newShown}`,
 					icon: "info",
 				};
 			}
-			if (oldName) {
-				return { text: `${oldName} removed their display name`, icon: "info" };
+			if (oldShown) {
+				return { text: `${oldShown} removed their display name`, icon: "info" };
 			}
+			return { text: `${stateKey} removed their display name`, icon: "info" };
 		}
 		const oldAvatar =
 			typeof prev.avatar_url === "string" ? prev.avatar_url : "";

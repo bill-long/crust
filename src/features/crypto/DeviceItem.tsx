@@ -1,7 +1,7 @@
 import { type Component, Match, Show, Switch } from "solid-js";
 import { Tooltip } from "../../components/Tooltip";
-import { displayNameOr } from "../../lib/controlChars";
 import type { DeviceVerification } from "../../lib/deviceVerification";
+import { displayNameOr } from "../../lib/displayName";
 import { formatRelativeTime } from "../../lib/relativeTime";
 
 /**
@@ -28,12 +28,14 @@ const UNNAMED_DEVICE = "Unnamed session";
  * What to call this device in UI - its display name, or its id when the
  * server gave none usable.
  *
- * `displayNameOr` is the repo's one definition of "a server-supplied name
- * safe to put on a line" (`lib/controlChars.ts`): it trims, and rejects
- * wholesale on control characters or absurd length rather than cleaning
- * up. `display_name` is as server-controlled as a member's, so it gets the
- * same rule - a plain trim would let `Laptop\u0000A` through into the row
- * title and into the sign-out button's accessible name.
+ * `displayNameOr` (`lib/displayName.ts`) is Element's display-name policy for
+ * the names matrix-js-sdk never sees, and a device's `display_name` off
+ * `/devices` is one of them - no `RoomMember` is involved, so nothing has
+ * normalized it. It strips the two direction overrides, falls back when
+ * nothing renders, and otherwise keeps the name: a device called
+ * `Laptop<RLO>A` would reorder the row it sits on, while one merely carrying
+ * a zero-width space is left alone, because barring those breaks real names
+ * and the id line below already says which device this is.
  *
  * The terminal fallback is not decoration: `DeviceList` already treats a
  * device the server reports without an id as possible, so without it the
