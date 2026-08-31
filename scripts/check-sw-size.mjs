@@ -33,7 +33,11 @@ const CEILING = 35 * 1024;
 // `removeHiddenCharsRegex` and appear nowhere in Crust's own source. Note
 // `⠀` would NOT work as a marker despite being in the same regex -
 // `lib/displayName.ts` legitimately contains it.
-const BARRED = ["u2062", "u061C"];
+// Matched case-insensitively: today's bundler emits `؜` uppercase, but
+// escape hex casing is not guaranteed across minifier versions, and a marker
+// that silently stops matching is the failure mode this whole check exists to
+// avoid.
+const BARRED = ["u2062", "u061c"];
 
 let size;
 try {
@@ -44,7 +48,8 @@ try {
 }
 
 const source = readFileSync(SW, "utf8");
-const found = BARRED.filter((marker) => source.includes(marker));
+const lowered = source.toLowerCase();
+const found = BARRED.filter((marker) => lowered.includes(marker));
 const failures = [];
 if (size > CEILING) {
 	failures.push(
