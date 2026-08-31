@@ -109,7 +109,12 @@ function applyRemoteConfigUrlOverride(base: string): string {
 	if (typeof raw !== "string" || raw.trim().length === 0) return base;
 	// An invalid override warns (inside normalizeRemoteConfigUrl) and leaves
 	// the configured value alone rather than blanking it.
-	return normalizeRemoteConfigUrl(raw) || base;
+	return (
+		normalizeRemoteConfigUrl(
+			raw,
+			"VITE_REMOTE_CONFIG_URL (the REMOTE_CONFIG_URL repository variable)",
+		) || base
+	);
 }
 
 export interface CrustConfig {
@@ -261,12 +266,19 @@ function isSecureCallUrl(url: string): boolean {
  * shipped CSP allows `connect-src ... https:` but not plain http:. Loopback
  * is accepted here because `tauri dev` runs under devCsp, which does allow it.
  */
-function normalizeRemoteConfigUrl(raw: unknown): string {
+function normalizeRemoteConfigUrl(
+	raw: unknown,
+	source = "config.remoteConfigUrl",
+): string {
 	const url = typeof raw === "string" ? raw.trim() : "";
 	if (!url) return "";
 	if (!isSecureOriginUrl(url)) {
+		// Name the source: the build-time override runs through here too, and
+		// pointing an operator at config.json when the bad value came from a CI
+		// variable sends them to a file that is correct - with, on desktop, a
+		// packaged WebView2 shell and no devtools to argue otherwise.
 		console.warn(
-			"config.remoteConfigUrl must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]); ignoring:",
+			`${source} must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]); ignoring:`,
 			url,
 		);
 		return "";
@@ -289,6 +301,47 @@ function normalizeBranding(raw: unknown): CrustConfig["branding"] {
 }
 
 /** Apply defaults for missing/malformed fields in operator config. */
+/**
+ * Top-level keys that mark a body as a Crust config. Every one is optional in
+ * the schema, so the probe below asks whether a body speaks the vocabulary at
+ * all, not whether any particular field is present - requiring a specific key
+ * would reject a valid config that every browser client accepts, on the
+ * desktop path only, with a console line as the operator's only clue.
+ *
+ * Lives beside CrustConfig because it mirrors it; a test locks the two
+ * together. `remoteConfigUrl` is deliberately absent: it is inert in a served
+ * config, so a body carrying nothing else is not one.
+ */
+export const CONFIG_KEYS = [
+	"defaultHomeserver",
+	"homeserverList",
+	"allowCustomHomeservers",
+	"elementCall",
+	"gif",
+	"push",
+	"branding",
+] as const;
+
+/**
+ * Whether a body is recognisably a Crust config.
+ *
+ * normalizeConfig() never throws - it coerces anything, including `null`, `[]`
+ * or an unrelated object, into a full defaults object pointing at matrix.org.
+ * So a caller accepting a fetched body without this check would take a captive
+ * portal's JSON error page or a WAF challenge as configuration.
+ *
+ * Object.hasOwn, not `in`: the question is whether the body itself carries a
+ * config key, and `in` would answer yes for anything on the prototype chain.
+ */
+export function looksLikeCrustConfig(raw: unknown): boolean {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		return false;
+	}
+	return CONFIG_KEYS.some((key) =>
+		Object.hasOwn(raw as Record<string, unknown>, key),
+	);
+}
+
 export function normalizeConfig(raw: unknown): CrustConfig {
 	if (typeof raw !== "object" || raw === null) {
 		return normalizeConfig({});

@@ -1,7 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { normalizeConfig } from "../types/config";
-import { CONFIG_KEYS, ConfigProvider, useConfig } from "./ConfigProvider";
+import { ConfigProvider, useConfig } from "./ConfigProvider";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -249,10 +248,11 @@ describe("ConfigProvider operator config", () => {
 			jsonResponse(String(input) === REMOTE ? { gif: LIVE.gif } : BUNDLED),
 		);
 
-		// matrix.org, not example.org: proves the remote body was taken, since
-		// the bundled fallback would have carried its own homeserver.
+		// The remote gif block is taken, and example.org survives from the
+		// bundled body rather than falling to the library's matrix.org - the
+		// installer's own homeserver is a better answer than a default.
 		expect((await renderProbe()).textContent).toBe(
-			"gif-button:klipy@matrix.org",
+			"gif-button:klipy@example.org",
 		);
 	});
 
@@ -270,18 +270,5 @@ describe("ConfigProvider operator config", () => {
 		expect((await renderProbe()).textContent).toBe(
 			"gif-button:klipy@live.example.org",
 		);
-	});
-});
-
-describe("CONFIG_KEYS", () => {
-	// The list is a hand-written mirror of CrustConfig. A key added there and
-	// forgotten here would silently narrow what counts as a valid remote body,
-	// and the failure would be desktop-only and console-only. Lock the two
-	// together so the omission is a red test instead.
-	it("covers every top-level config key except remoteConfigUrl", () => {
-		const schemaKeys = Object.keys(normalizeConfig({}))
-			.filter((key) => key !== "remoteConfigUrl")
-			.sort();
-		expect([...CONFIG_KEYS].sort()).toEqual(schemaKeys);
 	});
 });

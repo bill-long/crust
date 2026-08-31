@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isPushConfigured, normalizeConfig } from "./config";
+import {
+	CONFIG_KEYS,
+	isPushConfigured,
+	looksLikeCrustConfig,
+	normalizeConfig,
+} from "./config";
 
 const GIF_ENV_VARS = [
 	"VITE_GIF_API_KEY",
@@ -374,6 +379,44 @@ describe("normalizeConfig remoteConfigUrl env override", () => {
 			normalizeConfig({ remoteConfigUrl: "https://kept.example.com/c.json" })
 				.remoteConfigUrl,
 		).toBe("https://kept.example.com/c.json");
-		expect(warnSpy).toHaveBeenCalled();
+		// The message must name the CI variable, not config.json: that file is
+		// correct, and on desktop the operator has no devtools to check.
+		expect(String(warnSpy.mock.calls[0]?.[0])).toContain(
+			"REMOTE_CONFIG_URL repository variable",
+		);
+	});
+});
+
+describe("looksLikeCrustConfig", () => {
+	// CONFIG_KEYS is a hand-written mirror of CrustConfig. A key added there
+	// and forgotten here would silently narrow what counts as a valid remote
+	// body, and the failure would be desktop-only and console-only.
+	it("covers every top-level config key except remoteConfigUrl", () => {
+		const schemaKeys = Object.keys(normalizeConfig({}))
+			.filter((key) => key !== "remoteConfigUrl")
+			.sort();
+		expect([...CONFIG_KEYS].sort()).toEqual(schemaKeys);
+	});
+
+	it("accepts a body carrying any single config key", () => {
+		for (const key of CONFIG_KEYS) {
+			expect(looksLikeCrustConfig({ [key]: undefined })).toBe(true);
+		}
+	});
+
+	it("rejects bodies that are not configs", () => {
+		expect(looksLikeCrustConfig(null)).toBe(false);
+		expect(looksLikeCrustConfig([])).toBe(false);
+		expect(looksLikeCrustConfig("ok")).toBe(false);
+		expect(looksLikeCrustConfig(42)).toBe(false);
+		expect(looksLikeCrustConfig({ error: "blocked" })).toBe(false);
+		// remoteConfigUrl alone is inert in a served config, so it is not one.
+		expect(looksLikeCrustConfig({ remoteConfigUrl: "https://x/c.json" })).toBe(
+			false,
+		);
+	});
+
+	it("ignores keys that live only on the prototype", () => {
+		expect(looksLikeCrustConfig(Object.create({ gif: {} }))).toBe(false);
 	});
 });

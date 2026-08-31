@@ -7,7 +7,7 @@ import {
 } from "solid-js";
 import { reportError } from "../lib/reportError";
 import type { CrustConfig } from "../types/config";
-import { normalizeConfig } from "../types/config";
+import { looksLikeCrustConfig, normalizeConfig } from "../types/config";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 
 const ConfigContext = createContext<CrustConfig>();
@@ -33,50 +33,6 @@ async function fetchJson(url: string, init?: RequestInit): Promise<unknown> {
 }
 
 /**
- * Top-level keys that mark a body as a Crust config. Every one is optional in
- * the schema, so this asks whether the body speaks the vocabulary at all, not
- * whether any particular field is present - requiring a specific key would
- * reject a valid config that happens to omit it, on the desktop path only, and
- * the operator's only clue would be a console line no user reads.
- *
- * Keep in sync with CrustConfig. `remoteConfigUrl` is deliberately absent: it
- * is inert in a served config, so a body carrying nothing else is not one.
- */
-export const CONFIG_KEYS = [
-	"defaultHomeserver",
-	"homeserverList",
-	"allowCustomHomeservers",
-	"elementCall",
-	"gif",
-	"push",
-	"branding",
-] as const;
-
-/**
- * Whether a remote body is recognisably a Crust config.
- *
- * normalizeConfig() never throws - it coerces anything, including `null`, `[]`
- * or an unrelated object, into a full defaults object pointing at matrix.org.
- * So without this check a captive portal's JSON error page, a WAF challenge or
- * a misrouted upstream would be accepted as configuration, and the client
- * would boot on something WORSE than the copy it shipped with while the
- * fallback below never fired. Treat an unrecognisable body as a failed fetch.
- */
-function looksLikeConfig(raw: unknown): boolean {
-	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-		return false;
-	}
-	// Object.hasOwn, not `in`: the question is whether the body itself carries
-	// a config key, and `in` would answer yes for anything on the prototype
-	// chain. None of CONFIG_KEYS collides with Object.prototype today, so this
-	// is intent rather than a live hole - but a polluted prototype would
-	// otherwise turn every JSON body into a valid config.
-	return CONFIG_KEYS.some((key) =>
-		Object.hasOwn(raw as Record<string, unknown>, key),
-	);
-}
-
-/**
  * Load the operator config.
  *
  * In a browser the bundled copy IS the operator's - the deployment serves its
@@ -92,9 +48,8 @@ function looksLikeConfig(raw: unknown): boolean {
  * failure to read the BUNDLED config is fatal.
  */
 async function fetchConfig(): Promise<CrustConfig> {
-	const bundled = normalizeConfig(
-		await fetchJson(`${import.meta.env.BASE_URL}config.json`),
-	);
+	const bundledRaw = await fetchJson(`${import.meta.env.BASE_URL}config.json`);
+	const bundled = normalizeConfig(bundledRaw);
 	if (!isNativeShell() || !bundled.remoteConfigUrl) return bundled;
 	// The overlay is a second, chromeless, always-on-top window over a game,
 	// and this provider renders an opaque panel while it resolves. Making it
@@ -115,10 +70,20 @@ async function fetchConfig(): Promise<CrustConfig> {
 			// feature on; a cached copy would defer that to a cache eviction.
 			cache: "no-store",
 		});
-		if (!looksLikeConfig(raw)) {
+		if (!looksLikeCrustConfig(raw)) {
 			throw new Error("Remote config.json is not a Crust config");
 		}
-		return normalizeConfig(raw);
+		// Merged over the bundled body, not swapped for it. Every field is
+		// optional, so a served config that omits one would otherwise fall to
+		// the library default - booting the client on matrix.org while its own
+		// installer carried the right homeserver, which is the "worse than the
+		// copy it shipped with" outcome the check above exists to prevent. A
+		// key the operator did supply still wins outright, nested objects
+		// included: half a gif block is not a configuration.
+		const base = looksLikeCrustConfig(bundledRaw)
+			? (bundledRaw as Record<string, unknown>)
+			: {};
+		return normalizeConfig({ ...base, ...(raw as Record<string, unknown>) });
 	} catch (err) {
 		// Background best-effort work with a working fallback: console only,
 		// no toast (see AGENTS.md "Error handling").
