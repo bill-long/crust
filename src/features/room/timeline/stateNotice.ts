@@ -500,9 +500,13 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 					// using the old one as the actor does not quote it. The
 					// sibling branches below read "Bob changed their name
 					// to...", so this should not suddenly switch to an MXID.
+					// `oldRaw.trim()`, matching the `newRaw.trim()` guard on the
+					// branch condition: a whitespace-only previous name is no
+					// previous name, so this is a first-time set. Trimming one
+					// side and not the other was an asymmetry, not a rule.
 					text: oldShown
 						? `${oldShown} changed their display name`
-						: oldRaw
+						: oldRaw.trim()
 							? `${stateKey} changed their display name`
 							: `${stateKey} set their display name`,
 					icon: "info",

@@ -307,6 +307,26 @@ describe("stateNotice", () => {
 			expect(notice).toBeNull();
 		});
 
+		it("calls an unusable name after a whitespace-only one 'set'", () => {
+			// A whitespace-only previous name is no previous name, so this is
+			// a first-time set. The branch condition already trimmed the new
+			// side; trimming only one side was an asymmetry.
+			const notice = buildStateNotice(
+				makeEvent({
+					type: "m.room.member",
+					sender: "@bob:test",
+					stateKey: "@bob:test",
+					content: {
+						membership: "join",
+						displayname: `Rob${String.fromCharCode(0x0000)}ert`,
+					},
+					prevContent: { membership: "join", displayname: "   " },
+				}),
+				makeRoom(),
+			);
+			expect(notice?.text).toBe("@bob:test set their display name");
+		});
+
 		it("stays silent when a whitespace-only name replaces no name", () => {
 			// Both sides resolve to nothing, so there is no visible change -
 			// the escape hatch compares trimmed raws precisely so this does
