@@ -225,6 +225,21 @@ describe("ConfigProvider operator config", () => {
 		}
 	});
 
+	it("ignores config keys that live only on the prototype", async () => {
+		// Built with Object.create rather than by polluting Object.prototype,
+		// which would leak into every other test in the file. An `in` check
+		// treats this body as a config; an own-property check does not.
+		shell.native = true;
+		const inherited = Object.create({ gif: LIVE.gif, defaultHomeserver: "x" });
+		fetchSpy.mockImplementation(async (input: RequestInfo | URL) =>
+			jsonResponse(String(input) === REMOTE ? inherited : BUNDLED),
+		);
+
+		expect((await renderProbe()).textContent).toBe(
+			"no-gif-button:giphy@example.org",
+		);
+	});
+
 	it("accepts a live config that omits optional fields", async () => {
 		// defaultHomeserver is optional - normalizeConfig defaults it. A shape
 		// check that demanded it would reject a config every browser client

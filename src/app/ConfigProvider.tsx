@@ -66,7 +66,14 @@ function looksLikeConfig(raw: unknown): boolean {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
 		return false;
 	}
-	return CONFIG_KEYS.some((key) => key in (raw as Record<string, unknown>));
+	// Object.hasOwn, not `in`: the question is whether the body itself carries
+	// a config key, and `in` would answer yes for anything on the prototype
+	// chain. None of CONFIG_KEYS collides with Object.prototype today, so this
+	// is intent rather than a live hole - but a polluted prototype would
+	// otherwise turn every JSON body into a valid config.
+	return CONFIG_KEYS.some((key) =>
+		Object.hasOwn(raw as Record<string, unknown>, key),
+	);
 }
 
 /**
