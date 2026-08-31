@@ -474,19 +474,24 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 		// Untrimmed, "" to "   " emitted "set their display name" for a change
 		// nobody can see, which is what comparing resolved values was meant to
 		// stop.
+		// Trimmed once each, not per use: both the escape hatch and the wording
+		// below need them, and these are raw wire values that can be
+		// arbitrarily long.
+		const oldTrimmed = oldRaw.trim();
+		const newTrimmed = newRaw.trim();
 		if (
 			oldShown !== newShown ||
-			(!oldShown && !newShown && oldRaw.trim() !== newRaw.trim())
+			(!oldShown && !newShown && oldTrimmed !== newTrimmed)
 		) {
 			// Nothing unusable is ever quoted back as if it were a name: there
 			// is no honest MXID substitution here, since rendering "Ann
 			// changed their name to @mallory:evil" would assert something
 			// false.
-			// `newRaw.trim()`, not `newRaw`: a whitespace-only new name is a
+			// The TRIMMED new name, not the raw one: a whitespace-only new name is a
 			// removal, and testing the untrimmed value routed it here and
 			// announced "changed their display name" for someone who had
 			// cleared theirs - leaving the removal wording below unreachable.
-			if (newRaw.trim() && !newShown) {
+			if (newTrimmed && !newShown) {
 				// Distinguish set from changed the way the sibling branches do:
 				// with no previous name this is a first one, and calling it a
 				// change describes something that never happened.
@@ -500,13 +505,13 @@ function memberNotice(event: MatrixEvent, room: Room): StateNotice | null {
 					// using the old one as the actor does not quote it. The
 					// sibling branches below read "Bob changed their name
 					// to...", so this should not suddenly switch to an MXID.
-					// `oldRaw.trim()`, matching the `newRaw.trim()` guard on the
-					// branch condition: a whitespace-only previous name is no
-					// previous name, so this is a first-time set. Trimming one
-					// side and not the other was an asymmetry, not a rule.
+					// The TRIMMED old name, matching the guard on the branch
+					// condition: a whitespace-only previous name is no previous
+					// name, so this is a first-time set. Trimming one side and
+					// not the other was an asymmetry, not a rule.
 					text: oldShown
 						? `${oldShown} changed their display name`
-						: oldRaw.trim()
+						: oldTrimmed
 							? `${stateKey} changed their display name`
 							: `${stateKey} set their display name`,
 					icon: "info",
