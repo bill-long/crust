@@ -37,7 +37,7 @@ function renderItem(event: TimelineEvent, onCopyText?: (text: string) => void) {
 			shortcodeLookup={new Map()}
 			emoteLookup={new Map()}
 			packs={[]}
-			brokenAvatars={createFailedImageUrls()}
+			brokenImages={createFailedImageUrls()}
 			onOpenProfile={() => {}}
 		/>
 	));

@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, createResource, For, Show } from "solid-js";
+import type { FailedImageUrls } from "../../../lib/imageFallback";
 import { getOrFetchPreview, type UrlPreviewData } from "./previewCache";
 import { UrlPreviewCard } from "./UrlPreviewCard";
 
@@ -10,6 +11,13 @@ interface UrlPreviewListProps {
 	ts: () => number;
 	/** When true, fetches are skipped and nothing renders. */
 	disabled: () => boolean;
+	/**
+	 * Fail-closed image registry owned by the timeline, so a broken OG image
+	 * stays hidden across virtua recycling a row. Required, not optional:
+	 * a caller that forgot it would silently reintroduce the broken-image
+	 * flash with nothing to catch it at compile time.
+	 */
+	broken: FailedImageUrls;
 }
 
 interface PreviewItem {
@@ -29,6 +37,7 @@ const PreviewItemView: Component<{
 	url: string;
 	ts: number;
 	disabled: boolean;
+	broken: FailedImageUrls;
 }> = (props) => {
 	const [resource] = createResource<UrlPreviewData | null, string>(
 		// Source: re-fetch when the URL changes. When disabled, source
@@ -40,7 +49,12 @@ const PreviewItemView: Component<{
 	return (
 		<Show when={!props.disabled && resource()}>
 			{(data) => (
-				<UrlPreviewCard client={props.client} url={props.url} data={data()} />
+				<UrlPreviewCard
+					client={props.client}
+					url={props.url}
+					data={data()}
+					broken={props.broken}
+				/>
 			)}
 		</Show>
 	);
@@ -63,6 +77,7 @@ const UrlPreviewList: Component<UrlPreviewListProps> = (props) => {
 							url={url}
 							ts={props.ts()}
 							disabled={props.disabled()}
+							broken={props.broken}
 						/>
 					)}
 				</For>

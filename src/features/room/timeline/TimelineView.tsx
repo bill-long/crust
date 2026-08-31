@@ -79,11 +79,11 @@ const TimelineView: Component<{
 	onOpenThread?: (threadId: string) => void;
 }> = (props) => {
 	const { client } = useClient();
-	// Fail-closed avatars for message-header senders and grouped membership
-	// notices, owned here so the state outlives the timeline virtualizer
-	// recycling a row and is shared across rows rendering the same avatar
-	// (#457).
-	const brokenAvatars = createFailedImageUrls();
+	// Fail-closed remote images for message-header senders, grouped
+	// membership notices, and link-preview thumbnails, owned here so the
+	// state outlives the timeline virtualizer recycling a row and is shared
+	// across rows rendering the same URL (#457).
+	const brokenImages = createFailedImageUrls();
 	// One stable handler for every virtualized row (#444). Reads props
 	// lazily, so it stays correct across thread changes.
 	const onOpenProfile = (userId: string, anchor: HTMLElement): void =>
@@ -1134,7 +1134,7 @@ const TimelineView: Component<{
 														const g = group();
 														if (g) expandGroup(g);
 													}}
-													brokenAvatars={brokenAvatars}
+													brokenAvatars={brokenImages}
 												/>
 											</Match>
 											{/* Collapsed non-leader member: a zero-height anchor
@@ -1148,7 +1148,7 @@ const TimelineView: Component<{
 												<TimelineItem
 													event={event}
 													now={dayTick()}
-													brokenAvatars={brokenAvatars}
+													brokenImages={brokenImages}
 													onOpenProfile={onOpenProfile}
 													showHeader={shouldShowHeader(
 														events,

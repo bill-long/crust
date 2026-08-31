@@ -44,7 +44,7 @@ function renderItem(
 			shortcodeLookup={new Map()}
 			emoteLookup={new Map()}
 			packs={[]}
-			brokenAvatars={createFailedImageUrls()}
+			brokenImages={createFailedImageUrls()}
 			onOpenProfile={() => {}}
 		/>
 	));
