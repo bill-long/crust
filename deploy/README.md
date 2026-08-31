@@ -94,6 +94,50 @@ After editing, no restart is needed - nginx serves it on the next request, and
 the bundled cache headers (`expires -1` for `config.json`) ensure clients
 re-fetch it on reload.
 
+### `remoteConfigUrl` and the desktop app
+
+Browser clients always get this bind-mounted file, so the copy baked into the
+image never reaches them. The **desktop app cannot work that way** - it embeds
+the built `dist/` inside the installer, so it ships whatever
+`public/config.json` held when that release was cut.
+
+`remoteConfigUrl` closes that gap: the desktop shell reads it from its bundled
+config and re-fetches the live file from that URL at startup, falling back to
+the bundled copy when offline or when the deployment is unreachable. Browser
+clients ignore the field entirely.
+
+It must be `https://` - the file it names carries your GIF API key and push
+VAPID key. Loopback `http://` is accepted by the validator and works under
+`tauri dev`, but a **packaged** build cannot use it: the shipped CSP allows
+`connect-src ... https:` and not plain `http:`, so the fetch would be blocked
+and the shell would fall back to its bundled copy.
+
+**Setting it in the bind-mounted `config.json` does nothing.** That is the one
+place the rest of this page tells you to edit, so it is worth being explicit:
+browser clients ignore the field, and a desktop client reads it only from the
+copy baked into its own installer. This is the single setting on this page that
+is **build-time, not runtime**.
+
+Set it by defining a `REMOTE_CONFIG_URL` repository variable (Settings >
+Secrets and variables > Actions > Variables). The `Build web app` step of
+`.github/workflows/desktop-release.yml` passes it as `VITE_REMOTE_CONFIG_URL`,
+which is what bakes it into your installers. The variable wins wherever it is
+set; with none, that step falls back to upstream's own URL for the upstream
+repository only. `public/config.json` ships the field empty, so a fork that
+cuts a desktop release without setting the variable gets installers that just
+use their own bundled config - the previous behaviour, not a broken one.
+
+**Update the server image before cutting a desktop release.** The cross-origin
+read this depends on needs an `Access-Control-Allow-Origin` header that ships
+inside the container image (`docker-nginx.conf`), so an installer built against
+a server that has not been pulled fails the fetch and falls back silently. The
+only diagnostic is a CORS error in a packaged WebView2 shell with no devtools,
+so it is worth getting the order right rather than debugging it later.
+
+Because it is frozen at build time, changing the URL later means cutting a new
+installer; already-installed clients keep fetching from the old one. Only the
+*contents* at that URL are live.
+
 ## Background push notifications (Sygnal + Web Push)
 
 Crust is a PWA and can deliver **background** notifications (while the app is

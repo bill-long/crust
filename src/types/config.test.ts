@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isPushConfigured, normalizeConfig } from "./config";
+import {
+	CONFIG_KEYS,
+	isPushConfigured,
+	looksLikeCrustConfig,
+	normalizeConfig,
+} from "./config";
 
 const GIF_ENV_VARS = [
 	"VITE_GIF_API_KEY",
@@ -241,5 +246,177 @@ describe("normalizeConfig push", () => {
 					.push,
 			),
 		).toBe(false);
+	});
+});
+
+describe("normalizeConfig remoteConfigUrl", () => {
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		// As with VITE_GIF_*, a value inherited from the developer's shell
+		// would override every case below.
+		vi.stubEnv("VITE_REMOTE_CONFIG_URL", "");
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warnSpy.mockRestore();
+		vi.unstubAllEnvs();
+	});
+
+	function remoteUrl(raw: unknown): string {
+		return normalizeConfig({ remoteConfigUrl: raw }).remoteConfigUrl;
+	}
+
+	it("defaults to empty, meaning the bundled config stands", () => {
+		expect(normalizeConfig({}).remoteConfigUrl).toBe("");
+		expect(remoteUrl(undefined)).toBe("");
+		expect(remoteUrl("")).toBe("");
+		expect(remoteUrl("   ")).toBe("");
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("accepts https:// and loopback http:// URLs", () => {
+		expect(remoteUrl("https://example.com/crust/config.json")).toBe(
+			"https://example.com/crust/config.json",
+		);
+		expect(remoteUrl("http://localhost:5173/config.json")).toBe(
+			"http://localhost:5173/config.json",
+		);
+		expect(remoteUrl("http://127.0.0.1/config.json")).toBe(
+			"http://127.0.0.1/config.json",
+		);
+		expect(remoteUrl("http://[::1]/config.json")).toBe(
+			"http://[::1]/config.json",
+		);
+		expect(warnSpy).not.toHaveBeenCalled();
+	});
+
+	it("trims surrounding whitespace", () => {
+		expect(remoteUrl("  https://example.com/config.json  ")).toBe(
+			"https://example.com/config.json",
+		);
+	});
+
+	// The file this URL names carries the GIF API key and the push VAPID key,
+	// so a plaintext fetch would put both on the wire in clear.
+	it("rejects plaintext http:// on a non-loopback host", () => {
+		expect(remoteUrl("http://example.com/config.json")).toBe("");
+		expect(warnSpy).toHaveBeenCalled();
+	});
+
+	it("rejects a host that only looks like loopback", () => {
+		expect(remoteUrl("http://127.0.0.1.example.com/config.json")).toBe("");
+		expect(remoteUrl("http://127.999.999.999/config.json")).toBe("");
+	});
+
+	it("rejects non-http(s) schemes and unparseable values", () => {
+		expect(remoteUrl("file:///etc/config.json")).toBe("");
+		expect(remoteUrl("javascript:alert(1)")).toBe("");
+		expect(remoteUrl("not a url")).toBe("");
+		expect(remoteUrl("/crust/config.json")).toBe("");
+		expect(remoteUrl(42)).toBe("");
+		expect(remoteUrl(null)).toBe("");
+	});
+
+	// Unlike elementCall.url, which is rejected for a query or fragment
+	// because callSrc() concatenates onto it. Nothing is appended to this
+	// URL - it is fetched as-is - so the restriction must not leak across
+	// from the secure-origin rule the two now share.
+	it("allows a query string or fragment", () => {
+		expect(remoteUrl("https://example.com/config.json?v=2")).toBe(
+			"https://example.com/config.json?v=2",
+		);
+		expect(
+			normalizeConfig({
+				elementCall: { url: "https://call.example.com?v=2" },
+			}).elementCall.url,
+		).toBe("");
+	});
+});
+
+describe("normalizeConfig remoteConfigUrl env override", () => {
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		warnSpy.mockRestore();
+		vi.unstubAllEnvs();
+	});
+
+	// public/config.json ships the field empty so a fork's desktop build never
+	// fetches upstream's config; the release workflow supplies the real URL.
+	it("supplies a URL the shipped template leaves empty", () => {
+		vi.stubEnv("VITE_REMOTE_CONFIG_URL", "https://ops.example.com/c.json");
+		expect(normalizeConfig({ remoteConfigUrl: "" }).remoteConfigUrl).toBe(
+			"https://ops.example.com/c.json",
+		);
+	});
+
+	it("wins over a value in config.json", () => {
+		vi.stubEnv("VITE_REMOTE_CONFIG_URL", "https://ops.example.com/c.json");
+		expect(
+			normalizeConfig({ remoteConfigUrl: "https://old.example.com/c.json" })
+				.remoteConfigUrl,
+		).toBe("https://ops.example.com/c.json");
+	});
+
+	it("leaves the configured value alone when unset or blank", () => {
+		vi.stubEnv("VITE_REMOTE_CONFIG_URL", "");
+		expect(
+			normalizeConfig({ remoteConfigUrl: "https://kept.example.com/c.json" })
+				.remoteConfigUrl,
+		).toBe("https://kept.example.com/c.json");
+	});
+
+	// A typo in the build environment must not blank a working configured URL.
+	it("warns and keeps the configured value when the override is invalid", () => {
+		vi.stubEnv("VITE_REMOTE_CONFIG_URL", "http://insecure.example.com/c.json");
+		expect(
+			normalizeConfig({ remoteConfigUrl: "https://kept.example.com/c.json" })
+				.remoteConfigUrl,
+		).toBe("https://kept.example.com/c.json");
+		// The message must name the CI variable, not config.json: that file is
+		// correct, and on desktop the operator has no devtools to check.
+		expect(String(warnSpy.mock.calls[0]?.[0])).toContain(
+			"REMOTE_CONFIG_URL repository variable",
+		);
+	});
+});
+
+describe("looksLikeCrustConfig", () => {
+	// CONFIG_KEYS is a hand-written mirror of CrustConfig. A key added there
+	// and forgotten here would silently narrow what counts as a valid remote
+	// body, and the failure would be desktop-only and console-only.
+	it("covers every top-level config key except remoteConfigUrl", () => {
+		const schemaKeys = Object.keys(normalizeConfig({}))
+			.filter((key) => key !== "remoteConfigUrl")
+			.sort();
+		expect([...CONFIG_KEYS].sort()).toEqual(schemaKeys);
+	});
+
+	it("accepts a body carrying any single config key", () => {
+		for (const key of CONFIG_KEYS) {
+			expect(looksLikeCrustConfig({ [key]: undefined })).toBe(true);
+		}
+	});
+
+	it("rejects bodies that are not configs", () => {
+		expect(looksLikeCrustConfig(null)).toBe(false);
+		expect(looksLikeCrustConfig([])).toBe(false);
+		expect(looksLikeCrustConfig("ok")).toBe(false);
+		expect(looksLikeCrustConfig(42)).toBe(false);
+		expect(looksLikeCrustConfig({ error: "blocked" })).toBe(false);
+		// remoteConfigUrl alone is inert in a served config, so it is not one.
+		expect(looksLikeCrustConfig({ remoteConfigUrl: "https://x/c.json" })).toBe(
+			false,
+		);
+	});
+
+	it("ignores keys that live only on the prototype", () => {
+		expect(looksLikeCrustConfig(Object.create({ gif: {} }))).toBe(false);
 	});
 });

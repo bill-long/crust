@@ -1,4 +1,5 @@
 {
+	"remoteConfigUrl": "",
 	"defaultHomeserver": "strange.pizza",
 	"homeserverList": ["strange.pizza", "matrix.org"],
 	"allowCustomHomeservers": true,

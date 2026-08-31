@@ -186,8 +186,29 @@ jobs:
       - name: Install web dependencies
         run: pnpm install --frozen-lockfile
 
+      # Point the packaged shell at this deployment's live config.json. The
+      # installer embeds dist/, so without this it would ship the template in
+      # public/config.json forever - GIF search off, Web Push unconfigured
+      # (#580).
+      #
+      # The URL is keyed to the repository that owns that deployment, because
+      # this workflow runs on any `desktop-v*` tag in any fork. Hardcoding it
+      # outright would make a fork's own installers fetch upstream's homeserver
+      # list, GIF key and push gateway at every launch - silently overriding
+      # the fork operator's config, which is the exact outcome the empty
+      # template in public/config.json exists to prevent.
+      #
+      # A REMOTE_CONFIG_URL repository variable wins wherever it is set
+      # (Settings > Secrets and variables > Actions > Variables), upstream
+      # included - otherwise moving this deployment would mean setting the
+      # variable, watching it be ignored, and only finding out after the
+      # installers shipped pinned to the old URL, since the value is frozen at
+      # build time. With no variable a fork gets an empty string and its shell
+      # just uses the config it bundled: today's behaviour, not a broken one.
       - name: Build web app
         run: pnpm build
+        env:
+          VITE_REMOTE_CONFIG_URL: ${{ vars.REMOTE_CONFIG_URL || (github.repository == 'bill-long/crust' && 'https://strange.pizza/crust/config.json' || '') }}
 
       # The Tauri project (desktop/) is a separate pnpm package; install its
       # @tauri-apps/cli so tauri-action can run `pnpm tauri build`.

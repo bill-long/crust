@@ -92,10 +92,45 @@ function normalizeGifConfig(raw: unknown): GifConfig {
 	return applyGifEnvOverrides(base);
 }
 
+/**
+ * Build-time override for `remoteConfigUrl`, mirroring the VITE_GIF_* pattern
+ * above.
+ *
+ * The shipped public/config.json leaves the field EMPTY on purpose. That file
+ * doubles as the starting template operators copy (deploy/README.md), and a
+ * baked-in upstream URL would mean any fork's desktop build fetched upstream's
+ * homeserver list, GIF key and push gateway - silently overriding the
+ * operator's own. So the value is opt-in, and upstream's own installers get it
+ * from the desktop release workflow rather than from the template.
+ */
+function applyRemoteConfigUrlOverride(base: string): string {
+	const env = import.meta.env as Record<string, string | undefined>;
+	const raw = env.VITE_REMOTE_CONFIG_URL;
+	if (typeof raw !== "string" || raw.trim().length === 0) return base;
+	// An invalid override warns (inside normalizeRemoteConfigUrl) and leaves
+	// the configured value alone rather than blanking it.
+	return (
+		normalizeRemoteConfigUrl(
+			raw,
+			"VITE_REMOTE_CONFIG_URL (the REMOTE_CONFIG_URL repository variable)",
+		) || base
+	);
+}
+
 export interface CrustConfig {
 	defaultHomeserver: string;
 	homeserverList: string[];
 	allowCustomHomeservers: boolean;
+	/**
+	 * Where to fetch the live operator config from, overriding this bundled
+	 * copy. Only the native desktop shell uses it: a browser already loads
+	 * config.json from the deployment that serves it, but the desktop app
+	 * embeds dist/ at build time and would otherwise be stuck with whatever
+	 * public/config.json held when the installer was cut (see #580).
+	 *
+	 * Empty (the default) means "use the bundled copy as-is".
+	 */
+	remoteConfigUrl: string;
 	elementCall: {
 		url: string;
 	};
@@ -177,25 +212,29 @@ function normalizeElementCall(raw: unknown): CrustConfig["elementCall"] {
 	return { url: rawUrl };
 }
 
-function isSecureCallUrl(url: string): boolean {
+/**
+ * Whether `url` is a secure origin: https://, or http:// on loopback, which
+ * browsers treat as a secure context per the W3C Secure Contexts spec (so
+ * local dev setups still work).
+ *
+ * Shared by every config URL that must not be fetched or embedded over
+ * plaintext - `elementCall.url` needs a secure context for camera/mic, and
+ * `remoteConfigUrl` carries the GIF API key and push VAPID key over the wire.
+ * Defined once here so the two can never drift apart.
+ */
+function isSecureOriginUrl(url: string): boolean {
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
 	} catch {
 		return false;
 	}
-	// Reject any URL containing `?` or `#`. callSrc() appends
-	// `/room/#?roomId=...` to this base, so a query string or fragment
-	// (including a bare trailing `?` or `#`, which the URL parser
-	// normalizes to empty `search`/`hash`) would corrupt the resulting
-	// URL.
-	if (url.includes("?") || url.includes("#")) return false;
 	if (parsed.protocol === "https:") return true;
 	if (parsed.protocol !== "http:") return false;
 	const host = parsed.hostname.toLowerCase();
 	if (host === "localhost" || host === "[::1]") return true;
 	// Allow the full IPv4 127.0.0.0/8 loopback range. Validate octet ranges
-	// (0–255) so strings like `127.999.999.999` are rejected — URL parsers
+	// (0-255) so strings like `127.999.999.999` are rejected - URL parsers
 	// can treat those as hostnames rather than loopback IPs, which would
 	// defeat the loopback-HTTP secure-context exception.
 	const m = host.match(/^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
@@ -205,6 +244,46 @@ function isSecureCallUrl(url: string): boolean {
 		if (oct < 0 || oct > 255) return false;
 	}
 	return true;
+}
+
+function isSecureCallUrl(url: string): boolean {
+	// Reject any URL containing `?` or `#`. callSrc() appends
+	// `/room/#?roomId=...` to this base, so a query string or fragment
+	// (including a bare trailing `?` or `#`, which the URL parser
+	// normalizes to empty `search`/`hash`) would corrupt the resulting
+	// URL. This is specific to how the call URL is consumed, which is why
+	// it layers on top of isSecureOriginUrl rather than living inside it.
+	if (url.includes("?") || url.includes("#")) return false;
+	return isSecureOriginUrl(url);
+}
+
+/**
+ * A remote config URL is optional; an unset or malformed one just means the
+ * bundled config stands. Rejecting a plaintext URL matters because the file
+ * it points at carries the operator's GIF API key and push VAPID key.
+ *
+ * Note that a packaged desktop build can only reach an https:// URL: the
+ * shipped CSP allows `connect-src ... https:` but not plain http:. Loopback
+ * is accepted here because `tauri dev` runs under devCsp, which does allow it.
+ */
+function normalizeRemoteConfigUrl(
+	raw: unknown,
+	source = "config.remoteConfigUrl",
+): string {
+	const url = typeof raw === "string" ? raw.trim() : "";
+	if (!url) return "";
+	if (!isSecureOriginUrl(url)) {
+		// Name the source: the build-time override runs through here too, and
+		// pointing an operator at config.json when the bad value came from a CI
+		// variable sends them to a file that is correct - with, on desktop, a
+		// packaged WebView2 shell and no devtools to argue otherwise.
+		console.warn(
+			`${source} must be https:// or http:// loopback (localhost / 127.0.0.0/8 / [::1]); ignoring:`,
+			url,
+		);
+		return "";
+	}
+	return url;
 }
 
 function normalizeBranding(raw: unknown): CrustConfig["branding"] {
@@ -222,6 +301,47 @@ function normalizeBranding(raw: unknown): CrustConfig["branding"] {
 }
 
 /** Apply defaults for missing/malformed fields in operator config. */
+/**
+ * Top-level keys that mark a body as a Crust config. Every one is optional in
+ * the schema, so the probe below asks whether a body speaks the vocabulary at
+ * all, not whether any particular field is present - requiring a specific key
+ * would reject a valid config that every browser client accepts, on the
+ * desktop path only, with a console line as the operator's only clue.
+ *
+ * Lives beside CrustConfig because it mirrors it; a test locks the two
+ * together. `remoteConfigUrl` is deliberately absent: it is inert in a served
+ * config, so a body carrying nothing else is not one.
+ */
+export const CONFIG_KEYS = [
+	"defaultHomeserver",
+	"homeserverList",
+	"allowCustomHomeservers",
+	"elementCall",
+	"gif",
+	"push",
+	"branding",
+] as const;
+
+/**
+ * Whether a body is recognisably a Crust config.
+ *
+ * normalizeConfig() never throws - it coerces anything, including `null`, `[]`
+ * or an unrelated object, into a full defaults object pointing at matrix.org.
+ * So a caller accepting a fetched body without this check would take a captive
+ * portal's JSON error page or a WAF challenge as configuration.
+ *
+ * Object.hasOwn, not `in`: the question is whether the body itself carries a
+ * config key, and `in` would answer yes for anything on the prototype chain.
+ */
+export function looksLikeCrustConfig(raw: unknown): boolean {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		return false;
+	}
+	return CONFIG_KEYS.some((key) =>
+		Object.hasOwn(raw as Record<string, unknown>, key),
+	);
+}
+
 export function normalizeConfig(raw: unknown): CrustConfig {
 	if (typeof raw !== "object" || raw === null) {
 		return normalizeConfig({});
@@ -243,6 +363,9 @@ export function normalizeConfig(raw: unknown): CrustConfig {
 			typeof obj.allowCustomHomeservers === "boolean"
 				? obj.allowCustomHomeservers
 				: true,
+		remoteConfigUrl: applyRemoteConfigUrlOverride(
+			normalizeRemoteConfigUrl(obj.remoteConfigUrl),
+		),
 		elementCall: normalizeElementCall(obj.elementCall),
 		gif: normalizeGifConfig(obj.gif),
 		push: normalizePush(obj.push),
