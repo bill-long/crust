@@ -663,10 +663,11 @@ const TimelineItem: Component<{
 	 * unaffected - they render through the stateNotice branch.
 	 */
 	isSenderIgnored?: boolean;
-	/** Timeline-owned fail-closed registry for sender avatars. Required (not
-	 *  per-row) because virtua recycles/remounts rows constantly - per-row
-	 *  error state would be discarded on every remount and would not
-	 *  de-duplicate a broken URL across rows. */
+	/** Timeline-owned fail-closed registry for the row's remote images -
+	 *  sender avatars and link-preview thumbnails. Required (not per-row)
+	 *  because virtua recycles/remounts rows constantly - per-row error state
+	 *  would be discarded on every remount and would not de-duplicate a
+	 *  broken URL across rows. */
 	brokenImages: FailedImageUrls;
 	/** Open the sender's profile card anchored to the clicked header
 	 *  avatar/name (#444). Required: the header avatar and name are real

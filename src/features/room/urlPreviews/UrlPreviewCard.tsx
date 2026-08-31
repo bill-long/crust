@@ -70,8 +70,9 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 	// Hero only for large landscape images with known intrinsic dimensions
 	// (needed to reserve aspect-ratio space and avoid layout shift) that also
 	// resolve to a usable homeserver image URL — otherwise we'd reserve a
-	// large empty banner. Pure over the OG metadata, so it decides WHICH
-	// image the card requests before anything is loaded.
+	// large empty banner. Reads only the OG metadata and the client's
+	// mxc-to-HTTP conversion - never load state - so it decides WHICH image
+	// the card requests before anything has been fetched.
 	const heroEligible = (): boolean => {
 		const img = props.data.image;
 		return (
