@@ -8,6 +8,7 @@ import {
 	on,
 	onCleanup,
 } from "solid-js";
+import { displayNameOr } from "../../../lib/displayName";
 import { createReceiptResolver } from "./receiptResolution";
 import type { TimelineEvent } from "./timelineTypes";
 
@@ -95,7 +96,7 @@ export function useReadReceipts(
 			if (!map[readUpToId]) map[readUpToId] = [];
 			map[readUpToId].push({
 				userId: member.userId,
-				displayName: member.name?.trim() || member.userId,
+				displayName: displayNameOr(member.name, member.userId),
 			});
 		}
 		// Sort each per-event receipt list by userId for stable ordering.

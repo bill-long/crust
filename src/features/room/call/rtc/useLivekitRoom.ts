@@ -21,6 +21,7 @@ import {
 	onCleanup,
 } from "solid-js";
 import { avatarHttpUrl } from "../../../../lib/avatar";
+import { displayNameOr } from "../../../../lib/displayName";
 import { reportError } from "../../../../lib/reportError";
 import {
 	SCREEN_SHARE_CONTENT_HINT,
@@ -581,7 +582,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		return {
 			isUnresolved: false,
 			isForeignSfu: entry?.isForeignSfu ?? false,
-			displayName: user?.displayName ?? userId,
+			displayName: displayNameOr(user?.displayName, userId),
 			// Small crop for compact surfaces (PiP panel rows at ~32px).
 			avatarUrl: avatarHttpUrl(opts.client, mxc, 96),
 			// The full call tile renders this avatar large (up to 14rem ≈ 224px

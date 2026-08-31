@@ -1,6 +1,7 @@
 import type { MatrixClient, MatrixEvent, RoomMember } from "matrix-js-sdk";
 import { RoomMemberEvent } from "matrix-js-sdk";
 import { type Accessor, createSignal, onCleanup } from "solid-js";
+import { displayNameOr } from "../../../lib/displayName";
 
 export interface TypingUser {
 	userId: string;
@@ -39,7 +40,7 @@ export function useTypingUsers(
 			if (m.typing && m.userId !== myUserId) {
 				typing.push({
 					userId: m.userId,
-					displayName: m.name?.trim() || m.userId,
+					displayName: displayNameOr(m.name, m.userId),
 				});
 			}
 		}

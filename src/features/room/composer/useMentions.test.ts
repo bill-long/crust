@@ -286,6 +286,32 @@ describe("useMentions @room intent lifecycle", () => {
 		}
 	});
 
+	it("inserts a policy-resolved token, so a newline cannot split the body", () => {
+		// The name is spliced into the message body. A newline would split
+		// the body and `reconcileMentions` could no longer match the token,
+		// so the mention would send unpilled - no push for the person named.
+		// The picker renders the same resolution (Composer.tsx), so the row
+		// shows exactly what gets inserted.
+		const member = makeMember(
+			"@ann:example.com",
+			`Ann${String.fromCharCode(0x0a)}Smith`,
+		);
+		const h = setup([member], { canRoomMention: true, textarea: true });
+		try {
+			h.type("@An");
+			h.setCaret(3);
+			h.mentions.setMentionQuery("An");
+			h.mentions.onMentionSelect(member);
+			expect(h.getText()).toBe("@ann:example.com ");
+			expect(h.getText().includes(String.fromCharCode(0x0a))).toBe(false);
+			expect(h.mentions.mentions()).toEqual([
+				{ userId: "@ann:example.com", displayName: "ann:example.com" },
+			]);
+		} finally {
+			h.dispose();
+		}
+	});
+
 	it("resetMentionState clears mentions, intent, and query together", () => {
 		const h = setup([makeMember("@alice:example.com", "Alice")], {
 			canRoomMention: true,

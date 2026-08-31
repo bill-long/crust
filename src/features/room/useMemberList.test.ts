@@ -528,31 +528,72 @@ describe("buildEntry display names", () => {
 			getMxcAvatarUrl: () => null,
 		}) as unknown as RoomMember;
 
-	it("falls back to the user ID for a name with control characters", () => {
-		// Rejected, not cleaned: the SDK disambiguates against the raw
-		// displayname map, so stripping could render an exact copy of
-		// someone else's name with no user-ID suffix to give it away.
-		const entry = buildEntry(
-			member("Ann\nSmith"),
-			createMockClient() as unknown as MatrixClient,
-		);
-		expect(entry.displayName).toBe("@a:x");
+	const entryFor = (name: string): string =>
+		buildEntry(member(name), createMockClient() as unknown as MatrixClient)
+			.displayName;
+
+	// `RoomMember.name` arrives with Element's whole policy already applied -
+	// direction overrides stripped, the user ID substituted when nothing
+	// renders, and `(@user:server)` appended when the name is suspicious or
+	// collides. buildEntry's job is not to undo any of it.
+
+	it("passes the SDK's name through verbatim", () => {
+		expect(entryFor("Ann Smith")).toBe("Ann Smith");
 	});
 
-	it("keeps an ordinary name", () => {
-		const entry = buildEntry(
-			member("  Ann Smith  "),
-			createMockClient() as unknown as MatrixClient,
-		);
-		expect(entry.displayName).toBe("Ann Smith");
+	it("keeps the disambiguating suffix the SDK attached", () => {
+		// The important one. A bidi character makes the SDK append the MXID,
+		// which is precisely the signal that this name may be impersonating
+		// someone. An earlier revision rejected such names wholesale and
+		// rendered the bare MXID, throwing that signal away; a later one
+		// truncated over-length names, which cut the suffix off the end.
+		const disambiguated = `Ann${String.fromCharCode(0x202a)}Smith (@a:x)`;
+		expect(entryFor(disambiguated)).toBe(disambiguated);
 	});
 
-	it("falls back when nothing printable survives", () => {
-		const entry = buildEntry(
-			member("   "),
-			createMockClient() as unknown as MatrixClient,
-		);
-		expect(entry.displayName).toBe("@a:x");
+	it("keeps the invisible characters real names need", () => {
+		// Not filtered, deliberately: ZWJ and friends are load-bearing in
+		// several scripts and in every multi-part emoji, so barring them
+		// breaks real names. The MXID answers impersonation, not a filter.
+		for (const name of [
+			`A${String.fromCharCode(0x200b)}dmin`,
+			`A${String.fromCharCode(0x200d)}dmin`,
+		]) {
+			expect(entryFor(name)).toBe(name);
+		}
+	});
+
+	it("falls back on a control character", () => {
+		// This name reaches `memberRowLabel`'s aria-label and MembersTab's
+		// kick/ban copy, and C0 is the one invisible class the SDK does not
+		// normalize - so it collides with nothing and earns no (@mxid)
+		// suffix.
+		expect(entryFor(`Ann\nSmith`)).toBe("@a:x");
+	});
+
+	it("falls back when nothing visible renders", () => {
+		// A name of two Hangul fillers rendered a blank row, a blank avatar
+		// initial, and "View profile of " with nothing after it.
+		expect(entryFor(String.fromCharCode(0x3164).repeat(2))).toBe("@a:x");
+	});
+
+	it("bounds the length, which is the one thing the SDK does not", () => {
+		// The reason this path routes through displayNameOr at all. It
+		// rebuilds for every member on every membership and typing event and
+		// re-sorts each role section with localeCompare, and `displayname` is
+		// unbounded on the wire - Conduwuity does not cap it.
+		expect(entryFor("a".repeat(2000))).toBe("@a:x");
+	});
+
+	it("trims surrounding whitespace", () => {
+		// `calculateDisplayName` returns the name untrimmed whenever anything
+		// survives its hidden-character check, so padding does reach this row.
+		expect(entryFor("  Ann Smith  ")).toBe("Ann Smith");
+	});
+
+	it("falls back to the user ID when the SDK gave nothing", () => {
+		expect(entryFor("   ")).toBe("@a:x");
+		expect(entryFor("")).toBe("@a:x");
 	});
 });
 

@@ -13,6 +13,7 @@ import {
 import { unwrap } from "solid-js/store";
 import { useClient } from "../../../client/client";
 import { avatarInitial } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 import {
 	type CustomEmoji,
 	escapeHtml,
@@ -981,7 +982,9 @@ const Composer: Component<{
 						) : (
 							<div class="flex items-center gap-2">
 								<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[10px] font-semibold text-text-secondary">
-									{avatarInitial(candidate.name ?? candidate.userId)}
+									{avatarInitial(
+										displayNameOr(candidate.name, candidate.userId),
+									)}
 								</div>
 								<div class="min-w-0 flex-1">
 									<span
@@ -989,7 +992,16 @@ const Composer: Component<{
 											highlighted ? "text-text-primary" : "text-text-secondary"
 										}
 									>
-										{candidate.name?.trim() || candidate.userId}
+										{/* The same policy `insertableName` applies, so a
+										    name the policy refuses shows here as the user
+										    ID rather than as something the composer will
+										    not splice. Not identical to the inserted
+										    token: `insertableName` additionally drops a
+										    leading `@` and maps a member literally named
+										    `room` to their localpart, so the @room
+										    everyone-mention token cannot be collided
+										    with. */}
+										{displayNameOr(candidate.name, candidate.userId)}
 									</span>
 									<span class="ml-1 text-xs text-text-faint">
 										{candidate.userId}

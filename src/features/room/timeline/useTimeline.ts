@@ -21,6 +21,7 @@ import {
 } from "../../../client/serverTime";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { avatarHttpUrl } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 import { reportError } from "../../../lib/reportError";
 import { isThreadReply } from "../../../lib/threadEvents";
 import { parsePollStart } from "../poll/pollSnapshot";
@@ -79,7 +80,7 @@ function buildSyntheticCallLeaveEvent(
 	client: MatrixClient,
 ): TimelineEvent {
 	const member = room.getMember(leave.userId);
-	const subject = member?.name?.trim() || leave.userId;
+	const subject = displayNameOr(member?.name, leave.userId);
 	const avatarUrl = avatarHttpUrl(client, member?.getMxcAvatarUrl?.(), 48);
 	return {
 		eventId: syntheticCallLeaveId(leave),

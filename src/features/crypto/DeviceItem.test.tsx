@@ -155,13 +155,50 @@ describe("DeviceItem", () => {
 		expect(screen.getAllByText("DEVICEID")).toHaveLength(2);
 	});
 
-	it("rejects a name carrying control characters rather than cleaning it", () => {
-		// The repo's rule for server-supplied names (displayNameOr): a NUL
-		// in the middle must not reach the row title or the button's
-		// accessible name.
+	it("strips a direction override rather than hiding the device name", () => {
+		// Element's rule, and the reason for it: LRO and RLO override
+		// direction for the rest of the paragraph, so they reorder the row.
+		// Removing the two characters keeps the name the user chose - hiding
+		// the whole name behind the device id would show strictly less.
 		render(() => (
 			<DeviceItem
-				device={makeDevice({ displayName: "Laptop\u0000A" })}
+				device={makeDevice({
+					displayName: `Laptop${String.fromCharCode(0x202e)}A`,
+				})}
+				onSignOut={vi.fn()}
+			/>
+		));
+		expect(
+			screen.getByRole("button", { name: "Sign out LaptopA" }),
+		).toBeTruthy();
+	});
+
+	it("keeps a device name carrying an invisible character", () => {
+		// Not hidden, deliberately. Barring the invisibles breaks real names
+		// and never converges, and a device row already prints its id on the
+		// line below, so there is nothing here for one to impersonate.
+		const name = `Laptop${String.fromCharCode(0x200b)}A`;
+		render(() => (
+			<DeviceItem
+				device={makeDevice({ displayName: name })}
+				onSignOut={vi.fn()}
+			/>
+		));
+		expect(
+			screen.getByRole("button", { name: `Sign out ${name}` }),
+		).toBeTruthy();
+	});
+
+	it("falls back on a control character in a device name", () => {
+		// The device id is the fallback here rather than an MXID, and it is
+		// what the sign-out button announces. A NUL would otherwise ride into
+		// that accessible name and into SignOutSessionsDialog's destructive
+		// confirmation sentence.
+		render(() => (
+			<DeviceItem
+				device={makeDevice({
+					displayName: `Laptop${String.fromCharCode(0x0000)}A`,
+				})}
 				onSignOut={vi.fn()}
 			/>
 		));

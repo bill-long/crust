@@ -24,8 +24,16 @@ export interface PollVoter {
 
 /** Bound on a resolved voter display name (wire-controlled input): long
  *  enough for any real name, short enough that a 10-name tooltip label
- *  can't become an unbounded DOM string. Applied at the resolution
- *  boundary (the watcher), not here. */
+ *  can't become an unbounded DOM string. Applied at the resolution boundary
+ *  (the watcher), not here.
+ *
+ *  Bounds the NAME, not the label. Over the bound the watcher falls back to
+ *  the user ID rather than slicing - slicing cut the end of the name, which
+ *  is where `calculateDisplayName` appends its `(@user:server)`, so an
+ *  impersonating name lost exactly the suffix that exposed it. An MXID is
+ *  itself bounded (255 by the spec) but can exceed this number, so a tooltip
+ *  of ten fallbacks is bounded without being short. That is the accepted
+ *  trade: a long identifier beats a truncated copy of someone else's name. */
 export const MAX_VOTER_NAME_LENGTH = 100;
 
 /** Shared comparator for voter-name sorts. Creating the Collator once

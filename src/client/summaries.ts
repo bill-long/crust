@@ -308,6 +308,15 @@ function buildSummary(
 
 	return {
 		roomId: room.roomId,
+		// Raw, deliberately. `m.room.name` is not a display name, and only a
+		// couple of its dozen-odd readers route through this summary - the
+		// settings overlay, the explore dialog, the space hierarchy and the
+		// image-pack copy all read `room.name` directly. Filtering here and
+		// not there would render the same room under two names in two panels,
+		// which is the bug this policy exists to remove. A DM's name IS
+		// member-derived and does want the treatment, but that belongs at the
+		// sinks that cannot carry the characters, not on a field half its
+		// readers bypass.
 		name: room.name,
 		avatarUrl: room.getAvatarUrl(baseUrl, 48, 48, "crop") ?? null,
 		lastMessage,

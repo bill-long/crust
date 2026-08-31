@@ -5,6 +5,7 @@ import {
 	type Room,
 	TimelineWindow,
 } from "matrix-js-sdk";
+import { stripLineBreakers } from "../../../lib/controlChars";
 import { sanitizeFilename } from "../../../lib/filename";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import { crc32Chunked, ZipWriter } from "../../../lib/zip";
@@ -257,7 +258,15 @@ async function runExport(
 
 	const bundle: ExportBundle = {
 		roomId: room.roomId,
-		roomName: room.name?.trim() || room.roomId,
+		// Escaped at the sink, not run through the display-name policy. For an
+		// unnamed DM the SDK derives `room.name` from the peer's
+		// `RoomMember.name` and does not strip C0, and this lands in the
+		// plain-text transcript header as `Chat export: <name> (<id>)` - so
+		// `Bob<LF>Security: verify your account` would split that header in
+		// two, the second line reading as its own claim. Stripping keeps the
+		// name; applying the name policy here would instead hide it behind a
+		// room ID while every other reader of `room.name` still showed it.
+		roomName: stripLineBreakers(room.name ?? "").trim() || room.roomId,
 		exportedAt: new Date(),
 		rangeLabel:
 			opts.limit === null ? "entire history" : `last ${opts.limit} messages`,

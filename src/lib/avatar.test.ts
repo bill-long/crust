@@ -67,4 +67,28 @@ describe("avatarInitial", () => {
 		expect(avatarInitial("@")).toBe("?");
 		expect(avatarInitial("   ")).toBe("?");
 	});
+
+	it("looks past a leading invisible character for a glyph", () => {
+		// The display-name policy deliberately KEEPS a name like this - barring
+		// zero-width characters breaks real names - and `String.trim` does not
+		// remove them, so without the skip the circle painted empty.
+		expect(avatarInitial(`${String.fromCharCode(0x200b)}Admin`)).toBe("A");
+		expect(avatarInitial(`${String.fromCharCode(0x3164)}Bob`)).toBe("B");
+		expect(avatarInitial(`${String.fromCharCode(0xfe00)}@alice:hs`)).toBe("A");
+	});
+
+	it("does not stall between an invisible and a space", () => {
+		// A single pass over invisibles alone stops at the first space, so the
+		// initial came back as a zero-width character - the empty circle this
+		// skip exists to prevent. Whitespace is in the class for that reason.
+		const z = String.fromCharCode(0x200b);
+		expect(avatarInitial(`${z} ${z}Admin`)).toBe("A");
+		expect(avatarInitial(`${z}${String.fromCharCode(0x09)}@admin:hs`)).toBe(
+			"A",
+		);
+	});
+
+	it("still yields ? when a name is nothing but invisibles", () => {
+		expect(avatarInitial(String.fromCharCode(0x200b).repeat(3))).toBe("?");
+	});
 });

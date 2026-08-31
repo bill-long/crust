@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-	displayNameOr,
 	hasControlChar,
+	hasLineBreaker,
 	stripControlChars,
+	stripLineBreakers,
 } from "./controlChars";
 
 // Written as escapes, never as literal bytes. A raw control character in a
@@ -31,61 +32,38 @@ describe("stripControlChars", () => {
 	});
 });
 
-describe("displayNameOr", () => {
-	it("returns an ordinary name, trimmed", () => {
-		expect(displayNameOr("  Ann Smith  ", "@ann:x")).toBe("Ann Smith");
+describe("line breakers", () => {
+	const NEL = String.fromCharCode(0x85);
+	const LS = String.fromCharCode(0x2028);
+	const PS = String.fromCharCode(0x2029);
+
+	it("finds the hard breaks above DEL that hasControlChar misses", () => {
+		// UAX #14 class BK/NL - hard breaks in a browser, exactly like U+000A -
+		// but above DEL, so the control-character predicate does not see them.
+		for (const ch of [NEL, LS, PS]) {
+			expect(hasControlChar(`Bob${ch}Admin`)).toBe(false);
+			expect(hasLineBreaker(`Bob${ch}Admin`)).toBe(true);
+		}
+		expect(hasLineBreaker(`Bob${String.fromCharCode(0x0a)}Admin`)).toBe(true);
+		expect(hasLineBreaker("Bob Admin")).toBe(false);
 	});
 
-	it("keeps a name that arrives behind padding", () => {
-		// Trimming rather than windowing is what makes this work: a
-		// sanitiser that took a fixed slice first would spend its budget on
-		// the padding and silently render nothing at all.
-		expect(displayNameOr(`${" ".repeat(200)}Ann Smith  `, "@ann:x")).toBe(
-			"Ann Smith",
+	it("strips them while keeping the rest of the text", () => {
+		// The single-line sink escape: keep the text, lose only what would
+		// force a second line.
+		expect(stripLineBreakers(`Bob${LS}Security: verify`)).toBe(
+			"BobSecurity: verify",
 		);
+		expect(
+			stripLineBreakers(`a${NEL}b${PS}c${String.fromCharCode(0x0a)}d`),
+		).toBe("abcd");
 	});
 
-	it("falls back when even the padding is abusive", () => {
-		// Past the bound the whole value is refused rather than searched.
-		// The bound is 1024; Synapse caps a real name at 256. This fails
-		// closed and visibly, where a silent empty string would not.
-		expect(displayNameOr(`${" ".repeat(2000)}Ann`, "@ann:x")).toBe("@ann:x");
-	});
-
-	it("falls back rather than cleaning a name with control characters", () => {
-		// Cleaning is not safe here. `RoomMember.name` is disambiguated by
-		// the SDK against the raw displayname map, so `A<SOH>dmin` is not
-		// seen as a duplicate of the real `Admin` and gets no user-ID
-		// suffix - and stripping would then render exactly `Admin`.
-		expect(displayNameOr(`A${SOH}dmin`, "@mallory:x")).toBe("@mallory:x");
-	});
-
-	it("falls back for a missing or blank name", () => {
-		expect(displayNameOr(undefined, "@ann:x")).toBe("@ann:x");
-		expect(displayNameOr(null, "@ann:x")).toBe("@ann:x");
-		expect(displayNameOr("   ", "@ann:x")).toBe("@ann:x");
-	});
-
-	it("keeps a name whose only control character is edge whitespace", () => {
-		// `trim` removes tab and newline, which are themselves control
-		// characters - so judging before trimming rejected a perfectly good
-		// pasted name and rendered the bare MXID. The poll watcher trims
-		// before calling this, so it also made the same user render two
-		// different ways in two panels.
-		expect(displayNameOr("Ann Smith\n", "@ann:x")).toBe("Ann Smith");
-		expect(displayNameOr("\tAnn Smith", "@ann:x")).toBe("Ann Smith");
-	});
-
-	it("still rejects a control character inside the name", () => {
-		// Trimming must not reach the interior, which is where the
-		// impersonation case lives.
-		expect(displayNameOr(`Ann${SOH}Smith`, "@ann:x")).toBe("@ann:x");
-	});
-
-	it("rejects an unbounded name without scanning it", () => {
-		// `displayname` is unbounded on the wire and re-checked for every
-		// member on every membership or typing event, so the length test has
-		// to come before the scan.
-		expect(displayNameOr("a".repeat(500_000), "@ann:x")).toBe("@ann:x");
+	it("leaves stripControlChars alone, which is the filename rule", () => {
+		// A filename with U+2028 is odd but harmless; a heading with one
+		// silently becomes two lines. Different rules, deliberately.
+		expect(stripControlChars(`report${LS}2026.pdf`)).toBe(
+			`report${LS}2026.pdf`,
+		);
 	});
 });

@@ -13,6 +13,7 @@ import {
 	onCleanup,
 } from "solid-js";
 import { avatarHttpUrl } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 
 export interface PendingInvite {
 	userId: string;
@@ -27,7 +28,7 @@ function buildInvite(member: RoomMember, client: MatrixClient): PendingInvite {
 		.events?.member;
 	return {
 		userId: member.userId,
-		displayName: member.name?.trim() || member.userId,
+		displayName: displayNameOr(member.name, member.userId),
 		avatarUrl: avatarHttpUrl(client, member.getMxcAvatarUrl(), 32),
 		invitedAt: event?.getTs() ?? null,
 		invitedBy: event?.getSender() ?? null,

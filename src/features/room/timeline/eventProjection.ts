@@ -8,6 +8,8 @@ import {
 	THREAD_RELATION_TYPE,
 } from "matrix-js-sdk";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
+import { hasControlChar } from "../../../lib/controlChars";
+import { displayNameOr } from "../../../lib/displayName";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -30,7 +32,6 @@ import {
 } from "./stateNotice";
 import {
 	buildReplySnippet,
-	hasControlChar,
 	sanitizeMultiline,
 	senderProfileFields,
 } from "./timelineHelpers";
@@ -227,9 +228,9 @@ export function eventToTimelineEvent(
 		const parent = room.findEventById(replyToId);
 		if (parent) {
 			const parentSender = parent.getSender() ?? "";
-			const rawName = room.getMember(parentSender)?.name?.trim();
-			replyToSender =
-				rawName && !hasControlChar(rawName) ? rawName : parentSender || null;
+			replyToSender = parentSender
+				? displayNameOr(room.getMember(parentSender)?.name, parentSender)
+				: null;
 			replyToBody = buildReplySnippet(parent) || null;
 
 			// Thumbnail preview for image/sticker parents so the reply visually
@@ -357,10 +358,10 @@ export function eventToTimelineEvent(
 								}
 								if (seenSenders.has(senderId)) continue;
 								seenSenders.add(senderId);
-								const rawName = room.getMember(senderId)?.name?.trim();
-								const name =
-									rawName && !hasControlChar(rawName) ? rawName : senderId;
-								senders.push({ userId: senderId, name });
+								senders.push({
+									userId: senderId,
+									name: displayNameOr(room.getMember(senderId)?.name, senderId),
+								});
 							}
 							if (myBestId) myReactions[key] = myBestId;
 							if (senders.length > 0) {

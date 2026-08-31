@@ -13,6 +13,7 @@ import {
 	onCleanup,
 } from "solid-js";
 import { avatarHttpUrl } from "../../../lib/avatar";
+import { displayNameOr } from "../../../lib/displayName";
 
 export interface PendingKnock {
 	userId: string;
@@ -29,7 +30,7 @@ function buildKnock(member: RoomMember, client: MatrixClient): PendingKnock {
 	const reason = event?.getContent()?.reason;
 	return {
 		userId: member.userId,
-		displayName: member.name?.trim() || member.userId,
+		displayName: displayNameOr(member.name, member.userId),
 		avatarUrl: avatarHttpUrl(client, member.getMxcAvatarUrl(), 32),
 		knockedAt: event?.getTs() ?? null,
 		reason:

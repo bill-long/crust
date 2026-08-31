@@ -16,6 +16,7 @@ import {
 import { fetchThreePids } from "../../client/accountSecurity";
 import { useClient } from "../../client/client";
 import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
+import { displayNameOr } from "../../lib/displayName";
 import { createImageFallback } from "../../lib/imageFallback";
 import { loadSession } from "../../stores/session";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
@@ -113,8 +114,11 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 
 	const currentDisplayName = (): string => {
 		profileVersion(); // subscribe to refreshes
+		// `User.displayName` is raw profile data - no `RoomMember` normalizes
+		// it - and this is the same value `Layout` wraps for the sidebar. Left
+		// unwrapped the two surfaces disagreed about the same string.
 		const user = client.getUser(userId());
-		return user?.displayName?.trim() || userId();
+		return displayNameOr(user?.displayName, userId());
 	};
 
 	const currentAvatarUrl = (): string | null => {
@@ -132,7 +136,13 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 	const [nameError, setNameError] = createSignal("");
 
 	const startEditingName = (): void => {
-		setNameValue(currentDisplayName());
+		// The RAW stored name, never the resolved one. `currentDisplayName` is
+		// for rendering: it strips direction overrides and substitutes the
+		// MXID when a name would not render. Seeding the editor with that and
+		// pressing Save would silently rewrite your real profile - stripping
+		// characters you meant to keep, or setting your display name to your
+		// own MXID.
+		setNameValue(client.getUser(userId())?.displayName ?? "");
 		setEditingName(true);
 		setNameError("");
 	};

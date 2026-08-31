@@ -8,6 +8,7 @@ import {
 	onCleanup,
 } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { displayNameOr } from "../../../lib/displayName";
 import { reportError } from "../../../lib/reportError";
 import { parsePollStart } from "../poll/pollSnapshot";
 import {
@@ -114,7 +115,7 @@ export function useThreadList(
 		const member = senderId ? room.getMember(senderId) : null;
 		return {
 			rootId: thread.id,
-			senderName: member?.name ?? senderId,
+			senderName: displayNameOr(member?.name, senderId),
 			snippet: rootSnippet(root),
 			summary,
 			lastActivityTs: summary.latestTs ?? root.getTs(),

@@ -1,14 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { buildNotificationCopy, trimmedField } from "./pushCopy";
+import { buildNotificationCopy, stringField, trimmedField } from "./pushCopy";
 
 describe("trimmedField", () => {
 	it("trims strings and returns '' for non-strings", () => {
+		// Still used by the service worker for room_id / event_id, where
+		// surrounding whitespace is never meaningful.
 		expect(trimmedField("  hi  ")).toBe("hi");
 		expect(trimmedField("   ")).toBe("");
 		expect(trimmedField(42)).toBe("");
 		expect(trimmedField(null)).toBe("");
 		expect(trimmedField(undefined)).toBe("");
 		expect(trimmedField({})).toBe("");
+	});
+});
+
+describe("stringField", () => {
+	it("passes strings through and returns '' for non-strings", () => {
+		expect(stringField("  hi  ")).toBe("  hi  ");
+		expect(stringField("   ")).toBe("   ");
+		expect(stringField(42)).toBe("");
+		expect(stringField(null)).toBe("");
+		expect(stringField(undefined)).toBe("");
+		expect(stringField({})).toBe("");
+	});
+
+	it("does not trim, so displayNameOr sees the raw length", () => {
+		// The bound is tested against the raw string. Trimming here would let
+		// a name behind 2000 spaces past a bound the member list applies.
+		const padded = `${" ".repeat(2000)}Ann`;
+		expect(stringField(padded)).toBe(padded);
 	});
 });
 

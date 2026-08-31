@@ -215,7 +215,7 @@ describe("createPollWatcher", () => {
 		]);
 	});
 
-	it("caps a wire display name at MAX_VOTER_NAME_LENGTH", async () => {
+	it("falls back rather than capping a long wire display name", async () => {
 		room = createMockRoom(
 			ROOM_ID,
 			[],
@@ -238,7 +238,12 @@ describe("createPollWatcher", () => {
 		watcher.getSnapshot(rootEvent, room as unknown as Room);
 		await flushPromises();
 		const snapshot = watcher.getSnapshot(rootEvent, room as unknown as Room);
-		expect(snapshot?.voters.a[0].name).toBe("F".repeat(100));
+		// Was a `.slice(0, 100)`, which cut the END of the name - exactly
+		// where `calculateDisplayName` appends its `(@user:server)`. A voter
+		// named `Admin` plus 95 zero-width spaces collides with the real
+		// Admin, earns the suffix, and sliced back to a bare `Admin` in this
+		// tooltip. The user ID is bounded too, so the label stays short.
+		expect(snapshot?.voters.a[0].name).toBe("@frank:example.com");
 	});
 
 	it("resolves each voter once and reuses the object across recomputes", async () => {
