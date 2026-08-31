@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	formatDateSeparatorLabel,
 	formatFullDateTime,
+	formatHeaderTimestamp,
+	formatTime,
 	isDifferentDay,
 	isSameDay,
 	msUntilNextLocalMidnight,
@@ -87,6 +89,73 @@ describe("formatDateSeparatorLabel", () => {
 	});
 });
 
+describe("formatHeaderTimestamp", () => {
+	const now = at(2026, 4, 25, 13, 0); // Mon May 25 2026, 1pm local
+
+	it("prefixes 'Today at' for messages earlier the same day", () => {
+		const ts = at(2026, 4, 25, 9, 15);
+		expect(formatHeaderTimestamp(ts, "12h", now)).toBe(
+			`Today at ${formatTime(ts, "12h")}`,
+		);
+	});
+
+	it("prefixes 'Yesterday at' for the previous calendar day", () => {
+		const ts = at(2026, 4, 24, 7, 43);
+		expect(formatHeaderTimestamp(ts, "12h", now)).toBe(
+			`Yesterday at ${formatTime(ts, "12h")}`,
+		);
+	});
+
+	it("uses a short numeric date + time for older days", () => {
+		const ts = at(2026, 4, 23, 15, 44);
+		// Mirror the same Intl call to stay locale-stable across
+		// test environments.
+		const date = new Intl.DateTimeFormat(undefined, {
+			year: "numeric",
+			month: "numeric",
+			day: "numeric",
+		}).format(new Date(ts));
+		expect(formatHeaderTimestamp(ts, "12h", now)).toBe(
+			`${date} ${formatTime(ts, "12h")}`,
+		);
+	});
+
+	it("has no 'at' separator on the absolute form", () => {
+		// Discord renders "8/29/2026 3:44 PM", reserving "at" for the
+		// relative labels.
+		expect(
+			formatHeaderTimestamp(at(2026, 4, 23, 15, 44), "12h", now),
+		).not.toContain(" at ");
+	});
+
+	it("honors the 24h preference in every branch", () => {
+		const today = at(2026, 4, 25, 15, 44);
+		const older = at(2026, 4, 23, 15, 44);
+		expect(formatHeaderTimestamp(today, "24h", now)).toBe(
+			`Today at ${formatTime(today, "24h")}`,
+		);
+		expect(formatHeaderTimestamp(older, "24h", now)).not.toBe(
+			formatHeaderTimestamp(older, "12h", now),
+		);
+	});
+
+	it("handles the month boundary (Yesterday = last day of prior month)", () => {
+		const nowJune1 = at(2026, 5, 1, 9, 0);
+		const ts = at(2026, 4, 31, 22, 0);
+		expect(formatHeaderTimestamp(ts, "12h", nowJune1)).toBe(
+			`Yesterday at ${formatTime(ts, "12h")}`,
+		);
+	});
+
+	it("handles the year boundary (Yesterday = Dec 31)", () => {
+		const nowJan1 = at(2027, 0, 1, 9, 0);
+		const ts = at(2026, 11, 31, 22, 0);
+		expect(formatHeaderTimestamp(ts, "12h", nowJan1)).toBe(
+			`Yesterday at ${formatTime(ts, "12h")}`,
+		);
+	});
+});
+
 describe("formatFullDateTime", () => {
 	const ts = at(2026, 4, 25, 13, 42);
 
@@ -95,7 +164,7 @@ describe("formatFullDateTime", () => {
 			year: "numeric",
 			month: "long",
 			day: "numeric",
-			hour: "2-digit",
+			hour: "numeric",
 			minute: "2-digit",
 			hour12: true,
 		}).format(new Date(ts));

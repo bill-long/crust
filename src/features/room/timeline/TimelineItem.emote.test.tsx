@@ -20,6 +20,7 @@ function renderItem(event: TimelineEvent) {
 	return render(() => (
 		<TimelineItem
 			event={event}
+			now={Date.now()}
 			showHeader={true}
 			isOwnMessage={false}
 			onReact={() => {}}

@@ -30,12 +30,7 @@ import { createCopyLink } from "../useCopyLink";
 import { DateSeparator } from "./DateSeparator";
 import { DeleteMessageDialog } from "./DeleteMessageDialog";
 import { DragOverlay } from "./DragOverlay";
-import {
-	formatDateSeparatorLabel,
-	isDifferentDay,
-	isSameDay,
-	useDayTick,
-} from "./dateFormatting";
+import { formatDateSeparatorLabel, useDayTick } from "./dateFormatting";
 import { findLastEditableEvent } from "./editableEvents";
 import { ForwardDialog } from "./ForwardDialog";
 import { canForward } from "./forwardMessage";
@@ -48,6 +43,11 @@ import { OlderMessagesLoader } from "./OlderMessagesLoader";
 import { ReportMessageDialog } from "./ReportMessageDialog";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
+import {
+	type DateSeparatorMode,
+	dateSeparatorMode,
+	shouldShowHeader,
+} from "./timelineRows";
 import { UnreadDivider } from "./UnreadDivider";
 import { useImageLightbox } from "./useImageLightbox";
 import { useMembershipExpansion } from "./useMembershipExpansion";
@@ -56,62 +56,6 @@ import { useReadReceipts } from "./useReadReceipts";
 import { type TimelineEvent, useTimeline } from "./useTimeline";
 import { useUnreadMarker } from "./useUnreadMarker";
 import { ViewSourceDialog } from "./ViewSourceDialog";
-
-const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
-
-/** Whether a message should show the full header (avatar + name + time). */
-function shouldShowHeader(
-	events: readonly TimelineEvent[],
-	index: number,
-	firstUnreadEventId: string | null,
-): boolean {
-	const curr = events[index];
-	if (!curr) return true;
-	// State notices render as a compact one-liner without an avatar or
-	// header — and a regular message immediately after a notice should
-	// always show its own header so the grouping doesn't span the
-	// notice.
-	if (curr.stateNotice) return false;
-	// Emotes render as a self-identifying "* Name action" line (#448), so
-	// a separate avatar+name header would just double the name. Mirrors
-	// the state-notice rule: the emote shows no header, and the message
-	// after it always reintroduces its own.
-	if (curr.msgtype === "m.emote") return false;
-	// Break the group at the unread divider, for the same reason the day
-	// boundary breaks it: the divider lands between the two halves, and a
-	// headerless continuation row under it reads as an orphan - a red rule
-	// followed by a bare line with no avatar or name. Below the notice and
-	// emote rules deliberately: those rows identify their own sender, so
-	// forcing a header on them would print the name twice.
-	if (curr.eventId === firstUnreadEventId) return true;
-	if (index === 0) return true;
-	const prev = events[index - 1];
-	if (!prev) return true;
-	if (prev.stateNotice) return true;
-	if (prev.msgtype === "m.emote") return true;
-	if (prev.senderId !== curr.senderId) return true;
-	if (curr.timestamp - prev.timestamp > MESSAGE_GROUP_GAP_MS) return true;
-	// Break group on day boundary so the date separator can land cleanly
-	// between the two halves.
-	if (!isSameDay(prev.timestamp, curr.timestamp)) return true;
-	return false;
-}
-
-/**
- * Whether to render a date separator above this message. True at the
- * top of the loaded timeline, and whenever the message is the first
- * one on a new calendar day.
- */
-function shouldShowDateSeparator(
-	events: readonly TimelineEvent[],
-	index: number,
-): boolean {
-	if (index === 0) return true;
-	const prev = events[index - 1];
-	const curr = events[index];
-	if (!prev || !curr) return false;
-	return isDifferentDay(prev.timestamp, curr.timestamp);
-}
 
 const TimelineView: Component<{
 	roomId: string;
@@ -1134,6 +1078,18 @@ const TimelineView: Component<{
 									if (!g || expanded()) return "item";
 									return g.leaderIndex === indexAcc() ? "summary" : "hidden";
 								};
+								// How to draw the day boundary above this row. "rule" is
+								// only chosen when the row states its own date; rows that
+								// cannot (notices, emotes, collapsed membership runs,
+								// blocked senders) get a labeled separator instead. See
+								// the invariant on `dateSeparatorMode`.
+								const separatorMode = (): DateSeparatorMode =>
+									dateSeparatorMode(
+										events,
+										indexAcc(),
+										firstUnreadEventId(),
+										ignoredUsers().includes(event.senderId),
+									);
 								const showCollapseControl = (): boolean => {
 									const g = group();
 									return (
@@ -1144,12 +1100,13 @@ const TimelineView: Component<{
 								};
 								return (
 									<div>
-										<Show when={shouldShowDateSeparator(events, indexAcc())}>
+										<Show when={separatorMode() !== "none"}>
 											<DateSeparator
 												label={formatDateSeparatorLabel(
 													event.timestamp,
 													dayTick(),
 												)}
+												showLabel={separatorMode() === "labeled"}
 											/>
 										</Show>
 										<Show when={event.eventId === firstUnreadEventId()}>
@@ -1183,6 +1140,7 @@ const TimelineView: Component<{
 											<Match when={mode() === "item"}>
 												<TimelineItem
 													event={event}
+													now={dayTick()}
 													brokenAvatars={brokenAvatars}
 													onOpenProfile={onOpenProfile}
 													showHeader={shouldShowHeader(

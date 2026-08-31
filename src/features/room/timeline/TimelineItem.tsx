@@ -33,7 +33,11 @@ import { InlineVideo } from "../urlPreviews/InlineVideo";
 import { UrlPreviewList } from "../urlPreviews/UrlPreviewList";
 import { isDirectVideoUrl } from "../urlPreviews/videoUrl";
 import { copyableText } from "./copyMessageText";
-import { formatFullDateTime, formatTime } from "./dateFormatting";
+import {
+	formatFullDateTime,
+	formatHeaderTimestamp,
+	formatTime,
+} from "./dateFormatting";
 import { EncryptedImage } from "./EncryptedImage";
 import { isEditableContent } from "./editableEvents";
 import { MediaAudio } from "./MediaAudio";
@@ -582,6 +586,11 @@ const HoverToolbar: Component<{
 const TimelineItem: Component<{
 	event: TimelineEvent;
 	showHeader: boolean;
+	/** Current time, driving the header timestamp's "Today" /
+	 *  "Yesterday" labels. Sourced from the timeline's `useDayTick`
+	 *  so the labels refresh at local midnight rather than going
+	 *  stale in a session left open overnight. */
+	now: number;
 	isOwnMessage: boolean;
 	onReact: (key: string) => void;
 	/** Cast/change the local user's poll vote (empty array = retraction). */
@@ -672,6 +681,11 @@ const TimelineItem: Component<{
 	const copyText = (): string | null => copyableText(ev);
 	const formattedTime = createMemo(() =>
 		formatTime(ev.timestamp, userSettings().timeFormat),
+	);
+	// Group headers carry the date inline (Discord style); the date
+	// separator is a bare rule and no longer labels the boundary.
+	const headerTimestamp = createMemo(() =>
+		formatHeaderTimestamp(ev.timestamp, userSettings().timeFormat, props.now),
 	);
 	const fullDateTime = createMemo(() =>
 		formatFullDateTime(ev.timestamp, userSettings().timeFormat),
@@ -949,7 +963,7 @@ const TimelineItem: Component<{
 								{ev.senderName.trim() || "Unknown"}
 							</button>
 							<span class="text-xs text-text-muted" title={fullDateTime()}>
-								{formattedTime()}
+								{headerTimestamp()}
 							</span>
 							<Show when={ev.isEncrypted && !ev.isDecryptionFailure}>
 								<span

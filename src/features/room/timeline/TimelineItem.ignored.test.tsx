@@ -27,6 +27,7 @@ function renderItem(
 	return render(() => (
 		<TimelineItem
 			event={event}
+			now={Date.now()}
 			showHeader={true}
 			isOwnMessage={false}
 			isSenderIgnored={isSenderIgnored}

@@ -39,7 +39,7 @@ const fullDate12hFmt = new Intl.DateTimeFormat(undefined, {
 	year: "numeric",
 	month: "long",
 	day: "numeric",
-	hour: "2-digit",
+	hour: "numeric",
 	minute: "2-digit",
 	hour12: true,
 });
@@ -53,8 +53,14 @@ const fullDate24hFmt = new Intl.DateTimeFormat(undefined, {
 	hour12: false,
 });
 
+const shortDateFmt = new Intl.DateTimeFormat(undefined, {
+	year: "numeric",
+	month: "numeric",
+	day: "numeric",
+});
+
 const time12hFmt = new Intl.DateTimeFormat(undefined, {
-	hour: "2-digit",
+	hour: "numeric",
 	minute: "2-digit",
 	hour12: true,
 });
@@ -89,6 +95,29 @@ export function formatDateSeparatorLabel(
 	yesterday.setDate(yesterday.getDate() - 1);
 	if (isSameDay(ts, yesterday.getTime())) return "Yesterday";
 	return longDateFmt.format(new Date(ts));
+}
+
+/**
+ * Message group-header timestamp: "Today at 3:44 PM", "Yesterday at
+ * 7:43 AM", or "8/29/2026 3:44 PM" for anything older (Discord's
+ * format). Carries the date inline so a message's day is readable
+ * without hovering - the date separator is a bare rule and no longer
+ * labels the boundary visually.
+ *
+ * `now` exists so callers can drive the relative labels off the
+ * timeline's day tick, which refreshes them at local midnight.
+ */
+export function formatHeaderTimestamp(
+	ts: number,
+	timeFormat: "12h" | "24h",
+	now: number = Date.now(),
+): string {
+	const time = formatTime(ts, timeFormat);
+	if (isSameDay(ts, now)) return `Today at ${time}`;
+	const yesterday = new Date(now);
+	yesterday.setDate(yesterday.getDate() - 1);
+	if (isSameDay(ts, yesterday.getTime())) return `Yesterday at ${time}`;
+	return `${shortDateFmt.format(new Date(ts))} ${time}`;
 }
 
 /**
