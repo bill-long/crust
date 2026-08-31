@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import type { UrlPreviewData } from "./previewCache";
 import { UrlPreviewCard } from "./UrlPreviewCard";
 
@@ -27,6 +28,11 @@ function renderCard(data: UrlPreviewData): void {
 			data={data}
 		/>
 	));
+}
+
+/** Fail the currently rendered `<img>` the way a broken response would. */
+function failImage(img: HTMLImageElement): void {
+	img.dispatchEvent(new Event("error"));
 }
 
 afterEach(() => {
@@ -143,5 +149,83 @@ describe("UrlPreviewCard", () => {
 			"(video)",
 		);
 		expect(document.querySelector("svg path")).toBeNull();
+	});
+
+	// A homeserver can hand back a non-image body for an OG image - it caches
+	// whatever the remote origin returned, rate-limit pages included - and the
+	// browser's broken-image icon must never reach the card.
+	it("hides the compact thumbnail when it fails to load", () => {
+		renderCard({
+			title: "Broken thumb",
+			image: { mxcUrl: "mxc://h/b" },
+		});
+		failImage(document.querySelector("img") as HTMLImageElement);
+		expect(document.querySelector("img")).toBeNull();
+		// The textual card survives.
+		expect(screen.getByText("Broken thumb")).toBeTruthy();
+	});
+
+	it("retires the image outright when a hero fails, with no second request", () => {
+		renderCard({
+			title: "Broken hero",
+			image: { mxcUrl: "mxc://h/bh", width: 1280, height: 720 },
+		});
+		const hero = document.querySelector("img") as HTMLImageElement;
+		expect(hero.getAttribute("src")).toContain("w=800");
+
+		failImage(hero);
+
+		// One media failure is one failure: no reserved banner left empty, and
+		// no fallback request for the 192px scale of the same broken media -
+		// that would be a second near-certain failure and a second reflow.
+		expect(document.querySelector('[style*="aspect-ratio"]')).toBeNull();
+		expect(document.querySelector("img")).toBeNull();
+		expect(screen.getByText("Broken hero")).toBeTruthy();
+	});
+
+	it("keeps a focused link focused when the hero collapses", () => {
+		renderCard({
+			title: "Focus me",
+			image: { mxcUrl: "mxc://h/fh", width: 1280, height: 720 },
+		});
+		const link = screen.getByRole("link");
+		link.focus();
+		expect(document.activeElement).toBe(link);
+
+		failImage(document.querySelector("img") as HTMLImageElement);
+
+		// The layout swap must vary one <a>'s class, not replace the <a>:
+		// destroying the focused element drops a keyboard user to <body>.
+		expect(screen.getByRole("link")).toBe(link);
+		expect(document.activeElement).toBe(link);
+	});
+
+	it("honours a shared registry so a known-broken URL is never re-attempted", () => {
+		const broken = createFailedImageUrls();
+		const data: UrlPreviewData = {
+			title: "Shared",
+			image: { mxcUrl: "mxc://h/shared" },
+		};
+		render(() => (
+			<>
+				<UrlPreviewCard
+					client={makeClient()}
+					url="https://example.com/a"
+					data={data}
+					broken={broken}
+				/>
+				<UrlPreviewCard
+					client={makeClient()}
+					url="https://example.com/b"
+					data={data}
+					broken={broken}
+				/>
+			</>
+		));
+		expect(document.querySelectorAll("img")).toHaveLength(2);
+		// One card's failure retires the URL for every card rendering it -
+		// which is what survives the timeline virtualizer recycling a row.
+		failImage(document.querySelector("img") as HTMLImageElement);
+		expect(document.querySelectorAll("img")).toHaveLength(0);
 	});
 });

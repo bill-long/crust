@@ -663,11 +663,12 @@ const TimelineItem: Component<{
 	 * unaffected - they render through the stateNotice branch.
 	 */
 	isSenderIgnored?: boolean;
-	/** Timeline-owned fail-closed registry for sender avatars. Required (not
-	 *  per-row) because virtua recycles/remounts rows constantly - per-row
-	 *  error state would be discarded on every remount and would not
-	 *  de-duplicate a broken URL across rows. */
-	brokenAvatars: FailedImageUrls;
+	/** Timeline-owned fail-closed registry for the row's remote images -
+	 *  sender avatars and link-preview thumbnails. Required (not per-row)
+	 *  because virtua recycles/remounts rows constantly - per-row error state
+	 *  would be discarded on every remount and would not de-duplicate a
+	 *  broken URL across rows. */
+	brokenImages: FailedImageUrls;
 	/** Open the sender's profile card anchored to the clicked header
 	 *  avatar/name (#444). Required: the header avatar and name are real
 	 *  buttons, and a silently inert button is worse than a loud prop. */
@@ -926,10 +927,14 @@ const TimelineItem: Component<{
 					{/* Avatar - image when the sender has one, initials circle
 					    otherwise or when the URL fails to load (fail-closed).
 					    Both states are the same 8x8 box, so no layout shift.
-					    A button: opens the sender's profile card (#444). */}
+					    A button: opens the sender's profile card (#444).
+					    `self-start` is load-bearing: the row is a flex
+					    container, so without it the button stretches to the
+					    full group height and a <button> centres its own
+					    content, parking the avatar mid-message. */}
 					<button
 						type="button"
-						class="mt-0.5 shrink-0 rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						class="mt-0.5 shrink-0 self-start rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						aria-label={`View profile of ${ev.senderName.trim() || ev.senderId}`}
 						onClick={(e) => props.onOpenProfile(ev.senderId, e.currentTarget)}
 					>
@@ -937,7 +942,7 @@ const TimelineItem: Component<{
 							url={ev.senderAvatarUrl}
 							initial={avatarInitial(ev.senderName)}
 							loading="lazy"
-							broken={props.brokenAvatars}
+							broken={props.brokenImages}
 						/>
 					</button>
 				</Show>
@@ -1131,6 +1136,7 @@ const TimelineItem: Component<{
 																urls={previewUrls}
 																ts={() => ev.timestamp}
 																disabled={() => previewUrls().length === 0}
+																broken={props.brokenImages}
 															/>
 															<Show when={videoUrls().length > 0}>
 																<div class="mt-1 flex flex-col gap-1">
