@@ -46,13 +46,22 @@ export function stripControlChars(s: string): string {
  * U+0085 NEL, U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR are UAX #14
  * class BK/NL - hard breaks in a browser, exactly like U+000A - but they sit
  * above DEL, so {@link isControlCharCode} does not see them.
+ *
+ * A code-point test rather than a regex, matching the rest of this module:
+ * a `/g` regex is stateful under `.test()` and needs its `lastIndex` reset by
+ * hand, which is correct only until someone edits around it.
  */
-const HARD_BREAK_CHARS = /[\u0085\u2028\u2029]/g;
+function isHardBreakCode(code: number): boolean {
+	return code === 0x85 || code === 0x2028 || code === 0x2029;
+}
 
 /** Whether a string contains a mandatory line break of any kind. */
 export function hasLineBreaker(s: string): boolean {
-	HARD_BREAK_CHARS.lastIndex = 0;
-	return hasControlChar(s) || HARD_BREAK_CHARS.test(s);
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (isControlCharCode(c) || isHardBreakCode(c)) return true;
+	}
+	return false;
 }
 
 /**
@@ -65,9 +74,17 @@ export function hasLineBreaker(s: string): boolean {
  * DEL: a filename with U+2028 in it is odd but harmless, whereas a heading
  * with one in it silently becomes two lines, the second reading as its own
  * claim.
+ *
+ * One pass, not `stripControlChars` plus a replace: these are untrusted and
+ * can be long, and the intermediate string bought nothing.
  */
 export function stripLineBreakers(s: string): string {
-	return stripControlChars(s).replace(HARD_BREAK_CHARS, "");
+	let out = "";
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (!isControlCharCode(c) && !isHardBreakCode(c)) out += s[i];
+	}
+	return out;
 }
 
 /**
