@@ -1,7 +1,7 @@
 import { isDifferentDay, isSameDay } from "./dateFormatting";
-import type { TimelineEvent } from "./useTimeline";
+import type { TimelineEvent } from "./timelineTypes";
 
-export const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
+const MESSAGE_GROUP_GAP_MS = 7 * 60 * 1000; // 7 minutes
 
 /** Whether a message should show the full header (avatar + name + time). */
 export function shouldShowHeader(
@@ -85,6 +85,9 @@ export function rowShowsOwnDate(
  * cannot date itself.
  */
 export type DateSeparatorMode = "none" | "rule" | "labeled";
+
+/** The modes that actually draw something. */
+export type DrawnSeparatorMode = Exclude<DateSeparatorMode, "none">;
 
 export function dateSeparatorMode(
 	events: readonly TimelineEvent[],

@@ -44,7 +44,7 @@ import { ReportMessageDialog } from "./ReportMessageDialog";
 import { ScrollToBottomButton } from "./ScrollToBottomButton";
 import { TimelineItem } from "./TimelineItem";
 import {
-	type DateSeparatorMode,
+	type DrawnSeparatorMode,
 	dateSeparatorMode,
 	shouldShowHeader,
 } from "./timelineRows";
@@ -1083,13 +1083,18 @@ const TimelineView: Component<{
 								// cannot (notices, emotes, collapsed membership runs,
 								// blocked senders) get a labeled separator instead. See
 								// the invariant on `dateSeparatorMode`.
-								const separatorMode = (): DateSeparatorMode =>
-									dateSeparatorMode(
+								// Null rather than "none" so <Show> can gate on it and hand the
+								// mode to its child - one dateSeparatorMode call per row render
+								// instead of one per read.
+								const separatorMode = (): DrawnSeparatorMode | null => {
+									const m = dateSeparatorMode(
 										events,
 										indexAcc(),
 										firstUnreadEventId(),
 										ignoredUsers().includes(event.senderId),
 									);
+									return m === "none" ? null : m;
+								};
 								const showCollapseControl = (): boolean => {
 									const g = group();
 									return (
@@ -1100,14 +1105,16 @@ const TimelineView: Component<{
 								};
 								return (
 									<div>
-										<Show when={separatorMode() !== "none"}>
-											<DateSeparator
-												label={formatDateSeparatorLabel(
-													event.timestamp,
-													dayTick(),
-												)}
-												showLabel={separatorMode() === "labeled"}
-											/>
+										<Show when={separatorMode()}>
+											{(sepMode) => (
+												<DateSeparator
+													label={formatDateSeparatorLabel(
+														event.timestamp,
+														dayTick(),
+													)}
+													showLabel={sepMode() === "labeled"}
+												/>
+											)}
 										</Show>
 										<Show when={event.eventId === firstUnreadEventId()}>
 											<UnreadDivider onSeen={markUnreadBoundarySeen} />

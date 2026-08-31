@@ -26,6 +26,24 @@ const notice = (ts: number) =>
 
 const emote = (ts: number) => msg(ts, { msgtype: "m.emote", body: "waves" });
 
+/**
+ * A member of a collapsed membership run. Carries both fields a real run
+ * member has - `eventProjection.test.ts` locks the rule that a
+ * `membershipTransition` never arrives without its `stateNotice`, which is
+ * what lets `rowShowsOwnDate` treat these rows as undated via the
+ * state-notice branch alone.
+ */
+const runMember = (ts: number) =>
+	msg(ts, {
+		stateNotice: { text: "alice joined the room", icon: "join" },
+		membershipTransition: {
+			kind: "join",
+			userId: "@alice:example.com",
+			subject: "alice",
+			avatarUrl: null,
+		},
+	});
+
 /** dateSeparatorMode with the render-time flags defaulted to false. */
 const modeAt = (
 	events: readonly TimelineEvent[],
@@ -60,7 +78,7 @@ describe("dateSeparatorMode", () => {
 		// Collapsed runs need no flag of their own: a run member always has
 		// `membershipTransition` set, which implies `stateNotice` is set, so
 		// the row is already undated by the state-notice rule.
-		const events = [msg(MON), notice(TUE)];
+		const events = [msg(MON), runMember(TUE)];
 		expect(modeAt(events, 1)).toBe("labeled");
 		expect(shouldShowHeader(events, 1, null)).toBe(false);
 	});
@@ -99,7 +117,7 @@ describe("day-boundary date visibility invariant", () => {
 		{ name: "ordinary message", event: msg(TUE) },
 		{ name: "state notice", event: notice(TUE) },
 		{ name: "emote", event: emote(TUE) },
-		{ name: "collapsed membership run", event: notice(TUE) },
+		{ name: "collapsed membership run", event: runMember(TUE) },
 		{ name: "blocked sender", event: msg(TUE), ignored: true },
 		{ name: "blocked sender emote", event: emote(TUE), ignored: true },
 	];
