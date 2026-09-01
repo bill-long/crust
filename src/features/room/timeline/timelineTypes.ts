@@ -154,13 +154,16 @@ export interface TimelineEvent {
 	 */
 	replyToId: string | null;
 	/**
-	 * Resolved display name of the replied-to event's sender, or its raw
-	 * user ID, control-char-guarded. Null when {@link TimelineEvent.replyToId}
+	 * The replied-to event's sender: their Matrix ID plus their resolved
+	 * display name (or the raw ID, control-char-guarded). Both travel
+	 * together because a resolved parent always has both and an unresolved
+	 * one has neither - the name is what's rendered, the id is what the
+	 * name's color is hashed from. Null when {@link TimelineEvent.replyToId}
 	 * is set but the parent event isn't currently resolvable (not in any
 	 * loaded timeline) — the renderer then shows a generic "in reply to a
 	 * message" affordance instead.
 	 */
-	replyToSender: string | null;
+	replyToSender: { id: string; name: string } | null;
 	/**
 	 * One-line snippet of the replied-to event for the quoted context:
 	 * the parent's first body line (reply-fallback stripped) for text, or a

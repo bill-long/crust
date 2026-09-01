@@ -80,7 +80,7 @@ This repo uses **Tailwind CSS 4** with the CSS-native config (`@import "tailwind
 <div class="bg-zinc-900 text-gray-200 border-zinc-700">
 ```
 
-The token namespace (surfaces, text, borders, semantic colors, mention/indicator) is defined via `@theme` in `src/styles/global.css` as `--color-*` variables - that file is the source of truth. Variant sets differ per color, so check `global.css` for the exact token before using one.
+The token namespace (surfaces, text, borders, semantic colors, mention/indicator, per-sender username colors) is defined via `@theme` in `src/styles/global.css` as `--color-*` variables - that file is the source of truth. Variant sets differ per color, so check `global.css` for the exact token before using one.
 
 ### Spacing & layout
 

@@ -20,6 +20,7 @@ import {
 	extractUrlsFromText,
 } from "../../../lib/extractUrls";
 import type { FailedImageUrls } from "../../../lib/imageFallback";
+import { userColorClass } from "../../../lib/userColor";
 import { userSettings } from "../../../stores/settings";
 import { EmojiPicker } from "../../emoji/EmojiPicker";
 import { MessageBody } from "../../emoji/MessageBody";
@@ -238,7 +239,9 @@ const ReplyThumb: Component<{
  */
 const ReplyContext: Component<{
 	eventId: string | null;
-	sender: string | null;
+	/** The quoted sender's id + display name, or null when the parent event
+	    isn't resolvable. Never half-populated - see TimelineEvent. */
+	sender: { id: string; name: string } | null;
 	snippet: string | null;
 	thumbUrl: string | null;
 	thumbEncryptedFile: EncryptedFileInfo | null;
@@ -260,12 +263,16 @@ const ReplyContext: Component<{
 				when={props.sender}
 				fallback={<span class="italic">In reply to a message</span>}
 			>
-				<div class="min-w-0 truncate">
-					<span class="font-medium text-text-muted">{props.sender}</span>
-					<Show when={props.snippet}>
-						<span>{`: ${props.snippet}`}</span>
-					</Show>
-				</div>
+				{(sender) => (
+					<div class="min-w-0 truncate">
+						<span class={`font-medium ${userColorClass(sender().id)}`}>
+							{sender().name}
+						</span>
+						<Show when={props.snippet}>
+							<span>{`: ${props.snippet}`}</span>
+						</Show>
+					</div>
+				)}
 			</Show>
 		</div>
 	);
@@ -675,6 +682,10 @@ const TimelineItem: Component<{
 	onOpenProfile: (userId: string, anchor: HTMLElement) => void;
 }> = (props) => {
 	const ev = props.event;
+	// Per-sender name color, hashed from the sender's MXID. Derived once
+	// per row rather than in the JSX: this renders inside a virtualized
+	// list, so nothing avoidable belongs in the scroll hot path.
+	const senderColor = userColorClass(ev.senderId);
 	// Lazy accessor (not a setup-time const, which would go stale when a
 	// reconcile-based rebuild updates the row's body/caption in place
 	// without remounting; not an eager memo either - only the overflow
@@ -960,7 +971,7 @@ const TimelineItem: Component<{
 						<div class="flex items-baseline gap-2">
 							<button
 								type="button"
-								class="rounded text-sm font-semibold text-text-emphasis hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+								class={`rounded text-sm font-semibold ${senderColor} hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
 								onClick={(e) =>
 									props.onOpenProfile(ev.senderId, e.currentTarget)
 								}
@@ -1125,7 +1136,7 @@ const TimelineItem: Component<{
 															>
 																<div class="emote-body text-sm italic text-text-secondary">
 																	<span aria-hidden="true">* </span>
-																	<span class="font-medium">
+																	<span class={`font-medium ${senderColor}`}>
 																		{ev.senderName}
 																	</span>{" "}
 																	{messageBody()}

@@ -1,4 +1,5 @@
 import { type Component, Show } from "solid-js";
+import { userColorClass } from "../../../lib/userColor";
 import type { TimelineEvent } from "../timeline/useTimeline";
 
 interface ComposerContextBannerProps {
@@ -50,7 +51,11 @@ const ComposerContextBanner: Component<ComposerContextBannerProps> = (
 				{(reply) => (
 					<div class="mb-2 flex items-center gap-2 rounded bg-surface-2/50 px-3 py-1.5">
 						<div class="min-w-0 flex-1 border-l-2 border-accent-hover pl-2">
-							<p class="truncate text-xs font-medium text-text-muted">
+							<p
+								class={`truncate text-xs font-medium ${userColorClass(
+									reply().senderId,
+								)}`}
+							>
 								{reply().senderName.trim() || "Unknown"}
 							</p>
 							<p class="truncate text-xs text-text-disabled">

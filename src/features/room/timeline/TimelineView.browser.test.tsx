@@ -808,6 +808,107 @@ describe("TimelineView (browser)", () => {
 		m.unmount();
 	});
 
+	// Sender names are colored per-user (hashed from the MXID) so speakers
+	// separate at a glance. Asserted here rather than in a unit test because
+	// the failure mode is a Tailwind one: a computed class name compiles to
+	// no CSS, so the class must survive all the way into the rendered DOM.
+	it("colors sender names per user, and the quoted name in a reply", async () => {
+		const roomId = "!colors:example.com";
+		const alice = mkEvent("$a", "from alice", 1700000000000);
+		const bob: TimelineEvent = {
+			...mkEvent("$b", "from bob", 1700000001000),
+			senderId: "@bob:example.com",
+			senderName: "Bob",
+		};
+		const reply: TimelineEvent = {
+			...mkEvent("$r", "answering alice", 1700000002000),
+			senderId: "@bob:example.com",
+			senderName: "Bob",
+			replyToId: "$a",
+			replyToSender: { id: "@alice:example.com", name: "Alice" },
+			replyToBody: "from alice",
+		};
+		harness.setRoomState(roomId, { events: [alice, bob, reply] });
+		const m = mount(roomId);
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toMatch(/answering alice/);
+
+		const nameEl = (text: string): HTMLElement | undefined =>
+			[
+				...m.container.querySelectorAll<HTMLElement>(
+					'[class*="text-username-"]',
+				),
+			].find((el) => el.textContent?.trim() === text);
+		const colorOf = (text: string): string | undefined =>
+			nameEl(text)
+				?.className.split(/\s+/)
+				.find((c) => c.startsWith("text-username-"));
+
+		const aliceColor = colorOf("Alice");
+		const bobColor = colorOf("Bob");
+		expect(aliceColor).toMatch(/^text-username-[1-6]$/);
+		expect(bobColor).toMatch(/^text-username-[1-6]$/);
+		// Different senders, different buckets - with two users a collision
+		// would be luck, but these two IDs are fixed, so this is stable.
+		expect(aliceColor).not.toBe(bobColor);
+
+		// The class landing in the DOM is only half of it - the rule behind it
+		// has to resolve too. Compare the two names against the body text,
+		// which carries no username class: if the token layer broke (a
+		// renamed `--color-username-*`, a dropped rule), all three collapse
+		// to the same inherited value. Verified by mutation: renaming the
+		// tokens in global.css fails exactly this assertion.
+		const bodyEl = [...m.container.querySelectorAll<HTMLElement>("p")].find(
+			(el) => el.textContent?.trim() === "from alice",
+		);
+		expect(bodyEl).toBeTruthy();
+		const rendered = [
+			getComputedStyle(nameEl("Alice") as HTMLElement).color,
+			getComputedStyle(nameEl("Bob") as HTMLElement).color,
+			getComputedStyle(bodyEl as HTMLElement).color,
+		];
+		expect(new Set(rendered).size).toBe(3);
+
+		// The quoted name in the reply carries Alice's color, not Bob's -
+		// the quote is attributed to its own sender.
+		const quoted = m.container.querySelector<HTMLElement>(
+			'button[aria-label="Jump to replied message"] span.font-medium',
+		);
+		expect(quoted?.textContent).toBe("Alice");
+		expect(quoted?.className).toContain(aliceColor);
+		m.unmount();
+	});
+
+	// An unresolvable parent carries no sender at all - no name to render and
+	// no MXID to hash. The generic affordance takes over, and nothing in the
+	// quote is colored (the row's own header still is).
+	it("shows an uncolored generic quote when the parent is unresolved", async () => {
+		const roomId = "!nocolor:example.com";
+		const reply: TimelineEvent = {
+			...mkEvent("$r", "answering someone", 1700000000000),
+			replyToId: "$missing",
+			replyToSender: null,
+		};
+		harness.setRoomState(roomId, { events: [reply] });
+		const m = mount(roomId);
+		await expect
+			.poll(() => m.container.textContent ?? "", {
+				timeout: 2000,
+				interval: 50,
+			})
+			.toMatch(/In reply to a message/);
+		expect(m.container.querySelector('[class*="text-username-"]')).toBeTruthy();
+		const quote = m.container.querySelector(
+			'[aria-label="Jump to replied message"]',
+		);
+		expect(quote?.querySelector('[class*="text-username-"]')).toBeNull();
+		m.unmount();
+	});
+
 	// Clicking a message's reply-context block jumps to + flashes the
 	// original message (the same scroll/flash path the pinned panel uses).
 	it("clicking the reply context flashes the replied-to message", async () => {
@@ -816,7 +917,7 @@ describe("TimelineView (browser)", () => {
 		const reply: TimelineEvent = {
 			...mkEvent("$reply", "see above", 1700000001000),
 			replyToId: "$parent",
-			replyToSender: "Alice",
+			replyToSender: { id: "@alice:example.com", name: "Alice" },
 			replyToBody: "the original question",
 		};
 		harness.setRoomState(roomId, { events: [parent, reply] });

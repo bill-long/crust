@@ -111,6 +111,23 @@ body {
 
 	/* Indicators (badges, dots) */
 	--color-indicator: #737373;
+
+	/* Per-sender name colors. Six buckets, assigned by hashing the sender's
+	   full Matrix ID (see lib/userColor.ts) so a display-name change never
+	   moves a user between them. Values are Element's Compound
+	   `text-decorative-1..6` dark-theme steps, already tuned to clear 4.5:1
+	   against a dark ground. The palette is Element's; the bucket assignment
+	   is NOT - we hash differently, so a given user
+	   lands on the same color in both clients only by chance. Don't treat
+	   cross-client parity as an invariant. Never used for anything but
+	   decoration - six buckets means collisions are routine, so the color is
+	   a hint, never an identity. */
+	--color-username-1: #56c02c;
+	--color-username-2: #21bacd;
+	--color-username-3: #d991de;
+	--color-username-4: #ad9cfe;
+	--color-username-5: #fe84a2;
+	--color-username-6: #f6913d;
 }
 
 :root {

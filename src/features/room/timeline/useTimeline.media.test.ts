@@ -512,7 +512,10 @@ describe("useTimeline media projection", () => {
 
 				const reply = events.find((e) => e.eventId === "$mediaReply");
 				expect(reply?.replyToId).toBe("$parentText");
-				expect(reply?.replyToSender).toBe("Bob");
+				expect(reply?.replyToSender).toEqual({
+					id: "@bob:test",
+					name: "Bob",
+				});
 				expect(reply?.replyToBody).toBe("the original question");
 			});
 		});

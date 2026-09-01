@@ -21,6 +21,8 @@ import {
 export interface ThreadListRow {
 	rootId: string;
 	senderName: string;
+	/** Root sender's MXID, for their name color (never the display name). */
+	senderId: string;
 	/** One-line description of the root message (body, poll question, or a
 	 *  typed placeholder). */
 	snippet: string;
@@ -116,6 +118,7 @@ export function useThreadList(
 		return {
 			rootId: thread.id,
 			senderName: displayNameOr(member?.name, senderId),
+			senderId,
 			snippet: rootSnippet(root),
 			summary,
 			lastActivityTs: summary.latestTs ?? root.getTs(),

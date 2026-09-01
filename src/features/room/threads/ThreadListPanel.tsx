@@ -13,6 +13,7 @@ import {
 } from "solid-js";
 import { Virtualizer, type VirtualizerHandle } from "virtua/solid";
 import { formatRelativeTime, useMinuteTick } from "../../../lib/relativeTime";
+import { userColorClass } from "../../../lib/userColor";
 import { type ThreadListRow, useThreadList } from "./useThreadList";
 
 /** Above this row count we drop into virtualization (per AGENTS.md). */
@@ -209,7 +210,11 @@ const ThreadListPanel: Component<{
 				count, sr-only unread) IS the accessible name - an authored label
 				would erase the snippet for screen readers. */}
 			<span class="flex w-full items-baseline gap-2">
-				<span class="min-w-0 truncate text-xs font-semibold text-text-emphasis">
+				<span
+					class={`min-w-0 truncate text-xs font-semibold ${userColorClass(
+						row.senderId,
+					)}`}
+				>
 					{row.senderName}
 				</span>
 				<Show when={row.summary.latestTs !== null}>
