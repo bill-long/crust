@@ -27,6 +27,7 @@ function renderComposed(text: string) {
 	const { body, formatted_body } = formatMarkdown(text);
 	const { container } = render(() => (
 		<MessageBody
+			class="text-message"
 			body={body}
 			format={formatted_body ? "org.matrix.custom.html" : null}
 			formattedBody={formatted_body}
@@ -77,6 +78,7 @@ describe("MessageBody Matrix permalinks", () => {
 	it("keeps matrix.to anchors clickable in-app (target=_blank fallback retained)", () => {
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body="x"
 				format="org.matrix.custom.html"
 				formattedBody='<a href="https://matrix.to/#/!room:example.org">room</a>'
@@ -95,6 +97,7 @@ describe("MessageBody Matrix permalinks", () => {
 	it("lets matrix: URIs survive sanitization so the click router can intercept them", () => {
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body="x"
 				format="org.matrix.custom.html"
 				formattedBody='<a href="matrix:u/alice:example.org">alice</a>'
@@ -122,6 +125,7 @@ describe("MessageBody rich-reply fallback", () => {
 			"my actual reply";
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body="> <@bob:hs> the quoted parent text\n\nmy actual reply"
 				format="org.matrix.custom.html"
 				formattedBody={formattedBody}
@@ -142,6 +146,7 @@ describe("MessageBody rich-reply fallback", () => {
 			"<blockquote>a genuine quote</blockquote><p>and a comment</p>";
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body="a genuine quote\nand a comment"
 				format="org.matrix.custom.html"
 				formattedBody={formattedBody}
@@ -160,6 +165,7 @@ describe("MessageBody spoilers (MSC2010)", () => {
 	function renderFormatted(formattedBody: string, body = "fallback") {
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body={body}
 				format="org.matrix.custom.html"
 				formattedBody={formattedBody}
@@ -245,6 +251,7 @@ describe("MessageBody spoilers (MSC2010)", () => {
 		const [lookup, setLookup] = createSignal(new Map<string, ResolvedEmote>());
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body="fallback"
 				format="org.matrix.custom.html"
 				formattedBody="<span data-mx-spoiler>secret</span>"
@@ -291,6 +298,7 @@ describe("MessageBody spoilers (MSC2010)", () => {
 		);
 		const { container } = render(() => (
 			<MessageBody
+				class="text-message"
 				body="fallback"
 				format="org.matrix.custom.html"
 				formattedBody={body()}

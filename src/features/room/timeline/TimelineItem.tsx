@@ -971,7 +971,7 @@ const TimelineItem: Component<{
 						<div class="flex items-baseline gap-2">
 							<button
 								type="button"
-								class={`rounded text-sm font-semibold ${senderColor} hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
+								class={`rounded text-message font-semibold ${senderColor} hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
 								onClick={(e) =>
 									props.onOpenProfile(ev.senderId, e.currentTarget)
 								}
@@ -1000,7 +1000,7 @@ const TimelineItem: Component<{
 						<Show
 							when={!ev.isDecryptionFailure}
 							fallback={
-								<p class="text-sm italic text-warning-text/80">
+								<p class="text-message italic text-warning-text/80">
 									Unable to decrypt this message
 								</p>
 							}
@@ -1008,7 +1008,9 @@ const TimelineItem: Component<{
 							<Show
 								when={!ev.isEncrypted || ev.type !== "m.room.encrypted"}
 								fallback={
-									<p class="text-sm italic text-text-disabled">Decrypting…</p>
+									<p class="text-message italic text-text-disabled">
+										Decrypting…
+									</p>
 								}
 							>
 								{/* Reply context for ALL message types, resolved from the
@@ -1036,7 +1038,7 @@ const TimelineItem: Component<{
 											fallback={
 												<Switch
 													fallback={
-														<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+														<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-message text-text-secondary">
 															{ev.body ||
 																(ev.msgtype
 																	? unsupportedLabel(ev.msgtype)
@@ -1117,6 +1119,7 @@ const TimelineItem: Component<{
 												if (!gifUrl) {
 													const messageBody = () => (
 														<MessageBody
+															class="text-message"
 															body={ev.body}
 															format={ev.format}
 															formattedBody={ev.formattedBody}
@@ -1134,7 +1137,7 @@ const TimelineItem: Component<{
 																when={ev.msgtype === "m.emote"}
 																fallback={messageBody()}
 															>
-																<div class="emote-body text-sm italic text-text-secondary">
+																<div class="emote-body text-message italic text-text-secondary">
 																	<span aria-hidden="true">* </span>
 																	<span class={`font-medium ${senderColor}`}>
 																		{ev.senderName}
@@ -1245,7 +1248,7 @@ const TimelineItem: Component<{
 											<>
 												{imageBlock}
 												<Show when={ev.mediaCaption}>
-													<p class="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+													<p class="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-message text-text-secondary">
 														{ev.mediaCaption}
 													</p>
 												</Show>
