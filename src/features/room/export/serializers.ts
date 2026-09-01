@@ -284,7 +284,7 @@ export function htmlRow(row: ExportRow, bundle: ExportBundle): string {
 	}
 	if (te.replyToId && te.replyToSender) {
 		chunks.push(
-			`<div class="reply">↩ ${escapeHtml(te.replyToSender)}: ${escapeHtml(te.replyToBody ?? "")}</div>`,
+			`<div class="reply">↩ ${escapeHtml(te.replyToSender.name)}: ${escapeHtml(te.replyToBody ?? "")}</div>`,
 		);
 	}
 	if (te.poll) {

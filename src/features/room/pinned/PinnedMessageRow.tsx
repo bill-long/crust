@@ -17,6 +17,7 @@ import {
 import { displayNameOr } from "../../../lib/displayName";
 import { reportError } from "../../../lib/reportError";
 import { threadJumpTarget } from "../../../lib/threadEvents";
+import { userColorClass } from "../../../lib/userColor";
 import { MessageBody } from "../../emoji/MessageBody";
 import type { ResolvedEmote } from "../../emoji/types";
 
@@ -338,7 +339,9 @@ const PinnedMessageRow: Component<{
 				{(r) => (
 					<>
 						<div class="flex items-baseline gap-2">
-							<span class="truncate text-xs font-semibold text-text-emphasis">
+							<span
+								class={`truncate text-xs font-semibold ${userColorClass(r.sender)}`}
+							>
 								{r.senderName}
 							</span>
 							<span class="shrink-0 text-[11px] text-text-disabled">

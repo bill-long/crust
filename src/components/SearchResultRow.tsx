@@ -1,6 +1,7 @@
 import type { Component } from "solid-js";
 import { buildSnippetHtml } from "../lib/highlightSnippet";
 import type { SearchHit } from "../lib/searchHit";
+import { userColorClass } from "../lib/userColor";
 
 function formatHitTime(ts: number): string {
 	const d = new Date(ts);
@@ -64,7 +65,11 @@ const SearchResultRow: Component<{
 				Space to jump to message:{" "}
 			</span>
 			<div class="flex items-baseline gap-2">
-				<span class="truncate text-xs font-semibold text-text-emphasis">
+				<span
+					class={`truncate text-xs font-semibold ${userColorClass(
+						props.hit.sender,
+					)}`}
+				>
 					{props.hit.senderName}
 				</span>
 				<span class="shrink-0 text-[11px] text-text-disabled">

@@ -219,7 +219,7 @@ export function eventToTimelineEvent(
 		typeof inReplyToRaw === "string" && inReplyToRaw.length > 0
 			? inReplyToRaw
 			: null;
-	let replyToSender: string | null = null;
+	let replyToSender: { id: string; name: string } | null = null;
 	let replyToBody: string | null = null;
 	let replyToThumbUrl: string | null = null;
 	let replyToThumbEncryptedFile: EncryptedFileInfo | null = null;
@@ -229,7 +229,13 @@ export function eventToTimelineEvent(
 		if (parent) {
 			const parentSender = parent.getSender() ?? "";
 			replyToSender = parentSender
-				? displayNameOr(room.getMember(parentSender)?.name, parentSender)
+				? {
+						id: parentSender,
+						name: displayNameOr(
+							room.getMember(parentSender)?.name,
+							parentSender,
+						),
+					}
 				: null;
 			replyToBody = buildReplySnippet(parent) || null;
 
