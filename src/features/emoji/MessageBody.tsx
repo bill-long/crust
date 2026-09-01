@@ -328,6 +328,15 @@ const MessageBody: Component<{
 	isEdited: boolean;
 	client: MatrixClient;
 	shortcodeLookup: Map<string, ResolvedEmote>;
+	/**
+	 * Type size for the prose, as a Tailwind font-size class. Required, and
+	 * deliberately not defaulted: this component renders message prose in
+	 * three surfaces that do not agree on a size (the timeline at
+	 * `text-message`, the pinned panel at `text-sm` inside `text-xs` chrome),
+	 * so a default here would silently impose one surface’s choice on the
+	 * others - which is exactly what it used to do.
+	 */
+	class: string;
 }> = (props) => {
 	const renderedHtml = createMemo(() => {
 		// Prefer formatted_body when format is org.matrix.custom.html
@@ -404,7 +413,9 @@ const MessageBody: Component<{
 		<Show
 			when={renderedHtml()}
 			fallback={
-				<p class="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+				<p
+					class={`whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-text-secondary ${props.class}`}
+				>
 					{props.body}
 					<Show when={props.isEdited}>
 						<span class="ml-1 text-xs text-text-disabled">(edited)</span>
@@ -413,7 +424,9 @@ const MessageBody: Component<{
 			}
 		>
 			{(html) => (
-				<div class="message-body break-words [overflow-wrap:anywhere] text-sm text-text-secondary">
+				<div
+					class={`message-body break-words [overflow-wrap:anywhere] text-text-secondary ${props.class}`}
+				>
 					{/* biome-ignore lint/a11y/noStaticElementInteractions: passive delegate for the sanitizer-generated role="button" spoiler spans inside the static innerHTML, which cannot carry handlers themselves */}
 					<div
 						ref={htmlRef}

@@ -1,5 +1,106 @@
 @import "tailwindcss";
 
+/* ─── Inter (self-hosted) ───
+   Crust ships its own typeface rather than riding `system-ui`, which resolves
+   to Segoe UI on Windows - a face drawn for OS chrome, not for 15px chat
+   prose, and ~8% smaller on the body than Inter at the same nominal size.
+   Element and Cinny both ship Inter; Discord ships gg sans. Being the only
+   one on the system font is what made our timeline read thinner and smaller
+   than theirs.
+
+   One variable file per style covers every weight we use (400/500/600/700),
+   so this is two requests, not eight. Inter 4 also carries an `opsz` axis
+   that `font-optical-sizing: auto` (the default) drives from the rendered
+   size, so the letterforms adapt to 15px prose on their own - which is why
+   nothing here hand-tunes letter-spacing the way Element's scale does.
+
+   Filenames carry the upstream version because nginx serves `public/` assets
+   with `expires 1y` and Vite does not hash them - a future Inter bump needs a
+   new path to reach a cached client. Update BOTH the filenames here and the
+   preload hints in index.html together. */
+@font-face {
+	font-family: InterVariable;
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url("/fonts/InterVariable-4.1.woff2") format("woff2");
+}
+@font-face {
+	font-family: InterVariable;
+	font-style: italic;
+	font-weight: 100 900;
+	font-display: swap;
+	src: url("/fonts/InterVariable-Italic-4.1.woff2") format("woff2");
+}
+
+/* Metric-matched fallbacks for Inter's `swap` window (and for a 404 on the
+   file). Without them the first paint lays out in the local face and reflows
+   when Inter lands - which in a virtualized timeline is not a cosmetic
+   flicker but a row re-measure that moves the user's scroll position.
+   `size-adjust` scales the local face to Inter's set width, and the
+   ascent/descent overrides restore Inter's line box on top of it, so the
+   swap changes glyph shapes and nothing else.
+
+   `unicode-range` is load-bearing, not an optimization. Font matching is
+   per-glyph, so without it these faces also sit ahead of `system-ui` for
+   every codepoint Inter does NOT cover - and a Hebrew or Arabic body would
+   then render through Segoe UI at size-adjust 108% inside Inter's shorter
+   line box (measured: +7.8% / +8.3% wider, 5% short), clipping in
+   `line-clamp` containers. The range is the intersection we actually
+   measured against: Latin, Greek, Cyrillic, punctuation and currency, which
+   Inter and all three local faces cover. Anything else falls through to
+   `system-ui` unadjusted, which is correct.
+
+   Derivation, so a future Inter bump can be recomputed rather than guessed:
+     size-adjust      = width(Inter @15px) / width(local @15px), measured in
+                        the DOM over a mixed-case + digits + punctuation
+                        sample. Measure at the real body size - Inter 4's
+                        `opsz` axis makes a 100px canvas reading ~8% off.
+     ascent-override  = 0.969 / size-adjust   (Inter hhea ascender / upem)
+     descent-override = 0.241 / size-adjust   (Inter hhea descender / upem)
+     line-gap-override= 0%                    (Inter's lineGap is 0; Arial's
+                                               is not)
+   Cross-check: Element publishes 107.7093% / 89.9412% / 22.3946% for Segoe
+   UI against static Inter - within 0.5% of what we measure here.
+
+   Each face covers the whole weight range off the local regular, so bold text
+   is synthesized for that one frame instead of falling through to an
+   unadjusted family. Italic is not covered; a few `m.emote` lines rendering
+   unadjusted for one paint is not worth three more faces. */
+@font-face {
+	font-family: "Inter Fallback Segoe UI";
+	unicode-range:
+		U+0000-024F, U+0370-03FF, U+0400-04FF, U+2000-206F, U+20A0-20CF;
+	font-weight: 100 900;
+	size-adjust: 108.283%;
+	ascent-override: 89.4877%;
+	descent-override: 22.2565%;
+	line-gap-override: 0%;
+	src: local("Segoe UI"), local("SegoeUI");
+}
+@font-face {
+	font-family: "Inter Fallback Roboto";
+	unicode-range:
+		U+0000-024F, U+0370-03FF, U+0400-04FF, U+2000-206F, U+20A0-20CF;
+	font-weight: 100 900;
+	size-adjust: 107.98%;
+	ascent-override: 89.7388%;
+	descent-override: 22.3189%;
+	line-gap-override: 0%;
+	src: local("Roboto");
+}
+@font-face {
+	font-family: "Inter Fallback Arial";
+	unicode-range:
+		U+0000-024F, U+0370-03FF, U+0400-04FF, U+2000-206F, U+20A0-20CF;
+	font-weight: 100 900;
+	size-adjust: 106.466%;
+	ascent-override: 91.015%;
+	descent-override: 22.6363%;
+	line-gap-override: 0%;
+	src: local("Arial");
+}
+
 /* Viewport containment. Uses dvh (dynamic viewport height) so the layout
    tracks mobile browser chrome and the on-screen keyboard (paired with
    interactive-widget=resizes-content in the viewport meta) - otherwise the
@@ -48,6 +149,34 @@ body {
 
 /* ─── Design Tokens ─── */
 @theme {
+	/* Typeface. Tailwind derives `--default-font-family` (and so the <html>
+	   font-family in preflight) from this, which is how the whole app picks
+	   Inter up - components never name a font.
+
+	   The tail keeps Tailwind's default emoji families: Inter has no color
+	   emoji, and the timeline renders plenty. `ui-sans-serif` is dropped on
+	   purpose - Chrome does not implement it (it resolves like an unknown
+	   family), so it only ever added a dead entry ahead of `system-ui`. */
+	--font-sans:
+		InterVariable, "Inter Fallback Segoe UI", "Inter Fallback Roboto",
+		"Inter Fallback Arial", system-ui, sans-serif, "Apple Color Emoji",
+		"Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+
+	/* Message prose. Deliberately larger than the `text-sm` (14/20) used for
+	   app chrome: prose is the one thing a chat client is read for, and every
+	   client we benchmark sizes it up from its chrome - Element 15/22, Cinny
+	   15/22, Discord 16/22. Applied to the timeline body AND the sender name,
+	   which sit at the same size in all three, and to the composer preview,
+	   whose whole job is to show what the timeline will render.
+
+	   NOT applied to the pinned panel, which passes `text-sm` explicitly:
+	   its rows are chrome (`text-xs` sender, `text-[11px]` timestamp,
+	   `line-clamp-3`), so timeline-sized prose would invert the hierarchy
+	   there. MessageBody takes the size as a required prop precisely so that
+	   choice is made per surface instead of inherited by accident. */
+	--text-message: 0.9375rem;
+	--text-message--line-height: 1.375rem;
+
 	/* Surface hierarchy (dark → light) */
 	--color-surface-0: #0a0a0a;
 	--color-surface-1: #171717;

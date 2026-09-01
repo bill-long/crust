@@ -941,6 +941,7 @@ const Composer: Component<{
 					>
 						{(content) => (
 							<MessageBody
+								class="text-message"
 								body={content().body}
 								format={
 									content().formatted_body ? "org.matrix.custom.html" : null

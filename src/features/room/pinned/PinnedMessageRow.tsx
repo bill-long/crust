@@ -358,6 +358,7 @@ const PinnedMessageRow: Component<{
 								}
 							>
 								<MessageBody
+									class="text-sm"
 									body={r.body}
 									format={r.format}
 									formattedBody={r.formattedBody}
