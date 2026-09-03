@@ -13,6 +13,7 @@ import { useClient } from "../../../client/client";
 import { presenceOf } from "../../../client/presence";
 import { Avatar } from "../../../components/Avatar";
 import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
+import { readDirectMap } from "../../../lib/directMap";
 import { displayNameOr } from "../../../lib/displayName";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { reportError } from "../../../lib/reportError";
@@ -24,7 +25,7 @@ import {
 	performKickOrBan,
 	useModerationActions,
 } from "../settings/useModerationActions";
-import { findExistingDmRoom, readDirectMap, startDm } from "../startDm";
+import { findExistingDmRoom, startDm } from "../startDm";
 import { roleForPowerLevel } from "../useMemberList";
 import {
 	closeProfileCard,
