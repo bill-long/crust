@@ -218,6 +218,107 @@ describe("forwardMessage - media", () => {
 		expect(uploadBlobMock).not.toHaveBeenCalled();
 	});
 
+	it("never forwards an empty body when the source body was only bidi controls", async () => {
+		const targetRoom = createMockRoom("!target:example.com");
+		targetRoom.hasEncryptionStateEvent = () => false;
+		const rooms = new Map([["!target:example.com", targetRoom]]);
+		const client = createMockClient(rooms as never);
+		const RLO = String.fromCharCode(0x202e);
+		// With a filename, the body falls back to it (the pair stays equal).
+		await forwardMessage(
+			client as never,
+			makeSourceEvent({
+				msgtype: "m.file",
+				body: RLO,
+				filename: "report.pdf",
+				url: "mxc://example.com/file",
+			}),
+			"!target:example.com",
+		);
+		expect(client.sendMessage).toHaveBeenLastCalledWith(
+			"!target:example.com",
+			null,
+			{
+				msgtype: "m.file",
+				body: "report.pdf",
+				filename: "report.pdf",
+				url: "mxc://example.com/file",
+			},
+		);
+		// Without one, the generic label - never an empty string.
+		await forwardMessage(
+			client as never,
+			makeSourceEvent({
+				msgtype: "m.file",
+				body: RLO,
+				url: "mxc://example.com/file",
+			}),
+			"!target:example.com",
+		);
+		expect(client.sendMessage).toHaveBeenLastCalledWith(
+			"!target:example.com",
+			null,
+			{ msgtype: "m.file", body: "file", url: "mxc://example.com/file" },
+		);
+		// A body of nothing but control characters is as empty as one of
+		// nothing but bidi controls.
+		await forwardMessage(
+			client as never,
+			makeSourceEvent({
+				msgtype: "m.file",
+				body: String.fromCharCode(0x00),
+				url: "mxc://example.com/file",
+			}),
+			"!target:example.com",
+		);
+		expect(client.sendMessage).toHaveBeenLastCalledWith(
+			"!target:example.com",
+			null,
+			{ msgtype: "m.file", body: "file", url: "mxc://example.com/file" },
+		);
+		// A body that was the filename verbatim stays equal to the filename
+		// even when the filename rule drops a separator from it.
+		await forwardMessage(
+			client as never,
+			makeSourceEvent({
+				msgtype: "m.image",
+				body: "2024/report.png",
+				filename: "2024/report.png",
+				url: "mxc://example.com/image",
+			}),
+			"!target:example.com",
+		);
+		expect(client.sendMessage).toHaveBeenLastCalledWith(
+			"!target:example.com",
+			null,
+			{
+				msgtype: "m.image",
+				body: "2024report.png",
+				filename: "2024report.png",
+				url: "mxc://example.com/image",
+			},
+		);
+		// A reply quote followed by only a control must not come back as
+		// the forwarder's own words.
+		await forwardMessage(
+			client as never,
+			makeSourceEvent({
+				msgtype: "m.file",
+				body:
+					"> <@alice:example.com> secret plan" +
+					String.fromCharCode(10, 10) +
+					RLO,
+				url: "mxc://example.com/file",
+			}),
+			"!target:example.com",
+		);
+		expect(client.sendMessage).toHaveBeenLastCalledWith(
+			"!target:example.com",
+			null,
+			{ msgtype: "m.file", body: "file", url: "mxc://example.com/file" },
+		);
+	});
+
 	it("strips bidi scope controls from the forwarded filename and body", async () => {
 		const targetRoom = createMockRoom("!target:example.com");
 		targetRoom.hasEncryptionStateEvent = () => false;

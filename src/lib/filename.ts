@@ -4,6 +4,9 @@ import {
 	stripControlChars,
 } from "./controlChars";
 
+/** The label for an attachment with no usable name, everywhere one is shown. */
+export const FALLBACK_FILENAME = "file";
+
 /**
  * Sanitize a file-provided name for use as a Matrix `filename`/`body`, as a
  * UI/ARIA label and as the `download` attribute: drop control characters (C0
@@ -20,11 +23,11 @@ import {
  * drops, because `invoicegnp.exe` is still an honest filename.
  */
 export function sanitizeFilename(name: string | undefined | null): string {
-	if (!name) return "file";
+	if (!name) return FALLBACK_FILENAME;
 	const out = stripControlChars(stripBidiControls(name))
 		.replace(/[/\\]/g, "")
 		.trim();
-	return out || "file";
+	return out || FALLBACK_FILENAME;
 }
 
 /**
