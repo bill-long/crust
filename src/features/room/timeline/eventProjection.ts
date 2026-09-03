@@ -10,7 +10,7 @@ import {
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
 import { stripBidiControls } from "../../../lib/controlChars";
 import { displayNameOr } from "../../../lib/displayName";
-import { wireFilename } from "../../../lib/filename";
+import { wireAttachmentName, wireFilename } from "../../../lib/filename";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -115,28 +115,13 @@ export function eventToTimelineEvent(
 		content.info.size >= 0
 			? content.info.size
 			: null;
-	// The explicit `filename` wins whenever it has anything usable in it; only
-	// an empty or whitespace-only one (after the bidi strip) yields to
-	// `content.body`, which may carry a usable filename. A control-bearing
-	// explicit filename does NOT yield: `wireFilename` refuses it below, and a
-	// caption-style body is not a better filename than none.
-	const explicitFilename =
-		typeof content.filename === "string"
-			? stripBidiControls(content.filename).trim()
-			: "";
-	const rawFilename = !hasMediaSource
-		? null
-		: explicitFilename.length > 0
-			? content.filename
-			: typeof content.body === "string"
-				? content.body
-				: null;
-	// `wireFilename` is the one receive-side rule: bidi scope controls stripped
+	// `wireAttachmentName` is the one receive-side rule for which string names
+	// an attachment and how it is cleaned: bidi scope controls stripped
 	// (`invoice<RLO>gnp.exe` would otherwise render as `invoiceexe.png` in the
 	// chip and its aria-label), trimmed, and refused on a control character -
 	// attachment events often carry a caption-style body that isn't a
 	// filename, and a NUL would corrupt every label it reached.
-	const mediaFilename = wireFilename(rawFilename);
+	const mediaFilename = hasMediaSource ? wireAttachmentName(content) : null;
 
 	// Plain video poster from the cleartext `info.thumbnail_url`. Encrypted
 	// videos carry a ciphertext `thumbnail_file` instead, decoded separately

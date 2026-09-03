@@ -28,14 +28,18 @@ describe("buildReplySnippet for an attachment", () => {
 		).toBe("📎 invoicegnp.exe");
 	});
 
-	it("falls back to the body, then to a generic label", () => {
-		// A control-bearing filename is refused wholesale (wireFilename), so
-		// the body is consulted; when that is unusable too, no name at all.
+	it("names the attachment exactly as the chip does, including no name", () => {
+		// The same selection rule as the projection: an empty explicit
+		// filename yields to the body, a control-bearing one is refused and
+		// does NOT yield, so the snippet and the chip agree on "no name".
+		expect(
+			buildReplySnippet(fileEvent({ body: "report.pdf", filename: "  " })),
+		).toBe("📎 report.pdf");
 		expect(
 			buildReplySnippet(
 				fileEvent({ body: "report.pdf", filename: `a${NUL}b.pdf` }),
 			),
-		).toBe("📎 report.pdf");
+		).toBe("📎 File");
 		expect(buildReplySnippet(fileEvent({ body: `a${NUL}b.pdf` }))).toBe(
 			"📎 File",
 		);

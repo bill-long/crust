@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeFilename, wireFilename } from "./filename";
+import { sanitizeFilename, wireAttachmentName, wireFilename } from "./filename";
 
 // Build control-char strings programmatically so no raw control bytes live in
 // this source file.
@@ -27,6 +27,29 @@ describe("wireFilename", () => {
 
 	it("keeps an ordinary name", () => {
 		expect(wireFilename("report.pdf")).toBe("report.pdf");
+	});
+});
+
+describe("wireAttachmentName", () => {
+	it("prefers the explicit filename, yielding to the body only when empty", () => {
+		expect(wireAttachmentName({ filename: "a.png", body: "caption" })).toBe(
+			"a.png",
+		);
+		expect(wireAttachmentName({ filename: "  ", body: "b.png" })).toBe("b.png");
+		expect(
+			wireAttachmentName({
+				filename: String.fromCharCode(0x202e),
+				body: "c.png",
+			}),
+		).toBe("c.png");
+		expect(wireAttachmentName({ body: "d.png" })).toBe("d.png");
+	});
+
+	it("does not let a refused explicit filename yield to the body", () => {
+		expect(
+			wireAttachmentName({ filename: `a${NUL}b.png`, body: "clean.png" }),
+		).toBeNull();
+		expect(wireAttachmentName({})).toBeNull();
 	});
 });
 

@@ -4,7 +4,11 @@ import {
 	stripControlChars,
 } from "./controlChars";
 
-/** The label for an attachment with no usable name, everywhere one is shown. */
+/**
+ * The name used for an attachment that has no usable one: the chip label,
+ * the `download` attribute, an upload name, a forwarded body. A name, not a
+ * caption - the reply snippet says "File" in prose and is not this.
+ */
 export const FALLBACK_FILENAME = "file";
 
 /**
@@ -44,4 +48,24 @@ export function wireFilename(raw: unknown): string | null {
 	if (typeof raw !== "string") return null;
 	const trimmed = stripBidiControls(raw).trim();
 	return trimmed.length > 0 && !hasControlChar(trimmed) ? trimmed : null;
+}
+
+/**
+ * Which of an attachment's `filename` and `body` names it, resolved through
+ * {@link wireFilename}. The explicit `filename` wins whenever it has anything
+ * in it after the bidi strip; only an empty or whitespace-only one yields to
+ * `body`, which may carry a usable filename. A control-bearing explicit
+ * filename does NOT yield - it is refused, and a caption-style body is not a
+ * better filename than none. One rule, so the chip, the lightbox header, the
+ * export line and the reply snippet cannot disagree about which string names
+ * the attachment.
+ */
+export function wireAttachmentName(
+	content: Record<string, unknown>,
+): string | null {
+	const explicit =
+		typeof content.filename === "string"
+			? stripBidiControls(content.filename).trim()
+			: "";
+	return wireFilename(explicit.length > 0 ? content.filename : content.body);
 }
