@@ -74,9 +74,8 @@ unset, empty, or otherwise invalid values are ignored.
   whole point: a dense, keyboard-first, three-pane layout)
 - A bridge management UI (bridges are a server-side operator concern, configured
   out-of-band)
-- An SSO/OIDC client (password auth only - our homeserver, Continuwuity, has no
-  OIDC login support yet; this is a "not yet," not a "never," and worth
-  revisiting if that changes)
+- A general-purpose SSO client (it logs in with a password or with the
+  homeserver's own OAuth 2.0 login, and nothing else)
 - A clone of Element's full feature surface (features are chosen intentionally
   rather than to reach 100% parity - this rules out labs and niche admin
   surfaces, *not* mainstream features like threads or polls, which remain fair
@@ -92,6 +91,14 @@ TypeScript · Solid · Vite · Tailwind v4 · Kobalte · matrix-js-sdk · Biome
 pnpm install
 pnpm dev
 ```
+
+To test the OAuth login flow, run `pnpm dev:https` instead: the homeserver
+wants an HTTPS origin, so this self-signs a localhost certificate (with the
+`openssl` on PATH, or Git for Windows' copy) and serves https://localhost:5173;
+accept the browser warning once. It is `vite --mode https`, so it takes the
+same flags as `pnpm dev` except `--mode` (and reads `.env.https*` instead of
+`.env.development*`), and an `http://` homeserver must be a loopback one, as
+anything else is mixed content under an https origin.
 
 ## Self-hosting
 

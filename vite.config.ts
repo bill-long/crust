@@ -1,9 +1,12 @@
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import solid from "vite-plugin-solid";
 import { appendDevCspSources } from "./scripts/csp-lib.mjs";
+import { ensureDevCert } from "./scripts/dev-https-lib.mjs";
 import { ICON_FILENAMES } from "./src/lib/iconRuntimeCache";
 
 // Public base path the app is served from. Override with VITE_BASE_PATH
@@ -66,8 +69,25 @@ const devCsp = (): Plugin => ({
 	},
 });
 
-export default defineConfig({
+export default defineConfig(({ command, mode, isPreview }) => ({
 	base: basePath,
+	// `pnpm dev:https` is `vite --mode https` (#468): the dev server over TLS
+	// with a self-signed localhost certificate kept in .dev-certs/, because
+	// Continuwuity rejects an OAuth client_uri that is not https and the
+	// OAuth login flow cannot be exercised otherwise. Gated on the dev server
+	// proper: `vite build --mode https` never touches it, and neither does
+	// `vite preview`, which also runs as the serve command. The pair is named
+	// `*.pem` so Vite's stock `server.fs.deny` refuses to serve it; that list
+	// is not extended here because setting `fs.deny` replaces the defaults,
+	// and the default is the rule that matters.
+	server:
+		command === "serve" && !isPreview && mode === "https"
+			? {
+					https: ensureDevCert(join(import.meta.dirname, ".dev-certs"), {
+						run: (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" }),
+					}),
+				}
+			: undefined,
 	build: {
 		rolldownOptions: {
 			output: {
@@ -211,4 +231,4 @@ export default defineConfig({
 			},
 		],
 	},
-});
+}));

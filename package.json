@@ -6,6 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"dev:https": "vite --mode https",
 		"build": "node scripts/check-csp-sync.mjs && vite build && node scripts/check-vendor-chunks.mjs && node scripts/check-sw-size.mjs",
 		"build:vite": "vite build",
 		"preview": "vite preview",
