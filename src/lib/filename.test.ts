@@ -16,9 +16,7 @@ describe("wireFilename", () => {
 	it("refuses a control-bearing name wholesale, and non-strings", () => {
 		// A caption-style body with a newline is not a filename; a NUL would
 		// corrupt every label it reached. Reject, unlike the send side.
-		expect(
-			wireFilename("line one" + String.fromCharCode(0x0a) + "two"),
-		).toBeNull();
+		expect(wireFilename(`line one${String.fromCharCode(0x0a)}two`)).toBeNull();
 		expect(wireFilename(`a${NUL}b.png`)).toBeNull();
 		expect(wireFilename("   ")).toBeNull();
 		expect(wireFilename(undefined)).toBeNull();

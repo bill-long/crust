@@ -1,9 +1,6 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
-import {
-	stripBidiControls,
-	stripControlChars,
-} from "../../../lib/controlChars";
+import { stripBidiControls } from "../../../lib/controlChars";
 import { FALLBACK_FILENAME, sanitizeFilename } from "../../../lib/filename";
 import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { stripReplyFallback } from "../../../lib/replyFallback";
@@ -12,6 +9,7 @@ import {
 	parseEncryptedFile,
 } from "../composer/media/attachmentCrypto";
 import { uploadBlob } from "../composer/media/uploadMedia";
+import { sanitizeMultiline } from "./timelineHelpers";
 import type { TimelineEvent } from "./timelineTypes";
 
 /** Attachment types forwarded as media content (re-uploaded when needed). */
@@ -171,8 +169,9 @@ async function buildMediaForwardContent(
 	// body if stripping empties it: a media body doubles as the caption.
 	// The same reasoning covers a bidi scope control: this event goes out
 	// under the forwarder's name, so it gets the strips a fresh upload gets -
-	// `sanitizeFilename` on the filename, and the bidi strip alone on the
-	// body, which may be a multi-line caption rather than a filename. A body
+	// `sanitizeFilename` on the filename, and on the body - which may be a
+	// multi-line caption rather than a filename - the bidi strip plus the
+	// caption rule (newlines kept, every other control character dropped). A body
 	// that was the filename verbatim stays the filename, so the pair cannot
 	// drift apart on a separator the filename rule drops; a body with
 	// nothing visible left after the strips falls back to the filename, then
@@ -181,15 +180,13 @@ async function buildMediaForwardContent(
 		typeof content.filename === "string"
 			? sanitizeFilename(content.filename)
 			: undefined;
-	const strippedBody = stripBidiControls(
-		stripReplyFallback(rawBody).trim() || rawBody.trim(),
+	const cleanBody = sanitizeMultiline(
+		stripBidiControls(stripReplyFallback(rawBody).trim() || rawBody.trim()),
 	).trim();
 	const body =
 		filename !== undefined && content.body === content.filename
 			? filename
-			: stripControlChars(strippedBody).trim()
-				? strippedBody
-				: filename || FALLBACK_FILENAME;
+			: cleanBody || filename || FALLBACK_FILENAME;
 	const base: Record<string, unknown> = {
 		msgtype: content.msgtype,
 		body,

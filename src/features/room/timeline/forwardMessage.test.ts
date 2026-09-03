@@ -276,6 +276,34 @@ describe("forwardMessage - media", () => {
 			null,
 			{ msgtype: "m.file", body: "file", url: "mxc://example.com/file" },
 		);
+		// Control characters inside a caption are dropped, newlines kept: the
+		// event goes out under the forwarder's name, so it gets the caption
+		// rule a fresh send gets.
+		await forwardMessage(
+			client as never,
+			makeSourceEvent({
+				msgtype: "m.image",
+				body:
+					"cap" +
+					String.fromCharCode(0x00) +
+					"tion" +
+					String.fromCharCode(10) +
+					"line two",
+				filename: "photo.png",
+				url: "mxc://example.com/image",
+			}),
+			"!target:example.com",
+		);
+		expect(client.sendMessage).toHaveBeenLastCalledWith(
+			"!target:example.com",
+			null,
+			{
+				msgtype: "m.image",
+				body: `caption${String.fromCharCode(10)}line two`,
+				filename: "photo.png",
+				url: "mxc://example.com/image",
+			},
+		);
 		// A body that was the filename verbatim stays equal to the filename
 		// even when the filename rule drops a separator from it.
 		await forwardMessage(
