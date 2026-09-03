@@ -219,14 +219,12 @@ describe("buildRoomLinkById", () => {
 });
 
 describe("canShareJoinLink", () => {
-	it.each([
-		"public",
-		"knock",
-		"restricted",
-		"knock_restricted",
-	])("allows a shareable link for %s rooms", (rule) => {
-		expect(canShareJoinLink(rule)).toBe(true);
-	});
+	it.each(["public", "knock", "restricted", "knock_restricted"])(
+		"allows a shareable link for %s rooms",
+		(rule) => {
+			expect(canShareJoinLink(rule)).toBe(true);
+		},
+	);
 
 	it("hides the link for invite-only rooms", () => {
 		expect(canShareJoinLink("invite")).toBe(false);
