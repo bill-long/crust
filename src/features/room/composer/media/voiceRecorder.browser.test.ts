@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createVoiceRecorder,
 	isVoiceRecordingSupported,
@@ -45,15 +45,38 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Wait until the analyser has seen the tone. The tone and the recorder run
+ * in two realtime AudioContexts bridged by a MediaStream, and how long that
+ * bridge takes to carry its first non-silent frame depends on machine load
+ * (#470): a fixed window can close before the first non-zero sample and the
+ * captured waveform flatlines to zeros. Bounded, so a pipeline that never
+ * carries signal still fails, and says so - the caller's test timeout has
+ * to leave room for this bound plus the recording itself.
+ */
+function waitForSignal(recorder: VoiceRecorder): Promise<void> {
+	return vi.waitFor(
+		() => {
+			if (!recorder.liveAmplitudes().some((a) => a > 0)) {
+				throw new Error("no audio has reached the analyser yet");
+			}
+		},
+		{ timeout: 5_000, interval: 50 },
+	);
+}
+
 describe("createVoiceRecorder (browser)", () => {
 	it("is supported in a real browser", () => {
 		expect(isVoiceRecordingSupported()).toBe(true);
 	});
 
-	it("records a clip with sane metadata", async () => {
+	it("records a clip with sane metadata", { timeout: 10_000 }, async () => {
 		const { recorder } = makeRecorderOverTone();
 		await recorder.start();
 		expect(recorder.recording()).toBe(true);
+		// Record for a good half second of tone, however long it takes the
+		// graph to start carrying it.
+		await waitForSignal(recorder);
 		await sleep(500);
 		expect(recorder.elapsedMs()).toBeGreaterThan(300);
 		expect(recorder.liveAmplitudes().length).toBeGreaterThan(0);
@@ -67,7 +90,7 @@ describe("createVoiceRecorder (browser)", () => {
 		expect(result.mimetype).toMatch(/^audio\/[a-z0-9.+-]+$/);
 		expect(result.mimetype).not.toContain(";");
 		expect(result.voice.durationMs).toBeGreaterThan(300);
-		expect(result.voice.durationMs).toBeLessThan(5_000);
+		expect(result.voice.durationMs).toBeLessThan(10_000);
 		// A constant tone must produce non-zero MSC3246 amplitudes.
 		expect(result.voice.waveform.length).toBeGreaterThan(0);
 		expect(result.voice.waveform.length).toBeLessThanOrEqual(100);
