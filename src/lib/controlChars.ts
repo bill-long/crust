@@ -103,4 +103,46 @@ export function replaceControlChars(s: string, replacement: string): string {
 	return out;
 }
 
+/**
+ * Bidi scope controls: the embeddings and overrides U+202A-U+202E and the
+ * isolates U+2066-U+2069, initiators and terminators alike.
+ *
+ * An initiator opens a directional scope that per UAX #9 runs to its
+ * terminator or, when unmatched, to the end of the paragraph. Nothing makes
+ * a wire string balanced, so an unmatched one reorders whatever is rendered
+ * after it: the rest of a "<name> will be signed out" sentence, the tail of
+ * an aria-label, the extension of a filename. Element strips only the two
+ * overrides (`removeDirectionOverrideChars`); the embeddings and isolates leak
+ * the same way, and its pattern predates the isolates (Unicode 6.3), so this
+ * is the full set. The terminators are inert on their own and go with their
+ * initiators, so a balanced pair is never left half-stripped.
+ *
+ * Stripping, never rejecting: the string is still the user's. The accepted
+ * cost is a BALANCED pair in a genuinely mixed-direction name - with
+ * `<RLI>` and `<PDI>` around Hebrew letters followed by `Ltd`, the isolate puts
+ * `Ltd` left of the Hebrew and the strip leaves it on the right, because
+ * Crust's name slots are LTR blocks. That rendering is wrong but legible and
+ * stays inside the name's own box; an unmatched initiator reorders someone
+ * else's text. The marks U+200E, U+200F and U+061C carry no scope, are how an
+ * RTL run sits correctly beside LTR text, and stay - the SDK's display-name
+ * disambiguation rule keys on the first two.
+ *
+ * Defined here rather than in `displayName.ts` because the filename rule
+ * (#574) needs the same set, and two copies of it would drift.
+ */
+const BIDI_SCOPE_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
+
+/**
+ * Remove bidi scope controls, keeping everything else.
+ *
+ * A regex where the rest of this module loops, deliberately: display names go
+ * through this for every member on every typing tick, and `replace` measured
+ * at half a scan-and-copy loop's cost on a clean name and a third of it on a
+ * 1024-character hostile one. The module's caveat about `/g` is about
+ * `lastIndex` under `.test()`; `replace` always starts from zero and resets it.
+ */
+export function stripBidiControls(s: string): string {
+	return s.replace(BIDI_SCOPE_CONTROLS, "");
+}
+
 export { isControlCharCode };

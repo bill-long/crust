@@ -53,19 +53,15 @@ function buildEntry(member: RoomMember, client: MatrixClient): MemberEntry {
 		// like an MXID, carries a bidi character its pattern lists, or
 		// collides with another member after unhomoglyph normalization.
 		//
-		// `displayNameOr` still runs on it. The direction strip is a no-op on
-		// a name the SDK already stripped, but the other three rules do fire
-		// here and each one matters: `displayname` is unbounded on the wire
-		// while this rebuilds for every member on every typing event; the
-		// SDK's own emptiness test misses the Hangul fillers (unhomoglyph
-		// maps U+3164 rather than dropping it), so a name of two would render
-		// a blank row; and C0 is the one invisible class it does not
-		// normalize at all.
-		//
-		// Known gaps NOT closed here, because closing them locally grew a
-		// rule that needed another rule every time: #575 (bidi embeddings and
-		// isolates, which the SDK's own pattern misses) and #576 (invisible
-		// and control characters, which it does not normalize).
+		// `displayNameOr` still runs on it, and every one of its rules can
+		// fire here: its bidi strip is wider than the SDK's (the embeddings
+		// and isolates, #575), so `displayName` is not always byte-equal to
+		// `member.name`; `displayname` is unbounded on the wire while this
+		// rebuilds for every member on every typing event; the SDK's own
+		// emptiness test misses the Hangul fillers (unhomoglyph maps U+3164
+		// rather than dropping it), so a name of two would render a blank
+		// row; and C0 is the one invisible class it does not normalize at
+		// all.
 		displayName: displayNameOr(member.name, member.userId),
 		avatarUrl: avatarHttpUrl(client, member.getMxcAvatarUrl(), 32),
 		powerLevel: member.powerLevel ?? 0,

@@ -535,7 +535,9 @@ describe("buildEntry display names", () => {
 	// `RoomMember.name` arrives with Element's whole policy already applied -
 	// direction overrides stripped, the user ID substituted when nothing
 	// renders, and `(@user:server)` appended when the name is suspicious or
-	// collides. buildEntry's job is not to undo any of it.
+	// collides. buildEntry's job is not to undo any of it - though the
+	// policy's bidi strip is wider than the SDK's, so the output is not
+	// always byte-equal to the input.
 
 	it("passes the SDK's name through verbatim", () => {
 		expect(entryFor("Ann Smith")).toBe("Ann Smith");
@@ -547,8 +549,11 @@ describe("buildEntry display names", () => {
 		// someone. An earlier revision rejected such names wholesale and
 		// rendered the bare MXID, throwing that signal away; a later one
 		// truncated over-length names, which cut the suffix off the end.
+		// The scope control itself is stripped (#575) - the SDK has already
+		// appended the suffix by the time the name reaches the helper, so the
+		// signal stays and only the formatting character goes.
 		const disambiguated = `Ann${String.fromCharCode(0x202a)}Smith (@a:x)`;
-		expect(entryFor(disambiguated)).toBe(disambiguated);
+		expect(entryFor(disambiguated)).toBe("AnnSmith (@a:x)");
 	});
 
 	it("keeps the invisible characters real names need", () => {
