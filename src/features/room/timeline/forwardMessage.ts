@@ -1,5 +1,7 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
+import { stripBidiControls } from "../../../lib/controlChars";
+import { FALLBACK_FILENAME, sanitizeFilename } from "../../../lib/filename";
 import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import {
@@ -7,6 +9,7 @@ import {
 	parseEncryptedFile,
 } from "../composer/media/attachmentCrypto";
 import { uploadBlob } from "../composer/media/uploadMedia";
+import { sanitizeMultiline } from "./timelineHelpers";
 import type { TimelineEvent } from "./timelineTypes";
 
 /** Attachment types forwarded as media content (re-uploaded when needed). */
@@ -164,12 +167,31 @@ async function buildMediaForwardContent(
 	// quoted preamble here exactly like the text path - the forward must
 	// not attribute text the forwarder never wrote. Fall back to the raw
 	// body if stripping empties it: a media body doubles as the caption.
-	const body = stripReplyFallback(rawBody).trim() || rawBody.trim();
+	// The same reasoning covers a bidi scope control: this event goes out
+	// under the forwarder's name, so it gets the strips a fresh upload gets -
+	// `sanitizeFilename` on the filename, and on the body - which may be a
+	// multi-line caption rather than a filename - the bidi strip plus the
+	// caption rule (newlines kept, every other control character dropped). A body
+	// that was the filename verbatim stays the filename, so the pair cannot
+	// drift apart on a separator the filename rule drops; a body with
+	// nothing visible left after the strips falls back to the filename, then
+	// to the generic label, so the forward never goes out with an empty body.
+	const filename =
+		typeof content.filename === "string"
+			? sanitizeFilename(content.filename)
+			: undefined;
+	const cleanBody = sanitizeMultiline(
+		stripBidiControls(stripReplyFallback(rawBody).trim() || rawBody.trim()),
+	).trim();
+	const body =
+		filename !== undefined && content.body === content.filename
+			? filename
+			: cleanBody || filename || FALLBACK_FILENAME;
 	const base: Record<string, unknown> = {
 		msgtype: content.msgtype,
 		body,
 	};
-	if (typeof content.filename === "string") base.filename = content.filename;
+	if (filename !== undefined) base.filename = filename;
 	// Voice-message and other top-level rendering hints ride along in both
 	// paths (they describe the recording, not the upload).
 	if (
@@ -191,10 +213,7 @@ async function buildMediaForwardContent(
 	const uploaded = await uploadBlob(client, blob, {
 		encrypted: targetEncrypted,
 		type: readMimetype(content) ?? "application/octet-stream",
-		name:
-			typeof content.filename === "string"
-				? content.filename
-				: body || undefined,
+		name: filename ?? sanitizeFilename(body),
 	});
 	const info = infoWithoutThumbnails(content.info) ?? {};
 	info.size = blob.size;

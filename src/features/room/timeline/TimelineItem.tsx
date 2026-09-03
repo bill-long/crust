@@ -19,6 +19,7 @@ import {
 	extractUrlsFromHtml,
 	extractUrlsFromText,
 } from "../../../lib/extractUrls";
+import { FALLBACK_FILENAME } from "../../../lib/filename";
 import type { FailedImageUrls } from "../../../lib/imageFallback";
 import { userColorClass } from "../../../lib/userColor";
 import { userSettings } from "../../../stores/settings";
@@ -1103,7 +1104,7 @@ const TimelineItem: Component<{
 															httpUrl={ev.mediaFullUrl}
 															file={ev.mediaEncryptedFile}
 															mimetype={ev.mediaMimetype}
-															filename={ev.mediaFilename || "file"}
+															filename={ev.mediaFilename || FALLBACK_FILENAME}
 															size={ev.mediaSize}
 															isEncrypted={ev.mediaIsEncrypted}
 														/>
