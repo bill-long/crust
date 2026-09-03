@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
+import { recallRemoteConfig, rememberRemoteConfig } from "./remoteConfigCache";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -39,10 +40,10 @@ const LIVE = {
 	gif: { enabled: true, provider: "klipy", apiKey: "live-key", maxRating: "g" },
 };
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
 	return {
-		ok: true,
-		status: 200,
+		ok: status >= 200 && status < 300,
+		status,
 		json: async () => body,
 	} as unknown as Response;
 }
@@ -87,6 +88,9 @@ describe("ConfigProvider operator config", () => {
 		vi.stubEnv("VITE_REMOTE_CONFIG_URL", "");
 		shell.native = false;
 		shell.overlay = false;
+		// The last live config is remembered across launches (#581); a test
+		// that read one must not hand it to the next test's fallback.
+		localStorage.clear();
 		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		fetchSpy = vi.spyOn(globalThis, "fetch");
 	});
@@ -95,6 +99,7 @@ describe("ConfigProvider operator config", () => {
 		// Without this, a previous test's provider stays mounted and
 		// findByTestId matches its probe instead of this test's.
 		cleanup();
+		localStorage.clear();
 		fetchSpy.mockRestore();
 		errorSpy.mockRestore();
 		vi.unstubAllEnvs();
@@ -270,5 +275,91 @@ describe("ConfigProvider operator config", () => {
 		expect((await renderProbe()).textContent).toBe(
 			"gif-button:klipy@live.example.org",
 		);
+	});
+
+	/** The deployment is unreachable; only the bundled fetch answers. */
+	function deploymentDown() {
+		fetchSpy.mockImplementation(async (input: RequestInfo | URL) => {
+			if (String(input) === REMOTE) throw new TypeError("Failed to fetch");
+			return jsonResponse(BUNDLED);
+		});
+	}
+
+	it("remembers a live config it accepted, and keeps it over one it rejected (#581)", async () => {
+		shell.native = true;
+		fetchSpy.mockImplementation(async (input: RequestInfo | URL) =>
+			jsonResponse(String(input) === REMOTE ? LIVE : BUNDLED),
+		);
+		await renderProbe();
+		expect(recallRemoteConfig(REMOTE)).toEqual(LIVE);
+
+		// A captive portal or a WAF challenge answers 200 with a body that is
+		// not a config. It must neither replace the remembered copy nor evict
+		// it, or the next offline launch is on the template again.
+		cleanup();
+		fetchSpy.mockImplementation(async (input: RequestInfo | URL) =>
+			jsonResponse(String(input) === REMOTE ? { hello: "world" } : BUNDLED),
+		);
+		expect((await renderProbe()).textContent).toBe(
+			"gif-button:klipy@example.org",
+		);
+		expect(recallRemoteConfig(REMOTE)).toEqual(LIVE);
+	});
+
+	it("boots on the last live config when the deployment is unreachable (#581)", async () => {
+		// The plane case: the live config was read minutes ago, so the fallback
+		// is that, not the installer's template with GIF search off.
+		shell.native = true;
+		rememberRemoteConfig(REMOTE, LIVE);
+		deploymentDown();
+
+		expect((await renderProbe()).textContent).toBe(
+			"gif-button:klipy@example.org",
+		);
+	});
+
+	it("honours a homeserver change in the last live config offline (#581)", async () => {
+		// The remembered body is the operator's latest known intent, newer than
+		// the template's: its homeserver wins offline as it would have online.
+		shell.native = true;
+		rememberRemoteConfig(REMOTE, {
+			...LIVE,
+			defaultHomeserver: "moved.example.org",
+		});
+		deploymentDown();
+
+		expect((await renderProbe()).textContent).toBe(
+			"gif-button:klipy@moved.example.org",
+		);
+	});
+
+	it("forgets the last live config when the deployment withdraws the file (#581)", async () => {
+		// 404 is the operator taking the file away - the one way to revert
+		// desktop clients to the template, and how a leaked key stops living
+		// on in a remembered copy.
+		shell.native = true;
+		rememberRemoteConfig(REMOTE, LIVE);
+		fetchSpy.mockImplementation(async (input: RequestInfo | URL) =>
+			String(input) === REMOTE ? jsonResponse({}, 404) : jsonResponse(BUNDLED),
+		);
+
+		expect((await renderProbe()).textContent).toBe(
+			"no-gif-button:giphy@example.org",
+		);
+		expect(recallRemoteConfig(REMOTE)).toBeNull();
+	});
+
+	it("keeps the last live config when the deployment is merely broken (#581)", async () => {
+		// A 5xx is the deployment being down, not the file being withdrawn.
+		shell.native = true;
+		rememberRemoteConfig(REMOTE, LIVE);
+		fetchSpy.mockImplementation(async (input: RequestInfo | URL) =>
+			String(input) === REMOTE ? jsonResponse({}, 503) : jsonResponse(BUNDLED),
+		);
+
+		expect((await renderProbe()).textContent).toBe(
+			"gif-button:klipy@example.org",
+		);
+		expect(recallRemoteConfig(REMOTE)).toEqual(LIVE);
 	});
 });
