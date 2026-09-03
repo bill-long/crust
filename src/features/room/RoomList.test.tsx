@@ -137,6 +137,23 @@ afterEach(() => {
 	_resetLastChannelsForTests();
 });
 
+/**
+ * The accessible name of a row that is an icon (an svg with `aria-label`)
+ * followed by text. jsdom has no layout, so it never blockifies the flex
+ * items the row is built from and the accessible-name computation joins the
+ * two inline children without a space ("SpaceBeta"); a browser blockifies
+ * them and inserts it ("Space Beta"). Match either.
+ */
+function iconRowName(
+	icon: string,
+	text: string,
+	options?: { badged?: boolean },
+): RegExp {
+	// A badged row's name goes on with the unread count ("Space Beta 3", or
+	// "SpaceBeta3" in jsdom), so that variant is anchored at the start only.
+	return new RegExp(`^${icon}\\s*${text}${options?.badged ? "" : "$"}`);
+}
+
 describe("RoomList subspace rows (#443)", () => {
 	it("renders joined subspaces above the space's rooms, with the Space icon", () => {
 		paramsState.spaceId = "!alpha:example.com";
@@ -149,9 +166,11 @@ describe("RoomList subspace rows (#443)", () => {
 			makeRoomSummary("!general:example.com", "general"),
 		]);
 
-		const beta = screen.getByRole("button", { name: "Space Beta" });
+		const beta = screen.getByRole("button", {
+			name: iconRowName("Space", "Beta"),
+		});
 		const general = screen.getByRole("button", {
-			name: "Text channel general",
+			name: iconRowName("Text channel", "general"),
 		});
 		expect(within(beta).getByRole("img", { name: "Space" })).toBeTruthy();
 		expect(
@@ -166,7 +185,9 @@ describe("RoomList subspace rows (#443)", () => {
 			makeSpaceSummary("!beta:example.com", "Beta"),
 		]);
 
-		fireEvent.click(screen.getByRole("button", { name: "Space Beta" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: iconRowName("Space", "Beta") }),
+		);
 		expect(navigateMock).toHaveBeenCalledWith(
 			`/space/${encodeURIComponent("!beta:example.com")}`,
 		);
@@ -181,7 +202,9 @@ describe("RoomList subspace rows (#443)", () => {
 		]);
 		setLastChannel("!beta:example.com", "!general:example.com");
 
-		fireEvent.click(screen.getByRole("button", { name: "Space Beta" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: iconRowName("Space", "Beta") }),
+		);
 		expect(navigateMock).toHaveBeenCalledWith(
 			`/space/${encodeURIComponent("!beta:example.com")}/${encodeURIComponent("!general:example.com")}`,
 		);
@@ -198,7 +221,9 @@ describe("RoomList subspace rows (#443)", () => {
 			grandchild,
 		]);
 
-		const beta = screen.getByRole("button", { name: /Space Beta/ });
+		const beta = screen.getByRole("button", {
+			name: iconRowName("Space", "Beta", { badged: true }),
+		});
 		const badge = within(beta).getByRole("status");
 		expect(badge.textContent).toBe("4");
 		expect(badge.getAttribute("aria-label")).toBe("4 unread, 1 highlighted");
@@ -213,7 +238,9 @@ describe("RoomList subspace rows (#443)", () => {
 		]);
 
 		// Presence first (the absence assertion below is meaningless without it).
-		expect(screen.getByRole("button", { name: "Space Beta" })).toBeTruthy();
+		expect(
+			screen.getByRole("button", { name: iconRowName("Space", "Beta") }),
+		).toBeTruthy();
 		// Let the hierarchy fetch settle, then the empty state must NOT appear.
 		await waitFor(() => {
 			expect(screen.queryByText("No rooms in this space")).toBeNull();
@@ -236,7 +263,9 @@ describe("RoomList SubspaceEntry badge branches (#443)", () => {
 			makeSpaceSummary("!beta:example.com", "   "),
 		]);
 		expect(
-			screen.getByRole("button", { name: "Space Unnamed space" }),
+			screen.getByRole("button", {
+				name: iconRowName("Space", "Unnamed space"),
+			}),
 		).toBeTruthy();
 	});
 
@@ -247,7 +276,9 @@ describe("RoomList SubspaceEntry badge branches (#443)", () => {
 			makeSpaceSummary("!beta:example.com", "Beta", ["!gc:example.com"]),
 			makeRoomSummary("!gc:example.com", "gc"),
 		]);
-		const beta = screen.getByRole("button", { name: "Space Beta" });
+		const beta = screen.getByRole("button", {
+			name: iconRowName("Space", "Beta"),
+		});
 		// Presence of the row first, so the badge absence is meaningful.
 		expect(beta).toBeTruthy();
 		expect(within(beta).queryByRole("status")).toBeNull();
@@ -262,7 +293,9 @@ describe("RoomList SubspaceEntry badge branches (#443)", () => {
 			makeSpaceSummary("!beta:example.com", "Beta", ["!gc:example.com"]),
 			grandchild,
 		]);
-		const beta = screen.getByRole("button", { name: /Space Beta/ });
+		const beta = screen.getByRole("button", {
+			name: iconRowName("Space", "Beta", { badged: true }),
+		});
 		const badge = within(beta).getByRole("status");
 		expect(badge.textContent).toBe("99+");
 		expect(badge.getAttribute("aria-label")).toBe("150 unread");
