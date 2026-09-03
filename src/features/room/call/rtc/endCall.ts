@@ -27,7 +27,7 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  * room hosting a live call — leaving it (#435/#436/#437) or logging out (#474).
  *
  * Callers MUST await this before the request that revokes that access
- * (`client.leave(roomId)`, `client.logout()`).
+ * (`client.leave(roomId)`, the logout's `revokeSession`).
  *
  * ## Why teardown-before-leave, and why awaited
  *
@@ -41,7 +41,7 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  * unmounts `CallSessionController`, whose `onCleanup` fires the withdrawal
  * without awaiting it, and `MembershipManager.leave()` does not write the state
  * event synchronously — it wakes an async scheduler. The revoking request —
- * `client.leave()` or `client.logout()` — is issued in the current tick and wins
+ * `client.leave()` or the logout's revoke - is issued in the current tick and wins
  * that race. Awaiting `requestLeave()` is what makes
  * the ordering real, because it awaits `leaveRoomSession()` all the way down.
  *
@@ -53,11 +53,12 @@ const TEARDOWN_TIMEOUT_MS = 10_000;
  * membership on **every** leave-while-in-a-call. Do not reintroduce a
  * success-gated variant of this rule without revisiting #435.
  *
- * The logout caller pays the same price in a different currency: a
- * `client.logout()` that throws is caught by `Layout.handleLogout`, which signs
- * the user out locally anyway — so a failed logout has also ended their call for
- * nothing. And logging out while in a call now waits for the teardown (typically
- * ~300ms, capped as above) instead of being instant. Both are worth it, because
+ * The logout caller pays the same price in a different currency: a revoke
+ * that fails or times out is caught inside `runLogout` (`app/logout.ts`),
+ * which signs the user out locally anyway - so a failed logout has also ended
+ * their call for nothing. And logging out while in a call now waits for the
+ * teardown (typically ~300ms, capped as above) instead of being instant. Both
+ * are worth it, because
  * the cost of getting it wrong is borne by *other* people: they keep seeing a
  * tile that will never speak.
  *
@@ -89,16 +90,16 @@ export async function endCallForRoomLeave(roomId: string): Promise<void> {
  *
  * Same rule and same bound as `endCallForRoomLeave` — only the trigger differs,
  * so the caller does not need to know which room hosts the call. Await this
- * before anything that ends the session: `client.logout()`, or the desktop
+ * before anything that ends the session: the logout's revoke, or the desktop
  * shell quitting to apply an update. See the module rationale above for why the
  * wait is what makes the withdrawal land.
  *
- * The forced-logout escape hatch (`app/forceLogout.ts`) is one of those callers
- * as of #551, having previously been the documented exception: it stopped the
- * client rather than logging out, so there was no revoking request to lose the
+ * The logout teardown (`app/logout.ts`) is one of those callers. Its
+ * escape half was the documented exception until #551: it stopped the client
+ * rather than logging out, so there was no revoking request to lose the
  * race to, and waiting looked like it could only wedge the way out. Both halves
  * of that changed. It now revokes, so it has a revoking request like everyone
- * else - and `logout(true)` aborts the client's in-flight requests before it
+ * else - and the revoke aborts the client's in-flight requests before it
  * asks, so an unawaited withdrawal is not merely likely to lose that race, it is
  * cancelled outright. The wedge it worried about is answered by the bound above,
  * which is this module's to own: a caller that adds a second, shorter one is
