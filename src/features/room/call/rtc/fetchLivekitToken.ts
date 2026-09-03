@@ -28,8 +28,9 @@ export interface LivekitJwtResponse {
  * verbatim and we don't accidentally splice path segments after it.
  *
  * Defence-in-depth scheme validation: rejects any input that isn't an
- * absolute `http:` / `https:` URL. `parseFociFromWellKnown` already
- * filters these out at ingestion, but a relative / non-http(s) value
+ * absolute `http:` / `https:` URL. `parseLivekitTransports` (both the
+ * transports endpoint and `.well-known`) already filters these out at
+ * ingestion, but a relative / non-http(s) value
  * arriving here (e.g. via a custom `discoverFoci` override or a
  * misconfigured `elementCall.url`) would otherwise cause `fetch` to
  * POST the OpenID token to the app origin or a non-http(s) handler.

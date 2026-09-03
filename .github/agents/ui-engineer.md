@@ -117,7 +117,7 @@ Token namespace (define these in the config):
 ### matrix-js-sdk
 
 - One client instance, owned by a root context (`ClientProvider`). Children consume via `useClient()`.
-- **The SDK emits a 404 on `/_matrix/client/v3/voip/turnServer` for Conduwuity.** Suppress this in your error logging — it's expected, not a bug. Voice/video uses LiveKit via `org.matrix.msc4143.rtc_foci` from `.well-known/matrix/client`.
+- **The SDK emits a 404 on `/_matrix/client/v3/voip/turnServer` for Conduwuity.** Suppress this in your error logging - it's expected, not a bug. Voice/video uses LiveKit; the SFU is discovered by the MSC4519 `/rtc/transports` endpoint first and `org.matrix.msc4143.rtc_foci` from `.well-known/matrix/client` as the fallback (`features/room/call/rtc/discoverFoci.ts`). Continuwuity serves the endpoint (v26.8+), so that is the live path; `rtc_foci` stays published for older clients.
 - Subscribe to room events via SDK event emitters; bridge into Solid stores with `onMount`/`onCleanup`. Don't poll.
 - **Use `useDecodedParams()` instead of `useParams()` from `@solidjs/router`** — Matrix IDs contain `:` which gets percent-encoded in URLs. The custom hook in `src/app/useDecodedParams.ts` runs `decodeURIComponent` on all params.
 - Treat `Room.timeline` as append-mostly. For pagination, use `TimelineWindow.paginate(Direction.Backward)` / `Direction.Forward`.
@@ -212,7 +212,7 @@ Run `pnpm lint && pnpm typecheck` before declaring any task complete.
 
 - `/_matrix/client/v3/voip/turnServer` returns 404. Expected. Don't surface as user-visible error.
 - Some unstable MSCs aren't implemented; check `unstable_features` in `/_matrix/client/versions` before using them.
-- Voice/video is LiveKit-based via `org.matrix.msc4143.rtc_foci` in `.well-known/matrix/client`. JWT comes from the `lk-jwt-service` sidecar.
+- Voice/video is LiveKit-based. Discovery tries MSC4519 `/_matrix/client/unstable/org.matrix.msc4143/rtc/transports` first, which Continuwuity serves (v26.8+). That MSC advertises no `unstable_features` flag, so it is the one exception to the check-`unstable_features`-first rule above: the gate is attempt-once-and-remember (`M_UNRECOGNIZED` / `M_NOT_FOUND`, per `lib/endpointUnsupported.ts`, is remembered per client; a bare 404, timeout or 5xx is not), and falls back to `org.matrix.msc4143.rtc_foci` in `.well-known/matrix/client`, kept published for older clients. JWT comes from the `lk-jwt-service` sidecar.
 
 ---
 

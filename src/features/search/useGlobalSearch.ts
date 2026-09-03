@@ -1,6 +1,7 @@
 import type { ISearchResults, MatrixClient, Room } from "matrix-js-sdk";
 import { type Accessor, createSignal, onCleanup } from "solid-js";
 import { projectEvent } from "../../client/searchProjection";
+import { meansEndpointUnsupported } from "../../lib/endpointUnsupported";
 import {
 	MAX_QUERY_LEN,
 	matchesAllTokens,
@@ -131,26 +132,6 @@ const PAGE_SIZE = 20;
  * truncated scan as a complete one.
  */
 const LOCAL_SCAN_CEILING = 5_000;
-
-/**
- * Whether a `/search` rejection means the server has no search at all, as
- * opposed to this one request having failed.
- *
- * Conduwuity does not implement the endpoint; a server that never did
- * answers `M_UNRECOGNIZED`. Both are permanent for the session, and worth
- * remembering so every later query does not spend a round trip rediscovering
- * it. Everything else - timeouts, 5xx, rate limits - is transient.
- */
-function meansSearchUnsupported(e: unknown): boolean {
-	// An errcode, not a bare status. A 404 with no Matrix error body is a
-	// proxy or an ingress mid-restart, not evidence about the endpoint - and
-	// because this answer is latched for the session, one unlucky query in
-	// that window would downgrade every later search to local history until
-	// the page was reloaded. A server that genuinely lacks the endpoint says
-	// so in the body.
-	const err = e as { errcode?: unknown } | null;
-	return err?.errcode === "M_UNRECOGNIZED" || err?.errcode === "M_NOT_FOUND";
-}
 
 /**
  * The client whose homeserver was found not to implement `/search`.
@@ -521,7 +502,11 @@ export function useGlobalSearch(client: MatrixClient): UseGlobalSearch {
 			// the whole session to local scanning on one bad request - the
 			// same distinction the presence publisher draws before it
 			// contradicts its own optimistic write.
-			const unsupported = meansSearchUnsupported(e);
+			// Conduwuity does not implement /search; a server that never did
+			// answers M_UNRECOGNIZED. Both are permanent for the session and worth
+			// remembering (the errcode-only rule is lib/endpointUnsupported.ts);
+			// everything else - timeouts, 5xx, rate limits - is transient.
+			const unsupported = meansEndpointUnsupported(e);
 			if (unsupported) searchUnsupportedClient = client;
 			setServerUnsupported(unsupported);
 			// The server may not implement /search at all (Conduwuity), in
