@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	hasControlChar,
 	hasLineBreaker,
+	stripBidiControls,
 	stripControlChars,
 	stripLineBreakers,
 } from "./controlChars";
@@ -12,6 +13,37 @@ import {
 // asserts something else entirely with no sign of why.
 const SOH = "\u0001";
 const DEL = "\u007f";
+
+describe("stripBidiControls", () => {
+	// Code points, never literal characters: an unterminated one would
+	// reorder the source line it sits on.
+	const ch = (code: number): string => String.fromCharCode(code);
+
+	it("strips the overrides, embeddings and isolates and keeps the rest", () => {
+		const controls = [
+			0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+		];
+		for (const code of controls) {
+			expect(stripBidiControls(`invoice${ch(code)}gnp.exe`)).toBe(
+				"invoicegnp.exe",
+			);
+		}
+		expect(stripBidiControls(controls.map(ch).join(""))).toBe("");
+	});
+
+	it("keeps the directional marks, which carry no scope", () => {
+		for (const code of [0x200e, 0x200f, 0x061c]) {
+			const s = `Ann${ch(code)}Smith`;
+			expect(stripBidiControls(s)).toBe(s);
+		}
+	});
+
+	it("returns the same string when there is nothing to strip", () => {
+		const s = "Ann Smith";
+		expect(stripBidiControls(s)).toBe(s);
+		expect(stripBidiControls("")).toBe("");
+	});
+});
 
 describe("hasControlChar", () => {
 	it("finds C0 characters and DEL", () => {

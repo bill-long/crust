@@ -10,7 +10,7 @@ import {
 import { onCleanup } from "solid-js";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
-import { stripLineBreakers } from "../../lib/controlChars";
+import { stripBidiControls, stripLineBreakers } from "../../lib/controlChars";
 import { displayNameOr } from "../../lib/displayName";
 import {
 	type CanNotifyInput,
@@ -138,9 +138,10 @@ export function useNotifications(
 			// bound) here would show a long room under two different names in
 			// two panels. Stripping is what an OS title actually needs, since
 			// for an unnamed DM the SDK derives this from the peer's member
-			// name and does not remove C0.
+			// name and removes neither C0 nor the bidi embeddings and
+			// isolates - and an OS title has nothing to contain a stray one.
 			const notif = new Notification(
-				stripLineBreakers(room.name ?? "").trim() || "Room",
+				stripBidiControls(stripLineBreakers(room.name ?? "")).trim() || "Room",
 				{
 					body: buildBody(event, room),
 					tag: room.roomId,

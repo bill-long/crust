@@ -215,4 +215,20 @@ describe("buildNotificationCopy", () => {
 			}),
 		).toEqual({ title: "Alice", body: "hi" });
 	});
+
+	it("still frames a DM as a DM when the peer's name carries a bidi control", () => {
+		// Sygnal derives room_name from the peer's member name for an unnamed
+		// DM, and the sender goes through the name policy, so both sides of
+		// the "is this a room" comparison must be normalised the same way -
+		// otherwise the raw name lands in the OS title as a room, with the
+		// unmatched embedding intact.
+		const name = `Ann${String.fromCharCode(0x202a)}Smith`;
+		expect(
+			buildNotificationCopy({
+				room_name: name,
+				sender_display_name: name,
+				content: { msgtype: "m.text", body: "hi" },
+			}),
+		).toEqual({ title: "AnnSmith", body: "hi" });
+	});
 });

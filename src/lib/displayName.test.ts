@@ -22,7 +22,7 @@ describe("displayNameOr", () => {
 	it("falls back when the name is nothing but invisible padding", () => {
 		// Element's own emptiness test: removeHiddenChars strips zero-width
 		// characters and combining marks, and what is left here is nothing.
-		// It is narrower than it sounds - see #576 for what it misses.
+		// It is narrower than it sounds; the wider cases are pinned below.
 		expect(displayNameOr(`${ch(0x200b)}${ch(0x200b)}`, "@ann:x")).toBe(
 			"@ann:x",
 		);
@@ -59,7 +59,7 @@ describe("displayNameOr", () => {
 		expect(displayNameOr(`${" ".repeat(2000)}Ann`, "@ann:x")).toBe("@ann:x");
 	});
 
-	describe("direction overrides", () => {
+	describe("bidi scope controls", () => {
 		it("strips LRO and RLO rather than rejecting the name", () => {
 			// These two override direction for the rest of the paragraph, so
 			// they reorder whatever is rendered beside the name. Element
@@ -68,21 +68,20 @@ describe("displayNameOr", () => {
 			expect(displayNameOr(`Ann${LRO}Smith`, "@ann:x")).toBe("AnnSmith");
 		});
 
-		it("falls back when the name was only an override", () => {
-			expect(displayNameOr(RLO, "@mallory:x")).toBe("@mallory:x");
+		it("strips the embeddings and isolates too, through the shared rule", () => {
+			// The step past Element (#575): an unmatched embedding or isolate
+			// runs to the end of the paragraph exactly like an override. The
+			// full set, and the marks that stay, are pinned once in
+			// controlChars.test.ts; this pins only that the policy delegates,
+			// with the case from the issue.
+			expect(displayNameOr(`Admin${ch(0x2066)}`, "@mallory:x")).toBe("Admin");
 		});
 
-		it("leaves every other bidi character alone", () => {
-			// Element's rule, and deliberately not widened here. The
-			// embeddings and isolates are a real gap - an unmatched initiator
-			// is not scoped - but it is the SDK's gap and closing it locally
-			// grew a rule that needed another rule. Tracked in #575.
-			for (const code of [
-				0x202a, 0x202b, 0x202c, 0x2066, 0x2069, 0x200e, 0x200f,
-			]) {
-				const name = `Ann${ch(code)}Smith`;
-				expect(displayNameOr(name, "@ann:x")).toBe(name);
-			}
+		it("falls back when the name was only bidi controls", () => {
+			expect(displayNameOr(RLO, "@mallory:x")).toBe("@mallory:x");
+			expect(displayNameOr(`${ch(0x2066)}${ch(0x2069)}`, "@mallory:x")).toBe(
+				"@mallory:x",
+			);
 		});
 	});
 

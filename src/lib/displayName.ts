@@ -1,4 +1,4 @@
-import { hasLineBreaker } from "./controlChars";
+import { hasLineBreaker, stripBidiControls } from "./controlChars";
 
 /**
  * Longest display name worth rendering.
@@ -10,22 +10,6 @@ import { hasLineBreaker } from "./controlChars";
  * membership and typing event.
  */
 const MAX_NAME_LENGTH = 1024;
-
-/**
- * Element's direction-override strip, inlined.
- *
- * This is `removeDirectionOverrideChars` from `matrix-js-sdk/lib/utils`,
- * verbatim: U+202D LRO and U+202E RLO, which override direction for the rest
- * of the paragraph. Copied rather than imported because `pushCopy` runs in
- * the service worker and pulls this module with it - importing anything from
- * `matrix-js-sdk/lib/utils` takes the SDK's whole util graph along, and
- * measured `dist/sw.js` at 168.9 kB against 25.6 kB without it.
- *
- * A two-character regex is a safe thing to copy, and the tests pin both
- * characters. `scripts/check-sw-size.mjs` fails the build if the service
- * worker grows back, so this cannot regress silently the way it did once.
- */
-const DIRECTION_OVERRIDES = /[\u202D-\u202E]/g;
 
 /**
  * Whether a name has at least one glyph that renders.
@@ -72,16 +56,23 @@ const HAS_VISIBLE_GLYPH =
  * less than the fallback does.
  *
  * Element's policy, extended only where Element's own rationale reaches
- * further than its code does. Both halves are reimplemented rather than
- * delegated, each for its own reason recorded below - the strip because
- * importing `matrix-js-sdk/lib/utils` pulls the SDK into the service worker
- * through `pushCopy`, and the emptiness test because it is too expensive for
- * the member list's hot path.
+ * further than its code does. Neither half calls the SDK: the strip is a
+ * wider set than `removeDirectionOverrideChars` offers, and the emptiness
+ * test is too expensive for the member list's hot path in the SDK's form.
+ * Nothing here or in `lib/controlChars.ts` may import the SDK either way -
+ * `pushCopy` pulls this module into the service worker, and importing
+ * `matrix-js-sdk/lib/utils` once measured `dist/sw.js` at 168.9 kB against
+ * 25.6 kB; `scripts/check-sw-size.mjs` fails the build if it grows back.
  *
  * 1. **Bounded** - see {@link MAX_NAME_LENGTH}.
- * 2. **U+202D LRO and U+202E RLO stripped**, Element's rule and only that.
- *    They override direction for the rest of the paragraph. The name
- *    survives; only the two formatting characters go.
+ * 2. **Bidi scope controls stripped** - see {@link stripBidiControls}.
+ *    Element strips U+202D LRO and U+202E RLO because their scope runs to
+ *    the end of the paragraph; per UAX #9 that is equally true of an
+ *    unmatched embedding or isolate, and nothing makes a wire name
+ *    balanced. The device path has no SDK backstop at all - a
+ *    `display_name` off `/devices` passes through no `RoomMember` - so
+ *    `Old laptop<RLE>` reversed the rest of the sign-out confirmation it
+ *    sat in. The name survives; only the formatting characters go.
  * 3. **Falls back when nothing renders** - see {@link HAS_VISIBLE_GLYPH},
  *    which is Element's emptiness test widened and made cheap enough for the
  *    member list's hot path.
@@ -119,22 +110,20 @@ const HAS_VISIBLE_GLYPH =
  * the profile card, the member rows, the pending invite and knock lists, the
  * invite card and the kick/ban confirmation.
  *
- * Nor does it contain the bidi embeddings and isolates. Those leak the same
- * way an unterminated override does - per UAX #9 an unmatched initiator also
- * runs to the end of the paragraph - and the SDK's own pattern misses
- * U+2066-U+2069 entirely, so `Admin<LRI>` gets no suffix and collides with
- * nothing.
+ * The bidi strip adds nothing to that. The SDK's disambiguation pattern
+ * stops before the isolates, so `Admin<LRI>` beside a real `Admin` earns no
+ * suffix from it, and stripping the isolate leaves two members rendering as
+ * `Admin` with the MXID beside the name as the only tell - the position a
+ * Cyrillic A is already in. What the strip closes is the reorder, not the
+ * clone.
  *
- * `unicode-bidi: isolate` was tried as the containment and does not earn its
- * place here: every slot that renders a name in Crust is a block box holding
- * nothing else, and a block already establishes its own bidi paragraph, so
- * the property is a no-op there. The slots where an initiator genuinely
- * reorders neighbouring text are the ones that concatenate a name into a
- * longer STRING - the membership notices, `memberRowLabel`'s aria-label, the
- * kick/ban title, the push copy, the export transcript - and CSS cannot
- * reach inside a string. Closing this means widening the strip, which is a
- * deliberate step past Element and is tracked in #575 rather than taken
- * quietly here.
+ * The bidi strip is a string rule rather than `unicode-bidi: isolate` on the
+ * render sites because CSS cannot reach the slots that actually reorder:
+ * every element that renders a name on its own is a block box, which already
+ * establishes its own bidi paragraph, and the leaks are the sinks that
+ * concatenate a name into a longer STRING - the membership notices,
+ * `memberRowLabel`'s aria-label, the kick/ban title, the push copy, the
+ * export transcript.
  */
 export function displayNameOr(
 	raw: string | null | undefined,
@@ -142,7 +131,7 @@ export function displayNameOr(
 ): string {
 	if (!raw) return fallback;
 	if (raw.length > MAX_NAME_LENGTH) return fallback;
-	const name = raw.replace(DIRECTION_OVERRIDES, "").trim();
+	const name = stripBidiControls(raw).trim();
 	if (!HAS_VISIBLE_GLYPH.test(name)) return fallback;
 	if (hasLineBreaker(name)) return fallback;
 	return name;

@@ -5,7 +5,7 @@
  * src/features/room/useNotifications.ts.
  */
 
-import { stripLineBreakers } from "../../lib/controlChars";
+import { stripBidiControls, stripLineBreakers } from "../../lib/controlChars";
 import { displayNameOr } from "../../lib/displayName";
 import { isPollStartType, pollNotificationBody } from "../../lib/pollCopy";
 import { isVoiceMessageContent } from "../../lib/voiceMessage";
@@ -121,10 +121,16 @@ export function buildNotificationCopy(payload: PushPayload): {
 	// for the same reason: applying a person-name policy (its length bound
 	// included) to a room name would show the same room under two names in
 	// two places. Sygnal does derive this from the peer's member name for an
-	// unnamed DM, which is why it needs escaping at all.
+	// unnamed DM, which is why it needs escaping at all - and why the escape
+	// is the same pair of strips the name policy applies (line breakers and
+	// bidi scope controls): `inRoom` below compares this to the resolved
+	// sender, and a DM with a peer named `Ann<LRE>Smith` must still frame as
+	// a DM rather than putting the raw name in the title as a "room".
+	const escapeRoomName = (s: string): string =>
+		stripBidiControls(stripLineBreakers(s)).trim();
 	const room =
-		stripLineBreakers(stringField(payload.room_name)).trim() ||
-		stripLineBreakers(stringField(payload.room_alias)).trim();
+		escapeRoomName(stringField(payload.room_name)) ||
+		escapeRoomName(stringField(payload.room_alias));
 	const { isText, text } = describeContent(payload);
 	const inRoom = room !== "" && room !== sender;
 	// Thread framing matches the in-app copy (notificationCopy.ts) so the two

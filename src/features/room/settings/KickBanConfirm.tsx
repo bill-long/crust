@@ -30,11 +30,10 @@ const KickBanConfirm: Component<{
 					    impersonation, so the identifier has to be visible.
 					    In the body rather than the title: a title long enough
 					    to wrap would truncate the identifier, which defeats
-					    the point. Note the name in the title is a plain
-					    concatenated string, so a bidi embedding the policy
-					    left in it can still reorder the surrounding text -
-					    that gap is #575, and CSS cannot reach inside a
-					    string. */}
+					    the point. The name in the title is a plain
+					    concatenated string, which is why the policy strips
+					    bidi scope controls rather than leaning on CSS
+					    containment - CSS cannot reach inside a string. */}
 					<p class="mb-2 font-mono text-xs text-text-muted">
 						{props.action()?.userId}
 					</p>

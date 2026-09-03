@@ -137,7 +137,7 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 
 	const startEditingName = (): void => {
 		// The RAW stored name, never the resolved one. `currentDisplayName` is
-		// for rendering: it strips direction overrides and substitutes the
+		// for rendering: it strips bidi scope controls and substitutes the
 		// MXID when a name would not render. Seeding the editor with that and
 		// pressing Save would silently rewrite your real profile - stripping
 		// characters you meant to keep, or setting your display name to your

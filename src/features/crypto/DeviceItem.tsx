@@ -31,7 +31,7 @@ const UNNAMED_DEVICE = "Unnamed session";
  * `displayNameOr` (`lib/displayName.ts`) is Element's display-name policy for
  * the names matrix-js-sdk never sees, and a device's `display_name` off
  * `/devices` is one of them - no `RoomMember` is involved, so nothing has
- * normalized it. It strips the two direction overrides, falls back when
+ * normalized it. It strips the bidi scope controls, falls back when
  * nothing renders, and otherwise keeps the name: a device called
  * `Laptop<RLO>A` would reorder the row it sits on, while one merely carrying
  * a zero-width space is left alone, because barring those breaks real names
