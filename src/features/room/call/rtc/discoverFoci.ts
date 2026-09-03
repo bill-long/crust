@@ -111,8 +111,8 @@ const transportsUnsupported = new WeakSet<MatrixClient>();
  *
  * Order of precedence:
  *  0. MSC4519 `GET /_matrix/client/unstable/org.matrix.msc4143/rtc/transports`
- *     (the SDK's `_unstable_getRTCTransports`), which is what Element Call
- *     has preferred since v0.24 and what homeserver admins are being told
+ *     (through `client.http.authedRequest`, see the step), which is what
+ *     Element Call has preferred since v0.24 and what homeserver admins are being told
  *     they may replace `.well-known` with. Authenticated and per-user, so a
  *     server can hand different users different SFUs - which is why an
  *     answer, even an empty one, is final: a server that hands this user no
@@ -170,6 +170,7 @@ export async function discoverLivekitFoci(
 	if (
 		typeof http?.authedRequest === "function" &&
 		!transportsUnsupported.has(client) &&
+		remainingMs() > 0 &&
 		!options?.signal?.aborted
 	) {
 		const bound = boundedSignal(remainingMs(), options?.signal);
