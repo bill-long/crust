@@ -151,8 +151,23 @@ function iconRowName(
 ): RegExp {
 	// A badged row's name goes on with the unread count ("Space Beta 3", or
 	// "SpaceBeta3" in jsdom), so that variant is anchored at the start only.
-	return new RegExp(`^${icon}\\s*${text}${options?.badged ? "" : "$"}`);
+	// The pieces are literal text, so regex metacharacters in a label or a
+	// room name ("C++", "(wip)") must not change the matcher's meaning.
+	const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(
+		`^${literal(icon)}\\s*${literal(text)}${options?.badged ? "" : "$"}`,
+	);
 }
+
+describe("iconRowName", () => {
+	it("treats the icon label and the text as literal, metacharacters included", () => {
+		expect(iconRowName("Space", "C++").test("SpaceC++")).toBe(true);
+		expect(iconRowName("Space", "C++").test("Space C++")).toBe(true);
+		expect(iconRowName("Space", "C++").test("SpaceCCC")).toBe(false);
+		expect(iconRowName("Space", "(wip)").test("Space (wip)")).toBe(true);
+		expect(iconRowName("Space", "(wip)").test("Space wip")).toBe(false);
+	});
+});
 
 describe("RoomList subspace rows (#443)", () => {
 	it("renders joined subspaces above the space's rooms, with the Space icon", () => {
