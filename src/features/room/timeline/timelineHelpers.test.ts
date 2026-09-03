@@ -1,0 +1,43 @@
+import type { MatrixEvent } from "matrix-js-sdk";
+import { describe, expect, it } from "vitest";
+import { buildReplySnippet } from "./timelineHelpers";
+
+// Code points, never literal characters - an unterminated one would reorder
+// the source line it sits on.
+const RLO = String.fromCharCode(0x202e);
+const NUL = String.fromCharCode(0x00);
+
+function fileEvent(content: Record<string, unknown>): MatrixEvent {
+	return {
+		getContent: () => ({ msgtype: "m.file", ...content }),
+		getType: () => "m.room.message",
+	} as unknown as MatrixEvent;
+}
+
+describe("buildReplySnippet for an attachment", () => {
+	it("derives the name through the same rule as the chip, bidi controls stripped", () => {
+		// A reply quote sits one line above the chip that now shows the real
+		// extension; it must not show the spoofed one.
+		expect(
+			buildReplySnippet(
+				fileEvent({
+					body: `invoice${RLO}gnp.exe`,
+					filename: `invoice${RLO}gnp.exe`,
+				}),
+			),
+		).toBe("📎 invoicegnp.exe");
+	});
+
+	it("falls back to the body, then to a generic label", () => {
+		// A control-bearing filename is refused wholesale (wireFilename), so
+		// the body is consulted; when that is unusable too, no name at all.
+		expect(
+			buildReplySnippet(
+				fileEvent({ body: "report.pdf", filename: `a${NUL}b.pdf` }),
+			),
+		).toBe("📎 report.pdf");
+		expect(buildReplySnippet(fileEvent({ body: `a${NUL}b.pdf` }))).toBe(
+			"📎 File",
+		);
+	});
+});

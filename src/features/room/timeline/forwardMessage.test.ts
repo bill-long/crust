@@ -218,6 +218,34 @@ describe("forwardMessage - media", () => {
 		expect(uploadBlobMock).not.toHaveBeenCalled();
 	});
 
+	it("strips bidi scope controls from the forwarded filename and body", async () => {
+		const targetRoom = createMockRoom("!target:example.com");
+		targetRoom.hasEncryptionStateEvent = () => false;
+		const rooms = new Map([["!target:example.com", targetRoom]]);
+		const client = createMockClient(rooms as never);
+		// The forward goes out under the forwarder's name, so it must not
+		// republish an extension spoof the forwarder never typed - the same
+		// strips a fresh upload gets, with the filename/body pair kept equal.
+		const RLO = String.fromCharCode(0x202e);
+		const source = makeSourceEvent({
+			msgtype: "m.file",
+			body: `invoice${RLO}gnp.exe`,
+			filename: `invoice${RLO}gnp.exe`,
+			url: "mxc://example.com/file",
+		});
+		await forwardMessage(client as never, source, "!target:example.com");
+		expect(client.sendMessage).toHaveBeenCalledWith(
+			"!target:example.com",
+			null,
+			{
+				msgtype: "m.file",
+				body: "invoicegnp.exe",
+				filename: "invoicegnp.exe",
+				url: "mxc://example.com/file",
+			},
+		);
+	});
+
 	it("strips the reply fallback from a media body", async () => {
 		const targetRoom = createMockRoom("!target:example.com");
 		targetRoom.hasEncryptionStateEvent = () => false;

@@ -8,8 +8,9 @@ import {
 	THREAD_RELATION_TYPE,
 } from "matrix-js-sdk";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
-import { hasControlChar } from "../../../lib/controlChars";
+import { stripBidiControls } from "../../../lib/controlChars";
 import { displayNameOr } from "../../../lib/displayName";
+import { wireFilename } from "../../../lib/filename";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -114,28 +115,28 @@ export function eventToTimelineEvent(
 		content.info.size >= 0
 			? content.info.size
 			: null;
-	// Prefer `content.filename` only when it's a non-empty, non-whitespace
-	// string — an empty/whitespace `filename` would otherwise block the
-	// fallback to `content.body` even though the latter may carry a
-	// usable filename.
-	const rawFilename =
-		hasMediaSource &&
-		typeof content.filename === "string" &&
-		content.filename.trim().length > 0
+	// The explicit `filename` wins whenever it has anything usable in it; only
+	// an empty or whitespace-only one (after the bidi strip) yields to
+	// `content.body`, which may carry a usable filename. A control-bearing
+	// explicit filename does NOT yield: `wireFilename` refuses it below, and a
+	// caption-style body is not a better filename than none.
+	const explicitFilename =
+		typeof content.filename === "string"
+			? stripBidiControls(content.filename).trim()
+			: "";
+	const rawFilename = !hasMediaSource
+		? null
+		: explicitFilename.length > 0
 			? content.filename
-			: hasMediaSource && typeof content.body === "string"
+			: typeof content.body === "string"
 				? content.body
 				: null;
-	// Treat whitespace-only, multi-line, or otherwise control-char-bearing
-	// bodies as "no filename" — attachment events often carry a caption-style
-	// body that isn't actually a filename, and any ASCII control char
-	// (LF, CR, NUL, DEL, etc.) would corrupt UI labels / the lightbox header
-	// if used directly.
-	const trimmedFilename = rawFilename?.trim();
-	const mediaFilename =
-		trimmedFilename && !hasControlChar(trimmedFilename)
-			? trimmedFilename
-			: null;
+	// `wireFilename` is the one receive-side rule: bidi scope controls stripped
+	// (`invoice<RLO>gnp.exe` would otherwise render as `invoiceexe.png` in the
+	// chip and its aria-label), trimmed, and refused on a control character -
+	// attachment events often carry a caption-style body that isn't a
+	// filename, and a NUL would corrupt every label it reached.
+	const mediaFilename = wireFilename(rawFilename);
 
 	// Plain video poster from the cleartext `info.thumbnail_url`. Encrypted
 	// videos carry a ciphertext `thumbnail_file` instead, decoded separately
@@ -169,29 +170,24 @@ export function eventToTimelineEvent(
 
 	// Image caption: spec-correct sends put the filename in `content.filename`
 	// and the caption in `content.body`. So a caption exists only when an
-	// explicit non-empty `filename` is present AND `body` differs from it (when
+	// explicit usable `filename` is present AND `body` differs from it (when
 	// `filename` is absent, `body` *is* the filename, so there's no caption).
 	// Control chars are stripped; multi-line captions are preserved. Scoped to
-	// `m.image` — the file/video/audio renderers show the filename as a label.
-	const trimmedImageFilename =
-		content.msgtype === "m.image" && typeof content.filename === "string"
-			? content.filename.trim()
-			: "";
-	// Consistent with `mediaFilename`'s policy: a control-char-bearing filename
-	// (including newlines) isn't a usable explicit filename, so treat it as "no
-	// filename" — `body` is then the de-facto filename and there's no caption.
-	// This also keeps the filename control-char-free, so comparing it to the
-	// sanitized caption below can't mismatch on chars sanitization would erase.
-	const hasImageFilename =
-		trimmedImageFilename.length > 0 && !hasControlChar(trimmedImageFilename);
+	// `m.image` - the file/video/audio renderers show the filename as a label.
+	const imageFilename =
+		content.msgtype === "m.image" ? wireFilename(content.filename) : null;
 	const cleanedCaption =
 		typeof content.body === "string"
 			? sanitizeMultiline(content.body).trim()
 			: "";
+	// Compared under the same bidi strip the filename had, or Element's
+	// uncaptioned shape (`body === filename`, both carrying the same RLO) would
+	// surface the raw body as a phantom caption with the spoof intact. The
+	// caption itself is prose and renders as sent.
 	const mediaCaption =
-		hasImageFilename &&
+		imageFilename !== null &&
 		cleanedCaption.length > 0 &&
-		cleanedCaption !== trimmedImageFilename
+		stripBidiControls(cleanedCaption) !== imageFilename
 			? cleanedCaption
 			: null;
 

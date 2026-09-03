@@ -127,6 +127,81 @@ describe("useTimeline media projection", () => {
 		});
 	});
 
+	it("strips bidi scope controls from a wire filename so the visible extension is the real one", async () => {
+		// An unmatched U+202E reverses everything rendered after it, so
+		// `invoice<RLO>gnp.exe` would show as `invoiceexe.png` in the chip and its
+		// aria-label - the classic extension spoof. Stripped, not rejected: the
+		// C0 gate below stays a reject, this is a different class of character.
+		const RLO = String.fromCharCode(0x202e);
+		const roomA = createMockRoom("!roomA:test", [
+			{
+				eventId: "$spoof",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.file",
+					body: `invoice${RLO}gnp.exe`,
+					filename: `invoice${RLO}gnp.exe`,
+					url: "mxc://test/spoof",
+					info: { mimetype: "application/octet-stream", size: 10 },
+				},
+				ts: 1000,
+			},
+			{
+				// Element's uncaptioned shape: body === filename, BOTH carrying
+				// the override. The caption comparison must see the same strip
+				// the filename had, or the raw body surfaces as a phantom
+				// caption with the spoof intact.
+				eventId: "$spoofimg",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.image",
+					body: `photo${RLO}gnp.exe`,
+					filename: `photo${RLO}gnp.exe`,
+					url: "mxc://test/spoofimg",
+					info: { mimetype: "image/png", w: 10, h: 10 },
+				},
+				ts: 2000,
+			},
+			{
+				// An explicit filename that is nothing but the control is
+				// empty after the strip, so it yields to the body - the same
+				// rule an empty or whitespace-only filename follows.
+				eventId: "$onlycontrol",
+				roomId: "!roomA:test",
+				sender: "@alice:test",
+				type: "m.room.message",
+				content: {
+					msgtype: "m.file",
+					body: "report.pdf",
+					filename: RLO,
+					url: "mxc://test/onlycontrol",
+					info: { mimetype: "application/pdf", size: 10 },
+				},
+				ts: 3000,
+			},
+		]);
+
+		const client = createMockClient(new Map([["!roomA:test", roomA]]));
+
+		await withRoot(async () => {
+			const { events } = useTimeline(
+				client as unknown as MatrixClient,
+				() => "!roomA:test",
+			);
+			await flushPromises();
+
+			const [file, image, onlyControl] = events;
+			expect(file.mediaFilename).toBe("invoicegnp.exe");
+			expect(image.mediaFilename).toBe("photognp.exe");
+			expect(image.mediaCaption).toBeNull();
+			expect(onlyControl.mediaFilename).toBe("report.pdf");
+		});
+	});
+
 	it("parses the EncryptedFile descriptor for encrypted m.video / m.audio / m.file and fails closed on a malformed one", async () => {
 		const validFile = (url: string) => ({
 			url,

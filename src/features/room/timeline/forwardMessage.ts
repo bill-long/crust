@@ -1,5 +1,7 @@
 import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
 import type { RoomMessageEventContent } from "matrix-js-sdk/lib/@types/events";
+import { stripBidiControls } from "../../../lib/controlChars";
+import { sanitizeFilename } from "../../../lib/filename";
 import { TEXT_MSGTYPES } from "../../../lib/msgtypes";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import {
@@ -164,12 +166,21 @@ async function buildMediaForwardContent(
 	// quoted preamble here exactly like the text path - the forward must
 	// not attribute text the forwarder never wrote. Fall back to the raw
 	// body if stripping empties it: a media body doubles as the caption.
-	const body = stripReplyFallback(rawBody).trim() || rawBody.trim();
+	// The same reasoning covers a bidi scope control: this event goes out
+	// under the forwarder's name, so it gets the strips a fresh upload gets -
+	// `sanitizeFilename` on the filename, and the bidi strip alone on the
+	// body, which may be a multi-line caption rather than a filename. The
+	// pair stays equal when the source had them equal.
+	const body = stripBidiControls(
+		stripReplyFallback(rawBody).trim() || rawBody.trim(),
+	);
 	const base: Record<string, unknown> = {
 		msgtype: content.msgtype,
 		body,
 	};
-	if (typeof content.filename === "string") base.filename = content.filename;
+	if (typeof content.filename === "string") {
+		base.filename = sanitizeFilename(content.filename);
+	}
 	// Voice-message and other top-level rendering hints ride along in both
 	// paths (they describe the recording, not the upload).
 	if (
@@ -191,10 +202,7 @@ async function buildMediaForwardContent(
 	const uploaded = await uploadBlob(client, blob, {
 		encrypted: targetEncrypted,
 		type: readMimetype(content) ?? "application/octet-stream",
-		name:
-			typeof content.filename === "string"
-				? content.filename
-				: body || undefined,
+		name: typeof base.filename === "string" ? base.filename : body || undefined,
 	});
 	const info = infoWithoutThumbnails(content.info) ?? {};
 	info.size = blob.size;

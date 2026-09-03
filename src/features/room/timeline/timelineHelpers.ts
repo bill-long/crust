@@ -10,6 +10,7 @@ import {
 	stripControlChars,
 } from "../../../lib/controlChars";
 import { displayNameOr } from "../../../lib/displayName";
+import { wireFilename } from "../../../lib/filename";
 import { pollPreviewText } from "../../../lib/pollCopy";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import { isVoiceMessageContent } from "../../../lib/voiceMessage";
@@ -64,12 +65,9 @@ export function buildReplySnippet(parent: MatrixEvent): string {
 	const content = parent.getContent();
 	const type = parent.getType();
 	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
-	const filename =
-		typeof content.filename === "string" && content.filename.trim().length > 0
-			? content.filename.trim()
-			: typeof content.body === "string" && content.body.trim().length > 0
-				? content.body.trim()
-				: null;
+	// The same receive-side rule as the chip's label, so a reply quote never
+	// shows a different extension than the attachment it quotes.
+	const filename = wireFilename(content.filename) ?? wireFilename(content.body);
 	let snippet: string;
 	const pollPreview = M_POLL_START.matches(type)
 		? pollPreviewText(content)
