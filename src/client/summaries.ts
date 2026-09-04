@@ -11,6 +11,7 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
+import { readDirectMap } from "../lib/directMap";
 import {
 	isPollStartType,
 	isRenderablePollContent,
@@ -372,19 +373,9 @@ function getMutedRoomIds(client: MatrixClient): Set<string> {
  * last one seen; there is no better answer, and the flag is unaffected.
  */
 function getDmPeers(client: MatrixClient): Map<string, string> {
-	const dmEvent = client.getAccountData(EventType.Direct);
-	if (!dmEvent) return new Map();
-	const content = dmEvent.getContent();
 	const peers = new Map<string, string>();
-	for (const userId of Object.keys(content)) {
-		const rooms = content[userId];
-		if (Array.isArray(rooms)) {
-			for (const roomId of rooms) {
-				if (typeof roomId === "string") {
-					peers.set(roomId, userId);
-				}
-			}
-		}
+	for (const [userId, rooms] of Object.entries(readDirectMap(client))) {
+		for (const roomId of rooms) peers.set(roomId, userId);
 	}
 	return peers;
 }

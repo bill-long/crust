@@ -1,57 +1,6 @@
 import { EventType, type MatrixClient, Preset } from "matrix-js-sdk";
+import { addDmToMap, type DirectMap, readDirectMap } from "../../lib/directMap";
 import { enqueueKeyedWrite } from "../../lib/writeQueue";
-
-/**
- * The `m.direct` account-data map: a record of user ID -> list of room IDs
- * that are direct messages with that user. See
- * https://spec.matrix.org/v1.11/client-server-api/#mdirect.
- */
-export type DirectMap = Record<string, string[]>;
-
-/**
- * Read and normalize the `m.direct` account-data map for the current user.
- *
- * The spec only constrains values to be arrays of room-ID strings, so we
- * defensively drop any non-array entries and any non-string room IDs rather
- * than trusting the raw content shape.
- */
-export function readDirectMap(client: MatrixClient): DirectMap {
-	const event = client.getAccountData(EventType.Direct);
-	const content = event?.getContent() as Record<string, unknown> | undefined;
-	// Null-prototype map: m.direct keys are server-controlled user IDs, so a
-	// key like "__proto__" must become a normal entry, not pollute Object's
-	// prototype.
-	const map: DirectMap = Object.create(null);
-	// Defensive: the content is server-controlled and may be malformed. Only a
-	// non-null object is safe to enumerate (Object.entries(null) throws).
-	if (!content || typeof content !== "object") return map;
-	for (const [userId, rooms] of Object.entries(content)) {
-		if (Array.isArray(rooms)) {
-			map[userId] = rooms.filter((r): r is string => typeof r === "string");
-		}
-	}
-	return map;
-}
-
-/**
- * Return a new `m.direct` map with `roomId` recorded under `userId`,
- * preserving every other entry and de-duplicating within the user's list.
- * Pure: does not mutate the input.
- */
-export function addDmToMap(
-	map: DirectMap,
-	userId: string,
-	roomId: string,
-): DirectMap {
-	const next: DirectMap = Object.create(null);
-	for (const [user, rooms] of Object.entries(map)) {
-		next[user] = [...rooms];
-	}
-	const list = next[userId] ?? [];
-	if (!list.includes(roomId)) list.push(roomId);
-	next[userId] = list;
-	return next;
-}
 
 /**
  * Find an existing usable DM room with `userId` from the `m.direct` map.
@@ -116,13 +65,10 @@ export function recordDmInDirectMap(
 	roomId: string,
 ): Promise<void> {
 	return enqueueKeyedWrite(directWriteChains, client, async () => {
-		const nextMap = addDmToMap(readDirectMap(client), userId, roomId);
-		// Serialize a plain-prototype object: matrix-js-sdk's setAccountData
-		// runs deepCompare, which calls hasOwnProperty on the content — a
-		// null-prototype object (used internally for pollution safety) would
-		// throw. Object spread copies own keys without invoking any __proto__
-		// setter, so the boundary object stays pollution-safe too.
-		await client.setAccountData(EventType.Direct, { ...nextMap });
+		await client.setAccountData(
+			EventType.Direct,
+			addDmToMap(readDirectMap(client), userId, roomId),
+		);
 	});
 }
 

@@ -54,8 +54,8 @@ export function toPresenceInfo(content: Record<string, unknown>): PresenceInfo {
  * object, so `"__proto__"` is not an ordinary key in either direction.
  * Reading it yields `Object.prototype`, which the UI renders as
  * `aria-label="undefined"`; writing it through `produce` sets the target's
- * prototype instead of adding an entry. `startDm.ts` guards the same input
- * with a null-prototype map for the same reason.
+ * prototype instead of adding an entry. `lib/directMap.ts` guards the same
+ * input with a null-prototype map for the same reason.
  *
  * The test is what a user ID actually is (the spec requires the sigil)
  * rather than a list of dangerous names, so it cannot fall behind one.
