@@ -210,6 +210,14 @@ down and may be killed mid-write. The update itself is recoverable - the next
 launch re-checks and re-downloads - but a half-written install directory is
 not. Diagnostics for that path land in `updater.log` (see `log_update`).
 
+Immediately before handing the verified installer to Windows, the shell writes
+`pending-update-install.json` in its app-data directory with the running and
+target versions. A successful install relaunches a different version and clears
+the marker. If the old version launches again, the root-level update card says
+which update failed instead of silently downloading and offering it forever;
+acknowledging the card clears the marker. This also catches failures after the
+updater plugin's fire-and-forget Windows launch has returned successfully.
+
 The update artifact is signed by an Ed25519 keypair that has **nothing to do
 with Authenticode** - it answers "can this app trust this update", not "does
 Windows trust this app". Both are required for a release:
@@ -247,9 +255,18 @@ Notes:
   the environment you launch the resulting APP from - it is read at app startup,
   not at build time, so setting it on the `pnpm tauri build` command does
   nothing.
-- The endpoint follows `releases/latest`, so **publishing the draft release is
-  what makes an update live**. A draft is invisible to the updater, which is
-  what lets the artifacts be checked first.
+- The endpoint follows `releases/latest`, so publishing the draft is necessary
+  but not sufficient: it must be a **full (not prerelease) release** and marked
+  **latest**. GitHub does not allow a draft itself to be latest. After checking
+  the draft artifacts, run **Desktop release** from the Actions tab with
+  operation `publish` and its `desktop-v*` tag. That explicit maintainer action
+  publishes it with `--prerelease=false --latest`; do not publish from the
+  Releases form, where either state can be changed independently.
+- The publish operation then fetches the exact public endpoint installed apps
+  use, checks that its version matches the repo-latest `desktop-v*` tag, and
+  verifies that the manifest's installer URL names an asset on that release.
+  Run the same workflow with operation `verify` to repeat only that read-only
+  check; neither operation builds nor enters the signing environment.
 - `releases/latest` is **repo-wide**, not desktop-scoped: GitHub resolves it to
   the newest non-draft, non-prerelease release of the whole repository. Nothing
   else publishes releases today (`ci.yml` builds containers), but a future `v*`
