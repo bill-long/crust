@@ -133,9 +133,10 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	// External AbortController so onCleanup can cancel whichever discovery
 	// request is in flight on overlay close - otherwise a quickly-opened-
 	// and-closed call wastes up to the full 5-second discovery budget of
-	// network work.
-	const discoveryAbort =
-		typeof AbortController === "function" ? new AbortController() : undefined;
+	// network work. AbortController is baseline in every runtime this app
+	// has (Chromium, WebView2, Firefox, the jsdom and Node test hosts), so it
+	// is not feature-detected here, matching `boundedSignal` in discoverFoci.
+	const discoveryAbort = new AbortController();
 	// Disposed flag so the discovery promise (which still resolves
 	// after `discoveryAbort.abort()` via the fallback arm) doesn't
 	// write to `foci` after the hook has been disposed.
@@ -148,7 +149,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const fociReady: Promise<void> = Promise.resolve()
 		.then(() =>
 			discoverImpl(opts.client, opts.elementCallUrl, opts.roomId, {
-				signal: discoveryAbort?.signal,
+				signal: discoveryAbort.signal,
 			}),
 		)
 		.then((resolved) => {
@@ -540,7 +541,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// we're still in "joining" so a close-during-join doesn't strand a
 		// membership published moments later.
 		disposed = true;
-		discoveryAbort?.abort();
+		discoveryAbort.abort();
 		detachE2EE?.();
 		detachE2EE = null;
 		joinEpoch++;
