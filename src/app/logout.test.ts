@@ -286,6 +286,30 @@ describe("finishSessionExit (#601)", () => {
 		expect(finishAccountLogout).toHaveBeenCalledWith(SESSION.userId);
 	});
 
+	it("still wipes and redirects when stopping the chime throws", async () => {
+		closeNotificationSound.mockImplementationOnce(() => {
+			order.push("closeNotificationSound");
+			throw new Error("audio context gone");
+		});
+
+		await expect(
+			finishSessionExit({
+				client: CLIENT,
+				pushConfig: PUSH_CONFIG,
+				session: SESSION,
+				goToLogin: () => order.push("goToLogin"),
+			}),
+		).resolves.toBe("left");
+
+		expect(order).toEqual([
+			"setActiveCallRoomId",
+			"closeNotificationSound",
+			"clearCryptoStores",
+			"goToLogin",
+			"finishAccountLogout",
+		]);
+	});
+
 	it("still wipes and redirects when clearing the call signal throws", async () => {
 		// A Solid setter runs its subscribers synchronously, so a throwing
 		// effect here would otherwise leave an expired session with its stores

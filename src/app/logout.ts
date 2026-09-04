@@ -144,7 +144,15 @@ export async function finishSessionExit(
 			logLabel: "Could not clear the active call while ending the session",
 		});
 	}
-	closeNotificationSound();
+	// Caught for the same reason, and last: a throw here would skip the wipe
+	// and the clear outright.
+	try {
+		closeNotificationSound();
+	} catch (e) {
+		reportError(e, {
+			logLabel: "Could not stop the chime while ending the session",
+		});
+	}
 	// `finishAccountLogout` owns the rest: the (bounded) wipe finishes before
 	// anything navigates, so replacing the document cannot abort the delete. That
 	// is why the caller's screen has to stay up while this runs.
