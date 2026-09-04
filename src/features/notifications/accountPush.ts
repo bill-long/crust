@@ -16,11 +16,11 @@
  *  - {@link releaseWebPush}, on the way out of an account, hands the
  *    registration back while the outgoing token is still the one in the client.
  *    Every exit calls it: the switch and the add-account detour
- *    (`app/accountSwitch.ts`), the logout (`app/Layout.tsx`), and the two
- *    force-logout paths (`app/forceLogout.ts` and the expired-session effect
- *    in `app/App.tsx`) - which need it most, because they
- *    drop the account from storage with a token that no longer works, putting
- *    it out of the sweep's reach forever. Even there the local unsubscribe
+ *    (`app/accountSwitch.ts`), the logout teardown (`app/logout.ts` - the menu
+ *    logout and the escape, token still valid), and the expired-session effect
+ *    in `app/App.tsx` - which needs it most, because it drops the account from
+ *    storage with a token that no longer works, putting it out of the sweep's
+ *    reach forever. Even there the local unsubscribe
  *    lands, and nothing is delivered to a subscription the browser has dropped.
  *  - {@link removeOtherAccountPushers}, at boot, takes the pushkey off every
  *    account that is stored but not the one running. That is the cleanup for
@@ -129,8 +129,8 @@ export async function releaseWebPush(
  * Turn background notifications off for the account on screen: record the
  * preference, then hand the device's registration back. Every place that means
  * it goes through here - the settings toggle, and every logout, through
- * `finishAccountLogout`, so the force-logout paths (`app/forceLogout.ts`, the
- * expired-session effect) forget the preference too
+ * `finishAccountLogout`, so the exits that never touch the toggle (the escape
+ * in `app/logout.ts`, the expired-session effect) forget the preference too
  * rather than leaving the next login reading "on" with nothing registered.
  *
  * The order is the point. The release is bounded but can take seconds, and it no

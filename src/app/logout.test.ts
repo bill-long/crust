@@ -1,12 +1,16 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../stores/session";
 import type { PushConfig } from "../types/config";
 
 /**
- * Every step is recorded here in the order it actually ran. The escape's
+ * Every step is recorded here in the order it actually ran. The logout's
  * correctness IS this order - each step needs something the next one takes
  * away - so the assertions below are about sequence, not about calls happening.
+ *
+ * Every step is mocked, the revoke included: what it does on the wire (stop,
+ * abort, bounded keepalive request) is `revokeSession`'s own contract, locked
+ * in `client/accountLogout.test.ts`.
  */
 const order: string[] = [];
 
@@ -16,13 +20,18 @@ const endActiveCall = vi.fn(async () => {
 const disableBackgroundNotifications = vi.fn(async () => {
 	order.push("disableBackgroundNotifications");
 });
-const finishAccountLogout = vi.fn(async () => {
+const revokeSession = vi.fn(async (_client: MatrixClient) => {
+	order.push("revokeSession");
+});
+const finishAccountLogout = vi.fn(async (_userId: string) => {
 	order.push("finishAccountLogout");
 	return "left" as const;
 });
-const clearCryptoStores = vi.fn(async () => {
-	order.push("clearCryptoStores");
-});
+const clearCryptoStores = vi.fn(
+	async (_client: MatrixClient, _session: Session) => {
+		order.push("clearCryptoStores");
+	},
+);
 const setActiveCallRoomId = vi.fn(() => {
 	order.push("setActiveCallRoomId");
 });
@@ -34,10 +43,13 @@ vi.mock("../features/notifications/accountPush", () => ({
 	disableBackgroundNotifications: (...args: unknown[]) =>
 		disableBackgroundNotifications(...(args as [])),
 }));
+vi.mock("../client/accountLogout", () => ({
+	revokeSession: (client: MatrixClient) => revokeSession(client),
+}));
 vi.mock("./accountSwitch", () => ({
 	finishAccountLogout: async (
 		_exit: unknown,
-		_userId: string,
+		userId: string,
 		wipe: () => Promise<void>,
 		goToLogin: () => void,
 	) => {
@@ -45,17 +57,13 @@ vi.mock("./accountSwitch", () => ({
 		// see the wipe's position in the order.
 		await wipe();
 		goToLogin();
-		return finishAccountLogout();
+		return finishAccountLogout(userId);
 	},
 }));
-vi.mock("../client/cryptoRecovery", async (importOriginal) => {
-	const actual =
-		await importOriginal<typeof import("../client/cryptoRecovery")>();
-	return {
-		...actual,
-		clearCryptoStores: () => clearCryptoStores(),
-	};
-});
+vi.mock("../client/cryptoRecovery", () => ({
+	clearCryptoStores: (client: MatrixClient, session: Session) =>
+		clearCryptoStores(client, session),
+}));
 vi.mock("../stores/activeCall", () => ({
 	setActiveCallRoomId: () => setActiveCallRoomId(),
 }));
@@ -63,7 +71,7 @@ vi.mock("../features/room/notificationSound", () => ({
 	closeNotificationSound: () => {},
 }));
 
-import { FORCE_LOGOUT_REVOKE_TIMEOUT_MS, runForceLogout } from "./forceLogout";
+import { runLogout } from "./logout";
 
 const SESSION: Session = {
 	accessToken: "token",
@@ -72,43 +80,26 @@ const SESSION: Session = {
 	homeserverUrl: "https://example.com",
 };
 
+const CLIENT = {} as MatrixClient;
 const PUSH_CONFIG = {} as PushConfig;
 
-function makeClient(
-	logout: () => Promise<unknown> = async () => {
-		order.push("logout");
-	},
-) {
-	return {
-		logout: vi.fn(logout),
-		stopClient: vi.fn(() => {
-			order.push("stopClient");
-		}),
-	};
-}
-
-function run(client: ReturnType<typeof makeClient>) {
-	return runForceLogout({
-		client: client as unknown as MatrixClient,
+function run() {
+	return runLogout({
+		client: CLIENT,
 		pushConfig: PUSH_CONFIG,
 		session: SESSION,
 		goToLogin: () => order.push("goToLogin"),
 	});
 }
 
-describe("runForceLogout (#551)", () => {
+describe("runLogout (#551, #555)", () => {
 	beforeEach(() => {
 		order.length = 0;
 		vi.clearAllMocks();
 	});
 
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
 	it("does everything the server needs before the revoke that ends the session", async () => {
-		const client = makeClient();
-		await expect(run(client)).resolves.toBe("left");
+		await expect(run()).resolves.toBe("left");
 
 		// The withdrawal needs a token that can still write to the room (#474),
 		// and the pusher can only be named server-side by a credential that still
@@ -118,20 +109,25 @@ describe("runForceLogout (#551)", () => {
 			"endActiveCall",
 			"setActiveCallRoomId",
 			"disableBackgroundNotifications",
-			"logout",
+			"revokeSession",
 			"clearCryptoStores",
 			"goToLogin",
 			"finishAccountLogout",
 		]);
-		// Stops the client as it revokes, rather than leaving that to a later
-		// failure path.
-		expect(client.logout).toHaveBeenCalledWith(true);
+		// This document's RUNNING client is the one revoked and wiped - not a
+		// throwaway built from the session, which would leave the running one's
+		// sync and MatrixRTC on a token about to 401 (#474).
+		expect(revokeSession).toHaveBeenCalledWith(CLIENT);
+		expect(clearCryptoStores).toHaveBeenCalledWith(CLIENT, SESSION);
+		// This document's own account leaves, not whoever storage calls active:
+		// another tab may have switched since this one booted.
+		expect(finishAccountLogout).toHaveBeenCalledWith(SESSION.userId);
 	});
 
 	it("waits for the withdrawal to land before the revoke cancels it", async () => {
 		// Ordering alone cannot show this: a fire-and-forget teardown starts in
 		// the same place an awaited one does. So hold the withdrawal open and
-		// check that nothing has revoked yet - `logout(true)` aborts the client's
+		// check that nothing has revoked yet - the revoke aborts the client's
 		// in-flight requests, so a revoke issued here would cancel the very write
 		// being waited on (#474).
 		let landWithdrawal!: () => void;
@@ -144,17 +140,16 @@ describe("runForceLogout (#551)", () => {
 					};
 				}),
 		);
-		const client = makeClient();
-		const pending = run(client);
+		const pending = run();
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(client.logout).not.toHaveBeenCalled();
+		expect(revokeSession).not.toHaveBeenCalled();
 		expect(disableBackgroundNotifications).not.toHaveBeenCalled();
 
 		landWithdrawal();
 		await pending;
 		expect(order.indexOf("endActiveCall")).toBeLessThan(
-			order.indexOf("logout"),
+			order.indexOf("revokeSession"),
 		);
 	});
 
@@ -163,14 +158,13 @@ describe("runForceLogout (#551)", () => {
 			order.push("endActiveCall");
 			throw new Error("a subscriber threw");
 		});
-		const client = makeClient();
 
-		await expect(run(client)).resolves.toBe("left");
+		await expect(run()).resolves.toBe("left");
 		// The first step failing must not skip the three that take the account off
 		// this device: the alternative is the orphaned, still-push-capable device
-		// this escape exists to prevent.
+		// the logout exists to prevent.
 		expect(order).toContain("disableBackgroundNotifications");
-		expect(order).toContain("logout");
+		expect(order).toContain("revokeSession");
 		expect(order).toContain("clearCryptoStores");
 	});
 
@@ -182,11 +176,10 @@ describe("runForceLogout (#551)", () => {
 			order.push("setActiveCallRoomId");
 			throw new Error("a subscriber threw");
 		});
-		const client = makeClient();
 
-		await expect(run(client)).resolves.toBe("left");
+		await expect(run()).resolves.toBe("left");
 		expect(order).toContain("disableBackgroundNotifications");
-		expect(order).toContain("logout");
+		expect(order).toContain("revokeSession");
 		expect(order).toContain("clearCryptoStores");
 	});
 
@@ -198,61 +191,52 @@ describe("runForceLogout (#551)", () => {
 			order.push("disableBackgroundNotifications");
 			throw new Error("a subscriber threw");
 		});
-		const client = makeClient();
 
-		await expect(run(client)).resolves.toBe("left");
-		expect(order).toContain("logout");
+		await expect(run()).resolves.toBe("left");
+		expect(order).toContain("revokeSession");
 		expect(order).toContain("clearCryptoStores");
 	});
 
-	it("leaves without the revoke when the server never answers it", async () => {
-		vi.useFakeTimers();
-		const client = makeClient(() => new Promise<never>(() => {}));
-		const settled = vi.fn();
-		const pending = run(client).then(settled);
+	it("waits for the revoke to settle before the wipe", async () => {
+		// Same shape as the withdrawal test above: an un-awaited revoke would
+		// let the wipe and the clear run under it, and a remaining account's
+		// reload would then replace the document with the bound not yet paid.
+		let settleRevoke!: () => void;
+		revokeSession.mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					settleRevoke = () => {
+						order.push("revokeSession");
+						resolve();
+					};
+				}),
+		);
+		const pending = run();
 
-		await vi.advanceTimersByTimeAsync(FORCE_LOGOUT_REVOKE_TIMEOUT_MS - 1);
-		expect(settled).not.toHaveBeenCalled();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(clearCryptoStores).not.toHaveBeenCalled();
 
-		await vi.advanceTimersByTimeAsync(1);
+		settleRevoke();
 		await pending;
-		// The way out of a hang cannot itself hang: the revoke is given up on and
-		// the account still leaves the device.
-		expect(order).toContain("clearCryptoStores");
-		expect(order).toContain("finishAccountLogout");
-	});
-
-	it("still leaves the account when the recovery stop also throws", async () => {
-		// The likeliest reason to be on this path is that the stop inside
-		// `logout(true)` is what threw - so the recovery stop is the call most
-		// likely to throw again, and it sits after the point where giving up
-		// would leave the account fully alive on the device.
-		const client = {
-			logout: vi.fn(async () => {
-				order.push("logout");
-				throw new Error("stop failed inside logout");
-			}),
-			stopClient: vi.fn(() => {
-				order.push("stopClient");
-				throw new Error("and again here");
-			}),
-		};
-
-		await expect(run(client)).resolves.toBe("left");
-		expect(order).toContain("clearCryptoStores");
-		expect(order).toContain("finishAccountLogout");
-	});
-
-	it("stops the client itself when the revoke fails outright", async () => {
-		const client = makeClient(async () => {
-			order.push("logout");
-			throw new Error("network down");
-		});
-
-		await expect(run(client)).resolves.toBe("left");
-		expect(order).toContain("stopClient");
-		expect(order.indexOf("stopClient")).toBeLessThan(
+		expect(order.indexOf("revokeSession")).toBeLessThan(
 			order.indexOf("clearCryptoStores"),
 		);
+	});
+
+	it("still leaves the account when the revoke fails or times out", async () => {
+		// `revokeSession` rejects on a network failure and on its bound alike;
+		// either way the account still leaves the device. The escape used to
+		// skip revoking altogether, and a revoke that fails is the same outcome
+		// with a better chance of having landed.
+		revokeSession.mockImplementationOnce(async () => {
+			order.push("revokeSession");
+			throw new Error("server never answered");
+		});
+
+		await expect(run()).resolves.toBe("left");
+		expect(order.indexOf("revokeSession")).toBeLessThan(
+			order.indexOf("clearCryptoStores"),
+		);
+		expect(order).toContain("finishAccountLogout");
 	});
 });

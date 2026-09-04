@@ -11,8 +11,12 @@
  * `clearStores` refuses to run on a running client, no sync is opened, and
  * nothing here can touch the active account's databases because every call is
  * scoped by the account's own `cryptoPrefix` (#532).
+ *
+ * The revoke itself - stop, abort, bounded keepalive `POST /logout` - is the
+ * one every logout uses, foreground included (`app/logout.ts`, #555), so it
+ * lives here with its bound rather than in the app layer.
  */
-import { createClient } from "matrix-js-sdk";
+import { createClient, type MatrixClient, Method } from "matrix-js-sdk";
 import { createOidcTokenRefreshFn } from "../features/auth/oidcRefresh";
 import { reportError } from "../lib/reportError";
 import { removeAccount, type Session } from "../stores/session";
@@ -21,6 +25,58 @@ import {
 	clearCryptoStores,
 	withTimeout,
 } from "./cryptoRecovery";
+import { stopClientFully } from "./stopClientFully";
+
+/**
+ * How long a revoke waits for the server before the caller moves on without
+ * it. Long enough for a server that is merely stalled on one endpoint to
+ * answer, short enough that a logout is never itself a hang. The bad case is
+ * not a refused connection (which fails fast) but one that is accepted and then
+ * black-holed - hotel wifi, a split-tunnel VPN - where an unbounded await used
+ * to wedge the most-used exit in the app (#555) and, behind a background
+ * logout, the switcher's single-flight guard for the life of the document.
+ * The other waits in a logout are bounded where their own rules live; see
+ * `app/logout.ts` for how they add up.
+ */
+export const REVOKE_TIMEOUT_MS = 5_000;
+
+/**
+ * Stop `client` and revoke its token, bounded by {@link REVOKE_TIMEOUT_MS}.
+ *
+ * The request is sent with fetch `keepalive`, so it outlives this document:
+ * when the bound expires the `POST /logout` is still in flight, and a caller
+ * that goes on to reload into another account (`finishAccountLogout`) would
+ * otherwise cancel it - a revoke that would have landed a second later lost,
+ * and the device alive on the homeserver with a working token and no UI left
+ * to reach it. With `keepalive` the browser finishes the request on its own.
+ * One case stays open: an OAuth session whose access token has expired
+ * refreshes it first, and that refresh is a plain request the reload does
+ * cancel, so the revoke never starts. Closing it would mean a keepalive
+ * refresh, which is the SDK's transport, not ours.
+ *
+ * Mirrors `client.logout(true)`: the client is stopped and its in-flight
+ * requests aborted before the revoke is issued, so nothing races a token that
+ * is about to stop working. The stop is `stopClientFully`, which neither
+ * throws nor leaves `clientRunning` set - a stop that skipped the request, or
+ * left the flag up for the wipe to trip over, would defeat the call. Throws
+ * on failure or timeout of the request itself.
+ *
+ * The bound is a `withTimeout` race, not the SDK's `localTimeoutMs` on the
+ * same request: the SDK implements that option as an abort signal, which
+ * would cancel the keepalive request at the bound - the one thing this
+ * function exists not to do.
+ */
+export async function revokeSession(client: MatrixClient): Promise<void> {
+	stopClientFully(client);
+	client.http.abort();
+	await withTimeout(
+		client.http.authedRequest(Method.Post, "/logout", undefined, undefined, {
+			keepAlive: true,
+		}),
+		REVOKE_TIMEOUT_MS,
+		"Session revoke",
+	);
+}
 
 /**
  * A throwaway client for `account`, never started.
@@ -58,7 +114,7 @@ export function createAccountClient(
  */
 export async function revokeAccountToken(account: Session): Promise<void> {
 	try {
-		await createAccountClient(account).logout(true);
+		await revokeSession(createAccountClient(account));
 	} catch (e) {
 		reportError(e, {
 			logLabel: `Failed to revoke the token for ${account.userId}`,
@@ -78,7 +134,7 @@ export async function revokeAccountToken(account: Session): Promise<void> {
 export async function logOutAccount(account: Session): Promise<boolean> {
 	const client = createAccountClient(account);
 	try {
-		await client.logout(true);
+		await revokeSession(client);
 	} catch (e) {
 		reportError(e, {
 			logLabel: `Failed to revoke the token for ${account.userId}`,

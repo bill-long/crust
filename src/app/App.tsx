@@ -26,8 +26,8 @@ import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
-import { runForceLogout } from "./forceLogout";
 import { accountTransitionInFlight, Layout } from "./Layout";
+import { runLogout } from "./logout";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
 
@@ -222,10 +222,8 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				{ client, pushConfig },
 				// This document's own account; another tab may have switched.
 				session.userId,
-				() =>
-					clearCryptoStores(client, session).catch((e: unknown) => {
-						console.warn("Failed to clear stores on session expiry:", e);
-					}),
+				// Bounded and caught inside `finishAccountLogout`.
+				() => clearCryptoStores(client, session),
 				() => navigate("/login", { replace: true }),
 			);
 		}
@@ -247,7 +245,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 			// keeps running until the replacement takes over, and a second click
 			// would start an overlapping `clearCryptoStores`.
 			if (
-				(await runForceLogout({
+				(await runLogout({
 					client,
 					pushConfig,
 					session,
@@ -257,7 +255,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				return;
 			}
 		} catch (e) {
-			// A narrow net on purpose, and not the only one. `runForceLogout`
+			// A narrow net on purpose, and not the only one. `runLogout`
 			// swallows each step's own failure - that is its contract, since no
 			// step may abort the ones that follow - so what reaches here is the
 			// residue: a throw from something expected not to throw. The other

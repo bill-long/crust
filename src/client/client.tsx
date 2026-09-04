@@ -24,7 +24,6 @@ import {
 	type CryptoStatus,
 	useCryptoStatus,
 } from "../features/crypto/useCryptoStatus";
-import { reportError } from "../lib/reportError";
 import { loadSession, type Session } from "../stores/session";
 import { userSettings } from "../stores/settings";
 import { updateAppBadge } from "./appBadge";
@@ -51,6 +50,7 @@ import {
 	canReuseCachedSecretStorageKey,
 	resolveSecretStorageKey,
 } from "./secretStorageKey";
+import { stopClientFully } from "./stopClientFully";
 import {
 	createSummariesStore,
 	type OptimisticJoinInfo,
@@ -431,52 +431,6 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		document.addEventListener("visibilitychange", reassertBadgeOnVisible);
 	}
 
-	/**
-	 * Stop the client so that it is really stopped, whatever `stopClient` does on
-	 * the way (#551).
-	 *
-	 * Two SDK details make the plain call unreliable, and both bite on the paths
-	 * this app stops a client from. `stopClient` runs `cryptoBackend?.stop()`
-	 * BEFORE it clears `clientRunning` and before it touches the sync API, so a
-	 * throw there stops nothing and leaves the flag set - and `clearStores`
-	 * throws synchronously on that flag, so the account wipe every logout depends
-	 * on would fail for the life of the document. The retry is what gets past it:
-	 * `RustCrypto.stop()` sets its own `stopped` flag before the calls that can
-	 * throw, so a second attempt returns from it immediately and goes on to reach
-	 * the sync API the first never did.
-	 *
-	 * The `finally` is the last resort for a client that refuses to stop twice: a
-	 * flag left set fails every later wipe, which is worse than the sync loop it
-	 * would otherwise keep stoppable.
-	 *
-	 * The retry covers the crypto step and only that step, which is the one that
-	 * matters here: it runs BEFORE the flag is cleared, so it is the only throw
-	 * that leaves the flag set, and it is idempotent so a second attempt gets
-	 * past it. A throw from a step AFTER the flag is cleared (`matrixRTC.stop()`,
-	 * say) is a different animal: the retry is turned away by `stopClient`'s own
-	 * early return, and restoring the flag to force it back in would only
-	 * re-enter the same deterministic throw while re-stopping what already
-	 * stopped. Those later steps are then left running - a residual accepted
-	 * here, because the flag, which is what the account wipe depends on, is
-	 * already correct by that point.
-	 */
-	const stopClientFully = (): void => {
-		try {
-			matrixClient.stopClient();
-		} catch (e) {
-			reportError(e, { logLabel: "Failed to stop the client" });
-			try {
-				matrixClient.stopClient();
-			} catch (retryError) {
-				reportError(retryError, {
-					logLabel: "Failed to stop the client on the second attempt",
-				});
-			}
-		} finally {
-			matrixClient.clientRunning = false;
-		}
-	};
-
 	const onSync = (state: SyncState): void => {
 		// "logged-out" is terminal — don't let later sync events overwrite it
 		if (syncState() === "logged-out") return;
@@ -526,7 +480,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// `cryptoBackend?.stop()` runs ahead of it. Reported, not rethrown: this
 		// is an SDK emitter callback, and a throw here re-enters `HttpApi`'s
 		// error handling.
-		stopClientFully();
+		stopClientFully(matrixClient);
 		setSyncState("logged-out");
 	};
 	matrixClient.on(HttpApiEvent.SessionLoggedOut, onSessionLoggedOut);
@@ -588,7 +542,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			// Set so the stop is not turned away at `stopClient`'s own early
 			// return; `stopClientFully` puts it back.
 			matrixClient.clientRunning = true;
-			stopClientFully();
+			stopClientFully(matrixClient);
 			return;
 		}
 		// startClient is async and awaits /versions before it builds the sync
@@ -645,7 +599,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// Never throws, which matters here beyond the usual reason: this runs
 		// inside Solid's cleanup chain, so an escaping error would abort the
 		// disposal of everything after it in the tree.
-		stopClientFully();
+		stopClientFully(matrixClient);
 	});
 
 	return (

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const createClientMock = vi.hoisted(() => vi.fn());
 vi.mock("matrix-js-sdk", () => ({
 	createClient: (...args: unknown[]) => createClientMock(...args),
+	Method: { Post: "POST" },
 }));
 
 import {
@@ -12,7 +13,7 @@ import {
 	type Session,
 	saveSession,
 } from "../stores/session";
-import { logOutAccount } from "./accountLogout";
+import { logOutAccount, REVOKE_TIMEOUT_MS } from "./accountLogout";
 
 const ALICE: Session = {
 	accessToken: "syt_a",
@@ -27,17 +28,26 @@ const BOB: Session = {
 	deviceId: "DEV_B",
 };
 
-let logout: ReturnType<typeof vi.fn>;
+let revoke: ReturnType<typeof vi.fn>;
+let stopClient: ReturnType<typeof vi.fn>;
+let abort: ReturnType<typeof vi.fn>;
 let clearStores: ReturnType<typeof vi.fn>;
 let startClient: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
 	localStorage.clear();
-	logout = vi.fn(async () => {});
+	revoke = vi.fn(async () => {});
+	stopClient = vi.fn();
+	abort = vi.fn();
 	clearStores = vi.fn(async () => {});
 	startClient = vi.fn(async () => {});
 	createClientMock.mockReset();
-	createClientMock.mockReturnValue({ logout, clearStores, startClient });
+	createClientMock.mockReturnValue({
+		clearStores,
+		startClient,
+		stopClient,
+		http: { abort, authedRequest: revoke },
+	});
 	vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -87,7 +97,63 @@ describe("logOutAccount", () => {
 			userId: ALICE.userId,
 			deviceId: ALICE.deviceId,
 		});
-		expect(logout).toHaveBeenCalledWith(true);
+		// Stopped and aborted first, as `client.logout(true)` would - a stalled
+		// long-poll must not keep running on a token about to be invalidated -
+		// and revoked with keepalive so the request outlives whatever the caller
+		// navigates to.
+		expect(stopClient).toHaveBeenCalledOnce();
+		expect(abort).toHaveBeenCalledOnce();
+		expect(revoke).toHaveBeenCalledWith(
+			"POST",
+			"/logout",
+			undefined,
+			undefined,
+			{ keepAlive: true },
+		);
+		const [stopAt] = stopClient.mock.invocationCallOrder;
+		const [abortAt] = abort.mock.invocationCallOrder;
+		const [revokeAt] = revoke.mock.invocationCallOrder;
+		expect(stopAt).toBeLessThan(abortAt);
+		expect(abortAt).toBeLessThan(revokeAt);
+	});
+
+	it("still revokes when the client stop throws", async () => {
+		// `stopClient` runs the crypto backend's stop, which can throw. The
+		// device ending up revoked is the point of the whole call, so the stop
+		// failing must not skip the request (`stopClientFully` owns the retry
+		// and the flag; its own suite locks those).
+		saveSession(ALICE);
+		addSession(BOB);
+		stopClient.mockImplementation(() => {
+			throw new Error("crypto backend stop failed");
+		});
+
+		await expect(logOutAccount(ALICE)).resolves.toBe(true);
+
+		expect(abort).toHaveBeenCalledOnce();
+		expect(revoke).toHaveBeenCalledOnce();
+		expect(stored(ALICE.userId)).toBeUndefined();
+	});
+
+	it("gives up on a revoke the server never answers", async () => {
+		// The same hang the foreground logout bounds (#555): this runs under the
+		// switcher's single-flight guard, so an unbounded await here would lock
+		// out switching, adding and logging out for the life of the document.
+		vi.useFakeTimers();
+		try {
+			saveSession(ALICE);
+			addSession(BOB);
+			revoke.mockImplementation(() => new Promise<void>(() => {}));
+
+			const done = logOutAccount(ALICE);
+			await vi.advanceTimersByTimeAsync(REVOKE_TIMEOUT_MS);
+
+			await expect(done).resolves.toBe(true);
+			expect(stored(ALICE.userId)).toBeUndefined();
+			expect(clearStores).toHaveBeenCalledOnce();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("wipes ONLY that account's crypto store", async () => {
@@ -123,7 +189,7 @@ describe("logOutAccount", () => {
 		// are about to discard - so the local half runs either way.
 		saveSession(ALICE);
 		addSession(BOB);
-		logout.mockRejectedValueOnce(new Error("token already expired"));
+		revoke.mockRejectedValueOnce(new Error("token already expired"));
 
 		await logOutAccount(ALICE);
 
