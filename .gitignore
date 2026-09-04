@@ -18,6 +18,9 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Dev-only TLS certificate for `pnpm dev:https` (#468)
+.dev-certs/
+
 # Test
 coverage/
 test-results/
