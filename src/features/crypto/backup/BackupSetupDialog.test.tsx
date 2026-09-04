@@ -13,6 +13,7 @@ vi.mock("solid-refresh", () => ({
 const ensureKeyBackup = vi.fn();
 const activateExistingKeyBackup = vi.fn();
 const fetchServerKeyBackup = vi.fn();
+const bootstrapSecretStorage = vi.fn();
 
 vi.mock("./keyBackupSetup", () => ({
 	ensureKeyBackup: (...args: unknown[]) => ensureKeyBackup(...args),
@@ -22,6 +23,7 @@ vi.mock("./keyBackupSetup", () => ({
 }));
 
 const clearSecretStorageCache = vi.fn();
+const refresh = vi.fn(async () => undefined);
 
 vi.mock("../../../client/client", () => ({
 	useClient: () => ({
@@ -31,14 +33,31 @@ vi.mock("../../../client/client", () => ({
 					privateKey: new Uint8Array(),
 					encodedPrivateKey: "new-key",
 				})),
+				bootstrapSecretStorage: (...args: unknown[]) =>
+					bootstrapSecretStorage(...args),
+				checkKeyBackupAndEnable: vi.fn(async () => undefined),
+				getActiveSessionBackupVersion: vi.fn(async () => null),
 			}),
 		},
-		cryptoStatus: { refresh: vi.fn(async () => undefined) },
+		cryptoStatus: { refresh },
 		clearSecretStorageCache,
 	}),
 }));
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+interface BootstrapOpts {
+	createSecretStorageKey: () => Promise<unknown>;
+}
+
+interface TrackedCrypto {
+	bootstrapSecretStorage: (opts: BootstrapOpts) => Promise<void>;
+}
+
+const runBootstrap = (
+	crypto: TrackedCrypto,
+	createSecretStorageKey: () => Promise<unknown>,
+): Promise<void> => crypto.bootstrapSecretStorage({ createSecretStorageKey });
 
 afterEach(() => {
 	cleanup();
@@ -114,25 +133,93 @@ describe("BackupSetupDialog", () => {
 		expect(screen.getByText("Unlock your key backup")).toBeTruthy();
 	});
 
-	it("drops the 4S cache when setup fails after the dialog is gone", async () => {
-		// ensureKeyBackup can cache a recovery key before it fails, and it can
-		// settle long after a logout or route change has unmounted the dialog.
-		// Clearing the cache touches no UI, so the drop must not sit behind
-		// the mount check (#564).
-		let failSetup: ((e: Error) => void) | undefined;
-		ensureKeyBackup.mockReturnValue(
-			new Promise((_resolve, reject) => {
-				failSetup = reject;
-			}),
+	it("keeps the 4S cache when bootstrap fails after the dialog is gone", async () => {
+		// bootstrapSecretStorage can cache a recovery key before it fails, and
+		// it can settle long after a logout or route change unmounted the dialog.
+		// The cached key is validated against the offered/current key before its
+		// next reuse, so this opaque failure does not justify a broad drop.
+		let failBootstrap: ((e: Error) => void) | undefined;
+		bootstrapSecretStorage.mockImplementation(async (opts: BootstrapOpts) => {
+			await opts.createSecretStorageKey();
+			return new Promise((_resolve, reject) => {
+				failBootstrap = reject;
+			});
+		});
+		ensureKeyBackup.mockImplementation(
+			(crypto: TrackedCrypto, createKey: () => Promise<unknown>) =>
+				runBootstrap(crypto, createKey),
 		);
 		render(() => <BackupSetupDialog onClose={() => {}} />);
 
 		fireEvent.click(screen.getByText("Continue"));
-		await vi.waitFor(() => expect(ensureKeyBackup).toHaveBeenCalled());
+		await vi.waitFor(() => expect(failBootstrap).toBeTypeOf("function"));
 
 		cleanup();
-		failSetup?.(new Error("network died"));
-		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
+		failBootstrap?.(new Error("network died"));
+		await flush();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+	});
+
+	it("keeps the 4S cache when setup fails before bootstrap starts", async () => {
+		// A transient backup-discovery failure occurs before ensureKeyBackup
+		// calls bootstrapSecretStorage, so the cached key is still current.
+		ensureKeyBackup.mockRejectedValue(new Error("network died"));
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await vi.waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+
+		expect(bootstrapSecretStorage).not.toHaveBeenCalled();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+	});
+
+	it("shows a key minted before bootstrap fails", async () => {
+		bootstrapSecretStorage.mockImplementation(async (opts: BootstrapOpts) => {
+			await opts.createSecretStorageKey();
+			throw new Error("network died");
+		});
+		ensureKeyBackup.mockImplementation(
+			(crypto: TrackedCrypto, createKey: () => Promise<unknown>) =>
+				runBootstrap(crypto, createKey),
+		);
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await vi.waitFor(() =>
+			expect(screen.getByText("Save your recovery key")).toBeTruthy(),
+		);
+
+		expect(screen.getByText("new-key")).toBeTruthy();
+		expect(screen.getByRole("alert").textContent).toContain(
+			"Setup did not finish completely",
+		);
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+		expect(refresh).toHaveBeenCalledOnce();
+
+		fireEvent.click(screen.getByText("I've saved my key"));
+		expect(screen.getByText("Backup setup failed")).toBeTruthy();
+		expect(screen.queryByText("Key backup is set up")).toBeNull();
+	});
+
+	it("keeps the 4S cache when setup fails after bootstrap finishes", async () => {
+		bootstrapSecretStorage.mockImplementation(async (opts: BootstrapOpts) => {
+			await opts.createSecretStorageKey();
+		});
+		ensureKeyBackup.mockImplementation(
+			async (crypto: TrackedCrypto, createKey: () => Promise<unknown>) => {
+				await runBootstrap(crypto, createKey);
+				throw new Error("activation died");
+			},
+		);
+		render(() => <BackupSetupDialog onClose={() => {}} />);
+
+		fireEvent.click(screen.getByText("Continue"));
+		await vi.waitFor(() =>
+			expect(screen.getByText("Save your recovery key")).toBeTruthy(),
+		);
+
+		expect(bootstrapSecretStorage).toHaveBeenCalledOnce();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
 	});
 
 	it("drops the 4S cache when an unlock is refused after the dialog is gone", async () => {

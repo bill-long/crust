@@ -99,4 +99,30 @@ describe("RecoveryKeyResetDialog", () => {
 		failBootstrap?.(new Error("network died"));
 		await vi.waitFor(() => expect(clearSecretStorageCache).toHaveBeenCalled());
 	});
+
+	it("keeps the 4S cache when a post-bootstrap status check fails", async () => {
+		// bootstrapSecretStorage completed and cached the new default key, so a
+		// later status-probe failure must not discard that valid replacement.
+		getSecretStorageStatus.mockRejectedValue(new Error("network died"));
+		startReset();
+
+		await vi.waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+
+		expect(bootstrapSecretStorage).toHaveBeenCalledOnce();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+	});
+
+	it("keeps the 4S cache when readiness fails before bootstrap", async () => {
+		cryptoApi.getCrossSigningStatus.mockRejectedValue(
+			new Error("network died"),
+		);
+		startReset();
+
+		await vi.waitFor(() =>
+			expect(screen.getByText("Reset failed")).toBeTruthy(),
+		);
+
+		expect(bootstrapSecretStorage).not.toHaveBeenCalled();
+		expect(clearSecretStorageCache).not.toHaveBeenCalled();
+	});
 });

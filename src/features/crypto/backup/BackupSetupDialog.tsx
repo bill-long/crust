@@ -8,6 +8,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import {
 	activateExistingKeyBackup,
 	ensureKeyBackup,
@@ -44,6 +45,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 	const [step, setStep] = createSignal<SetupStep>("intro");
 	const [recoveryKey, setRecoveryKey] = createSignal<string | undefined>();
 	const [errorMessage, setErrorMessage] = createSignal("");
+	const [partial, setPartial] = createSignal(false);
 	// A backup exists but isn't active yet — the user must still unlock it even
 	// after a freshly minted recovery key has been shown.
 	const [restorePending, setRestorePending] = createSignal(false);
@@ -63,10 +65,12 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 
 		setStep("working");
 		setErrorMessage("");
+		setPartial(false);
+		// Kept outside the try so a key minted before a bootstrap failure is
+		// still shown to the user: it may already be the account default.
+		let generatedKey: GeneratedSecretStorageKey | undefined;
 
 		try {
-			let generatedKey: GeneratedSecretStorageKey | undefined;
-
 			// Reuse existing secret storage and an existing key backup; only mint
 			// a new recovery key / key backup when none exists. Never force new
 			// secret storage or reset the backup — that would supersede recoverable
@@ -105,18 +109,23 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 				setStep("done");
 			}
 		} catch (e) {
-			// Every failed setup drops the cache, whether or not a key was
-			// cached before the failure: the cost of a needless drop is one
-			// re-prompt, not a loss. What matters here is that it runs ahead
-			// of the mount check - clearing touches no UI, and ensureKeyBackup
-			// can settle after a logout or route change unmounted us (#564).
-			clearSecretStorageCache();
 			if (disposed) return;
 			console.error("Key backup setup failed:", e);
-			setErrorMessage(
-				e instanceof Error ? e.message : "Setup failed. Please try again.",
+			const message = userFacingErrorMessage(
+				e,
+				"Setup failed. Please try again.",
 			);
-			setStep("error");
+			setErrorMessage(message);
+			if (generatedKey?.encodedPrivateKey) {
+				// A failed bootstrap may still have changed account data. Refresh the
+				// global status without delaying the recovery key the user must save.
+				void cryptoStatus.refresh();
+				setRecoveryKey(generatedKey.encodedPrivateKey);
+				setPartial(true);
+				setStep("show-key");
+			} else {
+				setStep("error");
+			}
 		}
 	};
 
@@ -163,7 +172,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 			if (disposed) return;
 			console.error("Key backup restore failed:", e);
 			setErrorMessage(
-				e instanceof Error ? e.message : "Restore failed. Please try again.",
+				userFacingErrorMessage(e, "Restore failed. Please try again."),
 			);
 			setStep("restore-needed");
 		}
@@ -249,6 +258,15 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 							Store this key somewhere safe. You'll need it to recover your
 							encrypted messages if you lose access to all your devices.
 						</p>
+						<Show when={partial()}>
+							<p
+								class="mb-4 rounded-lg bg-warning-bg/60 px-3 py-2 text-sm text-warning-text-bright"
+								role="alert"
+							>
+								Setup did not finish completely. Save this key before retrying;
+								it may already protect your account's encryption secrets.
+							</p>
+						</Show>
 
 						<Show when={recoveryKey()}>
 							{(key) => <RecoveryKeyDisplay recoveryKey={key()} />}
@@ -258,7 +276,13 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 							<button
 								type="button"
 								onClick={() => {
-									setStep(restorePending() ? "restore-needed" : "done");
+									setStep(
+										partial()
+											? "error"
+											: restorePending()
+												? "restore-needed"
+												: "done",
+									);
 								}}
 								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
 							>
