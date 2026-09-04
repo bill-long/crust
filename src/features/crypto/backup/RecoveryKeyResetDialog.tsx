@@ -8,6 +8,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { RecoveryKeyDisplay } from "./RecoveryKeyDisplay";
 import {
 	canConsolidateRecoveryKey,
@@ -62,6 +63,10 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 		// Declared outside the try so a generated key is still shown if a later
 		// step fails (the new key may already be the account's default).
 		let generatedKey: GeneratedSecretStorageKey | undefined;
+		// True only while bootstrapSecretStorage may be replacing the cached
+		// key. Readiness failures leave the old cache valid; after bootstrap,
+		// the SDK has cached the new default key itself.
+		let secretStorageGone = false;
 
 		try {
 			// Only re-key when every secret is available locally; otherwise
@@ -76,6 +81,7 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 				return;
 			}
 
+			secretStorageGone = true;
 			await crypto.bootstrapSecretStorage(
 				secretStorageResetOpts(async () => {
 					const key = await crypto.createRecoveryKeyFromPassphrase();
@@ -83,6 +89,7 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 					return key;
 				}),
 			);
+			secretStorageGone = false;
 			if (disposed) return;
 
 			const status = await crypto.getSecretStorageStatus();
@@ -102,15 +109,12 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 				setStep("error");
 			}
 		} catch (e) {
-			// bootstrapSecretStorage caches the new key as it writes it, so a
-			// failure part-way through can leave a key for storage that was
-			// never finished. The drop stays unconditional on failure even
-			// though a late failure (getSecretStorageStatus) can discard a
-			// perfectly good new default key - that costs one re-prompt, and
-			// narrowing the window would need state this dialog doesn't keep.
-			// Ahead of the mount check: clearing touches no UI, and the reset
-			// can settle after the dialog is gone (#564).
-			clearSecretStorageCache();
+			if (secretStorageGone) {
+				// A failed bootstrap can leave the cache pointing at superseded
+				// storage. This stays ahead of the mount check because the reset can
+				// settle after the dialog is gone (#564).
+				clearSecretStorageCache();
+			}
 			if (disposed) return;
 			console.error("Recovery key reset failed:", e);
 			if (generatedKey?.encodedPrivateKey) {
@@ -121,7 +125,7 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 				setStep("show-key");
 			} else {
 				setErrorMessage(
-					e instanceof Error ? e.message : "Reset failed. Please try again.",
+					userFacingErrorMessage(e, "Reset failed. Please try again."),
 				);
 				setStep("error");
 			}
@@ -240,7 +244,9 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 						<h2 class="mb-2 text-lg font-semibold text-text-primary">
 							Reset failed
 						</h2>
-						<p class="mb-4 text-sm text-danger-text-bright">{errorMessage()}</p>
+						<p class="mb-4 text-sm text-danger-text-bright" role="alert">
+							{errorMessage()}
+						</p>
 						<div class="flex justify-end gap-2">
 							<button
 								type="button"
