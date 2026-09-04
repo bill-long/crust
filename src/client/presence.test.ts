@@ -1,4 +1,4 @@
-import type { MatrixClient, User } from "matrix-js-sdk";
+import { ClientEvent, type MatrixClient, type User } from "matrix-js-sdk";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -6,7 +6,9 @@ import {
 	MAX_STATUS_MSG_LENGTH,
 	presenceOf,
 	recordSelfPresence,
+	recordSelfStatusMsg,
 	sanitizeStatusMsg,
+	selfRawStatusMsg,
 	toPresenceInfo,
 } from "./presence";
 
@@ -22,6 +24,7 @@ function mkClient(users: User[]) {
 	const listeners = new Map<string, Set<(e: unknown, u: User) => void>>();
 	const client = {
 		getUsers: () => users,
+		getUserId: () => "@me:x",
 		on: vi.fn((event: string, fn: (e: unknown, u: User) => void) => {
 			const set = listeners.get(event) ?? new Set();
 			set.add(fn);
@@ -42,6 +45,12 @@ function mkClient(users: User[]) {
 			content === undefined ? undefined : { getContent: () => content };
 		for (const fn of [...(listeners.get(event) ?? [])]) fn(ev, user);
 	};
+	// A raw client-level emit (ClientEvent.Event carries a MatrixEvent-shaped
+	// object, not a User).
+	const emitRaw = (event: string, ...args: unknown[]): void => {
+		for (const fn of [...(listeners.get(event) ?? [])])
+			(fn as (...a: unknown[]) => void)(...args);
+	};
 	return {
 		client,
 		emitSync,
@@ -54,6 +63,7 @@ function mkClient(users: User[]) {
 			emitSync(event, user, content);
 			await Promise.resolve();
 		},
+		emitRaw,
 		listenerCount: () =>
 			[...listeners.values()].reduce((n, s) => n + s.size, 0),
 	};
@@ -487,7 +497,9 @@ describe("attachPresence", () => {
 	it("removes its listeners when the owner is disposed", () => {
 		const { client, listenerCount } = mkClient([]);
 		const dispose = withPresence(client);
-		expect(listenerCount()).toBe(1);
+		// Two: the per-User path for peers and the ClientEvent.Event path for
+		// our own echo.
+		expect(listenerCount()).toBe(2);
 		dispose();
 		expect(listenerCount()).toBe(0);
 	});
@@ -590,5 +602,122 @@ describe("recordSelfPresence", () => {
 			statusMsg: "In a meeting",
 		});
 		dispose();
+	});
+
+	describe("own echo (#538)", () => {
+		const presenceEvent = (
+			sender: string,
+			content: Record<string, unknown>,
+		) => ({
+			getType: () => "m.presence",
+			getSender: () => sender,
+			getContent: () => content,
+		});
+
+		it("takes our own status message from the client-level presence event", async () => {
+			// Our own User has no re-emitter, so the per-User path never fires
+			// for us; SyncApi's ClientEvent.Event does, and carries the message.
+			const { client, emitRaw } = mkClient([]);
+			const dispose = withPresence(client);
+			recordSelfPresence("@me:x", true);
+			emitRaw(
+				ClientEvent.Event,
+				presenceEvent("@me:x", {
+					presence: "offline",
+					status_msg: "  from\nElement  ",
+				}),
+			);
+			await Promise.resolve();
+			// The message, sanitised for display; the wire's `offline` is not
+			// drawn - our own status comes from the sharing preference.
+			expect(presenceOf("@me:x")).toEqual({
+				status: "online",
+				statusMsg: "from Element",
+			});
+			dispose();
+		});
+
+		it("clears our own message when the echo omits it", async () => {
+			const { client, emitRaw } = mkClient([]);
+			const dispose = withPresence(client);
+			recordSelfPresence("@me:x", true);
+			recordSelfStatusMsg("@me:x", "old");
+			emitRaw(
+				ClientEvent.Event,
+				presenceEvent("@me:x", { presence: "online" }),
+			);
+			await Promise.resolve();
+			expect(presenceOf("@me:x")).toEqual({
+				status: "online",
+				statusMsg: null,
+			});
+			dispose();
+		});
+
+		it("leaves peers to the per-User path and ignores other event types", async () => {
+			const { client, emitRaw } = mkClient([]);
+			const dispose = withPresence(client);
+			emitRaw(
+				ClientEvent.Event,
+				presenceEvent("@peer:x", { presence: "online" }),
+			);
+			emitRaw(ClientEvent.Event, {
+				getType: () => "m.room.message",
+				getSender: () => "@me:x",
+				getContent: () => ({ status_msg: "nope" }),
+			});
+			await Promise.resolve();
+			expect(presenceOf("@peer:x").status).toBe("unknown");
+			expect(presenceOf("@me:x").statusMsg).toBeNull();
+			dispose();
+		});
+
+		it("recordSelfStatusMsg renders the raw value and keeps our status", () => {
+			recordSelfPresence("@me:x", true);
+			recordSelfStatusMsg("@me:x", "  busy\t\tnow  ");
+			expect(presenceOf("@me:x")).toEqual({
+				status: "online",
+				statusMsg: "busy now",
+			});
+			const before = presenceOf("@me:x");
+			recordSelfStatusMsg("@me:x", "busy now");
+			// Same rendering: no write, so the member list is not re-partitioned.
+			expect(presenceOf("@me:x")).toBe(before);
+			recordSelfStatusMsg("@me:x", "");
+			expect(presenceOf("@me:x")).toEqual({
+				status: "online",
+				statusMsg: null,
+			});
+		});
+	});
+
+	describe("echoed raw status (#538)", () => {
+		it("tracks the raw value from the echo and from a round trip, and resets on attach", async () => {
+			const { client, emitRaw } = mkClient([]);
+			const dispose = withPresence(client);
+			expect(selfRawStatusMsg()).toBeNull();
+			emitRaw(ClientEvent.Event, {
+				getType: () => "m.presence",
+				getSender: () => "@me:x",
+				getContent: () => ({ presence: "online", status_msg: "  raw  " }),
+			});
+			await Promise.resolve();
+			expect(selfRawStatusMsg()).toBe("  raw  ");
+			recordSelfStatusMsg("@me:x", "");
+			expect(selfRawStatusMsg()).toBe("");
+			dispose();
+			expect(selfRawStatusMsg()).toBeNull();
+		});
+
+		it("writes only the message leaf when the status is unchanged", () => {
+			recordSelfPresence("@me:x", true);
+			recordSelfStatusMsg("@me:x", "one");
+			const entry = presenceOf("@me:x");
+			recordSelfStatusMsg("@me:x", "two");
+			// Same entry object: the member list's per-key subscription is not
+			// notified, only the message line re-runs.
+			expect(presenceOf("@me:x")).toBe(entry);
+			expect(entry.statusMsg).toBe("two");
+		});
 	});
 });

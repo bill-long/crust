@@ -25,10 +25,24 @@ export const UNKNOWN_PRESENCE: PresenceInfo = {
 
 /**
  * Longest a status message may be before it is cut, matching what the profile
- * card and user bar can show without wrapping. Applied on read rather than on
- * write, so a message set from another client cannot break the layout either.
+ * card and user bar can show without wrapping. Applied on read, so a message
+ * set from another client cannot break the layout, and enforced on write by
+ * the editor, which refuses to save past it - a longer status set elsewhere
+ * prefills over the cap and must be shortened before it can be saved again.
  */
 export const MAX_STATUS_MSG_LENGTH = 120;
+
+/**
+ * Length of a status message as the cap counts it: code points, not UTF-16
+ * units. An `<input maxLength>` counts units, so it would stop an all-emoji
+ * status at 60 where {@link MAX_STATUS_MSG_LENGTH} allows 120; the editor
+ * counts with this instead and never sets `maxLength`.
+ */
+export function statusMsgLength(raw: string): number {
+	let n = 0;
+	for (const _ of raw) n++;
+	return n;
+}
 
 /**
  * How much of a raw `status_msg` is copied for normalisation, measured from

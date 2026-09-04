@@ -323,7 +323,7 @@ const AppGeneralTab: Component = () => {
 				/>
 				<ToggleRow
 					label="Share my presence"
-					description="Let others see when you are online. Turning this off publishes you as offline; you still see everyone else."
+					description="Let others see when you are online. Turning this off publishes you as offline and keeps your status message; you still see everyone else."
 					checked={userSettings().sharePresence}
 					onChange={(v) => updateSetting("sharePresence", v)}
 				/>

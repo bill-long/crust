@@ -1,27 +1,43 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import { reportError } from "../lib/reportError";
-import { presenceOf, recordSelfPresence } from "./presence";
+import {
+	attachPresence,
+	presenceOf,
+	recordSelfPresence,
+	recordSelfStatusMsg,
+} from "./presence";
 import {
 	applySyncPresence,
 	attachPresencePublisher,
+	fetchStatusMessage,
 	setPresenceSharing,
+	setStatusMessage,
 } from "./presencePublish";
 
 vi.mock("../lib/reportError", () => ({
 	reportError: vi.fn(),
 }));
 
-function mkClient(setPresence = vi.fn(async () => {})) {
+function mkClient(
+	setPresence: Mock = vi.fn(async () => {}),
+	getPresence: Mock = vi.fn(async () => ({ presence: "online" })),
+) {
 	const setSyncPresence = vi.fn();
 	const client = {
 		setPresence,
 		setSyncPresence,
+		getPresence,
 		getUserId: () => "@me:x",
+		on: () => {},
+		off: () => {},
 	} as unknown as MatrixClient;
-	return { client, setPresence, setSyncPresence };
+	return { client, setPresence, setSyncPresence, getPresence };
 }
+
+/** Let the serialised read-then-write settle. */
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 /**
  * The publisher is module-level, so every case attaches inside its own root
@@ -29,6 +45,11 @@ function mkClient(setPresence = vi.fn(async () => {})) {
  * decide whether the next one publishes at all.
  */
 function withPublisher(client: MatrixClient, body: () => void): void {
+	// The store too, under a root that is never disposed: attaching resets
+	// the echoed raw status the publisher would otherwise carry over from
+	// the previous case, while disposing would wipe the entries a case
+	// asserts on after the body. The mock's listeners are no-ops.
+	createRoot(() => attachPresence(client));
 	createRoot((dispose) => {
 		attachPresencePublisher(client);
 		body();
@@ -37,17 +58,21 @@ function withPublisher(client: MatrixClient, body: () => void): void {
 }
 
 describe("presence publisher", () => {
-	it("publishes online when sharing is switched on", () => {
+	it("publishes online when sharing is switched on", async () => {
 		const { client, setPresence, setSyncPresence } = mkClient();
 		withPublisher(client, () => setPresenceSharing(true));
+		await settle();
 
-		// No status_msg ever: this client does not set one, and including the
-		// field would rewrite or clear what another client set.
-		expect(setPresence).toHaveBeenCalledWith({ presence: "online" });
+		// status_msg rides along, read fresh from the server first: the
+		// endpoint treats an omitted field as "clear". No status set -> "".
+		expect(setPresence).toHaveBeenCalledWith({
+			presence: "online",
+			status_msg: "",
+		});
 		expect(setSyncPresence).toHaveBeenCalledWith("online");
 	});
 
-	it("publishes offline rather than just going quiet", () => {
+	it("publishes offline rather than just going quiet", async () => {
 		// A server that has heard nothing recently keeps reporting the last
 		// value it was given, so silence would leave us online forever.
 		const { client, setPresence, setSyncPresence } = mkClient();
@@ -55,8 +80,12 @@ describe("presence publisher", () => {
 			setPresenceSharing(true);
 			setPresenceSharing(false);
 		});
+		await settle();
 
-		expect(setPresence).toHaveBeenLastCalledWith({ presence: "offline" });
+		expect(setPresence).toHaveBeenLastCalledWith({
+			presence: "offline",
+			status_msg: "",
+		});
 		expect(setSyncPresence).toHaveBeenLastCalledWith("offline");
 	});
 
@@ -68,12 +97,13 @@ describe("presence publisher", () => {
 		expect(setSyncPresence).toHaveBeenCalledWith("offline");
 	});
 
-	it("does not re-publish when nothing changed", () => {
+	it("does not re-publish when nothing changed", async () => {
 		const { client, setPresence } = mkClient();
 		withPublisher(client, () => {
 			setPresenceSharing(true);
 			setPresenceSharing(true);
 		});
+		await settle();
 		expect(setPresence).toHaveBeenCalledTimes(1);
 	});
 
@@ -126,8 +156,7 @@ describe("presence publisher", () => {
 			setPresenceSharing(true);
 			return d;
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		await settle();
 
 		expect(presenceOf("@me:x").status).toBe("unknown");
 		dispose();
@@ -159,13 +188,13 @@ describe("presence publisher", () => {
 		const dispose = createRoot((d) => {
 			attachPresencePublisher(client);
 			// Twice: the first call is start-up applying the stored value,
-			// and only a later one counts as the user reaching for it.
-			setPresenceSharing(false);
+			// and only a later one counts as the user reaching for it - and
+			// only the offline direction warns (online rides on the next /sync).
 			setPresenceSharing(true);
+			setPresenceSharing(false);
 			return d;
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		await settle();
 
 		expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
 			userMessage: expected,
@@ -194,8 +223,7 @@ describe("presence publisher", () => {
 			setPresenceSharing(true);
 			return d;
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		await settle();
 
 		expect(presenceOf("@me:x").status).toBe("online");
 		dispose();
@@ -221,10 +249,12 @@ describe("presence publisher", () => {
 			return d;
 		});
 		dispose();
+		// The publish reads the status first; let that resolve so the hanging
+		// PUT is actually in flight before it is refused.
+		await settle();
 
 		reject?.(Object.assign(new Error("not found"), { httpStatus: 404 }));
-		await Promise.resolve();
-		await Promise.resolve();
+		await settle();
 
 		expect(presenceOf("@me:x").status).toBe("online");
 	});
@@ -252,8 +282,7 @@ describe("presence publisher", () => {
 			setPresenceSharing(true);
 			return d;
 		});
-		await Promise.resolve();
-		await Promise.resolve();
+		await settle();
 
 		expect(presenceOf("@me:x").status).toBe("unknown");
 		dispose();
@@ -269,5 +298,279 @@ describe("presence publisher", () => {
 		expect(() =>
 			withPublisher(client, () => setPresenceSharing(true)),
 		).not.toThrow();
+	});
+
+	describe("status message (#538)", () => {
+		it("re-sends the account's current raw status with a sharing publish", async () => {
+			// A presence PUT that omits status_msg clears it server-side, so
+			// the sharing switch would otherwise wipe a status set anywhere.
+			const getPresence = vi.fn(async () => ({
+				presence: "online",
+				status_msg: "  raw\n\nstatus  ",
+			}));
+			const { client, setPresence } = mkClient(undefined, getPresence);
+			withPublisher(client, () => setPresenceSharing(false));
+			await settle();
+			expect(getPresence).toHaveBeenCalledWith("@me:x");
+			expect(setPresence).toHaveBeenLastCalledWith({
+				presence: "offline",
+				status_msg: "  raw\n\nstatus  ",
+			});
+		});
+
+		it("does not publish at all when the status read fails transiently", async () => {
+			// A PUT without the status would clear it server-side, so a blip on
+			// the read fails the publish like a blip on the write: the toggle
+			// gets its toast, the dot is left alone.
+			vi.mocked(reportError).mockClear();
+			const getPresence = vi.fn(async () => {
+				throw Object.assign(new Error("read failed"), { httpStatus: 500 });
+			});
+			const { client, setPresence } = mkClient(undefined, getPresence);
+			withPublisher(client, () => {
+				recordSelfPresence("@me:x", true);
+				setPresenceSharing(true);
+				setPresenceSharing(false);
+			});
+			await settle();
+			expect(setPresence).not.toHaveBeenCalled();
+			expect(presenceOf("@me:x").status).toBe("online");
+			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
+				userMessage:
+					"Couldn't update your presence. Others may still see you as online.",
+			});
+		});
+
+		it("treats a 403 on the read as presence being off: no write, dot down, no toast", async () => {
+			// Continuwuity answers 403 M_FORBIDDEN on both endpoints when presence
+			// is disabled; the read hits it first now.
+			vi.mocked(reportError).mockClear();
+			const getPresence = vi.fn(async () => {
+				throw Object.assign(new Error("Presence is disabled on this server"), {
+					httpStatus: 403,
+					errcode: "M_FORBIDDEN",
+				});
+			});
+			const { client, setPresence } = mkClient(undefined, getPresence);
+			const dispose = createRoot((d) => {
+				attachPresence(client);
+				attachPresencePublisher(client);
+				recordSelfPresence("@me:x", true);
+				setPresenceSharing(true);
+				setPresenceSharing(false);
+				return d;
+			});
+			await settle();
+			expect(setPresence).not.toHaveBeenCalled();
+			expect(presenceOf("@me:x").status).toBe("unknown");
+			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
+				userMessage: undefined,
+			});
+			dispose();
+		});
+
+		it("does not latch presence-off when the read answers not-found", async () => {
+			// Continuwuity answers M_NOT_FOUND for an account that shares no room
+			// with itself (zero joined rooms) even with a status stored, so this
+			// must not read as "this server has no presence" and take our own
+			// dot down for the session. Nothing is published either: `set_presence`
+			// on every /sync carries the sharing decision.
+			const getPresence = vi.fn(async () => {
+				throw Object.assign(
+					new Error("Presence state for this user was not found"),
+					{
+						httpStatus: 404,
+						errcode: "M_NOT_FOUND",
+					},
+				);
+			});
+			const { client, setPresence } = mkClient(undefined, getPresence);
+			const dispose = createRoot((d) => {
+				attachPresence(client);
+				recordSelfPresence("@me:x", true);
+				attachPresencePublisher(client);
+				setPresenceSharing(true);
+				return d;
+			});
+			await settle();
+			expect(setPresence).not.toHaveBeenCalled();
+			expect(presenceOf("@me:x").status).toBe("online");
+			dispose();
+		});
+
+		it("skips the read once the echo has told us our status, and writes synchronously", () => {
+			// A tab closed inside a read's RTT would drop the offline publish,
+			// and the read races a change from another client - so once known,
+			// the echoed raw value goes out with the toggle at once.
+			const { client, setPresence, getPresence } = mkClient();
+			withPublisher(client, () => {
+				recordSelfStatusMsg("@me:x", "  echoed  ");
+				setPresenceSharing(false);
+				expect(setPresence).toHaveBeenCalledWith({
+					presence: "offline",
+					status_msg: "  echoed  ",
+				});
+			});
+			expect(getPresence).not.toHaveBeenCalled();
+		});
+
+		it("stays quiet when a read blip fails the online direction", async () => {
+			// set_presence=online on the next /sync carries the intent anyway,
+			// and the toast's wording is about still appearing online.
+			vi.mocked(reportError).mockClear();
+			const getPresence = vi.fn(async () => {
+				throw Object.assign(new Error("blip"), { httpStatus: 500 });
+			});
+			const { client } = mkClient(undefined, getPresence);
+			withPublisher(client, () => {
+				setPresenceSharing(false);
+				setPresenceSharing(true);
+			});
+			await settle();
+			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
+				userMessage: undefined,
+			});
+		});
+
+		it("records the status a sharing publish re-sent, ahead of the echo", async () => {
+			const getPresence = vi.fn(async () => ({
+				presence: "online",
+				status_msg: "  set   elsewhere  ",
+			}));
+			const { client } = mkClient(undefined, getPresence);
+			const dispose = createRoot((d) => {
+				attachPresence(client);
+				recordSelfPresence("@me:x", true);
+				attachPresencePublisher(client);
+				setPresenceSharing(true);
+				return d;
+			});
+			await settle();
+			expect(presenceOf("@me:x")).toEqual({
+				status: "online",
+				statusMsg: "set elsewhere",
+			});
+			dispose();
+		});
+
+		it("sends a status that renders as nothing as a clear", async () => {
+			const { client, setPresence } = mkClient();
+			let saved: Promise<void> | undefined;
+			withPublisher(client, () => {
+				setPresenceSharing(true);
+				saved = setStatusMessage("   ");
+			});
+			await saved;
+			expect(setPresence).toHaveBeenLastCalledWith({
+				presence: "online",
+				status_msg: "",
+			});
+		});
+
+		it("publishes the status verbatim on the presence already published", async () => {
+			const { client, setPresence } = mkClient();
+			recordSelfPresence("@me:x", false);
+			// Attached across the await: the store write is identity-guarded, so
+			// disposing first would prove nothing about it.
+			const dispose = createRoot((d) => {
+				attachPresencePublisher(client);
+				setPresenceSharing(false);
+				return d;
+			});
+			await setStatusMessage("  in a\tmeeting  ");
+			expect(setPresence).toHaveBeenLastCalledWith({
+				presence: "offline",
+				status_msg: "  in a\tmeeting  ",
+			});
+			// The store learns the display rendering of what the server took;
+			// our own status stays whatever the sharing preference draws.
+			expect(presenceOf("@me:x")).toEqual({
+				status: "unknown",
+				statusMsg: "in a meeting",
+			});
+			dispose();
+		});
+
+		it("clears with an empty string and drops the message from the store", async () => {
+			const { client, setPresence } = mkClient();
+			recordSelfStatusMsg("@me:x", "old");
+			const dispose = createRoot((d) => {
+				attachPresencePublisher(client);
+				setPresenceSharing(true);
+				return d;
+			});
+			await setStatusMessage("");
+			expect(setPresence).toHaveBeenLastCalledWith({
+				presence: "online",
+				status_msg: "",
+			});
+			expect(presenceOf("@me:x").statusMsg).toBeNull();
+			dispose();
+		});
+
+		it("runs after a pending sharing publish so it cannot be undone by it", async () => {
+			// The publish reads the status, then writes. A save landing in that
+			// gap must be ordered after the write, or the publish re-sends the
+			// stale value it read.
+			const order: string[] = [];
+			const setPresence = vi.fn(async (opts: { status_msg?: string }) => {
+				order.push(`put:${opts.status_msg}`);
+			});
+			const getPresence = vi.fn(async () => {
+				order.push("get");
+				return { presence: "online", status_msg: "before" };
+			});
+			const { client } = mkClient(setPresence, getPresence);
+			let saved: Promise<void> | undefined;
+			withPublisher(client, () => {
+				setPresenceSharing(true);
+				saved = setStatusMessage("after");
+			});
+			await saved;
+			expect(order).toEqual(["get", "put:before", "put:after"]);
+		});
+
+		it("rejects to the caller and leaves the store alone on failure", async () => {
+			const failing = vi.fn(async () => {
+				throw new Error("nope");
+			});
+			const { client } = mkClient(failing);
+			let saved: Promise<void> | undefined;
+			withPublisher(client, () => {
+				recordSelfStatusMsg("@me:x", "kept");
+				setPresenceSharing(true);
+				saved = setStatusMessage("new");
+			});
+			await expect(saved).rejects.toThrow("nope");
+			expect(presenceOf("@me:x").statusMsg).toBe("kept");
+		});
+
+		it("rejects before a sharing preference is known", async () => {
+			const { client } = mkClient();
+			let saved: Promise<void> | undefined;
+			withPublisher(client, () => {
+				saved = setStatusMessage("x");
+			});
+			await expect(saved).rejects.toThrow();
+		});
+
+		it("fetchStatusMessage returns the raw value, or empty when unset", async () => {
+			const getPresence = vi.fn(async () => ({
+				presence: "online",
+				status_msg: " raw  ",
+			}));
+			const { client } = mkClient(undefined, getPresence);
+			let got: Promise<string> | undefined;
+			withPublisher(client, () => {
+				got = fetchStatusMessage();
+			});
+			expect(await got).toBe(" raw  ");
+			const bare = mkClient();
+			let none: Promise<string> | undefined;
+			withPublisher(bare.client, () => {
+				none = fetchStatusMessage();
+			});
+			expect(await none).toBe("");
+		});
 	});
 });

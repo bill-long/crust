@@ -1,8 +1,14 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { SetPresence } from "matrix-js-sdk/lib/sync";
 import { onCleanup } from "solid-js";
+import { sanitizeStatusMsg } from "../lib/presence";
 import { reportError } from "../lib/reportError";
-import { recordSelfPresence } from "./presence";
+import { enqueueKeyedWrite } from "../lib/writeQueue";
+import {
+	recordSelfPresence,
+	recordSelfStatusMsg,
+	selfRawStatusMsg,
+} from "./presence";
 
 /**
  * What we tell the homeserver about ourselves.
@@ -32,19 +38,86 @@ function syncPresenceValue(): SetPresence {
  * Whether a `setPresence` rejection means this server does not do presence,
  * as opposed to this one attempt having failed.
  *
- * Conduwuity answers 404 on the presence endpoints when the feature is off
- * (the same shape as its `voip/turnServer` 404), and a server that never
- * implemented them answers `M_UNRECOGNIZED`. Both are permanent for the
- * session. Everything else - timeouts, 5xx, rate limits - is transient, and
- * the difference decides whether we may contradict our own optimistic write.
+ * Conduwuity answered 404 on the presence endpoints when the feature was
+ * off (the same shape as its `voip/turnServer` 404); Continuwuity answers
+ * 403 `M_FORBIDDEN` ("Presence is disabled on this server") on both GET and
+ * PUT (`src/api/client/presence.rs`); a server that never implemented them
+ * answers `M_UNRECOGNIZED`. All are permanent for the session. Everything
+ * else - timeouts, 5xx, rate limits - is transient, and the difference
+ * decides whether we may contradict our own optimistic write. Applies to
+ * the read before a publish as much as to the write.
  */
 function meansPresenceUnsupported(e: unknown): boolean {
 	const err = e as { httpStatus?: unknown; errcode?: unknown } | null;
 	return (
 		err?.httpStatus === 404 ||
 		err?.errcode === "M_NOT_FOUND" ||
+		err?.errcode === "M_FORBIDDEN" ||
 		err?.errcode === "M_UNRECOGNIZED"
 	);
+}
+
+/**
+ * Presence writes run one at a time per client. A sharing publish reads
+ * the current status before it writes (see `publish`), and a status save
+ * may land in that gap; unserialised, the publish would re-send the status
+ * it read a moment before the save and undo it. Keyed by client (a
+ * WeakMap, as the account-data writers do) so a re-login never queues
+ * behind a dead session's request.
+ */
+const presenceChains = new WeakMap<MatrixClient, Promise<void>>();
+
+function publishedPresence(): PublishedPresence {
+	return sharing ? "online" : "offline";
+}
+
+/**
+ * The account's current raw `status_msg`, or "" when none is set.
+ *
+ * A presence publish has to carry it: the endpoint treats an omitted
+ * `status_msg` as "clear" (verified on Continuwuity - a presence-only PUT
+ * wiped the message; Synapse reads the field the same way), so publishing
+ * sharing without it would delete a status set from any client, ours
+ * included. Whether to read at all is `publish`'s decision, documented
+ * there; this only performs one.
+ *
+ * Failures reject. A "not found" is re-thrown stripped of its error
+ * shape, because on the read it does NOT mean the endpoint is missing:
+ * Continuwuity answers it for an account that shares no room with itself
+ * (zero joined rooms) even with a status stored, and letting that latch
+ * as "this server has no presence" would take our own dot down and skip
+ * every publish for the session on a server where presence works.
+ */
+async function currentStatusMsg(c: MatrixClient): Promise<string> {
+	const uid = c.getUserId();
+	if (!uid) return "";
+	try {
+		const res = await c.getPresence(uid);
+		return typeof res.status_msg === "string" ? res.status_msg : "";
+	} catch (e) {
+		const err = e as { httpStatus?: unknown; errcode?: unknown } | null;
+		if (err?.httpStatus === 404 || err?.errcode === "M_NOT_FOUND") {
+			throw new Error("Could not read the current status message.");
+		}
+		throw e;
+	}
+}
+
+/**
+ * PUT our presence, and record the status the server accepted so the store
+ * has it ahead of the /sync echo. The identity guard is the one the
+ * failure path keeps: after a session swap the store belongs to another
+ * account, and a late write would land under the previous user's ID.
+ */
+async function sendPresence(
+	c: MatrixClient,
+	presence: PublishedPresence,
+	status_msg: string,
+): Promise<void> {
+	await c.setPresence({ presence, status_msg });
+	if (client !== c) return;
+	const uid = c.getUserId();
+	if (uid) recordSelfStatusMsg(uid, status_msg);
 }
 
 function publish(userInitiated: boolean): void {
@@ -52,15 +125,23 @@ function publish(userInitiated: boolean): void {
 	// request and its rejection must not roll back the new account's dot.
 	const c = client;
 	if (!c) return;
-	const presence: PublishedPresence = sharing ? "online" : "offline";
+	const presence = publishedPresence();
 	// Keep the sync loop from re-asserting the opposite on its next poll.
 	// Silently a no-op before `startClient` - see applySyncPresence.
 	c.setSyncPresence(syncPresenceValue());
-	c.setPresence({
-		presence,
-		// status_msg is never sent. This client does not set one, and
-		// including the field would rewrite or clear whatever the account
-		// has set from another client - an empty string clears.
+	enqueueKeyedWrite(presenceChains, c, async () => {
+		// The status the server last confirmed for us goes back out with the
+		// presence, so the PUT is on the wire synchronously once /sync (or a
+		// round trip) has told us - a tab closed inside a read's RTT would
+		// otherwise drop the offline publish, and a read races a change made
+		// from another client in that RTT. Only the first publish of a
+		// session, before the initial sync, has to read first, and a failed
+		// read fails the publish (handled below like a failed write) rather
+		// than sending a PUT that would clear the status we could not read.
+		// Nothing is lost by not publishing: `set_presence` on every /sync
+		// carries the sharing decision on its own.
+		const status_msg = selfRawStatusMsg() ?? (await currentStatusMsg(c));
+		await sendPresence(c, presence, status_msg);
 	}).catch((e) => {
 		// Start-up is best effort and self-correcting, and a homeserver
 		// with presence disabled answers 404 here - not something to put
@@ -72,10 +153,10 @@ function publish(userInitiated: boolean): void {
 		// after they asked not to is exactly the case AGENTS.md says to
 		// surface.
 		// Take our own dot back down, but only when the failure means the
-		// server will never carry presence at all. The store writes
-		// `online` for us optimistically because no event delivers our own
-		// presence, and on a homeserver with presence disabled that
-		// publish is exactly what 404s while no peer produces an event
+		// server will never carry presence at all. The store draws our own
+		// status from the sharing preference rather than from the wire
+		// (recordSelfPresence), and on a homeserver with presence disabled
+		// this publish is exactly what 404s while no peer produces an event
 		// either - so left alone, the one green dot on screen would be
 		// ours, sourced from the single claim the server refused.
 		//
@@ -104,8 +185,11 @@ function publish(userInitiated: boolean): void {
 			// `voip/turnServer` 404, in the console-only bucket. The dot
 			// rollback just above is the inline surface for it, so a toast
 			// would be the second signal AGENTS.md says not to stack.
+			// And only for the offline direction: the wording is about it, and
+			// turning sharing on is already carried by `set_presence=online` on
+			// the very next /sync, so a failed online publish costs nothing.
 			userMessage:
-				userInitiated && !unsupported
+				userInitiated && !unsupported && presence === "offline"
 					? "Couldn't update your presence. Others may still see you as online."
 					: undefined,
 		});
@@ -165,18 +249,39 @@ export function setPresenceSharing(next: boolean): void {
 }
 
 /**
- * Setting our *own* status message is deliberately not implemented here.
- *
- * Displaying other people's statuses works and is wired up; publishing our
- * own turned out to need more than a setter. We never hold the raw text the
- * user typed - only `sanitizeStatusMsg`'s display rendering of it - so a
- * round trip through this module silently rewrites a status set from another
- * client (whitespace collapsed, control characters replaced, truncated past
- * the cap). Fixing that properly means fetching our own presence for the
- * prefill and keeping raw and rendered apart, and it interacts with the
- * share-presence switch: turning sharing off has to clear the status, and
- * turning it back on cannot restore what was cleared.
- *
- * That is a design with real decisions in it, not a missing function, so it
- * is tracked separately rather than guessed at here.
+ * The account's raw `status_msg` for an editor to prefill from - never the
+ * display rendering, which `sanitizeStatusMsg` has collapsed, cleaned and
+ * cut, so saving it back unedited would rewrite the real status (#538).
+ * Rejects on failure; the caller decides what an editor does without it.
  */
+export async function fetchStatusMessage(): Promise<string> {
+	const c = client;
+	if (!c) throw new Error("Presence is not attached.");
+	return currentStatusMsg(c);
+}
+
+/**
+ * Publish our own status message, verbatim. An empty string clears it.
+ *
+ * Rides on the presence we already publish (`online` while sharing, else
+ * `offline`), so saving a status never flips the sharing decision, and
+ * sharing-off keeps the status - `publish` re-sends it - rather than
+ * clearing it and losing it on the way back (the round trip #538 was cut
+ * over; the settings copy promises only the presence change). Rejects on
+ * failure so the editor renders the error inline; on success the store
+ * learns the message from the value the server accepted, and the /sync
+ * echo confirms or corrects it.
+ */
+export function setStatusMessage(raw: string): Promise<void> {
+	const c = client;
+	if (!c || sharing === null) {
+		return Promise.reject(new Error("Presence is not attached."));
+	}
+	const presence = publishedPresence();
+	// A status that renders as nothing is a clear: "set a status of spaces"
+	// and "clear" collapse to the same case here as they do on display.
+	const status_msg = sanitizeStatusMsg(raw) === null ? "" : raw;
+	return enqueueKeyedWrite(presenceChains, c, () =>
+		sendPresence(c, presence, status_msg),
+	);
+}

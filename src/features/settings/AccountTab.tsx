@@ -1,6 +1,7 @@
 import { UserEvent } from "matrix-js-sdk";
 import {
 	type Component,
+	createMemo,
 	createResource,
 	createSignal,
 	For,
@@ -15,8 +16,18 @@ import {
 } from "../../client/accountManagement";
 import { fetchThreePids } from "../../client/accountSecurity";
 import { useClient } from "../../client/client";
+import {
+	MAX_STATUS_MSG_LENGTH,
+	presenceOf,
+	statusMsgLength,
+} from "../../client/presence";
+import {
+	fetchStatusMessage,
+	setStatusMessage,
+} from "../../client/presencePublish";
 import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
 import { displayNameOr } from "../../lib/displayName";
+import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { createImageFallback } from "../../lib/imageFallback";
 import { loadSession } from "../../stores/session";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
@@ -173,9 +184,100 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 		}
 	};
 
+	// Escape stops here: the settings overlay closes on an Escape that
+	// reaches it, and abandoning an edit must not throw the user out of
+	// Settings. Enter during IME composition is the candidate commit, not a
+	// save (the composer keeps the same rule).
 	const handleNameKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Enter") saveName();
-		if (e.key === "Escape") cancelEditingName();
+		if (e.key === "Enter" && !e.isComposing) saveName();
+		if (e.key === "Escape") {
+			e.stopPropagation();
+			cancelEditingName();
+		}
+	};
+
+	// --- Status message editing (#538) ---
+	// Display comes from the presence store, which /sync keeps current for
+	// our own account too. The editor is prefilled from the RAW server value
+	// (`fetchStatusMessage`), never from that rendering: `sanitizeStatusMsg`
+	// collapses, cleans and cuts for display, so saving it back unedited
+	// would silently rewrite a status set from another client.
+	const currentStatusMsg = (): string | null => presenceOf(userId()).statusMsg;
+	const [editingStatus, setEditingStatus] = createSignal(false);
+	const [statusLoading, setStatusLoading] = createSignal(false);
+	const [statusValue, setStatusValue] = createSignal("");
+	const [statusSaving, setStatusSaving] = createSignal(false);
+	const [statusError, setStatusError] = createSignal("");
+	// Bumped when a prefill is superseded (Cancel, or a newer Edit) so a
+	// slow fetch cannot overwrite what the user has since typed.
+	let statusEditGen = 0;
+
+	// Memoised: read at six render sites per keystroke, over a raw prefill
+	// that is unbounded. The comparison below is not worth a node.
+
+	const statusLength = createMemo((): number => statusMsgLength(statusValue()));
+	const statusTooLong = (): boolean => statusLength() > MAX_STATUS_MSG_LENGTH;
+
+	const startEditingStatus = async (): Promise<void> => {
+		const gen = ++statusEditGen;
+		setStatusError("");
+		setStatusValue("");
+		setEditingStatus(true);
+		setStatusLoading(true);
+		try {
+			const raw = await fetchStatusMessage();
+			if (gen !== statusEditGen) return;
+			setStatusValue(raw);
+		} catch (e) {
+			if (gen !== statusEditGen) return;
+			// Without the raw value there is nothing safe to prefill, and an
+			// empty editor would offer to clear a status the user cannot see.
+			setEditingStatus(false);
+			setStatusError(
+				userFacingErrorMessage(e, "Couldn't load your current status."),
+			);
+		} finally {
+			if (gen === statusEditGen) setStatusLoading(false);
+		}
+	};
+
+	const cancelEditingStatus = (): void => {
+		statusEditGen++;
+		setEditingStatus(false);
+		setStatusLoading(false);
+		setStatusError("");
+	};
+
+	const saveStatus = async (raw: string): Promise<void> => {
+		// Enter reaches a focused readOnly input: saving the still-empty
+		// editor during the prefill would clear the real status.
+		if (statusLoading()) return;
+		if (statusMsgLength(raw) > MAX_STATUS_MSG_LENGTH) {
+			setStatusError(
+				`Status messages can be at most ${MAX_STATUS_MSG_LENGTH} characters.`,
+			);
+			return;
+		}
+		setStatusSaving(true);
+		setStatusError("");
+		try {
+			// Verbatim, whitespace and all; the publisher sends a status that
+			// renders as nothing as a clear.
+			await setStatusMessage(raw);
+			setEditingStatus(false);
+		} catch (e) {
+			setStatusError(userFacingErrorMessage(e, "Couldn't update your status."));
+		} finally {
+			setStatusSaving(false);
+		}
+	};
+
+	const handleStatusKeyDown = (e: KeyboardEvent): void => {
+		if (e.key === "Enter" && !e.isComposing) void saveStatus(statusValue());
+		if (e.key === "Escape") {
+			e.stopPropagation();
+			cancelEditingStatus();
+		}
 	};
 
 	// --- Avatar upload ---
@@ -413,6 +515,110 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 						</Show>
 
 						<div class="mt-2 text-xs text-text-disabled">{userId()}</div>
+
+						{/* Status message */}
+						<div class="mt-4 mb-1 text-xs font-medium uppercase tracking-wide text-text-muted">
+							Status message
+						</div>
+						<Show
+							when={editingStatus()}
+							fallback={
+								<div class="flex items-center gap-2">
+									<span
+										class="min-w-0 truncate text-sm"
+										classList={{
+											"text-text-primary": currentStatusMsg() !== null,
+											"text-text-muted": currentStatusMsg() === null,
+										}}
+									>
+										{currentStatusMsg() ?? "No status set"}
+									</span>
+									<button
+										type="button"
+										onClick={() => void startEditingStatus()}
+										class="rounded px-2 py-0.5 text-xs text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+									>
+										Edit
+									</button>
+								</div>
+							}
+						>
+							<div class="flex items-center gap-2">
+								<input
+									ref={(el) =>
+										requestAnimationFrame(() => {
+											if (el.isConnected && editingStatus()) el.focus();
+										})
+									}
+									type="text"
+									value={statusValue()}
+									onInput={(e) => {
+										setStatusValue(e.currentTarget.value);
+										setStatusError("");
+									}}
+									onKeyDown={handleStatusKeyDown}
+									disabled={statusSaving()}
+									// readOnly, not disabled, while the raw prefill is in flight:
+									// a disabled control refuses focus, and the fetch is usually
+									// far under the 200 ms that would justify a loading state.
+									readOnly={statusLoading()}
+									class="flex-1 rounded bg-surface-2 px-3 py-1.5 text-sm text-text-primary placeholder-text-disabled outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+									placeholder="What's up?"
+									aria-label="Status message"
+									aria-invalid={statusTooLong() ? "true" : undefined}
+									// The counter is always rendered beside the input, so it is
+									// always a valid description; an error joins it.
+									aria-describedby={
+										statusError() ? "status-error status-count" : "status-count"
+									}
+								/>
+								<span
+									id="status-count"
+									class="shrink-0 text-xs tabular-nums"
+									classList={{
+										"text-text-muted": !statusTooLong(),
+										"text-danger-text": statusTooLong(),
+									}}
+								>
+									{statusLength()}/{MAX_STATUS_MSG_LENGTH}
+								</span>
+								<button
+									type="button"
+									onClick={() => void saveStatus(statusValue())}
+									disabled={
+										statusSaving() || statusLoading() || statusTooLong()
+									}
+									class="rounded bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+								>
+									{statusSaving() ? "Saving…" : "Save"}
+								</button>
+								<button
+									type="button"
+									onClick={() => void saveStatus("")}
+									disabled={statusSaving() || statusLoading()}
+									class="rounded px-2 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+								>
+									Clear
+								</button>
+								<button
+									type="button"
+									onClick={cancelEditingStatus}
+									disabled={statusSaving()}
+									class="rounded px-2 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+								>
+									Cancel
+								</button>
+							</div>
+						</Show>
+						<Show when={statusError()}>
+							<div
+								id="status-error"
+								role="alert"
+								class="mt-1 text-xs text-danger-text"
+							>
+								{statusError()}
+							</div>
+						</Show>
 					</div>
 				</div>
 			</section>

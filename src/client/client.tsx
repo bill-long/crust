@@ -389,7 +389,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 	createEffect(() => {
 		const sharing = userSettings().sharePresence;
 		setPresenceSharing(sharing);
-		// Our own presence never arrives as an event (see recordSelfPresence),
+		// Our own status is never drawn from the wire (see recordSelfPresence),
 		// so the store learns it from the same place the server does.
 		const myUserId = matrixClient.getUserId();
 		if (myUserId) recordSelfPresence(myUserId, sharing);
