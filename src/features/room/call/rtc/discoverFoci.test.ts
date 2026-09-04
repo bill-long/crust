@@ -1,5 +1,5 @@
-import type { MatrixClient } from "matrix-js-sdk";
-import { describe, expect, it, vi } from "vitest";
+import { type MatrixClient, MatrixError } from "matrix-js-sdk";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildFallbackLivekitFoci, discoverLivekitFoci } from "./discoverFoci";
 
 describe("buildFallbackLivekitFoci", () => {
@@ -46,12 +46,58 @@ describe("buildFallbackLivekitFoci", () => {
 interface FakeClient {
 	getClientWellKnown: ReturnType<typeof vi.fn>;
 	getDomain: ReturnType<typeof vi.fn>;
+	http: { authedRequest: ReturnType<typeof vi.fn> } | undefined;
 }
+
+/** What a homeserver without MSC4519 answers: 404 M_UNRECOGNIZED. */
+const endpointMissing = () =>
+	new MatrixError(
+		{ errcode: "M_UNRECOGNIZED", error: "Unrecognized request" },
+		404,
+	);
+
+type RequestOpts = { abortSignal?: AbortSignal; localTimeoutMs?: number };
+
+/**
+ * An `http.authedRequest` fake for the transports endpoint. `answer` runs
+ * with the request options so a case can inspect the timeout budget or
+ * hold the request open; a held request rejects when `abortSignal` fires,
+ * as the SDK's does.
+ */
+function transportsRequest(
+	answer: (opts: RequestOpts) => Promise<unknown>,
+): ReturnType<typeof vi.fn> {
+	return vi.fn(
+		(
+			_method: string,
+			_path: string,
+			_query: unknown,
+			_body: unknown,
+			opts: RequestOpts,
+		) =>
+			new Promise((resolve, reject) => {
+				opts.abortSignal?.addEventListener("abort", () =>
+					reject(new DOMException("The operation was aborted.", "AbortError")),
+				);
+				answer(opts).then(resolve, reject);
+			}),
+	);
+}
+
+const endpointAnswers = (transports: unknown) =>
+	transportsRequest(async () => ({ rtc_transports: transports }));
+const endpointRejects = (err: () => unknown) =>
+	transportsRequest(async () => {
+		throw err();
+	});
 
 function makeClient(overrides: Partial<FakeClient> = {}): MatrixClient {
 	return {
 		getClientWellKnown: vi.fn(() => undefined),
 		getDomain: vi.fn(() => undefined),
+		// The default server has no MSC4519 endpoint, so the pre-existing
+		// well-known cases run unchanged past step 0.
+		http: { authedRequest: endpointRejects(endpointMissing) },
 		...overrides,
 	} as unknown as MatrixClient;
 }
@@ -271,7 +317,9 @@ describe("discoverLivekitFoci", () => {
 			fetchImpl: asFetch(fetchImpl),
 			signal: external.signal,
 		});
-		// Cancel before the fetch resolves.
+		// Cancel once the fetch is in flight (the MSC4519 probe runs first,
+		// so it is not in flight synchronously) and before it resolves.
+		await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalled());
 		external.abort();
 		const foci = await promise;
 		expect(receivedSignal?.aborted).toBe(true);
@@ -312,12 +360,17 @@ describe("discoverLivekitFoci", () => {
 		// never responds would otherwise hang fociReady forever and
 		// permanently block Join. The fetch must abort and fall through
 		// to the EC-bundled fallback.
+		// No HTTP layer, so the transports probe does not spend any of the
+		// budget before the fetch and the timeout path itself is what runs.
 		const client = makeClient({
 			getDomain: vi.fn(() => "example.com"),
+			http: undefined,
 		});
+		let receivedSignal: AbortSignal | undefined;
 		const fetchImpl = vi.fn(
 			(_url: string, init?: { signal?: AbortSignal }) =>
 				new Promise<Response>((_resolve, reject) => {
+					receivedSignal = init?.signal;
 					init?.signal?.addEventListener("abort", () => {
 						reject(
 							new DOMException("The operation was aborted.", "AbortError"),
@@ -329,6 +382,8 @@ describe("discoverLivekitFoci", () => {
 			fetchImpl: asFetch(fetchImpl),
 			timeoutMs: 5,
 		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(receivedSignal?.aborted).toBe(true);
 		expect(foci).toEqual(buildFallbackLivekitFoci(EC, ROOM));
 	});
 
@@ -404,5 +459,229 @@ describe("discoverLivekitFoci", () => {
 			fetchImpl: asFetch(fetchImpl),
 		});
 		expect(foci).toHaveLength(1);
+	});
+});
+
+describe("discoverLivekitFoci via MSC4519 /rtc/transports (#506)", () => {
+	const ROOM = "!room:example.com";
+	const EC = "https://call.example.com";
+	const WELL_KNOWN = {
+		"org.matrix.msc4143.rtc_foci": [
+			{ type: "livekit", livekit_service_url: "https://wk.example.com" },
+		],
+	};
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("prefers the transports endpoint and never touches .well-known", async () => {
+		const request = endpointAnswers([
+			{ type: "livekit", livekit_service_url: "https://ep.example.com" },
+		]);
+		const client = makeClient({
+			getClientWellKnown: vi.fn(() => WELL_KNOWN),
+			getDomain: vi.fn(() => "example.com"),
+			http: { authedRequest: request },
+		});
+		const fetchImpl = vi.fn();
+		const foci = await discoverLivekitFoci(client, EC, ROOM, {
+			fetchImpl: asFetch(fetchImpl),
+		});
+		expect(foci).toEqual([
+			{
+				type: "livekit",
+				livekit_service_url: "https://ep.example.com",
+				livekit_alias: ROOM,
+			},
+		]);
+		expect(request).toHaveBeenCalledWith(
+			"GET",
+			"/rtc/transports",
+			undefined,
+			undefined,
+			expect.objectContaining({
+				prefix: "/_matrix/client/unstable/org.matrix.msc4143",
+			}),
+		);
+		expect(client.getClientWellKnown).not.toHaveBeenCalled();
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("validates endpoint entries with the same rules as .well-known", async () => {
+		const client = makeClient({
+			http: {
+				authedRequest: endpointAnswers([
+					{ type: "sip", uri: "sip:example.com" },
+					{ type: "livekit", livekit_service_url: "/relative" },
+					{ type: "livekit", livekit_service_url: "javascript:alert(1)" },
+					{ type: "livekit" },
+					{ type: "livekit", livekit_service_url: "  https://ok.example.com " },
+				]),
+			},
+		});
+		const foci = await discoverLivekitFoci(client, EC, ROOM);
+		expect(foci.map((f) => f.livekit_service_url)).toEqual([
+			"https://ok.example.com",
+		]);
+	});
+
+	it("falls through to .well-known on M_UNRECOGNIZED and does not ask that client again", async () => {
+		// A server without the MSC: one probe per client, then straight to
+		// .well-known on every later join.
+		const request = endpointRejects(endpointMissing);
+		const client = makeClient({
+			getClientWellKnown: vi.fn(() => WELL_KNOWN),
+			http: { authedRequest: request },
+		});
+		const first = await discoverLivekitFoci(client, EC, ROOM);
+		const second = await discoverLivekitFoci(client, EC, ROOM);
+		expect(first[0]?.livekit_service_url).toBe("https://wk.example.com");
+		expect(second[0]?.livekit_service_url).toBe("https://wk.example.com");
+		expect(request).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps asking after a transient failure or a bare proxy 404", async () => {
+		// A 502 from a proxy, a dropped connection, or a 404 with no Matrix
+		// body say nothing about whether the server serves the endpoint; the
+		// next join tries again.
+		for (const err of [
+			() =>
+				new MatrixError({ errcode: "M_UNKNOWN", error: "bad gateway" }, 502),
+			() => ({ httpStatus: 404 }),
+			() => new TypeError("Failed to fetch"),
+		]) {
+			const request = endpointRejects(err);
+			const client = makeClient({
+				getClientWellKnown: vi.fn(() => WELL_KNOWN),
+				http: { authedRequest: request },
+			});
+			await discoverLivekitFoci(client, EC, ROOM);
+			await discoverLivekitFoci(client, EC, ROOM);
+			expect(request).toHaveBeenCalledTimes(2);
+		}
+	});
+
+	it("honours an empty answer: no .well-known, only the operator's EC fallback", async () => {
+		// The endpoint is authenticated and per-user; a server that hands this
+		// user no transport is not overridden by the global .well-known list.
+		const client = makeClient({
+			getClientWellKnown: vi.fn(() => WELL_KNOWN),
+			getDomain: vi.fn(() => "example.com"),
+			http: { authedRequest: endpointAnswers([]) },
+		});
+		const fetchImpl = vi.fn();
+		const foci = await discoverLivekitFoci(client, EC, ROOM, {
+			fetchImpl: asFetch(fetchImpl),
+		});
+		expect(foci).toEqual(buildFallbackLivekitFoci(EC, ROOM));
+		expect(client.getClientWellKnown).not.toHaveBeenCalled();
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("aborts a hung transports request at the deadline", async () => {
+		// The request is cancelled on the wire through its abortSignal, not
+		// abandoned in flight on the origin /sync shares.
+		vi.useFakeTimers();
+		let seen: RequestOpts | undefined;
+		const client = makeClient({
+			getDomain: vi.fn(() => "example.com"),
+			http: {
+				authedRequest: transportsRequest((opts) => {
+					seen = opts;
+					return new Promise(() => {});
+				}),
+			},
+		});
+		const fetchImpl = vi.fn();
+		const pending = discoverLivekitFoci(client, EC, ROOM, {
+			fetchImpl: asFetch(fetchImpl),
+			timeoutMs: 1234,
+		});
+		await vi.advanceTimersByTimeAsync(1233);
+		expect(seen?.abortSignal?.aborted).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+		expect(seen?.abortSignal?.aborted).toBe(true);
+		expect(await pending).toEqual(buildFallbackLivekitFoci(EC, ROOM));
+		// The budget is spent: the .well-known fetch is not even started.
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("treats a 2xx without the array as malformed, not as an empty answer", async () => {
+		// A proxy's `200 {}` on the unstable path must not silence a working
+		// .well-known.
+		for (const body of [{}, null, { rtc_transports: "nope" }]) {
+			const client = makeClient({
+				getClientWellKnown: vi.fn(() => WELL_KNOWN),
+				http: { authedRequest: transportsRequest(async () => body) },
+			});
+			const foci = await discoverLivekitFoci(client, EC, ROOM);
+			expect(foci[0]?.livekit_service_url, JSON.stringify(body)).toBe(
+				"https://wk.example.com",
+			);
+		}
+	});
+
+	it("shares one deadline with the .well-known fetch", async () => {
+		// A transports request that eats 3 s of a 5 s budget leaves the
+		// .well-known fetch 2 s, not a fresh 5: the join waits at most the
+		// budget, not twice it.
+		vi.useFakeTimers();
+		const client = makeClient({
+			getDomain: vi.fn(() => "example.com"),
+			http: {
+				authedRequest: transportsRequest(
+					() =>
+						new Promise((_resolve, reject) =>
+							setTimeout(() => reject(new Error("slow")), 3_000),
+						),
+				),
+			},
+		});
+		let abortedAt: number | undefined;
+		const fetchImpl = vi.fn(
+			(_url: string, init?: { signal?: AbortSignal }) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener("abort", () => {
+						abortedAt = Date.now();
+						reject(
+							new DOMException("The operation was aborted.", "AbortError"),
+						);
+					});
+				}),
+		);
+		const start = Date.now();
+		const pending = discoverLivekitFoci(client, EC, ROOM, {
+			fetchImpl: asFetch(fetchImpl),
+			timeoutMs: 5_000,
+		});
+		await vi.advanceTimersByTimeAsync(5_100);
+		expect(await pending).toEqual(buildFallbackLivekitFoci(EC, ROOM));
+		expect(abortedAt).toBeDefined();
+		expect((abortedAt ?? 0) - start).toBeLessThanOrEqual(5_000);
+	});
+
+	it("stops waiting on the endpoint when the caller aborts", async () => {
+		const controller = new AbortController();
+		const client = makeClient({
+			http: { authedRequest: transportsRequest(() => new Promise(() => {})) },
+		});
+		const pending = discoverLivekitFoci(client, EC, ROOM, {
+			signal: controller.signal,
+			timeoutMs: 10_000,
+		});
+		controller.abort();
+		// The abort is honoured by every step, so the result is the EC
+		// fallback rather than a hang.
+		expect(await pending).toEqual(buildFallbackLivekitFoci(EC, ROOM));
+	});
+
+	it("survives a client shape without an HTTP layer", async () => {
+		const client = makeClient({
+			getClientWellKnown: vi.fn(() => WELL_KNOWN),
+			http: undefined,
+		});
+		const foci = await discoverLivekitFoci(client, EC, ROOM);
+		expect(foci[0]?.livekit_service_url).toBe("https://wk.example.com");
 	});
 });

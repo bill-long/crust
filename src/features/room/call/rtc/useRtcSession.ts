@@ -37,10 +37,11 @@ export interface UseRtcSessionOptions {
 	 */
 	e2ee?: Accessor<RtcE2EEContext | null>;
 	/**
-	 * Test seam — overrides the foci discovery implementation. Defaults to
-	 * `discoverLivekitFoci` from `./discoverFoci`, which reads
-	 * `org.matrix.msc4143.rtc_foci` from the homeserver's `.well-known`
-	 * document and falls back to the EC-bundled derivation.
+	 * Test seam - overrides the foci discovery implementation. Defaults to
+	 * `discoverLivekitFoci` from `./discoverFoci`, which asks the MSC4519
+	 * transports endpoint, then reads `org.matrix.msc4143.rtc_foci` from the
+	 * homeserver's `.well-known` document, then falls back to the EC-bundled
+	 * derivation.
 	 */
 	discoverFoci?: (
 		client: MatrixClient,
@@ -71,8 +72,8 @@ export interface RtcSessionApi {
 	 */
 	activeFocus: Accessor<LivekitTransport | null>;
 	/**
-	 * Resolves once the async foci discovery (well-known fetch + fallback)
-	 * has settled. Surfaced so tests can synchronise on the moment
+	 * Resolves once the async foci discovery (transports endpoint,
+	 * well-known, EC fallback) has settled. Surfaced so tests can synchronise on the moment
 	 * `canJoin` / `joinBlockReason` reflect the final foci list rather
 	 * than the initial "discovering" state. Always resolves; never rejects.
 	 */
@@ -122,19 +123,20 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const [session, setSession] = createSignal<MatrixRTCSession | null>(null);
 
 	const room = opts.client.getRoom(opts.roomId);
-	// Foci are discovered asynchronously from `.well-known/matrix/client`
-	// per MSC4143, falling back to the EC-bundled derivation when the
-	// homeserver does not advertise any. `null` while in flight so the
-	// UI shows a "Discovering..." block reason instead of trying to join
-	// against a half-resolved list.
+	// Foci are discovered asynchronously: the MSC4519 transports endpoint,
+	// then `.well-known/matrix/client` per MSC4143, then the EC-bundled
+	// derivation when the homeserver advertises none. `null` while in
+	// flight so the UI shows a "Discovering..." block reason instead of
+	// trying to join against a half-resolved list.
 	const [foci, setFoci] = createSignal<LivekitTransport[] | null>(null);
 	const discoverImpl = opts.discoverFoci ?? discoverLivekitFoci;
-	// External AbortController so onCleanup can cancel the in-flight
-	// well-known fetch on overlay close — otherwise a quickly-opened-
-	// and-closed call wastes up to a full 5-second fetch timeout of
-	// network work.
-	const discoveryAbort =
-		typeof AbortController === "function" ? new AbortController() : undefined;
+	// External AbortController so onCleanup can cancel whichever discovery
+	// request is in flight on overlay close - otherwise a quickly-opened-
+	// and-closed call wastes up to the full 5-second discovery budget of
+	// network work. AbortController is baseline in every runtime this app
+	// has (Chromium, WebView2, Firefox, the jsdom and Node test hosts), so it
+	// is not feature-detected here, matching `boundedSignal` in discoverFoci.
+	const discoveryAbort = new AbortController();
 	// Disposed flag so the discovery promise (which still resolves
 	// after `discoveryAbort.abort()` via the fallback arm) doesn't
 	// write to `foci` after the hook has been disposed.
@@ -147,7 +149,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const fociReady: Promise<void> = Promise.resolve()
 		.then(() =>
 			discoverImpl(opts.client, opts.elementCallUrl, opts.roomId, {
-				signal: discoveryAbort?.signal,
+				signal: discoveryAbort.signal,
 			}),
 		)
 		.then((resolved) => {
@@ -171,7 +173,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			return "Discovering MatrixRTC focus…";
 		}
 		if (list.length === 0) {
-			return "No MatrixRTC foci configured — set elementCall.url in config.json or publish org.matrix.msc4143.rtc_foci in .well-known/matrix/client.";
+			return "No MatrixRTC focus available - set elementCall.url in config.json, or have the homeserver advertise a LiveKit transport (MSC4519 /rtc/transports, or org.matrix.msc4143.rtc_foci in .well-known/matrix/client).";
 		}
 		return null;
 	});
@@ -359,8 +361,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		startEpoch: number,
 	): Promise<void> => {
 		// Wait for async foci discovery to settle before evaluating the
-		// block reason — otherwise a quick Join click would race the
-		// well-known fetch and hit the "Discovering…" block path.
+		// block reason - otherwise a quick Join click would race discovery
+		// and hit the "Discovering…" block path.
 		if (foci() === null) {
 			await fociReady;
 		}
@@ -539,7 +541,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// we're still in "joining" so a close-during-join doesn't strand a
 		// membership published moments later.
 		disposed = true;
-		discoveryAbort?.abort();
+		discoveryAbort.abort();
 		detachE2EE?.();
 		detachE2EE = null;
 		joinEpoch++;
