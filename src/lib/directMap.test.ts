@@ -54,9 +54,11 @@ describe("readDirectMap", () => {
 		// The "__proto__" key is retained as an ordinary own entry (not the
 		// prototype), so it round-trips rather than being silently dropped.
 		expect(Object.hasOwn(map, "__proto__")).toBe(true);
-		expect(map.__proto__).toEqual(["!evil:server"]);
+		expect(Object.getOwnPropertyDescriptor(map, "__proto__")?.value).toEqual([
+			"!evil:server",
+		]);
 		// Object's prototype was not polluted.
-		expect(({} as Record<string, unknown>).__proto__).toBe(Object.prototype);
+		expect(Object.getPrototypeOf({})).toBe(Object.prototype);
 	});
 });
 
@@ -82,8 +84,11 @@ describe("addDmToMap", () => {
 		);
 		expect(Object.getPrototypeOf(next)).toBe(Object.prototype);
 		expect(Object.hasOwn(next, "__proto__")).toBe(true);
-		expect(next.__proto__).toEqual(["!evil:server", "!r2:server"]);
-		expect(({} as Record<string, unknown>).__proto__).toBe(Object.prototype);
+		expect(Object.getOwnPropertyDescriptor(next, "__proto__")?.value).toEqual([
+			"!evil:server",
+			"!r2:server",
+		]);
+		expect(Object.getPrototypeOf({})).toBe(Object.prototype);
 	});
 
 	it("appends to an existing user list and de-duplicates", () => {

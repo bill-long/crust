@@ -1,10 +1,4 @@
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	waitFor,
-} from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import {
 	afterEach,
 	beforeEach,
@@ -24,6 +18,7 @@ vi.mock("solid-refresh", () => ({
 }));
 
 import { DropdownMenu } from "@kobalte/core/dropdown-menu";
+import { pressWithMouse } from "../test/pressWithMouse";
 import { type AccountSummary, AccountSwitcher } from "./AccountSwitcher";
 
 const ALICE: AccountSummary = {
@@ -77,15 +72,7 @@ function setup(
 	return handlers;
 }
 
-// Kobalte opens on pointer events, which jsdom does not synthesize from a
-// plain click; the repo's other menu tests fire the same sequence.
-function press(el: Element): void {
-	fireEvent.pointerMove(el, { pointerType: "mouse" });
-	fireEvent.pointerDown(el, { button: 0, pointerType: "mouse" });
-	fireEvent.pointerUp(el, { button: 0, pointerType: "mouse" });
-	fireEvent.click(el);
-	fireEvent.keyDown(el, { key: "Enter" });
-}
+const press = pressWithMouse;
 
 async function openMenu(): Promise<void> {
 	press(screen.getByLabelText("Alice \u2014 switch account"));

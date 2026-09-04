@@ -88,7 +88,7 @@ export function getSpaceUnreadRollup(
 		if (id === undefined || visited.has(id)) continue;
 		visited.add(id);
 		const child = summaries[id];
-		if (!child || child.membership !== "join") continue;
+		if (child?.membership !== "join") continue;
 		if (child.isSpace) {
 			for (const grandchildId of child.children) stack.push(grandchildId);
 		} else {

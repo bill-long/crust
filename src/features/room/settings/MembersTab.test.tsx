@@ -10,6 +10,7 @@ import { EventType, type MatrixClient, RoomStateEvent } from "matrix-js-sdk";
 import type { Accessor, JSX } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { pressWithMouse } from "../../../test/pressWithMouse";
 import { MembersTab } from "./MembersTab";
 
 // virtua's Virtualizer requires real layout measurements (ResizeObserver +
@@ -139,22 +140,13 @@ function setup(options?: {
 }
 
 async function openActions(displayName: string): Promise<void> {
-	const trigger = screen.getByLabelText(`Member actions for ${displayName}`);
-	fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
-	fireEvent.pointerUp(trigger, { button: 0, pointerType: "mouse" });
-	fireEvent.click(trigger);
-	fireEvent.keyDown(trigger, { key: "Enter" });
+	pressWithMouse(screen.getByLabelText(`Member actions for ${displayName}`));
 	await waitFor(() => expect(screen.getByText("Kick…")).toBeTruthy());
 }
 
 async function clickAction(displayName: string, label: string): Promise<void> {
 	await openActions(displayName);
-	const item = screen.getByText(label);
-	fireEvent.pointerMove(item, { pointerType: "mouse" });
-	fireEvent.pointerDown(item, { button: 0, pointerType: "mouse" });
-	fireEvent.pointerUp(item, { button: 0, pointerType: "mouse" });
-	fireEvent.click(item);
-	fireEvent.keyDown(item, { key: "Enter" });
+	pressWithMouse(screen.getByText(label));
 }
 
 beforeEach(() => {

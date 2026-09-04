@@ -95,8 +95,13 @@ function persistRefreshedTokens(
  * session has nothing to refresh with (password sessions, or OAuth2 sessions
  * whose OP issued no refresh token). The SDK TokenRefresher is constructed
  * lazily because it needs the OP's auth metadata (a network fetch); the
- * refresh mapping is the SDK's: 4xx -> TokenRefreshLogoutError (session
- * ends), 5xx/network -> transient retry.
+ * refresh mapping is the SDK's. Since matrix-js-sdk 42.3 only a 4xx whose
+ * body is an OAuth 2.0 error (RFC 6749) or a Matrix error ends the session
+ * (TokenRefreshLogoutError); any other 4xx - a proxy's HTML 403, an empty
+ * 400 - is a transient failure like a 5xx or a network error, retried by
+ * the sync loop rather than logging the user out. A refresh that keeps
+ * failing that way leaves the client in the sync-error state, where the
+ * escape hatch (#551) is the way out.
  */
 export function createOidcTokenRefreshFn(
 	session: Session,

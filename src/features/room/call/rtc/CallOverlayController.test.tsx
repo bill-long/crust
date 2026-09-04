@@ -153,8 +153,8 @@ describe("CallOverlayController", () => {
 		const pagehideCall = addEventListener.mock.calls.find(
 			(c) => c[0] === "pagehide",
 		);
-		expect(pagehideCall).toBeTruthy();
-		(pagehideCall?.[1] as () => void)();
+		if (!pagehideCall) throw new Error("no pagehide listener registered");
+		(pagehideCall[1] as () => void)();
 
 		// State is cleared, but we must NOT call close() on an already-closing
 		// window (teardown(false)).
