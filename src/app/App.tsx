@@ -12,22 +12,18 @@ import {
 	Switch,
 } from "solid-js";
 import { ClientProvider, useClient } from "../client/client";
-import { clearCryptoStores } from "../client/cryptoRecovery";
 import { NoticeToasts } from "../components/NoticeToasts";
 import { LoginGate } from "../features/auth/LoginGate";
 import { toReturnToPath } from "../features/auth/returnTo";
 import { CryptoStatusBanner } from "../features/crypto/CryptoStatusBanner";
 import { PersistentCallSurface } from "../features/room/call/rtc/PersistentCallSurface";
-import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
-import { setActiveCallRoomId } from "../stores/activeCall";
 import { loadSession, loadSessions } from "../stores/session";
-import { finishAccountLogout } from "./accountSwitch";
 import { basePrefix } from "./basePath";
 import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
 import { accountTransitionInFlight, Layout } from "./Layout";
-import { runLogout } from "./logout";
+import { finishSessionExit, runLogout } from "./logout";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
 
@@ -193,39 +189,23 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 				return;
 			}
 			cleaningUp = true;
-			// Tear down any active call surface so the controller unmounts
-			// and its onCleanup chain runs. The client is already stopped
-			// by `onSessionLoggedOut` (per the comment below), so any
-			// in-flight `leaveRoomSession` will no-op — but we still need
-			// to drop the global signal so a stale mini-widget / overlay
-			// never outlives the session.
+			// The same post-network tail the ordinary logout ends with (#601):
+			// drop the global call signal so a stale mini-widget or overlay never
+			// outlives the session, stop the chime, wipe, and redirect. Only the
+			// tail - the client is already stopped by `onSessionLoggedOut`
+			// (`stopClient` runs before the `setSyncState` that triggers this
+			// effect), and on a token the server has invalidated there is no
+			// withdrawal, release or revoke left to land.
 			//
-			// Caught, like the same write on every other exit: a Solid setter runs
-			// its subscribers synchronously, and a throwing effect here would
-			// abort this cleanup before `finishAccountLogout` - leaving an expired
-			// session with its stores unwiped, its account still in storage, and
-			// no redirect.
-			try {
-				setActiveCallRoomId(null);
-			} catch (e) {
-				reportError(e, {
-					logLabel: "Failed to clear the active call on session expiry",
-				});
-			}
-			closeNotificationSound();
-			// Client is already stopped by onSessionLoggedOut handler
-			// (stopClient runs before setSyncState triggers this effect).
-			// Clear stores (best-effort async) then redirect.
 			// Another account may still be logged in; land there rather than on a
 			// login form that would replace it (#533).
-			void finishAccountLogout(
-				{ client, pushConfig },
+			void finishSessionExit({
+				client,
+				pushConfig,
 				// This document's own account; another tab may have switched.
-				session.userId,
-				// Bounded and caught inside `finishAccountLogout`.
-				() => clearCryptoStores(client, session),
-				() => navigate("/login", { replace: true }),
-			);
+				session,
+				goToLogin: () => navigate("/login", { replace: true }),
+			});
 		}
 	});
 

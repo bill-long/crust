@@ -35,6 +35,9 @@ const clearCryptoStores = vi.fn(
 const setActiveCallRoomId = vi.fn(() => {
 	order.push("setActiveCallRoomId");
 });
+const closeNotificationSound = vi.fn(() => {
+	order.push("closeNotificationSound");
+});
 
 vi.mock("../features/room/call/rtc/endCall", () => ({
 	endActiveCall: () => endActiveCall(),
@@ -68,10 +71,10 @@ vi.mock("../stores/activeCall", () => ({
 	setActiveCallRoomId: () => setActiveCallRoomId(),
 }));
 vi.mock("../features/room/notificationSound", () => ({
-	closeNotificationSound: () => {},
+	closeNotificationSound: () => closeNotificationSound(),
 }));
 
-import { runLogout } from "./logout";
+import { finishSessionExit, runLogout } from "./logout";
 
 const SESSION: Session = {
 	accessToken: "token",
@@ -106,10 +109,16 @@ describe("runLogout (#551, #555)", () => {
 		// works (#534) - so both precede the revoke. The wipe needs nothing from
 		// the network and follows it.
 		expect(order).toEqual([
+			"closeNotificationSound",
 			"endActiveCall",
 			"setActiveCallRoomId",
 			"disableBackgroundNotifications",
 			"revokeSession",
+			// Again, deliberately: the network steps above take a bounded but
+			// real while, and a call started behind the screen in that time would
+			// otherwise be inherited by the next account on this tab (#601).
+			"setActiveCallRoomId",
+			"closeNotificationSound",
 			"clearCryptoStores",
 			"goToLogin",
 			"finishAccountLogout",
@@ -238,5 +247,69 @@ describe("runLogout (#551, #555)", () => {
 			order.indexOf("clearCryptoStores"),
 		);
 		expect(order).toContain("finishAccountLogout");
+	});
+});
+
+describe("finishSessionExit (#601)", () => {
+	beforeEach(() => {
+		order.length = 0;
+		vi.clearAllMocks();
+	});
+
+	it("runs the post-network tail, and only it", async () => {
+		// The entry point the expired-session effect uses: on a token the server
+		// has already invalidated there is no withdrawal, release or revoke left
+		// to land, and ending the call properly would only spend its bound
+		// failing to reach a server that has stopped listening.
+		await expect(
+			finishSessionExit({
+				client: CLIENT,
+				pushConfig: PUSH_CONFIG,
+				session: SESSION,
+				goToLogin: () => order.push("goToLogin"),
+			}),
+		).resolves.toBe("left");
+
+		expect(order).toEqual([
+			"setActiveCallRoomId",
+			"closeNotificationSound",
+			"clearCryptoStores",
+			"goToLogin",
+			"finishAccountLogout",
+		]);
+		expect(endActiveCall).not.toHaveBeenCalled();
+		expect(disableBackgroundNotifications).not.toHaveBeenCalled();
+		expect(revokeSession).not.toHaveBeenCalled();
+		// This document's own account, and its running client - the same rule
+		// runLogout keeps.
+		expect(clearCryptoStores).toHaveBeenCalledWith(CLIENT, SESSION);
+		expect(finishAccountLogout).toHaveBeenCalledWith(SESSION.userId);
+	});
+
+	it("still wipes and redirects when clearing the call signal throws", async () => {
+		// A Solid setter runs its subscribers synchronously, so a throwing
+		// effect here would otherwise leave an expired session with its stores
+		// unwiped, its account still in storage, and no redirect.
+		setActiveCallRoomId.mockImplementationOnce(() => {
+			order.push("setActiveCallRoomId");
+			throw new Error("subscriber blew up");
+		});
+
+		await expect(
+			finishSessionExit({
+				client: CLIENT,
+				pushConfig: PUSH_CONFIG,
+				session: SESSION,
+				goToLogin: () => order.push("goToLogin"),
+			}),
+		).resolves.toBe("left");
+
+		expect(order).toEqual([
+			"setActiveCallRoomId",
+			"closeNotificationSound",
+			"clearCryptoStores",
+			"goToLogin",
+			"finishAccountLogout",
+		]);
 	});
 });

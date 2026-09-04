@@ -38,10 +38,7 @@ import {
 	releaseWebPush,
 	restoreWebPush,
 } from "../features/notifications/accountPush";
-import { endActiveCall } from "../features/room/call/rtc/endCall";
-import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
-import { setActiveCallRoomId } from "../stores/activeCall";
 import { clearNotices } from "../stores/notices";
 import {
 	activeAccount,
@@ -54,6 +51,7 @@ import {
 } from "../stores/session";
 import type { PushConfig } from "../types/config";
 import { basePrefix } from "./basePath";
+import { quiesceLiveSession } from "./quiesceSession";
 
 /** Reload into whatever account is active, at the app root. */
 function reloadIntoActiveAccount(): void {
@@ -108,30 +106,11 @@ export async function endSessionForAccountExit(
 	exit: AccountExit,
 	commit?: () => boolean,
 ): Promise<boolean> {
-	// Stop the chime first, matching `runLogout`: a message arriving mid-exit
-	// must not chime into the account being left.
-	closeNotificationSound();
-	try {
-		await endActiveCall();
-	} catch (e) {
-		// A withdrawal that cannot land must not trap the user in this account;
-		// the membership expires on its own.
-		reportError(e, {
-			logLabel: "Failed to end the call before leaving the account",
-		});
-	}
-	// `endActiveCall` clears the signal only for the room it tore down, and it is
-	// module-global, so a call started during the teardown would otherwise be
-	// inherited by the next account. Caught like the teardown above: this write
-	// runs its subscribers synchronously, and a throwing effect must not abort
-	// an exit that has already ended the user's call.
-	try {
-		setActiveCallRoomId(null);
-	} catch (e) {
-		reportError(e, {
-			logLabel: "Failed to clear the active call while leaving the account",
-		});
-	}
+	// The chime, the call teardown and the global call signal, shared with the
+	// logout (`quiesceSession.ts`): a withdrawal that cannot land must not trap
+	// the user in this account, so each step is caught and the membership
+	// expires on its own.
+	await quiesceLiveSession("while leaving the account");
 	// Background notifications follow the active account, so the one being left
 	// gives the device's push registration back - a pusher left behind delivers
 	// ITS message previews onto a device that is about to be showing someone

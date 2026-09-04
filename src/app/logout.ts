@@ -9,8 +9,8 @@
  * path used to carry its own copy of this sequence, which is the drift #555
  * closed. The third exit, the expired-session effect in `App`, runs only step
  * 4 below (the client is already stopped, and on a token the server has
- * invalidated there is no withdrawal, release or revoke left to land) and
- * assembles it by hand; folding that in is #601.
+ * invalidated there is no withdrawal, release or revoke left to land), and
+ * enters it through the same `finishSessionExit` this one ends with (#601).
  *
  * It lives here rather than in a component for the reason `accountSwitch.ts`
  * does: what makes it correct is an ORDER, and an order that only exists inside
@@ -43,13 +43,13 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { revokeSession } from "../client/accountLogout";
 import { clearCryptoStores } from "../client/cryptoRecovery";
 import { disableBackgroundNotifications } from "../features/notifications/accountPush";
-import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
 import { setActiveCallRoomId } from "../stores/activeCall";
 import type { Session } from "../stores/session";
 import type { PushConfig } from "../types/config";
 import { finishAccountLogout } from "./accountSwitch";
+import { quiesceLiveSession } from "./quiesceSession";
 
 export interface LogoutOptions {
 	/** The running client, still holding this account's token. */
@@ -73,47 +73,11 @@ export interface LogoutOptions {
 export async function runLogout(
 	opts: LogoutOptions,
 ): Promise<"reloading" | "left"> {
-	const { client, pushConfig, session } = opts;
-	closeNotificationSound();
-	// A call can be live behind any screen this runs from: the ordinary logout
-	// is a menu item, and `PersistentCallSurface` is a sibling of the sync-state
-	// switch, so a sync error does not end one either. The withdrawal has to
-	// reach the server while this token can still write to the room (#474), and
-	// the revoke below is about to invalidate it - dropping the signal alone
-	// only SCHEDULES the withdrawal on unmount, which the revoke's
-	// `http.abort()` then cancels outright, leaving the user a ghost participant
-	// until the membership expires.
-	//
-	// Caught, though not bounded: `endCall` owns the bound, but it clears
-	// `activeCallRoomId` on one branch OUTSIDE its own try, and a Solid setter
-	// runs its subscribers synchronously - so a throwing effect surfaces here.
-	// Aborting on the FIRST step would skip the release, the revoke and the wipe
-	// and leave the account fully alive on this device - a teardown that has
-	// already ended the user's call must not then leave them signed in. Same
-	// reason `endSessionForAccountExit` catches it.
-	try {
-		await endActiveCall();
-	} catch (e) {
-		reportError(e, { logLabel: "Could not end the call on the way out" });
-	}
-	// `endActiveCall` clears the signal only for the room it tore down, and the
-	// signal is module-global and never reset on login: a call started during
-	// the teardown would otherwise outlive this session and be picked up by the
-	// NEXT account to log in on this tab, with the mini-widget / overlay pointing
-	// at a client that is about to stop.
-	//
-	// Caught for the same reason the call above it is, and it is the same
-	// hazard rather than a similar one: this IS the setter whose subscribers run
-	// synchronously, so when a call is live - the only time this write notifies
-	// anything - a throwing effect would abort the three steps that take the
-	// account off this device.
-	try {
-		setActiveCallRoomId(null);
-	} catch (e) {
-		reportError(e, {
-			logLabel: "Could not clear the active call on the way out",
-		});
-	}
+	const { client, pushConfig } = opts;
+	// Steps 1a-1b, shared with the account switch (`quiesceSession.ts`): the
+	// chime, then the call teardown while this token can still write to the
+	// room, then the global call signal.
+	await quiesceLiveSession("on the way out");
 	// While the token is still valid, and before `finishAccountLogout` clears the
 	// account the preference is filed under (#534): a pusher can only be removed
 	// server-side by a credential that still works. Bounded in its own right.
@@ -146,7 +110,42 @@ export async function runLogout(
 			logLabel: "Could not revoke this session on the way out",
 		});
 	}
-	// `finishAccountLogout` owns the tail: the (bounded) wipe finishes before
+	return await finishSessionExit(opts);
+}
+
+/**
+ * The part of the teardown that needs nothing from the network: quiet the
+ * per-account surfaces once more, then take the account off this device.
+ *
+ * Two callers, and the second is why this is exported. `runLogout` reaches it
+ * after the network steps, which take a bounded but real while - long enough
+ * for a call to have been started behind the screen, which is why the signal
+ * is cleared again here rather than only in the prefix. The expired-session
+ * effect in `App` enters HERE, because on a token the server has already
+ * invalidated there is no withdrawal, release or revoke left to land - it used
+ * to assemble these same two steps by hand, in the same order, with nothing
+ * holding them to it and no test (#601).
+ *
+ * The chime and the signal, not `quiesceLiveSession`: ending the call properly
+ * is a network step, and on an expired session it would only spend
+ * `TEARDOWN_TIMEOUT_MS` failing to reach a server that has stopped listening.
+ */
+export async function finishSessionExit(
+	opts: LogoutOptions,
+): Promise<"reloading" | "left"> {
+	const { client, pushConfig, session } = opts;
+	// Caught like every other write to it: a Solid setter runs its subscribers
+	// synchronously, and a throwing effect here would abort the wipe and the
+	// clear - leaving an account still on this device with no UI to reach it.
+	try {
+		setActiveCallRoomId(null);
+	} catch (e) {
+		reportError(e, {
+			logLabel: "Could not clear the active call while ending the session",
+		});
+	}
+	closeNotificationSound();
+	// `finishAccountLogout` owns the rest: the (bounded) wipe finishes before
 	// anything navigates, so replacing the document cannot abort the delete. That
 	// is why the caller's screen has to stay up while this runs.
 	return await finishAccountLogout(
