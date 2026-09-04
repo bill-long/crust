@@ -14,7 +14,6 @@ import {
 } from "solid-js";
 import { logOutAccount } from "../client/accountLogout";
 import { useClient } from "../client/client";
-import { clearCryptoStores } from "../client/cryptoRecovery";
 import {
 	canMarkRoomUnread,
 	markRoomUnread,
@@ -33,20 +32,15 @@ import {
 } from "../components/ResizableLayout";
 import { UserBar } from "../components/UserBar";
 import type { LoginState } from "../features/auth/returnTo";
-import { disableBackgroundNotifications } from "../features/notifications/accountPush";
 import { useWebPushSync } from "../features/notifications/useWebPushSync";
 import { CopyLinkFallbackDialog } from "../features/room/CopyLinkFallbackDialog";
 import { CallStatusPanel } from "../features/room/call/rtc/CallStatusPanel";
-import {
-	endActiveCall,
-	endCallForRoomLeave,
-} from "../features/room/call/rtc/endCall";
+import { endCallForRoomLeave } from "../features/room/call/rtc/endCall";
 import { ExploreDialog } from "../features/room/ExploreDialog";
 import { InviteDialog } from "../features/room/InviteDialog";
 import { InvitePane } from "../features/room/invites/InvitePane";
 import { JoinRoomDialogHost } from "../features/room/JoinRoomDialogHost";
 import { KnockPane } from "../features/room/knocks/KnockPane";
-import { closeNotificationSound } from "../features/room/notificationSound";
 import { PermalinkRouting } from "../features/room/PermalinkRouting";
 import { ProfileCardHost } from "../features/room/profile/ProfileCardHost";
 import { RoomList } from "../features/room/RoomList";
@@ -70,7 +64,7 @@ import { displayNameOr } from "../lib/displayName";
 import { loadPersisted, savePersisted } from "../lib/persistedSignal";
 import { reportError } from "../lib/reportError";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "../lib/storageKeys";
-import { activeCallRoomId, setActiveCallRoomId } from "../stores/activeCall";
+import { activeCallRoomId } from "../stores/activeCall";
 import { triggerCryptoAction } from "../stores/cryptoActions";
 import { closeExploreDialog, exploreDialogOpen } from "../stores/exploreDialog";
 import { cleanupIgnoredUsers, initIgnoredUsers } from "../stores/ignoredUsers";
@@ -86,14 +80,11 @@ import {
 } from "../stores/session";
 import { isMobile } from "../stores/viewport";
 import type { CryptoAction } from "../types/crypto";
-import {
-	endSessionForAccountExit,
-	finishAccountLogout,
-	switchToAccount,
-} from "./accountSwitch";
+import { endSessionForAccountExit, switchToAccount } from "./accountSwitch";
 import { basePrefix, stripBasePath } from "./basePath";
 import { useConfig } from "./ConfigProvider";
 import { dmCanonicalTarget } from "./dmRoute";
+import { runLogout } from "./logout";
 import { RoomPane } from "./RoomPane";
 import { useDecodedParams } from "./useDecodedParams";
 
@@ -359,22 +350,27 @@ const Layout: Component = () => {
 		if (target) navigate(target, { replace: true });
 	});
 
-	/** True once a logout has committed to replacing the document. */
 	const handleLogout = async (): Promise<void> => {
-		// Single-flight. The call teardown below makes logout a multi-second
-		// operation (bounded, but not instant), so without this a second
-		// click would run this whole body concurrently: two `client.logout`
-		// calls (the loser 401s) and — the real hazard — two overlapping
-		// `clearCryptoStores`, whose `deleteDatabase` can be blocked by the
-		// other's open connection. That await has no timeout, so the user
-		// would be stranded on the app UI holding an invalidated token.
+		// Single-flight. The teardown in `app/logout.ts` is bounded but not
+		// instant, so without this a second click would run it concurrently -
+		// and the real hazard is two overlapping `clearCryptoStores`, whose
+		// `deleteDatabase` calls block each other until the wipe's bound expires,
+		// with the user stranded on the app UI holding an invalidated token.
 		if (accountTransitionInFlight()) return;
 		setLoggingOut(true);
 		try {
 			// A logout that ends in a reload keeps the guard set: this document
 			// keeps running until the replacement takes over, and releasing it
 			// would re-arm the button that is already on its way out.
-			if ((await runLogout()) === "reloading") return;
+			const outcome = await runLogout({
+				client,
+				pushConfig,
+				// This document's own account, not whoever storage currently calls
+				// active: another tab may have switched since we booted.
+				session,
+				goToLogin: () => navigate("/login", { replace: true }),
+			});
+			if (outcome === "reloading") return;
 		} catch (e) {
 			reportError(e, {
 				userMessage: "Could not log out.",
@@ -472,93 +468,6 @@ const Layout: Component = () => {
 		} finally {
 			setAccountBusy(false);
 		}
-	};
-
-	const runLogout = async (): Promise<"reloading" | "left"> => {
-		// Stop the chime first, as this did before the teardown await was
-		// introduced. It is not a mute: `playNotificationSound` builds a fresh
-		// AudioContext on demand, so a message arriving during the teardown
-		// still chimes. Restoring the old ordering is the point.
-		closeNotificationSound();
-		// End a call hosted anywhere BEFORE logging out, and await it: the
-		// MatrixRTC withdrawal has to reach the server while our token is
-		// still valid, exactly as for a room leave (#474). Dropping the
-		// signal alone only *schedules* the withdrawal, which then races
-		// `client.logout()` and 401s whenever it loses.
-		//
-		// Caught for the reason `app/forceLogout.ts` documents: a teardown that
-		// has already ended the user's call must not then abort the logout they
-		// asked for and leave them signed in.
-		try {
-			await endActiveCall();
-		} catch (e) {
-			reportError(e, { logLabel: "Failed to end the call before logging out" });
-		}
-		// Restore the unconditional guarantee the plain `setActiveCallRoomId`
-		// used to give: `endActiveCall` clears the signal only for
-		// the room it tore down, so a call started (or switched to) during
-		// the teardown would otherwise survive into the logged-out state and
-		// be picked up by the NEXT account to log in on this tab —
-		// `activeCallRoomId` is module-global and never reset on login. Caught
-		// too: this write runs its Solid subscribers synchronously.
-		try {
-			setActiveCallRoomId(null);
-		} catch (e) {
-			reportError(e, { logLabel: "Failed to clear the active call on logout" });
-		}
-		// Forget the preference and hand this device's push registration back
-		// before the session is invalidated - while the token is still valid, so
-		// the pusher can actually be removed server-side and not just
-		// unsubscribed here, and before clearSession() below, since settings are
-		// per-account (#532) and once the account is gone there is no key left to
-		// file the preference under. Every other account exit releases too (#534):
-		// the switch and the add-account detour in this file, and, through
-		// finishAccountLogout, the escape hatch in `app/forceLogout.ts` and the
-		// expired-session effect in `App`.
-		//
-		// Caught like every other step in this teardown: it writes a Solid
-		// setting before its own release, and those subscribers run
-		// synchronously. A throw here would abort the logout before the revoke
-		// and leave the user signed in holding a token they asked to end.
-		try {
-			await disableBackgroundNotifications(client, pushConfig);
-		} catch (e) {
-			reportError(e, {
-				logLabel: "Failed to release background notifications on logout",
-			});
-		}
-		try {
-			await client.logout(true);
-		} catch (e) {
-			reportError(e, {
-				logLabel: "Could not revoke this session while logging out",
-			});
-			// Guarded like the same recovery stop in `app/forceLogout.ts`: the
-			// likeliest reason to be here is that the stop inside `logout(true)`
-			// threw, which would throw again and take the wipe and the clear with
-			// it.
-			try {
-				client.stopClient();
-			} catch (stopError) {
-				reportError(stopError, {
-					logLabel: "Could not stop the client while logging out",
-				});
-			}
-		}
-		return await finishAccountLogout(
-			{ client, pushConfig },
-			// This document's own account, not whoever storage currently calls
-			// active: another tab may have switched since we booted.
-			session.userId,
-			async () => {
-				try {
-					await clearCryptoStores(client, session);
-				} catch (e) {
-					console.warn("Failed to clear stores on logout:", e);
-				}
-			},
-			() => navigate("/login", { replace: true }),
-		);
 	};
 
 	const userId = () => client.getUserId() ?? "";

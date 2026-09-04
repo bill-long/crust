@@ -102,15 +102,25 @@ the built `dist/` inside the installer, so it ships whatever
 `public/config.json` held when that release was cut.
 
 `remoteConfigUrl` closes that gap: the desktop shell reads it from its bundled
-config and re-fetches the live file from that URL at startup, falling back to
-the bundled copy when offline or when the deployment is unreachable. Browser
-clients ignore the field entirely.
+config and re-fetches the live file from that URL at startup. When the live
+file cannot be read - offline, a timeout, a 5xx - it boots on the last live
+config it successfully read (kept for 30 days from that read), and only with
+nothing remembered on the bundled copy. A `404` or `410` is different: that is
+you withdrawing the file, so the shell forgets the remembered copy and boots on
+the bundled one. That is the one way to revert desktop clients to the template
+before the 30 days run out (a leaked key, say) - and note that deleting the
+bind-mounted file does NOT produce it: Docker mounts a directory in its place
+and nginx answers `403`, which the shell treats as "down" and keeps the copy.
+To withdraw, make the URL answer `404` - a `return 404;` in the `/crust/`
+location block for `config.json`, or serve a `404` from whatever fronts the
+deployment - until every client has launched once. Browser clients ignore the
+field entirely.
 
 It must be `https://` - the file it names carries your GIF API key and push
 VAPID key. Loopback `http://` is accepted by the validator and works under
 `tauri dev`, but a **packaged** build cannot use it: the shipped CSP allows
 `connect-src ... https:` and not plain `http:`, so the fetch would be blocked
-and the shell would fall back to its bundled copy.
+and the shell would fall back to whatever it last read, or its bundled copy.
 
 **Setting it in the bind-mounted `config.json` does nothing.** That is the one
 place the rest of this page tells you to edit, so it is worth being explicit:
@@ -130,7 +140,8 @@ use their own bundled config - the previous behaviour, not a broken one.
 **Update the server image before cutting a desktop release.** The cross-origin
 read this depends on needs an `Access-Control-Allow-Origin` header that ships
 inside the container image (`docker-nginx.conf`), so an installer built against
-a server that has not been pulled fails the fetch and falls back silently. The
+a server that has not been pulled fails the fetch and falls back silently (to
+the last config it read, if any, else the bundled copy). The
 only diagnostic is a CORS error in a packaged WebView2 shell with no devtools,
 so it is worth getting the order right rather than debugging it later.
 

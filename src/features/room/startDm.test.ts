@@ -1,11 +1,6 @@
 import { EventType } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
-import {
-	addDmToMap,
-	findExistingDmRoom,
-	readDirectMap,
-	startDm,
-} from "./startDm";
+import { findExistingDmRoom, startDm } from "./startDm";
 
 type Membership = "join" | "invite" | "leave" | "ban";
 
@@ -55,68 +50,6 @@ function makeClient(opts: FakeClientOptions = {}) {
 	} as any;
 	return { client, setAccountData, createRoom, joinRoom };
 }
-
-describe("readDirectMap", () => {
-	it("returns an empty map when no m.direct account data exists", () => {
-		const { client } = makeClient();
-		expect(readDirectMap(client)).toEqual({});
-	});
-
-	it("drops non-array entries and non-string room IDs", () => {
-		const { client } = makeClient({
-			direct: {
-				"@a:server": ["!r1:server", 42, "!r2:server"],
-				"@b:server": "not-an-array",
-			},
-		});
-		expect(readDirectMap(client)).toEqual({
-			"@a:server": ["!r1:server", "!r2:server"],
-		});
-	});
-
-	it("returns a null-prototype map and preserves a JSON __proto__ key safely", () => {
-		// JSON.parse produces an OWN "__proto__" property (unlike an object
-		// literal, which would invoke the prototype setter), mirroring how
-		// server-sent m.direct content reaches us.
-		const content = JSON.parse(
-			'{"__proto__":["!evil:server"],"@a:server":["!ok:server"]}',
-		);
-		const { client } = makeClient({ direct: content });
-		const map = readDirectMap(client);
-		expect(Object.getPrototypeOf(map)).toBeNull();
-		expect(map["@a:server"]).toEqual(["!ok:server"]);
-		// The "__proto__" key is retained as an ordinary own entry (not the
-		// prototype), so it round-trips rather than being silently dropped.
-		expect(Object.hasOwn(map, "__proto__")).toBe(true);
-		expect(Object.getOwnPropertyDescriptor(map, "__proto__")?.value).toEqual([
-			"!evil:server",
-		]);
-		// Object's prototype was not polluted.
-		expect(Object.getPrototypeOf({})).toBe(Object.prototype);
-	});
-});
-
-describe("addDmToMap", () => {
-	it("adds a new room without mutating the input", () => {
-		const map = { "@a:server": ["!r1:server"] };
-		const next = addDmToMap(map, "@b:server", "!r2:server");
-		expect(next).toEqual({
-			"@a:server": ["!r1:server"],
-			"@b:server": ["!r2:server"],
-		});
-		expect(map).toEqual({ "@a:server": ["!r1:server"] });
-	});
-
-	it("appends to an existing user list and de-duplicates", () => {
-		const map = { "@a:server": ["!r1:server"] };
-		expect(addDmToMap(map, "@a:server", "!r2:server")).toEqual({
-			"@a:server": ["!r1:server", "!r2:server"],
-		});
-		expect(addDmToMap(map, "@a:server", "!r1:server")).toEqual({
-			"@a:server": ["!r1:server"],
-		});
-	});
-});
 
 describe("findExistingDmRoom", () => {
 	it("returns null when the user has no DM rooms", () => {

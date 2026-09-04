@@ -1,7 +1,7 @@
 /**
  * Switching which account the app is running as (#533).
  *
- * A switch is the logout teardown (`Layout.runLogout`) minus everything
+ * A switch is the logout teardown (`app/logout.ts`) minus everything
  * destructive: the outgoing account keeps its token, its crypto store and its
  * per-account data. What it still owes the server is the same thing a logout
  * owes it - a MatrixRTC withdrawal for any live call, sent while the outgoing
@@ -275,11 +275,11 @@ export async function finishAccountLogout(
 ): Promise<"reloading" | "left"> {
 	// Before anything else, because clearing the account takes away both the
 	// credentials the pusher removal needs and the key its preference is filed
-	// under (#532). This is the choke point every logout
-	// goes through - the one in `Layout`, the escape hatch in `app/forceLogout.ts`
-	// and the expired-session effect in `App` -
-	// so no exit can forget it (#534). The foreground logout releases earlier as
-	// well, while its token is still valid and the pusher can actually be removed
+	// under (#532). This is the choke point every logout goes through - the
+	// teardown in `app/logout.ts` (menu logout and escape hatch alike) and the
+	// expired-session effect in `App` - so no exit can forget it (#534). The
+	// foreground logout releases earlier as well, while its token is still
+	// valid and the pusher can actually be removed
 	// server-side; if that got as far as unsubscribing, this second call finds no
 	// subscription and returns, and if it did not, this is the one that closes
 	// the leak.
