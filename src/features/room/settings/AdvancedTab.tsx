@@ -7,11 +7,11 @@ import {
 	on,
 	Show,
 } from "solid-js";
-import { useClient } from "../../../client/client";
 import { endCallForRoomLeave } from "../call/rtc/endCall";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HistoryVisibilitySection } from "./HistoryVisibilitySection";
 import { JoinRuleSection } from "./JoinRuleSection";
+import { useMyMembership } from "./useRoomPermissions";
 
 interface AdvancedTabProps {
 	client: MatrixClient;
@@ -39,15 +39,11 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 	// under a request whose failure still needs to render inline.
 	const [actionPending, setActionPending] = createSignal(false);
 
-	// Read membership from the summaries store at the leaf (like the
-	// sibling RoomsTab) so every mount is reactive to leave/rejoin from
-	// anywhere; the SDK room is only a mount-time fallback for a room the
-	// store never saw, so an already-left room still resolves to Forget
+	// The settings feature's one membership read (store first, SDK room as
+	// the fallback for a room the store never saw), reactive to leave and
+	// rejoin from anywhere, so an already-left room resolves to Forget
 	// instead of failing open to a doomed Leave.
-	const { summaries } = useClient();
-	const membership = (): string | undefined =>
-		summaries[props.roomId]?.membership ??
-		props.client.getRoom(props.roomId)?.getMyMembership();
+	const membership = useMyMembership(props.client, () => props.roomId);
 
 	// Forget is only valid (and only useful) once the user is out of the
 	// room: the server rejects /forget while joined (spec 10.2.3). Memoized
@@ -101,11 +97,11 @@ const AdvancedTab: Component<AdvancedTabProps> = (props) => {
 		<div class="space-y-8">
 			{/* Join rule + history visibility live in Advanced for regular rooms.
 			    For spaces they move to the dedicated Visibility tab, so they are
-			    hidden here to avoid two UIs editing the same state. Hidden too
-			    for a left/banned room: the power-level gate alone would still
-			    offer the controls to an ex-admin whose writes the server now
-			    rejects. */}
-			<Show when={!props.isSpace && !canForget()}>
+			    hidden here to avoid two UIs editing the same state. For a
+			    left/banned room they render read-only like every other tab
+			    (useRoomPermissions gates on membership; the overlay notice
+			    says why). */}
+			<Show when={!props.isSpace}>
 				<JoinRuleSection client={props.client} roomId={props.roomId} />
 				<HistoryVisibilitySection client={props.client} roomId={props.roomId} />
 			</Show>

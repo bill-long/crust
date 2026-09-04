@@ -8,6 +8,7 @@ import {
 	on,
 	onCleanup,
 	onMount,
+	Show,
 	Switch,
 } from "solid-js";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
@@ -18,6 +19,7 @@ import { MembersTab } from "./MembersTab";
 import { PermissionsTab } from "./PermissionsTab";
 import { RoomGeneralTab } from "./RoomGeneralTab";
 import { RoomsTab } from "./RoomsTab";
+import { useMyMembership } from "./useRoomPermissions";
 import { VisibilityTab } from "./VisibilityTab";
 
 export const roomSettingsTabMeta = [
@@ -146,6 +148,26 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 		return name || props.roomId;
 	};
 
+	// One notice for every tab: the write gates in useRoomPermissions go
+	// read-only whenever the caller is not joined, and each tab's
+	// per-control tooltip only says "no permission" - this names the actual
+	// reason. Shown for an unknown room too: SyncGate has run, so a room
+	// neither the store nor the SDK knows is one the user is not in. (The
+	// one transient exception is the moment after joinRoom() resolves,
+	// before /sync stores the Room: the store says joined, the gates are
+	// closed for want of a Room, and this stays silent until the Room
+	// arrives.)
+	const myMembership = useMyMembership(props.client, () => props.roomId);
+	const readOnlyNotice = (): string | null => {
+		const m = myMembership();
+		if (m === "join") return null;
+		const lead =
+			m === "ban"
+				? `You've been banned from this ${entityNoun()}.`
+				: `You're not a member of this ${entityNoun()}.`;
+		return `${lead} Its settings can't be changed.`;
+	};
+
 	return (
 		<div
 			ref={overlayRef}
@@ -215,6 +237,17 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 							</kbd>
 						</button>
 					</div>
+
+					<Show when={readOnlyNotice()}>
+						{(notice) => (
+							<p
+								role="status"
+								class="shrink-0 border-b border-warning-border bg-warning-bg/50 px-8 py-2 text-sm text-warning-text"
+							>
+								{notice()}
+							</p>
+						)}
+					</Show>
 
 					<div ref={contentRef} class="flex-1 overflow-y-auto px-8 py-6">
 						<div class="max-w-2xl">

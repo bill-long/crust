@@ -299,7 +299,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						<FieldStatus
 							state={avatarState()}
 							error={avatarError() ?? avatarOpt.lastError()}
-							onRetry={retryAvatar}
+							onRetry={perms.canSetAvatar() ? retryAvatar : undefined}
 							onDismiss={() => {
 								setAvatarError(null);
 								avatarOpt.clearError();
@@ -351,16 +351,20 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						</button>
 					</p>
 				</Show>
-				<Show when={nameDirty() && perms.canSetName()}>
+				{/* Cancel stays on a dirty draft even after the gate closes (left
+				    mid-edit), so the draft is never stranded in a read-only field. */}
+				<Show when={nameDirty()}>
 					<div class="mt-2 flex gap-2">
-						<button
-							type="button"
-							onClick={handleSaveName}
-							disabled={nameOpt.pending()}
-							class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
-						>
-							Save
-						</button>
+						<Show when={perms.canSetName()}>
+							<button
+								type="button"
+								onClick={handleSaveName}
+								disabled={nameOpt.pending()}
+								class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							>
+								Save
+							</button>
+						</Show>
 						<button
 							type="button"
 							onClick={cancelName}
@@ -374,7 +378,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 				<FieldStatus
 					state={nameState()}
 					error={nameOpt.lastError()}
-					onRetry={handleSaveName}
+					onRetry={perms.canSetName() ? handleSaveName : undefined}
 					onDismiss={() => nameOpt.clearError()}
 				/>
 			</section>
@@ -421,16 +425,18 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 						</button>
 					</p>
 				</Show>
-				<Show when={topicDirty() && perms.canSetTopic()}>
+				<Show when={topicDirty()}>
 					<div class="mt-2 flex gap-2">
-						<button
-							type="button"
-							onClick={handleSaveTopic}
-							disabled={topicOpt.pending()}
-							class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
-						>
-							Save
-						</button>
+						<Show when={perms.canSetTopic()}>
+							<button
+								type="button"
+								onClick={handleSaveTopic}
+								disabled={topicOpt.pending()}
+								class="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-text-primary hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+							>
+								Save
+							</button>
+						</Show>
 						<button
 							type="button"
 							onClick={cancelTopic}
@@ -444,7 +450,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 				<FieldStatus
 					state={topicState()}
 					error={topicOpt.lastError()}
-					onRetry={handleSaveTopic}
+					onRetry={perms.canSetTopic() ? handleSaveTopic : undefined}
 					onDismiss={() => topicOpt.clearError()}
 				/>
 			</section>

@@ -191,7 +191,7 @@ export function createMockRoom(
 		powerLevel?: number;
 		avatarUrl?: string;
 	}[] = [],
-	options?: { name?: string },
+	options?: { name?: string; membership?: string },
 ) {
 	const matrixEvents = events.map(createMatrixEvent);
 	// Mutable member state for typing simulation
@@ -300,8 +300,9 @@ export function createMockRoom(
 		// Mirrors `Room.myUserId`, matching createMockClient's getUserId so
 		// own-vs-other checks (e.g. the legacy missed-call notice) resolve.
 		myUserId: "@test:example.com",
-		// Own membership; tests override per-case (e.g. "leave" for forget).
-		getMyMembership: () => "join",
+		// Own membership (`options.membership`, default joined); a test that
+		// flips it mid-run reassigns this and emits RoomEvent.MyMembership.
+		getMyMembership: () => options?.membership ?? "join",
 		// Mirrors `Room.tags` (m.tag account data); tests mutate directly.
 		tags: {} as Record<string, Record<string, unknown>>,
 		currentState,

@@ -31,10 +31,19 @@ import {
 function setup(
 	active: RoomSettingsTab = "general",
 	isSpace?: boolean,
-	options?: { membership?: string; onForgot?: (roomId: string) => void },
+	options?: {
+		/** Summaries-store membership (the app's source of truth). */
+		membership?: string;
+		/** SDK-room membership when it should differ from the store. */
+		sdkMembership?: string;
+		onForgot?: (roomId: string) => void;
+		/** Render for a room neither the store nor the SDK knows. */
+		unknownRoom?: boolean;
+	},
 ) {
 	const room = createMockRoom("!room:example.com", [], [], {
 		name: "Test Room",
+		membership: options?.sdkMembership ?? options?.membership,
 	});
 	room.__setStateEvent("m.room.name", "", { name: "Test Room" });
 	room.__setStateEvent("m.room.topic", "", { topic: "Initial topic" });
@@ -62,7 +71,9 @@ function setup(
 			<TestClientProvider client={client} summaries={summaries}>
 				<RoomSettingsOverlay
 					client={client as unknown as MatrixClient}
-					roomId="!room:example.com"
+					roomId={
+						options?.unknownRoom ? "!missing:example.com" : "!room:example.com"
+					}
 					activeTab={activeTab()}
 					onTabChange={onTabChange}
 					onClose={onClose}
@@ -210,5 +221,63 @@ describe("RoomSettingsOverlay", () => {
 			expect(onForgot).toHaveBeenCalledWith("!room:example.com"),
 		);
 		expect(onClose).toHaveBeenCalled();
+	});
+
+	describe("non-member notice (#527)", () => {
+		it("shows nothing for a joined room", () => {
+			setup("general");
+			expect(screen.queryByRole("status")).toBeNull();
+		});
+
+		it("names the reason for a left room and renders the tab read-only", () => {
+			setup("general", false, { membership: "leave" });
+			expect(screen.getByRole("status").textContent).toBe(
+				"You're not a member of this room. Its settings can't be changed.",
+			);
+			// The mock grants every power level; membership alone must gate.
+			const name = screen.getByLabelText("Name") as HTMLInputElement;
+			expect(name.readOnly).toBe(true);
+		});
+
+		it("treats a room neither the store nor the SDK knows as not a member", () => {
+			// SyncGate has run by the time settings can open, so an unknown room
+			// is one the user is not in; every gate is false and the notice must
+			// agree with them rather than leave an unexplained read-only tab.
+			setup("general", false, { unknownRoom: true });
+			expect(screen.getByRole("status").textContent).toBe(
+				"You're not a member of this room. Its settings can't be changed.",
+			);
+		});
+
+		it("uses banned copy and the space noun for a banned space", () => {
+			setup("visibility", true, { membership: "ban" });
+			expect(screen.getByRole("status").textContent).toBe(
+				"You've been banned from this space. Its settings can't be changed.",
+			);
+		});
+	});
+
+	describe("membership source (#527)", () => {
+		it("trusts the store's optimistic join over a lagging SDK room", () => {
+			// client.joinRoom() resolves before /sync updates the SDK room;
+			// Layout marks the summary joined and opens the pane on that.
+			setup("general", false, { membership: "join", sdkMembership: "invite" });
+			expect(screen.queryByRole("status")).toBeNull();
+			const name = screen.getByLabelText("Name") as HTMLInputElement;
+			expect(name.readOnly).toBe(false);
+		});
+
+		it("trusts the store's optimistic leave over a lagging SDK room", () => {
+			setup("general", false, { membership: "leave", sdkMembership: "join" });
+			expect(screen.getByRole("status")).toBeTruthy();
+			const name = screen.getByLabelText("Name") as HTMLInputElement;
+			expect(name.readOnly).toBe(true);
+		});
+
+		it("keeps join rule on Advanced for a left room, alongside Forget", () => {
+			setup("advanced", false, { membership: "leave" });
+			expect(screen.getByRole("heading", { name: "Join rule" })).toBeTruthy();
+			expect(screen.getByRole("button", { name: "Forget room" })).toBeTruthy();
+		});
 	});
 });

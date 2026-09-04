@@ -1,9 +1,19 @@
 import {
 	type MatrixClient,
 	type MatrixEvent,
+	type Room,
+	RoomEvent,
 	RoomStateEvent,
 } from "matrix-js-sdk";
-import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
+import {
+	type Accessor,
+	createMemo,
+	createSignal,
+	onCleanup,
+	useContext,
+} from "solid-js";
+import { ClientContext } from "../../../client/client";
+import type { SummariesStore } from "../../../client/summaries";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import {
 	effectiveLevel,
@@ -15,7 +25,66 @@ import {
 const POWER_LEVELS_TYPE = "m.room.power_levels";
 const MEMBER_TYPE = "m.room.member";
 
+/**
+ * The caller's own membership in `roomId` ("join" / "leave" / "ban" / ...),
+ * or undefined while the room is unknown. The summaries store is the
+ * app's source of truth: it carries Layout's optimistic join/leave marks,
+ * which the SDK room lacks (`client.joinRoom()` never updates
+ * `Room.getMyMembership()`; only the next /sync does). The SDK room is
+ * the fallback for a room the store never saw - it seeds from
+ * `client.getVisibleRooms()`, which drops the joined predecessors of an
+ * upgraded room, and a deep link can still route to one - and for callers
+ * mounted outside `ClientProvider` (unit tests). Both are load-bearing.
+ */
+function readMyMembership(
+	summaries: SummariesStore | undefined,
+	client: MatrixClient,
+	roomId: string | undefined,
+): string | undefined {
+	if (!roomId) return undefined;
+	return (
+		summaries?.[roomId]?.membership ?? client.getRoom(roomId)?.getMyMembership()
+	);
+}
+
+/**
+ * Reactive `readMyMembership`: tracks the store, `RoomEvent.MyMembership`
+ * (for the SDK fallback) and the room arriving after a deep link. For a
+ * consumer that already has a `useRoomPermissions` instance, read
+ * `perms.isJoined` instead of mounting this a second time.
+ */
+export function useMyMembership(
+	client: MatrixClient,
+	roomId: Accessor<string | undefined>,
+): Accessor<string | undefined> {
+	const summaries = useContext(ClientContext)?.summaries;
+	const [tick, setTick] = createSignal(0);
+	const onMyMembership = (room: Room): void => {
+		if (room.roomId === roomId()) setTick((n) => n + 1);
+	};
+	client.on(RoomEvent.MyMembership, onMyMembership);
+	onCleanup(() => {
+		client.off(RoomEvent.MyMembership, onMyMembership);
+	});
+	const roomAvailableTick = useRoomAvailableTick(client, roomId);
+	return createMemo(() => {
+		tick();
+		roomAvailableTick();
+		return readMyMembership(summaries, client, roomId());
+	});
+}
+
 export interface RoomPermissions {
+	/**
+	 * Whether the caller is currently joined. Every write gate below is
+	 * ANDed with this: power levels survive leaving (`RoomMember.powerLevel`
+	 * keeps an ex-admin at 100 and `maySendStateEvent` reads only the PL
+	 * event), so without it a left/banned room offers editors whose saves
+	 * fail with M_FORBIDDEN (#527). Read it directly for a write that has
+	 * no power-level rule (directory listing) or to hide "no permission"
+	 * copy that would misstate the reason next to the overlay's notice.
+	 */
+	isJoined: Accessor<boolean>;
 	myPowerLevel: Accessor<number>;
 	usersDefault: Accessor<number>;
 	/** Required power level to send a given state event type. */
@@ -105,6 +174,12 @@ export function useRoomPermissions(
 	// false and settings render read-only until an unrelated PL change.
 	const roomAvailableTick = useRoomAvailableTick(client, roomId);
 
+	// See RoomPermissions.isJoined. Read gates (`myPowerLevel`,
+	// `targetPowerLevel`, `requiredPowerLevel*`) stay unfiltered: they
+	// describe the room, not what the caller may do to it.
+	const myMembership = useMyMembership(client, roomId);
+	const isJoined = createMemo((): boolean => myMembership() === "join");
+
 	const plContent = createMemo<PowerLevelContent>(() => {
 		tick();
 		roomAvailableTick();
@@ -149,11 +224,13 @@ export function useRoomPermissions(
 		createMemo(() => {
 			tick();
 			roomAvailableTick();
-			return canSendStateEvent(client, roomId(), type);
+			return isJoined() && canSendStateEvent(client, roomId(), type);
 		});
 
 	const makeKeyCan = (key: GatedKey): Accessor<boolean> =>
-		createMemo(() => myPowerLevel() >= effectiveLevel(plContent(), key));
+		createMemo(
+			() => isJoined() && myPowerLevel() >= effectiveLevel(plContent(), key),
+		);
 
 	const targetPowerLevel = (targetUserId: string): number => {
 		// Read the PL content FIRST so reactive callers subscribe to PL
@@ -185,11 +262,13 @@ export function useRoomPermissions(
 		return targetPowerLevel(targetUserId) < myPowerLevel();
 	};
 
+	const canSetPowerLevelsMemo = makeStateCan(POWER_LEVELS_TYPE);
+
 	const canChangePowerLevel = (
 		targetUserId: string,
 		requestedPL: number,
 	): boolean => {
-		if (!canSendStateEvent(client, roomId(), POWER_LEVELS_TYPE)) return false;
+		if (!canSetPowerLevelsMemo()) return false;
 		const myPL = myPowerLevel();
 		const targetPL = targetPowerLevel(targetUserId);
 		// Matrix auth requires both the target's current PL and the
@@ -209,11 +288,12 @@ export function useRoomPermissions(
 		canSetTopic: makeStateCan("m.room.topic"),
 		canSetAvatar: makeStateCan("m.room.avatar"),
 		canSetCanonicalAlias: makeStateCan("m.room.canonical_alias"),
-		canSetPowerLevels: makeStateCan(POWER_LEVELS_TYPE),
+		canSetPowerLevels: canSetPowerLevelsMemo,
 		canSetJoinRules: makeStateCan("m.room.join_rules"),
 		canSetHistoryVisibility: makeStateCan("m.room.history_visibility"),
 		canSetGuestAccess: makeStateCan("m.room.guest_access"),
 		canSetSpaceChild: makeStateCan("m.space.child"),
+		isJoined,
 		canInvite: makeKeyCan("invite"),
 		canKick: canKickMemo,
 		canBan: canBanMemo,

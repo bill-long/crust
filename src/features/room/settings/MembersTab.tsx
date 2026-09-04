@@ -114,26 +114,30 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 
 	return (
 		<div class="space-y-8">
-			{/* Invite */}
-			<section>
-				<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-					Invite by user ID
-				</h3>
-				<Show
-					when={perms.canInvite()}
-					fallback={
-						<p class="text-sm text-text-muted">
-							You don't have permission to invite users.
-						</p>
-					}
-				>
-					<InviteByUserIdForm
-						client={props.client}
-						roomId={props.roomId}
-						submitLabel="Invite"
-					/>
-				</Show>
-			</section>
+			{/* Invite. Only while joined: for a non-member the overlay notice
+			    already names the real reason, and the no-permission copy (or a
+			    heading over nothing) would only contradict it. */}
+			<Show when={perms.isJoined()}>
+				<section>
+					<h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
+						Invite by user ID
+					</h3>
+					<Show
+						when={perms.canInvite()}
+						fallback={
+							<p class="text-sm text-text-muted">
+								You don't have permission to invite users.
+							</p>
+						}
+					>
+						<InviteByUserIdForm
+							client={props.client}
+							roomId={props.roomId}
+							submitLabel="Invite"
+						/>
+					</Show>
+				</section>
+			</Show>
 
 			{/* Pending invites */}
 			<section>

@@ -5,7 +5,7 @@ import {
 	screen,
 	waitFor,
 } from "@solidjs/testing-library";
-import { EventType, type MatrixClient } from "matrix-js-sdk";
+import { EventType, type MatrixClient, RoomEvent } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { PermissionsTab } from "./PermissionsTab";
@@ -121,6 +121,19 @@ describe("PermissionsTab", () => {
 			{ state_default: 0, users: { "@a:s": 100 } },
 			"",
 		);
+	});
+
+	it("closes a parked state_default confirm when the caller leaves (#527)", async () => {
+		const { client, room } = setup({
+			state_default: 50,
+			users: { "@a:s": 100 },
+		});
+		fireEvent.click(rowButton("Change room settings", "Anyone"));
+		expect(screen.getByRole("dialog")).toBeTruthy();
+		room.getMyMembership = () => "leave";
+		client.__emit(RoomEvent.MyMembership, room, "leave", "join");
+		expect(screen.queryByRole("dialog")).toBeNull();
+		expect(client.sendStateEvent).not.toHaveBeenCalled();
 	});
 
 	it("disables all rows when the user cannot send power-level state", () => {

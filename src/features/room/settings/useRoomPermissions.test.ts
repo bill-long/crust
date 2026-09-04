@@ -1,12 +1,26 @@
 import {
 	type MatrixClient,
 	type MatrixEvent,
+	RoomEvent,
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
-import { useRoomPermissions } from "./useRoomPermissions";
+
+// The hook reads the summaries store through ClientContext, which lives in
+// client.tsx; the dev-server refresh runtime it references is not a module
+// under vitest, so shim it like every .tsx test does.
+vi.mock("solid-refresh", () => ({
+	$$registry: () => new Map(),
+	$$component: (_registry: unknown, _id: string, component: unknown) =>
+		component,
+	$$context: (_registry: unknown, _id: string, context: unknown) => context,
+	$$decline: () => undefined,
+	$$refresh: () => undefined,
+}));
+
+import { useMyMembership, useRoomPermissions } from "./useRoomPermissions";
 
 function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
@@ -361,6 +375,103 @@ describe("useRoomPermissions", () => {
 				fakeStateEvent("!r:x", "m.room.member", "@other:example.com"),
 			);
 			expect(perms.myPowerLevel()).toBe(0);
+		});
+	});
+
+	describe("membership gate (#527)", () => {
+		function adminRoom(membership: string) {
+			const room = createMockRoom(
+				"!r:x",
+				[],
+				[
+					{
+						userId: "@test:example.com",
+						name: "Me",
+						membership,
+						powerLevel: 100,
+					},
+					{ userId: "@bob:example.com", name: "Bob", membership: "join" },
+				],
+				{ membership },
+			);
+			room.__setStateEvent("m.room.power_levels", "", { users_default: 0 });
+			return room;
+		}
+
+		it.each(["leave", "ban", "invite", "knock"])(
+			"an ex-admin with membership %s gets every write gate false",
+			async (membership) => {
+				const room = adminRoom(membership);
+				const client = createMockClient(new Map([["!r:x", room]]));
+				await withRoot(async () => {
+					const perms = useRoomPermissions(
+						client as unknown as MatrixClient,
+						() => "!r:x",
+					);
+					// Power survives leaving: the read gates still describe the room.
+					expect(perms.myPowerLevel()).toBe(100);
+					expect(perms.targetPowerLevel("@bob:example.com")).toBe(0);
+					// ...but no write is offered.
+					expect(perms.canSetName()).toBe(false);
+					expect(perms.canSetPowerLevels()).toBe(false);
+					expect(perms.canSetJoinRules()).toBe(false);
+					expect(perms.canSetSpaceChild()).toBe(false);
+					expect(perms.isJoined()).toBe(false);
+					expect(perms.canInvite()).toBe(false);
+					expect(perms.canKick()).toBe(false);
+					expect(perms.canBan()).toBe(false);
+					expect(perms.canKickTarget("@bob:example.com")).toBe(false);
+					expect(perms.canBanTarget("@bob:example.com")).toBe(false);
+					expect(perms.canChangePowerLevel("@bob:example.com", 50)).toBe(false);
+				});
+			},
+		);
+
+		it("re-opens the gates on RoomEvent.MyMembership for this room only", async () => {
+			const room = adminRoom("leave");
+			const other = createMockRoom("!other:x");
+			const client = createMockClient(
+				new Map([
+					["!r:x", room],
+					["!other:x", other],
+				]),
+			);
+			await withRoot(async () => {
+				const perms = useRoomPermissions(
+					client as unknown as MatrixClient,
+					() => "!r:x",
+				);
+				expect(perms.canSetName()).toBe(false);
+				room.getMyMembership = () => "join";
+				// Another room's membership flip must not re-read this room.
+				client.__emit(RoomEvent.MyMembership, other, "join", "leave");
+				expect(perms.canSetName()).toBe(false);
+				client.__emit(RoomEvent.MyMembership, room, "join", "leave");
+				expect(perms.canSetName()).toBe(true);
+				expect(perms.canKickTarget("@bob:example.com")).toBe(true);
+				expect(perms.canChangePowerLevel("@bob:example.com", 50)).toBe(true);
+				expect(perms.isJoined()).toBe(true);
+			});
+		});
+
+		it("useMyMembership is undefined for an unknown room and follows the SDK room", async () => {
+			const room = adminRoom("join");
+			const client = createMockClient(new Map([["!r:x", room]]));
+			await withRoot(async () => {
+				const known = useMyMembership(
+					client as unknown as MatrixClient,
+					() => "!r:x",
+				);
+				const unknown = useMyMembership(
+					client as unknown as MatrixClient,
+					() => "!missing:x",
+				);
+				expect(known()).toBe("join");
+				expect(unknown()).toBeUndefined();
+				room.getMyMembership = () => "ban";
+				client.__emit(RoomEvent.MyMembership, room, "ban", "join");
+				expect(known()).toBe("ban");
+			});
 		});
 	});
 });

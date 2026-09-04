@@ -9,6 +9,7 @@ import {
 	Show,
 } from "solid-js";
 import { FieldStatus } from "./FieldStatus";
+import { useRoomPermissions } from "./useRoomPermissions";
 
 interface DirectoryPublishingSectionProps {
 	client: MatrixClient;
@@ -24,15 +25,18 @@ interface DirectoryPublishingSectionProps {
  * that reverts on failure.
  *
  * There is no `maySendStateEvent` permission for directory listing, so the
- * toggle is not permission-gated: it stays enabled and relies on the server
+ * toggle is not power-level-gated: it stays enabled and relies on the server
  * to reject unauthorized writes (the error is surfaced inline). It is only
- * disabled while loading or saving, or when the initial load failed — in the
- * load-failure case a separate Retry is offered, since there is no known
- * current value to toggle from.
+ * disabled for a non-member (`perms.isJoined`, the membership gate every
+ * settings write shares), while loading or saving, or when the initial
+ * load failed - in the load-failure case a separate Retry is offered,
+ * since there is no known current value to toggle from. A failed write's
+ * Retry is likewise withdrawn once the caller is no longer a member.
  */
 const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 	props,
 ) => {
+	const perms = useRoomPermissions(props.client, () => props.roomId);
 	let disposed = false;
 	onCleanup(() => {
 		disposed = true;
@@ -79,7 +83,7 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 	};
 
 	const toggle = async (): Promise<void> => {
-		if (saving() || published.loading || published.error) return;
+		if (disabled()) return;
 		const current = published() ?? false;
 		const next = !current;
 		const gen = ++opGen;
@@ -107,7 +111,10 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 
 	const checked = (): boolean => published() ?? false;
 	const disabled = (): boolean =>
-		saving() || published.loading || published.error !== undefined;
+		!perms.isJoined() ||
+		saving() ||
+		published.loading ||
+		published.error !== undefined;
 
 	return (
 		<section>
@@ -130,7 +137,7 @@ const DirectoryPublishingSection: Component<DirectoryPublishingSectionProps> = (
 			<FieldStatus
 				state={state()}
 				error={error()}
-				onRetry={() => void toggle()}
+				onRetry={disabled() ? undefined : () => void toggle()}
 				onDismiss={() => setError(null)}
 			/>
 			<Show when={published.error}>
