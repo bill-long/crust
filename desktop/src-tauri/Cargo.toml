@@ -1,6 +1,6 @@
 [package]
 name = "crust"
-version = "0.2.3"
+version = "0.2.4"
 description = "Crust desktop shell"
 authors = ["Bill Long <bill@selfish.net>"]
 license = "Apache-2.0"
