@@ -179,7 +179,8 @@ const ClientContext = createContext<ClientContextValue>();
 
 /**
  * Exported for the browser-mode test harness in `src/test/`. Production
- * code must continue to use `<ClientProvider>` and `useClient()` —
+ * code must continue to use `<ClientProvider>` and `useClient()` (or
+ * `useClientIfProvided` for the one sanctioned optional read) -
  * importing the context directly bypasses the SDK / crypto lifecycle.
  */
 export { ClientContext };
@@ -632,4 +633,18 @@ export function useClient(): ClientContextValue {
 	const ctx = useContext(ClientContext);
 	if (!ctx) throw new Error("useClient must be used within ClientProvider");
 	return ctx;
+}
+
+/**
+ * `useClient` for a hook that is handed its `MatrixClient` explicitly and
+ * only reads the context for what the SDK cannot answer (today: the
+ * summaries store's optimistic membership marks). Returns undefined outside
+ * a provider so such a hook can fall back to the SDK - which is how its
+ * unit tests mount it under a bare `createRoot`. Production surfaces are
+ * always under `<ClientProvider>`; a component that needs the client
+ * should keep using `useClient()`, whose throw is the guard against
+ * mounting outside the lifecycle.
+ */
+export function useClientIfProvided(): ClientContextValue | undefined {
+	return useContext(ClientContext);
 }

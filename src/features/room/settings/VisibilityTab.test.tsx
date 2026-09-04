@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
-import type { MatrixClient } from "matrix-js-sdk";
+import { type MatrixClient, RoomEvent } from "matrix-js-sdk";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
@@ -23,8 +23,12 @@ function setup(opts?: {
 	guestAccess?: string;
 	directory?: "public" | "private";
 	canGuest?: boolean;
+	membership?: string;
 }) {
-	const room = createMockRoom(ROOM_ID, [], [], { name: "My Space" });
+	const room = createMockRoom(ROOM_ID, [], [], {
+		name: "My Space",
+		membership: opts?.membership,
+	});
 	room.__setStateEvent("m.room.power_levels", "", {});
 	room.__setStateEvent("m.room.join_rules", "", { join_rule: "invite" });
 	room.__setStateEvent("m.room.history_visibility", "", {
@@ -114,6 +118,16 @@ describe("VisibilityTab", () => {
 			"public",
 		);
 		expect(checkbox.checked).toBe(true);
+	});
+
+	it("disables the directory toggle for a left space and never writes (#527)", async () => {
+		const { client } = setup({ directory: "private", membership: "leave" });
+		await flush();
+		const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+		expect(checkbox.disabled).toBe(true);
+		fireEvent.click(checkbox);
+		await flush();
+		expect(client.setRoomDirectoryVisibility).not.toHaveBeenCalled();
 	});
 
 	it("reverts the directory toggle when the write fails", async () => {
@@ -241,5 +255,23 @@ describe("VisibilityTab", () => {
 		await flush();
 		expect(checkbox().checked).toBe(true);
 		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("withdraws a failed write's Retry once the caller has left (#527)", async () => {
+		const { client, room } = setup({ directory: "private" });
+		await flush();
+		(
+			client.setRoomDirectoryVisibility as ReturnType<typeof vi.fn>
+		).mockRejectedValueOnce(new Error("nope"));
+		fireEvent.click(screen.getByRole("checkbox"));
+		await flush();
+		await flush();
+		expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+		room.getMyMembership = () => "leave";
+		client.__emit(RoomEvent.MyMembership, room, "leave", "join");
+		await flush();
+		// The error stays readable; only the doomed Retry goes.
+		expect(screen.getByRole("alert")).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 	});
 });

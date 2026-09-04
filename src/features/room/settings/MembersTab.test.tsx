@@ -6,7 +6,12 @@ import {
 	waitFor,
 	within,
 } from "@solidjs/testing-library";
-import { EventType, type MatrixClient, RoomStateEvent } from "matrix-js-sdk";
+import {
+	EventType,
+	type MatrixClient,
+	RoomEvent,
+	RoomStateEvent,
+} from "matrix-js-sdk";
 import type { Accessor, JSX } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
@@ -58,6 +63,7 @@ function setup(options?: {
 	includeKnock?: boolean;
 	knockReason?: string;
 	aliceAvatarMxc?: string;
+	membership?: string;
 }) {
 	const myPower = options?.myPower ?? 100;
 	const members: {
@@ -93,7 +99,9 @@ function setup(options?: {
 			membership: "knock",
 		});
 	}
-	const room = createMockRoom("!room:example.com", [], members);
+	const room = createMockRoom("!room:example.com", [], members, {
+		membership: options?.membership,
+	});
 	if (options?.includeKnock && options?.knockReason !== undefined) {
 		// Attach the knock's member event the way the SDK's
 		// RoomMember.events.member presents it, so usePendingKnocks can
@@ -250,6 +258,23 @@ describe("MembersTab", () => {
 		);
 	});
 
+	it("refuses a parked kick inline once the caller has left (#527)", async () => {
+		// The confirm outlives the row menu that gated it; re-validated at
+		// confirm time like promote/demote, so an in-flight request is never
+		// orphaned by a closing dialog.
+		const { client, room } = setup();
+		await clickAction("Alice", "Kick…");
+		room.getMyMembership = () => "leave";
+		client.__emit(RoomEvent.MyMembership, room, "leave", "join");
+		fireEvent.click(screen.getByRole("button", { name: "Kick" }));
+		await waitFor(() =>
+			expect(screen.getByRole("dialog").textContent).toContain(
+				"You can no longer kick Alice.",
+			),
+		);
+		expect(client.kick).not.toHaveBeenCalled();
+	});
+
 	it("surfaces kick failures inside the ConfirmDialog without closing it", async () => {
 		const { client } = setup();
 		client.kick.mockRejectedValueOnce(new Error("M_FORBIDDEN: not allowed"));
@@ -345,6 +370,18 @@ describe("MembersTab", () => {
 		expect(
 			screen.getByText("You don't have permission to invite users."),
 		).toBeTruthy();
+	});
+
+	it("offers neither the invite form nor no-permission copy to a non-member (#527)", () => {
+		// An ex-admin: the overlay notice names the reason, so the
+		// permission copy would only contradict it.
+		setup({ membership: "leave" });
+		expect(screen.queryByLabelText("User ID")).toBeNull();
+		expect(screen.queryByText("Invite by user ID")).toBeNull();
+		expect(screen.queryByText(/permission to invite/)).toBeNull();
+		expect(
+			screen.queryAllByRole("button", { name: /Member actions/ }),
+		).toHaveLength(0);
 	});
 });
 

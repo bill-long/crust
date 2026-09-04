@@ -259,9 +259,13 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 			<Show
 				when={canManage()}
 				fallback={
-					<p class="text-sm text-text-muted">
-						You don't have permission to manage this space's rooms.
-					</p>
+					// Only while joined: the overlay notice already names the real
+					// reason for a non-member, and this copy would contradict it.
+					<Show when={perms.isJoined()}>
+						<p class="text-sm text-text-muted">
+							You don't have permission to manage this space's rooms.
+						</p>
+					</Show>
 				}
 			>
 				<section>

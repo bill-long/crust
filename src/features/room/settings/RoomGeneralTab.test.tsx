@@ -9,6 +9,7 @@ import {
 	EventType,
 	type MatrixClient,
 	type MatrixEvent,
+	RoomEvent,
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, type Mock, vi } from "vitest";
@@ -148,6 +149,34 @@ describe("RoomGeneralTab", () => {
 			{ name: "Retry name" },
 			"",
 		);
+	});
+
+	it("withdraws Retry once the caller is no longer a member (#527)", async () => {
+		const { client, room } = setup();
+		const sendStateEvent = client.sendStateEvent as unknown as Mock;
+		sendStateEvent.mockRejectedValueOnce(new Error("network down"));
+		fireEvent.input(nameInput(), { target: { value: "Retry name" } });
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy(),
+		);
+		room.getMyMembership = () => "leave";
+		client.__emit(RoomEvent.MyMembership, room, "leave", "join");
+		// The error stays readable; the doomed write path goes.
+		expect(screen.getByRole("alert").textContent).toContain("network down");
+		expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+		expect(sendStateEvent).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps Cancel on a dirty draft after the caller leaves mid-edit (#527)", () => {
+		const { client, room } = setup();
+		fireEvent.input(nameInput(), { target: { value: "Stranded draft" } });
+		room.getMyMembership = () => "leave";
+		client.__emit(RoomEvent.MyMembership, room, "leave", "join");
+		expect(nameInput().readOnly).toBe(true);
+		expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(nameInput().value).toBe("Alpha");
 	});
 
 	it("Cancel reverts the field to the server baseline", () => {

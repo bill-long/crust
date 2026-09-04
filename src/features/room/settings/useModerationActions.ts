@@ -175,8 +175,25 @@ export function useModerationActions(
 	// Kick/Ban are invoked from inside ConfirmDialog.onConfirm - let the
 	// promise reject so the dialog catches and renders the error inline
 	// instead of closing first and surfacing the failure elsewhere.
-	const performKickOrBanAction = (action: MemberAction): Promise<void> =>
-		performKickOrBan(client, roomId(), action);
+	const performKickOrBanAction = (action: MemberAction): Promise<void> => {
+		// Re-validate at confirm time, like promote/demote do in
+		// performAction: the parked dialog outlives the row menu that gated
+		// it, and the caller may have left, been kicked or been demoted in
+		// between. A rejection renders inline; closing the dialog instead
+		// would swallow a request already in flight.
+		const allowed =
+			action.kind === "kick"
+				? perms.canKickTarget(action.userId)
+				: action.kind === "ban"
+					? perms.canBanTarget(action.userId)
+					: true;
+		if (!allowed) {
+			return Promise.reject(
+				new Error(`You can no longer ${action.kind} ${action.displayName}.`),
+			);
+		}
+		return performKickOrBan(client, roomId(), action);
+	};
 
 	const requestAction = (action: MemberAction): void => {
 		if (action.kind === "kick" || action.kind === "ban") {

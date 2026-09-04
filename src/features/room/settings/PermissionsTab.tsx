@@ -1,5 +1,13 @@
 import { EventType, type MatrixClient } from "matrix-js-sdk";
-import { type Component, createMemo, createSignal, For, Show } from "solid-js";
+import {
+	type Component,
+	createEffect,
+	createMemo,
+	createSignal,
+	For,
+	on,
+	Show,
+} from "solid-js";
 import { Tooltip } from "../../../components/Tooltip";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FieldStatus } from "./FieldStatus";
@@ -110,6 +118,14 @@ const PermissionsTab: Component<PermissionsTabProps> = (props) => {
 		}
 		void writePreset(key, preset);
 	};
+
+	// A parked state_default confirm outlives the gate that opened it: if
+	// the caller leaves, is kicked or is demoted while the dialog is open,
+	// confirming would only earn an M_FORBIDDEN - close it instead (the
+	// AdvancedTab leave/forget dialog does the same on a membership flip).
+	createEffect(
+		on(perms.canSetPowerLevels, () => setPendingConfirm(null), { defer: true }),
+	);
 
 	const confirmStateDefault = async (): Promise<void> => {
 		const target = pendingConfirm();
