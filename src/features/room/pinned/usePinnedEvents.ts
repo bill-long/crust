@@ -14,6 +14,8 @@ import {
 	createSignal,
 	onCleanup,
 } from "solid-js";
+import { useClientIfProvided } from "../../../client/client";
+import { canSendStateEvent } from "../../../client/stateEventPermission";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 
 /**
@@ -114,6 +116,7 @@ export function usePinnedEvents(
 	client: MatrixClient,
 	roomId: Accessor<string | undefined>,
 ): UsePinnedEvents {
+	const summaries = useClientIfProvided()?.summaries;
 	// Tick to re-derive the server view when the SDK emits the pinned
 	// state event for this room.
 	const [serverTick, setServerTick] = createSignal(0);
@@ -185,16 +188,7 @@ export function usePinnedEvents(
 	const canPin = createMemo<boolean>(() => {
 		stateTick();
 		roomAvailableTick();
-		const rid = roomId();
-		if (!rid) return false;
-		const room = client.getRoom(rid);
-		const uid = client.getUserId();
-		if (!room || !uid) return false;
-		try {
-			return room.currentState.maySendStateEvent(PINNED_TYPE, uid);
-		} catch {
-			return false;
-		}
+		return canSendStateEvent(client, roomId(), PINNED_TYPE, summaries);
 	});
 
 	// Subscribe to client-level RoomStateEvent.Events for this room

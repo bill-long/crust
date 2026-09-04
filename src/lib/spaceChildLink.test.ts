@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SummariesStore } from "../client/summaries";
 import { linkRoomToSpace, unlinkRoomFromSpace } from "./spaceChildLink";
 
 interface MockOpts {
@@ -9,6 +10,7 @@ interface MockOpts {
 	userId?: string | null;
 	/** maySendStateEvent result for the child room (undefined = no room). */
 	maySendParent?: boolean;
+	membership?: string;
 }
 
 function makeClient(opts: MockOpts = {}) {
@@ -25,6 +27,7 @@ function makeClient(opts: MockOpts = {}) {
 		opts.maySendParent === undefined
 			? null
 			: {
+					getMyMembership: () => opts.membership ?? "join",
 					currentState: {
 						maySendStateEvent: () => opts.maySendParent === true,
 					},
@@ -118,6 +121,18 @@ describe("linkRoomToSpace", () => {
 		expect(sendStateEvent).toHaveBeenCalledTimes(2);
 	});
 
+	it("skips the parent when summaries say the user left despite stale SDK power", async () => {
+		const { client, sendStateEvent } = makeClient({ maySendParent: true });
+		const res = await linkRoomToSpace(client, "!space:x", "!child:x", {
+			checkParentPermission: true,
+			summaries: {
+				"!child:x": { membership: "leave" },
+			} as unknown as SummariesStore,
+		});
+		expect(res.parent).toBe("skipped");
+		expect(sendStateEvent).toHaveBeenCalledTimes(1);
+	});
+
 	it("skips the parent when checkParentPermission is set and the child room is unknown", async () => {
 		// getRoom returns null (room not in SDK) → cannot verify permission.
 		const { client, sendStateEvent } = makeClient({ maySendParent: undefined });
@@ -145,6 +160,7 @@ describe("linkRoomToSpace", () => {
 			getDomain: () => "example.com",
 			getUserId: () => "@me:example.com",
 			getRoom: () => ({
+				getMyMembership: () => "join",
 				currentState: {
 					maySendStateEvent: () => {
 						throw new Error("boom");

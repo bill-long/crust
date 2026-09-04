@@ -149,6 +149,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 				// its failure to roll back; the parent send is best-effort.
 				const res = await linkRoomToSpace(props.client, props.roomId, roomId, {
 					checkParentPermission: true,
+					summaries,
 				});
 				if (!res.childOk) {
 					throw res.childError instanceof Error
@@ -181,7 +182,7 @@ const RoomsTab: Component<RoomsTabProps> = (props) => {
 						props.client,
 						props.roomId,
 						roomId,
-						{ checkParentPermission: true },
+						{ checkParentPermission: true, summaries },
 					);
 					if (!res.childOk) {
 						throw res.childError instanceof Error

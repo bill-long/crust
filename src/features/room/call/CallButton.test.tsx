@@ -32,12 +32,14 @@ vi.mock("solid-refresh", () => ({
 interface MockRoomOpts {
 	roomId: string;
 	canSendCallMember: boolean;
+	membership?: string;
 }
 
 function makeMockRoom(opts: MockRoomOpts) {
 	const listeners = new Set<() => void>();
 	return {
 		roomId: opts.roomId,
+		getMyMembership: () => opts.membership ?? "join",
 		currentState: {
 			maySendStateEvent: (_type: string, _uid: string): boolean =>
 				opts.canSendCallMember,
@@ -141,6 +143,16 @@ describe("CallButton visibility", () => {
 
 	it("hidden when the user lacks the power level for the call-member state event", () => {
 		renderButton({ canSendCallMember: false });
+		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
+	});
+
+	it("hidden for a summaries-marked left room even when admin power survives", () => {
+		renderButton({
+			canSendCallMember: true,
+			summaries: {
+				"!room:example.com": { membership: "leave" },
+			} as unknown as SummariesStore,
+		});
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
 	});
 

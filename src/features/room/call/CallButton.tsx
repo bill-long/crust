@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { canSendStateEvent } from "../../../client/stateEventPermission";
 import { activeCallRoomId } from "../../../stores/activeCall";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
@@ -70,14 +71,12 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const canStartCall = createMemo((): boolean => {
 		bump();
 		roomAvailableTick();
-		const room = client.getRoom(props.roomId);
-		const uid = client.getUserId();
-		if (!room || !uid) return false;
-		try {
-			return room.currentState.maySendStateEvent(CALL_MEMBER_EVENT_TYPE, uid);
-		} catch {
-			return false;
-		}
+		return canSendStateEvent(
+			client,
+			props.roomId,
+			CALL_MEMBER_EVENT_TYPE,
+			summaries,
+		);
 	});
 
 	const visible = (): boolean => canStartCall();
