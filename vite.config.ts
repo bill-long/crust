@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig, type Plugin } from "vite";
@@ -8,6 +9,11 @@ import solid from "vite-plugin-solid";
 import { appendDevCspSources } from "./scripts/csp-lib.mjs";
 import { ensureDevCert } from "./scripts/dev-https-lib.mjs";
 import { ICON_FILENAMES } from "./src/lib/iconRuntimeCache";
+
+// fileURLToPath rather than import.meta.dirname: the latter needs Node >=
+// 20.11 and this file is evaluated by every `pnpm dev` and `pnpm build`, so
+// it must work on any Node ESM runtime (same rule as scripts/check-vendor-chunks.mjs).
+const configDir = dirname(fileURLToPath(import.meta.url));
 
 // Public base path the app is served from. Override with VITE_BASE_PATH
 // at build time (e.g. `VITE_BASE_PATH=/crust/ pnpm build`) to host the
@@ -83,7 +89,7 @@ export default defineConfig(({ command, mode, isPreview }) => ({
 	server:
 		command === "serve" && !isPreview && mode === "https"
 			? {
-					https: ensureDevCert(join(import.meta.dirname, ".dev-certs"), {
+					https: ensureDevCert(join(configDir, ".dev-certs"), {
 						run: (cmd, args) => execFileSync(cmd, args, { stdio: "inherit" }),
 					}),
 				}
