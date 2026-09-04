@@ -11,9 +11,11 @@
  *
  * Keys fall into two classes (#532):
  *   - **Install-global** - one value for the browser profile, shared by every
- *     account: pane widths, layout, call-overlay size, and the OIDC client
- *     registrations (which are per *install* per issuer, not per account).
- *     They keep the bare key below.
+ *     account: pane widths, layout, call-overlay size, the OIDC client
+ *     registrations (which are per *install* per issuer, not per account),
+ *     and the desktop shell's last live operator config (which is read before
+ *     any account is, and carries the operator's keys, not a user's). They
+ *     keep the bare key below.
  *   - **Per-account** - the values in {@link ACCOUNT_SCOPED_KEYS}, which belong
  *     to one Matrix user. Their real key is the bare key suffixed with the
  *     owning user ID (see {@link accountScopedKey}); the bare key exists only
@@ -34,6 +36,8 @@ export const STORAGE_KEYS = {
 	membersWidth: "crust:members-width",
 	threadWidth: "crust:thread-width",
 	oidcClientRegistrations: "crust:oidc-client-registrations",
+	/** The desktop shell's last successfully read live config (#581). */
+	remoteConfig: "crust:remote-config",
 } as const;
 
 /**
