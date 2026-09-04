@@ -23,7 +23,20 @@ pub fn write(path: &Path, from_version: &str, target_version: &str) -> Result<()
         target_version: target_version.to_string(),
     };
     let encoded = serde_json::to_vec(&marker).map_err(|e| e.to_string())?;
-    std::fs::write(path, encoded).map_err(|e| e.to_string())
+    // Never expose a half-written JSON document if the updater kills this
+    // process during the write. Windows cannot atomically replace an existing
+    // destination with `rename`, so clear an older attempt immediately before
+    // moving the fully-written temporary file into place.
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, encoded).map_err(|e| e.to_string())?;
+    if let Err(e) = clear(path) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(e);
+    }
+    std::fs::rename(&temporary, path).map_err(|e| {
+        let _ = std::fs::remove_file(&temporary);
+        e.to_string()
+    })
 }
 
 /// Return the target of an install attempt that left the old version running.
@@ -114,6 +127,21 @@ mod tests {
 
         assert_eq!(pending_failure(&path, "0.2.4").unwrap(), None);
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_new_attempt_replaces_an_existing_marker() {
+        let dir = TestDir::new();
+        let path = dir.marker();
+        write(&path, "0.2.3", "0.2.4").unwrap();
+
+        write(&path, "0.2.3", "0.2.5").unwrap();
+
+        assert_eq!(
+            pending_failure(&path, "0.2.3").unwrap(),
+            Some("0.2.5".to_string())
+        );
+        assert!(!path.with_extension("json.tmp").exists());
     }
 
     #[test]

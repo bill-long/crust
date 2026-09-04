@@ -21,16 +21,19 @@ import {
 } from "./nativeUpdate";
 
 /** One card. Shared by both update sources so they cannot drift apart. */
-const UpdateCard: Component<{
+type UpdateCardProps = {
 	title: string;
 	body: JSX.Element;
-	actionLabel?: string;
-	onAction?: () => void;
 	onDismiss: () => void;
 	dismissLabel?: string;
 	pending?: boolean;
 	error?: string | null;
-}> = (props) => (
+} & (
+	| { actionLabel: string; onAction: () => void }
+	| { actionLabel?: never; onAction?: never }
+);
+
+const UpdateCard: Component<UpdateCardProps> = (props) => (
 	// Positioned by the stack below, not by itself: two cards both claiming
 	// `fixed bottom-4 … z-50` sat exactly on top of each other, and the second in
 	// DOM order hid the first's buttons entirely.

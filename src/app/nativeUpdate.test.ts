@@ -190,6 +190,18 @@ describe("nativeUpdate", () => {
 		expect(failedInstallDismissError()).toBeNull();
 	});
 
+	it("does not invoke or leave stale errors when there is no warning to dismiss", () => {
+		const { invoke } = installTauri();
+
+		dismissFailedInstall();
+
+		expect(invoke).not.toHaveBeenCalledWith(
+			"dismiss_update_install_failure",
+			undefined,
+		);
+		expect(failedInstallDismissError()).toBeNull();
+	});
+
 	it("does not let a late catch-up query overwrite a newer version", async () => {
 		// The query answers for the state at the moment it was SENT. The shell's
 		// re-check loop can stage a newer build and emit while it is in flight, and

@@ -44,6 +44,7 @@ import { UpdatePrompt } from "./UpdatePrompt";
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 	pwa.setNeedRefresh?.(false);
 	pwa.updateServiceWorker.mockClear();
 	pwa.useRegisterSW.mockClear();

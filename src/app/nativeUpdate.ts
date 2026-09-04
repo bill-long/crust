@@ -233,6 +233,7 @@ export function dismissNativeUpdate(): void {
 /** Acknowledge the previous install failure and remove its persisted marker. */
 export function dismissFailedInstall(): void {
 	const dismissed = failedInstallVersionSignal();
+	if (dismissed === null) return;
 	setFailedInstallDismissError(null);
 	setFailedInstallVersion(null);
 	void invokeTauri("dismiss_update_install_failure").catch((err) => {
@@ -242,7 +243,7 @@ export function dismissFailedInstall(): void {
 		);
 		// Optimistic dismissal stays instant. Roll it back only if another source
 		// has not installed a newer warning while the IPC request was in flight.
-		if (!failedInstallVersionSignal()) {
+		if (failedInstallVersionSignal() === null) {
 			setFailedInstallVersion(dismissed);
 			setFailedInstallDismissError(
 				"Couldn't dismiss this warning. Crust will show it again next time.",
