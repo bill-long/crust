@@ -46,10 +46,9 @@ function syncPresenceValue(): SetPresence {
  * else - timeouts, 5xx, rate limits - is transient, and the difference
  * decides whether we may contradict our own optimistic write.
  *
- * This classifies the WRITE. A not-found from the read that precedes it is
- * not the same claim - Continuwuity answers one for an account that shares
- * no room with itself - so `currentStatusMsg` strips that shape before it
- * ever reaches here.
+ * The write is what this classifies. A not-found from the read that
+ * precedes it never reaches here: `currentStatusMsg` reads that as "no
+ * status set" and lets the write be the one claim about the endpoint.
  */
 function meansPresenceUnsupported(e: unknown): boolean {
 	const err = e as { httpStatus?: unknown; errcode?: unknown } | null;
@@ -85,12 +84,19 @@ function publishedPresence(): PublishedPresence {
  * included. Whether to read at all is `publish`'s decision, documented
  * there; this only performs one.
  *
- * Failures reject. A "not found" is re-thrown stripped of its error
- * shape, because on the read it does NOT mean the endpoint is missing:
- * Continuwuity answers it for an account that shares no room with itself
- * (zero joined rooms) even with a status stored, and letting that latch
- * as "this server has no presence" would take our own dot down and skip
- * every publish for the session on a server where presence works.
+ * A "not found" reads as no status. Two servers answer it and the plain
+ * reading serves both: a homeserver with no presence at all (the older
+ * Conduwuity 404) goes on to fail the PUT, which is where that gets
+ * classified once and where the dot rollback belongs; and Continuwuity
+ * answers it for an account that shares no room with ITSELF - zero joined
+ * rooms - where the alternative, failing every publish, would also mean
+ * the status editor could never open. The accepted cost is the corner of
+ * that corner: an account with no rooms at all, and a status set from
+ * another client, loses it on the next launch's publish. It shares no
+ * room with anyone, so nobody could see that status.
+ *
+ * Any other failure rejects: a publish must not go out without a status
+ * it could not read, since the server would clear it.
  */
 async function currentStatusMsg(c: MatrixClient): Promise<string> {
 	const uid = c.getUserId();
@@ -100,9 +106,7 @@ async function currentStatusMsg(c: MatrixClient): Promise<string> {
 		return typeof res.status_msg === "string" ? res.status_msg : "";
 	} catch (e) {
 		const err = e as { httpStatus?: unknown; errcode?: unknown } | null;
-		if (err?.httpStatus === 404 || err?.errcode === "M_NOT_FOUND") {
-			throw new Error("Could not read the current status message.");
-		}
+		if (err?.httpStatus === 404 || err?.errcode === "M_NOT_FOUND") return "";
 		throw e;
 	}
 }

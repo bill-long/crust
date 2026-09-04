@@ -61,11 +61,12 @@ function setup() {
 	render(() => <AccountTab onDeactivated={() => {}} />);
 }
 
-const editButton = (): HTMLButtonElement => {
-	// The Profile section has two Edit buttons (display name first).
-	const buttons = screen.getAllByRole("button", { name: "Edit" });
-	return buttons[buttons.length - 1] as HTMLButtonElement;
-};
+const editButton = (): HTMLButtonElement =>
+	// Both editors' triggers read "Edit"; only their labels tell them apart,
+	// which is why they have distinct ones.
+	screen.getByRole("button", {
+		name: "Edit status message",
+	}) as HTMLButtonElement;
 const input = (): HTMLInputElement =>
 	screen.getByLabelText("Status message") as HTMLInputElement;
 const setInput = (value: string): void => {

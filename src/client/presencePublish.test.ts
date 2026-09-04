@@ -369,19 +369,16 @@ describe("presence publisher", () => {
 			dispose();
 		});
 
-		it("does not latch presence-off when the read answers not-found", async () => {
-			// Continuwuity answers M_NOT_FOUND for an account that shares no room
-			// with itself (zero joined rooms) even with a status stored, so this
-			// must not read as "this server has no presence" and take our own
-			// dot down for the session. Nothing is published either: `set_presence`
-			// on every /sync carries the sharing decision.
+		it("reads a not-found as no status and publishes on", async () => {
+			// Two servers answer it: one with no presence at all, which fails the
+			// PUT next and is classified there (once, with the dot rollback); and
+			// Continuwuity for an account that shares no room with itself. Failing
+			// the publish instead would take our own dot down on the first and
+			// make the status editor unopenable on the second.
 			const getPresence = vi.fn(async () => {
 				throw Object.assign(
 					new Error("Presence state for this user was not found"),
-					{
-						httpStatus: 404,
-						errcode: "M_NOT_FOUND",
-					},
+					{ httpStatus: 404, errcode: "M_NOT_FOUND" },
 				);
 			});
 			const { client, setPresence } = mkClient(undefined, getPresence);
@@ -393,7 +390,10 @@ describe("presence publisher", () => {
 				return d;
 			});
 			await settle();
-			expect(setPresence).not.toHaveBeenCalled();
+			expect(setPresence).toHaveBeenCalledWith({
+				presence: "online",
+				status_msg: "",
+			});
 			expect(presenceOf("@me:x").status).toBe("online");
 			dispose();
 		});

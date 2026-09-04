@@ -484,6 +484,7 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 									</span>
 									<button
 										type="button"
+										aria-label="Edit display name"
 										onClick={startEditingName}
 										class="rounded px-2 py-0.5 text-xs text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									>
@@ -557,6 +558,7 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 									</span>
 									<button
 										type="button"
+										aria-label="Edit status message"
 										onClick={() => void startEditingStatus()}
 										class="rounded px-2 py-0.5 text-xs text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 									>
