@@ -62,6 +62,7 @@ const mockSdkClient = {
 	// records our own presence, which no event ever delivers.
 	getUserId: () => "@alice:example.com",
 	setPresence: vi.fn(async () => {}),
+	getPresence: vi.fn(async () => ({ presence: "online" })),
 	setSyncPresence: vi.fn(),
 };
 
@@ -274,14 +275,18 @@ describe("ClientProvider session wiring (#460)", () => {
 });
 
 describe("presence wiring (#445)", () => {
-	it("publishes presence on start, per the share-presence setting", () => {
+	it("publishes presence on start, per the share-presence setting", async () => {
 		setup(PASSWORD_SESSION);
+		// The publish reads the current status first (a presence PUT that
+		// omits status_msg clears it), so the write lands a tick later.
+		await new Promise((r) => setTimeout(r, 0));
 
 		// Defaults on, matching Element - and both halves are needed: the
 		// state write, and the sync parameter that stops the next poll
 		// asserting the opposite.
 		expect(mockSdkClient.setPresence).toHaveBeenCalledWith({
 			presence: "online",
+			status_msg: "",
 		});
 		expect(mockSdkClient.setSyncPresence).toHaveBeenCalledWith("online");
 	});
