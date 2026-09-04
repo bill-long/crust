@@ -17,9 +17,11 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 mod mic_hotkey;
+mod update_install_marker;
 pub use mic_hotkey::run_helper;
 
 const OVERLAY_LABEL: &str = "overlay";
+const UPDATE_INSTALL_MARKER: &str = "pending-update-install.json";
 
 /// Injected into every webview this shell creates (as a plugin initialization
 /// script, see `run`), to run before the page's own scripts whatever served the
@@ -41,8 +43,7 @@ const UPDATE_READY_EVENT: &str = "crust://update-ready";
 
 /// How often the shell looks again. Long enough to be invisible, short enough
 /// that a day-long session still gets the release.
-const UPDATE_RECHECK_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(6 * 60 * 60);
+const UPDATE_RECHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 /// First retry after a FAILED check, quadrupling up to the normal interval.
 /// A launch that beats the network back online should not wait six hours.
@@ -172,6 +173,47 @@ fn pending_update_version(app: AppHandle) -> Option<String> {
         .map(|(update, _)| update.version.clone())
 }
 
+fn update_install_marker_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join(UPDATE_INSTALL_MARKER))
+        .map_err(|e| e.to_string())
+}
+
+/// A target version whose installer was launched by the previous process but
+/// left that same application version running. Kept until the webview asks the
+/// user to acknowledge it; a successful update clears itself because the
+/// running version changes.
+#[tauri::command]
+fn pending_update_install_failure(app: AppHandle) -> Option<String> {
+    let result = update_install_marker_path(&app).and_then(|path| {
+        update_install_marker::pending_failure(&path, &app.package_info().version.to_string())
+    });
+    match result {
+        Ok(version) => version,
+        Err(e) => {
+            log_update(
+                &app,
+                &format!("could not read the update install marker: {e}"),
+            );
+            None
+        }
+    }
+}
+
+#[tauri::command]
+fn dismiss_update_install_failure(app: AppHandle) -> Result<(), String> {
+    let result =
+        update_install_marker_path(&app).and_then(|path| update_install_marker::clear(&path));
+    if let Err(e) = &result {
+        log_update(
+            &app,
+            &format!("could not clear the update install marker: {e}"),
+        );
+    }
+    result
+}
+
 fn apply_click_through(app: &AppHandle, on: bool) {
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = win.set_ignore_cursor_events(on);
@@ -254,6 +296,26 @@ fn install_staged_update(app: &AppHandle) {
     let Some((update, bytes)) = staged else {
         return;
     };
+    // Write BEFORE handing off. `Update::install` can report extraction errors,
+    // but on Windows its ShellExecuteW launch is fire-and-forget: a refused,
+    // killed or otherwise incomplete installer can still return Ok. The next
+    // process distinguishes success by its changed package version.
+    let marker = update_install_marker_path(app).and_then(|path| {
+        update_install_marker::write(
+            &path,
+            &app.package_info().version.to_string(),
+            &update.version,
+        )
+    });
+    if let Err(e) = marker {
+        // Do not hold a valid, verified update hostage to its diagnostic. The
+        // updater log remains the fallback if this machine cannot persist the
+        // marker at all.
+        log_update(
+            app,
+            &format!("could not write the update install marker: {e}"),
+        );
+    }
     // Only pre-launch failures (extraction, a bad temp path) can surface here:
     // on Windows the plugin hands off with ShellExecuteW, ignores its result and
     // exits the process, so a launch the shell refuses is silent either way.
@@ -296,6 +358,8 @@ pub fn run() {
             overlay_is_open,
             restart_for_update,
             pending_update_version,
+            pending_update_install_failure,
+            dismiss_update_install_failure,
             mic_hotkey::set_mic_hotkey
         ])
         // A plugin init script reaches every webview the shell creates (the

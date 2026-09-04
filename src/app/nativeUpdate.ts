@@ -25,10 +25,25 @@ const UPDATE_READY_EVENT = "crust://update-ready";
 const [pendingVersionSignal, setPendingVersion] = createSignal<string | null>(
 	null,
 );
+const [failedInstallVersionSignal, setFailedInstallVersion] = createSignal<
+	string | null
+>(null);
+const [failedInstallDismissErrorSignal, setFailedInstallDismissError] =
+	createSignal<string | null>(null);
 
 /** Reactive: the version waiting to be applied, or null when none is staged. */
 export function pendingUpdateVersion(): string | null {
 	return pendingVersionSignal();
+}
+
+/** Reactive: the update whose previous install handoff did not complete. */
+export function failedInstallVersion(): string | null {
+	return failedInstallVersionSignal();
+}
+
+/** Reactive: why acknowledging the persisted install warning failed. */
+export function failedInstallDismissError(): string | null {
+	return failedInstallDismissErrorSignal();
 }
 
 /** How long to wait for the process to actually go before re-enabling. */
@@ -111,6 +126,17 @@ export async function watchNativeUpdates(): Promise<UnlistenTauri> {
 		if (staged && !pendingVersionSignal()) setPendingVersion(staged);
 	} catch (err) {
 		console.error("watchNativeUpdates could not read the staged version", err);
+	}
+	try {
+		const failed = await invokeTauri<string | null>(
+			"pending_update_install_failure",
+		);
+		if (failed) {
+			setFailedInstallDismissError(null);
+			setFailedInstallVersion(failed);
+		}
+	} catch (err) {
+		console.error("watchNativeUpdates could not read the install marker", err);
 	}
 	return unlisten;
 }
@@ -204,9 +230,33 @@ export function dismissNativeUpdate(): void {
 	setRestartError(null);
 }
 
+/** Acknowledge the previous install failure and remove its persisted marker. */
+export function dismissFailedInstall(): void {
+	const dismissed = failedInstallVersionSignal();
+	if (dismissed === null) return;
+	setFailedInstallDismissError(null);
+	setFailedInstallVersion(null);
+	void invokeTauri("dismiss_update_install_failure").catch((err) => {
+		console.error(
+			"dismissFailedInstall could not clear the install marker",
+			err,
+		);
+		// Optimistic dismissal stays instant. Roll it back only if another source
+		// has not installed a newer warning while the IPC request was in flight.
+		if (failedInstallVersionSignal() === null) {
+			setFailedInstallVersion(dismissed);
+			setFailedInstallDismissError(
+				"Couldn't dismiss this warning. Crust will show it again next time.",
+			);
+		}
+	});
+}
+
 /** Test seam: clear module state between cases. */
 export function _resetNativeUpdateForTests(): void {
 	setPendingVersion(null);
+	setFailedInstallVersion(null);
+	setFailedInstallDismissError(null);
 	setRestarting(false);
 	setRestartError(null);
 	// The signals are not all of it: a case that asserts the stale-attempt branch

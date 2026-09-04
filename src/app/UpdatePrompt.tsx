@@ -9,7 +9,10 @@ import {
 } from "solid-js";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import {
+	dismissFailedInstall,
 	dismissNativeUpdate,
+	failedInstallDismissError,
+	failedInstallVersion,
 	pendingUpdateVersion,
 	restartError,
 	restartForUpdate,
@@ -18,15 +21,19 @@ import {
 } from "./nativeUpdate";
 
 /** One card. Shared by both update sources so they cannot drift apart. */
-const UpdateCard: Component<{
+type UpdateCardProps = {
 	title: string;
 	body: JSX.Element;
-	actionLabel: string;
-	onAction: () => void;
 	onDismiss: () => void;
+	dismissLabel?: string;
 	pending?: boolean;
 	error?: string | null;
-}> = (props) => (
+} & (
+	| { actionLabel: string; onAction: () => void }
+	| { actionLabel?: never; onAction?: never }
+);
+
+const UpdateCard: Component<UpdateCardProps> = (props) => (
 	// Positioned by the stack below, not by itself: two cards both claiming
 	// `fixed bottom-4 … z-50` sat exactly on top of each other, and the second in
 	// DOM order hid the first's buttons entirely.
@@ -62,27 +69,29 @@ const UpdateCard: Component<{
 						: "text-text-muted hover:bg-surface-2 hover:text-text-primary"
 				}`}
 			>
-				Later
+				{props.dismissLabel ?? "Later"}
 			</button>
-			<button
-				type="button"
-				onClick={() => {
-					if (props.pending) return;
-					props.onAction();
-				}}
-				aria-disabled={props.pending ?? false}
-				// Dimmed via the background, not `opacity-*`: element opacity also
-				// fades the box-shadow the focus ring is drawn with, and this button
-				// stays tab-focusable while pending (that is the point of
-				// aria-disabled), so the indicator has to keep its full contrast.
-				class={`rounded px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
-					props.pending
-						? "cursor-default bg-accent/60"
-						: "bg-accent hover:bg-accent/90"
-				}`}
-			>
-				{props.actionLabel}
-			</button>
+			<Show when={props.onAction}>
+				<button
+					type="button"
+					onClick={() => {
+						if (props.pending) return;
+						props.onAction?.();
+					}}
+					aria-disabled={props.pending ?? false}
+					// Dimmed via the background, not `opacity-*`: element opacity also
+					// fades the box-shadow the focus ring is drawn with, and this button
+					// stays tab-focusable while pending (that is the point of
+					// aria-disabled), so the indicator has to keep its full contrast.
+					class={`rounded px-3 py-1.5 text-xs font-semibold text-accent-foreground transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover ${
+						props.pending
+							? "cursor-default bg-accent/60"
+							: "bg-accent hover:bg-accent/90"
+					}`}
+				>
+					{props.actionLabel}
+				</button>
+			</Show>
 		</div>
 	</div>
 );
@@ -172,12 +181,24 @@ const UpdatePrompt: Component = () => {
 	// Nothing at all when there is nothing to show: the wrapper is zero-height
 	// today, but rendering it in the overlay contradicts the guard above.
 	const anyCard = (): boolean =>
-		showCards() && Boolean(pendingUpdateVersion() || needRefresh());
+		showCards() &&
+		Boolean(failedInstallVersion() || pendingUpdateVersion() || needRefresh());
 
 	return (
 		// One stack, so a second card sits above the first instead of on it.
 		<Show when={anyCard()}>
 			<div class="fixed bottom-4 left-4 right-4 z-50 flex flex-col gap-2 sm:right-auto sm:w-80">
+				<Show when={showCards() && native() && failedInstallVersion()}>
+					{(version) => (
+						<UpdateCard
+							title="Desktop update didn't install"
+							body={`Crust ${version()} did not finish installing the last time the app closed. Crust will try again after downloading it; reinstall manually if it keeps failing.`}
+							onDismiss={dismissFailedInstall}
+							dismissLabel="Dismiss"
+							error={failedInstallDismissError()}
+						/>
+					)}
+				</Show>
 				<Show when={showCards() && native() && pendingUpdateVersion()}>
 					{(version) => (
 						<UpdateCard

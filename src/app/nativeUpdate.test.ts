@@ -4,7 +4,10 @@ import { clearNotices } from "../stores/notices";
 import { withPathname } from "../test/withPathname";
 import {
 	_resetNativeUpdateForTests,
+	dismissFailedInstall,
 	dismissNativeUpdate,
+	failedInstallDismissError,
+	failedInstallVersion,
 	pendingUpdateVersion,
 	restartError,
 	restartForUpdate,
@@ -23,6 +26,7 @@ function installTauri(
 	// Runs inside the staged-version query, so a test can hold it open and act
 	// while it is in flight.
 	onQuery?: () => Promise<void>,
+	failedInstall: string | null = null,
 ): {
 	invoke: ReturnType<typeof vi.fn>;
 	fire: (event: string, payload: unknown) => void;
@@ -42,6 +46,7 @@ function installTauri(
 			if (onQuery) await onQuery();
 			return staged;
 		}
+		if (cmd === "pending_update_install_failure") return failedInstall;
 		return undefined;
 	});
 
@@ -126,6 +131,75 @@ describe("nativeUpdate", () => {
 		installTauri("0.2.0");
 		await watchNativeUpdates();
 		expect(pendingUpdateVersion()).toBe("0.2.0");
+	});
+
+	it("surfaces and acknowledges an install attempt left on the old version", async () => {
+		const { invoke } = installTauri(null, undefined, "0.2.4");
+
+		await watchNativeUpdates();
+		expect(failedInstallVersion()).toBe("0.2.4");
+
+		dismissFailedInstall();
+		expect(failedInstallVersion()).toBeNull();
+		expect(invoke).toHaveBeenCalledWith(
+			"dismiss_update_install_failure",
+			undefined,
+		);
+	});
+
+	it("restores the warning if its persisted marker cannot be cleared", async () => {
+		const { invoke } = installTauri(null, undefined, "0.2.4");
+		await watchNativeUpdates();
+		invoke.mockRejectedValueOnce(new Error("read-only data directory"));
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		dismissFailedInstall();
+		expect(failedInstallVersion()).toBeNull();
+		await vi.waitFor(() => expect(failedInstallVersion()).toBe("0.2.4"));
+		expect(failedInstallDismissError()).toMatch(/Couldn't dismiss/);
+	});
+
+	it("does not let a stale dismissal failure replace a newer warning", async () => {
+		const { invoke } = installTauri(null, undefined, "0.2.4");
+		await watchNativeUpdates();
+		let rejectDismiss = (): void => {};
+		const heldDismiss = new Promise<void>((_resolve, reject) => {
+			rejectDismiss = () => reject(new Error("marker stayed locked"));
+		});
+		invoke.mockImplementation(async (cmd: string) => {
+			if (cmd === "plugin:event|listen") return 1;
+			if (cmd === "pending_update_version") return null;
+			if (cmd === "pending_update_install_failure") return "0.2.5";
+			if (cmd === "dismiss_update_install_failure") return heldDismiss;
+			return undefined;
+		});
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		dismissFailedInstall();
+		await watchNativeUpdates();
+		expect(failedInstallVersion()).toBe("0.2.5");
+		rejectDismiss();
+
+		await vi.waitFor(() =>
+			expect(console.error).toHaveBeenCalledWith(
+				"dismissFailedInstall could not clear the install marker",
+				expect.any(Error),
+			),
+		);
+		expect(failedInstallVersion()).toBe("0.2.5");
+		expect(failedInstallDismissError()).toBeNull();
+	});
+
+	it("does not invoke or leave stale errors when there is no warning to dismiss", () => {
+		const { invoke } = installTauri();
+
+		dismissFailedInstall();
+
+		expect(invoke).not.toHaveBeenCalledWith(
+			"dismiss_update_install_failure",
+			undefined,
+		);
+		expect(failedInstallDismissError()).toBeNull();
 	});
 
 	it("does not let a late catch-up query overwrite a newer version", async () => {

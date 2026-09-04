@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("solid-refresh", () => ({
@@ -33,13 +39,17 @@ vi.mock("virtual:pwa-register/solid", async () => {
 });
 
 import { withPathname } from "../test/withPathname";
+import { _resetNativeUpdateForTests } from "./nativeUpdate";
 import { UpdatePrompt } from "./UpdatePrompt";
 
 afterEach(() => {
 	cleanup();
+	vi.restoreAllMocks();
 	pwa.setNeedRefresh?.(false);
 	pwa.updateServiceWorker.mockClear();
 	pwa.useRegisterSW.mockClear();
+	(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
+	_resetNativeUpdateForTests();
 });
 
 describe("UpdatePrompt", () => {
@@ -97,5 +107,52 @@ describe("UpdatePrompt in the desktop shell", () => {
 		render(() => <UpdatePrompt />);
 		expect(pwa.useRegisterSW).not.toHaveBeenCalled();
 		expect(screen.queryByText("App update")).toBeNull();
+	});
+
+	it("shows and dismisses the previous install failure", async () => {
+		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: vi.fn(async (cmd: string) => {
+				if (cmd === "plugin:event|listen") return 1;
+				if (cmd === "pending_update_version") return null;
+				if (cmd === "pending_update_install_failure") return "0.2.4";
+				return undefined;
+			}),
+			transformCallback: () => 1,
+		};
+
+		render(() => <UpdatePrompt />);
+
+		await waitFor(() =>
+			expect(screen.getByText("Desktop update didn't install")).toBeTruthy(),
+		);
+		expect(screen.getByText(/Crust 0\.2\.4 did not finish/)).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+		expect(screen.queryByText("Desktop update didn't install")).toBeNull();
+	});
+
+	it("explains why a failed dismissal returned the warning", async () => {
+		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+			invoke: vi.fn(async (cmd: string) => {
+				if (cmd === "plugin:event|listen") return 1;
+				if (cmd === "pending_update_version") return null;
+				if (cmd === "pending_update_install_failure") return "0.2.4";
+				if (cmd === "dismiss_update_install_failure") {
+					throw new Error("read-only data directory");
+				}
+				return undefined;
+			}),
+			transformCallback: () => 1,
+		};
+		vi.spyOn(console, "error").mockImplementation(() => {});
+
+		render(() => <UpdatePrompt />);
+		await waitFor(() =>
+			expect(screen.getByText("Desktop update didn't install")).toBeTruthy(),
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+		await waitFor(() =>
+			expect(screen.getByText(/Couldn't dismiss this warning/)).toBeTruthy(),
+		);
 	});
 });
