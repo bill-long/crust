@@ -5,14 +5,8 @@ import {
 	RoomEvent,
 	RoomStateEvent,
 } from "matrix-js-sdk";
-import {
-	type Accessor,
-	createMemo,
-	createSignal,
-	onCleanup,
-	useContext,
-} from "solid-js";
-import { ClientContext } from "../../../client/client";
+import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
+import { useClientIfProvided } from "../../../client/client";
 import type { SummariesStore } from "../../../client/summaries";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import {
@@ -57,7 +51,7 @@ export function useMyMembership(
 	client: MatrixClient,
 	roomId: Accessor<string | undefined>,
 ): Accessor<string | undefined> {
-	const summaries = useContext(ClientContext)?.summaries;
+	const summaries = useClientIfProvided()?.summaries;
 	const [tick, setTick] = createSignal(0);
 	const onMyMembership = (room: Room): void => {
 		if (room.roomId === roomId()) setTick((n) => n + 1);
