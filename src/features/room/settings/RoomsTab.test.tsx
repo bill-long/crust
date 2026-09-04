@@ -56,6 +56,7 @@ function setup(opts?: {
 	registerCandidateRoom?: boolean;
 	registerChildRoom?: boolean;
 	childAvatarUrl?: string;
+	childMembership?: string;
 }) {
 	const space = createMockRoom("!space:x", [], [], { name: "My Space" });
 	space.__setStateEvent("m.room.create", "", { type: "m.space" });
@@ -91,6 +92,7 @@ function setup(opts?: {
 			roomId: "!child:x",
 			name: "Child Room",
 			avatarUrl: opts?.childAvatarUrl ?? null,
+			membership: opts?.childMembership ?? "join",
 		}),
 	);
 	store.setSummaries(
@@ -199,6 +201,24 @@ describe("RoomsTab", () => {
 		);
 		await flush();
 		expect(client.sendStateEvent).toHaveBeenCalledWith(
+			"!child:x",
+			"m.space.parent",
+			{},
+			"!space:x",
+		);
+	});
+
+	it("does not clear m.space.parent after the summaries store marks the child left", async () => {
+		const { client } = setup({
+			registerChildRoom: true,
+			childMembership: "leave",
+		});
+		fireEvent.click(
+			screen.getByRole("button", { name: "Remove Child Room from this space" }),
+		);
+		await flush();
+		expect(client.sendStateEvent).toHaveBeenCalledTimes(1);
+		expect(client.sendStateEvent).not.toHaveBeenCalledWith(
 			"!child:x",
 			"m.space.parent",
 			{},

@@ -1,4 +1,6 @@
 import { EventType, type MatrixClient } from "matrix-js-sdk";
+import { canSendStateEvent } from "../client/stateEventPermission";
+import type { SummariesStore } from "../client/summaries";
 
 export interface SpaceLinkResult {
 	/** Whether the parent-side `m.space.child` event was sent successfully. */
@@ -21,6 +23,11 @@ type LinkClient = Pick<
 	MatrixClient,
 	"sendStateEvent" | "getDomain" | "getUserId" | "getRoom"
 >;
+
+interface SpaceLinkOptions {
+	checkParentPermission?: boolean;
+	summaries?: SummariesStore;
+}
 
 /**
  * Establish the bidirectional space relationship between a parent space and a
@@ -47,12 +54,17 @@ export async function linkRoomToSpace(
 	client: LinkClient,
 	spaceId: string,
 	childRoomId: string,
-	opts?: { checkParentPermission?: boolean },
+	opts?: SpaceLinkOptions,
 ): Promise<SpaceLinkResult> {
 	const domain = client.getDomain();
 	const via = domain ? [domain] : [];
 	const sendParent = opts?.checkParentPermission
-		? canSendSpaceParent(client, childRoomId)
+		? canSendStateEvent(
+				client,
+				childRoomId,
+				EventType.SpaceParent,
+				opts.summaries,
+			)
 		: true;
 	return writeLinkSequential(
 		client,
@@ -79,10 +91,15 @@ export async function unlinkRoomFromSpace(
 	client: LinkClient,
 	spaceId: string,
 	childRoomId: string,
-	opts?: { checkParentPermission?: boolean },
+	opts?: SpaceLinkOptions,
 ): Promise<SpaceLinkResult> {
 	const removeParent = opts?.checkParentPermission
-		? canSendSpaceParent(client, childRoomId)
+		? canSendStateEvent(
+				client,
+				childRoomId,
+				EventType.SpaceParent,
+				opts.summaries,
+			)
 		: true;
 	// Empty content removes each relationship.
 	return writeLinkSequential(
@@ -142,21 +159,5 @@ async function writeLinkSequential(
 			parentError,
 		);
 		return { childOk: true, parent: "failed", parentError };
-	}
-}
-
-/**
- * Whether the current user may send `m.space.parent` in `childRoomId`. Returns
- * false when the room isn't known locally, there's no user id, or the SDK
- * permission check throws (treated as "cannot", like other call sites).
- */
-function canSendSpaceParent(client: LinkClient, childRoomId: string): boolean {
-	const uid = client.getUserId();
-	const room = client.getRoom(childRoomId);
-	if (!uid || !room) return false;
-	try {
-		return room.currentState.maySendStateEvent(EventType.SpaceParent, uid);
-	} catch {
-		return false;
 	}
 }

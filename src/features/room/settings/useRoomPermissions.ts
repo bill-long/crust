@@ -7,7 +7,10 @@ import {
 } from "matrix-js-sdk";
 import { type Accessor, createMemo, createSignal, onCleanup } from "solid-js";
 import { useClientIfProvided } from "../../../client/client";
-import type { SummariesStore } from "../../../client/summaries";
+import {
+	canSendStateEvent,
+	readMyMembership,
+} from "../../../client/stateEventPermission";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import {
 	effectiveLevel,
@@ -18,28 +21,6 @@ import {
 
 const POWER_LEVELS_TYPE = "m.room.power_levels";
 const MEMBER_TYPE = "m.room.member";
-
-/**
- * The caller's own membership in `roomId` ("join" / "leave" / "ban" / ...),
- * or undefined while the room is unknown. The summaries store is the
- * app's source of truth: it carries Layout's optimistic join/leave marks,
- * which the SDK room lacks (`client.joinRoom()` never updates
- * `Room.getMyMembership()`; only the next /sync does). The SDK room is
- * the fallback for a room the store never saw - it seeds from
- * `client.getVisibleRooms()`, which drops the joined predecessors of an
- * upgraded room, and a deep link can still route to one - and for callers
- * mounted outside `ClientProvider` (unit tests). Both are load-bearing.
- */
-function readMyMembership(
-	summaries: SummariesStore | undefined,
-	client: MatrixClient,
-	roomId: string | undefined,
-): string | undefined {
-	if (!roomId) return undefined;
-	return (
-		summaries?.[roomId]?.membership ?? client.getRoom(roomId)?.getMyMembership()
-	);
-}
 
 /**
  * Reactive `readMyMembership`: tracks the store, `RoomEvent.MyMembership`
@@ -64,7 +45,7 @@ export function useMyMembership(
 	return createMemo(() => {
 		tick();
 		roomAvailableTick();
-		return readMyMembership(summaries, client, roomId());
+		return readMyMembership(client, roomId(), summaries);
 	});
 }
 
@@ -124,26 +105,11 @@ export interface RoomPermissions {
 	targetPowerLevel: (targetUserId: string) => number;
 }
 
-function canSendStateEvent(
-	client: MatrixClient,
-	roomId: string | undefined,
-	type: string,
-): boolean {
-	if (!roomId) return false;
-	const room = client.getRoom(roomId);
-	const uid = client.getUserId();
-	if (!room || !uid) return false;
-	try {
-		return room.currentState.maySendStateEvent(type, uid);
-	} catch {
-		return false;
-	}
-}
-
 export function useRoomPermissions(
 	client: MatrixClient,
 	roomId: Accessor<string | undefined>,
 ): RoomPermissions {
+	const summaries = useClientIfProvided()?.summaries;
 	const [tick, setTick] = createSignal(0);
 
 	const onRoomState = (event: MatrixEvent): void => {
@@ -218,7 +184,11 @@ export function useRoomPermissions(
 		createMemo(() => {
 			tick();
 			roomAvailableTick();
-			return isJoined() && canSendStateEvent(client, roomId(), type);
+			// Subscribe to RoomEvent.MyMembership for the SDK fallback. The shared
+			// helper repeats the membership check so every non-reactive caller gets
+			// the same safety rule too.
+			if (!isJoined()) return false;
+			return canSendStateEvent(client, roomId(), type, summaries);
 		});
 
 	const makeKeyCan = (key: GatedKey): Accessor<boolean> =>

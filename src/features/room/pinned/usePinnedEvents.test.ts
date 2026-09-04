@@ -7,9 +7,18 @@ import {
 	RoomStateEvent,
 } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { usePinnedEvents } from "./usePinnedEvents";
+
+vi.mock("solid-refresh", () => ({
+	$$registry: () => new Map(),
+	$$component: (_registry: unknown, _id: string, component: unknown) =>
+		component,
+	$$context: (_registry: unknown, _id: string, context: unknown) => context,
+	$$decline: () => undefined,
+	$$refresh: () => undefined,
+}));
 
 const PINNED_TYPE = EventType.RoomPinnedEvents;
 
