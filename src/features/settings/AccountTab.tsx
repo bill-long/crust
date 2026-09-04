@@ -34,6 +34,32 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DeactivateAccountDialog } from "./DeactivateAccountDialog";
 import { SectionHeading } from "./SettingsControls";
 
+/**
+ * Focus an inline editor's input once it has rendered, but only if the user
+ * has not already moved focus somewhere else.
+ *
+ * The Edit button that opened the editor unmounts as it does, so focus falls
+ * back to the document - body, or the root element in the environments that
+ * use that instead - and reclaiming it there is right. A frame is long enough
+ * for a click or a Tab to have gone somewhere real, and stealing focus back
+ * from that would be worse than not moving it at all.
+ */
+function focusWhenIdle(
+	el: HTMLInputElement,
+	stillEditing: () => boolean,
+): void {
+	requestAnimationFrame(() => {
+		if (!el.isConnected || !stillEditing()) return;
+		const active = document.activeElement;
+		const unfocused =
+			!active ||
+			active === document.body ||
+			active === document.documentElement;
+		if (!unfocused && active !== el) return;
+		el.focus();
+	});
+}
+
 interface AccountTabProps {
 	/** Signs this session out after a successful account deactivation
 	 *  (every token is already invalid server-side by then). */
@@ -468,11 +494,7 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 						>
 							<div class="flex items-center gap-2">
 								<input
-									ref={(el) =>
-										requestAnimationFrame(() => {
-											if (el.isConnected && editingName()) el.focus();
-										})
-									}
+									ref={(el) => focusWhenIdle(el, editingName)}
 									type="text"
 									value={nameValue()}
 									onInput={(e) => {
@@ -545,11 +567,7 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 						>
 							<div class="flex items-center gap-2">
 								<input
-									ref={(el) =>
-										requestAnimationFrame(() => {
-											if (el.isConnected && editingStatus()) el.focus();
-										})
-									}
+									ref={(el) => focusWhenIdle(el, editingStatus)}
 									type="text"
 									value={statusValue()}
 									onInput={(e) => {

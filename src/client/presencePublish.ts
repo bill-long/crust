@@ -44,8 +44,12 @@ function syncPresenceValue(): SetPresence {
  * PUT (`src/api/client/presence.rs`); a server that never implemented them
  * answers `M_UNRECOGNIZED`. All are permanent for the session. Everything
  * else - timeouts, 5xx, rate limits - is transient, and the difference
- * decides whether we may contradict our own optimistic write. Applies to
- * the read before a publish as much as to the write.
+ * decides whether we may contradict our own optimistic write.
+ *
+ * This classifies the WRITE. A not-found from the read that precedes it is
+ * not the same claim - Continuwuity answers one for an account that shares
+ * no room with itself - so `currentStatusMsg` strips that shape before it
+ * ever reaches here.
  */
 function meansPresenceUnsupported(e: unknown): boolean {
 	const err = e as { httpStatus?: unknown; errcode?: unknown } | null;

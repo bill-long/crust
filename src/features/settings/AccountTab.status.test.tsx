@@ -91,6 +91,28 @@ describe("AccountTab status message (#538)", () => {
 		expect(screen.getByText("on holiday")).toBeTruthy();
 	});
 
+	it("does not steal focus the user has already moved", async () => {
+		// The Edit button unmounts as the editor opens, so focus lands on the
+		// body and reclaiming it is right - but a click that landed somewhere
+		// real in that frame must keep it.
+		setup();
+		const elsewhere = document.createElement("button");
+		document.body.appendChild(elsewhere);
+		fireEvent.click(editButton());
+		elsewhere.focus();
+		await new Promise((r) => requestAnimationFrame(() => r(null)));
+		expect(document.activeElement).toBe(elsewhere);
+		elsewhere.remove();
+	});
+
+	it("focuses the editor when focus was left on the body", async () => {
+		setup();
+		fireEvent.click(editButton());
+		(document.activeElement as HTMLElement | null)?.blur();
+		await new Promise((r) => requestAnimationFrame(() => r(null)));
+		expect(document.activeElement).toBe(input());
+	});
+
 	it("prefills the editor from the raw server value, not the rendering", async () => {
 		// The rendering collapses whitespace and cuts at the cap; saving it
 		// back unedited would rewrite the real status (#538's round trip).
