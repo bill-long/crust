@@ -59,18 +59,22 @@ describe("ZipWriter", () => {
 		zip.addEntry("media/img.bin", binary);
 
 		const entries = readZip(zip.toBytes());
+		const [textEntry, binaryEntry] = entries;
+		if (textEntry === undefined || binaryEntry === undefined) {
+			throw new Error("Expected both ZIP entries to round-trip");
+		}
 		expect(entries.map((e) => e.name)).toEqual(["export.txt", "media/img.bin"]);
-		expect(Array.from(entries[0].data)).toEqual(Array.from(text));
-		expect(entries[0].crc).toBe(crc32(text));
-		expect(Array.from(entries[1].data)).toEqual(Array.from(binary));
-		expect(entries[1].crc).toBe(crc32(binary));
+		expect(Array.from(textEntry.data)).toEqual(Array.from(text));
+		expect(textEntry.crc).toBe(crc32(text));
+		expect(Array.from(binaryEntry.data)).toEqual(Array.from(binary));
+		expect(binaryEntry.crc).toBe(crc32(binary));
 	});
 
 	it("encodes non-ASCII entry names as UTF-8", async () => {
 		const zip = new ZipWriter();
 		zip.addEntry("média/café ☕.txt", new Uint8Array([1]));
-		const entries = readZip(zip.toBytes());
-		expect(entries[0].name).toBe("média/café ☕.txt");
+		const [entry] = readZip(zip.toBytes());
+		expect(entry?.name).toBe("média/café ☕.txt");
 	});
 
 	it("refuses a 65536th entry instead of wrapping the EOCD counts", () => {
