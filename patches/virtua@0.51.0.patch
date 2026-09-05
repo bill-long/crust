@@ -1,0 +1,9 @@
+diff --git a/lib/solid/index.jsx b/lib/solid/index.jsx
+index 24e4e917c58f26471c005232a58b75437957838b..c6459ef7f7076c449ae96c0baeba37962611d647 100644
+--- a/lib/solid/index.jsx
++++ b/lib/solid/index.jsx
+@@ -613 +613,3 @@ var createContainerDriver = (store, isHorizontal) => {
+-				if (target <= 0 || target >= store.$getStartSpacerSize() + store.$getTotalSize() - store.$getViewportSize()) {
++				// A prepend shift must land at the store's absolute target; a relative
++				// scroll can race the layout change and discard the preserved anchor.
++				if (shift || target <= 0 || target >= store.$getStartSpacerSize() + store.$getTotalSize() - store.$getViewportSize()) {

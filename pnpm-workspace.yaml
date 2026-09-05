@@ -1,0 +1,2 @@
+patchedDependencies:
+  virtua@0.51.0: patches/virtua@0.51.0.patch
