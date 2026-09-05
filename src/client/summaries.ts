@@ -296,6 +296,7 @@ function buildSummary(
 	const timeline = room.getLiveTimeline().getEvents();
 	for (let i = timeline.length - 1; i >= 0; i--) {
 		const ev = timeline[i];
+		if (ev === undefined) continue;
 		if (isDisplayableMessage(ev)) {
 			lastMessage = buildLastMessage(ev);
 			break;
@@ -512,9 +513,10 @@ export function createSummariesStore(client: MatrixClient): {
 		);
 		const id = setTimeout(() => {
 			callExpiryTimers.delete(room.roomId);
-			if (!summaries[room.roomId]) return;
+			const summary = summaries[room.roomId];
+			if (summary === undefined) return;
 			const active = isCallActive(room, serverTime.now());
-			if (summaries[room.roomId].callActive !== active) {
+			if (summary.callActive !== active) {
 				setSummaries(room.roomId, "callActive", active);
 			}
 			// Re-arm if the room is still considered active (e.g. another
@@ -767,8 +769,10 @@ export function createSummariesStore(client: MatrixClient): {
 			if (roomId === skipRoomId) continue;
 			const room = client.getRoom(roomId);
 			if (!room) continue;
+			const summary = summaries[roomId];
+			if (summary === undefined) continue;
 			const active = isCallActive(room, serverTime.now());
-			if (summaries[roomId].callActive !== active) {
+			if (summary.callActive !== active) {
 				setSummaries(roomId, "callActive", active);
 			}
 			scheduleCallExpiryRefresh(room);
@@ -858,6 +862,7 @@ export function createSummariesStore(client: MatrixClient): {
 					const timeline = room.getLiveTimeline().getEvents();
 					for (let i = timeline.length - 1; i >= 0; i--) {
 						const ev = timeline[i];
+						if (ev === undefined) continue;
 						if (isDisplayableMessage(ev)) {
 							if (summaries[room.roomId]) {
 								setSummaries(room.roomId, "lastMessage", buildLastMessage(ev));
@@ -940,7 +945,10 @@ export function createSummariesStore(client: MatrixClient): {
 			setSummaries(
 				produce((s) => {
 					for (const roomId of Object.keys(s)) {
-						s[roomId].isMuted = mutedRoomIds.has(roomId);
+						const summary = s[roomId];
+						if (summary !== undefined) {
+							summary.isMuted = mutedRoomIds.has(roomId);
+						}
 					}
 				}),
 			);
@@ -951,8 +959,11 @@ export function createSummariesStore(client: MatrixClient): {
 		setSummaries(
 			produce((s) => {
 				for (const roomId of Object.keys(s)) {
-					s[roomId].isDirect = dmPeers.has(roomId);
-					s[roomId].dmUserId = dmPeers.get(roomId) ?? null;
+					const summary = s[roomId];
+					if (summary !== undefined) {
+						summary.isDirect = dmPeers.has(roomId);
+						summary.dmUserId = dmPeers.get(roomId) ?? null;
+					}
 				}
 			}),
 		);
@@ -971,7 +982,8 @@ export function createSummariesStore(client: MatrixClient): {
 			serverTime.sampleFromEvent(event) &&
 			Math.abs(serverTime.getOffsetMs() - prevOffset) >=
 				MATERIAL_OFFSET_CHANGE_MS;
-		if (!summaries[room.roomId]) {
+		const summary = summaries[room.roomId];
+		if (summary === undefined) {
 			upsertRoom(room);
 			// upsertRoom computed callActive with the fresh offset, so skip it.
 			if (offsetChanged) refreshAllCallActive(room.roomId);
@@ -995,7 +1007,7 @@ export function createSummariesStore(client: MatrixClient): {
 			}
 		} else if (type === CALL_MEMBER_EVENT_TYPE) {
 			const active = isCallActive(room, serverTime.now());
-			if (summaries[room.roomId].callActive !== active) {
+			if (summary.callActive !== active) {
 				setSummaries(room.roomId, "callActive", active);
 			}
 			// Always re-arm: even when the boolean is unchanged, the earliest
@@ -1026,7 +1038,8 @@ export function createSummariesStore(client: MatrixClient): {
 		for (const room of rooms) {
 			const timeline = room.getLiveTimeline().getEvents();
 			for (let i = timeline.length - 1; i >= 0; i--) {
-				if (serverTime.sampleFromEvent(timeline[i])) break;
+				const event = timeline[i];
+				if (event !== undefined && serverTime.sampleFromEvent(event)) break;
 				// Stop scanning this room after at most 5 events to avoid
 				// O(N) work on large timelines; one sample per room is
 				// enough to seed.
