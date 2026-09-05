@@ -28,7 +28,7 @@
 		"matrix-js-sdk": "^42.3.0",
 		"solid-js": "^1.9.15",
 		"uqr": "^0.1.3",
-		"virtua": "^0.50.6",
+		"virtua": "^0.51.0",
 		"workbox-window": "^7.4.1"
 	},
 	"devDependencies": {
