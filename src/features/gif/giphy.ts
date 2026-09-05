@@ -119,7 +119,9 @@ async function fetchGiphy(url: string): Promise<GiphyResponse> {
 		!Number.isInteger(pagination.offset) ||
 		(pagination.total_count as number) < 0 ||
 		(pagination.count as number) < 0 ||
-		(pagination.offset as number) < 0
+		(pagination.offset as number) < 0 ||
+		((pagination.count as number) === 0 &&
+			(pagination.offset as number) < (pagination.total_count as number))
 	) {
 		throw new Error("Giphy API returned an unexpected response shape");
 	}

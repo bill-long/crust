@@ -192,6 +192,7 @@ describe("createGiphyProvider", () => {
 		{ data: [], pagination: { total_count: "1", count: 0, offset: 0 } },
 		{ data: [], pagination: { total_count: 1, count: -1, offset: 0 } },
 		{ data: [], pagination: { total_count: 1, count: 1, offset: 0.5 } },
+		{ data: [], pagination: { total_count: 10, count: 0, offset: 5 } },
 	])("rejects an unexpected response shape: %j", async (payload) => {
 		mockJsonResponse(payload);
 
