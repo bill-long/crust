@@ -27,12 +27,15 @@ afterEach(() => {
 	clearNotices();
 });
 
-function setup() {
+function setup(targetEvent?: TimelineEvent) {
 	const client = createMockClient();
-	const [target, setTarget] = createSignal<TimelineEvent | null>({
-		eventId: "$bad",
-		body: "offensive",
-	} as unknown as TimelineEvent);
+	const [target, setTarget] = createSignal<TimelineEvent | null>(
+		targetEvent ??
+			({
+				eventId: "$bad",
+				body: "offensive",
+			} as unknown as TimelineEvent),
+	);
 	const onClose = vi.fn(() => setTarget(null));
 	render(() => (
 		<TestClientProvider client={client}>
@@ -95,5 +98,18 @@ describe("ReportMessageDialog", () => {
 		expect(onClose).not.toHaveBeenCalled();
 		expect(notices()).toHaveLength(0);
 		vi.restoreAllMocks();
+	});
+
+	it("previews an attachment with its sanitized filename", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		setup({
+			eventId: "$bad",
+			msgtype: "m.file",
+			body: rawBody,
+			mediaFilename: "invoicegnp.exe",
+		} as unknown as TimelineEvent);
+		expect(screen.getByText("invoicegnp.exe")).toBeTruthy();
+		expect(screen.queryByText(rawBody)).toBeNull();
 	});
 });

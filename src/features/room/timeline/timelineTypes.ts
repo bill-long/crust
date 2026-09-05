@@ -85,12 +85,14 @@ export interface TimelineEvent {
 	 */
 	mediaFilename: string | null;
 	/**
-	 * Caption text for an `m.image`, taken from `content.body` when the
+	 * Caption text for an attachment, taken from `content.body` when the
 	 * send carried an explicit `content.filename` *and* `body` differs from
 	 * it (the spec-correct shape: filename in `filename`, caption in `body`).
 	 * Null when there is no separate caption (no `filename`, or `body`
-	 * equals the filename). Control chars are stripped; multi-line captions
-	 * are preserved. Only populated for `m.image`.
+	 * equals the filename). The transport-level reply fallback and control chars
+	 * are stripped; multi-line captions are preserved. Populated for image,
+	 * video, audio, and file messages even though individual renderers may choose
+	 * not to display it.
 	 */
 	mediaCaption: string | null;
 	/**

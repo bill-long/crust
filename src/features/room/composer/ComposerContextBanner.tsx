@@ -1,5 +1,6 @@
 import { type Component, Show } from "solid-js";
 import { userColorClass } from "../../../lib/userColor";
+import { messagePreviewText } from "../timeline/MessagePreview";
 import type { TimelineEvent } from "../timeline/useTimeline";
 
 interface ComposerContextBannerProps {
@@ -33,7 +34,7 @@ const ComposerContextBanner: Component<ComposerContextBannerProps> = (
 								Editing message
 							</p>
 							<p class="truncate text-xs text-text-disabled">
-								{editing().body.trim() || "Message"}
+								{messagePreviewText(editing())}
 							</p>
 						</div>
 						<button
@@ -59,7 +60,7 @@ const ComposerContextBanner: Component<ComposerContextBannerProps> = (
 								{reply().senderName.trim() || "Unknown"}
 							</p>
 							<p class="truncate text-xs text-text-disabled">
-								{reply().body.trim() || "Message"}
+								{messagePreviewText(reply())}
 							</p>
 						</div>
 						<button

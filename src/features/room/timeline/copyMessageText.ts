@@ -26,6 +26,9 @@ export function copyableText(ev: TimelineEvent): string | null {
 		return text !== "" ? text : null;
 	}
 	if (!ev.mediaCaption) return null;
-	const caption = stripReplyFallback(ev.mediaCaption).trim();
+	// Projection already removed the transport-level reply fallback. Stripping
+	// again would eat a fallback-shaped blockquote authored at the start of the
+	// real caption.
+	const caption = ev.mediaCaption.trim();
 	return caption !== "" ? caption : null;
 }

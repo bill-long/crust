@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeFilename, wireAttachmentName, wireFilename } from "./filename";
+import {
+	sanitizeFilename,
+	wireAttachmentCaption,
+	wireAttachmentName,
+	wireFilename,
+} from "./filename";
 
 // Build control-char strings programmatically so no raw control bytes live in
 // this source file.
@@ -43,11 +48,83 @@ describe("wireAttachmentName", () => {
 		expect(wireAttachmentName({ body: "d.png" })).toBe("d.png");
 	});
 
+	it("recovers a legacy filename after a reply fallback", () => {
+		expect(
+			wireAttachmentName({
+				body: "> <@alice:test> quoted\n\nreport.pdf",
+				"m.relates_to": {
+					"m.in_reply_to": { event_id: "$parent" },
+				},
+			}),
+		).toBe("report.pdf");
+	});
+
 	it("does not let a refused explicit filename yield to the body", () => {
 		expect(
 			wireAttachmentName({ filename: `a${NUL}b.png`, body: "clean.png" }),
 		).toBeNull();
 		expect(wireAttachmentName({})).toBeNull();
+	});
+});
+
+describe("wireAttachmentCaption", () => {
+	it("returns a distinct caption only when an explicit filename is usable", () => {
+		expect(
+			wireAttachmentCaption({
+				filename: "report.pdf",
+				body: "Quarterly report",
+			}),
+		).toBe("Quarterly report");
+		expect(
+			wireAttachmentCaption({ filename: "report.pdf", body: "report.pdf" }),
+		).toBeNull();
+		expect(wireAttachmentCaption({ body: "legacy.pdf" })).toBeNull();
+		expect(
+			wireAttachmentCaption({
+				filename: `bad${NUL}.pdf`,
+				body: "Quarterly report",
+			}),
+		).toBeNull();
+	});
+
+	it("normalizes caption controls and strips a reply fallback", () => {
+		expect(
+			wireAttachmentCaption({
+				filename: "report.pdf",
+				body: `> <@alice:test> quoted\n\nline${BS} one\r\nline two`,
+				"m.relates_to": {
+					"m.in_reply_to": { event_id: "$parent" },
+				},
+				format: "org.matrix.custom.html",
+				formatted_body:
+					"<mx-reply><blockquote>quoted</blockquote></mx-reply><p>line one<br>line two</p>",
+			}),
+		).toBe("line one\nline two");
+	});
+
+	it("preserves fallback-shaped prose on a relation-only media reply", () => {
+		const body = "> <@alice:test> authored quote\n\ncaption";
+		expect(
+			wireAttachmentCaption({
+				filename: "report.pdf",
+				body,
+				"m.relates_to": {
+					"m.in_reply_to": { event_id: "$parent" },
+				},
+			}),
+		).toBe(body);
+	});
+
+	it("recognizes an uncaptioned reply when the remainder is the filename", () => {
+		expect(
+			wireAttachmentCaption({
+				filename: "report.pdf",
+				body: "> <@alice:test> quoted\n\nreport.pdf",
+				"m.relates_to": {
+					"m.in_reply_to": { event_id: "$parent" },
+				},
+			}),
+		).toBeNull();
 	});
 });
 

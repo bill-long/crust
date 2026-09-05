@@ -8,9 +8,12 @@ import {
 	THREAD_RELATION_TYPE,
 } from "matrix-js-sdk";
 import { CALL_MEMBER_EVENT_TYPE } from "../../../client/summaries";
-import { stripBidiControls } from "../../../lib/controlChars";
 import { displayNameOr } from "../../../lib/displayName";
-import { wireAttachmentName, wireFilename } from "../../../lib/filename";
+import {
+	isAttachmentMsgtype,
+	wireAttachmentCaption,
+	wireAttachmentName,
+} from "../../../lib/filename";
 import {
 	isVoiceMessageContent,
 	parseVoiceInfo,
@@ -31,11 +34,7 @@ import {
 	buildStateNotice,
 	isStateNoticeType,
 } from "./stateNotice";
-import {
-	buildReplySnippet,
-	sanitizeMultiline,
-	senderProfileFields,
-} from "./timelineHelpers";
+import { buildReplySnippet, senderProfileFields } from "./timelineHelpers";
 import type { ReactionAggregate, TimelineEvent } from "./timelineTypes";
 
 export function eventToTimelineEvent(
@@ -98,11 +97,7 @@ export function eventToTimelineEvent(
 	// must fail closed / decrypt rather than render its ciphertext URL). GIF-URL
 	// `m.text` rows aren't media sources in this sense, so they don't get these
 	// fields.
-	const isAttachment =
-		content.msgtype === "m.image" ||
-		content.msgtype === "m.video" ||
-		content.msgtype === "m.audio" ||
-		content.msgtype === "m.file";
+	const isAttachment = isAttachmentMsgtype(content.msgtype);
 	const hasMediaSource = isAttachment || event.getType() === "m.sticker";
 	const infoMime =
 		hasMediaSource && typeof content.info?.mimetype === "string"
@@ -153,28 +148,11 @@ export function eventToTimelineEvent(
 			? content.info.thumbnail_info.mimetype
 			: null;
 
-	// Image caption: spec-correct sends put the filename in `content.filename`
-	// and the caption in `content.body`. So a caption exists only when an
-	// explicit usable `filename` is present AND `body` differs from it (when
-	// `filename` is absent, `body` *is* the filename, so there's no caption).
-	// Control chars are stripped; multi-line captions are preserved. Scoped to
-	// `m.image` - the file/video/audio renderers show the filename as a label.
-	const imageFilename =
-		content.msgtype === "m.image" ? wireFilename(content.filename) : null;
-	const cleanedCaption =
-		typeof content.body === "string"
-			? sanitizeMultiline(content.body).trim()
-			: "";
-	// Compared under the same bidi strip the filename had, or Element's
-	// uncaptioned shape (`body === filename`, both carrying the same RLO) would
-	// surface the raw body as a phantom caption with the spoof intact. The
-	// caption itself is prose and renders as sent.
-	const mediaCaption =
-		imageFilename !== null &&
-		cleanedCaption.length > 0 &&
-		stripBidiControls(cleanedCaption) !== imageFilename
-			? cleanedCaption
-			: null;
+	// One receive-side caption projection is shared with pins and thread roots:
+	// it distinguishes authored prose from the attachment's wire filename and
+	// strips legacy reply fallback before any of those surfaces render it.
+	const mediaCaption = isAttachment ? wireAttachmentCaption(content) : null;
+	const relatesTo = content["m.relates_to"];
 
 	// Reply context: resolve the parent of an `m.in_reply_to` relation so the
 	// renderer can show a quoted snippet for ALL message types (media sends
@@ -187,7 +165,6 @@ export function eventToTimelineEvent(
 	// is_falling_back: true. That must not render as a quote; a REAL
 	// in-thread reply omits the flag or sets it false and keeps its quote
 	// (Element suppresses only on a truthy flag).
-	const relatesTo = content["m.relates_to"];
 	// Server-latched relation name, not a literal: mirrors Gate S
 	// (threadEvents.ts) so pre-stable servers stay in sync.
 	const isThreadFallbackReply =

@@ -81,6 +81,30 @@ describe("rootSnippet", () => {
 		expect(rootSnippet(ev)).toBe("hello");
 	});
 
+	it("uses the sanitized filename for attachment roots", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const ev = {
+			...base,
+			getContent: () => ({
+				msgtype: "m.file",
+				body: `invoice${RLO}gnp.exe`,
+			}),
+		} as unknown as MatrixEvent;
+		expect(rootSnippet(ev)).toBe("invoicegnp.exe");
+	});
+
+	it("uses a distinct caption for attachment roots", () => {
+		const ev = {
+			...base,
+			getContent: () => ({
+				msgtype: "m.file",
+				body: "Quarterly report",
+				filename: "report.pdf",
+			}),
+		} as unknown as MatrixEvent;
+		expect(rootSnippet(ev)).toBe("Quarterly report");
+	});
+
 	it("uses the poll question for poll roots", () => {
 		const ev = {
 			...base,

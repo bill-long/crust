@@ -311,6 +311,59 @@ describe("exportRoom", () => {
 		expect(out.messages[0].body).toBe("actual reply");
 	});
 
+	it("does not export an attachment's raw body as prose", async () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		setEvents(1);
+		projected.mockImplementation((id: string) =>
+			makeTimelineEvent({
+				eventId: id,
+				msgtype: "m.file",
+				body: rawBody,
+				mediaFullUrl: "https://hs/file",
+				mediaFilename: "invoicegnp.exe",
+				status: null,
+			}),
+		);
+		const result = await exportRoom(
+			fakeClient(),
+			fakeRoom(),
+			{ format: "json", limit: null, includeAttachments: false },
+			noProgress,
+			never,
+		);
+		const raw = await textOf(result?.blob);
+		const out = JSON.parse(raw);
+		expect(out.messages[0].body).toBeUndefined();
+		expect(out.messages[0].media.filename).toBe("invoicegnp.exe");
+		expect(raw).not.toContain(rawBody);
+	});
+
+	it("exports a non-image attachment caption without its reply fallback", async () => {
+		setEvents(1);
+		projected.mockImplementation((id: string) =>
+			makeTimelineEvent({
+				eventId: id,
+				msgtype: "m.file",
+				body: "> <@alice:hs> quoted\n\nactual caption",
+				mediaCaption: "actual caption",
+				mediaFullUrl: "https://hs/file",
+				mediaFilename: "report.pdf",
+				status: null,
+			}),
+		);
+		const result = await exportRoom(
+			fakeClient(),
+			fakeRoom(),
+			{ format: "json", limit: null, includeAttachments: false },
+			noProgress,
+			never,
+		);
+		const out = JSON.parse(await textOf(result?.blob));
+		expect(out.messages[0].body).toBe("actual caption");
+		expect(out.messages[0].media.filename).toBe("report.pdf");
+	});
+
 	it("seeds a private timeline set at the newest event instead of the shared one", async () => {
 		setEvents(2);
 		await exportRoom(

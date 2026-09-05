@@ -1,3 +1,4 @@
+import { isAttachmentMsgtype } from "../../../lib/filename";
 import { escapeAttr, escapeHtml } from "../../../lib/htmlEscape";
 import { sanitizeMatrixHtmlToDiv } from "../../../lib/matrixHtml";
 import type { TimelineEvent } from "../timeline/timelineTypes";
@@ -6,9 +7,9 @@ import type { TimelineEvent } from "../timeline/timelineTypes";
 export interface ExportRow {
 	te: TimelineEvent;
 	/**
-	 * The plain body with the legacy reply fallback stripped (the
-	 * machine-readable reply context is carried separately), empty when
-	 * the event could not be decrypted.
+	 * Exportable prose: the plain body with its legacy reply fallback stripped,
+	 * or an attachment's projected caption. Empty for undecryptable events and
+	 * attachments whose wire body is only their filename.
 	 */
 	bodyText: string;
 	/** The event exists but its content could not be decrypted. */
@@ -57,10 +58,36 @@ function attachmentHref(row: ExportRow): string | null {
 	return row.te.mediaFullUrl;
 }
 
+/** Media with a resolved URL keeps the existing export behavior (including
+ * stickers); attachment events also get a record when their source is absent
+ * or cannot be resolved, so their sanitized filename is not lost. */
+function hasMediaRecord(row: ExportRow): boolean {
+	return Boolean(row.te.mediaFullUrl) || isAttachmentMsgtype(row.te.msgtype);
+}
+
+/** Attachment bodies can be filenames on the wire. Only the separately
+ * projected caption is prose worth emitting beside the attachment record. */
+function exportedBodyText(row: ExportRow): string {
+	return isAttachmentMsgtype(row.te.msgtype)
+		? (row.te.mediaCaption ?? "")
+		: row.bodyText;
+}
+
+/** Rich attachment prose is valid only when projection found a real caption;
+ * otherwise the formatted body is another representation of the filename. */
+function exportedFormattedBody(row: ExportRow): string | null {
+	if (!row.te.formattedBody) return null;
+	return !isAttachmentMsgtype(row.te.msgtype) || row.te.mediaCaption !== null
+		? row.te.formattedBody
+		: null;
+}
+
 // ---------------------------------------------------------------- JSON
 
 export function jsonRow(row: ExportRow): Record<string, unknown> {
 	const te = row.te;
+	const bodyText = exportedBodyText(row);
+	const formattedBody = exportedFormattedBody(row);
 	const out: Record<string, unknown> = {
 		event_id: te.eventId,
 		sender: te.senderId,
@@ -79,17 +106,17 @@ export function jsonRow(row: ExportRow): Record<string, unknown> {
 		out.undecryptable = true;
 		return out;
 	}
-	if (row.bodyText) out.body = row.bodyText;
+	if (bodyText) out.body = bodyText;
 	// The raw formatted body is source data in a data document - the
 	// sanitizer applies where HTML is re-emitted into a page, not here.
-	if (te.formattedBody) out.formatted_body = te.formattedBody;
+	if (formattedBody) out.formatted_body = formattedBody;
 	if (te.isEdited) out.edited = true;
 	if (te.replyToId) out.reply_to = te.replyToId;
 	const reactions = reactionSummary(te);
 	if (reactions.length > 0) {
 		out.reactions = Object.fromEntries(reactions.map((r) => [r.key, r.count]));
 	}
-	if (te.mediaFullUrl) {
+	if (hasMediaRecord(row)) {
 		const href = attachmentHref(row);
 		out.media = {
 			filename: te.mediaFilename,
@@ -140,6 +167,7 @@ export function assembleJson(
 
 export function textRow(row: ExportRow): string {
 	const te = row.te;
+	const bodyText = exportedBodyText(row);
 	const ts = timestampIso(te.timestamp);
 	const lines: string[] = [];
 	if (te.stateNotice) {
@@ -156,20 +184,26 @@ export function textRow(row: ExportRow): string {
 		return lines.join("\n");
 	}
 	const edited = te.isEdited ? " (edited)" : "";
-	if (row.bodyText) {
+	if (bodyText) {
 		// Indent continuation lines so multi-line bodies stay attached to
 		// their header line.
-		const body = row.bodyText.split("\n").join("\n    ");
+		const body = bodyText.split("\n").join("\n    ");
 		lines.push(`[${ts}] ${te.senderName}: ${body}${edited}`);
 	}
-	if (te.mediaFullUrl) {
+	if (hasMediaRecord(row)) {
 		const name = te.mediaFilename ?? "attachment";
 		const href = attachmentHref(row);
 		const target = row.attachmentFailed
 			? "export failed"
-			: (href ?? "not exported (encrypted)");
-		const header = row.bodyText ? "    " : `[${ts}] ${te.senderName}: `;
-		lines.push(`${header}[attachment: ${name} -> ${target}]`);
+			: href
+				? href
+				: te.mediaIsEncrypted
+					? "not exported (encrypted)"
+					: "unavailable";
+		const header = bodyText ? "    " : `[${ts}] ${te.senderName}: `;
+		lines.push(
+			`${header}[attachment: ${name} -> ${target}]${bodyText ? "" : edited}`,
+		);
 	}
 	const reactions = reactionSummary(te);
 	if (reactions.length > 0) {
@@ -222,10 +256,12 @@ img.emoji-inline { width: 1.2em; height: 1.2em; vertical-align: -0.2em; }
  */
 function exportBodyHtml(row: ExportRow, bundle: ExportBundle): string {
 	const te = row.te;
-	if (!(te.format === "org.matrix.custom.html" && te.formattedBody)) {
-		return escapeHtml(row.bodyText).split("\n").join("<br>");
+	const bodyText = exportedBodyText(row);
+	const formattedBody = exportedFormattedBody(row);
+	if (!(te.format === "org.matrix.custom.html" && formattedBody)) {
+		return escapeHtml(bodyText).split("\n").join("<br>");
 	}
-	const div = sanitizeMatrixHtmlToDiv(te.formattedBody, bundle.mxcToHttp);
+	const div = sanitizeMatrixHtmlToDiv(formattedBody, bundle.mxcToHttp);
 	for (const img of div.querySelectorAll("img")) {
 		img.classList.add("emoji-inline");
 	}
@@ -257,7 +293,7 @@ function attachmentHtml(row: ExportRow): string {
 		if (te.mediaIsEncrypted) {
 			return `<p class="meta">[encrypted attachment "${name}" - not exported]</p>`;
 		}
-		return "";
+		return `<p class="meta">[attachment "${name}" - unavailable]</p>`;
 	}
 	if (row.attachmentPath && te.mediaMimetype?.startsWith("image/")) {
 		return `<a href="${escapeAttr(href)}"><img class="attachment" src="${escapeAttr(href)}" alt="${name}"></a>`;
@@ -267,6 +303,8 @@ function attachmentHtml(row: ExportRow): string {
 
 export function htmlRow(row: ExportRow, bundle: ExportBundle): string {
 	const te = row.te;
+	const bodyText = exportedBodyText(row);
+	const formattedBody = exportedFormattedBody(row);
 	const ts = timestampIso(te.timestamp);
 	if (te.stateNotice) {
 		return `<div class="msg notice">${escapeHtml(ts)} - ${escapeHtml(te.stateNotice.text)}</div>`;
@@ -294,10 +332,10 @@ export function htmlRow(row: ExportRow, bundle: ExportBundle): string {
 		chunks.push(
 			`<div class="poll"><strong>${escapeHtml(te.poll.question)}</strong><ul>${answers}</ul></div>`,
 		);
-	} else if (row.bodyText || te.formattedBody) {
+	} else if (bodyText || formattedBody) {
 		chunks.push(`<div class="body">${exportBodyHtml(row, bundle)}</div>`);
 	}
-	if (te.mediaFullUrl) chunks.push(attachmentHtml(row));
+	if (hasMediaRecord(row)) chunks.push(attachmentHtml(row));
 	const reactions = reactionSummary(te);
 	if (reactions.length > 0) {
 		chunks.push(

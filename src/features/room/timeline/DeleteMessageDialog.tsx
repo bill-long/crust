@@ -51,7 +51,7 @@ const DeleteMessageDialog: Component<DeleteMessageDialogProps> = (props) => {
 						Are you sure you want to delete this message? This cannot be undone.
 					</p>
 					<Show when={props.target()}>
-						{(target) => <MessagePreview body={target().body} />}
+						{(target) => <MessagePreview event={target()} />}
 					</Show>
 					<label class="flex flex-col gap-1">
 						<span class="text-xs font-medium text-text-secondary">

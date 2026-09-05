@@ -9,6 +9,11 @@ import {
 } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { displayNameOr } from "../../../lib/displayName";
+import {
+	isAttachmentMsgtype,
+	wireAttachmentCaption,
+	wireAttachmentName,
+} from "../../../lib/filename";
 import { reportError } from "../../../lib/reportError";
 import { parsePollStart } from "../poll/pollSnapshot";
 import {
@@ -61,6 +66,11 @@ export function rootSnippet(event: MatrixEvent): string {
 	const poll = parsePollStart(event);
 	if (poll) return poll.question;
 	const content = event.getContent?.() ?? {};
+	if (isAttachmentMsgtype(content.msgtype)) {
+		return (
+			wireAttachmentCaption(content) ?? wireAttachmentName(content) ?? "Message"
+		);
+	}
 	const body = typeof content.body === "string" ? content.body.trim() : "";
 	if (body) return body;
 	return "Message";
