@@ -41,6 +41,15 @@ function reEscape(s: string): string {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Read a capture group that the matching regex always requires. */
+function requiredCapture(match: RegExpExecArray, index: number): string {
+	const value = match[index];
+	if (value === undefined) {
+		throw new Error(`Markdown regex is missing capture group ${index}`);
+	}
+	return value;
+}
+
 /**
  * Fail-closed link gate: only `http`, `https`, and `mailto` URLs become
  * anchors. Anything else (e.g. `javascript:`) renders as literal text. The
@@ -237,12 +246,15 @@ export function formatMarkdown(
 	let i = 0;
 	while (i < lines.length) {
 		const line = lines[i];
+		if (line === undefined) break;
 
 		const heading = /^(#{1,6})[ \t]+(.+)$/.exec(line);
 		if (heading) {
 			flushText();
-			const level = heading[1].length;
-			out.push(`<h${level}>${formatInline(heading[2], ctx)}</h${level}>`);
+			const level = requiredCapture(heading, 1).length;
+			out.push(
+				`<h${level}>${formatInline(requiredCapture(heading, 2), ctx)}</h${level}>`,
+			);
 			blockApplied = true;
 			i++;
 			continue;
@@ -251,8 +263,10 @@ export function formatMarkdown(
 		if (QUOTE_RE.test(line)) {
 			flushText();
 			const quoted: string[] = [];
-			while (i < lines.length && QUOTE_RE.test(lines[i])) {
-				quoted.push(formatInline(lines[i].replace(QUOTE_RE, ""), ctx));
+			while (i < lines.length) {
+				const quotedLine = lines[i];
+				if (quotedLine === undefined || !QUOTE_RE.test(quotedLine)) break;
+				quoted.push(formatInline(quotedLine.replace(QUOTE_RE, ""), ctx));
 				i++;
 			}
 			out.push(`<blockquote>${quoted.join("<br>")}</blockquote>`);
@@ -263,8 +277,8 @@ export function formatMarkdown(
 		if (UL_RE.test(line)) {
 			flushText();
 			const items: string[] = [];
-			for (let m = UL_RE.exec(lines[i]); m; m = UL_RE.exec(lines[i] ?? "")) {
-				items.push(`<li>${formatInline(m[1], ctx)}</li>`);
+			for (let m = UL_RE.exec(line); m; m = UL_RE.exec(lines[i] ?? "")) {
+				items.push(`<li>${formatInline(requiredCapture(m, 1), ctx)}</li>`);
 				i++;
 				if (i >= lines.length) break;
 			}
@@ -276,12 +290,14 @@ export function formatMarkdown(
 		const ol = OL_RE.exec(line);
 		if (ol) {
 			flushText();
-			const startNum = Number(ol[1]);
+			const startNum = Number(requiredCapture(ol, 1));
 			const items: string[] = [];
-			for (let m = OL_RE.exec(lines[i]); m; m = OL_RE.exec(lines[i] ?? "")) {
-				items.push(`<li>${formatInline(m[2], ctx)}</li>`);
+			let m: RegExpExecArray | null = ol;
+			while (m) {
+				items.push(`<li>${formatInline(requiredCapture(m, 2), ctx)}</li>`);
 				i++;
 				if (i >= lines.length) break;
+				m = OL_RE.exec(lines[i] ?? "");
 			}
 			const startAttr = startNum !== 1 ? ` start="${startNum}"` : "";
 			out.push(`<ol${startAttr}>${items.join("")}</ol>`);
@@ -306,9 +322,8 @@ export function formatMarkdown(
 	const restore = (s: string): string =>
 		s.replace(new RegExp(`${PH}(\\d+)${PH}`, "g"), (m, idx: string) => {
 			const n = Number(idx);
-			return n < ctx.protectedBlocks.length
-				? restore(ctx.protectedBlocks[n])
-				: m;
+			const block = ctx.protectedBlocks[n];
+			return block === undefined ? m : restore(block);
 		});
 	const html = restore(out.join(""));
 
