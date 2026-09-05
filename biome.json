@@ -19,9 +19,6 @@
 			"recommended": true,
 			"style": {
 				"noNonNullAssertion": "warn"
-			},
-			"suspicious": {
-				"noExplicitAny": "error"
 			}
 		}
 	},
@@ -42,6 +39,7 @@
 			"linter": {
 				"rules": {
 					"suspicious": {
+						"noExplicitAny": "error",
 						"noConsole": {
 							"level": "error",
 							"options": { "allow": ["error", "warn"] }
