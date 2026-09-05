@@ -73,8 +73,8 @@ function parseMatrixScheme(path: string): MatrixUriTarget | null {
 	const rawPath = qIdx >= 0 ? path.slice(0, qIdx) : path;
 	const query = qIdx >= 0 ? path.slice(qIdx + 1) : "";
 	const segments = rawPath.split("/");
-	if (segments.length < 2) return null;
 	const [typeSeg, idSeg, ...rest] = segments;
+	if (typeSeg === undefined || idSeg === undefined) return null;
 	const id = decodeSegment(idSeg);
 	if (id === null) return null;
 
@@ -99,8 +99,14 @@ function parseMatrixScheme(path: string): MatrixUriTarget | null {
 		return { kind: "room", idOrAlias, viaServers };
 	}
 	// Event permalink: `matrix:roomid/<id>/e/<event id>`.
-	if (typeSeg === "roomid" && rest.length === 2 && rest[0] === "e") {
-		const eventId = decodeSegment(rest[1]);
+	const [eventType, eventSegment, ...extraSegments] = rest;
+	if (
+		typeSeg === "roomid" &&
+		eventType === "e" &&
+		eventSegment !== undefined &&
+		extraSegments.length === 0
+	) {
+		const eventId = decodeSegment(eventSegment);
 		if (eventId === null) return null;
 		const withSigil = `$${eventId}`;
 		if (!isValidEventId(withSigil)) return null;
@@ -125,7 +131,8 @@ function parseIdentifierPath(pathAndQuery: string): MatrixUriTarget | null {
 	const segments = rawPath.split("/");
 	if (segments.length < 1 || segments.length > 2) return null;
 
-	const identifier = decodeSegment(segments[0]);
+	const [identifierSegment = "", eventSegment] = segments;
+	const identifier = decodeSegment(identifierSegment);
 	if (identifier === null || identifier === "") return null;
 
 	if (identifier.startsWith("@")) {
@@ -142,7 +149,8 @@ function parseIdentifierPath(pathAndQuery: string): MatrixUriTarget | null {
 	if (segments.length === 1) {
 		return { kind: "room", idOrAlias: identifier, viaServers };
 	}
-	const eventId = decodeSegment(segments[1]);
+	if (eventSegment === undefined) return null;
+	const eventId = decodeSegment(eventSegment);
 	if (eventId === null || !isValidEventId(eventId)) return null;
 	return {
 		kind: "event",
