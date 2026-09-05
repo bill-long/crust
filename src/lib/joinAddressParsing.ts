@@ -46,12 +46,16 @@ export function parseJoinAddress(raw: string): ParseJoinAddressResult {
 
 	const matrixTo = /^(?:https?:\/\/)?matrix\.to\/#\/(.+)$/i.exec(trimmed);
 	if (matrixTo) {
-		return parseMatrixToFragment(matrixTo[1]);
+		const fragment = matrixTo[1];
+		if (fragment === undefined) {
+			return { ok: false, error: "That matrix.to link is malformed." };
+		}
+		return parseMatrixToFragment(fragment);
 	}
 
 	// Bare form: first token is the address; any remaining tokens are via
 	// servers to try the join through.
-	const [identifier, ...viaTokens] = trimmed.split(/\s+/);
+	const [identifier = "", ...viaTokens] = trimmed.split(/\s+/);
 	if (identifier.startsWith("@")) {
 		return {
 			ok: false,
@@ -80,7 +84,8 @@ function parseMatrixToFragment(fragment: string): ParseJoinAddressResult {
 	// further segments; user/event deep links are out of scope here).
 	let identifier: string;
 	try {
-		identifier = decodeURIComponent(path.split("/")[0]);
+		const [encodedIdentifier = ""] = path.split("/");
+		identifier = decodeURIComponent(encodedIdentifier);
 	} catch {
 		return { ok: false, error: "That matrix.to link is malformed." };
 	}
