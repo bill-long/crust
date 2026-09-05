@@ -1,7 +1,12 @@
-/** Validate that a URL uses the https: scheme. */
+/** Validate an absolute HTTPS URL with an explicit host. */
 export function isValidHttpsUrl(url: string): boolean {
 	try {
-		return new URL(url).protocol === "https:";
+		const parsed = new URL(url);
+		return (
+			/^https:\/\/[^/]/i.test(url) &&
+			parsed.protocol === "https:" &&
+			parsed.hostname.length > 0
+		);
 	} catch {
 		return false;
 	}

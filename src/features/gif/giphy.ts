@@ -31,7 +31,38 @@ interface GiphyResponse {
 	};
 }
 
-function toGifItem(gif: GiphyGif): GifItem | null {
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toRendition(value: unknown): GiphyRendition | undefined {
+	if (!isRecord(value)) return undefined;
+	return {
+		url: typeof value.url === "string" ? value.url : undefined,
+		width: typeof value.width === "string" ? value.width : undefined,
+		height: typeof value.height === "string" ? value.height : undefined,
+	};
+}
+
+function positiveDimension(value: string | undefined): number {
+	const parsed = Number.parseInt(value ?? "", 10);
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 200;
+}
+
+function toGifItem(value: unknown): GifItem | null {
+	if (!isRecord(value) || typeof value.id !== "string") return null;
+	const images = value.images;
+	if (!isRecord(images)) return null;
+
+	const gif: GiphyGif = {
+		id: value.id,
+		title: typeof value.title === "string" ? value.title : "",
+		images: {
+			original: toRendition(images.original),
+			fixed_width: toRendition(images.fixed_width),
+			fixed_width_still: toRendition(images.fixed_width_still),
+		},
+	};
 	const original = gif.images.original;
 	const preview = gif.images.fixed_width;
 	const still = gif.images.fixed_width_still;
@@ -47,8 +78,8 @@ function toGifItem(gif: GiphyGif): GifItem | null {
 		previewUrl: preview.url,
 		stillUrl:
 			still?.url && isValidHttpsUrl(still.url) ? still.url : preview.url,
-		width: Number.parseInt(original.width ?? "0", 10) || 200,
-		height: Number.parseInt(original.height ?? "0", 10) || 200,
+		width: positiveDimension(original.width),
+		height: positiveDimension(original.height),
 	};
 }
 
@@ -76,7 +107,25 @@ async function fetchGiphy(url: string): Promise<GiphyResponse> {
 	if (!res.ok) {
 		throw new Error(`Giphy API error: ${res.status} ${res.statusText}`);
 	}
-	return res.json();
+	const json: unknown = await res.json();
+	if (!isRecord(json) || !Array.isArray(json.data)) {
+		throw new Error("Giphy API returned an unexpected response shape");
+	}
+	const pagination = json.pagination;
+	if (
+		!isRecord(pagination) ||
+		!Number.isInteger(pagination.total_count) ||
+		!Number.isInteger(pagination.count) ||
+		!Number.isInteger(pagination.offset) ||
+		(pagination.total_count as number) < 0 ||
+		(pagination.count as number) < 0 ||
+		(pagination.offset as number) < 0 ||
+		((pagination.count as number) === 0 &&
+			(pagination.offset as number) < (pagination.total_count as number))
+	) {
+		throw new Error("Giphy API returned an unexpected response shape");
+	}
+	return json as unknown as GiphyResponse;
 }
 
 function toSearchResult(data: GiphyResponse): GifSearchResult {
