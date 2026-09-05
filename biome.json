@@ -16,7 +16,10 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true
+			"recommended": true,
+			"style": {
+				"noNonNullAssertion": "warn"
+			}
 		}
 	},
 	"css": {
@@ -31,6 +34,20 @@
 		}
 	},
 	"overrides": [
+		{
+			"includes": ["src/**/*"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "error",
+						"noConsole": {
+							"level": "error",
+							"options": { "allow": ["error", "warn"] }
+						}
+					}
+				}
+			}
+		},
 		{
 			"includes": ["**/*.svg"],
 			"linter": {
