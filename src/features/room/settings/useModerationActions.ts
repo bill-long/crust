@@ -232,7 +232,16 @@ export function useModerationActions(
 	// instead of closing first and surfacing the failure elsewhere.
 	const performKickOrBanAction = (action: MemberAction): Promise<void> => {
 		const pending = pendingKickBan();
-		const targetRoomId = pending?.action === action ? pending.roomId : roomId();
+		if (
+			pending &&
+			(pending.action.kind !== action.kind ||
+				pending.action.userId !== action.userId)
+		) {
+			return Promise.reject(
+				new Error("This moderation action is no longer pending."),
+			);
+		}
+		const targetRoomId = pending?.roomId ?? roomId();
 		// Re-validate at confirm time, like promote/demote do in
 		// performAction: the parked dialog outlives the row menu that gated
 		// it, and the caller may have left, been kicked or been demoted in

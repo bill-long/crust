@@ -189,10 +189,24 @@ describe("useModerationActions routing and permissions", () => {
 
 		actions.requestAction(kick);
 		currentRoomId = "!other:example.com";
-		await actions.performKickOrBan(kick);
+		await actions.performKickOrBan({ ...kick });
 
 		expect(client.kick).toHaveBeenCalledWith(ROOM_ID, ALICE);
 		expect(mocks.perms.canKickTarget).toHaveBeenLastCalledWith(ALICE, ROOM_ID);
+		dispose();
+	});
+
+	it("rejects a confirmation that does not match the parked action", async () => {
+		const client = createClient();
+		const { actions, dispose } = mount(client.client);
+
+		actions.requestAction(kick);
+		await expect(actions.performKickOrBan(ban)).rejects.toThrow(
+			"This moderation action is no longer pending.",
+		);
+
+		expect(client.kick).not.toHaveBeenCalled();
+		expect(client.ban).not.toHaveBeenCalled();
 		dispose();
 	});
 
