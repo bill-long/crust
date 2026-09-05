@@ -28,7 +28,13 @@ const CRC_TABLE = (() => {
 export function crc32Update(crc: number, chunk: Uint8Array): number {
 	let c = crc;
 	for (let i = 0; i < chunk.length; i++) {
-		c = CRC_TABLE[(c ^ chunk[i]) & 0xff] ^ (c >>> 8);
+		const byte = chunk[i];
+		if (byte === undefined) break;
+		const tableEntry = CRC_TABLE[(c ^ byte) & 0xff];
+		if (tableEntry === undefined) {
+			throw new RangeError("CRC table index is out of bounds");
+		}
+		c = tableEntry ^ (c >>> 8);
 	}
 	return c;
 }
