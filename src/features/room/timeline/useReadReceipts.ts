@@ -111,8 +111,25 @@ export function useReadReceipts(
 
 	// Send read receipt for the latest event when at bottom
 	let lastSentReceiptEventId: string | null = null;
+	let receiptScopeGeneration = 0;
+	let activeRoomId = roomId();
+	let activeThreadId = thread()?.threadId;
+	let inFlightReceipt: { eventId: string; generation: number } | null = null;
+
+	function syncReceiptScope(): void {
+		const nextRoomId = roomId();
+		const nextThreadId = thread()?.threadId;
+		if (nextRoomId === activeRoomId && nextThreadId === activeThreadId) return;
+
+		activeRoomId = nextRoomId;
+		activeThreadId = nextThreadId;
+		receiptScopeGeneration++;
+		lastSentReceiptEventId = null;
+		inFlightReceipt = null;
+	}
 
 	function sendReadReceipt(): void {
+		syncReceiptScope();
 		if (!deps.atBottom()) return;
 		// Don't send receipts for events the user hasn't scrolled to.
 		// When behind live, forward pagination appends events but
@@ -121,11 +138,23 @@ export function useReadReceipts(
 		const lastEvent = deps.events[deps.events.length - 1];
 		if (!lastEvent || lastEvent.eventId === lastSentReceiptEventId) return;
 		const eventId = lastEvent.eventId;
+		const generation = receiptScopeGeneration;
+		if (
+			inFlightReceipt?.eventId === eventId &&
+			inFlightReceipt.generation === generation
+		) {
+			return;
+		}
 		// Skip local echo events - their temporary ~-prefixed IDs
 		// are rejected by the server with 400.
 		if (!eventId.startsWith("$")) return;
 		const matrixEvent = deps.getSourceEvent(eventId);
 		if (!matrixEvent) return;
+		const pendingReceipt = { eventId, generation };
+		inFlightReceipt = pendingReceipt;
+		const clearInFlight = (): void => {
+			if (inFlightReceipt === pendingReceipt) inFlightReceipt = null;
+		};
 		client
 			// Main timeline: UNTHREADED (3rd arg true) - a plain receipt would
 			// get thread_id "main" and clear only main-timeline counts, leaving
@@ -136,12 +165,21 @@ export function useReadReceipts(
 			// thread_id from the event, so reading a thread clears exactly that
 			// thread's counts and never the whole room's read state.
 			.sendReadReceipt(matrixEvent, ReceiptType.Read, !thread())
-			.then(() => {
-				lastSentReceiptEventId = eventId;
-			})
-			.catch(() => {
-				// Best-effort; receipt will retry on next scroll/event
-			});
+			.then(
+				() => {
+					if (
+						receiptScopeGeneration === generation &&
+						deps.events[deps.events.length - 1]?.eventId === eventId
+					) {
+						lastSentReceiptEventId = eventId;
+					}
+					clearInFlight();
+				},
+				() => {
+					// Best-effort; receipt will retry on next scroll/event
+					clearInFlight();
+				},
+			);
 	}
 
 	// Send receipt when new events arrive or last event ID changes
@@ -169,10 +207,10 @@ export function useReadReceipts(
 		}),
 	);
 
-	// Send receipt when room first opens
+	// Send receipt when a room or thread first opens
 	createEffect(
-		on(roomId, () => {
-			lastSentReceiptEventId = null;
+		on([roomId, () => thread()?.threadId], () => {
+			syncReceiptScope();
 			// Defer so events are loaded first
 			requestAnimationFrame(() => sendReadReceipt());
 		}),
