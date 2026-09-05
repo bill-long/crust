@@ -22,7 +22,10 @@ function applyAndSort(
 		o,
 	]);
 	for (const { index, order } of ops) {
-		zipped[index][1] = order;
+		const entry = zipped[index];
+		if (entry === undefined)
+			throw new RangeError("Order index is out of bounds");
+		entry[1] = order;
 	}
 	return [...zipped].sort((a, b) => {
 		if (a[1] === b[1]) return 0;
@@ -41,7 +44,7 @@ const moveTest = (
 ): void => {
 	const ops = reorderLexicographically(orders, fromIndex, toIndex, maxLength);
 	const newOrders = applyAndSort(orders, ops);
-	expect(newOrders[toIndex][0]).toBe(fromIndex);
+	expect(newOrders[toIndex]?.[0]).toBe(fromIndex);
 	expect(ops).toHaveLength(expectedChanges);
 };
 

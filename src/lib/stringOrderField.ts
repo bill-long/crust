@@ -22,8 +22,7 @@ export function moveElement<T>(
 	toIndex: number,
 ): T[] {
 	const next = [...arr];
-	const [moved] = next.splice(fromIndex, 1);
-	next.splice(toIndex, 0, moved);
+	next.splice(toIndex, 0, ...next.splice(fromIndex, 1));
 	return next;
 }
 
@@ -126,7 +125,7 @@ export function reorderLexicographically(
 	}
 
 	// Verify the left move would be sufficient.
-	const firstOrder = newOrder[0].order;
+	const firstOrder = newOrder[0]?.order;
 	const firstOrderBase =
 		firstOrder === undefined ? undefined : stringToBase(firstOrder);
 	const bigToIndex = BigInt(toIndex);
@@ -196,8 +195,11 @@ export function reorderLexicographically(
 		maxLen,
 	);
 
-	return changes.map((order, i) => ({
-		index: newOrder[leftBoundIdx + i].index,
-		order,
-	}));
+	return changes.map((order, i) => {
+		const target = newOrder[leftBoundIdx + i];
+		if (target === undefined) {
+			throw new RangeError("Order update target is out of bounds");
+		}
+		return { index: target.index, order };
+	});
 }

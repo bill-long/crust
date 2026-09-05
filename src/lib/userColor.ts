@@ -48,5 +48,5 @@ export function userColorIndex(userId: string): number {
  * Callers pass the Matrix ID (`@user:server`), not a display name.
  */
 export function userColorClass(userId: string): string {
-	return USER_COLOR_CLASSES[userColorIndex(userId)];
+	return USER_COLOR_CLASSES[userColorIndex(userId)] ?? USER_COLOR_CLASSES[0];
 }
