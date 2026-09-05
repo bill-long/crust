@@ -15,6 +15,21 @@ export interface MemberAction {
 	displayName: string;
 }
 
+function currentPowerLevels(
+	client: MatrixClient,
+	roomId: string,
+): PowerLevelContent | null {
+	const event = client
+		.getRoom(roomId)
+		?.currentState.getStateEvents(EventType.RoomPowerLevels, "");
+	if (!event || Array.isArray(event)) return null;
+	const content = event.getContent?.();
+	if (!content || typeof content !== "object" || Array.isArray(content)) {
+		return null;
+	}
+	return content as PowerLevelContent;
+}
+
 /**
  * Run a parked kick/ban. Standalone (not hook state) so a caller whose
  * confirm dialog outlives the component that parked the action - the
@@ -57,6 +72,11 @@ export interface ModerationActions {
 	canDemote: (userId: string, currentPowerLevel: number) => boolean;
 }
 
+interface PendingKickBan {
+	action: MemberAction;
+	roomId: string;
+}
+
 /**
  * Room-member moderation flow shared by the settings Members tab and the
  * profile card: permission-gated promote/demote power-level writes
@@ -87,8 +107,16 @@ export function useModerationActions(
 	);
 
 	const [actionError, setActionError] = createSignal<string | null>(null);
-	const [pendingAction, setPendingAction] = createSignal<MemberAction | null>(
-		null,
+	const [pendingKickBan, setPendingKickBan] =
+		createSignal<PendingKickBan | null>(null);
+	const pendingAction = (): MemberAction | null =>
+		pendingKickBan()?.action ?? null;
+	const setPendingAction = (action: MemberAction | null): void => {
+		setPendingKickBan(action ? { action, roomId: roomId() } : null);
+	};
+	const confirmationPerms = useRoomPermissions(
+		client,
+		() => pendingKickBan()?.roomId ?? roomId(),
 	);
 
 	// Serialize PL writes so rapid consecutive promote/demote actions
@@ -96,34 +124,59 @@ export function useModerationActions(
 	// sends but also threads a local "pending PL" snapshot so write N
 	// merges against write N-1's changes (the server echo may not have
 	// arrived by the time write N reads `plContent()`).
-	let plWriteChain: Promise<void> = Promise.resolve();
-	let pendingPL: PowerLevelContent | null = null;
-	let plWriteSeq = 0;
+	const plWriteChains = new Map<string, Promise<void>>();
+	const pendingPLByRoom = new Map<string, PowerLevelContent | null>();
+	const plWriteSeqByRoom = new Map<string, number>();
 	const writePowerLevel = (
 		userId: string,
 		level: number | null,
 	): Promise<void> => {
-		const mySeq = ++plWriteSeq;
-		const run = plWriteChain.then(async () => {
-			const base = pendingPL ?? plContent();
+		// The write runs in a later microtask after the prior queue entry. Capture
+		// its destination now so switching the settings overlay to another room
+		// cannot redirect an already-requested action.
+		const targetRoomId = roomId();
+		const mySeq = (plWriteSeqByRoom.get(targetRoomId) ?? 0) + 1;
+		plWriteSeqByRoom.set(targetRoomId, mySeq);
+		const previous = plWriteChains.get(targetRoomId) ?? Promise.resolve();
+		const run = previous.then(async () => {
+			const base = pendingPLByRoom.has(targetRoomId)
+				? (pendingPLByRoom.get(targetRoomId) ?? null)
+				: currentPowerLevels(client, targetRoomId);
 			const next = withUserLevel(base, userId, level);
-			pendingPL = next;
+			pendingPLByRoom.set(targetRoomId, next);
 			try {
 				await client.sendStateEvent(
-					roomId(),
+					targetRoomId,
 					EventType.RoomPowerLevels,
 					next as unknown as Record<string, unknown>,
 					"",
 				);
+			} catch (error) {
+				// A queued successor has not started yet (the chain is serialized), so
+				// this is still the active overlay. Restore the base that preceded only
+				// this rejected mutation, preserving earlier successful queued writes.
+				if (pendingPLByRoom.get(targetRoomId) === next) {
+					pendingPLByRoom.set(targetRoomId, base);
+				}
+				throw error;
 			} finally {
 				// Drop the overlay once the most-recent write settles
 				// so a later burst rebases on the freshest server snapshot.
-				if (mySeq === plWriteSeq) pendingPL = null;
+				if (mySeq === plWriteSeqByRoom.get(targetRoomId)) {
+					pendingPLByRoom.delete(targetRoomId);
+					plWriteSeqByRoom.delete(targetRoomId);
+				}
 			}
 		});
-		// Keep the chain alive on failure so one bad write doesn't
-		// permanently break serialization.
-		plWriteChain = run.catch(() => {});
+		// Keep this room's chain alive on failure so one bad write doesn't
+		// permanently break serialization. Other rooms never wait behind it.
+		const chain = run.catch(() => {});
+		plWriteChains.set(targetRoomId, chain);
+		void chain.finally(() => {
+			if (plWriteChains.get(targetRoomId) === chain) {
+				plWriteChains.delete(targetRoomId);
+			}
+		});
 		return run;
 	};
 
@@ -168,6 +221,8 @@ export function useModerationActions(
 				}
 			}
 		} catch (e) {
+			// Every queued mutation is independent. Keep a failure visible even if a
+			// later queued write succeeds, since the failed mutation was rolled back.
 			setActionError(userFacingErrorMessage(e, "Action failed."));
 		}
 	};
@@ -176,6 +231,17 @@ export function useModerationActions(
 	// promise reject so the dialog catches and renders the error inline
 	// instead of closing first and surfacing the failure elsewhere.
 	const performKickOrBanAction = (action: MemberAction): Promise<void> => {
+		const pending = pendingKickBan();
+		if (
+			pending &&
+			(pending.action.kind !== action.kind ||
+				pending.action.userId !== action.userId)
+		) {
+			return Promise.reject(
+				new Error("This moderation action is no longer pending."),
+			);
+		}
+		const targetRoomId = pending?.roomId ?? roomId();
 		// Re-validate at confirm time, like promote/demote do in
 		// performAction: the parked dialog outlives the row menu that gated
 		// it, and the caller may have left, been kicked or been demoted in
@@ -183,16 +249,16 @@ export function useModerationActions(
 		// would swallow a request already in flight.
 		const allowed =
 			action.kind === "kick"
-				? perms.canKickTarget(action.userId)
+				? confirmationPerms.canKickTarget(action.userId)
 				: action.kind === "ban"
-					? perms.canBanTarget(action.userId)
+					? confirmationPerms.canBanTarget(action.userId)
 					: true;
 		if (!allowed) {
 			return Promise.reject(
 				new Error(`You can no longer ${action.kind} ${action.displayName}.`),
 			);
 		}
-		return performKickOrBan(client, roomId(), action);
+		return performKickOrBan(client, targetRoomId, action);
 	};
 
 	const requestAction = (action: MemberAction): void => {
