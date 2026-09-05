@@ -13,6 +13,10 @@ describe("isValidHttpsUrl", () => {
 
 	it.each([
 		"http://example.com/image.gif",
+		"https:",
+		"https:example.com/image.gif",
+		"https:/example.com/image.gif",
+		"https:///path",
 		"javascript:alert(1)",
 		"data:image/gif;base64,R0lGODlh",
 		"//example.com/image.gif",
