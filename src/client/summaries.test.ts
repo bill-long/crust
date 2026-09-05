@@ -15,12 +15,25 @@ import {
 	createSummariesStore,
 	getNextCallExpiry,
 	isCallActive,
+	type RoomSummary,
+	type SummariesStore,
 } from "./summaries";
 import { getSpaces } from "./summaries-selectors";
 
 const CALL_TYPE = "org.matrix.msc3401.call.member";
 const NOW = 1_780_000_000_000;
 const HOUR = 60 * 60 * 1000;
+
+function requireSummary(
+	summaries: SummariesStore,
+	roomId: string,
+): RoomSummary {
+	const summary = summaries[roomId];
+	if (summary === undefined) {
+		throw new Error(`Expected summary for ${roomId}`);
+	}
+	return summary;
+}
 
 function modernMembership(opts: {
 	createdTs: number;
@@ -565,11 +578,11 @@ describe("createSummariesStore call expiry timer", () => {
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
 
-		expect(store.summaries[room.roomId].callActive).toBe(true);
+		expect(requireSummary(store.summaries, room.roomId).callActive).toBe(true);
 
 		vi.advanceTimersByTime(60_000 + 100);
 
-		expect(store.summaries[room.roomId].callActive).toBe(false);
+		expect(requireSummary(store.summaries, room.roomId).callActive).toBe(false);
 
 		store.cleanup();
 	});
@@ -593,7 +606,7 @@ describe("createSummariesStore call expiry timer", () => {
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
 
-		expect(store.summaries[room.roomId].callActive).toBe(true);
+		expect(requireSummary(store.summaries, room.roomId).callActive).toBe(true);
 		expect(vi.getTimerCount()).toBe(0);
 
 		store.cleanup();
@@ -674,7 +687,7 @@ describe("createSummariesStore call expiry timer", () => {
 
 		// Without any server-time sample yet, the client clock wins and
 		// the membership is treated as expired.
-		expect(store.summaries[room.roomId].callActive).toBe(false);
+		expect(requireSummary(store.summaries, room.roomId).callActive).toBe(false);
 
 		// Live event whose origin_server_ts implies server time is 2h
 		// behind the client clock. `unsigned.age = 0` => localTimestamp
@@ -695,7 +708,7 @@ describe("createSummariesStore call expiry timer", () => {
 
 		// callActive should flip to true now that the offset-corrected
 		// "now" is before the membership expiry.
-		expect(store.summaries[room.roomId].callActive).toBe(true);
+		expect(requireSummary(store.summaries, room.roomId).callActive).toBe(true);
 
 		store.cleanup();
 	});
@@ -716,7 +729,7 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 			avatarUrl: "https://example.com/a.png",
 		});
 
-		const s = store.summaries["!new:x"];
+		const s = requireSummary(store.summaries, "!new:x");
 		expect(s).toBeDefined();
 		expect(s.roomId).toBe("!new:x");
 		expect(s.name).toBe("General");
@@ -756,7 +769,7 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 			avatarUrl: "hierarchy.png",
 		});
 
-		const s = store.summaries["!r:x"];
+		const s = requireSummary(store.summaries, "!r:x");
 		expect(s.membership).toBe("join");
 		// Existing authoritative fields are preserved — hierarchy is only
 		// a fallback when there's no summary yet.
@@ -796,8 +809,8 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 			avatarUrl: "should-not-overwrite.png",
 		});
 
-		expect(store.summaries["!r:x"].name).toBe("Real name");
-		expect(store.summaries["!r:x"].avatarUrl).toBeNull();
+		expect(requireSummary(store.summaries, "!r:x").name).toBe("Real name");
+		expect(requireSummary(store.summaries, "!r:x").avatarUrl).toBeNull();
 
 		store.cleanup();
 	});
@@ -810,7 +823,7 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 			isSpace: true,
 		});
 
-		expect(store.summaries["!space:x"].isSpace).toBe(true);
+		expect(requireSummary(store.summaries, "!space:x").isSpace).toBe(true);
 
 		store.cleanup();
 	});
@@ -839,8 +852,8 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 			isSpace: true,
 		});
 
-		expect(store.summaries["!r:x"].isSpace).toBe(true);
-		expect(store.summaries["!r:x"].membership).toBe("join");
+		expect(requireSummary(store.summaries, "!r:x").isSpace).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").membership).toBe("join");
 
 		store.cleanup();
 	});
@@ -868,7 +881,7 @@ describe("createSummariesStore optimisticallyMarkJoined", () => {
 			avatarUrl: null,
 		});
 
-		expect(store.summaries["!s:x"].isSpace).toBe(true);
+		expect(requireSummary(store.summaries, "!s:x").isSpace).toBe(true);
 
 		store.cleanup();
 	});
@@ -889,7 +902,7 @@ describe("createSummariesStore optimisticallyMarkKnocked", () => {
 			avatarUrl: null,
 		});
 
-		const s = store.summaries["!new:x"];
+		const s = requireSummary(store.summaries, "!new:x");
 		expect(s).toBeDefined();
 		expect(s.name).toBe("Restricted Club");
 		expect(s.membership).toBe("knock");
@@ -921,7 +934,7 @@ describe("createSummariesStore optimisticallyMarkKnocked", () => {
 			avatarUrl: null,
 		});
 
-		const s = store.summaries["!r:x"];
+		const s = requireSummary(store.summaries, "!r:x");
 		expect(s.membership).toBe("knock");
 		expect(s.name).toBe("Existing name");
 		expect(s.isEncrypted).toBe(true);
@@ -952,7 +965,7 @@ describe("createSummariesStore optimisticallyMarkKnocked", () => {
 			avatarUrl: null,
 		});
 
-		expect(store.summaries["!r:x"].membership).toBe("join");
+		expect(requireSummary(store.summaries, "!r:x").membership).toBe("join");
 
 		store.cleanup();
 	});
@@ -965,7 +978,7 @@ describe("createSummariesStore optimisticallyMarkKnocked", () => {
 			isSpace: true,
 		});
 
-		const s = store.summaries["!sub:x"];
+		const s = requireSummary(store.summaries, "!sub:x");
 		expect(s.membership).toBe("knock");
 		expect(s.isSpace).toBe(true);
 
@@ -995,14 +1008,14 @@ describe("createSummariesStore optimisticallyMarkKnocked", () => {
 			avatarUrl: null,
 			isSpace: true,
 		});
-		expect(store.summaries["!sub:x"].isSpace).toBe(true);
+		expect(requireSummary(store.summaries, "!sub:x").isSpace).toBe(true);
 
 		// And a plain knock never demotes an authoritative isSpace:true.
 		store.optimisticallyMarkKnocked("!sub:x", {
 			name: "Ignored",
 			avatarUrl: null,
 		});
-		expect(store.summaries["!sub:x"].isSpace).toBe(true);
+		expect(requireSummary(store.summaries, "!sub:x").isSpace).toBe(true);
 
 		store.cleanup();
 	});
@@ -1045,7 +1058,7 @@ describe("createSummariesStore optimisticallyMarkLeft", () => {
 
 		store.optimisticallyMarkLeft("!r:x");
 
-		const s = store.summaries["!r:x"];
+		const s = requireSummary(store.summaries, "!r:x");
 		expect(s.membership).toBe("leave");
 		expect(s.name).toBe("Keep me");
 		expect(s.avatarUrl).toBe("keep.png");
@@ -1068,7 +1081,7 @@ describe("createSummariesStore optimisticallyMarkLeft", () => {
 			membership: "leave",
 		});
 		store.optimisticallyMarkLeft("!r:x");
-		expect(store.summaries["!r:x"].membership).toBe("leave");
+		expect(requireSummary(store.summaries, "!r:x").membership).toBe("leave");
 		store.cleanup();
 	});
 
@@ -1115,14 +1128,14 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 		const room = stubRoomForStore(createMockRoom("!r:x"));
 		room.__setRoomAccountData("m.marked_unread", { unread: true });
 		const { store } = makeStore(room);
-		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(true);
 		store.cleanup();
 	});
 
 	it("updates markedUnread when the stable account-data event arrives", () => {
 		const room = stubRoomForStore(createMockRoom("!r:x"));
 		const { client, store } = makeStore(room);
-		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(false);
 
 		room.__setRoomAccountData("m.marked_unread", { unread: true });
 		client.__emit(
@@ -1130,7 +1143,7 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 			accountDataEvent("m.marked_unread"),
 			room,
 		);
-		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(true);
 
 		room.__setRoomAccountData("m.marked_unread", { unread: false });
 		client.__emit(
@@ -1138,7 +1151,7 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 			accountDataEvent("m.marked_unread"),
 			room,
 		);
-		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(false);
 
 		store.cleanup();
 	});
@@ -1153,7 +1166,7 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 			accountDataEvent("com.famedly.marked_unread"),
 			room,
 		);
-		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(true);
 
 		store.cleanup();
 	});
@@ -1166,7 +1179,7 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 		// so the handler must not re-read it.
 		room.__setRoomAccountData("m.marked_unread", { unread: true });
 		client.__emit("Room.accountData", accountDataEvent("m.fully_read"), room);
-		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(false);
 
 		store.cleanup();
 	});
@@ -1175,14 +1188,14 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 		const room = stubRoomForStore(createMockRoom("!r:x"));
 		room.__setRoomAccountData("im.vector.web.space_order", { order: "aa" });
 		const { store } = makeStore(room);
-		expect(store.summaries["!r:x"].spaceOrder).toBe("aa");
+		expect(requireSummary(store.summaries, "!r:x").spaceOrder).toBe("aa");
 		store.cleanup();
 	});
 
 	it("updates spaceOrder when its account-data event arrives (#449)", () => {
 		const room = stubRoomForStore(createMockRoom("!r:x"));
 		const { client, store } = makeStore(room);
-		expect(store.summaries["!r:x"].spaceOrder).toBeNull();
+		expect(requireSummary(store.summaries, "!r:x").spaceOrder).toBeNull();
 
 		room.__setRoomAccountData("im.vector.web.space_order", { order: "m" });
 		client.__emit(
@@ -1190,7 +1203,7 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 			accountDataEvent("im.vector.web.space_order"),
 			room,
 		);
-		expect(store.summaries["!r:x"].spaceOrder).toBe("m");
+		expect(requireSummary(store.summaries, "!r:x").spaceOrder).toBe("m");
 
 		store.cleanup();
 	});
@@ -1200,9 +1213,9 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 		const { store } = makeStore(room);
 
 		store.optimisticallySetSpaceOrder("!r:x", "q");
-		expect(store.summaries["!r:x"].spaceOrder).toBe("q");
+		expect(requireSummary(store.summaries, "!r:x").spaceOrder).toBe("q");
 		store.optimisticallySetSpaceOrder("!r:x", null);
-		expect(store.summaries["!r:x"].spaceOrder).toBeNull();
+		expect(requireSummary(store.summaries, "!r:x").spaceOrder).toBeNull();
 		store.optimisticallySetSpaceOrder("!missing:x", "q");
 		expect(store.summaries["!missing:x"]).toBeUndefined();
 
@@ -1214,9 +1227,9 @@ describe("createSummariesStore marked-unread (MSC2867)", () => {
 		const { store } = makeStore(room);
 
 		store.optimisticallySetMarkedUnread("!r:x", true);
-		expect(store.summaries["!r:x"].markedUnread).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(true);
 		store.optimisticallySetMarkedUnread("!r:x", false);
-		expect(store.summaries["!r:x"].markedUnread).toBe(false);
+		expect(requireSummary(store.summaries, "!r:x").markedUnread).toBe(false);
 
 		store.optimisticallySetMarkedUnread("!missing:x", true);
 		expect(store.summaries["!missing:x"]).toBeUndefined();
@@ -1244,14 +1257,14 @@ describe("createSummariesStore room tags (#449)", () => {
 		const client = createMockClient(rooms);
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
-		expect(store.summaries["!r:x"].isFavourite).toBe(true);
-		expect(store.summaries["!r:x"].isLowPriority).toBe(false);
+		expect(requireSummary(store.summaries, "!r:x").isFavourite).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").isLowPriority).toBe(false);
 
 		delete room.tags["m.favourite"];
 		room.tags["m.lowpriority"] = {};
 		client.__emit("Room.tags", { getType: () => "m.tag" }, room);
-		expect(store.summaries["!r:x"].isFavourite).toBe(false);
-		expect(store.summaries["!r:x"].isLowPriority).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").isFavourite).toBe(false);
+		expect(requireSummary(store.summaries, "!r:x").isLowPriority).toBe(true);
 
 		store.cleanup();
 	});
@@ -1264,9 +1277,9 @@ describe("createSummariesStore room tags (#449)", () => {
 		store.init();
 
 		store.optimisticallySetRoomTag("!r:x", "m.favourite", true);
-		expect(store.summaries["!r:x"].isFavourite).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").isFavourite).toBe(true);
 		store.optimisticallySetRoomTag("!r:x", "m.lowpriority", true);
-		expect(store.summaries["!r:x"].isLowPriority).toBe(true);
+		expect(requireSummary(store.summaries, "!r:x").isLowPriority).toBe(true);
 		store.optimisticallySetRoomTag("!missing:x", "m.favourite", true);
 		expect(store.summaries["!missing:x"]).toBeUndefined();
 
@@ -1307,7 +1320,9 @@ describe("createSummariesStore poll previews", () => {
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
 
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("Poll: Best pizza?");
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"Poll: Best pizza?",
+		);
 		store.cleanup();
 	});
 
@@ -1330,7 +1345,9 @@ describe("createSummariesStore poll previews", () => {
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
 
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("older text");
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"older text",
+		);
 		store.cleanup();
 	});
 
@@ -1346,7 +1363,9 @@ describe("createSummariesStore poll previews", () => {
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
 
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("latest text");
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"latest text",
+		);
 		store.cleanup();
 	});
 
@@ -1363,7 +1382,9 @@ describe("createSummariesStore poll previews", () => {
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
 
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("main message");
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"main message",
+		);
 		store.cleanup();
 	});
 
@@ -1384,7 +1405,9 @@ describe("createSummariesStore poll previews", () => {
 		const client = createMockClient(new Map([[room.roomId, room]]));
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("newer main");
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"newer main",
+		);
 
 		unread = 3;
 		const rootEvent = createMatrixEvent(
@@ -1395,8 +1418,10 @@ describe("createSummariesStore poll previews", () => {
 			timeline: { getTimelineSet: () => ({ thread: { id: "$root" } }) },
 		});
 
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("newer main");
-		expect(store.summaries["!r:x"].unreadCount).toBe(3);
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"newer main",
+		);
+		expect(requireSummary(store.summaries, "!r:x").unreadCount).toBe(3);
 		store.cleanup();
 	});
 
@@ -1412,7 +1437,9 @@ describe("createSummariesStore poll previews", () => {
 		const client = createMockClient(new Map([[room.roomId, room]]));
 		const store = createSummariesStore(client as unknown as MatrixClient);
 		store.init();
-		expect(store.summaries["!r:x"].lastMessage?.timestamp).toBe(1000);
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.timestamp).toBe(
+			1000,
+		);
 
 		const reply = createMatrixEvent(
 			threadReplyEvent("!r:x", "$tr", "@bob:x", "$main", "in thread", 5000),
@@ -1422,8 +1449,12 @@ describe("createSummariesStore poll previews", () => {
 			timeline: { getTimelineSet: () => ({ thread: { id: "$main" } }) },
 		});
 
-		expect(store.summaries["!r:x"].lastMessage?.timestamp).toBe(5000);
-		expect(store.summaries["!r:x"].lastMessage?.body).toBe("main message");
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.timestamp).toBe(
+			5000,
+		);
+		expect(requireSummary(store.summaries, "!r:x").lastMessage?.body).toBe(
+			"main message",
+		);
 		store.cleanup();
 	});
 });
