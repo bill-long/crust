@@ -453,7 +453,9 @@ describe("useTimeline media projection", () => {
 			});
 		});
 
-		it("strips control chars from a caption and never sets one for non-image attachments", async () => {
+		it("strips control chars and projects captions for every attachment type", async () => {
+			const RLO = String.fromCharCode(0x202e);
+			const rawReplyFilename = `invoice${RLO}gnp.exe`;
 			const roomA = createMockRoom("!roomA:test", [
 				{
 					eventId: "$ctrl",
@@ -503,8 +505,8 @@ describe("useTimeline media projection", () => {
 					},
 					ts: 1800,
 				},
-				// A file with a differing body is a caption per spec, but captions are
-				// scoped to m.image in the renderer, so the projection leaves it null.
+				// A file with a differing body is also a caption per spec. It is
+				// projected even though the file renderer only shows the filename.
 				{
 					eventId: "$fileCaption",
 					roomId: "!roomA:test",
@@ -518,6 +520,81 @@ describe("useTimeline media projection", () => {
 						info: { mimetype: "application/pdf", size: 1 },
 					},
 					ts: 2000,
+				},
+				// A legacy reply fallback is transport metadata. Once removed, this
+				// body is the same filename and must not become a caption carrying
+				// the raw bidi override.
+				{
+					eventId: "$fileReplyNoCaption",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.file",
+						body: `> <@bob:test> quoted\n\n${rawReplyFilename}`,
+						filename: rawReplyFilename,
+						url: "mxc://test/reply-doc",
+						info: { mimetype: "application/pdf", size: 1 },
+						"m.relates_to": {
+							"m.in_reply_to": { event_id: "$parent" },
+						},
+					},
+					ts: 2200,
+				},
+				// Strip only the transport fallback. A fallback-shaped blockquote at
+				// the start of the actual caption is user-authored and stays intact.
+				{
+					eventId: "$fileReplyCaption",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.file",
+						body: "> <@bob:test> outer quote\n\n> <@carol:test> authored quote\n\ncaption",
+						filename: "report.pdf",
+						url: "mxc://test/captioned-reply-doc",
+						info: { mimetype: "application/pdf", size: 1 },
+						"m.relates_to": {
+							"m.in_reply_to": { event_id: "$parent" },
+						},
+						format: "org.matrix.custom.html",
+						formatted_body:
+							"<mx-reply><blockquote>outer quote</blockquote></mx-reply><blockquote>authored quote</blockquote><p>caption</p>",
+					},
+					ts: 2400,
+				},
+				// The same syntax without reply metadata is authored prose.
+				{
+					eventId: "$fileBlockquoteCaption",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.file",
+						body: "> <@carol:test> authored quote\n\ncaption",
+						filename: "notes.pdf",
+						url: "mxc://test/blockquote-doc",
+						info: { mimetype: "application/pdf", size: 1 },
+					},
+					ts: 2600,
+				},
+				// A legacy client may omit `filename` and prepend a plain reply
+				// fallback to the body that otherwise names the attachment.
+				{
+					eventId: "$legacyFileReply",
+					roomId: "!roomA:test",
+					sender: "@alice:test",
+					type: "m.room.message",
+					content: {
+						msgtype: "m.file",
+						body: "> <@bob:test> quoted\n\nlegacy-report.pdf",
+						url: "mxc://test/legacy-reply-doc",
+						info: { mimetype: "application/pdf", size: 1 },
+						"m.relates_to": {
+							"m.in_reply_to": { event_id: "$parent" },
+						},
+					},
+					ts: 2800,
 				},
 			]);
 
@@ -533,10 +610,32 @@ describe("useTimeline media projection", () => {
 				const ctrl = events.find((e) => e.eventId === "$ctrl");
 				const multiline = events.find((e) => e.eventId === "$multiline");
 				const fileCaption = events.find((e) => e.eventId === "$fileCaption");
+				const fileReplyNoCaption = events.find(
+					(e) => e.eventId === "$fileReplyNoCaption",
+				);
+				const fileReplyCaption = events.find(
+					(e) => e.eventId === "$fileReplyCaption",
+				);
+				const fileBlockquoteCaption = events.find(
+					(e) => e.eventId === "$fileBlockquoteCaption",
+				);
+				const legacyFileReply = events.find(
+					(e) => e.eventId === "$legacyFileReply",
+				);
 				const ctrlFilename = events.find((e) => e.eventId === "$ctrlFilename");
 				expect(ctrl?.mediaCaption).toBe("lineone");
 				expect(multiline?.mediaCaption).toBe("first line\nsecond line");
-				expect(fileCaption?.mediaCaption).toBeNull();
+				expect(fileCaption?.mediaCaption).toBe("see attached");
+				expect(fileReplyNoCaption?.mediaFilename).toBe("invoicegnp.exe");
+				expect(fileReplyNoCaption?.mediaCaption).toBeNull();
+				expect(fileReplyCaption?.mediaCaption).toBe(
+					"> <@carol:test> authored quote\n\ncaption",
+				);
+				expect(fileBlockquoteCaption?.mediaCaption).toBe(
+					"> <@carol:test> authored quote\n\ncaption",
+				);
+				expect(legacyFileReply?.mediaFilename).toBe("legacy-report.pdf");
+				expect(legacyFileReply?.mediaCaption).toBeNull();
 				expect(ctrlFilename?.mediaCaption).toBeNull();
 			});
 		});

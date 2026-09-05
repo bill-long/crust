@@ -72,7 +72,7 @@ const ReportMessageDialog: Component<ReportMessageDialogProps> = (props) => {
 						sender is not notified.
 					</p>
 					<Show when={props.target()}>
-						{(target) => <MessagePreview body={target().body} />}
+						{(target) => <MessagePreview event={target()} />}
 					</Show>
 					<label class="flex flex-col gap-1">
 						<span class="text-xs font-medium text-text-secondary">

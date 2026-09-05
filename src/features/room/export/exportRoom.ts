@@ -9,7 +9,7 @@ import {
 	stripBidiControls,
 	stripLineBreakers,
 } from "../../../lib/controlChars";
-import { sanitizeFilename } from "../../../lib/filename";
+import { isAttachmentMsgtype, sanitizeFilename } from "../../../lib/filename";
 import { stripReplyFallback } from "../../../lib/replyFallback";
 import { crc32Chunked, ZipWriter } from "../../../lib/zip";
 import {
@@ -191,7 +191,11 @@ async function runExport(
 			if (!isExportable(te)) continue;
 			fresh.push({
 				te,
-				bodyText: te.isDecryptionFailure ? "" : stripReplyFallback(te.body),
+				bodyText: te.isDecryptionFailure
+					? ""
+					: isAttachmentMsgtype(te.msgtype)
+						? (te.mediaCaption ?? "")
+						: stripReplyFallback(te.body),
 				undecryptable: te.isDecryptionFailure,
 				attachmentPath: null,
 				attachmentFailed: false,

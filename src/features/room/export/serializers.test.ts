@@ -92,6 +92,55 @@ describe("JSON export", () => {
 		expect(out.messages[1].media.export_failed).toBe(true);
 	});
 
+	it("emits an attachment filename once without the raw wire body", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		const out = jsonOf([
+			row(
+				{
+					msgtype: "m.file",
+					body: rawBody,
+					mediaFullUrl: "https://hs/file",
+					mediaFilename: "invoicegnp.exe",
+				},
+				{ bodyText: rawBody },
+			),
+		]);
+		expect(out.messages[0].body).toBeUndefined();
+		expect(out.messages[0].media.filename).toBe("invoicegnp.exe");
+		expect(JSON.stringify(out)).not.toContain(rawBody);
+	});
+
+	it("preserves normalized non-image captions", () => {
+		const out = jsonOf([
+			row({
+				msgtype: "m.audio",
+				body: "> <@alice:hs> quoted\n\nlisten to this",
+				mediaCaption: "listen to this",
+				mediaFullUrl: "https://hs/audio",
+				mediaFilename: "clip.ogg",
+			}),
+		]);
+		expect(out.messages[0].body).toBe("listen to this");
+		expect(out.messages[0].media.filename).toBe("clip.ogg");
+	});
+
+	it("retains the sanitized filename when attachment media is unavailable", () => {
+		const out = jsonOf([
+			row({
+				msgtype: "m.file",
+				body: "report.pdf",
+				mediaFilename: "report.pdf",
+				mediaFullUrl: null,
+			}),
+		]);
+		expect(out.messages[0].body).toBeUndefined();
+		expect(out.messages[0].media).toMatchObject({
+			filename: "report.pdf",
+			exported: false,
+		});
+	});
+
 	it("never emits a ciphertext URL for an unbundled encrypted attachment", () => {
 		const out = jsonOf([
 			row({
@@ -192,6 +241,52 @@ describe("text export", () => {
 		expect(text).not.toContain("ciphertext");
 	});
 
+	it("prints an attachment filename once without the raw wire body", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		const text = textOf([
+			row(
+				{
+					msgtype: "m.file",
+					body: rawBody,
+					mediaFullUrl: "https://hs/file",
+					mediaFilename: "invoicegnp.exe",
+				},
+				{ bodyText: rawBody },
+			),
+		]);
+		expect(text).not.toContain(rawBody);
+		expect(text.match(/invoicegnp\.exe/g)).toHaveLength(1);
+	});
+
+	it("prints an unavailable attachment's sanitized filename once", () => {
+		const text = textOf([
+			row({
+				msgtype: "m.file",
+				body: "report.pdf",
+				mediaFilename: "report.pdf",
+				mediaFullUrl: null,
+			}),
+		]);
+		expect(text).toContain("[attachment: report.pdf -> unavailable]");
+		expect(text.match(/report\.pdf/g)).toHaveLength(1);
+	});
+
+	it("marks a captionless attachment as edited", () => {
+		const text = textOf([
+			row({
+				msgtype: "m.file",
+				body: "report.pdf",
+				mediaFilename: "report.pdf",
+				mediaFullUrl: "https://hs/file",
+				isEdited: true,
+			}),
+		]);
+		expect(text).toContain(
+			"[attachment: report.pdf -> https://hs/file] (edited)",
+		);
+	});
+
 	it("carries the E2EE plaintext warning for encrypted rooms", () => {
 		expect(textOf([], true)).toContain("end-to-end encrypted");
 	});
@@ -250,6 +345,37 @@ describe("HTML export", () => {
 		]);
 		expect(html).toContain('src="media/1_photo.png"');
 		expect(html).toContain('href="media/2_notes.pdf"');
+	});
+
+	it("renders an attachment filename once without the raw wire body", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		const html = htmlOf([
+			row(
+				{
+					msgtype: "m.file",
+					body: rawBody,
+					mediaFullUrl: "https://hs/file",
+					mediaFilename: "invoicegnp.exe",
+				},
+				{ bodyText: rawBody },
+			),
+		]);
+		expect(html).not.toContain(rawBody);
+		expect(html.match(/invoicegnp\.exe/g)).toHaveLength(1);
+	});
+
+	it("renders an unavailable attachment's sanitized filename once", () => {
+		const html = htmlOf([
+			row({
+				msgtype: "m.file",
+				body: "report.pdf",
+				mediaFilename: "report.pdf",
+				mediaFullUrl: null,
+			}),
+		]);
+		expect(html).toContain('[attachment "report.pdf" - unavailable]');
+		expect(html.match(/report\.pdf/g)).toHaveLength(1);
 	});
 
 	it("notes an unbundled encrypted attachment without linking ciphertext", () => {

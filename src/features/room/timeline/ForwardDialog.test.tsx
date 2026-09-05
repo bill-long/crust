@@ -275,6 +275,21 @@ describe("ForwardDialog", () => {
 		expect(screen.getByText("DM")).toBeTruthy();
 	});
 
+	it("previews an attachment with its sanitized filename", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		setup([], {
+			target: () => ({
+				...makeTimelineEvent(),
+				msgtype: "m.file",
+				body: rawBody,
+				mediaFilename: "invoicegnp.exe",
+			}),
+		});
+		expect(screen.getByText("invoicegnp.exe")).toBeTruthy();
+		expect(screen.queryByText(rawBody)).toBeNull();
+	});
+
 	it("reflects listbox presence in aria-expanded", async () => {
 		setup([makeRoomSummary("!a:example.com", "alpha")]);
 		const input = screen.getByPlaceholderText("Search rooms");

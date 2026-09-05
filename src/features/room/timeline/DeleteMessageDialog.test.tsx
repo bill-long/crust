@@ -79,4 +79,24 @@ describe("DeleteMessageDialog", () => {
 		));
 		expect(screen.getByText("Attachment")).toBeTruthy();
 	});
+
+	it("previews an attachment with its sanitized filename", () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		const [target] = createSignal<TimelineEvent | null>({
+			eventId: "$file",
+			msgtype: "m.file",
+			body: rawBody,
+			mediaFilename: "invoicegnp.exe",
+		} as unknown as TimelineEvent);
+		render(() => (
+			<DeleteMessageDialog
+				target={target}
+				onClose={() => {}}
+				onDelete={() => {}}
+			/>
+		));
+		expect(screen.getByText("invoicegnp.exe")).toBeTruthy();
+		expect(screen.queryByText(rawBody)).toBeNull();
+	});
 });

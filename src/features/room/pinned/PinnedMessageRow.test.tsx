@@ -184,6 +184,34 @@ describe("PinnedMessageRow", () => {
 		expect(await screen.findByText("arrived late")).toBeTruthy();
 	});
 
+	it("shows a sanitized filename for pinned attachments", async () => {
+		const RLO = String.fromCharCode(0x202e);
+		const rawBody = `invoice${RLO}gnp.exe`;
+		const ev = {
+			...cachedEvent(rawBody),
+			getContent: () => ({ msgtype: "m.file", body: rawBody }),
+		} as unknown as MatrixEvent;
+		const room = makeRoom({ findEventById: () => ev });
+		renderRow(makeClient(), room);
+		expect(await screen.findByText("invoicegnp.exe")).toBeTruthy();
+		expect(screen.queryByText(rawBody)).toBeNull();
+	});
+
+	it("shows a distinct attachment caption instead of its filename", async () => {
+		const ev = {
+			...cachedEvent("Quarterly report"),
+			getContent: () => ({
+				msgtype: "m.file",
+				body: "Quarterly report",
+				filename: "report.pdf",
+			}),
+		} as unknown as MatrixEvent;
+		const room = makeRoom({ findEventById: () => ev });
+		renderRow(makeClient(), room);
+		expect(await screen.findByText("Quarterly report")).toBeTruthy();
+		expect(screen.queryByText("report.pdf")).toBeNull();
+	});
+
 	it("serves a cached resolution without any network calls on reopen", async () => {
 		const client = makeClient();
 		const cache = new Map<string, ResolvedPinnedEvent>();

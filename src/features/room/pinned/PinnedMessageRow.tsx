@@ -15,6 +15,11 @@ import {
 	Show,
 } from "solid-js";
 import { displayNameOr } from "../../../lib/displayName";
+import {
+	isAttachmentMsgtype,
+	wireAttachmentCaption,
+	wireAttachmentName,
+} from "../../../lib/filename";
 import { reportError } from "../../../lib/reportError";
 import { threadJumpTarget } from "../../../lib/threadEvents";
 import { userColorClass } from "../../../lib/userColor";
@@ -63,11 +68,26 @@ function projectEvent(room: Room, ev: MatrixEvent): ResolvedPinnedEvent {
 	const sender = ev.getSender() ?? "";
 	const member = sender ? room.getMember(sender) : null;
 	const content = (ev.getContent?.() ?? {}) as Record<string, unknown>;
-	const body = typeof content.body === "string" ? content.body : "";
-	const format = typeof content.format === "string" ? content.format : null;
-	const formattedBody =
-		typeof content.formatted_body === "string" ? content.formatted_body : null;
 	const msgtype = typeof content.msgtype === "string" ? content.msgtype : "";
+	const isAttachment = isAttachmentMsgtype(msgtype);
+	const attachmentCaption = isAttachment
+		? wireAttachmentCaption(content)
+		: null;
+	const body = isAttachment
+		? (attachmentCaption ?? wireAttachmentName(content) ?? "Attachment")
+		: typeof content.body === "string"
+			? content.body
+			: "";
+	const format =
+		(!isAttachment || attachmentCaption !== null) &&
+		typeof content.format === "string"
+			? content.format
+			: null;
+	const formattedBody =
+		(!isAttachment || attachmentCaption !== null) &&
+		typeof content.formatted_body === "string"
+			? content.formatted_body
+			: null;
 	return {
 		event: ev,
 		sender,

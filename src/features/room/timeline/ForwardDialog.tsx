@@ -169,7 +169,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 							Forward message
 						</h2>
 						<p class="mb-4 truncate text-sm text-text-muted">
-							{messagePreviewText(target().body)}
+							{messagePreviewText(target())}
 						</p>
 
 						<label
