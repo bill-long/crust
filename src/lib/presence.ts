@@ -151,7 +151,8 @@ export function sanitizeStatusMsg(raw: unknown): string | null {
 	// units - but a value that arrives ending in one, or is cut to one by
 	// the bound above, would otherwise fall under the cap and skip that
 	// branch entirely, rendering as a replacement glyph.
-	if (points.length > 0 && isLoneSurrogate(points[points.length - 1])) {
+	const lastPoint = points.at(-1);
+	if (lastPoint !== undefined && isLoneSurrogate(lastPoint)) {
 		points.pop();
 	}
 	if (points.length === 0) return null;

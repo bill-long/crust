@@ -34,7 +34,8 @@ export function urlRegex(): RegExp {
 export function trimUrlTail(url: string): string {
 	let s = url;
 	while (s.length > 0) {
-		const last = s[s.length - 1];
+		const last = s.at(-1);
+		if (last === undefined) break;
 		if (last === ")") {
 			const open = (s.match(/\(/g) ?? []).length;
 			const close = (s.match(/\)/g) ?? []).length;
