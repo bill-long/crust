@@ -28,12 +28,11 @@ const CRC_TABLE = (() => {
 export function crc32Update(crc: number, chunk: Uint8Array): number {
 	let c = crc;
 	for (let i = 0; i < chunk.length; i++) {
-		const byte = chunk[i];
-		if (byte === undefined) break;
-		const tableEntry = CRC_TABLE[(c ^ byte) & 0xff];
-		if (tableEntry === undefined) {
-			throw new RangeError("CRC table index is out of bounds");
-		}
+		// The loop bound proves the typed-array byte exists, and the mask keeps
+		// the table lookup inside its fixed 256 entries. Assertions are erased
+		// so this per-byte hot path retains the original branch-free runtime.
+		const byte = chunk[i] as number;
+		const tableEntry = CRC_TABLE[(c ^ byte) & 0xff] as number;
 		c = tableEntry ^ (c >>> 8);
 	}
 	return c;
