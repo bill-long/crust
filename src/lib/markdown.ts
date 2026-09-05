@@ -245,8 +245,7 @@ export function formatMarkdown(
 
 	let i = 0;
 	while (i < lines.length) {
-		const line = lines[i];
-		if (line === undefined) break;
+		const line = lines[i] ?? "";
 
 		const heading = /^(#{1,6})[ \t]+(.+)$/.exec(line);
 		if (heading) {
