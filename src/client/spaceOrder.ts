@@ -111,7 +111,13 @@ export function moveRootSpace(
 	if (updates.length === 0) return;
 
 	const writes = updates.map(({ index, order }) => {
-		const roomId = roots[index].roomId;
+		const root = roots[index];
+		if (root === undefined) {
+			return Promise.reject(
+				new RangeError("Space order update index is out of bounds"),
+			);
+		}
+		const roomId = root.roomId;
 		ctx.optimisticallySetSpaceOrder(roomId, order);
 		return enqueueOrderWrite(ctx.client, roomId, order).catch((err) => {
 			// A newer move already re-stamped this space: its own queued

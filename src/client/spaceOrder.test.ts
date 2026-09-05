@@ -114,7 +114,9 @@ describe("moveRootSpace", () => {
 		moveRootSpace(ctx, roots, 2, 1);
 		// One midpoint write for the moved space only.
 		expect(optimisticallySetSpaceOrder).toHaveBeenCalledTimes(1);
-		const [roomId, order] = optimisticallySetSpaceOrder.mock.calls[0];
+		const firstCall = optimisticallySetSpaceOrder.mock.calls[0];
+		if (firstCall === undefined) throw new Error("Expected an order update");
+		const [roomId, order] = firstCall;
 		expect(roomId).toBe("!c:x");
 		expect(typeof order).toBe("string");
 		expect(client.setRoomAccountData).toHaveBeenCalledWith(
@@ -159,9 +161,9 @@ describe("moveRootSpace", () => {
 		expect(client.setRoomAccountData.mock.calls.length).toBeGreaterThan(1);
 		await flush();
 		// Server holds no orders, so every optimistic order converges back.
-		expect(summaries["!a:x"].spaceOrder).toBeNull();
-		expect(summaries["!b:x"].spaceOrder).toBeNull();
-		expect(summaries["!c:x"].spaceOrder).toBeNull();
+		expect(summaries["!a:x"]?.spaceOrder).toBeNull();
+		expect(summaries["!b:x"]?.spaceOrder).toBeNull();
+		expect(summaries["!c:x"]?.spaceOrder).toBeNull();
 		// One batch failure -> one reportError console line, not one per write.
 		expect(errorSpy).toHaveBeenCalledTimes(1);
 	});
@@ -184,21 +186,21 @@ describe("moveRootSpace", () => {
 				}),
 		);
 		moveRootSpace(ctx, roots, 2, 1); // stamps !c:x between a and c
-		const firstOrder = summaries["!c:x"].spaceOrder;
+		const firstOrder = summaries["!c:x"]?.spaceOrder;
 		moveRootSpace(
 			ctx,
 			[...roots].sort(compareSpaceOrder),
 			1, // !c:x's new position
 			0,
 		); // stamps !c:x again, below "a"
-		const newerOrder = summaries["!c:x"].spaceOrder;
+		const newerOrder = summaries["!c:x"]?.spaceOrder;
 		expect(newerOrder).not.toBe(firstOrder);
 
 		rejectFirst(new Error("late failure"));
 		await flush();
 
 		// The newer optimistic value survives; no misleading failure toast.
-		expect(summaries["!c:x"].spaceOrder).toBe(newerOrder);
+		expect(summaries["!c:x"]?.spaceOrder).toBe(newerOrder);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });
