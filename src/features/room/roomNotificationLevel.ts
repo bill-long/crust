@@ -51,21 +51,21 @@ export function getRoomNotificationLevel(
 
 	// Check for mute override first (highest priority)
 	const overrides = rules.global?.override;
-	if (overrides) {
+	if (Array.isArray(overrides)) {
 		const mId = muteRuleId(roomId);
 		const muteRule = overrides.find(
-			(r) => r.rule_id === mId && r.enabled !== false,
+			(r) => r?.rule_id === mId && r.enabled !== false,
 		);
 		if (muteRule) return "mute";
 	}
 
 	// Check room-kind rules
 	const roomRules = rules.global?.room;
-	if (roomRules) {
+	if (Array.isArray(roomRules)) {
 		const roomRule = roomRules.find(
-			(r) => r.rule_id === roomId && r.enabled !== false,
+			(r) => r?.rule_id === roomId && r.enabled !== false,
 		);
-		if (roomRule) {
+		if (roomRule && Array.isArray(roomRule.actions)) {
 			const hasDontNotify = roomRule.actions.some(
 				(a) => a === PushRuleActionName.DontNotify,
 			);
