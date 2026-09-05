@@ -72,6 +72,11 @@ export interface ModerationActions {
 	canDemote: (userId: string, currentPowerLevel: number) => boolean;
 }
 
+interface PendingKickBan {
+	action: MemberAction;
+	roomId: string;
+}
+
 /**
  * Room-member moderation flow shared by the settings Members tab and the
  * profile card: permission-gated promote/demote power-level writes
@@ -102,8 +107,16 @@ export function useModerationActions(
 	);
 
 	const [actionError, setActionError] = createSignal<string | null>(null);
-	const [pendingAction, setPendingAction] = createSignal<MemberAction | null>(
-		null,
+	const [pendingKickBan, setPendingKickBan] =
+		createSignal<PendingKickBan | null>(null);
+	const pendingAction = (): MemberAction | null =>
+		pendingKickBan()?.action ?? null;
+	const setPendingAction = (action: MemberAction | null): void => {
+		setPendingKickBan(action ? { action, roomId: roomId() } : null);
+	};
+	const confirmationPerms = useRoomPermissions(
+		client,
+		() => pendingKickBan()?.roomId ?? roomId(),
 	);
 
 	// Serialize PL writes so rapid consecutive promote/demote actions
@@ -218,6 +231,8 @@ export function useModerationActions(
 	// promise reject so the dialog catches and renders the error inline
 	// instead of closing first and surfacing the failure elsewhere.
 	const performKickOrBanAction = (action: MemberAction): Promise<void> => {
+		const pending = pendingKickBan();
+		const targetRoomId = pending?.action === action ? pending.roomId : roomId();
 		// Re-validate at confirm time, like promote/demote do in
 		// performAction: the parked dialog outlives the row menu that gated
 		// it, and the caller may have left, been kicked or been demoted in
@@ -225,16 +240,16 @@ export function useModerationActions(
 		// would swallow a request already in flight.
 		const allowed =
 			action.kind === "kick"
-				? perms.canKickTarget(action.userId)
+				? confirmationPerms.canKickTarget(action.userId)
 				: action.kind === "ban"
-					? perms.canBanTarget(action.userId)
+					? confirmationPerms.canBanTarget(action.userId)
 					: true;
 		if (!allowed) {
 			return Promise.reject(
 				new Error(`You can no longer ${action.kind} ${action.displayName}.`),
 			);
 		}
-		return performKickOrBan(client, roomId(), action);
+		return performKickOrBan(client, targetRoomId, action);
 	};
 
 	const requestAction = (action: MemberAction): void => {

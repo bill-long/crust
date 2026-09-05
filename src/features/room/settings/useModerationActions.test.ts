@@ -14,7 +14,13 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./useRoomPermissions", () => ({
-	useRoomPermissions: () => mocks.perms,
+	useRoomPermissions: (_client: MatrixClient, roomId: () => string) => ({
+		...mocks.perms,
+		canKickTarget: (userId: string) =>
+			mocks.perms.canKickTarget(userId, roomId()),
+		canBanTarget: (userId: string) =>
+			mocks.perms.canBanTarget(userId, roomId()),
+	}),
 }));
 
 vi.mock("./useRoomStateContent", () => ({
@@ -167,6 +173,26 @@ describe("useModerationActions routing and permissions", () => {
 		expect(actions.pendingAction()).toBe(ban);
 		expect(client.kick).not.toHaveBeenCalled();
 		expect(client.ban).not.toHaveBeenCalled();
+		dispose();
+	});
+
+	it("confirms a parked kick in the room where it was requested", async () => {
+		const client = createClient();
+		let currentRoomId = ROOM_ID;
+		mocks.perms.canKickTarget.mockImplementation(
+			(_userId: string, permissionRoomId: string) =>
+				permissionRoomId === ROOM_ID,
+		);
+		const { actions, dispose } = mount(client.client, {
+			roomId: () => currentRoomId,
+		});
+
+		actions.requestAction(kick);
+		currentRoomId = "!other:example.com";
+		await actions.performKickOrBan(kick);
+
+		expect(client.kick).toHaveBeenCalledWith(ROOM_ID, ALICE);
+		expect(mocks.perms.canKickTarget).toHaveBeenLastCalledWith(ALICE, ROOM_ID);
 		dispose();
 	});
 
