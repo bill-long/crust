@@ -8,6 +8,7 @@
 		"strict": true,
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
 		"noEmit": true,
 		"isolatedModules": true,
 		"esModuleInterop": true,
