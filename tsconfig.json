@@ -9,6 +9,7 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"noFallthroughCasesInSwitch": true,
+		"noImplicitOverride": true,
 		"noEmit": true,
 		"isolatedModules": true,
 		"esModuleInterop": true,
