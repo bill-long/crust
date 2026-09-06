@@ -1,14 +1,8 @@
-import {
-	type Component,
-	createEffect,
-	createSignal,
-	onMount,
-	Show,
-} from "solid-js";
+import { type Component, createEffect, createSignal, on, Show } from "solid-js";
 import { deactivateAccount } from "../../client/accountSecurity";
 import { useClient } from "../../client/client";
+import { Modal } from "../../components/Modal";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 
 interface DeactivateAccountDialogProps {
 	onClose: () => void;
@@ -41,15 +35,19 @@ const DeactivateAccountDialog: Component<DeactivateAccountDialogProps> = (
 
 	let overlayEl!: HTMLDivElement;
 	let confirmEl: HTMLInputElement | undefined;
-	onMount(() => confirmEl?.focus());
 	// The focused submit button disables while working; a failure would
 	// otherwise leave focus on the body and kill Escape/Tab handling -
 	// reclaim it, but only when it was actually lost.
-	createEffect(() => {
-		working();
-		const active = document.activeElement;
-		if (!active || active === document.body) overlayEl.focus();
-	});
+	createEffect(
+		on(
+			working,
+			() => {
+				const active = document.activeElement;
+				if (!active || active === document.body) overlayEl.focus();
+			},
+			{ defer: true },
+		),
+	);
 
 	// Fails closed when the user ID is unknown: an empty userId must never
 	// let an untouched confirm field satisfy the gate.
@@ -88,22 +86,14 @@ const DeactivateAccountDialog: Component<DeactivateAccountDialogProps> = (
 	};
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Deactivate account"
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) onDismiss();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Tab") {
-					trapTabKey(overlayEl, e);
-					return;
-				}
-				if (e.key === "Escape") onDismiss();
+		<Modal
+			open
+			onClose={onDismiss}
+			dismissible={!working()}
+			label="Deactivate account"
+			initialFocus={() => confirmEl}
+			contentRef={(element) => {
+				overlayEl = element;
 			}}
 		>
 			<form
@@ -199,7 +189,7 @@ const DeactivateAccountDialog: Component<DeactivateAccountDialogProps> = (
 					</button>
 				</div>
 			</form>
-		</div>
+		</Modal>
 	);
 };
 

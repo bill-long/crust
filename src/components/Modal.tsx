@@ -161,7 +161,10 @@ function ModalSurface(props: ModalProps) {
 					else close();
 				}}
 			>
-				{props.children}
+				{/* Kobalte inserts focus sentinels into Content. Give Solid's
+				    dynamic child reconciliation its own stable parent so a sole
+				    Show/Switch does not retain old panels beside those sentinels. */}
+				<div class="contents">{props.children}</div>
 			</Dialog.Content>
 		</Dialog>
 	);

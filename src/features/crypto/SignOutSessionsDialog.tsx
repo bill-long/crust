@@ -9,8 +9,8 @@ import {
 	signOutDevice,
 	signOutOtherDevices,
 } from "../../client/deviceManagement";
+import { Modal } from "../../components/Modal";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
 import { createUiaDialogFlow } from "./uiaDialogFlow";
 
@@ -170,38 +170,15 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 	// which the policy refuses to dismiss.
 	const dismiss = (): void => uia.dismiss(props.onClose);
 
-	const handleBackdropClick = (e: MouseEvent): void => {
-		if (e.target !== e.currentTarget) return;
-		dismiss();
-	};
-
-	// Unlike the other crypto dialogs (mounted at App level under
-	// CryptoStatusBanner), this one renders INSIDE SettingsOverlay, whose
-	// root has its own Escape-closes and Tab-trap handlers. Solid delegates
-	// keydown, so without stopping propagation an Escape here would also
-	// close the whole Settings modal, and both focus traps would fight over
-	// the same Tab. This dialog owns both keys while it is open.
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Tab") {
-			e.stopPropagation();
-			trapTabKey(overlayEl, e);
-			return;
-		}
-		if (e.key !== "Escape") return;
-		e.stopPropagation();
-		dismiss();
-	};
-
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label={dialogLabel()}
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={handleBackdropClick}
-			onKeyDown={handleKeyDown}
+		<Modal
+			open
+			onClose={dismiss}
+			label={dialogLabel()}
+			initialFocus={() => overlayEl}
+			contentRef={(element) => {
+				overlayEl = element;
+			}}
 		>
 			<Switch>
 				{/* Identity prompts shadow the working state while the flow
@@ -402,7 +379,7 @@ const SignOutSessionsDialog: Component<SignOutSessionsDialogProps> = (
 					</div>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };
 
