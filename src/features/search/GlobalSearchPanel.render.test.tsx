@@ -184,6 +184,23 @@ describe("GlobalSearchPanel", () => {
 		expect(second.getAttribute("aria-selected")).toBe("true");
 	});
 
+	it("moves focus back to the first result on Home", () => {
+		render(() => (
+			<Wrapper>
+				<GlobalSearchPanel search={stubSearch()} />
+			</Wrapper>
+		));
+		const list = screen.getByRole("listbox");
+		const options = screen.getAllByRole("option");
+		const first = requiredOption(options, 0);
+		requiredOption(options, 1).focus();
+
+		fireEvent.keyDown(list, { key: "Home" });
+
+		expect(document.activeElement).toBe(first);
+		expect(first.getAttribute("aria-selected")).toBe("true");
+	});
+
 	it("moves focus to the far end of a full page, not just the neighbour", () => {
 		// This is the case virtualization kept breaking: a row far from the
 		// current one. There is no virtua mock in this file any more, so the

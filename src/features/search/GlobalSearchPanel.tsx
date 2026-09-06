@@ -207,7 +207,7 @@ const GlobalSearchPanel: Component<{
 		if (list.length === 0) return;
 		const clamped = Math.max(0, Math.min(next, list.length - 1));
 		const row = list[clamped];
-		if (!row) return;
+		if (row === undefined) return;
 		setFocusedHit(clamped);
 		// Every row is rendered, so the element is simply there. `isConnected`
 		// is still checked because Solid never re-invokes a ref with null: a
