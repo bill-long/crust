@@ -81,6 +81,12 @@ describe("PollMessage rendering", () => {
 		expect(screen.getByText("3 votes")).toBeTruthy();
 	});
 
+	it("renders zeroes while a tally map is temporarily incomplete", () => {
+		setup({ counts: {}, totalVotes: 0 });
+
+		expect(screen.getAllByText("0 · 0%")).toHaveLength(2);
+	});
+
 	it("hides counts for an active undisclosed poll but keeps the bars' geometry", () => {
 		const { container } = setup({ kind: "undisclosed" });
 		expect(screen.getByText("Results hidden until the poll ends")).toBeTruthy();
@@ -428,6 +434,15 @@ describe("PollMessage event card (#418)", () => {
 		expect(expected.some((text) => screen.queryByText(text) !== null)).toBe(
 			true,
 		);
+	});
+
+	it("renders zeroes while event tally and voter maps are incomplete", () => {
+		setupEvent(eventInfo(), {
+			snapshot: { counts: {}, voters: {}, totalVotes: 0 },
+		});
+
+		expect(optionButton("Margherita").textContent).toContain("0");
+		expect(optionButton("Pepperoni").textContent).toContain("0");
 	});
 
 	it("renders no event chrome for a plain poll (no block)", () => {

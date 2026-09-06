@@ -34,6 +34,7 @@ interface PollMessageProps {
 
 /** Cap on rendered avatars per RSVP option; the rest collapse into "+N". */
 const MAX_VOTER_AVATARS = 6;
+const EMPTY_VOTERS: PollVoter[] = [];
 
 /** 20px voter avatar for the event RSVP stacks (#418): image with the
  *  same error-fallback-to-initial policy as the shared Avatar, at the
@@ -322,10 +323,14 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 		() => !props.poll.canVote || props.poll.isEnded || props.poll.endPending,
 	);
 	const isMultiSelect = () => props.poll.maxSelections > 1;
+	const answerCount = (answerId: string): number =>
+		props.poll.counts[answerId] ?? 0;
+	const answerVoters = (answerId: string): PollVoter[] =>
+		props.poll.voters[answerId] ?? EMPTY_VOTERS;
 	const maxCount = createMemo(() => {
 		let max = 0;
 		for (const answer of props.poll.answers) {
-			const count = props.poll.counts[answer.id];
+			const count = answerCount(answer.id);
 			if (count > max) max = count;
 		}
 		return max;
@@ -398,7 +403,7 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 		const radios = [...group.querySelectorAll<HTMLButtonElement>("button")];
 		const current = radios.indexOf(document.activeElement as HTMLButtonElement);
 		if (current === -1 || radios.length === 0) return;
-		radios[(current + delta + radios.length) % radios.length].focus();
+		radios[(current + delta + radios.length) % radios.length]?.focus();
 	};
 
 	return (
@@ -451,9 +456,9 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 					>
 						<For each={props.poll.answers}>
 							{(answer) => {
-								// counts is zero-filled for every answer id (see
-								// PollSnapshot.counts), so direct indexing is safe.
-								const count = () => props.poll.counts[answer.id];
+								// Snapshots normally zero-fill every answer id; the
+								// accessor also covers a transiently incomplete map.
+								const count = () => answerCount(answer.id);
 								const isMine = () => props.poll.myAnswers.includes(answer.id);
 								const isWinner = () =>
 									props.poll.isEnded && count() > 0 && count() === maxCount();
@@ -541,16 +546,16 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 				>
 					<For each={props.poll.answers}>
 						{(answer) => {
-							const count = () => props.poll.counts[answer.id];
+							const count = () => answerCount(answer.id);
 							const isMine = () => props.poll.myAnswers.includes(answer.id);
 							const capLocked = () =>
 								isMultiSelect() &&
 								!isMine() &&
 								props.poll.myAnswers.length >= props.poll.maxSelections;
 							const locked = () => votingDisabled() || capLocked();
-							// voters is zero-filled for every answer id (see
-							// PollSnapshot.voters), so direct indexing is safe.
-							const voters = () => props.poll.voters[answer.id];
+							// Snapshots normally zero-fill every answer id; the
+							// accessor also covers a transiently incomplete map.
+							const voters = () => answerVoters(answer.id);
 							const shownVoters = () => voters().slice(0, MAX_VOTER_AVATARS);
 							// The snapshot caps voters at MAX_VOTER_NAMES; counts
 							// carries the true total, so "+N" derives from it (also

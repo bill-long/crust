@@ -554,12 +554,12 @@ describe("buildPollSnapshot", () => {
 		});
 		// Zoe sorts after Amy despite casting first (deterministic order,
 		// matching the reaction tooltip sender convention).
-		expect(snapshot.voters.a.map((v) => v.userId)).toEqual([
+		expect(snapshot.voters.a?.map((v) => v.userId)).toEqual([
 			"@amy:x",
 			"@zoe:x",
 		]);
 		expect(snapshot.voters.b).toEqual([]);
-		expect(snapshot.voters.c.map((v) => v.name)).toEqual(["bob"]);
+		expect(snapshot.voters.c?.map((v) => v.name)).toEqual(["bob"]);
 		expect(Object.getPrototypeOf(snapshot.voters)).toBeNull();
 	});
 
@@ -600,6 +600,6 @@ describe("buildPollSnapshot", () => {
 		// caps retention; the renderer reads the true total from counts
 		// for its "+N".
 		expect(snapshot.counts.a).toBe(12);
-		expect(snapshot.voters.a.length).toBe(10);
+		expect(snapshot.voters.a?.length).toBe(10);
 	});
 });

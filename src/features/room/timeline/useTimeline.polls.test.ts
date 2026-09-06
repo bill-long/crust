@@ -120,13 +120,14 @@ describe("useTimeline polls", () => {
 
 			expect(events.length).toBe(2);
 			const pollRow = events[1];
+			if (!pollRow) throw new Error("poll row was not projected");
 			expect(pollRow.eventId).toBe(POLL_ID);
 			expect(pollRow.poll?.question).toBe("Best pizza?");
 			expect(pollRow.poll?.answers.map((a) => a.id)).toEqual(["a", "b"]);
 			expect(pollRow.poll?.counts).toEqual({ a: 0, b: 0 });
 			expect(pollRow.poll?.isEnded).toBe(false);
 			// Non-poll rows carry no snapshot.
-			expect(events[0].poll).toBeNull();
+			expect(events[0]?.poll).toBeNull();
 		});
 	});
 
@@ -159,7 +160,7 @@ describe("useTimeline polls", () => {
 			);
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].poll?.question).toBe("Stable?");
+			expect(events[0]?.poll?.question).toBe("Stable?");
 		});
 	});
 
@@ -223,21 +224,21 @@ describe("useTimeline polls", () => {
 				() => ROOM_ID,
 			);
 			await flushPromises();
-			expect(events[1].poll?.counts).toEqual({ a: 0, b: 0 });
+			expect(events[1]?.poll?.counts).toEqual({ a: 0, b: 0 });
 
 			// The SDK routes vote relations to the Poll model (not the
 			// timeline); the watcher must translate that into a row update.
 			poll.onNewRelation(makeRealResponse("$v1", "@bob:test", ["a"], 3000));
 			await flushPromises();
-			expect(events[1].poll?.counts).toEqual({ a: 1, b: 0 });
-			expect(events[1].poll?.totalVotes).toBe(1);
+			expect(events[1]?.poll?.counts).toEqual({ a: 1, b: 0 });
+			expect(events[1]?.poll?.totalVotes).toBe(1);
 
 			poll.onNewRelation(
 				makeRealResponse("$v2", "@test:example.com", ["b"], 3100),
 			);
 			await flushPromises();
-			expect(events[1].poll?.counts).toEqual({ a: 1, b: 1 });
-			expect(events[1].poll?.myAnswers).toEqual(["b"]);
+			expect(events[1]?.poll?.counts).toEqual({ a: 1, b: 1 });
+			expect(events[1]?.poll?.myAnswers).toEqual(["b"]);
 		});
 	});
 
@@ -249,7 +250,7 @@ describe("useTimeline polls", () => {
 				() => ROOM_ID,
 			);
 			await flushPromises();
-			expect(events[1].poll?.isEnded).toBe(false);
+			expect(events[1]?.poll?.isEnded).toBe(false);
 
 			poll.onNewRelation(
 				realEventFrom(
@@ -257,7 +258,7 @@ describe("useTimeline polls", () => {
 				),
 			);
 			await flushPromises();
-			expect(events[1].poll?.isEnded).toBe(true);
+			expect(events[1]?.poll?.isEnded).toBe(true);
 		});
 	});
 

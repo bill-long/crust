@@ -316,8 +316,11 @@ export function computePollTally(
 		if (ballot.answers === null) continue;
 		totalVotes++;
 		for (const id of ballot.answers) {
-			counts[id]++;
-			votersByAnswer[id].push(sender);
+			const count = counts[id];
+			const voters = votersByAnswer[id];
+			if (count === undefined || voters === undefined) continue;
+			counts[id] = count + 1;
+			voters.push(sender);
 		}
 		if (myUserId && sender === myUserId) myAnswers = ballot.answers;
 	}
