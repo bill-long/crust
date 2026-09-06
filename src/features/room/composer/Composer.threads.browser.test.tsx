@@ -13,9 +13,9 @@ import {
 	clearMentionIntent,
 	requestMention,
 } from "../../../stores/composerIntents";
-import { requiredAt } from "../../../test/assertions";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
+import { requiredAt } from "./testAssertions";
 
 vi.mock("../../gif/gifConfig", () => ({
 	useGifConfig: () => ({
