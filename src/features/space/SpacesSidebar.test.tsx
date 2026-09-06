@@ -141,7 +141,7 @@ const Wrapper: ParentComponent<{
 afterEach(() => {
 	cleanup();
 	navigateMock.mockReset();
-	paramsState.spaceId = undefined;
+	delete paramsState.spaceId;
 	_resetLastChannelsForTests();
 });
 

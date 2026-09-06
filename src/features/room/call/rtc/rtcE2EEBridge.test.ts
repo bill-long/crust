@@ -12,8 +12,8 @@ type Listener = (...args: unknown[]) => void;
 class FakeBaseKeyProvider {
 	calls: Array<{
 		key: CryptoKey;
-		participantIdentity?: string;
-		keyIndex?: number;
+		participantIdentity: string | undefined;
+		keyIndex: number | undefined;
 	}> = [];
 	protected onSetEncryptionKey(
 		key: CryptoKey,

@@ -80,7 +80,9 @@ const renderRtc = (overrides?: {
 }) => {
 	const session = overrides?.session ?? createFakeSession();
 	const { client } = createClient({
-		roomFound: overrides?.roomFound,
+		...(overrides?.roomFound !== undefined
+			? { roomFound: overrides.roomFound }
+			: {}),
 		session,
 	});
 	const { result } = renderHook(() =>
@@ -88,7 +90,7 @@ const renderRtc = (overrides?: {
 			client: client as never,
 			roomId: "!room:example.com",
 			elementCallUrl: overrides?.elementCallUrl ?? "https://call.example.com",
-			e2ee: overrides?.e2ee,
+			...(overrides?.e2ee !== undefined ? { e2ee: overrides.e2ee } : {}),
 		}),
 	);
 	return { rtc: result, session, client };

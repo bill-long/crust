@@ -1218,7 +1218,6 @@ describe("computeCallTimelineNotices — suppression", () => {
 		const noSender = makeEvent({
 			type: CALL,
 			id: "x",
-			sender: undefined,
 			content: callBlob("A"),
 			prevContent: {},
 		});

@@ -30,7 +30,7 @@ describe("leaveChildRooms", () => {
 				{ roomId: "!a:x", name: "Alpha" },
 				{ roomId: "!b:x", name: "Beta" },
 			],
-			{ currentRoomId: undefined },
+			{},
 		);
 
 		expect(out.leftRoomIds).toEqual(["!a:x", "!b:x"]);
@@ -60,7 +60,7 @@ describe("leaveChildRooms", () => {
 				{ roomId: "!a:x", name: "Alpha" },
 				{ roomId: "!b:x", name: "Beta" },
 			],
-			{ currentRoomId: undefined },
+			{},
 		);
 
 		expect(out.leftRoomIds).toEqual(["!a:x"]);
@@ -73,9 +73,7 @@ describe("leaveChildRooms", () => {
 		const out = await leaveChildRooms(
 			client,
 			[{ roomId: "!b:x", name: "   " }],
-			{
-				currentRoomId: undefined,
-			},
+			{},
 		);
 
 		expect(out.failedNames).toEqual(["!b:x"]);
@@ -118,7 +116,7 @@ describe("leaveChildRooms", () => {
 				{ roomId: "!b:x", name: "Beta" },
 				{ roomId: "!c:x", name: "Gamma" },
 			],
-			{ currentRoomId: undefined, onRoomLeft: (id) => left.push(id) },
+			{ onRoomLeft: (id) => left.push(id) },
 		);
 		expect(left.sort()).toEqual(["!a:x", "!c:x"]);
 		expect(out.leftRoomIds).toEqual(["!a:x", "!c:x"]);
@@ -142,7 +140,6 @@ describe("leaveChildRooms", () => {
 			client,
 			[{ roomId: "!a:x", name: "Alpha" }],
 			{
-				currentRoomId: undefined,
 				onBeforeRoomLeave: async (id) => {
 					order.push(`before:${id}`);
 					await teardown;
@@ -167,7 +164,6 @@ describe("leaveChildRooms", () => {
 			client,
 			[{ roomId: "!a:x", name: "Alpha" }],
 			{
-				currentRoomId: undefined,
 				onBeforeRoomLeave: () => Promise.reject(new Error("boom")),
 			},
 		);
@@ -183,7 +179,6 @@ describe("leaveChildRooms", () => {
 			client,
 			[{ roomId: "!a:x", name: "Alpha" }],
 			{
-				currentRoomId: undefined,
 				onRoomLeft: () => {
 					throw new Error("boom");
 				},

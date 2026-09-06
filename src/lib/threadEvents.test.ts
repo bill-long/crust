@@ -23,7 +23,9 @@ function realEvent(
 		sender: "@a:hs",
 		origin_server_ts: 1,
 		content,
-		unsigned: overrides?.unsigned,
+		...(overrides?.unsigned !== undefined
+			? { unsigned: overrides.unsigned }
+			: {}),
 		...(overrides?.stateKey !== undefined
 			? { state_key: overrides.stateKey }
 			: {}),
