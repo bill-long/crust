@@ -171,6 +171,7 @@ async function runExport(
 				await yieldToMain();
 			}
 			const event = events[i];
+			if (event === undefined) continue;
 			if (event.isRedacted()) continue;
 			// Edit events fold into their target via the projection; exporting
 			// the m.replace event too would duplicate every edited message
@@ -289,23 +290,23 @@ async function runExport(
 	let text: string | null = null;
 	if (opts.format === "json") {
 		const rowObjects: Record<string, unknown>[] = [];
-		for (let i = 0; i < rows.length; i++) {
+		for (const [i, row] of rows.entries()) {
 			if (i % SERIALIZE_CHUNK === 0 && i > 0) {
 				if (isCancelled()) return null;
 				await yieldToMain();
 			}
-			rowObjects.push(jsonRow(rows[i]));
+			rowObjects.push(jsonRow(row));
 		}
 		text = assembleJson(bundle, rowObjects);
 	} else {
 		const rowStrings: string[] = [];
-		for (let i = 0; i < rows.length; i++) {
+		for (const [i, row] of rows.entries()) {
 			if (i % SERIALIZE_CHUNK === 0 && i > 0) {
 				if (isCancelled()) return null;
 				await yieldToMain();
 			}
 			rowStrings.push(
-				opts.format === "html" ? htmlRow(rows[i], bundle) : textRow(rows[i]),
+				opts.format === "html" ? htmlRow(row, bundle) : textRow(row),
 			);
 		}
 		text =
