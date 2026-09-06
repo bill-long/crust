@@ -15,8 +15,7 @@ import { MediaVideo } from "./MediaVideo";
 
 function bytesToBase64Unpadded(bytes: Uint8Array): string {
 	let binary = "";
-	for (let i = 0; i < bytes.length; i++)
-		binary += String.fromCharCode(bytes[i]);
+	for (const byte of bytes) binary += String.fromCharCode(byte);
 	return btoa(binary).replace(/=+$/, "");
 }
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -63,6 +62,14 @@ function stubFetch(body: ArrayBuffer): void {
 	);
 }
 
+function tamperFirstByte(buffer: ArrayBuffer): void {
+	const bytes = new Uint8Array(buffer);
+	const first = bytes[0];
+	if (first === undefined)
+		throw new Error("cannot tamper with an empty buffer");
+	bytes[0] = first ^ 0xff;
+}
+
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
@@ -103,7 +110,7 @@ describe("encrypted MediaVideo", () => {
 			new Uint8Array([1, 2, 3, 4]),
 		);
 		const corrupted = ciphertext.slice(0);
-		new Uint8Array(corrupted)[0] ^= 0xff;
+		tamperFirstByte(corrupted);
 		stubFetch(corrupted);
 
 		const { findByLabelText, findByText, queryByLabelText } = render(() => (
@@ -182,7 +189,7 @@ describe("encrypted MediaVideo", () => {
 		);
 		const thumb = await encryptAttachment(new Uint8Array([1, 2, 3, 4]));
 		const corruptedThumb = thumb.ciphertext.slice(0);
-		new Uint8Array(corruptedThumb)[0] ^= 0xff;
+		tamperFirstByte(corruptedThumb);
 		vi.stubGlobal(
 			"fetch",
 			vi.fn(async (url: string) =>
@@ -278,7 +285,11 @@ describe("encrypted MediaFile", () => {
 
 		await waitFor(() => expect(anchorClick).toHaveBeenCalled());
 		expect(createObjUrl).toHaveBeenCalledTimes(1);
-		expect(createObjUrl.mock.calls[0][0]).toBeInstanceOf(Blob);
+		const firstObjectUrlCall = createObjUrl.mock.calls[0];
+		if (firstObjectUrlCall === undefined) {
+			throw new Error("download did not create an object URL");
+		}
+		expect(firstObjectUrlCall[0]).toBeInstanceOf(Blob);
 	});
 
 	it("fails closed (shows an error, no download) when the ciphertext is tampered", async () => {
@@ -286,7 +297,7 @@ describe("encrypted MediaFile", () => {
 			new Uint8Array([5, 6, 7, 8]),
 		);
 		const corrupted = ciphertext.slice(0);
-		new Uint8Array(corrupted)[0] ^= 0xff;
+		tamperFirstByte(corrupted);
 		stubFetch(corrupted);
 
 		const anchorClick = vi

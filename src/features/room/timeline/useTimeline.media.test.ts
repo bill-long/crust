@@ -32,6 +32,14 @@ function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function requiredAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) {
+		throw new Error(`timeline event ${index} was not projected`);
+	}
+	return item;
+}
+
 const HTTP = "https://example.com/_matrix/media/v3/download";
 
 describe("useTimeline media projection", () => {
@@ -96,7 +104,9 @@ describe("useTimeline media projection", () => {
 			);
 			await flushPromises();
 
-			const [file, video, audio] = events;
+			const file = requiredAt(events, 0);
+			const video = requiredAt(events, 1);
+			const audio = requiredAt(events, 2);
 
 			expect(file.mediaFullUrl).toBe(`${HTTP}/test/doc`);
 			expect(file.mediaMimetype).toBe("application/pdf");
@@ -194,7 +204,9 @@ describe("useTimeline media projection", () => {
 			);
 			await flushPromises();
 
-			const [file, image, onlyControl] = events;
+			const file = requiredAt(events, 0);
+			const image = requiredAt(events, 1);
+			const onlyControl = requiredAt(events, 2);
 			expect(file.mediaFilename).toBe("invoicegnp.exe");
 			expect(image.mediaFilename).toBe("photognp.exe");
 			expect(image.mediaCaption).toBeNull();
@@ -263,7 +275,9 @@ describe("useTimeline media projection", () => {
 			);
 			await flushPromises();
 
-			const [video, audio, badFile] = events;
+			const video = requiredAt(events, 0);
+			const audio = requiredAt(events, 1);
+			const badFile = requiredAt(events, 2);
 
 			expect(video.mediaIsEncrypted).toBe(true);
 			expect(video.mediaFullUrl).toBe(`${HTTP}/test/encvid`);
@@ -325,8 +339,9 @@ describe("useTimeline media projection", () => {
 			);
 			await flushPromises();
 
-			expect(events[0].mediaIsEncrypted).toBe(true);
-			expect(events[0].mediaPosterUrl).toBeNull();
+			const video = requiredAt(events, 0);
+			expect(video.mediaIsEncrypted).toBe(true);
+			expect(video.mediaPosterUrl).toBeNull();
 		});
 	});
 
@@ -375,7 +390,8 @@ describe("useTimeline media projection", () => {
 			);
 			await flushPromises();
 
-			const [plain, enc] = events;
+			const plain = requiredAt(events, 0);
+			const enc = requiredAt(events, 1);
 
 			expect(plain.mediaIsEncrypted).toBe(false);
 			expect(plain.mediaEncryptedFile).toBeNull();
@@ -446,7 +462,9 @@ describe("useTimeline media projection", () => {
 				);
 				await flushPromises();
 
-				const [captioned, noCaption, legacy] = events;
+				const captioned = requiredAt(events, 0);
+				const noCaption = requiredAt(events, 1);
+				const legacy = requiredAt(events, 2);
 				expect(captioned.mediaCaption).toBe("Look at this sunset 🌅");
 				expect(noCaption.mediaCaption).toBeNull();
 				expect(legacy.mediaCaption).toBeNull();
@@ -793,9 +811,10 @@ describe("useTimeline media projection", () => {
 				);
 				await flushPromises();
 
-				expect(events[0].replyToId).toBe("$notInWindow");
-				expect(events[0].replyToSender).toBeNull();
-				expect(events[0].replyToBody).toBeNull();
+				const reply = requiredAt(events, 0);
+				expect(reply.replyToId).toBe("$notInWindow");
+				expect(reply.replyToSender).toBeNull();
+				expect(reply.replyToBody).toBeNull();
 			});
 		});
 
@@ -1026,7 +1045,7 @@ describe("useTimeline media projection", () => {
 				);
 				await flushPromises();
 
-				const [video] = events;
+				const video = requiredAt(events, 0);
 				expect(video.mediaIsEncrypted).toBe(true);
 				expect(video.mediaThumbnailUrl).toBe(`${HTTP}/test/encthumb`);
 				expect(video.mediaThumbnailFile).toEqual(
@@ -1070,7 +1089,7 @@ describe("useTimeline media projection", () => {
 				);
 				await flushPromises();
 
-				const [video] = events;
+				const video = requiredAt(events, 0);
 				expect(video.mediaThumbnailFile).toBeNull();
 				expect(video.mediaThumbnailUrl).toBeNull();
 				expect(video.mediaThumbnailMimetype).toBeNull();
@@ -1107,7 +1126,7 @@ describe("useTimeline media projection", () => {
 				);
 				await flushPromises();
 
-				const [video] = events;
+				const video = requiredAt(events, 0);
 				expect(video.mediaThumbnailFile).toBeNull();
 				expect(video.mediaThumbnailUrl).toBeNull();
 				expect(video.mediaPosterUrl).toBe(`${HTTP}/test/poster`);
