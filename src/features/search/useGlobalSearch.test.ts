@@ -7,6 +7,12 @@ import {
 	useGlobalSearch,
 } from "./useGlobalSearch";
 
+function requiredAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) throw new Error(`search result ${index} was missing`);
+	return item;
+}
+
 function hit(over: Partial<GlobalSearchHit> = {}): GlobalSearchHit {
 	return {
 		eventId: "$e",
@@ -117,8 +123,11 @@ describe("groupByRoom", () => {
 		]);
 
 		expect(grouped.map((g) => g.roomId)).toEqual(["!a:x", "!b:x"]);
-		expect(grouped[0].hits.map((h) => h.eventId)).toEqual(["$1", "$3"]);
-		expect(grouped[1].hits.map((h) => h.eventId)).toEqual(["$2"]);
+		expect(requiredAt(grouped, 0).hits.map((h) => h.eventId)).toEqual([
+			"$1",
+			"$3",
+		]);
+		expect(requiredAt(grouped, 1).hits.map((h) => h.eventId)).toEqual(["$2"]);
 	});
 
 	it("returns nothing for no hits", () => {
@@ -160,7 +169,9 @@ describe("useGlobalSearch", () => {
 
 		expect(search.mode()).toBe("local");
 		expect(search.total()).toBe(1);
-		expect(search.groups()[0].hits[0].eventId).toBe("$1");
+		expect(requiredAt(requiredAt(search.groups(), 0).hits, 0).eventId).toBe(
+			"$1",
+		);
 		dispose();
 	});
 
@@ -187,7 +198,9 @@ describe("useGlobalSearch", () => {
 		// The hit from the encrypted room is merged into the server answer,
 		// not merely counted.
 		expect(search.total()).toBe(1);
-		expect(search.groups()[0].hits[0].eventId).toBe("$secret");
+		expect(requiredAt(requiredAt(search.groups(), 0).hits, 0).eventId).toBe(
+			"$secret",
+		);
 		dispose();
 	});
 
@@ -302,8 +315,8 @@ describe("useGlobalSearch", () => {
 		search.submit("match");
 		await settle();
 
-		expect(search.groups()[0].hits.length).toBe(20);
-		expect(search.groups()[0].total).toBe(40);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(20);
+		expect(requiredAt(search.groups(), 0).total).toBe(40);
 		dispose();
 	});
 
@@ -435,7 +448,9 @@ describe("useGlobalSearch", () => {
 
 		expect(search.status()).toBe("results");
 		expect(search.total()).toBe(1);
-		expect(search.groups()[0].hits[0].eventId).toBe("$s");
+		expect(requiredAt(requiredAt(search.groups(), 0).hits, 0).eventId).toBe(
+			"$s",
+		);
 		// Nothing claimed as covered, since nothing was - and the panel has
 		// to say so. With `scanTruncated` false as well, `coverageNote`
 		// falls through every branch and returns null, so every encrypted
@@ -499,7 +514,7 @@ describe("useGlobalSearch", () => {
 		await Promise.resolve();
 
 		expect(search.total()).toBe(40);
-		expect(search.groups()[0].hits.length).toBe(20);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(20);
 		expect(search.hasMore()).toBe(true);
 		dispose();
 	});
@@ -609,7 +624,9 @@ describe("useGlobalSearch", () => {
 		await Promise.resolve();
 
 		expect(search.total()).toBe(1);
-		expect(search.groups()[0].hits[0].eventId).toBe("$reply");
+		expect(requiredAt(requiredAt(search.groups(), 0).hits, 0).eventId).toBe(
+			"$reply",
+		);
 		dispose();
 	});
 
@@ -789,19 +806,19 @@ describe("useGlobalSearch", () => {
 		await Promise.resolve();
 
 		expect(search.total()).toBe(30);
-		expect(search.groups()[0].hits.length).toBe(20);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(20);
 		expect(search.hasMore()).toBe(true);
 
 		search.loadMore();
 
 		// The window moved rather than grew: page two is the remaining ten,
 		// and no second request was needed for them.
-		expect(search.groups()[0].hits.length).toBe(10);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(10);
 		expect(search.hasPrevious()).toBe(true);
 		expect(backPaginate).not.toHaveBeenCalled();
 
 		search.loadPrevious();
-		expect(search.groups()[0].hits.length).toBe(20);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(20);
 		expect(search.hasPrevious()).toBe(false);
 		dispose();
 	});
@@ -944,20 +961,24 @@ describe("useGlobalSearch", () => {
 
 		search.submit("match");
 		await settle();
-		expect(search.groups()[0].hits.map((h) => h.eventId)).toContain("$e0");
+		expect(requiredAt(search.groups(), 0).hits.map((h) => h.eventId)).toContain(
+			"$e0",
+		);
 
 		search.loadMore();
 		await settle();
 
 		// The whole second page, and none of the first.
-		const shown = search.groups()[0].hits.map((h) => h.eventId);
+		const shown = requiredAt(search.groups(), 0).hits.map((h) => h.eventId);
 		expect(shown).toContain("$e20");
 		expect(shown).not.toContain("$e0");
 		expect(search.hasPrevious()).toBe(true);
 
 		// And back, landing on the page boundary rather than off-grid.
 		search.loadPrevious();
-		expect(search.groups()[0].hits.map((h) => h.eventId)).toContain("$e0");
+		expect(requiredAt(search.groups(), 0).hits.map((h) => h.eventId)).toContain(
+			"$e0",
+		);
 		expect(search.hasPrevious()).toBe(false);
 		dispose();
 	});
@@ -1200,14 +1221,14 @@ describe("useGlobalSearch", () => {
 		await settle();
 		// Page two is the rest of what arrived.
 		search.loadMore();
-		expect(search.groups()[0].hits.length).toBe(5);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(5);
 
 		// Page three needs the server, which returns only unprojectable
 		// results. The window must not slide backwards onto a seen row.
 		search.loadMore();
 		await settle();
 
-		expect(search.groups()[0].hits.map((h) => h.eventId)).toEqual([
+		expect(requiredAt(search.groups(), 0).hits.map((h) => h.eventId)).toEqual([
 			"$e20",
 			"$e21",
 			"$e22",
@@ -1339,20 +1360,24 @@ describe("useGlobalSearch", () => {
 		search.submit("match");
 		await settle();
 		// A partial first page: 15 of a 20-row window.
-		expect(search.groups()[0].hits.length).toBe(15);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(15);
 
 		search.loadMore();
 		await settle();
 		// The fetch fills the page the user is on rather than stepping past
 		// it - those five rows would otherwise be counted and never shown.
-		expect(search.groups()[0].hits[0].eventId).toBe("$e0");
-		expect(search.groups()[0].hits.length).toBe(20);
+		expect(requiredAt(requiredAt(search.groups(), 0).hits, 0).eventId).toBe(
+			"$e0",
+		);
+		expect(requiredAt(search.groups(), 0).hits.length).toBe(20);
 
 		search.loadMore();
 		await settle();
 		// Now the page was full, so this one advances - to the boundary, not
 		// to wherever the previous page's hits happened to run out.
-		expect(search.groups()[0].hits[0].eventId).toBe("$e20");
+		expect(requiredAt(requiredAt(search.groups(), 0).hits, 0).eventId).toBe(
+			"$e20",
+		);
 		dispose();
 	});
 
@@ -1395,7 +1420,7 @@ describe("useGlobalSearch", () => {
 		await settle();
 		search.loadMore();
 		await settle();
-		expect(search.groups()[0].hits.length).toBeGreaterThan(0);
+		expect(requiredAt(search.groups(), 0).hits.length).toBeGreaterThan(0);
 
 		// The next page comes back smaller than the window's offset.
 		shrink = true;
@@ -1403,7 +1428,7 @@ describe("useGlobalSearch", () => {
 		await settle();
 
 		expect(search.total()).toBe(3);
-		expect(search.groups()[0].hits.length).toBeGreaterThan(0);
+		expect(requiredAt(search.groups(), 0).hits.length).toBeGreaterThan(0);
 		dispose();
 	});
 
