@@ -228,7 +228,7 @@ export function useMessageActions(
 		const room = client.getRoom(roomId());
 		if (!room) return;
 		const last = arr[arr.length - 1];
-		if (last.status !== EventStatus.NOT_SENT) return;
+		if (!last || last.status !== EventStatus.NOT_SENT) return;
 		const originalRoomId = roomId();
 		try {
 			await client.resendEvent(last, room);
@@ -271,7 +271,7 @@ export function useMessageActions(
 		const room = client.getRoom(roomId());
 		if (!room) return;
 		const last = arr[arr.length - 1];
-		if (last.status !== EventStatus.NOT_SENT) return;
+		if (!last || last.status !== EventStatus.NOT_SENT) return;
 		const originalRoomId = roomId();
 		try {
 			await client.resendEvent(last, room);

@@ -1,4 +1,5 @@
-import type { MatrixClient } from "matrix-js-sdk";
+import type { MatrixClient, MatrixEvent } from "matrix-js-sdk";
+import { EventStatus } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearNotices, notices } from "../../../stores/notices";
 import type { TimelineEvent } from "./timelineTypes";
@@ -7,6 +8,7 @@ import { useMessageActions } from "./useMessageActions";
 afterEach(() => {
 	clearNotices();
 	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
 });
 
 function makeDeps(events: TimelineEvent[]) {
@@ -23,6 +25,10 @@ function makeDeps(events: TimelineEvent[]) {
 
 const roomId = () => "!room:server";
 const noThread = () => undefined;
+
+function failedEvent(id: string): MatrixEvent {
+	return { getId: () => id, status: EventStatus.NOT_SENT } as MatrixEvent;
+}
 
 describe("useMessageActions reaction error surfacing", () => {
 	it("toasts when removing your own reaction fails (no inline affordance for a failed reaction redaction)", async () => {
@@ -134,5 +140,56 @@ describe("useMessageActions reaction error surfacing", () => {
 		await actions.onReact("$m1", "\u{1F44D}");
 
 		expect(notices()).toHaveLength(0);
+	});
+});
+
+describe("useMessageActions failed-echo retries", () => {
+	it("retries the newest reaction and edit echoes", async () => {
+		vi.stubGlobal(
+			"requestAnimationFrame",
+			vi.fn(() => 1),
+		);
+		const resendEvent = vi.fn().mockResolvedValue(undefined);
+		const client = {
+			getRoom: vi.fn(() => ({})),
+			resendEvent,
+		} as unknown as MatrixClient;
+		const reaction = failedEvent("$reaction-new");
+		const edit = failedEvent("$edit-new");
+		const actions = useMessageActions(client, roomId, noThread, {
+			...makeDeps([]),
+			pendingReactions: {
+				$target: { sparkle: [failedEvent("$reaction-old"), reaction] },
+			},
+			pendingEdits: { $target: [failedEvent("$edit-old"), edit] },
+		});
+
+		await actions.onRetryReaction("$target", "sparkle");
+		await actions.onRetryEdit("$target");
+
+		expect(resendEvent).toHaveBeenNthCalledWith(1, reaction, {});
+		expect(resendEvent).toHaveBeenNthCalledWith(2, edit, {});
+	});
+
+	it("ignores an absent newest reaction or edit slot", async () => {
+		const resendEvent = vi.fn();
+		const client = {
+			getRoom: vi.fn(() => ({})),
+			resendEvent,
+		} as unknown as MatrixClient;
+		const reactions = [failedEvent("$reaction")];
+		reactions.length = 2;
+		const edits = [failedEvent("$edit")];
+		edits.length = 2;
+		const actions = useMessageActions(client, roomId, noThread, {
+			...makeDeps([]),
+			pendingReactions: { $target: { sparkle: reactions } },
+			pendingEdits: { $target: edits },
+		});
+
+		await actions.onRetryReaction("$target", "sparkle");
+		await actions.onRetryEdit("$target");
+
+		expect(resendEvent).not.toHaveBeenCalled();
 	});
 });
