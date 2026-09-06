@@ -1,6 +1,6 @@
 import { Popover } from "@kobalte/core/popover";
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { createEffect, createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Match, Show, Switch } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import { appModalOpen } from "../stores/modalStack";
@@ -10,6 +10,36 @@ import { Modal } from "./Modal";
 afterEach(cleanup);
 
 describe("Modal", () => {
+	it("replaces a sole dynamic panel without retaining old controls", async () => {
+		render(() => {
+			const [step, setStep] = createSignal(false);
+			return (
+				<Modal open onClose={() => {}} label="Step flow">
+					<Switch>
+						<Match when={step()}>
+							<div>
+								<button type="button" onClick={() => setStep(false)}>
+									Back
+								</button>
+							</div>
+						</Match>
+						<Match when={true}>
+							<div>
+								<button type="button" onClick={() => setStep(true)}>
+									Next
+								</button>
+							</div>
+						</Match>
+					</Switch>
+				</Modal>
+			);
+		});
+		await userEvent.click(screen.getByText("Next"));
+		expect(screen.queryByText("Next")).toBeNull();
+		await userEvent.click(screen.getByText("Back"));
+		expect(screen.queryByText("Back")).toBeNull();
+		expect(screen.getAllByRole("button")).toHaveLength(1);
+	});
 	it("restores fallback focus when a virtualized opener disappears", async () => {
 		let removeOpener!: () => void;
 		render(() => {

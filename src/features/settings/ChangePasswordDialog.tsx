@@ -3,14 +3,14 @@ import {
 	createEffect,
 	createSignal,
 	Match,
-	onMount,
+	on,
 	Show,
 	Switch,
 } from "solid-js";
 import { changePassword } from "../../client/accountSecurity";
 import { useClient } from "../../client/client";
+import { Modal } from "../../components/Modal";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 
 interface ChangePasswordDialogProps {
 	onClose: () => void;
@@ -46,16 +46,20 @@ const ChangePasswordDialog: Component<ChangePasswordDialogProps> = (props) => {
 
 	let overlayEl!: HTMLDivElement;
 	let currentEl: HTMLInputElement | undefined;
-	onMount(() => currentEl?.focus());
 	// A step swap can strand focus on the body (the focused submit button
 	// disables, or the form unmounts for the done panel), which kills the
 	// overlay-scoped Escape/Tab handling - reclaim it, but only when it
 	// was actually lost (VerificationDialog's rule).
-	createEffect(() => {
-		step();
-		const active = document.activeElement;
-		if (!active || active === document.body) overlayEl.focus();
-	});
+	createEffect(
+		on(
+			step,
+			() => {
+				const active = document.activeElement;
+				if (!active || active === document.body) overlayEl.focus();
+			},
+			{ defer: true },
+		),
+	);
 
 	const submit = async (e: Event): Promise<void> => {
 		e.preventDefault();
@@ -89,22 +93,14 @@ const ChangePasswordDialog: Component<ChangePasswordDialogProps> = (props) => {
 	};
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Change password"
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) onDismiss();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Tab") {
-					trapTabKey(overlayEl, e);
-					return;
-				}
-				if (e.key === "Escape") onDismiss();
+		<Modal
+			open
+			onClose={onDismiss}
+			dismissible={step() !== "working"}
+			label="Change password"
+			initialFocus={() => currentEl}
+			contentRef={(element) => {
+				overlayEl = element;
 			}}
 		>
 			<Switch>
@@ -243,7 +239,7 @@ const ChangePasswordDialog: Component<ChangePasswordDialogProps> = (props) => {
 					</form>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };
 
