@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../../test/assertions";
 import { createGiphyProvider } from "./giphy";
 
 function validResponse(overrides: Record<string, unknown> = {}) {
@@ -27,7 +28,9 @@ describe("createGiphyProvider", () => {
 
 		await provider.search("cats & dogs", "pg-13");
 
-		const requestUrl = new URL(String(fetchMock.mock.calls[0][0]));
+		const requestUrl = new URL(
+			String(requiredAt(requiredAt(fetchMock.mock.calls, 0), 0)),
+		);
 		expect(requestUrl.pathname).toBe("/v1/gifs/search");
 		expect(Object.fromEntries(requestUrl.searchParams)).toEqual({
 			api_key: "key with spaces",
@@ -45,7 +48,9 @@ describe("createGiphyProvider", () => {
 
 		await provider.trending("g", 50, 10);
 
-		const requestUrl = new URL(String(fetchMock.mock.calls[0][0]));
+		const requestUrl = new URL(
+			String(requiredAt(requiredAt(fetchMock.mock.calls, 0), 0)),
+		);
 		expect(requestUrl.pathname).toBe("/v1/gifs/trending");
 		expect(Object.fromEntries(requestUrl.searchParams)).toEqual({
 			api_key: "test-key",

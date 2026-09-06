@@ -1,5 +1,6 @@
 import { encode } from "uqr";
 import { describe, expect, it } from "vitest";
+import { requiredAt } from "../../../test/assertions";
 import { encodeVerificationQr } from "./qrCode";
 
 /**
@@ -23,7 +24,8 @@ function gridFromPath(size: number, path: string): boolean[][] {
 		expect(ws).toBe(backWs);
 		const x = Number(xs);
 		const y = Number(ys);
-		for (let i = 0; i < Number(ws); i++) grid[y][x + i] = true;
+		const row = requiredAt(grid, y, "QR row");
+		for (let i = 0; i < Number(ws); i++) row[x + i] = true;
 		match = run.exec(path);
 	}
 	return grid;
@@ -62,10 +64,14 @@ describe("encodeVerificationQr", () => {
 		const grid = gridFromPath(size, path);
 		for (let i = 0; i < size; i++) {
 			for (let j = 0; j < 4; j++) {
-				expect(grid[j][i]).toBe(false);
-				expect(grid[size - 1 - j][i]).toBe(false);
-				expect(grid[i][j]).toBe(false);
-				expect(grid[i][size - 1 - j]).toBe(false);
+				expect(requiredAt(requiredAt(grid, j, "top row"), i)).toBe(false);
+				expect(
+					requiredAt(requiredAt(grid, size - 1 - j, "bottom row"), i),
+				).toBe(false);
+				expect(requiredAt(requiredAt(grid, i, "side row"), j)).toBe(false);
+				expect(requiredAt(requiredAt(grid, i, "side row"), size - 1 - j)).toBe(
+					false,
+				);
 			}
 		}
 	});

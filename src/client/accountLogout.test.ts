@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../test/assertions";
 
 const createClientMock = vi.hoisted(() => vi.fn());
 vi.mock("matrix-js-sdk", () => ({
@@ -110,9 +111,21 @@ describe("logOutAccount", () => {
 			undefined,
 			{ keepAlive: true },
 		);
-		const [stopAt] = stopClient.mock.invocationCallOrder;
-		const [abortAt] = abort.mock.invocationCallOrder;
-		const [revokeAt] = revoke.mock.invocationCallOrder;
+		const stopAt = requiredAt(
+			stopClient.mock.invocationCallOrder,
+			0,
+			"stop order",
+		);
+		const abortAt = requiredAt(
+			abort.mock.invocationCallOrder,
+			0,
+			"abort order",
+		);
+		const revokeAt = requiredAt(
+			revoke.mock.invocationCallOrder,
+			0,
+			"revoke order",
+		);
 		expect(stopAt).toBeLessThan(abortAt);
 		expect(abortAt).toBeLessThan(revokeAt);
 	});

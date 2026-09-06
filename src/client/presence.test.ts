@@ -1,6 +1,7 @@
 import { ClientEvent, type MatrixClient, type User } from "matrix-js-sdk";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../test/assertions";
 import {
 	attachPresence,
 	MAX_STATUS_MSG_LENGTH,
@@ -382,7 +383,9 @@ describe("attachPresence", () => {
 			),
 		);
 
-		expect(presenceOf(ids[9]).status).toBe("online");
+		expect(presenceOf(requiredAt(ids, 9, "last user id")).status).toBe(
+			"online",
+		);
 		expect(runs).toBe(1);
 		dispose();
 	});

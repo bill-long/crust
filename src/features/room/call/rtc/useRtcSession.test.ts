@@ -157,7 +157,11 @@ describe("useRtcSession", () => {
 			}),
 		);
 		await result.join();
-		const [fociArg] = session.joinRoomSession.mock.calls[0];
+		const fociArg = requiredAt(
+			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
+			0,
+			"focus argument",
+		);
 		expect(fociArg).toEqual(discovered);
 	});
 

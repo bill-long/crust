@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../stores/session";
+import { requiredAt } from "../test/assertions";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -103,7 +104,11 @@ describe("ClientProvider session wiring (#460)", () => {
 
 		await screen.findByText("provider-child");
 		expect(createClientMock).toHaveBeenCalledTimes(1);
-		const opts = createClientMock.mock.calls[0][0];
+		const opts = requiredAt(
+			requiredAt(createClientMock.mock.calls, 0, "createClient call"),
+			0,
+			"createClient options",
+		);
 		expect(opts).toMatchObject({
 			baseUrl: "https://matrix.example.com",
 			accessToken: "access-old",
@@ -123,7 +128,11 @@ describe("ClientProvider session wiring (#460)", () => {
 	it("advertises only the verification methods Crust can complete (#452)", () => {
 		setup(PASSWORD_SESSION);
 
-		const opts = createClientMock.mock.calls[0][0];
+		const opts = requiredAt(
+			requiredAt(createClientMock.mock.calls, 0, "createClient call"),
+			0,
+			"createClient options",
+		);
 		// Locked here because the SDK default also advertises
 		// m.qr_code.scan.v1: with no camera capture path, letting the other
 		// device show us a code it expects us to read strands the flow with
@@ -139,7 +148,11 @@ describe("ClientProvider session wiring (#460)", () => {
 		setup(PASSWORD_SESSION);
 
 		await screen.findByText("provider-child");
-		const opts = createClientMock.mock.calls[0][0];
+		const opts = requiredAt(
+			requiredAt(createClientMock.mock.calls, 0, "createClient call"),
+			0,
+			"createClient options",
+		);
 		expect(opts.refreshToken).toBeUndefined();
 		expect(opts.tokenRefreshFunction).toBeUndefined();
 	});
