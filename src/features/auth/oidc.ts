@@ -495,7 +495,7 @@ export async function completeOidcLogin(
 
 	return {
 		accessToken: tokenResponse.access_token,
-		...(tokenResponse.refresh_token !== undefined
+		...(tokenResponse.refresh_token
 			? { refreshToken: tokenResponse.refresh_token }
 			: {}),
 		userId: whoami.user_id,
