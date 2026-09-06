@@ -1,6 +1,7 @@
 import { EventType } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
 import { findExistingDmRoom, startDm } from "./startDm";
+import { requiredAt } from "./testAssertions";
 
 type Membership = "join" | "invite" | "leave" | "ban";
 
@@ -117,7 +118,11 @@ describe("startDm", () => {
 		const result = await startDm(client, "@a:server");
 		expect(result).toEqual({ roomId: "!new:server", created: true });
 
-		const createArg = createRoom.mock.calls[0][0] as Record<string, unknown>;
+		const createArg = requiredAt(
+			createRoom.mock.calls,
+			0,
+			"create-room call",
+		)[0] as Record<string, unknown>;
 		expect(createArg.is_direct).toBe(true);
 		expect(createArg.preset).toBe("trusted_private_chat");
 		expect(createArg.invite).toEqual(["@a:server"]);
@@ -137,7 +142,11 @@ describe("startDm", () => {
 	it("omits encryption initial state when encrypt is false", async () => {
 		const { client, createRoom } = makeClient();
 		await startDm(client, "@a:server", { encrypt: false });
-		const createArg = createRoom.mock.calls[0][0] as Record<string, unknown>;
+		const createArg = requiredAt(
+			createRoom.mock.calls,
+			0,
+			"create-room call",
+		)[0] as Record<string, unknown>;
 		expect(createArg.initial_state).toBeUndefined();
 	});
 
@@ -153,7 +162,11 @@ describe("startDm", () => {
 		});
 		// The content handed to the SDK must have a normal prototype so the
 		// SDK's deepCompare (hasOwnProperty) doesn't throw.
-		const content = setAccountData.mock.calls[0][1];
+		const content = requiredAt(
+			setAccountData.mock.calls,
+			0,
+			"account-data call",
+		)[1];
 		expect(Object.getPrototypeOf(content)).toBe(Object.prototype);
 	});
 

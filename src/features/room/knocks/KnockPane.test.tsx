@@ -16,6 +16,7 @@ import {
 } from "../../../client/summaries";
 import { createMockClient } from "../../../test/mockClient";
 import { TEST_SESSION } from "../../../test/testSession";
+import { requiredAt } from "../testAssertions";
 import { KnockPane } from "./KnockPane";
 
 vi.mock("solid-refresh", () => ({
@@ -131,8 +132,14 @@ describe("KnockPane", () => {
 		// Ordering matters: the store flip must come AFTER the navigation so
 		// Layout doesn't transiently mount RoomPane for the just-left room
 		// (same ordering useInviteActions.decline documents).
-		expect(onCancelled.mock.invocationCallOrder[0]).toBeLessThan(
-			optimisticallyMarkLeft.mock.invocationCallOrder[0],
+		expect(
+			requiredAt(onCancelled.mock.invocationCallOrder, 0, "cancel order"),
+		).toBeLessThan(
+			requiredAt(
+				optimisticallyMarkLeft.mock.invocationCallOrder,
+				0,
+				"left order",
+			),
 		);
 	});
 

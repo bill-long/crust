@@ -168,7 +168,9 @@ export function useRoomSearch(
 		const needles = splitQueryTokens(q);
 		const hits: SearchHit[] = [];
 		for (let i = events.length - 1; i >= 0; i--) {
-			const proj = projectEvent(r, events[i]);
+			const event = events[i];
+			if (!event) continue;
+			const proj = projectEvent(r, event);
 			if (!proj) continue;
 			if (matchesAllTokens(proj.body, needles)) hits.push(proj);
 		}

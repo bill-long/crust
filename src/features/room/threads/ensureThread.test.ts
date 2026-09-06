@@ -1,6 +1,7 @@
 import type { Room, Thread } from "matrix-js-sdk";
 import { ThreadEvent } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../testAssertions";
 import { ensureThread } from "./ensureThread";
 
 function emitterThread(overrides?: {
@@ -88,7 +89,9 @@ describe("ensureThread", () => {
 		expect(fetchRoomEvent).toHaveBeenCalledWith("!r:hs", "$root");
 		// createThread got a MatrixEvent wrapping the fetched root.
 		expect(createThread).toHaveBeenCalledTimes(1);
-		expect(createThread.mock.calls[0][0]).toBe("$root");
+		expect(
+			requiredAt(createThread.mock.calls, 0, "create-thread call")[0],
+		).toBe("$root");
 	});
 
 	it("returns null when the server fetch fails (unloaded + unreachable)", async () => {

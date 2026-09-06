@@ -11,6 +11,7 @@ import {
 import { createMockClient } from "../../test/mockClient";
 import { TEST_SESSION } from "../../test/testSession";
 import { CreateRoomDialog } from "./CreateRoomDialog";
+import { requiredAt } from "./testAssertions";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -72,6 +73,16 @@ const Wrapper: ParentComponent<{
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
+function submittedOptions(
+	client: ReturnType<typeof createMockClient>,
+): Record<string, unknown> {
+	return requiredAt(
+		(client.createRoom as ReturnType<typeof vi.fn>).mock.calls,
+		0,
+		"create-room call",
+	)[0] as Record<string, unknown>;
+}
+
 function makeImageFile(name = "a.png", bytes = 100, type = "image/png"): File {
 	return new File([new Uint8Array(bytes)], name, { type });
 }
@@ -108,8 +119,7 @@ describe("CreateRoomDialog", () => {
 		await flush();
 		await flush();
 		expect(client.createRoom).toHaveBeenCalledTimes(1);
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		expect(opts.name).toBe("general");
 		expect(opts.visibility).toBe("private");
 		expect(opts.preset).toBe("private_chat");
@@ -135,8 +145,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		expect(opts.visibility).toBe("public");
 		expect(opts.preset).toBe("public_chat");
 		expect(opts.initial_state).toBeUndefined();
@@ -160,8 +169,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		expect(opts.initial_state).toBeUndefined();
 	});
 
@@ -220,8 +228,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		expect(opts.invite).toEqual(["@alice:example.com", "@bob:example.com"]);
 	});
 
@@ -463,8 +470,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		expect(opts.invite).toEqual(["@alice:example.com"]);
 	});
 
@@ -523,8 +529,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		const initial = opts.initial_state as Array<{
 			type: string;
 			content: Record<string, unknown>;
@@ -631,8 +636,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		const initial = opts.initial_state as Array<{
 			type: string;
 			content: Record<string, unknown>;
@@ -658,8 +662,7 @@ describe("CreateRoomDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = submittedOptions(client);
 		const initial = (opts.initial_state ?? []) as Array<{ type: string }>;
 		expect(initial.find((e) => e.type === "m.room.avatar")).toBeUndefined();
 	});

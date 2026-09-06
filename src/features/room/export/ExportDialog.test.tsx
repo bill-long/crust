@@ -7,6 +7,7 @@ import {
 } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../testAssertions";
 import { ExportDialog } from "./ExportDialog";
 
 vi.mock("solid-refresh", () => ({
@@ -53,7 +54,9 @@ describe("ExportDialog", () => {
 		const { onClose } = setup();
 		fireEvent.click(screen.getByRole("button", { name: "Export" }));
 		await waitFor(() => expect(exportRoom).toHaveBeenCalled());
-		expect(exportRoom.mock.calls[0][2]).toMatchObject({
+		expect(
+			requiredAt(exportRoom.mock.calls, 0, "export call")[2],
+		).toMatchObject({
 			format: "html",
 			limit: 100,
 			includeAttachments: false,
@@ -74,7 +77,9 @@ describe("ExportDialog", () => {
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Export" }));
 		await waitFor(() => expect(exportRoom).toHaveBeenCalled());
-		expect(exportRoom.mock.calls[0][2]).toMatchObject({ limit: 50 });
+		expect(
+			requiredAt(exportRoom.mock.calls, 0, "export call")[2],
+		).toMatchObject({ limit: 50 });
 	});
 
 	it("reads the count the way the browser displays it, and rejects non-integers", async () => {
@@ -92,7 +97,9 @@ describe("ExportDialog", () => {
 		fireEvent.input(count, { target: { value: "1e10" } });
 		fireEvent.click(screen.getByRole("button", { name: "Export" }));
 		await waitFor(() => expect(exportRoom).toHaveBeenCalled());
-		expect(exportRoom.mock.calls[0][2]).toMatchObject({
+		expect(
+			requiredAt(exportRoom.mock.calls, 0, "export call")[2],
+		).toMatchObject({
 			limit: 10_000_000_000,
 		});
 	});
@@ -103,7 +110,9 @@ describe("ExportDialog", () => {
 		fireEvent.click(screen.getByRole("radio", { name: /Entire history/ }));
 		fireEvent.click(screen.getByRole("button", { name: "Export" }));
 		await waitFor(() => expect(exportRoom).toHaveBeenCalled());
-		expect(exportRoom.mock.calls[0][2]).toMatchObject({ limit: null });
+		expect(
+			requiredAt(exportRoom.mock.calls, 0, "export call")[2],
+		).toMatchObject({ limit: null });
 	});
 
 	it("aborts attachment downloads on cancel and force-closes on a second dismiss", async () => {

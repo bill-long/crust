@@ -16,6 +16,7 @@ import type { Accessor, JSX } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { pressWithMouse } from "../../../test/pressWithMouse";
+import { requiredAt } from "../testAssertions";
 import { MembersTab } from "./MembersTab";
 
 // virtua's Virtualizer requires real layout measurements (ResizeObserver +
@@ -216,7 +217,11 @@ describe("MembersTab", () => {
 		await clickAction("Mod", "Demote to Member");
 
 		await waitFor(() => expect(client.sendStateEvent).toHaveBeenCalledTimes(1));
-		const content = client.sendStateEvent.mock.calls[0][2] as {
+		const content = requiredAt(
+			client.sendStateEvent.mock.calls,
+			0,
+			"state event call",
+		)[2] as {
 			users: Record<string, number>;
 		};
 		expect(content.users["@mod:example.com"]).toBeUndefined();
@@ -228,7 +233,11 @@ describe("MembersTab", () => {
 		await clickAction("Mod", "Demote to Member");
 
 		await waitFor(() => expect(client.sendStateEvent).toHaveBeenCalledTimes(1));
-		const content = client.sendStateEvent.mock.calls[0][2] as {
+		const content = requiredAt(
+			client.sendStateEvent.mock.calls,
+			0,
+			"state event call",
+		)[2] as {
 			users: Record<string, number>;
 		};
 		expect(content.users["@mod:example.com"]).toBe(0);

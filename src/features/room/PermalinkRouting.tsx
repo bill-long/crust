@@ -68,13 +68,14 @@ const PermalinkRouting: Component = () => {
 		const spaceMatch = /^\/space\/([^/]+)/.exec(
 			stripBasePath(location.pathname, basePrefix),
 		);
+		const encodedSpaceId = spaceMatch?.[1];
 		return roomRoutePath(
 			summaries,
 			roomId,
 			// `safeDecode`: this parses the path by hand, and a stray `%` in
 			// the address bar would otherwise throw a URIError out of a
 			// document-level click handler.
-			spaceMatch ? safeDecode(spaceMatch[1]) : undefined,
+			encodedSpaceId ? safeDecode(encodedSpaceId) : undefined,
 		);
 	};
 

@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../testAssertions";
 import { sendSerializedPollEvent } from "./pollSdk";
 
 function makeClient() {
@@ -39,7 +40,9 @@ describe("sendSerializedPollEvent", () => {
 			pollEvent,
 			{ threadId: "$root:hs" },
 		);
-		expect(client.sendEvent.mock.calls[0][1]).toBe("$root:hs");
+		expect(requiredAt(client.sendEvent.mock.calls, 0, "send call")[1]).toBe(
+			"$root:hs",
+		);
 	});
 
 	it("lets extraContent add keys but never override serialized ones", async () => {
@@ -55,10 +58,11 @@ describe("sendSerializedPollEvent", () => {
 				},
 			},
 		);
-		const content = client.sendEvent.mock.calls[0][3] as Record<
-			string,
-			unknown
-		>;
+		const content = requiredAt(
+			client.sendEvent.mock.calls,
+			0,
+			"send call",
+		)[3] as Record<string, unknown>;
 		expect(content["com.example.block"]).toEqual({ extra: true });
 		// The serializer's block wins over a colliding extraContent key.
 		expect(content["org.matrix.msc3381.poll.start"]).toEqual({
