@@ -368,9 +368,11 @@ describe("useMemberList hook", () => {
 				);
 
 				await flushPromises();
-				expect(requireAt(requireAt(groups(), 0).members, 0).isTyping).toBe(
-					false,
-				);
+				const initialGroups = groups();
+				expect(initialGroups).toHaveLength(1);
+				const initialMembers = requireAt(initialGroups, 0).members;
+				expect(initialMembers).toHaveLength(1);
+				expect(requireAt(initialMembers, 0).isTyping).toBe(false);
 
 				room.__setTyping("@alice:x", true);
 
@@ -388,9 +390,11 @@ describe("useMemberList hook", () => {
 				rafCallback = null;
 
 				await flushPromises();
-				expect(requireAt(requireAt(groups(), 0).members, 0).isTyping).toBe(
-					true,
-				);
+				const refreshedGroups = groups();
+				expect(refreshedGroups).toHaveLength(1);
+				const refreshedMembers = requireAt(refreshedGroups, 0).members;
+				expect(refreshedMembers).toHaveLength(1);
+				expect(requireAt(refreshedMembers, 0).isTyping).toBe(true);
 			});
 		} finally {
 			globalThis.requestAnimationFrame = originalRAF;
@@ -655,6 +659,7 @@ describe("partitionByPresence ordering", () => {
 			},
 		];
 		const out = partitionByPresence(groups, () => "offline");
+		expect(out).toHaveLength(1);
 		expect(requireAt(out, 0).members.map((m) => m.displayName)).toEqual([
 			"Ann",
 			"Bea",
