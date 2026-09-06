@@ -93,6 +93,16 @@ describe("pickReturnToCallRoute", () => {
 		).toBe(`/home/${encodeURIComponent("!room:example.org")}`);
 	});
 
+	it("ignores absent summary values while scanning candidate spaces", () => {
+		const summaries = {
+			"!room:example.org": makeSummary({ roomId: "!room:example.org" }),
+			"!missing:example.org": undefined,
+		} as unknown as SummariesStore;
+		expect(
+			pickReturnToCallRoute(summaries, "!room:example.org", undefined),
+		).toBe(`/home/${encodeURIComponent("!room:example.org")}`);
+	});
+
 	it("falls back to /home/<roomId> when the current space is unknown to summaries", () => {
 		const summaries: SummariesStore = {
 			"!room:example.org": makeSummary({ roomId: "!room:example.org" }),
