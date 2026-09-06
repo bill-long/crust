@@ -9,6 +9,11 @@ interface ModalProps {
 	labelledBy?: string | undefined;
 	describedBy?: string | undefined;
 	label?: string | undefined;
+	/** Layout of the outer surface; focus styling remains shared. */
+	class?: string | undefined;
+	style?: JSX.CSSProperties | undefined;
+	fallbackFocus?: (() => HTMLElement | null | undefined) | undefined;
+	onBackdropClick?: ((event: MouseEvent) => void) | undefined;
 	/** Temporarily yield to a legacy dialog rendered above this one. */
 	suspended?: boolean | undefined;
 	/** A pending operation can prevent dismissal without leaking Escape. */
@@ -56,7 +61,8 @@ function ModalSurface(props: ModalProps) {
 					content = element;
 					props.contentRef?.(element);
 				}}
-				class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+				class={`${props.class ?? "fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60"} focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
+				style={props.style}
 				aria-label={props.label}
 				aria-labelledby={props.labelledBy}
 				aria-describedby={props.describedBy}
@@ -92,7 +98,10 @@ function ModalSurface(props: ModalProps) {
 					// Respect a newer focus owner (e.g. close-and-open in one turn).
 					if (event.defaultPrevented) return;
 					event.preventDefault();
-					if (returnFocus?.isConnected) returnFocus.focus();
+					const target = returnFocus?.isConnected
+						? returnFocus
+						: props.fallbackFocus?.();
+					target?.focus();
 					returnFocus = undefined;
 				}}
 				onEscapeKeyDown={(event) => {
@@ -132,7 +141,14 @@ function ModalSurface(props: ModalProps) {
 					props.onKeyDown?.(event);
 				}}
 				onClick={(event: MouseEvent) => {
-					if (event.target === event.currentTarget) close();
+					if (
+						event.target !== event.currentTarget ||
+						props.suspended ||
+						props.dismissible === false
+					)
+						return;
+					if (props.onBackdropClick) props.onBackdropClick(event);
+					else close();
 				}}
 			>
 				{props.children}

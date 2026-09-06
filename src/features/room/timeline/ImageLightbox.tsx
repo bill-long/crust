@@ -10,15 +10,12 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
+import { Modal } from "../../../components/Modal";
 import { formatBytes } from "../../../lib/formatBytes";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
-import { trackAppModalOpen } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
 import { createDecryptedObjectUrl } from "../composer/media/useDecryptedMedia";
-
-const FOCUSABLE =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export interface LightboxImage {
 	eventId: string;
@@ -106,12 +103,9 @@ function normalizeWheelDelta(e: WheelEvent): number {
 }
 
 const ImageLightbox: Component<ImageLightboxProps> = (props) => {
-	trackAppModalOpen(props.open);
-	let overlayRef!: HTMLDivElement;
 	let imgRef: HTMLImageElement | undefined;
 	let panSurfaceRef: HTMLDivElement | undefined;
 	let closeBtnRef: HTMLButtonElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 
 	const titleId = createUniqueId();
 
@@ -276,7 +270,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				setDownloadError(null);
 				setImgLoadError(false);
 				// If the descriptor has explicit dims, seed naturalSize early so
@@ -288,11 +281,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				} else {
 					setNaturalSize(null);
 				}
-				queueMicrotask(() => {
-					closeBtnRef?.focus();
-				});
-			} else if (!isOpen && wasOpen) {
-				restoreFocus();
 			}
 		}),
 	);
@@ -344,25 +332,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		}),
 	);
 
-	const restoreFocus = (): void => {
-		const target =
-			previousFocus && document.body.contains(previousFocus)
-				? previousFocus
-				: (props.fallbackFocus?.() ?? null);
-		previousFocus = null;
-		if (target) {
-			try {
-				target.focus();
-			} catch {
-				// noop
-			}
-		}
-	};
-
-	onCleanup(() => {
-		restoreFocus();
-	});
-
 	// Window resize tracking — only while the lightbox is open. Avoids
 	// recomputing `viewport` / `fitScale` for an unmounted overlay.
 	const onResize = (): void => {
@@ -386,28 +355,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	};
 
 	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			tryClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			const focusable = Array.from(
-				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			if (!first || !last) return;
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
-			return;
-		}
 		if (e.key === "ArrowRight") {
 			if (props.hasNext?.()) {
 				e.preventDefault();
@@ -591,74 +538,35 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	const zoomPercent = createMemo(() => Math.round(scale() * 100));
 
 	return (
-		<Show when={props.open()}>
-			<div
-				ref={overlayRef}
-				class="fixed inset-0 z-50 flex flex-col bg-black/90 backdrop-blur-sm"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				tabIndex={-1}
-				onKeyDown={handleKeyDown}
-				onClick={onBackdropClick}
-			>
-				{/* Header / toolbar */}
-				<div class="flex items-center justify-between gap-2 border-b border-white/10 bg-black/40 px-3 py-2 text-text-primary">
-					<div id={titleId} class="min-w-0 flex-1 truncate text-sm">
-						<Show
-							when={props.image()}
-							fallback={<span class="text-text-muted">Image</span>}
-						>
-							{(img) => (
-								<span class="font-medium">{img().filename ?? "Image"}</span>
-							)}
-						</Show>
-					</div>
-					<div class="flex flex-wrap items-center justify-end gap-1">
-						<Show when={props.hasPrev?.()}>
-							<button
-								type="button"
-								onClick={() => props.onPrev?.()}
-								class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-								aria-label="Previous image"
-							>
-								<svg
-									class="h-5 w-5"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									aria-hidden="true"
-								>
-									<polyline points="15 18 9 12 15 6" />
-								</svg>
-							</button>
-						</Show>
-						<Show when={props.hasNext?.()}>
-							<button
-								type="button"
-								onClick={() => props.onNext?.()}
-								class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-								aria-label="Next image"
-							>
-								<svg
-									class="h-5 w-5"
-									viewBox="0 0 24 24"
-									fill="none"
-									stroke="currentColor"
-									stroke-width="2"
-									aria-hidden="true"
-								>
-									<polyline points="9 18 15 12 9 6" />
-								</svg>
-							</button>
-						</Show>
-						<span class="mx-1 h-5 w-px bg-white/20" aria-hidden="true" />
+		<Modal
+			open={props.open()}
+			onClose={tryClose}
+			class="fixed inset-0 z-50 flex flex-col bg-surface-0/90 backdrop-blur-sm"
+			labelledBy={titleId}
+			initialFocus={() => closeBtnRef}
+			fallbackFocus={props.fallbackFocus}
+			onKeyDown={handleKeyDown}
+			onBackdropClick={onBackdropClick}
+		>
+			{/* Header / toolbar */}
+			<div class="flex items-center justify-between gap-2 border-b border-white/10 bg-black/40 px-3 py-2 text-text-primary">
+				<div id={titleId} class="min-w-0 flex-1 truncate text-sm">
+					<Show
+						when={props.image()}
+						fallback={<span class="text-text-muted">Image</span>}
+					>
+						{(img) => (
+							<span class="font-medium">{img().filename ?? "Image"}</span>
+						)}
+					</Show>
+				</div>
+				<div class="flex flex-wrap items-center justify-end gap-1">
+					<Show when={props.hasPrev?.()}>
 						<button
 							type="button"
-							onClick={() => zoomBy(1 / ZOOM_STEP)}
+							onClick={() => props.onPrev?.()}
 							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label="Zoom out"
+							aria-label="Previous image"
 						>
 							<svg
 								class="h-5 w-5"
@@ -668,33 +576,16 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 								stroke-width="2"
 								aria-hidden="true"
 							>
-								<circle cx="11" cy="11" r="7" />
-								<line x1="8" y1="11" x2="14" y2="11" />
-								<line x1="20" y1="20" x2="16.65" y2="16.65" />
+								<polyline points="15 18 9 12 15 6" />
 							</svg>
 						</button>
+					</Show>
+					<Show when={props.hasNext?.()}>
 						<button
 							type="button"
-							onClick={resetToFit}
-							class="rounded px-2 py-1 text-xs text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label="Fit to viewport"
-							aria-current={isFitted() ? "true" : undefined}
-						>
-							Fit
-						</button>
-						<button
-							type="button"
-							onClick={setActualSize}
-							class="rounded px-2 py-1 text-xs tabular-nums text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label="Zoom to 100%"
-						>
-							{zoomPercent()}%
-						</button>
-						<button
-							type="button"
-							onClick={() => zoomBy(ZOOM_STEP)}
+							onClick={() => props.onNext?.()}
 							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label="Zoom in"
+							aria-label="Next image"
 						>
 							<svg
 								class="h-5 w-5"
@@ -704,263 +595,314 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 								stroke-width="2"
 								aria-hidden="true"
 							>
-								<circle cx="11" cy="11" r="7" />
-								<line x1="11" y1="8" x2="11" y2="14" />
-								<line x1="8" y1="11" x2="14" y2="11" />
-								<line x1="20" y1="20" x2="16.65" y2="16.65" />
+								<polyline points="9 18 15 12 9 6" />
 							</svg>
 						</button>
-						<span class="mx-1 h-5 w-px bg-white/20" aria-hidden="true" />
-						<Show when={props.image()}>
-							{(img) => (
-								<>
-									<button
-										type="button"
-										onClick={handleDownload}
-										disabled={img().isEncrypted && !displaySrc()}
-										title={
-											img().isEncrypted &&
-											(!img().encryptedFile || decrypted.failed())
-												? "Image can't be decrypted"
-												: img().isEncrypted && !displaySrc()
-													? "Decrypting…"
-													: "Download"
-										}
-										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-										aria-label="Download image"
+					</Show>
+					<span class="mx-1 h-5 w-px bg-white/20" aria-hidden="true" />
+					<button
+						type="button"
+						onClick={() => zoomBy(1 / ZOOM_STEP)}
+						class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						aria-label="Zoom out"
+					>
+						<svg
+							class="h-5 w-5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<circle cx="11" cy="11" r="7" />
+							<line x1="8" y1="11" x2="14" y2="11" />
+							<line x1="20" y1="20" x2="16.65" y2="16.65" />
+						</svg>
+					</button>
+					<button
+						type="button"
+						onClick={resetToFit}
+						class="rounded px-2 py-1 text-xs text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						aria-label="Fit to viewport"
+						aria-current={isFitted() ? "true" : undefined}
+					>
+						Fit
+					</button>
+					<button
+						type="button"
+						onClick={setActualSize}
+						class="rounded px-2 py-1 text-xs tabular-nums text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						aria-label="Zoom to 100%"
+					>
+						{zoomPercent()}%
+					</button>
+					<button
+						type="button"
+						onClick={() => zoomBy(ZOOM_STEP)}
+						class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						aria-label="Zoom in"
+					>
+						<svg
+							class="h-5 w-5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<circle cx="11" cy="11" r="7" />
+							<line x1="11" y1="8" x2="11" y2="14" />
+							<line x1="8" y1="11" x2="14" y2="11" />
+							<line x1="20" y1="20" x2="16.65" y2="16.65" />
+						</svg>
+					</button>
+					<span class="mx-1 h-5 w-px bg-white/20" aria-hidden="true" />
+					<Show when={props.image()}>
+						{(img) => (
+							<>
+								<button
+									type="button"
+									onClick={handleDownload}
+									disabled={img().isEncrypted && !displaySrc()}
+									title={
+										img().isEncrypted &&
+										(!img().encryptedFile || decrypted.failed())
+											? "Image can't be decrypted"
+											: img().isEncrypted && !displaySrc()
+												? "Decrypting…"
+												: "Download"
+									}
+									class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+									aria-label="Download image"
+								>
+									<svg
+										class="h-5 w-5"
+										viewBox="0 0 24 24"
+										fill="none"
+										stroke="currentColor"
+										stroke-width="2"
+										aria-hidden="true"
 									>
-										<svg
-											class="h-5 w-5"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2"
-											aria-hidden="true"
-										>
-											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-											<polyline points="7 10 12 15 17 10" />
-											<line x1="12" y1="15" x2="12" y2="3" />
-										</svg>
-									</button>
-									<Show when={displaySrc()}>
-										{(src) => {
-											// New nodes per call — a single shared JSX node can't live
-											// in both Show branches.
-											const renderOpenIcon = () => (
-												<>
-													<span class="sr-only">Open in new tab</span>
-													<svg
-														class="h-5 w-5"
-														viewBox="0 0 24 24"
-														fill="none"
-														stroke="currentColor"
-														stroke-width="2"
-														aria-hidden="true"
-													>
-														<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-														<polyline points="15 3 21 3 21 9" />
-														<line x1="10" y1="14" x2="21" y2="3" />
-													</svg>
-												</>
-											);
-											const openClass =
-												"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
-											// Encrypted: a button minting a fresh, independently-revoked
-											// blob URL (the displaySrc blob is revoked on unmount and
-											// would break the opened tab). Plain: a normal anchor.
-											return (
-												<Show
-													when={!props.image()?.isEncrypted}
-													fallback={
-														<button
-															type="button"
-															onClick={openInNewTab}
-															class={openClass}
-															aria-label="Open in new tab"
-														>
-															{renderOpenIcon()}
-														</button>
-													}
+										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+										<polyline points="7 10 12 15 17 10" />
+										<line x1="12" y1="15" x2="12" y2="3" />
+									</svg>
+								</button>
+								<Show when={displaySrc()}>
+									{(src) => {
+										// New nodes per call — a single shared JSX node can't live
+										// in both Show branches.
+										const renderOpenIcon = () => (
+											<>
+												<span class="sr-only">Open in new tab</span>
+												<svg
+													class="h-5 w-5"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													stroke-width="2"
+													aria-hidden="true"
 												>
-													<a
-														href={src()}
-														target="_blank"
-														rel="noopener noreferrer"
+													<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+													<polyline points="15 3 21 3 21 9" />
+													<line x1="10" y1="14" x2="21" y2="3" />
+												</svg>
+											</>
+										);
+										const openClass =
+											"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
+										// Encrypted: a button minting a fresh, independently-revoked
+										// blob URL (the displaySrc blob is revoked on unmount and
+										// would break the opened tab). Plain: a normal anchor.
+										return (
+											<Show
+												when={!props.image()?.isEncrypted}
+												fallback={
+													<button
+														type="button"
+														onClick={openInNewTab}
 														class={openClass}
 														aria-label="Open in new tab"
 													>
 														{renderOpenIcon()}
-													</a>
-												</Show>
-											);
-										}}
-									</Show>
-								</>
-							)}
-						</Show>
-						<button
-							type="button"
-							ref={closeBtnRef}
-							onClick={tryClose}
-							class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							aria-label="Close"
-						>
-							<svg
-								class="h-5 w-5"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								aria-hidden="true"
-							>
-								<line x1="18" y1="6" x2="6" y2="18" />
-								<line x1="6" y1="6" x2="18" y2="18" />
-							</svg>
-						</button>
-					</div>
-				</div>
-
-				{/* Image surface: interactive pan/zoom region inside the
-				    role="dialog" overlay. The dialog itself owns the
-				    keyboard handlers; this surface only forwards pointer
-				    / wheel gestures. */}
-				{/* biome-ignore lint/a11y/noStaticElementInteractions: interactive surface inside role="dialog" with keyboard handled at the dialog level */}
-				{/* biome-ignore lint/a11y/useKeyWithClickEvents: Esc / arrow / zoom keys are handled by the parent dialog's onKeyDown */}
-				<div
-					ref={panSurfaceRef}
-					class="relative flex flex-1 select-none items-center justify-center overflow-hidden"
-					style={{
-						cursor: scale() > fitScale() + 1e-4 ? "grab" : "zoom-in",
-						"touch-action": "none",
-					}}
-					// Non-passive wheel listener so preventDefault() actually
-					// stops page scroll while zooming. Solid's onWheel attaches
-					// via addEventListener, which defaults to passive: true for
-					// wheel events; the on: namespace lets us override that.
-					on:wheel={{ handleEvent: handleWheel, passive: false }}
-					onPointerDown={onPointerDown}
-					onPointerMove={onPointerMove}
-					onPointerUp={onPointerUp}
-					onPointerCancel={onPointerUp}
-					onDblClick={onDoubleClick}
-					onClick={(e) => {
-						// Click on empty area around the image closes the
-						// lightbox, mirroring Discord's behavior. Don't close
-						// if the user just finished a drag, or if they clicked
-						// the image itself.
-						if (e.target !== e.currentTarget) return;
-						if (performance.now() - lastDragEndAt < 250) return;
-						tryClose();
-					}}
-				>
-					<Show
-						when={props.image()}
-						fallback={<div class="text-text-muted">No image</div>}
-					>
-						{(img) => (
-							<Switch>
-								{/* Encrypted with no usable descriptor (malformed
-								    `content.file`) or a failed download/verify/decrypt →
-								    fail closed. `isEncrypted` is authoritative so we never
-								    fall through to rendering the ciphertext `fullUrl`. */}
-								<Match
-									when={
-										img().isEncrypted &&
-										(!img().encryptedFile || decrypted.failed())
-									}
-								>
-									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
-										<div class="mb-1 font-semibold text-text-primary">
-											Couldn't decrypt image
-										</div>
-										<p>
-											This encrypted image could not be decrypted or failed its
-											integrity check.
-										</p>
-									</div>
-								</Match>
-								{/* Encrypted: still downloading / decrypting. */}
-								<Match when={img().isEncrypted && !decrypted.url()}>
-									<div class="text-text-muted">Decrypting…</div>
-								</Match>
-								{/* Plain image failed to load. */}
-								<Match when={imgLoadError()}>
-									<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
-										<div class="mb-1 font-semibold text-text-primary">
-											Couldn't load image
-										</div>
-										<p>The full-resolution image failed to load.</p>
-									</div>
-								</Match>
-								<Match when={displaySrc()}>
-									{(src) => (
-										<img
-											ref={imgRef}
-											src={src()}
-											alt={img().filename ?? "Image"}
-											onLoad={onImgLoad}
-											onError={onImgError}
-											draggable={false}
-											style={{
-												transform: transformStyle(),
-												"transform-origin": "center center",
-												"max-width": "none",
-												"max-height": "none",
-												"will-change": "transform",
-											}}
-											class="block"
-										/>
-									)}
-								</Match>
-							</Switch>
-						)}
-					</Show>
-				</div>
-
-				{/* Metadata strip */}
-				<div class="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-black/40 px-3 py-2 text-xs text-text-muted">
-					<Show when={props.image()}>
-						{(img) => (
-							<>
-								<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-									<span class="truncate text-text-secondary">
-										{img().senderName}
-									</span>
-									<span aria-hidden="true">·</span>
-									<span>
-										{formatTimestamp(
-											img().timestamp,
-											userSettings().timeFormat,
-										)}
-									</span>
-									<Show when={naturalSize()}>
-										{(n) => (
-											<>
-												<span aria-hidden="true">·</span>
-												<span class="tabular-nums">
-													{n().w} × {n().h}
-												</span>
-											</>
-										)}
-									</Show>
-									<Show when={img().size !== null}>
-										<span aria-hidden="true">·</span>
-										<span class="tabular-nums">
-											{formatBytes(img().size as number)}
-										</span>
-									</Show>
-								</div>
-								<Show when={downloadError()}>
-									<div role="alert" class="text-danger-text">
-										{downloadError()}
-									</div>
+													</button>
+												}
+											>
+												<a
+													href={src()}
+													target="_blank"
+													rel="noopener noreferrer"
+													class={openClass}
+													aria-label="Open in new tab"
+												>
+													{renderOpenIcon()}
+												</a>
+											</Show>
+										);
+									}}
 								</Show>
 							</>
 						)}
 					</Show>
+					<button
+						type="button"
+						ref={closeBtnRef}
+						onClick={tryClose}
+						class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						aria-label="Close"
+					>
+						<svg
+							class="h-5 w-5"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
+							<line x1="18" y1="6" x2="6" y2="18" />
+							<line x1="6" y1="6" x2="18" y2="18" />
+						</svg>
+					</button>
 				</div>
 			</div>
-		</Show>
+
+			{/* Image surface: interactive pan/zoom region inside the
+				    role="dialog" overlay. The dialog itself owns the
+				    keyboard handlers; this surface only forwards pointer
+				    / wheel gestures. */}
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: interactive surface inside role="dialog" with keyboard handled at the dialog level */}
+			{/* biome-ignore lint/a11y/useKeyWithClickEvents: Esc / arrow / zoom keys are handled by the parent dialog's onKeyDown */}
+			<div
+				ref={panSurfaceRef}
+				class="relative flex flex-1 select-none items-center justify-center overflow-hidden"
+				style={{
+					cursor: scale() > fitScale() + 1e-4 ? "grab" : "zoom-in",
+					"touch-action": "none",
+				}}
+				// Non-passive wheel listener so preventDefault() actually
+				// stops page scroll while zooming. Solid's onWheel attaches
+				// via addEventListener, which defaults to passive: true for
+				// wheel events; the on: namespace lets us override that.
+				on:wheel={{ handleEvent: handleWheel, passive: false }}
+				onPointerDown={onPointerDown}
+				onPointerMove={onPointerMove}
+				onPointerUp={onPointerUp}
+				onPointerCancel={onPointerUp}
+				onDblClick={onDoubleClick}
+				onClick={(e) => {
+					// Click on empty area around the image closes the
+					// lightbox, mirroring Discord's behavior. Don't close
+					// if the user just finished a drag, or if they clicked
+					// the image itself.
+					if (e.target !== e.currentTarget) return;
+					if (performance.now() - lastDragEndAt < 250) return;
+					tryClose();
+				}}
+			>
+				<Show
+					when={props.image()}
+					fallback={<div class="text-text-muted">No image</div>}
+				>
+					{(img) => (
+						<Switch>
+							{/* Encrypted with no usable descriptor (malformed
+								    `content.file`) or a failed download/verify/decrypt →
+								    fail closed. `isEncrypted` is authoritative so we never
+								    fall through to rendering the ciphertext `fullUrl`. */}
+							<Match
+								when={
+									img().isEncrypted &&
+									(!img().encryptedFile || decrypted.failed())
+								}
+							>
+								<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
+									<div class="mb-1 font-semibold text-text-primary">
+										Couldn't decrypt image
+									</div>
+									<p>
+										This encrypted image could not be decrypted or failed its
+										integrity check.
+									</p>
+								</div>
+							</Match>
+							{/* Encrypted: still downloading / decrypting. */}
+							<Match when={img().isEncrypted && !decrypted.url()}>
+								<div class="text-text-muted">Decrypting…</div>
+							</Match>
+							{/* Plain image failed to load. */}
+							<Match when={imgLoadError()}>
+								<div class="max-w-md rounded bg-surface-1/90 p-6 text-center text-sm text-text-secondary shadow-xl">
+									<div class="mb-1 font-semibold text-text-primary">
+										Couldn't load image
+									</div>
+									<p>The full-resolution image failed to load.</p>
+								</div>
+							</Match>
+							<Match when={displaySrc()}>
+								{(src) => (
+									<img
+										ref={imgRef}
+										src={src()}
+										alt={img().filename ?? "Image"}
+										onLoad={onImgLoad}
+										onError={onImgError}
+										draggable={false}
+										style={{
+											transform: transformStyle(),
+											"transform-origin": "center center",
+											"max-width": "none",
+											"max-height": "none",
+											"will-change": "transform",
+										}}
+										class="block"
+									/>
+								)}
+							</Match>
+						</Switch>
+					)}
+				</Show>
+			</div>
+
+			{/* Metadata strip */}
+			<div class="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 bg-black/40 px-3 py-2 text-xs text-text-muted">
+				<Show when={props.image()}>
+					{(img) => (
+						<>
+							<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+								<span class="truncate text-text-secondary">
+									{img().senderName}
+								</span>
+								<span aria-hidden="true">·</span>
+								<span>
+									{formatTimestamp(img().timestamp, userSettings().timeFormat)}
+								</span>
+								<Show when={naturalSize()}>
+									{(n) => (
+										<>
+											<span aria-hidden="true">·</span>
+											<span class="tabular-nums">
+												{n().w} × {n().h}
+											</span>
+										</>
+									)}
+								</Show>
+								<Show when={img().size !== null}>
+									<span aria-hidden="true">·</span>
+									<span class="tabular-nums">
+										{formatBytes(img().size as number)}
+									</span>
+								</Show>
+							</div>
+							<Show when={downloadError()}>
+								<div role="alert" class="text-danger-text">
+									{downloadError()}
+								</div>
+							</Show>
+						</>
+					)}
+				</Show>
+			</div>
+		</Modal>
 	);
 };
 
