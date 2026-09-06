@@ -30,10 +30,10 @@ function hasBoundedToken(stripped: string, token: string): boolean {
 	while (searchFrom < stripped.length) {
 		const idx = stripped.indexOf(token, searchFrom);
 		if (idx < 0) return false;
-		const beforeOk = idx === 0 || !/\w/.test(stripped[idx - 1]);
+		const beforeOk = idx === 0 || !/\w/.test(stripped.charAt(idx - 1));
 		const afterIdx = idx + token.length;
 		const afterOk =
-			afterIdx >= stripped.length || !/\w/.test(stripped[afterIdx]);
+			afterIdx >= stripped.length || !/\w/.test(stripped.charAt(afterIdx));
 		if (beforeOk && afterOk) return true;
 		searchFrom = idx + 1;
 	}
@@ -153,11 +153,7 @@ export function useMentions(deps: UseMentionsDeps) {
 		const before = text.slice(0, pos);
 		// Look for @ at start or after non-word char, capture query after it
 		const match = before.match(/(^|[^\w])@(\S*)$/);
-		if (match) {
-			setMentionQuery(match[2]);
-		} else {
-			setMentionQuery(null);
-		}
+		setMentionQuery(match?.[2] ?? null);
 		// Disarm a picked @room the moment its token leaves the text, not
 		// just at send: a LATER hand-typed @room in the same draft must not
 		// ride the stale intent into an everyone-ping (user mentions accept
@@ -215,7 +211,9 @@ export function useMentions(deps: UseMentionsDeps) {
 		setMentions((prev) => {
 			const existing = prev.findIndex((m) => m.userId === userId);
 			if (existing < 0) return [...prev, { userId, displayName }];
-			if (prev[existing].displayName === displayName) return prev;
+			const current = prev[existing];
+			if (current === undefined) return [...prev, { userId, displayName }];
+			if (current.displayName === displayName) return prev;
 			const next = [...prev];
 			next[existing] = { userId, displayName };
 			return next;
@@ -241,8 +239,9 @@ export function useMentions(deps: UseMentionsDeps) {
 		const before = currentText.slice(0, pos);
 		// Use same regex as detectMention to find the triggering @
 		const triggerMatch = before.match(/(^|[^\w])@(\S*)$/);
-		if (!triggerMatch) return;
-		const atIdx = before.length - triggerMatch[2].length - 1;
+		const triggerQuery = triggerMatch?.[2];
+		if (triggerQuery === undefined) return;
+		const atIdx = before.length - triggerQuery.length - 1;
 
 		const displayName = isRoomMentionCandidate(candidate)
 			? "room"
