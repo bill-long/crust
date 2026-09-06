@@ -285,7 +285,11 @@ describe("encrypted MediaFile", () => {
 
 		await waitFor(() => expect(anchorClick).toHaveBeenCalled());
 		expect(createObjUrl).toHaveBeenCalledTimes(1);
-		expect(createObjUrl.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
+		const firstObjectUrlCall = createObjUrl.mock.calls[0];
+		if (firstObjectUrlCall === undefined) {
+			throw new Error("download did not create an object URL");
+		}
+		expect(firstObjectUrlCall[0]).toBeInstanceOf(Blob);
 	});
 
 	it("fails closed (shows an error, no download) when the ciphertext is tampered", async () => {
