@@ -80,6 +80,7 @@ function findCustomEmoji(
 
 	for (const match of stripped.matchAll(SHORTCODE_RE)) {
 		const shortcode = match[1];
+		if (!shortcode) continue;
 		if (seen.has(shortcode)) continue;
 		const emote = lookup.get(shortcode);
 		if (emote) {

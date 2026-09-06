@@ -50,7 +50,8 @@ export function parseSlashCommand(input: string): ParsedSlashCommand {
 	// falling through to literal text would send the secret in the clear.
 	const match = /^\/([a-z]+)(?:\s+([\s\S]*))?$/i.exec(input);
 	if (!match) return passthrough(input);
-	const command = match[1].toLowerCase();
+	const command = match[1]?.toLowerCase();
+	if (!command) return passthrough(input);
 	const rest = match[2]?.trim() ?? "";
 
 	// Object.hasOwn: a plain-object lookup would resolve "/constructor"

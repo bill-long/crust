@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { requiredAt } from "../testAssertions";
 import {
 	decryptAttachment,
 	type EncryptedFileInfo,
@@ -16,7 +17,7 @@ import {
 function bytesToBase64Unpadded(bytes: Uint8Array): string {
 	let binary = "";
 	for (let i = 0; i < bytes.length; i++)
-		binary += String.fromCharCode(bytes[i]);
+		binary += String.fromCharCode(requiredAt(bytes, i, `byte ${i}`));
 	return btoa(binary).replace(/=+$/, "");
 }
 
@@ -89,7 +90,8 @@ describe("decryptAttachment", () => {
 			new Uint8Array([9, 8, 7, 6]),
 		);
 		const corrupted = ciphertext.slice(0);
-		new Uint8Array(corrupted)[0] ^= 0xff;
+		const corruptedBytes = new Uint8Array(corrupted);
+		corruptedBytes[0] = requiredAt(corruptedBytes, 0, "ciphertext byte") ^ 0xff;
 		await expect(decryptAttachment(corrupted, file)).rejects.toThrow(
 			/hash mismatch/i,
 		);

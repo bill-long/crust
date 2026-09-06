@@ -9,6 +9,7 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../../test/mockClient";
+import { requiredAt } from "../testAssertions";
 import { decryptAttachment, parseEncryptedFile } from "./attachmentCrypto";
 import type { PendingAttachment } from "./types";
 import { uploadAndSend } from "./uploadMedia";
@@ -88,7 +89,7 @@ describe("uploadAndSend (encrypted room)", () => {
 
 		// The full file's ciphertext was uploaded as opaque octet-stream with no
 		// filename — the server never sees the real type or name.
-		const fullUpload = uploads[0];
+		const fullUpload = requiredAt(uploads, 0, "full upload");
 		expect(fullUpload.opts.type).toBe("application/octet-stream");
 		expect(fullUpload.opts.name).toBeUndefined();
 		// The uploaded blob is ciphertext, not the plaintext file.
@@ -126,7 +127,7 @@ describe("uploadAndSend (encrypted room)", () => {
 
 		// The thumbnail ciphertext (second upload) decrypts back to the stub bytes,
 		// and like the full file it leaks no filename to the server.
-		const thumbUpload = uploads[1];
+		const thumbUpload = requiredAt(uploads, 1, "thumbnail upload");
 		expect(thumbUpload.opts.type).toBe("application/octet-stream");
 		expect(thumbUpload.opts.name).toBeUndefined();
 		const parsed = parseEncryptedFile(thumbFile);
