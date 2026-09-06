@@ -12,6 +12,14 @@ import {
 	useMemberList,
 } from "./useMemberList";
 
+function requireAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) {
+		throw new Error(`Expected item at index ${index}`);
+	}
+	return item;
+}
+
 describe("roleForPowerLevel", () => {
 	it("returns Admin for powerLevel >= 100", () => {
 		expect(roleForPowerLevel(100)).toBe("Admin");
@@ -51,15 +59,18 @@ describe("groupMembers", () => {
 		];
 
 		const groups = groupMembers(entries);
+		const admins = requireAt(groups, 0);
+		const moderators = requireAt(groups, 1);
+		const members = requireAt(groups, 2);
 		expect(groups).toHaveLength(3);
-		expect(groups[0].role).toBe("Admin");
-		expect(groups[0].members).toHaveLength(1);
-		expect(groups[1].role).toBe("Moderator");
-		expect(groups[1].members).toHaveLength(1);
-		expect(groups[2].role).toBe("Member");
-		expect(groups[2].members).toHaveLength(2);
-		expect(groups[2].members[0].displayName).toBe("Alice");
-		expect(groups[2].members[1].displayName).toBe("Bob");
+		expect(admins.role).toBe("Admin");
+		expect(admins.members).toHaveLength(1);
+		expect(moderators.role).toBe("Moderator");
+		expect(moderators.members).toHaveLength(1);
+		expect(members.role).toBe("Member");
+		expect(members.members).toHaveLength(2);
+		expect(requireAt(members.members, 0).displayName).toBe("Alice");
+		expect(requireAt(members.members, 1).displayName).toBe("Bob");
 	});
 
 	it("omits empty groups", () => {
@@ -70,7 +81,7 @@ describe("groupMembers", () => {
 
 		const groups = groupMembers(entries);
 		expect(groups).toHaveLength(1);
-		expect(groups[0].role).toBe("Member");
+		expect(requireAt(groups, 0).role).toBe("Member");
 	});
 
 	it("returns empty array for empty input", () => {
@@ -93,7 +104,7 @@ describe("buildEntry", () => {
 				},
 			],
 		);
-		const member = room.getJoinedMembers()[0];
+		const member = requireAt(room.getJoinedMembers(), 0);
 
 		const entry = buildEntry(
 			member as unknown as RoomMember,
@@ -113,7 +124,7 @@ describe("buildEntry", () => {
 			[],
 			[{ userId: "@noname:x", name: "" }],
 		);
-		const member = room.getJoinedMembers()[0];
+		const member = requireAt(room.getJoinedMembers(), 0);
 
 		const entry = buildEntry(
 			member as unknown as RoomMember,
@@ -129,7 +140,7 @@ describe("buildEntry", () => {
 			[],
 			[{ userId: "@noavatar:x", name: "No Avatar" }],
 		);
-		const member = room.getJoinedMembers()[0];
+		const member = requireAt(room.getJoinedMembers(), 0);
 
 		const entry = buildEntry(
 			member as unknown as RoomMember,
@@ -145,7 +156,7 @@ describe("buildEntry", () => {
 			[],
 			[{ userId: "@typist:x", name: "Typist", typing: true }],
 		);
-		const member = room.getJoinedMembers()[0];
+		const member = requireAt(room.getJoinedMembers(), 0);
 
 		const entry = buildEntry(
 			member as unknown as RoomMember,
@@ -169,7 +180,7 @@ describe("getJoinedMembers filtering", () => {
 
 		const joined = room.getJoinedMembers();
 		expect(joined).toHaveLength(1);
-		expect(joined[0].userId).toBe("@joined:x");
+		expect(requireAt(joined, 0).userId).toBe("@joined:x");
 	});
 });
 
@@ -221,9 +232,10 @@ describe("useMemberList hook", () => {
 			await flushPromises();
 			expect(loading()).toBe(false);
 			expect(memberCount()).toBe(2);
-			expect(groups().length).toBe(2);
-			expect(groups()[0].role).toBe("Admin");
-			expect(groups()[1].role).toBe("Member");
+			const currentGroups = groups();
+			expect(currentGroups.length).toBe(2);
+			expect(requireAt(currentGroups, 0).role).toBe("Admin");
+			expect(requireAt(currentGroups, 1).role).toBe("Member");
 		});
 	});
 
@@ -354,7 +366,9 @@ describe("useMemberList hook", () => {
 				);
 
 				await flushPromises();
-				expect(groups()[0].members[0].isTyping).toBe(false);
+				expect(requireAt(requireAt(groups(), 0).members, 0).isTyping).toBe(
+					false,
+				);
 
 				room.__setTyping("@alice:x", true);
 
@@ -372,7 +386,9 @@ describe("useMemberList hook", () => {
 				rafCallback = null;
 
 				await flushPromises();
-				expect(groups()[0].members[0].isTyping).toBe(true);
+				expect(requireAt(requireAt(groups(), 0).members, 0).isTyping).toBe(
+					true,
+				);
 			});
 		} finally {
 			globalThis.requestAnimationFrame = originalRAF;
@@ -615,10 +631,11 @@ describe("partitionByPresence ordering", () => {
 			{ role: "Member" as const, members: [entry("Bob"), entry("Yan")] },
 		];
 		const out = partitionByPresence(groups, () => "offline");
+		const offline = requireAt(out, 0);
 
 		expect(out).toHaveLength(1);
-		expect(out[0].role).toBe("Offline");
-		expect(out[0].members.map((m) => m.displayName)).toEqual([
+		expect(offline.role).toBe("Offline");
+		expect(offline.members.map((m) => m.displayName)).toEqual([
 			"Ana",
 			"Bob",
 			"Yan",
@@ -637,7 +654,7 @@ describe("partitionByPresence ordering", () => {
 			},
 		];
 		const out = partitionByPresence(groups, () => "offline");
-		expect(out[0].members.map((m) => m.displayName)).toEqual([
+		expect(requireAt(out, 0).members.map((m) => m.displayName)).toEqual([
 			"Ann",
 			"Bea",
 			"Cal",
