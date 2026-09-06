@@ -85,8 +85,8 @@ export function canReuseCachedSecretStorageKey(
  *  1. The account's default key, using a freshly fetched description
  *     (correct even when the SDK's offered set is stale).
  *  2. The account's default key, using the SDK's offered description.
- *  3. The first offered key (no usable default — the SDK knows best).
- *  4. null when there are no keys at all.
+ *  3. The first usable offered key.
+ *  4. null when there are no usable keys.
  */
 export async function resolveSecretStorageKey(
 	source: SecretStorageKeySource,
@@ -110,10 +110,13 @@ export async function resolveSecretStorageKey(
 	}
 
 	const offeredKeyIds = Object.keys(source.offeredKeys);
+	// Preserve the callback's existing empty-id behavior. Supporting empty key
+	// ids also requires coordinated changes to ClientProvider's cache guards.
 	if (!offeredKeyIds[0]) return null;
 	for (const keyId of offeredKeyIds) {
-		const keyInfo = source.offeredKeys[keyId];
-		if (keyInfo) return { keyId, keyInfo };
+		if (!keyId) continue;
+		const keyInfo = source.offeredKeys[keyId] ?? null;
+		if (isUsableKeyDescription(keyInfo)) return { keyId, keyInfo };
 	}
 	return null;
 }

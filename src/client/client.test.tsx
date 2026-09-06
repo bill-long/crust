@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import type { SecretStorageKeyDescription } from "matrix-js-sdk/lib/secret-storage";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../stores/session";
 import { requiredAt } from "../test/assertions";
@@ -50,7 +51,7 @@ vi.mock("../features/crypto/useCryptoStatus", () => ({
 	}),
 }));
 
-import { ClientProvider } from "./client";
+import { ClientProvider, useClient } from "./client";
 
 const mockSdkClient = {
 	on: vi.fn(),
@@ -65,6 +66,13 @@ const mockSdkClient = {
 	setPresence: vi.fn(async () => {}),
 	getPresence: vi.fn(async () => ({ presence: "online" })),
 	setSyncPresence: vi.fn(),
+	secretStorage: {
+		getDefaultKeyId: vi.fn(async () => null),
+		checkKey: vi.fn(async () => false),
+	},
+	http: {
+		authedRequest: vi.fn(async () => null),
+	},
 };
 
 const PASSWORD_SESSION: Session = {
@@ -99,6 +107,49 @@ afterEach(() => {
 });
 
 describe("ClientProvider session wiring (#460)", () => {
+	it("reports unusable secret-storage metadata as a validation failure", async () => {
+		let clientContext: ReturnType<typeof useClient> | undefined;
+		function ClientCapture() {
+			clientContext = useClient();
+			return <div>provider-child</div>;
+		}
+
+		createClientMock.mockReturnValue(mockSdkClient);
+		render(() => (
+			<ClientProvider session={PASSWORD_SESSION}>
+				<ClientCapture />
+			</ClientProvider>
+		));
+		await screen.findByText("provider-child");
+		if (!clientContext) throw new Error("Client context was not captured");
+		clientContext.setRecoveryKeyResolver(async (validate) => {
+			if (!validate) throw new Error("Expected a recovery-key validator");
+			await validate(new Uint8Array([1, 2, 3]));
+			return null;
+		});
+
+		const opts = requiredAt(
+			requiredAt(createClientMock.mock.calls, 0, "createClient call"),
+			0,
+			"createClient options",
+		);
+		const getSecretStorageKey = opts.cryptoCallbacks.getSecretStorageKey as (
+			options: { keys: Record<string, SecretStorageKeyDescription> },
+			name: string,
+		) => Promise<[string, Uint8Array<ArrayBuffer>] | null>;
+
+		await expect(
+			getSecretStorageKey(
+				{
+					keys: {
+						tombstoned: {},
+					} as unknown as Record<string, SecretStorageKeyDescription>,
+				},
+				"m.cross_signing.master",
+			),
+		).rejects.toThrow("No usable secret-storage key metadata is available");
+	});
+
 	it("passes refreshToken and a tokenRefreshFunction for an OIDC session", async () => {
 		setup(OIDC_SESSION);
 
