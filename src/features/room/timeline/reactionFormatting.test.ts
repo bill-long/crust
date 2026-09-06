@@ -45,6 +45,27 @@ describe("formatReactors", () => {
 		);
 	});
 
+	it("degrades safely when the sender array is sparse", () => {
+		const alice = { userId: "@alice:test", name: "Alice" };
+		const bob = { userId: "@bob:test", name: "Bob" };
+		const carol = { userId: "@carol:test", name: "Carol" };
+		const missingFirst = new Array<typeof alice>(2);
+		missingFirst[1] = bob;
+		const missingSecond = [alice];
+		missingSecond.length = 3;
+		missingSecond[2] = carol;
+		const missingLast = [alice, bob];
+		missingLast.length = 3;
+
+		expect(formatReactors(missingFirst, ":ok:")).toBe("");
+		expect(formatReactors(missingSecond, ":ok:")).toBe(
+			"Alice reacted with :ok:",
+		);
+		expect(formatReactors(missingLast, ":ok:")).toBe(
+			"Alice and Bob reacted with :ok:",
+		);
+	});
+
 	it("strips ASCII control characters from the label", () => {
 		expect(formatReactors(s(1), "\u0000\u0007\u001b\u007f🎉\r\n")).toBe(
 			"Alice reacted with 🎉",
