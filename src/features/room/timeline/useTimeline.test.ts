@@ -22,6 +22,19 @@ import { MEMBER_REBUILD_THROTTLE_MS, useTimeline } from "./useTimeline";
 const row = (eventId: string, timestamp: number): TimelineEvent =>
 	({ eventId, timestamp }) as unknown as TimelineEvent;
 
+function requiredValue<T>(value: T | undefined, label: string): T {
+	if (value === undefined) throw new Error(`${label} was missing`);
+	return value;
+}
+
+function requiredAt<T>(
+	items: readonly T[],
+	index: number,
+	label = `timeline item ${index}`,
+): T {
+	return requiredValue(items[index], label);
+}
+
 describe("mergeRowsByTimestamp", () => {
 	const ids = (rows: TimelineEvent[]) => rows.map((r) => r.eventId);
 
@@ -148,8 +161,8 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[0].body).toBe("hello");
-			expect(events[1].body).toBe("world");
+			expect(requiredAt(events, 0).body).toBe("hello");
+			expect(requiredAt(events, 1).body).toBe("world");
 			expect(loading()).toBe(false);
 		});
 	});
@@ -184,7 +197,7 @@ describe("useTimeline", () => {
 
 			await flushPromises();
 
-			expect(events[0].senderAvatarUrl).toBe(
+			expect(requiredAt(events, 0).senderAvatarUrl).toBe(
 				"https://example.com/_matrix/media/v3/download/test/alice-avatar",
 			);
 			expect(toHttp).toHaveBeenCalledWith(
@@ -193,7 +206,7 @@ describe("useTimeline", () => {
 				48,
 				"crop",
 			);
-			expect(events[1].senderAvatarUrl).toBeNull();
+			expect(requiredAt(events, 1).senderAvatarUrl).toBeNull();
 		});
 	});
 
@@ -211,8 +224,8 @@ describe("useTimeline", () => {
 				() => "!roomA:test",
 			);
 			await flushPromises();
-			expect(events[0].senderAvatarUrl).toBeNull();
-			expect(events[0].senderName).toBe("Alice");
+			expect(requiredAt(events, 0).senderAvatarUrl).toBeNull();
+			expect(requiredAt(events, 0).senderName).toBe("Alice");
 
 			roomA.__addMember({
 				userId: "@alice:test",
@@ -238,7 +251,7 @@ describe("useTimeline", () => {
 					}),
 				);
 				await vi.advanceTimersByTimeAsync(MEMBER_REBUILD_THROTTLE_MS + 1);
-				expect(events[0].senderAvatarUrl).toBeNull();
+				expect(requiredAt(events, 0).senderAvatarUrl).toBeNull();
 
 				client.__emit(
 					"RoomState.members",
@@ -256,15 +269,15 @@ describe("useTimeline", () => {
 					}),
 				);
 				// Nothing changes synchronously - the refresh is throttled.
-				expect(events[0].senderAvatarUrl).toBeNull();
+				expect(requiredAt(events, 0).senderAvatarUrl).toBeNull();
 				await vi.advanceTimersByTimeAsync(MEMBER_REBUILD_THROTTLE_MS + 1);
 			} finally {
 				vi.useRealTimers();
 			}
-			expect(events[0].senderAvatarUrl).toBe(
+			expect(requiredAt(events, 0).senderAvatarUrl).toBe(
 				"https://example.com/_matrix/media/v3/download/test/new-avatar",
 			);
-			expect(events[0].senderName).toBe("Alicia");
+			expect(requiredAt(events, 0).senderName).toBe("Alicia");
 		});
 	});
 
@@ -310,8 +323,8 @@ describe("useTimeline", () => {
 
 			// Initial load: room A
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room A msg");
-			expect(events[0].eventId).toBe("$a1");
+			expect(requiredAt(events, 0).body).toBe("room A msg");
+			expect(requiredAt(events, 0).eventId).toBe("$a1");
 
 			// Switch to room B
 			setRoomId("!roomB:test");
@@ -320,14 +333,14 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[0].body).toBe("room B msg");
-			expect(events[0].eventId).toBe("$b1");
-			expect(events[1].body).toBe("room B msg 2");
+			expect(requiredAt(events, 0).body).toBe("room B msg");
+			expect(requiredAt(events, 0).eventId).toBe("$b1");
+			expect(requiredAt(events, 1).body).toBe("room B msg 2");
 
 			// No events from room A should remain
 			const allBodies = Array.from(
 				{ length: events.length },
-				(_, i) => events[i].body,
+				(_, i) => requiredAt(events, i).body,
 			);
 			expect(allBodies).not.toContain("room A msg");
 		});
@@ -363,7 +376,7 @@ describe("useTimeline", () => {
 
 			// Must be exactly 1 event, not 3 with stale trailing items
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("only msg");
+			expect(requiredAt(events, 0).body).toBe("only msg");
 		});
 	});
 
@@ -403,7 +416,7 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("visible");
+			expect(requiredAt(events, 0).body).toBe("visible");
 		});
 	});
 
@@ -603,7 +616,9 @@ describe("useTimeline", () => {
 			appendLive(client, roomA, redaction);
 
 			expect(events.map((e) => e.eventId)).toEqual(["$m", "$j2"]);
-			expect(events[1].stateNotice?.text).toBe("@alice:test joined the call");
+			expect(requiredAt(events, 1).stateNotice?.text).toBe(
+				"@alice:test joined the call",
+			);
 		});
 	});
 
@@ -646,7 +661,7 @@ describe("useTimeline", () => {
 			expect(
 				events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
 			).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
-			const synthetic = events[events.length - 1];
+			const synthetic = requiredAt(events, events.length - 1);
 			expect(synthetic.eventId).toBe(
 				`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
 			);
@@ -707,7 +722,7 @@ describe("useTimeline", () => {
 				expect(
 					events.filter((e) => e.stateNotice).map((e) => e.stateNotice?.text),
 				).toEqual(["@alice:test joined the call", "@alice:test left the call"]);
-				expect(events[events.length - 1].eventId).toBe(
+				expect(requiredAt(events, events.length - 1).eventId).toBe(
 					`~call-expiry-leave:${encodeURIComponent("@alice:test")}:A:${expiresAt}`,
 				);
 			});
@@ -834,10 +849,12 @@ describe("useTimeline", () => {
 
 			// hello + join + name change. The no-op topic write is filtered.
 			expect(events.length).toBe(3);
-			expect(events[0].body).toBe("hello");
-			expect(events[0].stateNotice).toBe(null);
-			expect(events[1].stateNotice?.text).toBe("Bob joined the room");
-			expect(events[2].stateNotice?.text).toBe(
+			expect(requiredAt(events, 0).body).toBe("hello");
+			expect(requiredAt(events, 0).stateNotice).toBe(null);
+			expect(requiredAt(events, 1).stateNotice?.text).toBe(
+				"Bob joined the room",
+			);
+			expect(requiredAt(events, 2).stateNotice?.text).toBe(
 				'@alice:test changed the room name to "New Title"',
 			);
 		});
@@ -860,8 +877,8 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[0].isDecryptionFailure).toBe(true);
-			expect(events[1].body).toBe("normal");
+			expect(requiredAt(events, 0).isDecryptionFailure).toBe(true);
+			expect(requiredAt(events, 1).body).toBe("normal");
 		});
 	});
 
@@ -962,21 +979,21 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(6);
-			expect(events[0].mediaWidth).toBe(1920);
-			expect(events[0].mediaHeight).toBe(1080);
-			expect(events[1].mediaWidth).toBe(128);
-			expect(events[1].mediaHeight).toBe(256);
-			expect(events[2].mediaWidth).toBeNull();
-			expect(events[2].mediaHeight).toBeNull();
+			expect(requiredAt(events, 0).mediaWidth).toBe(1920);
+			expect(requiredAt(events, 0).mediaHeight).toBe(1080);
+			expect(requiredAt(events, 1).mediaWidth).toBe(128);
+			expect(requiredAt(events, 1).mediaHeight).toBe(256);
+			expect(requiredAt(events, 2).mediaWidth).toBeNull();
+			expect(requiredAt(events, 2).mediaHeight).toBeNull();
 			// "640" is a string, not a number → rejected. h=0 is non-positive.
-			expect(events[3].mediaWidth).toBeNull();
-			expect(events[3].mediaHeight).toBeNull();
+			expect(requiredAt(events, 3).mediaWidth).toBeNull();
+			expect(requiredAt(events, 3).mediaHeight).toBeNull();
 			// NaN and negative both rejected.
-			expect(events[4].mediaWidth).toBeNull();
-			expect(events[4].mediaHeight).toBeNull();
+			expect(requiredAt(events, 4).mediaWidth).toBeNull();
+			expect(requiredAt(events, 4).mediaHeight).toBeNull();
 			// Half-valid: missing one dim ⇒ both null (all-or-nothing).
-			expect(events[5].mediaWidth).toBeNull();
-			expect(events[5].mediaHeight).toBeNull();
+			expect(requiredAt(events, 5).mediaWidth).toBeNull();
+			expect(requiredAt(events, 5).mediaHeight).toBeNull();
 		});
 	});
 
@@ -1022,10 +1039,10 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[0].mediaWidth).toBeNull();
-			expect(events[0].mediaHeight).toBeNull();
-			expect(events[1].mediaWidth).toBeNull();
-			expect(events[1].mediaHeight).toBeNull();
+			expect(requiredAt(events, 0).mediaWidth).toBeNull();
+			expect(requiredAt(events, 0).mediaHeight).toBeNull();
+			expect(requiredAt(events, 1).mediaWidth).toBeNull();
+			expect(requiredAt(events, 1).mediaHeight).toBeNull();
 		});
 	});
 
@@ -1086,15 +1103,15 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(3);
-			expect(events[0].mediaUrl).toBeNull();
-			expect(events[0].mediaFullUrl).toBeNull();
-			expect(events[0].mediaIsEncrypted).toBe(false);
-			expect(events[1].mediaUrl).toBeNull();
-			expect(events[1].mediaFullUrl).toBeNull();
-			expect(events[1].mediaIsEncrypted).toBe(false);
-			expect(events[2].mediaUrl).not.toBeNull();
-			expect(events[2].mediaFullUrl).not.toBeNull();
-			expect(events[2].mediaIsEncrypted).toBe(true);
+			expect(requiredAt(events, 0).mediaUrl).toBeNull();
+			expect(requiredAt(events, 0).mediaFullUrl).toBeNull();
+			expect(requiredAt(events, 0).mediaIsEncrypted).toBe(false);
+			expect(requiredAt(events, 1).mediaUrl).toBeNull();
+			expect(requiredAt(events, 1).mediaFullUrl).toBeNull();
+			expect(requiredAt(events, 1).mediaIsEncrypted).toBe(false);
+			expect(requiredAt(events, 2).mediaUrl).not.toBeNull();
+			expect(requiredAt(events, 2).mediaFullUrl).not.toBeNull();
+			expect(requiredAt(events, 2).mediaIsEncrypted).toBe(true);
 		});
 	});
 
@@ -1149,11 +1166,11 @@ describe("useTimeline", () => {
 			);
 			await flushPromises();
 
-			expect(events[0].mediaIsEncrypted).toBe(false);
-			expect(events[0].mediaEncryptedFile).toBeNull();
+			expect(requiredAt(events, 0).mediaIsEncrypted).toBe(false);
+			expect(requiredAt(events, 0).mediaEncryptedFile).toBeNull();
 
-			expect(events[1].mediaIsEncrypted).toBe(true);
-			expect(events[1].mediaEncryptedFile).toEqual({
+			expect(requiredAt(events, 1).mediaIsEncrypted).toBe(true);
+			expect(requiredAt(events, 1).mediaEncryptedFile).toEqual({
 				url: "mxc://test/enc",
 				key: { k: "A".repeat(43) },
 				iv: "AAAAAAAAAAAAAAAAAAAAAA==",
@@ -1161,8 +1178,8 @@ describe("useTimeline", () => {
 				v: "v2",
 			});
 
-			expect(events[2].mediaIsEncrypted).toBe(true);
-			expect(events[2].mediaEncryptedFile).toBeNull();
+			expect(requiredAt(events, 2).mediaIsEncrypted).toBe(true);
+			expect(requiredAt(events, 2).mediaEncryptedFile).toBeNull();
 		});
 	});
 
@@ -1220,9 +1237,9 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(3);
-			expect(events[0].mediaFilename).toBe("photo.png");
-			expect(events[1].mediaFilename).toBe("shot.jpg");
-			expect(events[2].mediaFilename).toBe("real.png");
+			expect(requiredAt(events, 0).mediaFilename).toBe("photo.png");
+			expect(requiredAt(events, 1).mediaFilename).toBe("shot.jpg");
+			expect(requiredAt(events, 2).mediaFilename).toBe("real.png");
 		});
 	});
 
@@ -1289,10 +1306,10 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(4);
-			expect(events[0].mediaFilename).toBeNull();
-			expect(events[1].mediaFilename).toBeNull();
-			expect(events[2].mediaFilename).toBeNull();
-			expect(events[3].mediaFilename).toBe("fine name.png");
+			expect(requiredAt(events, 0).mediaFilename).toBeNull();
+			expect(requiredAt(events, 1).mediaFilename).toBeNull();
+			expect(requiredAt(events, 2).mediaFilename).toBeNull();
+			expect(requiredAt(events, 3).mediaFilename).toBe("fine name.png");
 		});
 	});
 
@@ -1367,14 +1384,14 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(4);
-			expect(events[0].mediaWidth).toBe(480);
-			expect(events[0].mediaHeight).toBe(270);
-			expect(events[1].mediaWidth).toBe(320);
-			expect(events[1].mediaHeight).toBe(240);
-			expect(events[2].mediaWidth).toBeNull();
-			expect(events[2].mediaHeight).toBeNull();
-			expect(events[3].mediaWidth).toBeNull();
-			expect(events[3].mediaHeight).toBeNull();
+			expect(requiredAt(events, 0).mediaWidth).toBe(480);
+			expect(requiredAt(events, 0).mediaHeight).toBe(270);
+			expect(requiredAt(events, 1).mediaWidth).toBe(320);
+			expect(requiredAt(events, 1).mediaHeight).toBe(240);
+			expect(requiredAt(events, 2).mediaWidth).toBeNull();
+			expect(requiredAt(events, 2).mediaHeight).toBeNull();
+			expect(requiredAt(events, 3).mediaWidth).toBeNull();
+			expect(requiredAt(events, 3).mediaHeight).toBeNull();
 		});
 	});
 
@@ -1405,7 +1422,7 @@ describe("useTimeline", () => {
 
 			// Events should now be loaded
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("hello");
+			expect(requiredAt(events, 0).body).toBe("hello");
 		});
 	});
 
@@ -1483,7 +1500,7 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("backfilled");
+			expect(requiredAt(events, 0).body).toBe("backfilled");
 		});
 	});
 
@@ -1535,7 +1552,7 @@ describe("useTimeline", () => {
 			expect(getRoomCalls).toBe(callsAfterLoad);
 			// Events unchanged
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("existing");
+			expect(requiredAt(events, 0).body).toBe("existing");
 		});
 	});
 
@@ -1659,7 +1676,7 @@ describe("useTimeline", () => {
 			await flushPromises();
 			// Auto-backfill kicked in and surfaced the older message.
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("older msg");
+			expect(requiredAt(events, 0).body).toBe("older msg");
 			expect(loading()).toBe(false);
 			expect(canLoadOlder()).toBe(false);
 			expect(client.paginateEventTimeline).toHaveBeenCalledTimes(1);
@@ -1844,13 +1861,13 @@ describe("useTimeline", () => {
 			setRid("!roomB:test");
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room B msg");
+			expect(requiredAt(events, 0).body).toBe("room B msg");
 
 			// Now resolve A — must not mutate room B's events.
 			resolveA(false);
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room B msg");
+			expect(requiredAt(events, 0).body).toBe("room B msg");
 		});
 	});
 
@@ -1895,15 +1912,15 @@ describe("useTimeline", () => {
 
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("recent");
+			expect(requiredAt(events, 0).body).toBe("recent");
 			expect(canLoadOlder()).toBe(true);
 
 			await loadOlderMessages();
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[0].body).toBe("older msg");
-			expect(events[1].body).toBe("recent");
+			expect(requiredAt(events, 0).body).toBe("older msg");
+			expect(requiredAt(events, 1).body).toBe("recent");
 			expect(loadingOlder()).toBe(false);
 			expect(canLoadOlder()).toBe(true);
 		});
@@ -1968,7 +1985,7 @@ describe("useTimeline", () => {
 
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room A msg");
+			expect(requiredAt(events, 0).body).toBe("room A msg");
 
 			// Start pagination for room A (will hang until we resolve)
 			const paginationPromise = loadOlderMessages();
@@ -1977,13 +1994,13 @@ describe("useTimeline", () => {
 			setRoomId("!roomB:test");
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room B msg");
+			expect(requiredAt(events, 0).body).toBe("room B msg");
 
 			// Switch back to room A (A→B→A)
 			setRoomId("!roomA:test");
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room A msg");
+			expect(requiredAt(events, 0).body).toBe("room A msg");
 
 			// Now resolve the stale pagination from the first visit to A
 			resolvePagination(true);
@@ -1993,7 +2010,7 @@ describe("useTimeline", () => {
 			// Events should still be room A's current state — stale pagination
 			// result must NOT be applied (generation counter should catch it)
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room A msg");
+			expect(requiredAt(events, 0).body).toBe("room A msg");
 		});
 	});
 
@@ -2037,7 +2054,7 @@ describe("useTimeline", () => {
 
 			// Event should NOT be added to the store
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("initial");
+			expect(requiredAt(events, 0).body).toBe("initial");
 			// canLoadNewer should be set
 			expect(canLoadNewer()).toBe(true);
 		});
@@ -2138,8 +2155,8 @@ describe("useTimeline", () => {
 			expect(canLoadNewer()).toBe(false);
 			expect(loading()).toBe(false);
 			expect(events.length).toBe(2);
-			expect(events[0].body).toBe("initial");
-			expect(events[1].body).toBe("new msg");
+			expect(requiredAt(events, 0).body).toBe("initial");
+			expect(requiredAt(events, 1).body).toBe("new msg");
 		});
 	});
 
@@ -2187,7 +2204,7 @@ describe("useTimeline", () => {
 
 			expect(canLoadNewer()).toBe(false);
 			expect(events.length).toBe(2);
-			expect(events[1].body).toBe("new msg");
+			expect(requiredAt(events, 1).body).toBe("new msg");
 		});
 	});
 
@@ -2240,7 +2257,7 @@ describe("useTimeline", () => {
 
 			expect(canLoadNewer()).toBe(false);
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room B");
+			expect(requiredAt(events, 0).body).toBe("room B");
 		});
 	});
 
@@ -2275,7 +2292,7 @@ describe("useTimeline", () => {
 
 			// Event should be added normally
 			expect(events.length).toBe(2);
-			expect(events[1].body).toBe("live msg");
+			expect(requiredAt(events, 1).body).toBe("live msg");
 		});
 	});
 
@@ -2328,9 +2345,9 @@ describe("useTimeline", () => {
 
 			// All 5 events should now be visible
 			expect(events.length).toBe(5);
-			expect(events[2].body).toBe("msg 3");
-			expect(events[3].body).toBe("msg 4");
-			expect(events[4].body).toBe("msg 5");
+			expect(requiredAt(events, 2).body).toBe("msg 3");
+			expect(requiredAt(events, 3).body).toBe("msg 4");
+			expect(requiredAt(events, 4).body).toBe("msg 5");
 			expect(loadingNewer()).toBe(false);
 			expect(canLoadNewer()).toBe(false);
 			// Window should contain all events
@@ -2397,7 +2414,7 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(4);
-			expect(events[3].body).toBe("live after catchup");
+			expect(requiredAt(events, 3).body).toBe("live after catchup");
 			expect(canLoadNewer()).toBe(false);
 		});
 	});
@@ -2529,10 +2546,10 @@ describe("useTimeline", () => {
 			expect(getWindowEvents().length).toBe(6);
 			// Store has only displayable events
 			expect(events.length).toBe(4);
-			expect(events[0].body).toBe("initial");
-			expect(events[1].body).toBe("msg 2");
-			expect(events[2].body).toBe("msg 3");
-			expect(events[3].body).toBe("msg 4");
+			expect(requiredAt(events, 0).body).toBe("initial");
+			expect(requiredAt(events, 1).body).toBe("msg 2");
+			expect(requiredAt(events, 2).body).toBe("msg 3");
+			expect(requiredAt(events, 3).body).toBe("msg 4");
 		});
 	});
 
@@ -2558,7 +2575,7 @@ describe("useTimeline", () => {
 
 			await flushPromises();
 			expect(events.length).toBe(5);
-			expect(events[0].body).toBe("msg 1");
+			expect(requiredAt(events, 0).body).toBe("msg 1");
 
 			// Emit non-displayable live events to trigger eviction.
 			// Each extends the window by 1 and evicts 1 from the oldest end.
@@ -2582,14 +2599,14 @@ describe("useTimeline", () => {
 
 			// Window evicted $1, $2, $3 (replaced by 3 state events).
 			// Store must also have trimmed those events.
-			expect(events[0].body).toBe("msg 4");
-			expect(events[1].body).toBe("msg 5");
+			expect(requiredAt(events, 0).body).toBe("msg 4");
+			expect(requiredAt(events, 1).body).toBe("msg 5");
 			expect(events.length).toBe(2);
 
 			// Every store event must exist in the window
 			const windowIds = new Set(getWindowEvents().map((e) => e.getId()));
 			for (let i = 0; i < events.length; i++) {
-				expect(windowIds.has(events[i].eventId)).toBe(true);
+				expect(windowIds.has(requiredAt(events, i).eventId)).toBe(true);
 			}
 		});
 	});
@@ -2622,8 +2639,8 @@ describe("useTimeline", () => {
 
 			// All events remain (no eviction, no trimming)
 			expect(events.length).toBe(3);
-			expect(events[0].body).toBe("msg 1");
-			expect(events[2].body).toBe("msg 3");
+			expect(requiredAt(events, 0).body).toBe("msg 1");
+			expect(requiredAt(events, 2).body).toBe("msg 3");
 		});
 	});
 
@@ -2662,8 +2679,8 @@ describe("useTimeline", () => {
 
 			// Both the initial event and the gap event must appear
 			expect(events.length).toBe(2);
-			expect(events[0].body).toBe("initial");
-			expect(events[1].body).toBe("gap msg");
+			expect(requiredAt(events, 0).body).toBe("initial");
+			expect(requiredAt(events, 1).body).toBe("gap msg");
 		});
 	});
 
@@ -2702,10 +2719,10 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(4);
-			expect(events[0].body).toBe("initial");
-			expect(events[1].body).toBe("gap msg 1");
-			expect(events[2].body).toBe("gap msg 2");
-			expect(events[3].body).toBe("gap msg 3");
+			expect(requiredAt(events, 0).body).toBe("initial");
+			expect(requiredAt(events, 1).body).toBe("gap msg 1");
+			expect(requiredAt(events, 2).body).toBe("gap msg 2");
+			expect(requiredAt(events, 3).body).toBe("gap msg 3");
 		});
 	});
 
@@ -2745,7 +2762,7 @@ describe("useTimeline", () => {
 
 			// Only the initial displayable event should be in the store
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("initial");
+			expect(requiredAt(events, 0).body).toBe("initial");
 		});
 	});
 
@@ -2820,7 +2837,7 @@ describe("useTimeline", () => {
 				.map((e) => e.getId());
 			const storeIds = Array.from(
 				{ length: events.length },
-				(_, i) => events[i].eventId,
+				(_, i) => requiredAt(events, i).eventId,
 			);
 			expect(storeIds).toEqual(displayableWindowIds);
 		});
@@ -2920,7 +2937,7 @@ describe("useTimeline", () => {
 
 			// After load: room B events
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("room B");
+			expect(requiredAt(events, 0).body).toBe("room B");
 			expect(loading()).toBe(false);
 		});
 	});
@@ -2948,7 +2965,7 @@ describe("useTimeline", () => {
 			// Before promises flush: loading true, but events still present
 			expect(loading()).toBe(true);
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("hello");
+			expect(requiredAt(events, 0).body).toBe("hello");
 
 			await flushPromises();
 
@@ -2982,7 +2999,7 @@ describe("useTimeline", () => {
 			appendLive(client, roomA, echo);
 
 			expect(events.length).toBe(1);
-			expect(events[0].status).toBe(EventStatus.SENDING);
+			expect(requiredAt(events, 0).status).toBe(EventStatus.SENDING);
 
 			// Server confirms: SDK rekeys event ID and clears status, then
 			// fires LocalEchoUpdated with the old ID for reconciliation.
@@ -2997,8 +3014,8 @@ describe("useTimeline", () => {
 			);
 
 			expect(events.length).toBe(1);
-			expect(events[0].eventId).toBe("$server.1");
-			expect(events[0].status).toBe(null);
+			expect(requiredAt(events, 0).eventId).toBe("$server.1");
+			expect(requiredAt(events, 0).status).toBe(null);
 		});
 	});
 
@@ -3034,7 +3051,7 @@ describe("useTimeline", () => {
 			);
 
 			expect(events.length).toBe(1);
-			expect(events[0].status).toBe(EventStatus.NOT_SENT);
+			expect(requiredAt(events, 0).status).toBe(EventStatus.NOT_SENT);
 		});
 	});
 
@@ -3105,7 +3122,7 @@ describe("useTimeline", () => {
 				EventStatus.SENDING,
 			);
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("in A");
+			expect(requiredAt(events, 0).body).toBe("in A");
 		});
 	});
 
@@ -3175,13 +3192,19 @@ describe("useTimeline", () => {
 
 			expect(events.length).toBe(1);
 			// Only the sent reaction should count, with one sender.
-			expect(events[0].reactions["🚀"].count).toBe(1);
-			expect(events[0].reactions["🚀"].senders).toHaveLength(1);
-			expect(events[0].reactions["🚀"].senders[0].userId).toBe("@bob:test");
+			const aggregate = requiredValue(
+				requiredAt(events, 0).reactions["🚀"],
+				"rocket reaction aggregate",
+			);
+			expect(aggregate.count).toBe(1);
+			expect(aggregate.senders).toHaveLength(1);
+			expect(requiredAt(aggregate.senders, 0, "reaction sender 0").userId).toBe(
+				"@bob:test",
+			);
 			// myReactions tracks the user's own pressed key. The user's
 			// own reaction failed (NOT_SENT), so myReactions must not
 			// include "🚀" — otherwise the pressed pill state lies.
-			expect(events[0].myReactions["🚀"]).toBeUndefined();
+			expect(requiredAt(events, 0).myReactions["🚀"]).toBeUndefined();
 		});
 	});
 
@@ -3246,10 +3269,15 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			const agg = events[0].reactions["🚀"];
+			const agg = requiredValue(
+				requiredAt(events, 0).reactions["🚀"],
+				"rocket reaction aggregate",
+			);
 			expect(agg.count).toBe(1);
 			expect(agg.senders).toHaveLength(1);
-			expect(agg.senders[0].userId).toBe("@bob:test");
+			expect(requiredAt(agg.senders, 0, "reaction sender 0").userId).toBe(
+				"@bob:test",
+			);
 		});
 	});
 
@@ -3321,8 +3349,13 @@ describe("useTimeline", () => {
 			// must point at the server-confirmed id (status === null
 			// beats pending status) so the redaction path targets the
 			// correct event.
-			expect(events[0].reactions["🚀"].count).toBe(1);
-			expect(events[0].myReactions["🚀"]).toBe("$server.r1");
+			expect(
+				requiredValue(
+					requiredAt(events, 0).reactions["🚀"],
+					"rocket reaction aggregate",
+				).count,
+			).toBe(1);
+			expect(requiredAt(events, 0).myReactions["🚀"]).toBe("$server.r1");
 		});
 	});
 
@@ -3391,7 +3424,7 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			expect(events[0].myReactions["🎉"]).toBe("$server.r2");
+			expect(requiredAt(events, 0).myReactions["🎉"]).toBe("$server.r2");
 		});
 	});
 
@@ -3468,7 +3501,10 @@ describe("useTimeline", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(1);
-			const senders = events[0].reactions["🎯"].senders;
+			const senders = requiredValue(
+				requiredAt(events, 0).reactions["🎯"],
+				"target reaction aggregate",
+			).senders;
 			// Display names default to MXID when no member is found in
 			// the mock room, so sort by MXID: alice < bob < charlie.
 			expect(senders.map((s) => s.userId)).toEqual([
@@ -3514,9 +3550,9 @@ describe("useTimeline", () => {
 
 			expect(events.length).toBe(1);
 			// Failed edit: must NOT appear edited.
-			expect(events[0].isEdited).toBe(false);
+			expect(requiredAt(events, 0).isEdited).toBe(false);
 			// Original body still visible.
-			expect(events[0].body).toBe("original body");
+			expect(requiredAt(events, 0).body).toBe("original body");
 		});
 	});
 
@@ -3555,9 +3591,9 @@ describe("useTimeline", () => {
 
 			expect(events.length).toBe(1);
 			// Optimistic: edited body visible while the SDK round-trips.
-			expect(events[0].body).toBe("edited body");
+			expect(requiredAt(events, 0).body).toBe("edited body");
 			// And the (edited) indicator surfaces too.
-			expect(events[0].isEdited).toBe(true);
+			expect(requiredAt(events, 0).isEdited).toBe(true);
 		});
 	});
 
@@ -3596,8 +3632,8 @@ describe("useTimeline", () => {
 
 			expect(events.length).toBe(1);
 			// Cancelled edit: treated the same as NOT_SENT — original body.
-			expect(events[0].body).toBe("original body");
-			expect(events[0].isEdited).toBe(false);
+			expect(requiredAt(events, 0).body).toBe("original body");
+			expect(requiredAt(events, 0).isEdited).toBe(false);
 		});
 	});
 
@@ -3729,7 +3765,7 @@ describe("useTimeline", () => {
 			expect(pendingRedactions.$target).toBeUndefined();
 			// Target stays — discard restores normal appearance.
 			expect(events.length).toBe(1);
-			expect(events[0].eventId).toBe("$target");
+			expect(requiredAt(events, 0).eventId).toBe("$target");
 		});
 	});
 
@@ -3833,7 +3869,7 @@ describe("useTimeline", () => {
 
 			// Initially: target visible, body cleared by local redaction.
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("");
+			expect(requiredAt(events, 0).body).toBe("");
 
 			// SDK unmarks (simulated by clearing localRedaction on the
 			// mock target) then fires `Room.timeline(removed=true)` for
@@ -3847,7 +3883,7 @@ describe("useTimeline", () => {
 			expect(pendingRedactions.$target).toBeUndefined();
 			// Target's body restored from getContent().
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("delete me");
+			expect(requiredAt(events, 0).body).toBe("delete me");
 		});
 	});
 
@@ -3937,11 +3973,11 @@ describe("useTimeline", () => {
 
 			// Target survives isDisplayable so the overlay has an anchor.
 			expect(events.length).toBe(1);
-			expect(events[0].eventId).toBe("$target");
+			expect(requiredAt(events, 0).eventId).toBe("$target");
 			// Body is empty — SDK cleared it via markLocallyRedacted.
 			// The "Deleting…" overlay (rendered by TimelineItem from the
 			// separate pendingRedactions store) is what the user sees.
-			expect(events[0].body).toBe("");
+			expect(requiredAt(events, 0).body).toBe("");
 		});
 	});
 
@@ -4414,7 +4450,7 @@ describe("useTimeline legacy 1:1 call notices (#529)", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[1].stateNotice?.text).toBe(
+			expect(requiredAt(events, 1).stateNotice?.text).toBe(
 				"Missed a call from Alice (unsupported call type)",
 			);
 		});
@@ -4574,7 +4610,7 @@ describe("useTimeline legacy 1:1 call notices (#529)", () => {
 			await flushPromises();
 
 			expect(events.length).toBe(2);
-			expect(events[1].stateNotice?.icon).toBe("info");
+			expect(requiredAt(events, 1).stateNotice?.icon).toBe("info");
 		});
 	});
 });
@@ -4683,7 +4719,7 @@ describe("useTimeline jumpToEvent anchored loads", () => {
 			).toBe(true);
 			// Live fallback loaded instead of stranding on a blank timeline.
 			expect(events.length).toBe(1);
-			expect(events[0].body).toBe("hello");
+			expect(requiredAt(events, 0).body).toBe("hello");
 			expect(loading()).toBe(false);
 			expect(pendingScrollToId()).toBeNull();
 		});
