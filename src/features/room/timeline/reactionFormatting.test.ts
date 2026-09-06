@@ -56,6 +56,9 @@ describe("formatReactors", () => {
 		missingSecond[2] = carol;
 		const missingLast = [alice, bob];
 		missingLast.length = 3;
+		const missingMiddle = [alice, bob];
+		missingMiddle.length = 4;
+		missingMiddle[3] = carol;
 
 		expect(formatReactors(missingFirst, ":ok:")).toBe("");
 		expect(formatReactors(missingSecond, ":ok:")).toBe(
@@ -63,6 +66,9 @@ describe("formatReactors", () => {
 		);
 		expect(formatReactors(missingLast, ":ok:")).toBe(
 			"Alice and Bob reacted with :ok:",
+		);
+		expect(formatReactors(missingMiddle, ":ok:")).toBe(
+			"Alice, Bob, and Carol reacted with :ok:",
 		);
 	});
 

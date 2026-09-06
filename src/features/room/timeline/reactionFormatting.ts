@@ -38,14 +38,15 @@ export function formatReactors(
 	if (n === 2)
 		return `${first.name} and ${second.name} reacted with ${safeLabel}`;
 	if (n <= 5) {
-		const head = senders
-			.slice(0, -1)
-			.map((s) => s.name)
-			.join(", ");
+		const headNames: string[] = [];
+		for (let i = 0; i < n - 1; i++) {
+			const sender = senders[i];
+			if (sender !== undefined) headNames.push(sender.name);
+		}
 		const last = senders[n - 1];
 		if (last === undefined)
 			return `${first.name} and ${second.name} reacted with ${safeLabel}`;
-		return `${head}, and ${last.name} reacted with ${safeLabel}`;
+		return `${headNames.join(", ")}, and ${last.name} reacted with ${safeLabel}`;
 	}
 	return `${first.name}, ${second.name}, and ${n - 2} others reacted with ${safeLabel}`;
 }
