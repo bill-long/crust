@@ -148,6 +148,45 @@ describe("Modal", () => {
 		expect(screen.queryByText("Back")).toBeNull();
 		expect(screen.getAllByRole("button")).toHaveLength(1);
 	});
+
+	it("does not focus a detached fallback when the opener also disappears", async () => {
+		const fallback = document.createElement("button");
+		const focus = vi.spyOn(fallback, "focus");
+		const fallbackFocus = vi.fn(() => fallback);
+		let removeOpener!: () => void;
+		render(() => {
+			const [open, setOpen] = createSignal(false);
+			const [opener, setOpener] = createSignal(true);
+			removeOpener = () => setOpener(false);
+			return (
+				<>
+					<Show when={opener()}>
+						<button type="button" onClick={() => setOpen(true)}>
+							Open detached fallback test
+						</button>
+					</Show>
+					<Modal
+						open={open()}
+						onClose={() => setOpen(false)}
+						label="Detached fallback"
+						fallbackFocus={fallbackFocus}
+					>
+						<div>
+							<button type="button">Inside detached fallback test</button>
+						</div>
+					</Modal>
+				</>
+			);
+		});
+		await userEvent.click(screen.getByText("Open detached fallback test"));
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByText("Inside detached fallback test"));
+		removeOpener();
+		await userEvent.keyboard("{Escape}");
+		await expect.poll(() => fallbackFocus.mock.calls.length).toBe(1);
+		expect(focus).not.toHaveBeenCalled();
+	});
 	it("restores fallback focus when a virtualized opener disappears", async () => {
 		let removeOpener!: () => void;
 		render(() => {

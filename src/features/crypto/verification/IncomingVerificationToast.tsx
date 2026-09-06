@@ -8,6 +8,7 @@ import {
 	type VerificationRequest,
 } from "matrix-js-sdk/lib/crypto-api/verification";
 import { type Component, createSignal, onCleanup, Show } from "solid-js";
+import { Portal } from "solid-js/web";
 import { setCryptoTriggerElement } from "../../../stores/cryptoActions";
 
 interface IncomingVerificationToastProps {
@@ -131,34 +132,40 @@ const IncomingVerificationToast: Component<IncomingVerificationToastProps> = (
 
 	return (
 		<Show when={pendingRequest()}>
-			<div
-				class="fixed bottom-4 right-4 z-50 w-80 rounded-lg border border-border-default bg-surface-1 p-4 shadow-xl"
-				role="alert"
-				aria-live="assertive"
-			>
-				<h3 class="mb-1 text-sm font-semibold text-text-primary">
-					Verification request
-				</h3>
-				<p class="mb-3 text-xs text-text-muted">
-					Another device wants to verify with you.
-				</p>
-				<div class="flex justify-end gap-2">
-					<button
-						type="button"
-						onClick={handleDecline}
-						class="rounded px-3 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
-					>
-						Decline
-					</button>
-					<button
-						type="button"
-						onClick={handleAccept}
-						class="rounded bg-success px-3 py-1.5 text-xs font-semibold text-text-primary transition-colors hover:bg-success-hover"
-					>
-						Accept
-					</button>
+			<Portal>
+				<div
+					class="portal-scale pointer-events-auto fixed bottom-4 right-4 z-60 w-80 rounded-lg border border-border-default bg-surface-1 p-4 shadow-xl"
+					// Kobalte's toast top-layer marker exempts these actions from
+					// modal focus containment and aria-hiding. The body portal also
+					// keeps requests above portaled dialogs and out of inert parents.
+					data-kb-top-layer=""
+					role="alert"
+					aria-live="assertive"
+				>
+					<h3 class="mb-1 text-sm font-semibold text-text-primary">
+						Verification request
+					</h3>
+					<p class="mb-3 text-xs text-text-muted">
+						Another device wants to verify with you.
+					</p>
+					<div class="flex justify-end gap-2">
+						<button
+							type="button"
+							onClick={handleDecline}
+							class="rounded px-3 py-1.5 text-xs text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						>
+							Decline
+						</button>
+						<button
+							type="button"
+							onClick={handleAccept}
+							class="rounded bg-success px-3 py-1.5 text-xs font-semibold text-text-primary transition-colors hover:bg-success-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						>
+							Accept
+						</button>
+					</div>
 				</div>
-			</div>
+			</Portal>
 		</Show>
 	);
 };

@@ -112,7 +112,7 @@ function ModalSurface(props: ModalProps) {
 					const target = returnFocus?.isConnected
 						? returnFocus
 						: props.fallbackFocus?.();
-					target?.focus();
+					if (target?.isConnected) target.focus();
 					returnFocus = undefined;
 				}}
 				onEscapeKeyDown={(event) => {
