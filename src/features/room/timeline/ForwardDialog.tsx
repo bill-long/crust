@@ -11,11 +11,10 @@ import {
 import { useClient } from "../../../client/client";
 import type { RoomSummary } from "../../../client/summaries";
 import { getForwardableRooms } from "../../../client/summaries-selectors";
+import { Modal } from "../../../components/Modal";
 import { createPicker } from "../../../components/picker/Picker";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
-import { trapTabKey } from "../../../lib/focusTrap";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
-import { trackAppModalOpen } from "../../../stores/modalStack";
 import { pushNotice } from "../../../stores/notices";
 import { forwardMessage } from "./forwardMessage";
 import { messagePreviewText } from "./MessagePreview";
@@ -37,11 +36,8 @@ const { Picker, handlePickerKey, getActiveDescendant, getExpanded, listboxId } =
 const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 	const { client, summaries } = useClient();
 	const open = () => props.target() !== null;
-	trackAppModalOpen(open);
 
-	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	onCleanup(() => {
 		mounted = false;
@@ -82,24 +78,10 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 	createEffect(
 		on(open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				reset();
-				queueMicrotask(() => inputRef?.focus());
-			} else if (!isOpen && wasOpen) {
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
 			}
 		}),
 	);
-
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
-	});
 
 	const handleForward = async (room: RoomSummary): Promise<void> => {
 		if (forwarding()) return;
@@ -134,32 +116,17 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 		}
 	};
 
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			tryClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
-	};
-
 	return (
 		<Show when={props.target()}>
 			{(target) => (
-				<div
-					ref={overlayRef}
-					class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-					role="dialog"
-					aria-modal="true"
-					aria-labelledby={titleId}
-					inert={cryptoDialogOpen() || undefined}
-					tabIndex={-1}
-					onKeyDown={handleKeyDown}
-					onClick={(e) => {
-						if (e.target === e.currentTarget) tryClose();
-					}}
+				<Modal
+					open
+					onClose={tryClose}
+					dismissible={!forwarding()}
+					labelledBy={titleId}
+					suspended={cryptoDialogOpen()}
+					initialFocus={() => inputRef}
+					class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 p-4"
 				>
 					<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
 						<h2
@@ -256,7 +223,7 @@ const ForwardDialog: Component<ForwardDialogProps> = (props) => {
 							</button>
 						</div>
 					</div>
-				</div>
+				</Modal>
 			)}
 		</Show>
 	);
