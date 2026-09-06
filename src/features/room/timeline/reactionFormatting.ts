@@ -1,6 +1,7 @@
 /**
  * Format a list of reaction senders into a Discord-style tooltip string:
  *
+ *   no sender   → "Someone reacted with X"
  *   1 sender    → "Alice reacted with X"
  *   2 senders   → "Alice and Bob reacted with X"
  *   3-5 senders → "Alice, Bob, and Carol reacted with X"  (Oxford comma)
@@ -30,16 +31,23 @@ export function formatReactors(
 ): string {
 	const safeLabel = sanitizeLabel(label);
 	const n = senders.length;
-	if (n === 0) return "";
-	if (n === 1) return `${senders[0].name} reacted with ${safeLabel}`;
+	const first = senders[0];
+	if (first === undefined) return `Someone reacted with ${safeLabel}`;
+	if (n === 1) return `${first.name} reacted with ${safeLabel}`;
+	const second = senders[1];
+	if (second === undefined) return `${first.name} reacted with ${safeLabel}`;
 	if (n === 2)
-		return `${senders[0].name} and ${senders[1].name} reacted with ${safeLabel}`;
+		return `${first.name} and ${second.name} reacted with ${safeLabel}`;
 	if (n <= 5) {
-		const head = senders
-			.slice(0, -1)
-			.map((s) => s.name)
-			.join(", ");
-		return `${head}, and ${senders[n - 1].name} reacted with ${safeLabel}`;
+		const headNames: string[] = [];
+		for (let i = 0; i < n - 1; i++) {
+			const sender = senders[i];
+			if (sender !== undefined) headNames.push(sender.name);
+		}
+		const last = senders[n - 1];
+		if (last === undefined)
+			return `${first.name} and ${second.name} reacted with ${safeLabel}`;
+		return `${headNames.join(", ")}, and ${last.name} reacted with ${safeLabel}`;
 	}
-	return `${senders[0].name}, ${senders[1].name}, and ${n - 2} others reacted with ${safeLabel}`;
+	return `${first.name}, ${second.name}, and ${n - 2} others reacted with ${safeLabel}`;
 }

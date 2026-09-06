@@ -9,8 +9,8 @@ describe("formatReactors", () => {
 				["Alice", "Bob", "Carol", "Dan", "Eve", "Frank", "Grace"][i] ?? `U${i}`,
 		}));
 
-	it("returns empty string for no senders", () => {
-		expect(formatReactors([], "🎉")).toBe("");
+	it("returns a generic label for no senders", () => {
+		expect(formatReactors([], "🎉")).toBe("Someone reacted with 🎉");
 	});
 
 	it("formats one sender", () => {
@@ -42,6 +42,35 @@ describe("formatReactors", () => {
 	it("collapses many senders into 'and N others'", () => {
 		expect(formatReactors(s(7), ":heart:")).toBe(
 			"Alice, Bob, and 5 others reacted with :heart:",
+		);
+	});
+
+	it("degrades safely when the sender array is sparse", () => {
+		const alice = { userId: "@alice:test", name: "Alice" };
+		const bob = { userId: "@bob:test", name: "Bob" };
+		const carol = { userId: "@carol:test", name: "Carol" };
+		const missingFirst = new Array<typeof alice>(2);
+		missingFirst[1] = bob;
+		const missingSecond = [alice];
+		missingSecond.length = 3;
+		missingSecond[2] = carol;
+		const missingLast = [alice, bob];
+		missingLast.length = 3;
+		const missingMiddle = [alice, bob];
+		missingMiddle.length = 4;
+		missingMiddle[3] = carol;
+
+		expect(formatReactors(missingFirst, ":ok:")).toBe(
+			"Someone reacted with :ok:",
+		);
+		expect(formatReactors(missingSecond, ":ok:")).toBe(
+			"Alice reacted with :ok:",
+		);
+		expect(formatReactors(missingLast, ":ok:")).toBe(
+			"Alice and Bob reacted with :ok:",
+		);
+		expect(formatReactors(missingMiddle, ":ok:")).toBe(
+			"Alice, Bob, and Carol reacted with :ok:",
 		);
 	});
 
