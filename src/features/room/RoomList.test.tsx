@@ -27,6 +27,7 @@ import {
 import { createMockClient } from "../../test/mockClient";
 import { TEST_SESSION } from "../../test/testSession";
 import { RoomList } from "./RoomList";
+import { requiredAt } from "./testAssertions";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -451,12 +452,14 @@ describe("RoomList tag sections and toggles (#449)", () => {
 			(t) => screen.getByText(t) as HTMLElement,
 		);
 		expect(
-			labels[0].compareDocumentPosition(labels[1]) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
+			requiredAt(labels, 0, "favorites label").compareDocumentPosition(
+				requiredAt(labels, 1, "low-priority label"),
+			) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		expect(
-			labels[1].compareDocumentPosition(labels[2]) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
+			requiredAt(labels, 1, "low-priority label").compareDocumentPosition(
+				requiredAt(labels, 2, "rooms label"),
+			) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 		// The tagged rooms render once, in their sections, not under Rooms.
 		expect(screen.getAllByRole("button", { name: /starred/ })).toHaveLength(1);

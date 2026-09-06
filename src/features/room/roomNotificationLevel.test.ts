@@ -10,6 +10,7 @@ import {
 	getRoomNotificationLevel,
 	setRoomNotificationLevel,
 } from "./roomNotificationLevel";
+import { requiredAt } from "./testAssertions";
 
 const ROOM_ID = "!room:example.com";
 const MUTE_RULE_ID = `crust.mute.${ROOM_ID}`;
@@ -173,9 +174,17 @@ describe("setRoomNotificationLevel", () => {
 			MUTE_RULE_ID,
 		);
 		expect(
-			vi.mocked(client.addPushRule).mock.invocationCallOrder[0],
+			requiredAt(
+				vi.mocked(client.addPushRule).mock.invocationCallOrder,
+				0,
+				"add rule order",
+			),
 		).toBeLessThan(
-			vi.mocked(client.deletePushRule).mock.invocationCallOrder[0],
+			requiredAt(
+				vi.mocked(client.deletePushRule).mock.invocationCallOrder,
+				0,
+				"delete rule order",
+			),
 		);
 	});
 
@@ -223,9 +232,17 @@ describe("setRoomNotificationLevel", () => {
 			ROOM_ID,
 		);
 		expect(
-			vi.mocked(client.addPushRule).mock.invocationCallOrder[0],
+			requiredAt(
+				vi.mocked(client.addPushRule).mock.invocationCallOrder,
+				0,
+				"add rule order",
+			),
 		).toBeLessThan(
-			vi.mocked(client.deletePushRule).mock.invocationCallOrder[0],
+			requiredAt(
+				vi.mocked(client.deletePushRule).mock.invocationCallOrder,
+				0,
+				"delete rule order",
+			),
 		);
 	});
 

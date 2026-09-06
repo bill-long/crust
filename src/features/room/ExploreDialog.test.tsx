@@ -22,6 +22,7 @@ import {
 import { createMockClient } from "../../test/mockClient";
 import { TEST_SESSION } from "../../test/testSession";
 import { ExploreDialog } from "./ExploreDialog";
+import { requiredAt } from "./testAssertions";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -520,7 +521,7 @@ describe("ExploreDialog", () => {
 		resolveJoin({ roomId: "!a:example.com" });
 		// Awaiting the same join promise flushes the component's
 		// continuation (attached before this await) deterministically.
-		await client.joinRoom.mock.results[0].value;
+		await requiredAt(client.joinRoom.mock.results, 0, "join result").value;
 		expect(navigateMock).not.toHaveBeenCalled();
 		expect(onClose).toHaveBeenCalledTimes(1);
 		expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
@@ -597,7 +598,7 @@ describe("ExploreDialog", () => {
 		// The late join continuation bails on the generation bump: no stub,
 		// no navigation.
 		resolveJoin({ roomId: "!a:example.com" });
-		await client.joinRoom.mock.results[0].value;
+		await requiredAt(client.joinRoom.mock.results, 0, "join result").value;
 		expect(optimisticallyMarkJoined).not.toHaveBeenCalled();
 		expect(navigateMock).not.toHaveBeenCalled();
 	});

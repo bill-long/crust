@@ -1,6 +1,7 @@
 import type { MatrixClient, MatrixEvent, Room } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeTimelineEvent } from "../../../test/timelineEvent";
+import { requiredAt } from "../testAssertions";
 import { exportRoom } from "./exportRoom";
 
 // The engine's collaborators are heavy (TimelineWindow drives real
@@ -222,7 +223,7 @@ describe("exportRoom", () => {
 
 	it("skips m.replace edit events so edits never export twice", async () => {
 		setEvents(3);
-		windowState.all[1].editOf = true;
+		requiredAt(windowState.all, 1, "edit event").editOf = true;
 		const result = await exportRoom(
 			fakeClient(),
 			fakeRoom(),

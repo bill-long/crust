@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PresenceStatus } from "../../client/presence";
+import { requiredAt } from "./testAssertions";
 import {
 	type MemberEntry,
 	type MemberGroup,
@@ -38,8 +39,12 @@ describe("partitionByPresence", () => {
 			statusMap({ "@a": "online", "@b": "offline", "@d": "offline" }),
 		);
 		expect(out.map((g) => g.role)).toEqual(["Admin", "Member", "Offline"]);
-		expect(out[0].members.map((m) => m.userId)).toEqual(["@a"]);
-		expect(out[2].members.map((m) => m.userId)).toEqual(["@b", "@d"]);
+		expect(
+			requiredAt(out, 0, "admin group").members.map((m) => m.userId),
+		).toEqual(["@a"]);
+		expect(
+			requiredAt(out, 2, "offline group").members.map((m) => m.userId),
+		).toEqual(["@b", "@d"]);
 	});
 
 	it("does not demote people the server never mentioned", () => {
@@ -50,7 +55,7 @@ describe("partitionByPresence", () => {
 			statusMap({}),
 		);
 		expect(out.map((g) => g.role)).toEqual(["Member"]);
-		expect(out[0].members).toHaveLength(2);
+		expect(requiredAt(out, 0, "member group").members).toHaveLength(2);
 	});
 
 	it("drops a role section that emptied out", () => {
@@ -82,7 +87,9 @@ describe("partitionByPresence", () => {
 			statusMap({ "@z": "offline", "@a": "offline" }),
 		);
 		expect(out.map((g) => g.role)).toEqual(["Offline"]);
-		expect(out[0].members.map((m) => m.displayName)).toEqual(["Alice", "Zoe"]);
+		expect(
+			requiredAt(out, 0, "offline group").members.map((m) => m.displayName),
+		).toEqual(["Alice", "Zoe"]);
 	});
 
 	it("preserves order within a section", () => {
@@ -90,6 +97,8 @@ describe("partitionByPresence", () => {
 			groups({ Member: ["@a", "@b", "@c"] }),
 			statusMap({ "@b": "offline" }),
 		);
-		expect(out[0].members.map((m) => m.userId)).toEqual(["@a", "@c"]);
+		expect(
+			requiredAt(out, 0, "member group").members.map((m) => m.userId),
+		).toEqual(["@a", "@c"]);
 	});
 });

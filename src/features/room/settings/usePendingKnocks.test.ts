@@ -6,6 +6,7 @@ import {
 import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { requiredAt } from "../testAssertions";
 import { usePendingKnocks } from "./usePendingKnocks";
 
 function withRoot(fn: (dispose: () => void) => Promise<void>): Promise<void> {
@@ -100,8 +101,9 @@ describe("usePendingKnocks", () => {
 				() => "!r:x",
 			);
 			expect(knocks()).toHaveLength(1);
-			expect(knocks()[0].reason).toBe("let me in");
-			expect(knocks()[0].knockedAt).toBe(1234);
+			const knock = requiredAt(knocks(), 0, "pending knock");
+			expect(knock.reason).toBe("let me in");
+			expect(knock.knockedAt).toBe(1234);
 		});
 	});
 
@@ -117,7 +119,7 @@ describe("usePendingKnocks", () => {
 				client as unknown as MatrixClient,
 				() => "!r:x",
 			);
-			expect(knocks()[0].reason).toBeNull();
+			expect(requiredAt(knocks(), 0, "pending knock").reason).toBeNull();
 		});
 	});
 
