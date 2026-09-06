@@ -8,6 +8,7 @@ import {
 	Show,
 } from "solid-js";
 import { avatarInitial } from "../../../../lib/avatar";
+import { FOCUSABLE_SELECTOR } from "../../../../lib/focusTrap";
 import {
 	createFailedImageUrls,
 	createImageFallback,
@@ -29,9 +30,6 @@ import type {
 	RtcParticipant,
 	VideoTrackEntry,
 } from "./useLivekitRoom";
-
-const FOCUSABLE_SELECTOR =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * Pane-scoped chrome for the active call. Mounted inside the main-pane

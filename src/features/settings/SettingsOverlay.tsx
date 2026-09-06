@@ -5,12 +5,10 @@ import {
 	For,
 	Match,
 	on,
-	onCleanup,
-	onMount,
 	Switch,
 } from "solid-js";
+import { Modal } from "../../components/Modal";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
-import { trackAppModalMounted } from "../../stores/modalStack";
 import { userSettings } from "../../stores/settings";
 import { AccountTab } from "./AccountTab";
 import { AppGeneralTab } from "./AppGeneralTab";
@@ -68,27 +66,8 @@ const LogoutIcon: Component = () => (
 	</svg>
 );
 
-const FOCUSABLE =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
-	trackAppModalMounted();
-	let overlayRef!: HTMLDivElement;
 	let contentRef!: HTMLDivElement;
-	let previousFocus: HTMLElement | null = null;
-
-	onMount(() => {
-		previousFocus = document.activeElement as HTMLElement;
-		// Focus first tabbable element so Tab/Shift+Tab trap works correctly
-		const first = overlayRef.querySelector<HTMLElement>(FOCUSABLE);
-		(first ?? overlayRef).focus();
-	});
-
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-	});
 
 	// Reset scroll position when switching tabs (skip initial mount)
 	createEffect(
@@ -99,49 +78,17 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 		),
 	);
 
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			props.onClose();
-			return;
-		}
-
-		// Focus trap
-		if (e.key === "Tab") {
-			const focusable = Array.from(
-				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			if (!first || !last) return;
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		}
-	};
-
 	const tabTitle = () =>
 		tabMeta.find((t) => t.id === props.activeTab)?.label ?? "";
 
 	return (
-		<div
-			ref={overlayRef}
-			class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+		<Modal
+			open
+			onClose={props.onClose}
+			class="fixed inset-0 z-40 flex items-center justify-center bg-surface-0/60"
 			style={{ zoom: `${100 / userSettings().zoomLevel}` }}
-			role="dialog"
-			aria-modal="true"
-			aria-label="Settings"
-			inert={cryptoDialogOpen() || undefined}
-			tabIndex={-1}
-			onKeyDown={handleKeyDown}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) props.onClose();
-			}}
+			label={"Settings"}
+			suspended={cryptoDialogOpen()}
 		>
 			{/* Modal panel */}
 			<div class="flex h-[85vh] w-[min(960px,90vw)] overflow-hidden rounded-lg bg-surface-0 shadow-2xl">
@@ -246,7 +193,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 					</div>
 				</div>
 			</div>
-		</div>
+		</Modal>
 	);
 };
 
