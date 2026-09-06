@@ -70,6 +70,27 @@ describe("FOCUSABLE_SELECTOR", () => {
 });
 
 describe("trapTabKey", () => {
+	it("skips focus-trap sentinels at both boundaries", () => {
+		const buttons = mountButtons(4);
+		const startSentinel = requiredAt(buttons, 0, "start sentinel");
+		const first = requiredAt(buttons, 1, "first button");
+		const last = requiredAt(buttons, 2, "last button");
+		const endSentinel = requiredAt(buttons, 3, "end sentinel");
+		startSentinel.setAttribute("data-focus-trap", "");
+		endSentinel.setAttribute("data-focus-trap", "");
+
+		last.focus();
+		const forward = tabEvent(false);
+		trapTabKey(container as HTMLElement, forward);
+		expect(document.activeElement).toBe(first);
+		expect(forward.defaultPrevented).toBe(true);
+
+		const backward = tabEvent(true);
+		trapTabKey(container as HTMLElement, backward);
+		expect(document.activeElement).toBe(last);
+		expect(backward.defaultPrevented).toBe(true);
+	});
+
 	it("wraps focus from the last element to the first on Tab", () => {
 		const buttons = mountButtons(3);
 		const first = requiredAt(buttons, 0, "first button");
