@@ -1,10 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAttachments } from "./useAttachments";
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 describe("useAttachments paste handling", () => {
 	it("skips absent clipboard slots and queues later images", () => {
+		const createObjectURL = vi.fn(() => "blob:pasted-preview");
+		const NativeURL = URL;
+		class TestURL extends NativeURL {
+			static override createObjectURL = createObjectURL;
+		}
+		vi.stubGlobal("URL", TestURL);
 		const file = new File(["image bytes"], "pasted.bin", {
-			type: "application/octet-stream",
+			type: "image/png",
 		});
 		const items = {
 			1: {
@@ -25,6 +35,9 @@ describe("useAttachments paste handling", () => {
 
 		expect(attachments).toHaveLength(1);
 		expect(attachments[0]?.file).toBe(file);
+		expect(attachments[0]?.kind).toBe("image");
+		expect(attachments[0]?.previewUrl).toBe("blob:pasted-preview");
+		expect(createObjectURL).toHaveBeenCalledWith(file);
 		expect(preventDefault).toHaveBeenCalledOnce();
 	});
 });
