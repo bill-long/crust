@@ -72,6 +72,17 @@ const Wrapper: ParentComponent<{
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
+function firstCreateRoomOptions(
+	client: ReturnType<typeof createMockClient>,
+): Record<string, unknown> {
+	const call = (client.createRoom as ReturnType<typeof vi.fn>).mock.calls[0];
+	const options = call?.[0];
+	if (typeof options !== "object" || options === null) {
+		throw new Error("createRoom was not called with options");
+	}
+	return options as Record<string, unknown>;
+}
+
 afterEach(() => {
 	cleanup();
 	navigateMock.mockReset();
@@ -108,8 +119,7 @@ describe("CreateSpaceDialog", () => {
 		await flush();
 		await flush();
 		expect(client.createRoom).toHaveBeenCalledTimes(1);
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		expect(opts.name).toBe("My Space");
 		expect(opts.visibility).toBe("private");
 		expect(opts.preset).toBe("private_chat");
@@ -152,8 +162,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		expect(opts.visibility).toBe("public");
 		expect(opts.preset).toBe("public_chat");
 		const initial = opts.initial_state as Array<{
@@ -182,8 +191,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		const initial = opts.initial_state as Array<{
 			type: string;
 			content: Record<string, unknown>;
@@ -293,8 +301,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		const initial = opts.initial_state as Array<{
 			type: string;
 			content: Record<string, unknown>;
@@ -339,8 +346,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		const initial = opts.initial_state as Array<{ type: string }>;
 		expect(initial.find((e) => e.type === "m.room.avatar")).toBeUndefined();
 	});
@@ -356,8 +362,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		expect(opts.invite).toEqual(["@alice:example.com", "@bob:example.com"]);
 	});
 
@@ -372,8 +377,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		expect(opts.invite).toEqual(["@alice:example.com"]);
 	});
 
@@ -423,8 +427,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		expect(opts.room_alias_name).toBe("my-space");
 	});
 
@@ -612,8 +615,7 @@ describe("CreateSpaceDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
 		await flush();
 		await flush();
-		const opts = (client.createRoom as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as Record<string, unknown>;
+		const opts = firstCreateRoomOptions(client);
 		const initial = opts.initial_state as Array<{ type: string }>;
 		expect(initial.find((e) => e.type === "m.room.avatar")).toBeUndefined();
 	});

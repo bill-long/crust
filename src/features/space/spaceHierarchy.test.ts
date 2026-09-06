@@ -58,6 +58,12 @@ const SPACE_ID = "!space:example.com";
 const mockMxcToHttp = (mxcUrl: string): string | null =>
 	mxcUrl.replace("mxc://", "https://example.com/_matrix/media/v3/download/");
 
+function requiredAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) throw new Error(`room ${index} was not discovered`);
+	return item;
+}
+
 describe("extractViaServers", () => {
 	it("extracts via servers from children_state matching the child room", () => {
 		const rooms: HierarchyRoom[] = [
@@ -161,7 +167,7 @@ describe("filterDiscoverableRooms", () => {
 			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
-		expect(result[0].roomId).toBe("!room1:example.com");
+		expect(requiredAt(result, 0).roomId).toBe("!room1:example.com");
 	});
 
 	it("carries sub-spaces (room_type m.space) through with isSpace=true", () => {
@@ -186,11 +192,13 @@ describe("filterDiscoverableRooms", () => {
 			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(2);
-		expect(result[0].roomId).toBe("!subspace:example.com");
-		expect(result[0].isSpace).toBe(true);
-		expect(result[0].canJoin).toBe(true);
-		expect(result[1].roomId).toBe("!room1:example.com");
-		expect(result[1].isSpace).toBe(false);
+		const subspace = requiredAt(result, 0);
+		const room = requiredAt(result, 1);
+		expect(subspace.roomId).toBe("!subspace:example.com");
+		expect(subspace.isSpace).toBe(true);
+		expect(subspace.canJoin).toBe(true);
+		expect(room.roomId).toBe("!room1:example.com");
+		expect(room.isSpace).toBe(false);
 	});
 
 	it("excludes joined, invited, and knocked subspaces (they render in the space view / sidebar)", () => {
@@ -249,9 +257,10 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].isSpace).toBe(true);
-		expect(result[0].canJoin).toBe(false);
-		expect(result[0].canKnock).toBe(true);
+		const room = requiredAt(result, 0);
+		expect(room.isSpace).toBe(true);
+		expect(room.canJoin).toBe(false);
+		expect(room.canKnock).toBe(true);
 	});
 
 	it("excludes rooms the user has already joined", () => {
@@ -277,7 +286,7 @@ describe("filterDiscoverableRooms", () => {
 			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
-		expect(result[0].roomId).toBe("!notjoined:example.com");
+		expect(requiredAt(result, 0).roomId).toBe("!notjoined:example.com");
 	});
 
 	it("excludes invited rooms (they render in the Invites section) but keeps left rooms", () => {
@@ -304,7 +313,7 @@ describe("filterDiscoverableRooms", () => {
 			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
-		expect(result[0].roomId).toBe("!left:example.com");
+		expect(requiredAt(result, 0).roomId).toBe("!left:example.com");
 	});
 
 	it("maps room fields correctly", () => {
@@ -328,7 +337,7 @@ describe("filterDiscoverableRooms", () => {
 			mockMxcToHttp,
 		);
 		expect(result).toHaveLength(1);
-		expect(result[0]).toEqual({
+		expect(requiredAt(result, 0)).toEqual({
 			roomId: "!room1:example.com",
 			name: "General Chat",
 			avatarUrl:
@@ -366,8 +375,8 @@ describe("filterDiscoverableRooms", () => {
 			summaries,
 			mockMxcToHttp,
 		);
-		expect(result[0].name).toBe("#general:example.com");
-		expect(result[1].name).toBe("!room2:example.com");
+		expect(requiredAt(result, 0).name).toBe("#general:example.com");
+		expect(requiredAt(result, 1).name).toBe("!room2:example.com");
 	});
 
 	it("treats empty or whitespace-only name as missing", () => {
@@ -387,8 +396,8 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].name).toBe("#fallback:example.com");
-		expect(result[1].name).toBe("!spaces:example.com");
+		expect(requiredAt(result, 0).name).toBe("#fallback:example.com");
+		expect(requiredAt(result, 1).name).toBe("!spaces:example.com");
 	});
 
 	it("sets canJoin=true for public rooms", () => {
@@ -400,7 +409,7 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].canJoin).toBe(true);
+		expect(requiredAt(result, 0).canJoin).toBe(true);
 	});
 
 	it("sets canJoin=false and canKnock=true for knock rooms", () => {
@@ -412,8 +421,9 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].canJoin).toBe(false);
-		expect(result[0].canKnock).toBe(true);
+		const room = requiredAt(result, 0);
+		expect(room.canJoin).toBe(false);
+		expect(room.canKnock).toBe(true);
 	});
 
 	it("sets canKnock for knock_restricted rooms based on parent-space membership", () => {
@@ -427,13 +437,16 @@ describe("filterDiscoverableRooms", () => {
 		const member: SummariesStore = {
 			[SPACE_ID]: makeSummary(SPACE_ID, "join", true),
 		};
-		expect(
-			filterDiscoverableRooms(rooms, SPACE_ID, member, mockMxcToHttp)[0]
-				.canKnock,
-		).toBe(true);
-		expect(
-			filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp)[0].canKnock,
-		).toBe(false);
+		const memberRoom = requiredAt(
+			filterDiscoverableRooms(rooms, SPACE_ID, member, mockMxcToHttp),
+			0,
+		);
+		const nonMemberRoom = requiredAt(
+			filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp),
+			0,
+		);
+		expect(memberRoom.canKnock).toBe(true);
+		expect(nonMemberRoom.canKnock).toBe(false);
 	});
 
 	it("excludes rooms with a pending knock from discoverable rooms", () => {
@@ -469,7 +482,7 @@ describe("filterDiscoverableRooms", () => {
 			summaries,
 			mockMxcToHttp,
 		);
-		expect(result[0].canJoin).toBe(true);
+		expect(requiredAt(result, 0).canJoin).toBe(true);
 	});
 
 	it("sets canJoin=false for restricted rooms when not joined to parent space", () => {
@@ -481,7 +494,7 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].canJoin).toBe(false);
+		expect(requiredAt(result, 0).canJoin).toBe(false);
 	});
 
 	it("sets canJoin=false for restricted rooms when only invited to parent space", () => {
@@ -501,7 +514,7 @@ describe("filterDiscoverableRooms", () => {
 			summaries,
 			mockMxcToHttp,
 		);
-		expect(result[0].canJoin).toBe(false);
+		expect(requiredAt(result, 0).canJoin).toBe(false);
 	});
 
 	it("sets canJoin=true for knock_restricted rooms when joined to parent space", () => {
@@ -521,7 +534,7 @@ describe("filterDiscoverableRooms", () => {
 			summaries,
 			mockMxcToHttp,
 		);
-		expect(result[0].canJoin).toBe(true);
+		expect(requiredAt(result, 0).canJoin).toBe(true);
 	});
 
 	it("sets canJoin=false for knock_restricted rooms when not joined to parent space", () => {
@@ -533,7 +546,7 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].canJoin).toBe(false);
+		expect(requiredAt(result, 0).canJoin).toBe(false);
 	});
 
 	it("sets canJoin=false for invite-only rooms", () => {
@@ -545,7 +558,7 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].canJoin).toBe(false);
+		expect(requiredAt(result, 0).canJoin).toBe(false);
 	});
 
 	it("sets canJoin=false when join_rule is undefined", () => {
@@ -557,7 +570,7 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].canJoin).toBe(false);
+		expect(requiredAt(result, 0).canJoin).toBe(false);
 	});
 
 	it("returns empty array when no discoverable rooms exist", () => {
@@ -583,6 +596,6 @@ describe("filterDiscoverableRooms", () => {
 			}),
 		];
 		const result = filterDiscoverableRooms(rooms, SPACE_ID, {}, mockMxcToHttp);
-		expect(result[0].avatarUrl).toBeNull();
+		expect(requiredAt(result, 0).avatarUrl).toBeNull();
 	});
 });

@@ -66,7 +66,9 @@ export async function leaveChildRooms(
 	let routeRoomLeft = false;
 
 	results.forEach((res, i) => {
-		const { roomId, name } = children[i];
+		const child = children[i];
+		if (!child) return;
+		const { roomId, name } = child;
 		if (res.status === "fulfilled") {
 			leftRoomIds.push(roomId);
 			if (roomId === opts.currentRoomId) routeRoomLeft = true;
