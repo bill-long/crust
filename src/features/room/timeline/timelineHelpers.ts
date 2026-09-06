@@ -128,12 +128,15 @@ export function capStoreToRealLimit(
 	limit: number,
 ): void {
 	let realCount = 0;
-	for (const r of draft) if (!isSyntheticEventId(r.eventId)) realCount++;
+	for (const r of draft) {
+		if (r !== undefined && !isSyntheticEventId(r.eventId)) realCount++;
+	}
 	let excess = realCount - limit;
 	if (excess <= 0) return;
 	let cut = 0;
 	while (cut < draft.length && excess > 0) {
-		if (!isSyntheticEventId(draft[cut].eventId)) excess--;
+		const row = draft[cut];
+		if (row !== undefined && !isSyntheticEventId(row.eventId)) excess--;
 		cut++;
 	}
 	if (cut > 0) draft.splice(0, cut);
@@ -156,14 +159,21 @@ export function mergeRowsByTimestamp(
 	const out: TimelineEvent[] = [];
 	let i = 0;
 	for (const ev of base) {
-		while (i < inserts.length && inserts[i].timestamp < ev.timestamp) {
-			out.push(inserts[i]);
+		while (i < inserts.length) {
+			const insert = inserts[i];
+			if (insert === undefined) {
+				i++;
+				continue;
+			}
+			if (insert.timestamp >= ev.timestamp) break;
+			out.push(insert);
 			i++;
 		}
 		out.push(ev);
 	}
 	while (i < inserts.length) {
-		out.push(inserts[i]);
+		const insert = inserts[i];
+		if (insert !== undefined) out.push(insert);
 		i++;
 	}
 	return out;
