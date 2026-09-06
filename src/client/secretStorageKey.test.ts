@@ -74,6 +74,19 @@ describe("resolveSecretStorageKey", () => {
 		expect(choice).toEqual({ keyId: "only-key", keyInfo: KEY_INFO });
 	});
 
+	it("skips a malformed missing offered entry", async () => {
+		const choice = await resolveSecretStorageKey({
+			offeredKeys: {
+				missing: undefined,
+				valid: KEY_INFO,
+			} as unknown as Record<string, SecretStorageKeyDescription>,
+			getDefaultKeyId: async () => null,
+			fetchKeyInfo: vi.fn(async () => null),
+		});
+
+		expect(choice).toEqual({ keyId: "valid", keyInfo: KEY_INFO });
+	});
+
 	it("returns null when there are no keys at all", async () => {
 		const choice = await resolveSecretStorageKey({
 			offeredKeys: {},

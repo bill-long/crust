@@ -109,14 +109,11 @@ export async function resolveSecretStorageKey(
 		}
 	}
 
-	const firstOfferedId = Object.keys(source.offeredKeys)[0];
-	if (firstOfferedId) {
-		const keyInfo = source.offeredKeys[firstOfferedId];
-		if (!keyInfo) return null;
-		return {
-			keyId: firstOfferedId,
-			keyInfo,
-		};
+	const offeredKeyIds = Object.keys(source.offeredKeys);
+	if (!offeredKeyIds[0]) return null;
+	for (const keyId of offeredKeyIds) {
+		const keyInfo = source.offeredKeys[keyId];
+		if (keyInfo) return { keyId, keyInfo };
 	}
 	return null;
 }
