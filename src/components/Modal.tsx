@@ -1,0 +1,128 @@
+import { Dialog } from "@kobalte/core/dialog";
+import { type JSX, Show } from "solid-js";
+import { trackAppModalOpen } from "../stores/modalStack";
+
+interface ModalProps {
+	open: boolean;
+	onClose: () => void;
+	children: JSX.Element;
+	labelledBy?: string | undefined;
+	describedBy?: string | undefined;
+	label?: string | undefined;
+	/** Temporarily yield to a legacy dialog rendered above this one. */
+	suspended?: boolean | undefined;
+	/** A pending operation can prevent dismissal without leaking Escape. */
+	dismissible?: boolean | undefined;
+	initialFocus?: (() => HTMLElement | undefined) | undefined;
+	contentRef?: ((element: HTMLDivElement) => void) | undefined;
+	onKeyDown?: ((event: KeyboardEvent) => void) | undefined;
+}
+
+/**
+ * Shared app dialog shell. Feature components own their content and actions.
+ * Keep Content in its owner's DOM during the staged migration: body portals
+ * would escape #root's zoom/stacking context and cover legacy crypto dialogs.
+ * No portal means the existing root scale applies exactly once.
+ */
+export function Modal(props: ModalProps) {
+	trackAppModalOpen(() => props.open);
+	return (
+		<Show when={props.open}>
+			<ModalSurface {...props} />
+		</Show>
+	);
+}
+
+// Per-opening ownership keeps delayed focus cleanup from sharing state
+// with a dialog that has already reopened.
+function ModalSurface(props: ModalProps) {
+	let content: HTMLDivElement | undefined;
+	let returnFocus: HTMLElement | undefined;
+
+	const close = () => {
+		if (!props.suspended && props.dismissible !== false) props.onClose();
+	};
+
+	return (
+		<Dialog
+			open
+			modal={!props.suspended}
+			onOpenChange={(open) => {
+				if (!open) close();
+			}}
+		>
+			<Dialog.Content
+				ref={(element: HTMLDivElement) => {
+					content = element;
+					props.contentRef?.(element);
+				}}
+				class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+				aria-label={props.label}
+				aria-labelledby={props.labelledBy}
+				aria-describedby={props.describedBy}
+				aria-modal="true"
+				inert={props.suspended || undefined}
+				onOpenAutoFocus={(event) => {
+					returnFocus =
+						document.activeElement instanceof HTMLElement
+							? document.activeElement
+							: undefined;
+					const target = props.initialFocus?.();
+					if (target) {
+						event.preventDefault();
+						target.focus();
+						if (!content?.contains(document.activeElement)) content?.focus();
+					}
+				}}
+				onCloseAutoFocus={(event) => {
+					// Respect a newer focus owner (e.g. close-and-open in one turn).
+					if (event.defaultPrevented) return;
+					event.preventDefault();
+					if (returnFocus?.isConnected) returnFocus.focus();
+					returnFocus = undefined;
+				}}
+				onEscapeKeyDown={(event) => {
+					event.preventDefault();
+					// A legacy child can remove itself and clear suspension in
+					// Solid's delegated handler before this document listener runs.
+					// Use the event's original surface, not the new open state.
+					if (
+						!(event.target instanceof Element) ||
+						event.target.closest('[role="dialog"], [role="alertdialog"]') !==
+							content
+					)
+						return;
+					event.stopPropagation();
+					close();
+				}}
+				onInteractOutside={(event) => event.preventDefault()}
+				onFocusOutside={(event) => {
+					if (props.suspended) return;
+					const target = event.target;
+					if (
+						target instanceof Element &&
+						target.closest('[aria-modal="true"]')
+					)
+						return;
+					// Kobalte excludes its nested layers before invoking this hook.
+					// Its last-focused control can become disabled while pending,
+					// so retain a focusable-surface fallback for that case.
+					props.initialFocus?.()?.focus();
+					if (!content?.contains(document.activeElement)) content?.focus();
+				}}
+				onKeyDown={(event: KeyboardEvent) => {
+					// Solid delegates through owners before Kobalte's
+					// document Escape listener. Stop an old parent dialog here;
+					// Kobalte still decides which dismissable layer owns Escape.
+					if (event.key === "Escape") event.stopPropagation();
+					props.onKeyDown?.(event);
+				}}
+				onClick={(event: MouseEvent) => {
+					if (event.target === event.currentTarget) close();
+				}}
+			>
+				{props.children}
+			</Dialog.Content>
+		</Dialog>
+	);
+}
