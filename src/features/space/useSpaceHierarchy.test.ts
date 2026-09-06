@@ -43,6 +43,12 @@ function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function requiredAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) throw new Error(`room ${index} was not discovered`);
+	return item;
+}
+
 function makeHierarchyRoom(
 	roomId: string,
 	overrides: Partial<HierarchyRoom> = {},
@@ -142,8 +148,9 @@ describe("useSpaceHierarchy", () => {
 			expect(hierarchy.loading).toBe(false);
 			expect(hierarchy.error).toBeNull();
 			expect(hierarchy.discoverableRooms).toHaveLength(1);
-			expect(hierarchy.discoverableRooms[0].roomId).toBe("!child:x");
-			expect(hierarchy.discoverableRooms[0].name).toBe("General");
+			const room = requiredAt(hierarchy.discoverableRooms, 0);
+			expect(room.roomId).toBe("!child:x");
+			expect(room.name).toBe("General");
 		});
 	});
 
@@ -419,8 +426,12 @@ describe("useSpaceHierarchy", () => {
 			await flushPromises();
 
 			expect(hierarchy.discoverableRooms).toHaveLength(2);
-			expect(hierarchy.discoverableRooms[0].roomId).toBe("!room1:x");
-			expect(hierarchy.discoverableRooms[1].roomId).toBe("!room2:x");
+			expect(requiredAt(hierarchy.discoverableRooms, 0).roomId).toBe(
+				"!room1:x",
+			);
+			expect(requiredAt(hierarchy.discoverableRooms, 1).roomId).toBe(
+				"!room2:x",
+			);
 			expect(hierarchy.truncated).toBe(false);
 
 			// Verify pagination token was passed
@@ -505,7 +516,9 @@ describe("useSpaceHierarchy", () => {
 
 			// Only the new space's rooms, no carryover
 			expect(hierarchy.discoverableRooms).toHaveLength(1);
-			expect(hierarchy.discoverableRooms[0].roomId).toBe("!room3:x");
+			expect(requiredAt(hierarchy.discoverableRooms, 0).roomId).toBe(
+				"!room3:x",
+			);
 			expect(hierarchy.truncated).toBe(false);
 		});
 	});

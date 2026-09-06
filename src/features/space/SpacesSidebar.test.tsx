@@ -39,6 +39,12 @@ vi.mock("@solidjs/router", () => ({
 	useParams: () => paramsState,
 }));
 
+function requiredAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) throw new Error(`item ${index} was not rendered`);
+	return item;
+}
+
 function makeSpaceSummary(roomId: string, name: string): RoomSummary {
 	return {
 		roomId,
@@ -483,13 +489,14 @@ describe("SpacesSidebar nested subspaces (#443)", () => {
 		const betas = screen.getAllByRole("button", { name: "Beta" });
 		expect(alphas).toHaveLength(1);
 		expect(betas).toHaveLength(1);
+		const alpha = requiredAt(alphas, 0);
+		const beta = requiredAt(betas, 0);
 		// The nested tile's SidebarItem wrapper carries the depth indent.
-		expect(betas[0].closest(".pl-4")).not.toBeNull();
-		expect(alphas[0].closest(".pl-4")).toBeNull();
+		expect(beta.closest(".pl-4")).not.toBeNull();
+		expect(alpha.closest(".pl-4")).toBeNull();
 		// Parent renders before its nested child.
 		expect(
-			alphas[0].compareDocumentPosition(betas[0]) &
-				Node.DOCUMENT_POSITION_FOLLOWING,
+			alpha.compareDocumentPosition(beta) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
 	});
 

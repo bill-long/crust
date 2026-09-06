@@ -39,6 +39,18 @@ describe("leaveChildRooms", () => {
 		expect(client.leave).toHaveBeenCalledTimes(2);
 	});
 
+	it("skips an absent child slot while collecting settled results", async () => {
+		const client = makeClient({ "!a:x": "resolve" });
+		const children = [{ roomId: "!a:x", name: "Alpha" }];
+		children.length = 2;
+
+		const out = await leaveChildRooms(client, children, {});
+
+		expect(client.leave).toHaveBeenCalledOnce();
+		expect(out.leftRoomIds).toEqual(["!a:x"]);
+		expect(out.failedNames).toEqual([]);
+	});
+
 	it("collects names of failed leaves without aborting the batch", async () => {
 		vi.spyOn(console, "error").mockImplementation(() => {});
 		const client = makeClient({ "!a:x": "resolve", "!b:x": "reject" });
