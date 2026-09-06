@@ -336,7 +336,7 @@ const ThreadListPanel: Component<{
 									ref={(h) => {
 										virtRef = h ?? undefined;
 									}}
-									scrollRef={scrollRef}
+									{...(scrollRef ? { scrollRef } : {})}
 									data={rows()}
 								>
 									{(row) => <div class="py-0.5">{renderRow(row)}</div>}

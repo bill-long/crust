@@ -40,7 +40,7 @@ interface AccountSwitcherProps {
 	/** Classes for the trigger, which wraps the caller's identity block. */
 	triggerClass: string;
 	triggerLabel: string;
-	triggerTitle?: string;
+	triggerTitle?: string | undefined;
 	children: JSX.Element;
 }
 

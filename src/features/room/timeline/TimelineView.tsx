@@ -62,8 +62,8 @@ const TimelineView: Component<{
 	canPin?: boolean;
 	isPinned?: (eventId: string) => boolean;
 	onTogglePin?: (eventId: string) => void;
-	jumpRequest?: () => string | null;
-	onJumpHandled?: () => void;
+	jumpRequest?: (() => string | null) | undefined;
+	onJumpHandled?: (() => void) | undefined;
 	/** Optional shared image packs accessor. When provided, TimelineView
 	 *  reuses it instead of spinning up its own `useImagePacks` instance.
 	 *  Lifting to the parent avoids duplicate SDK event subscriptions
@@ -76,7 +76,7 @@ const TimelineView: Component<{
 	thread?: { threadId: string };
 	/** Open the thread panel for a root event ("Open thread" affordances
 	 *  on chips and the hover toolbar). Absent inside the panel itself. */
-	onOpenThread?: (threadId: string) => void;
+	onOpenThread?: ((threadId: string) => void) | undefined;
 }> = (props) => {
 	const { client } = useClient();
 	// Fail-closed remote images for message-header senders, grouped
@@ -1059,7 +1059,7 @@ const TimelineView: Component<{
 							ref={(h) => {
 								virtHandle = h ?? undefined;
 							}}
-							scrollRef={scrollRef}
+							{...(scrollRef ? { scrollRef } : {})}
 							data={events}
 							shift={pagingOlder()}
 							startMargin={topAreaHeight()}

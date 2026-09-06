@@ -208,7 +208,10 @@ const MemberList: Component<{ roomId: string }> = (props) => {
 							</div>
 						}
 					>
-						<Virtualizer scrollRef={scrollRef} data={flatItems()}>
+						<Virtualizer
+							{...(scrollRef ? { scrollRef } : {})}
+							data={flatItems()}
+						>
 							{(item) => (
 								<Switch>
 									<Match when={item.type === "header" && item}>

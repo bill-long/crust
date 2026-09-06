@@ -32,7 +32,7 @@ interface SettingsOverlayProps {
 	/** True while the logout is in flight — surfaces a pending state on the
 	 * button so a slow logout (it awaits the call teardown) doesn't look
 	 * like nothing happened, and makes it non-operable while it does. */
-	loggingOut?: Accessor<boolean>;
+	loggingOut?: Accessor<boolean> | undefined;
 }
 
 const CloseIcon: Component = () => (

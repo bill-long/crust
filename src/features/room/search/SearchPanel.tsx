@@ -381,7 +381,7 @@ const SearchPanel: Component<{
 									ref={(h) => {
 										virtRef = h ?? undefined;
 									}}
-									scrollRef={scrollRef}
+									{...(scrollRef ? { scrollRef } : {})}
 									data={results()}
 								>
 									{(hit, i) => <div class="py-0.5">{renderRow(hit, i())}</div>}

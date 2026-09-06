@@ -41,7 +41,7 @@ interface SignOutSessionsDialogProps {
 	 * would tell every OIDC user their server offers no link during the
 	 * round-trip that is about to produce one.
 	 */
-	portalUrl?: string | null;
+	portalUrl?: string | null | undefined;
 	/** True for a session the server won't let confirm this in-app (OIDC). */
 	viaPortal?: boolean;
 	onClose: () => void;

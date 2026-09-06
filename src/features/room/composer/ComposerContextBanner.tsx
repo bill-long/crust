@@ -6,9 +6,9 @@ import type { TimelineEvent } from "../timeline/useTimeline";
 interface ComposerContextBannerProps {
 	/** The message being edited, if edit mode is active. Takes precedence over
 	 *  a reply (you can't reply and edit at once). */
-	editingEvent?: TimelineEvent | null;
+	editingEvent?: TimelineEvent | null | undefined;
 	/** The message being replied to, shown only when not editing. */
-	replyTo?: TimelineEvent | null;
+	replyTo?: TimelineEvent | null | undefined;
 	/** Cancel the in-progress edit (clears the draft and exits edit mode). */
 	onCancelEdit: () => void;
 	/** Cancel the pending reply. */

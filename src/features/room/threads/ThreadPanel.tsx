@@ -27,8 +27,8 @@ export const ThreadPanel: Component<{
 	 *  issue #334). Forwarded to the thread-scoped TimelineView, whose
 	 *  mount-time jump effect anchors the window on it - so a target set
 	 *  before the thread resolves still lands once the timeline mounts. */
-	jumpRequest?: () => string | null;
-	onJumpHandled?: () => void;
+	jumpRequest?: (() => string | null) | undefined;
+	onJumpHandled?: (() => void) | undefined;
 }> = (props) => {
 	const { client } = useClient();
 	const [thread] = createResource(

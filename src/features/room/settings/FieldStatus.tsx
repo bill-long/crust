@@ -5,7 +5,7 @@ export type FieldState = "idle" | "saving" | "error";
 interface FieldStatusProps {
 	state: FieldState;
 	error?: string | null;
-	onRetry?: () => void;
+	onRetry?: (() => void) | undefined;
 	onDismiss?: () => void;
 	/** Optional saving label override. Default: "Saving…". */
 	savingLabel?: string;

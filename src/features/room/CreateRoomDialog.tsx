@@ -38,7 +38,7 @@ interface CreateRoomDialogProps {
 	 * space pointing at the new room. Snapshotted at open time so route
 	 * changes during submit don't redirect the child relation.
 	 */
-	spaceId?: string;
+	spaceId?: string | undefined;
 }
 
 const CreateRoomDialog: Component<CreateRoomDialogProps> = (props) => {
