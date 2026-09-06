@@ -1,3 +1,4 @@
+import { createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAttachments } from "./useAttachments";
 
@@ -29,15 +30,22 @@ describe("useAttachments paste handling", () => {
 			clipboardData: { items },
 			preventDefault,
 		} as unknown as ClipboardEvent;
-		const { attachments, onPaste } = useAttachments(() => null);
 
-		onPaste(event);
+		createRoot((dispose) => {
+			try {
+				const { attachments, onPaste } = useAttachments(() => null);
 
-		expect(attachments).toHaveLength(1);
-		expect(attachments[0]?.file).toBe(file);
-		expect(attachments[0]?.kind).toBe("image");
-		expect(attachments[0]?.previewUrl).toBe("blob:pasted-preview");
-		expect(createObjectURL).toHaveBeenCalledWith(file);
-		expect(preventDefault).toHaveBeenCalledOnce();
+				onPaste(event);
+
+				expect(attachments).toHaveLength(1);
+				expect(attachments[0]?.file).toBe(file);
+				expect(attachments[0]?.kind).toBe("image");
+				expect(attachments[0]?.previewUrl).toBe("blob:pasted-preview");
+				expect(createObjectURL).toHaveBeenCalledWith(file);
+				expect(preventDefault).toHaveBeenCalledOnce();
+			} finally {
+				dispose();
+			}
+		});
 	});
 });
