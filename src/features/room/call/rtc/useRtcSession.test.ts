@@ -160,7 +160,7 @@ describe("useRtcSession", () => {
 		const fociArg = requiredAt(
 			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
 			0,
-			"focus argument",
+			"foci argument",
 		);
 		expect(fociArg).toEqual(discovered);
 	});
