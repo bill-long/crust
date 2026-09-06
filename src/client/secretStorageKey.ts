@@ -109,11 +109,12 @@ export async function resolveSecretStorageKey(
 		}
 	}
 
-	const firstOffered = Object.entries(source.offeredKeys)[0];
-	if (firstOffered?.[0]) {
-		const [keyId, keyInfo] = firstOffered;
+	const firstOfferedId = Object.keys(source.offeredKeys)[0];
+	if (firstOfferedId) {
+		const keyInfo = source.offeredKeys[firstOfferedId];
+		if (!keyInfo) return null;
 		return {
-			keyId,
+			keyId: firstOfferedId,
 			keyInfo,
 		};
 	}
