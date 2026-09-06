@@ -6,13 +6,11 @@ import {
 	For,
 	Match,
 	on,
-	onCleanup,
-	onMount,
 	Show,
 	Switch,
 } from "solid-js";
+import { Modal } from "../../../components/Modal";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
-import { trackAppModalMounted } from "../../../stores/modalStack";
 import { userSettings } from "../../../stores/settings";
 import { AdvancedTab } from "./AdvancedTab";
 import { MembersTab } from "./MembersTab";
@@ -56,9 +54,6 @@ interface RoomSettingsOverlayProps {
 	isSpace?: boolean | undefined;
 }
 
-const FOCUSABLE =
-	'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
 const CloseIcon: Component = () => (
 	<svg
 		class="h-5 w-5"
@@ -76,22 +71,7 @@ const CloseIcon: Component = () => (
 );
 
 const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
-	trackAppModalMounted();
-	let overlayRef!: HTMLDivElement;
 	let contentRef!: HTMLDivElement;
-	let previousFocus: HTMLElement | null = null;
-
-	onMount(() => {
-		previousFocus = document.activeElement as HTMLElement;
-		const first = overlayRef.querySelector<HTMLElement>(FOCUSABLE);
-		(first ?? overlayRef).focus();
-	});
-
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-	});
 
 	createEffect(
 		on(
@@ -100,30 +80,6 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 			{ defer: true },
 		),
 	);
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			props.onClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			const focusable = Array.from(
-				overlayRef.querySelectorAll<HTMLElement>(FOCUSABLE),
-			);
-			if (focusable.length === 0) return;
-			const first = focusable[0];
-			const last = focusable[focusable.length - 1];
-			if (!first || !last) return;
-			if (e.shiftKey && document.activeElement === first) {
-				e.preventDefault();
-				last.focus();
-			} else if (!e.shiftKey && document.activeElement === last) {
-				e.preventDefault();
-				first.focus();
-			}
-		}
-	};
 
 	const tabTitle = (): string =>
 		roomSettingsTabMeta.find((t) => t.id === props.activeTab)?.label ?? "";
@@ -170,19 +126,13 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 	};
 
 	return (
-		<div
-			ref={overlayRef}
-			class="fixed inset-0 z-40 flex items-center justify-center bg-black/60"
+		<Modal
+			open
+			onClose={props.onClose}
+			class="fixed inset-0 z-40 flex items-center justify-center bg-surface-0/60"
 			style={{ zoom: `${100 / userSettings().zoomLevel}` }}
-			role="dialog"
-			aria-modal="true"
-			aria-label={`${isSpace() ? "Space" : "Room"} settings — ${roomName()}`}
-			inert={cryptoDialogOpen() || undefined}
-			tabIndex={-1}
-			onKeyDown={handleKeyDown}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) props.onClose();
-			}}
+			label={`${isSpace() ? "Space" : "Room"} settings — ${roomName()}`}
+			suspended={cryptoDialogOpen()}
 		>
 			<div class="flex h-[85vh] w-[min(960px,90vw)] overflow-hidden rounded-lg bg-surface-0 shadow-2xl">
 				<nav class="flex w-56 shrink-0 flex-col rounded-l-lg bg-surface-1">
@@ -288,7 +238,7 @@ const RoomSettingsOverlay: Component<RoomSettingsOverlayProps> = (props) => {
 					</div>
 				</div>
 			</div>
-		</div>
+		</Modal>
 	);
 };
 

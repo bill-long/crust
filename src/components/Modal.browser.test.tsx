@@ -10,6 +10,46 @@ import { Modal } from "./Modal";
 afterEach(cleanup);
 
 describe("Modal", () => {
+	it("restores fallback focus when a virtualized opener disappears", async () => {
+		let removeOpener!: () => void;
+		render(() => {
+			const [open, setOpen] = createSignal(false);
+			const [opener, setOpener] = createSignal(true);
+			removeOpener = () => setOpener(false);
+			let fallback!: HTMLButtonElement;
+			return (
+				<>
+					<button ref={fallback} type="button">
+						Timeline
+					</button>
+					<Show when={opener()}>
+						<button type="button" onClick={() => setOpen(true)}>
+							Image
+						</button>
+					</Show>
+					<Modal
+						open={open()}
+						onClose={() => setOpen(false)}
+						label="Image viewer"
+						fallbackFocus={() => fallback}
+					>
+						<div>
+							<button type="button">Image action</button>
+						</div>
+					</Modal>
+				</>
+			);
+		});
+		await userEvent.click(screen.getByText("Image"));
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByText("Image action"));
+		removeOpener();
+		await userEvent.keyboard("{Escape}");
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByText("Timeline"));
+	});
 	it("does not close when a legacy child clears suspension during Escape", async () => {
 		const close = vi.fn();
 		render(() => {
