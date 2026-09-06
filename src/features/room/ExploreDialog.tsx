@@ -139,9 +139,9 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 		const term = query().trim();
 		const serverName = server().trim();
 		return {
-			server: serverName || undefined,
+			...(serverName ? { server: serverName } : {}),
 			limit: DIRECTORY_PAGE_LIMIT,
-			filter: term ? { generic_search_term: term } : undefined,
+			...(term ? { filter: { generic_search_term: term } } : {}),
 		};
 	};
 

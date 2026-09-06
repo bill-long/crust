@@ -89,8 +89,12 @@ export function buildMediaContent(
 		// Encrypted thumbnail → `thumbnail_file`; cleartext → `thumbnail_url`.
 		if (thumbnail.file) {
 			info.thumbnail_file = thumbnail.file;
-		} else {
+		} else if (thumbnail.contentUri) {
 			info.thumbnail_url = thumbnail.contentUri;
+		} else {
+			throw new Error(
+				"buildMediaContent: thumbnail must have exactly one of file / contentUri",
+			);
 		}
 		info.thumbnail_info = {
 			w: thumbnail.w,

@@ -184,6 +184,10 @@ function publish(userInitiated: boolean): void {
 			const uid = c.getUserId();
 			if (uid) recordSelfPresence(uid, false);
 		}
+		const userMessage =
+			userInitiated && !unsupported && presence === "offline"
+				? "Couldn't update your presence. Others may still see you as online."
+				: undefined;
 		reportError(e, {
 			logLabel: "setPresence",
 			// No toast when the server simply does not do presence. The
@@ -196,10 +200,7 @@ function publish(userInitiated: boolean): void {
 			// And only for the offline direction: the wording is about it, and
 			// turning sharing on is already carried by `set_presence=online` on
 			// the very next /sync, so a failed online publish costs nothing.
-			userMessage:
-				userInitiated && !unsupported && presence === "offline"
-					? "Couldn't update your presence. Others may still see you as online."
-					: undefined,
+			...(userMessage !== undefined ? { userMessage } : {}),
 		});
 	});
 }

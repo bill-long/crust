@@ -213,9 +213,11 @@ const ProfileCardPopover: Component<{
 			// invisible and a toast is the only surface left.
 			reportError(err, {
 				logLabel: "Start DM from profile card failed",
-				userMessage: disposed
-					? "Couldn't start the conversation. Please try again."
-					: undefined,
+				...(disposed
+					? {
+							userMessage: "Couldn't start the conversation. Please try again.",
+						}
+					: {}),
 			});
 			if (disposed) return;
 			setActionErrorLocal(
@@ -258,7 +260,7 @@ const ProfileCardPopover: Component<{
 			// invisible and a toast is the only surface left.
 			reportError(err, {
 				logLabel: "Toggle ignore failed",
-				userMessage: disposed ? message : undefined,
+				...(disposed ? { userMessage: message } : {}),
 			});
 			if (disposed) return;
 			setActionErrorLocal(message);

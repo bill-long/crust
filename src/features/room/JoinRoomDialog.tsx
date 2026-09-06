@@ -276,7 +276,7 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 		setSubmitting(true);
 		try {
 			const { room_id } = await props.client.knockRoom(idOrAlias, {
-				reason: reason || undefined,
+				...(reason ? { reason } : {}),
 				viaServers,
 			});
 			if (!mounted || !props.open() || myGeneration !== submitGeneration)

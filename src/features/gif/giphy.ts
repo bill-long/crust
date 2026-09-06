@@ -38,9 +38,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function toRendition(value: unknown): GiphyRendition | undefined {
 	if (!isRecord(value)) return undefined;
 	return {
-		url: typeof value.url === "string" ? value.url : undefined,
-		width: typeof value.width === "string" ? value.width : undefined,
-		height: typeof value.height === "string" ? value.height : undefined,
+		...(typeof value.url === "string" ? { url: value.url } : {}),
+		...(typeof value.width === "string" ? { width: value.width } : {}),
+		...(typeof value.height === "string" ? { height: value.height } : {}),
 	};
 }
 
@@ -53,14 +53,23 @@ function toGifItem(value: unknown): GifItem | null {
 	if (!isRecord(value) || typeof value.id !== "string") return null;
 	const images = value.images;
 	if (!isRecord(images)) return null;
+	const originalRendition = toRendition(images.original);
+	const fixedWidthRendition = toRendition(images.fixed_width);
+	const stillRendition = toRendition(images.fixed_width_still);
 
 	const gif: GiphyGif = {
 		id: value.id,
 		title: typeof value.title === "string" ? value.title : "",
 		images: {
-			original: toRendition(images.original),
-			fixed_width: toRendition(images.fixed_width),
-			fixed_width_still: toRendition(images.fixed_width_still),
+			...(originalRendition !== undefined
+				? { original: originalRendition }
+				: {}),
+			...(fixedWidthRendition !== undefined
+				? { fixed_width: fixedWidthRendition }
+				: {}),
+			...(stillRendition !== undefined
+				? { fixed_width_still: stillRendition }
+				: {}),
 		},
 	};
 	const original = gif.images.original;

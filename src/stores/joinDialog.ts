@@ -46,8 +46,10 @@ export function requestJoinDialog(
 ): void {
 	setJoinDialogRequest({
 		prefill,
-		knockOffered: options?.knockOffered,
-		isSpace: options?.isSpace,
+		...(options?.knockOffered !== undefined
+			? { knockOffered: options.knockOffered }
+			: {}),
+		...(options?.isSpace !== undefined ? { isSpace: options.isSpace } : {}),
 	});
 }
 

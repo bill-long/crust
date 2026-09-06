@@ -122,7 +122,7 @@ export async function fetchLivekitToken(
 				openid_token: openIdToken,
 				device_id: deviceId,
 			}),
-			signal: options?.signal,
+			...(options?.signal !== undefined ? { signal: options.signal } : {}),
 		});
 	} catch (e) {
 		if (e instanceof DOMException && e.name === "AbortError") throw e;
