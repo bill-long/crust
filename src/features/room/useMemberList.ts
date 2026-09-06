@@ -274,10 +274,17 @@ function mergeSorted(runs: MemberEntry[][]): MemberEntry[] {
 		let bestMember: MemberEntry | undefined;
 		for (let i = 0; i < runs.length; i++) {
 			const run = runs[i];
-			const head = heads[i];
+			let head = heads[i];
 			if (run === undefined || head === undefined || head >= run.length)
 				continue;
-			const member = run[head];
+			let member = run[head];
+			if (member === undefined) {
+				do {
+					head++;
+					member = run[head];
+				} while (member === undefined && head < run.length);
+				heads[i] = head;
+			}
 			if (member === undefined) continue;
 			if (bestMember === undefined || cmp(member, bestMember) < 0) {
 				best = i;
