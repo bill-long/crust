@@ -27,8 +27,12 @@ function requiredValue<T>(value: T | undefined, label: string): T {
 	return value;
 }
 
-function requiredAt<T>(items: readonly T[], index: number): T {
-	return requiredValue(items[index], `timeline item ${index}`);
+function requiredAt<T>(
+	items: readonly T[],
+	index: number,
+	label = `timeline item ${index}`,
+): T {
+	return requiredValue(items[index], label);
 }
 
 describe("mergeRowsByTimestamp", () => {
@@ -3194,7 +3198,9 @@ describe("useTimeline", () => {
 			);
 			expect(aggregate.count).toBe(1);
 			expect(aggregate.senders).toHaveLength(1);
-			expect(requiredAt(aggregate.senders, 0).userId).toBe("@bob:test");
+			expect(requiredAt(aggregate.senders, 0, "reaction sender 0").userId).toBe(
+				"@bob:test",
+			);
 			// myReactions tracks the user's own pressed key. The user's
 			// own reaction failed (NOT_SENT), so myReactions must not
 			// include "🚀" — otherwise the pressed pill state lies.
@@ -3269,7 +3275,9 @@ describe("useTimeline", () => {
 			);
 			expect(agg.count).toBe(1);
 			expect(agg.senders).toHaveLength(1);
-			expect(requiredAt(agg.senders, 0).userId).toBe("@bob:test");
+			expect(requiredAt(agg.senders, 0, "reaction sender 0").userId).toBe(
+				"@bob:test",
+			);
 		});
 	});
 
