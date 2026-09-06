@@ -460,7 +460,9 @@ export function updateSession(session: Session): boolean {
 	if (!existing) return false;
 	// The crypto prefix is fixed when the account is added; a caller round-
 	// tripping a session must not be able to move the account's crypto store.
-	const entry: Session = { ...session, cryptoPrefix: existing.cryptoPrefix };
+	const entry: Session = { ...session };
+	if (existing.cryptoPrefix === undefined) delete entry.cryptoPrefix;
+	else entry.cryptoPrefix = existing.cryptoPrefix;
 	const next: SessionStore = {
 		activeUserId: store.activeUserId,
 		sessions: store.sessions.map((s) =>

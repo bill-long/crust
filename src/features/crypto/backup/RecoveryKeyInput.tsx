@@ -84,7 +84,10 @@ const RecoveryKeyInput: Component = () => {
 		validate?: (key: Uint8Array<ArrayBuffer>) => Promise<boolean>,
 	): Promise<Uint8Array<ArrayBuffer> | null> => {
 		return new Promise((resolve) => {
-			pendingRequests.push({ resolve, validate });
+			pendingRequests.push({
+				resolve,
+				...(validate !== undefined ? { validate } : {}),
+			});
 			if (pendingRequests.length === 1) {
 				// First request — show the dialog
 				resetPromptState();

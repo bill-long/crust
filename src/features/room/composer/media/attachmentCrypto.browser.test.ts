@@ -147,9 +147,9 @@ describe("parseEncryptedFile", () => {
 
 	it("rejects an explicitly-unsupported protocol version", () => {
 		expect(parseEncryptedFile({ ...valid, v: "v1" })).toBeNull();
-		// Absent v is tolerated (older content) and normalizes to undefined.
+		// Absent v is tolerated (older content) and remains absent.
 		const { v: _v, ...noVersion } = valid;
-		expect(parseEncryptedFile(noVersion)?.v).toBeUndefined();
+		expect(parseEncryptedFile(noVersion)).not.toHaveProperty("v");
 	});
 });
 

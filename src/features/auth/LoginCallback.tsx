@@ -58,14 +58,7 @@ const LoginCallback: Component = () => {
 			// The stashed target was sanitized before stashing; sanitize again
 			// here so a tampered sessionStorage value can't redirect us.
 			const target = sanitizeReturnTo(takeOidcReturnTo());
-			const session = {
-				accessToken: result.accessToken,
-				refreshToken: result.refreshToken,
-				userId: result.userId,
-				deviceId: result.deviceId,
-				homeserverUrl: result.homeserverUrl,
-				oidc: result.oidc,
-			};
+			const session = { ...result };
 			if (isAdding) {
 				// Same as the password path: the pointer moves and a reload follows,
 				// so the account-scoped stores must not rebind in the window before

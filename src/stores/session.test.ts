@@ -543,6 +543,22 @@ describe("crypto store prefixes", () => {
 		});
 		expect(loadSession()?.cryptoPrefix).toBe(CRYPTO_DB_PREFIX);
 	});
+
+	it("preserves a missing stored prefix during token rotation", () => {
+		seedStore([VALID], VALID.userId);
+
+		expect(
+			updateSession({
+				...VALID,
+				accessToken: "syt_rotated",
+				cryptoPrefix: "caller-prefix",
+			}),
+		).toBe(true);
+
+		const updated = loadSession();
+		expect(updated?.accessToken).toBe("syt_rotated");
+		expect(updated).not.toHaveProperty("cryptoPrefix");
+	});
 });
 
 describe("per-account storage keys", () => {

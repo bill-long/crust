@@ -495,7 +495,9 @@ export async function completeOidcLogin(
 
 	return {
 		accessToken: tokenResponse.access_token,
-		refreshToken: tokenResponse.refresh_token,
+		...(tokenResponse.refresh_token
+			? { refreshToken: tokenResponse.refresh_token }
+			: {}),
 		userId: whoami.user_id,
 		deviceId: whoami.device_id,
 		homeserverUrl: signin.homeserverUrl.replace(/\/+$/, ""),
