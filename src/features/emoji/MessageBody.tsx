@@ -145,6 +145,7 @@ function replaceShortcodesInTextNodes(
 			if (!match) break;
 			const prefix = match[1];
 			const shortcode = match[2];
+			if (prefix === undefined || shortcode === undefined) continue;
 			const emote = shortcodeLookup.get(shortcode);
 			if (!emote) continue;
 
@@ -270,14 +271,17 @@ function plainTextToHtml(
 	for (const part of parts) {
 		const codeMatch = part.match(codeOnlyRe);
 		if (codeMatch) {
-			const idx = Number.parseInt(codeMatch[1], 10);
-			result.push(idx < codeBlocks.length ? escapeHtml(codeBlocks[idx]) : "");
+			const indexText = codeMatch[1];
+			if (indexText === undefined) continue;
+			const codeBlock = codeBlocks[Number.parseInt(indexText, 10)];
+			result.push(codeBlock === undefined ? "" : escapeHtml(codeBlock));
 			continue;
 		}
 		const anchorMatch = part.match(anchorOnlyRe);
 		if (anchorMatch) {
-			const idx = Number.parseInt(anchorMatch[1], 10);
-			result.push(idx < anchors.length ? anchors[idx] : "");
+			const indexText = anchorMatch[1];
+			if (indexText === undefined) continue;
+			result.push(anchors[Number.parseInt(indexText, 10)] ?? "");
 			continue;
 		}
 

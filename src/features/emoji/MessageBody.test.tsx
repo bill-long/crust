@@ -20,6 +20,19 @@ import type { ResolvedEmote } from "./types";
 afterEach(cleanup);
 
 const client = createMockClient() as unknown as MatrixClient;
+const customEmoji = new Map<string, ResolvedEmote>([
+	[
+		"wave",
+		{
+			shortcode: "wave",
+			mxcUrl: "mxc://example.com/wave",
+			httpUrl: "https://example.com/wave.png",
+			body: ":wave:",
+			packId: "test",
+			packName: "Test",
+		},
+	],
+]);
 
 /** Compose markdown then render it the way the timeline would, returning the
  *  rendered container so we can assert the HTML survives DOMPurify. */
@@ -71,6 +84,48 @@ describe("MessageBody — Phase 6 markdown round-trip through DOMPurify", () => 
 	it("blockquote survives", () => {
 		const c = renderComposed("> quoted");
 		expect(c.querySelector("blockquote")?.textContent).toContain("quoted");
+	});
+});
+
+describe("MessageBody custom emoji", () => {
+	it("replaces plain-text shortcodes without entering protected code or links", () => {
+		const { container } = render(() => (
+			<MessageBody
+				class="text-message"
+				body="hello :wave: `:wave:` https://example.com/:wave:"
+				format={null}
+				formattedBody={null}
+				isEdited={false}
+				client={client}
+				shortcodeLookup={customEmoji}
+			/>
+		));
+
+		const images = container.querySelectorAll("img.emoji-inline");
+		expect(images).toHaveLength(1);
+		expect(images[0]?.getAttribute("alt")).toBe(":wave:");
+		expect(container.textContent).toContain("`:wave:`");
+		expect(container.querySelector("a")?.textContent).toBe(
+			"https://example.com/:wave",
+		);
+	});
+
+	it("replaces formatted-body text nodes but skips code and anchors", () => {
+		const { container } = render(() => (
+			<MessageBody
+				class="text-message"
+				body="fallback"
+				format="org.matrix.custom.html"
+				formattedBody='<p>:wave: <code>:wave:</code> <a href="https://example.com">:wave:</a></p>'
+				isEdited={false}
+				client={client}
+				shortcodeLookup={customEmoji}
+			/>
+		));
+
+		expect(container.querySelectorAll("img.emoji-inline")).toHaveLength(1);
+		expect(container.querySelector("code")?.textContent).toBe(":wave:");
+		expect(container.querySelector("a")?.textContent).toBe(":wave:");
 	});
 });
 
