@@ -13,6 +13,7 @@ import {
 	clearMentionIntent,
 	requestMention,
 } from "../../../stores/composerIntents";
+import { requiredAt } from "../../../test/assertions";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
 
@@ -66,7 +67,11 @@ describe("Composer thread sends", () => {
 		typeAndSend(container, "hello thread");
 		await tick();
 		expect(client.sendMessage).toHaveBeenCalledTimes(1);
-		const [roomId, threadId, content] = client.sendMessage.mock.calls[0];
+		const [roomId, threadId, content] = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"sendMessage call",
+		);
 		expect(roomId).toBe(ROOM);
 		expect(threadId).toBe("$root");
 		// The SDK's addThreadRelationIfNeeded builds the MSC3440 shape;
@@ -87,7 +92,11 @@ describe("Composer thread sends", () => {
 		typeAndSend(container, "hello main");
 		await tick();
 		expect(client.sendMessage).toHaveBeenCalledTimes(1);
-		const [roomId, threadId, content] = client.sendMessage.mock.calls[0];
+		const [roomId, threadId, content] = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"sendMessage call",
+		);
 		expect(roomId).toBe(ROOM);
 		expect(threadId).toBeNull();
 		expect((content as Record<string, unknown>).body).toBe("hello main");
@@ -116,7 +125,11 @@ describe("Composer thread sends", () => {
 		));
 		typeAndSend(container, "quoting you");
 		await tick();
-		const [, threadId, content] = client.sendMessage.mock.calls[0];
+		const [, threadId, content] = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"sendMessage call",
+		);
 		expect(threadId).toBe("$root");
 		const relates = (content as Record<string, unknown>)["m.relates_to"] as
 			| Record<string, unknown>
@@ -152,7 +165,11 @@ describe("Composer thread sends", () => {
 		typeAndSend(container, "edited text");
 		await tick();
 		expect(client.sendMessage).toHaveBeenCalledTimes(1);
-		const [roomId, threadId, content] = client.sendMessage.mock.calls[0];
+		const [roomId, threadId, content] = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"sendMessage call",
+		);
 		expect(roomId).toBe(ROOM);
 		// Without the threadId the edit's local echo would get no thread
 		// association and the panel's acceptsEvent gate would reject it.
@@ -209,7 +226,11 @@ describe("Composer thread sends", () => {
 		if (!submit) throw new Error("no submit button");
 		await userEvent.click(submit);
 		expect(client.sendEvent).toHaveBeenCalledTimes(1);
-		const [roomId, threadId, type] = client.sendEvent.mock.calls[0];
+		const [roomId, threadId, type] = requiredAt(
+			client.sendEvent.mock.calls,
+			0,
+			"sendEvent call",
+		);
 		expect(roomId).toBe(ROOM);
 		expect(threadId).toBe("$root");
 		expect(type).toBe("org.matrix.msc3381.poll.start");

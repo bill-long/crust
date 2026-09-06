@@ -185,7 +185,11 @@ describe("useRtcSession", () => {
 		await result.fociReady;
 		expect(result.canJoin()).toBe(true);
 		await result.join();
-		const [fociArg] = session.joinRoomSession.mock.calls[0];
+		const fociArg = requiredAt(
+			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
+			0,
+			"foci argument",
+		);
 		expect(fociArg).toEqual([
 			{
 				type: "livekit",
@@ -352,7 +356,11 @@ describe("useRtcSession", () => {
 		// override can't permanently block Join.
 		expect(result.canJoin()).toBe(true);
 		await result.join();
-		const [fociArg] = session.joinRoomSession.mock.calls[0];
+		const fociArg = requiredAt(
+			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
+			0,
+			"foci argument",
+		);
 		expect(fociArg).toEqual([
 			{
 				type: "livekit",
@@ -379,7 +387,11 @@ describe("useRtcSession", () => {
 		const { rtc, session } = renderRtc();
 		await rtc.join();
 		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
-		const [foci, multi, joinConfig] = session.joinRoomSession.mock.calls[0];
+		const [foci, multi, joinConfig] = requiredAt(
+			session.joinRoomSession.mock.calls,
+			0,
+			"join call",
+		);
 		expect(foci).toEqual([
 			{
 				type: "livekit",

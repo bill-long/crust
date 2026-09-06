@@ -102,18 +102,19 @@ export async function resolveSecretStorageKey(
 			// Fresh fetch failed — fall through to the offered set.
 		}
 		const offeredDefault = Object.hasOwn(source.offeredKeys, defaultKeyId)
-			? source.offeredKeys[defaultKeyId]
+			? (source.offeredKeys[defaultKeyId] ?? null)
 			: null;
 		if (isUsableKeyDescription(offeredDefault)) {
 			return { keyId: defaultKeyId, keyInfo: offeredDefault };
 		}
 	}
 
-	const firstOfferedId = Object.keys(source.offeredKeys)[0];
-	if (firstOfferedId) {
+	const firstOffered = Object.entries(source.offeredKeys)[0];
+	if (firstOffered?.[0]) {
+		const [keyId, keyInfo] = firstOffered;
 		return {
-			keyId: firstOfferedId,
-			keyInfo: source.offeredKeys[firstOfferedId],
+			keyId,
+			keyInfo,
 		};
 	}
 	return null;
