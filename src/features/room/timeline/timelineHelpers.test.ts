@@ -253,6 +253,15 @@ describe("capStoreToRealLimit", () => {
 			"$real",
 		]);
 	});
+
+	it("walks past absent rows while finding the oldest excess real row", () => {
+		const rows = new Array<TimelineEvent>(1);
+		rows.push(row("$one", 1), row("$two", 2));
+
+		capStoreToRealLimit(rows, 1);
+
+		expect(rows.map((entry) => entry.eventId)).toEqual(["$two"]);
+	});
 });
 
 describe("mergeRowsByTimestamp", () => {
@@ -283,6 +292,22 @@ describe("mergeRowsByTimestamp", () => {
 
 		expect(merged).toEqual(base);
 		expect(merged).not.toBe(base);
+	});
+
+	it("skips absent insert rows", () => {
+		const inserts = new Array<TimelineEvent>(1);
+		inserts.push(row("~call-expiry-leave:middle", 15));
+
+		const merged = mergeRowsByTimestamp(
+			[row("$base-1", 10), row("$base-2", 20)],
+			inserts,
+		);
+
+		expect(merged.map((entry) => entry.eventId)).toEqual([
+			"$base-1",
+			"~call-expiry-leave:middle",
+			"$base-2",
+		]);
 	});
 });
 
