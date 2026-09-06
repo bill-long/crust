@@ -612,7 +612,9 @@ export function useTimeline(
 				// all in-window reals or later (in-range) synthetics.
 				let boundary = draft.length;
 				for (let i = 0; i < draft.length; i++) {
-					const id = draft[i].eventId;
+					const row = draft[i];
+					if (!row) continue;
+					const id = row.eventId;
 					if (!isSyntheticEventId(id) && windowIds.has(id)) {
 						boundary = i;
 						break;
@@ -620,6 +622,7 @@ export function useTimeline(
 				}
 				for (let i = boundary - 1; i >= 0; i--) {
 					const row = draft[i];
+					if (!row) continue;
 					const evicted = isSyntheticEventId(row.eventId)
 						? row.timestamp < oldestWindowTs
 						: true;
@@ -1058,7 +1061,9 @@ export function useTimeline(
 				// already cleared by the SDK, so we can't identify which
 				// parent a redacted reaction belonged to)
 				for (let i = 0; i < draft.length; i++) {
-					const evt = eventMap.get(draft[i].eventId);
+					const row = draft[i];
+					if (!row) continue;
+					const evt = eventMap.get(row.eventId);
 					if (evt) {
 						draft[i] = projectEvent(evt, room);
 					}

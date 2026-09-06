@@ -30,6 +30,7 @@ export function firstUnreadIndex(
 
 	for (let i = readIndex + 1; i < events.length; i++) {
 		const ev = events[i];
+		if (!ev) continue;
 		if (ev.senderId === myUserId) continue;
 		if (ev.stateNotice) continue;
 		return i;

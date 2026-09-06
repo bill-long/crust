@@ -50,7 +50,8 @@ function resampleWaveform(samples: number[] | null): number[] {
 		);
 		let max = 0;
 		for (let j = start; j < end; j++) {
-			if (samples[j] > max) max = samples[j];
+			const sample = samples[j];
+			if (sample !== undefined && sample > max) max = sample;
 		}
 		bars.push(Math.max(max, MIN_BAR));
 	}

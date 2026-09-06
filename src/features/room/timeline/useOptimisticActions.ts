@@ -85,9 +85,9 @@ export function useOptimisticActions() {
 		}
 		setPendingReactions(
 			produce((d) => {
-				let byKey = d[targetId];
+				let byKey: Record<string, MatrixEvent[]> | undefined = d[targetId];
 				if (!byKey) {
-					byKey = Object.create(null);
+					byKey = Object.create(null) as Record<string, MatrixEvent[]>;
 					d[targetId] = byKey;
 				}
 				let arr = byKey[key];

@@ -104,7 +104,7 @@ export function useReadReceipts(
 		// than sorting the full room member list (which can be 1000s) on
 		// every receipt tick.
 		for (const id in map) {
-			map[id].sort((a, b) => a.userId.localeCompare(b.userId));
+			map[id]?.sort((a, b) => a.userId.localeCompare(b.userId));
 		}
 		return map;
 	});

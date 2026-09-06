@@ -18,6 +18,7 @@ import {
 	makeTimelineHarnessRef,
 	TestClientProvider,
 } from "../../../test/TimelineHarness";
+import { requiredAt } from "./testAssertions";
 
 const harness = makeTimelineHarnessRef();
 vi.mock("./useTimeline", () => ({
@@ -123,9 +124,13 @@ describe("TimelineView drag-and-drop", () => {
 		await tick();
 
 		expect(mockEnqueue).toHaveBeenCalledTimes(1);
-		const passed = mockEnqueue.mock.calls[0][0] as FileList;
+		const passed = requiredAt(
+			mockEnqueue.mock.calls,
+			0,
+			"enqueue call",
+		)[0] as FileList;
 		expect(passed.length).toBe(1);
-		expect(passed[0].name).toBe("dropped.bin");
+		expect(requiredAt(passed, 0, "dropped file").name).toBe("dropped.bin");
 		// Drop ends the drag, so the overlay is gone.
 		expect(queryByText(OVERLAY_TEXT)).toBeNull();
 	});

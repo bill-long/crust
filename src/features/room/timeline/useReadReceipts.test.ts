@@ -3,6 +3,7 @@ import { ReceiptType, RoomEvent } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "./testAssertions";
 import type { TimelineEvent } from "./timelineTypes";
 import { useReadReceipts } from "./useReadReceipts";
 
@@ -210,7 +211,7 @@ describe("useReadReceipts receipt projection", () => {
 		});
 		expect(handle.result.receipts().$first).toHaveLength(1);
 
-		members[0].readUpTo = "$second";
+		requiredAt(members, 0, "room member").readUpTo = "$second";
 		handle.emitReceipt(ROOM_B);
 		expect(handle.result.receipts().$first).toHaveLength(1);
 		expect(handle.result.receipts().$second).toBeUndefined();

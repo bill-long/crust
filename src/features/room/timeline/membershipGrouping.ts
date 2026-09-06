@@ -75,8 +75,10 @@ export function computeMembershipGroups(
 			const memberIndices: number[] = [];
 			const memberEventIds: string[] = [];
 			for (let i = runStart; i < end; i++) {
+				const event = events[i];
+				if (!event) continue;
 				memberIndices.push(i);
-				memberEventIds.push(events[i].eventId);
+				memberEventIds.push(event.eventId);
 			}
 			const group: MembershipGroup = {
 				leaderIndex: runStart,

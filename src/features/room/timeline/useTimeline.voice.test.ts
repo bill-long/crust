@@ -6,6 +6,7 @@ import {
 	createMockRoom,
 	type MockEvent,
 } from "../../../test/mockClient";
+import { requiredAt } from "./testAssertions";
 import { useTimeline } from "./useTimeline";
 
 const ROOM_ID = "!room:test";
@@ -62,11 +63,12 @@ describe("useTimeline voice messages", () => {
 			);
 			await flushPromises();
 			expect(events.length).toBe(1);
-			expect(events[0].msgtype).toBe("m.audio");
-			expect(events[0].isVoice).toBe(true);
-			expect(events[0].voiceDurationMs).toBe(6541);
-			expect(events[0].voiceWaveform).toEqual([0, 0.5, 1]);
-			expect(events[0].mediaFullUrl).toContain("https://");
+			const voice = requiredAt(events, 0, "voice event");
+			expect(voice.msgtype).toBe("m.audio");
+			expect(voice.isVoice).toBe(true);
+			expect(voice.voiceDurationMs).toBe(6541);
+			expect(voice.voiceWaveform).toEqual([0, 0.5, 1]);
+			expect(voice.mediaFullUrl).toContain("https://");
 		});
 	});
 
@@ -93,9 +95,10 @@ describe("useTimeline voice messages", () => {
 				() => ROOM_ID,
 			);
 			await flushPromises();
-			expect(events[0].isVoice).toBe(false);
-			expect(events[0].voiceDurationMs).toBeNull();
-			expect(events[0].voiceWaveform).toBeNull();
+			const audio = requiredAt(events, 0, "plain audio event");
+			expect(audio.isVoice).toBe(false);
+			expect(audio.voiceDurationMs).toBeNull();
+			expect(audio.voiceWaveform).toBeNull();
 		});
 	});
 

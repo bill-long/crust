@@ -221,8 +221,7 @@ const TimelineView: Component<{
 		// arrivals pile up below the fold with no "Jump to latest" offered
 		// (that button is hidden while atBottom reads true).
 		const rows = events;
-		const targetIsLive =
-			rows.length > 0 && rows[rows.length - 1].eventId === target;
+		const targetIsLive = rows.at(-1)?.eventId === target;
 		setWantsBottom(targetIsLive);
 		// Hand focus to the scroller too. This button unmounts the moment the
 		// divider is seen, and focus on a removed element falls to <body>,
@@ -965,10 +964,12 @@ const TimelineView: Component<{
 	// Typing indicator text
 	const typingText = createMemo(() => {
 		const users = typingUsers();
-		if (users.length === 0) return null;
-		if (users.length === 1) return `${users[0].displayName} is typing…`;
-		if (users.length === 2)
-			return `${users[0].displayName} and ${users[1].displayName} are typing…`;
+		const first = users[0];
+		if (!first) return null;
+		if (users.length === 1) return `${first.displayName} is typing…`;
+		const second = users[1];
+		if (users.length === 2 && second)
+			return `${first.displayName} and ${second.displayName} are typing…`;
 		return "Several people are typing…";
 	});
 
@@ -1215,6 +1216,7 @@ const TimelineView: Component<{
 														const arr = pendingEdits[event.eventId];
 														if (!arr || arr.length === 0) return undefined;
 														const last = arr[arr.length - 1];
+														if (!last) return undefined;
 														const newContent = last.getContent()?.[
 															"m.new_content"
 														] as { body?: unknown } | undefined;
