@@ -86,7 +86,8 @@ export function canReuseCachedSecretStorageKey(
  *     (correct even when the SDK's offered set is stale).
  *  2. The account's default key, using the SDK's offered description.
  *  3. The first usable offered key.
- *  4. null when there are no usable keys.
+ *  4. null when the first offered id is empty (legacy behavior) or there are
+ *     no usable keys.
  */
 export async function resolveSecretStorageKey(
 	source: SecretStorageKeySource,
