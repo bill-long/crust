@@ -5,6 +5,7 @@ import {
 	FOREIGN_RETRY_MS,
 	type ForeignSfuRoomsDeps,
 } from "./foreignSfuRooms";
+import { requiredAt } from "./testAssertions";
 
 // Hoisted so the vi.mock factory can reference it.
 const { jwtMock } = vi.hoisted(() => ({
@@ -204,10 +205,9 @@ describe("foreignSfuRooms", () => {
 		);
 		await flush();
 		expect(builtRooms).toHaveLength(2);
-		expect(builtRooms[0].connect).toHaveBeenCalledWith(
-			"wss://sfu-foreign",
-			"JWT-F",
-		);
+		expect(
+			requiredAt(builtRooms, 0, "foreign room").connect,
+		).toHaveBeenCalledWith("wss://sfu-foreign", "JWT-F");
 		expect(jwtMock).toHaveBeenCalledTimes(2);
 		expect(rooms.rooms().map((r) => r.state)).toEqual([
 			"connected",
@@ -229,7 +229,9 @@ describe("foreignSfuRooms", () => {
 		rooms.reconcile(set);
 		await flush();
 		expect(builtRooms).toHaveLength(1);
-		expect(builtRooms[0].disconnect).not.toHaveBeenCalled();
+		expect(
+			requiredAt(builtRooms, 0, "foreign room").disconnect,
+		).not.toHaveBeenCalled();
 	});
 
 	it("tears down an origin that leaves the desired set (media cleanup + disconnect)", async () => {
@@ -411,7 +413,9 @@ describe("foreignSfuRooms", () => {
 		expect(reportErrorMock).toHaveBeenCalledTimes(1);
 		// Console-only: no userMessage (the #494 badge is the user-facing
 		// signal for an unreachable peer).
-		expect(reportErrorMock.mock.calls[0][1]).not.toHaveProperty("userMessage");
+		expect(
+			requiredAt(reportErrorMock.mock.calls, 0, "reported error")[1],
+		).not.toHaveProperty("userMessage");
 	});
 
 	it("retries a failed origin only after the backoff elapses", async () => {
@@ -421,7 +425,9 @@ describe("foreignSfuRooms", () => {
 		const set = desired("https://sfu-a.example.org");
 		rooms.reconcile(set);
 		await flush();
-		expect(rooms.rooms()[0].state).toBe("failed");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"failed",
+		);
 		// Within the backoff: reconcile must NOT re-attempt.
 		rooms.reconcile(set);
 		await flush();
@@ -431,7 +437,9 @@ describe("foreignSfuRooms", () => {
 		rooms.reconcile(set);
 		await flush();
 		expect(jwtMock).toHaveBeenCalledTimes(2);
-		expect(rooms.rooms()[0].state).toBe("connected");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"connected",
+		);
 	});
 
 	it("marks an unsolicited room drop failed and reclaims its media", async () => {
@@ -449,7 +457,9 @@ describe("foreignSfuRooms", () => {
 		);
 		room.emit("disconnected");
 		await flush();
-		expect(rooms.rooms()[0].state).toBe("failed");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"failed",
+		);
 		expect(fx.detachAudioTrack).toHaveBeenCalledWith("sid-audio");
 	});
 
@@ -489,14 +499,25 @@ describe("foreignSfuRooms", () => {
 		// Ordering: E2EE enabled before the websocket connects.
 		expect(room.setE2EEEnabled).toHaveBeenCalledWith(true);
 		expect(room.setE2EEEnabled.mock.invocationCallOrder[0]).toBeLessThan(
-			room.connect.mock.invocationCallOrder[0],
+			requiredAt(
+				room.connect.mock.invocationCallOrder,
+				0,
+				"connect call order",
+			),
 		);
 		rooms.reconcile(new Map());
 		await flush();
 		// Released only after disconnect resolved.
-		expect(fx.bindings[0].release).toHaveBeenCalledTimes(1);
+		expect(
+			requiredAt(fx.bindings, 0, "E2EE binding").release,
+		).toHaveBeenCalledTimes(1);
 		expect(room.disconnect.mock.invocationCallOrder[0]).toBeLessThan(
-			fx.bindings[0].release.mock.invocationCallOrder[0],
+			requiredAt(
+				requiredAt(fx.bindings, 0, "E2EE binding").release.mock
+					.invocationCallOrder,
+				0,
+				"release call order",
+			),
 		);
 	});
 
@@ -517,7 +538,9 @@ describe("foreignSfuRooms", () => {
 		rooms.reconcile(desired("https://sfu-a.example.org"));
 		await flush();
 		await rooms.clear();
-		expect(builtRooms[0].disconnect).toHaveBeenCalled();
+		expect(
+			requiredAt(builtRooms, 0, "foreign room").disconnect,
+		).toHaveBeenCalled();
 		expect(rooms.rooms()).toHaveLength(0);
 		rooms.reconcile(desired("https://sfu-a.example.org"));
 		await flush();
@@ -543,15 +566,19 @@ describe("foreignSfuRooms", () => {
 		await flush();
 		room.emit("disconnected");
 		await flush();
-		expect(rooms.rooms()[0].state).toBe("failed");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"failed",
+		);
 		const armed = fx.scheduled.filter((t) => !t.cleared);
 		expect(armed).toHaveLength(1);
-		expect(armed[0].ms).toBe(FOREIGN_RETRY_MS);
+		expect(requiredAt(armed, 0, "retry timer").ms).toBe(FOREIGN_RETRY_MS);
 		// Fire the timer: the origin reconnects with NO reconcile call.
 		roomQueue.push(createFakeRoom());
-		armed[0].fn();
+		requiredAt(armed, 0, "retry timer").fn();
 		await flush();
-		expect(rooms.rooms()[0].state).toBe("connected");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"connected",
+		);
 		expect(jwtMock).toHaveBeenCalledTimes(2);
 	});
 
@@ -565,7 +592,9 @@ describe("foreignSfuRooms", () => {
 		const rooms = createForeignSfuRooms(fx.deps);
 		rooms.reconcile(desired("https://sfu-a.example.org"));
 		await flush();
-		expect(rooms.rooms()[0].state).toBe("failed");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"failed",
+		);
 		// Same origin, updated path - arrives within the backoff window.
 		const updated = transport("https://sfu-a.example.org/livekit");
 		rooms.reconcile(
@@ -575,11 +604,13 @@ describe("foreignSfuRooms", () => {
 		expect(jwtMock).toHaveBeenCalledTimes(1);
 		roomQueue.push(createFakeRoom());
 		const armed = fx.scheduled.filter((t) => !t.cleared);
-		armed[armed.length - 1].fn();
+		requiredAt(armed, armed.length - 1, "latest retry timer").fn();
 		await flush();
 		expect(jwtMock).toHaveBeenCalledTimes(2);
 		expect((jwtMock.mock.calls[1] as unknown[])[0]).toEqual(updated);
-		expect(rooms.rooms()[0].state).toBe("connected");
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"connected",
+		);
 	});
 
 	it("removing an origin cancels its armed retry timer", async () => {
@@ -625,10 +656,14 @@ describe("foreignSfuRooms", () => {
 		const rooms = createForeignSfuRooms(fx.deps);
 		rooms.reconcile(desired("https://sfu-a.example.org"));
 		await flush();
-		expect(rooms.rooms()[0].state).toBe("failed");
-		expect(rooms.rooms()[0].room).toBeNull();
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").state).toBe(
+			"failed",
+		);
+		expect(requiredAt(rooms.rooms(), 0, "foreign room state").room).toBeNull();
 		expect(room.disconnect).toHaveBeenCalledTimes(1);
-		expect(fx.bindings[0].release).toHaveBeenCalledTimes(1);
+		expect(
+			requiredAt(fx.bindings, 0, "E2EE binding").release,
+		).toHaveBeenCalledTimes(1);
 	});
 
 	it("passes the local userId:deviceId identity to bindRoom for replay ordering", async () => {

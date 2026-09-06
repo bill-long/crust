@@ -22,7 +22,8 @@ function inlineStyleSheet(sheet: CSSStyleSheet, target: Document): boolean {
 		const rules = sheet.cssRules;
 		const parts: string[] = [];
 		for (let i = 0; i < rules.length; i++) {
-			parts.push(rules[i].cssText);
+			const rule = rules[i];
+			if (rule) parts.push(rule.cssText);
 		}
 		const style = target.createElement("style");
 		style.textContent = parts.join("");

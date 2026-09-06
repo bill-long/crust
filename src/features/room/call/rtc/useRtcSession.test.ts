@@ -7,6 +7,7 @@ import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSess
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
+import { requiredAt } from "./testAssertions";
 import { useRtcSession } from "./useRtcSession";
 
 type Listener = (...args: unknown[]) => void;
@@ -728,9 +729,21 @@ describe("useRtcSession", () => {
 			const { rtc, session } = renderRtc({ e2ee: () => ctx });
 			await rtc.join();
 			// Invocation-order assertion: attach < joinRoomSession < reemit.
-			const attachOrder = attach.mock.invocationCallOrder[0];
-			const joinOrder = session.joinRoomSession.mock.invocationCallOrder[0];
-			const reemitOrder = reemit.mock.invocationCallOrder[0];
+			const attachOrder = requiredAt(
+				attach.mock.invocationCallOrder,
+				0,
+				"attach call order",
+			);
+			const joinOrder = requiredAt(
+				session.joinRoomSession.mock.invocationCallOrder,
+				0,
+				"join call order",
+			);
+			const reemitOrder = requiredAt(
+				reemit.mock.invocationCallOrder,
+				0,
+				"reemit call order",
+			);
 			expect(attachOrder).toBeLessThan(joinOrder);
 			expect(joinOrder).toBeLessThan(reemitOrder);
 		});
@@ -739,7 +752,11 @@ describe("useRtcSession", () => {
 			const { ctx } = fakeCtx();
 			const { rtc, session } = renderRtc({ e2ee: () => ctx });
 			await rtc.join();
-			const joinConfig = session.joinRoomSession.mock.calls[0][2];
+			const joinConfig = requiredAt(
+				session.joinRoomSession.mock.calls,
+				0,
+				"join call",
+			)[2];
 			expect(joinConfig).toEqual({
 				manageMediaKeys: true,
 				// Phase 5+ owns this flag; must stay false until summaries.ts
@@ -752,7 +769,11 @@ describe("useRtcSession", () => {
 			const { ctx, attach } = fakeCtx();
 			const { rtc } = renderRtc({ e2ee: () => ctx });
 			await rtc.join();
-			const isLive = attach.mock.calls[0][1] as () => boolean;
+			const isLive = requiredAt(
+				attach.mock.calls,
+				0,
+				"attach call",
+			)[1] as () => boolean;
 			expect(isLive()).toBe(true);
 			await rtc.leave();
 			expect(isLive()).toBe(false);
@@ -797,7 +818,11 @@ describe("useRtcSession", () => {
 			expect(detach).toHaveBeenCalledTimes(1);
 			// isLive must be false after the failed attempt so any late
 			// EncryptionKeyChanged that snuck in before detach bails.
-			const isLive = attach.mock.calls[0][1] as () => boolean;
+			const isLive = requiredAt(
+				attach.mock.calls,
+				0,
+				"attach call",
+			)[1] as () => boolean;
 			expect(isLive()).toBe(false);
 		});
 
@@ -821,7 +846,11 @@ describe("useRtcSession", () => {
 			expect(detach).toHaveBeenCalledTimes(1);
 			// isLive must be false so a late EncryptionKeyChanged bails
 			// before pumping a key from the failed session into the bridge.
-			const isLive = attach.mock.calls[0][1] as () => boolean;
+			const isLive = requiredAt(
+				attach.mock.calls,
+				0,
+				"attach call",
+			)[1] as () => boolean;
 			expect(isLive()).toBe(false);
 		});
 
@@ -839,7 +868,11 @@ describe("useRtcSession", () => {
 			// bridge — detach would silently kill E2EE mid-call.
 			expect(rtc.status()).toBe("joined");
 			expect(detach).not.toHaveBeenCalled();
-			const isLive = attach.mock.calls[0][1] as () => boolean;
+			const isLive = requiredAt(
+				attach.mock.calls,
+				0,
+				"attach call",
+			)[1] as () => boolean;
 			expect(isLive()).toBe(true);
 		});
 
@@ -857,7 +890,11 @@ describe("useRtcSession", () => {
 			// events from the departing RTCEncryptionManager bail before
 			// pumping a stale key into the keyProvider.
 			expect(detach).toHaveBeenCalledTimes(1);
-			const isLive = attach.mock.calls[0][1] as () => boolean;
+			const isLive = requiredAt(
+				attach.mock.calls,
+				0,
+				"attach call",
+			)[1] as () => boolean;
 			expect(isLive()).toBe(false);
 		});
 	});

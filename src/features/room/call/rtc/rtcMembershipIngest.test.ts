@@ -1,5 +1,6 @@
 import { MatrixRTCSession } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
 import { describe, expect, it } from "vitest";
+import { requiredAt } from "./testAssertions";
 
 /**
  * Locks the matrix-js-sdk behaviour Crust's identity resolution depends on
@@ -140,8 +141,12 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 			SLOT,
 		);
 		expect(memberships).toHaveLength(1);
-		expect(memberships[0].userId).toBe("@alice:example.org");
-		expect(memberships[0].rtcBackendIdentity).toBe("@alice:example.org:DEVA");
+		expect(requiredAt(memberships, 0, "legacy membership").userId).toBe(
+			"@alice:example.org",
+		);
+		expect(
+			requiredAt(memberships, 0, "legacy membership").rtcBackendIdentity,
+		).toBe("@alice:example.org:DEVA");
 	});
 
 	it("ingests an MSC4143 sticky membership with the MSC4195 hashed backend identity", async () => {
@@ -154,8 +159,12 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 			SLOT,
 		);
 		expect(memberships).toHaveLength(1);
-		expect(memberships[0].userId).toBe(RTC_MEMBER.user_id);
-		expect(memberships[0].rtcBackendIdentity).toBe(RTC_MEMBER_HASH);
+		expect(requiredAt(memberships, 0, "sticky membership").userId).toBe(
+			RTC_MEMBER.user_id,
+		);
+		expect(
+			requiredAt(memberships, 0, "sticky membership").rtcBackendIdentity,
+		).toBe(RTC_MEMBER_HASH);
 	});
 
 	it("surfaces legacy and MSC4143 memberships side by side", async () => {
@@ -201,6 +210,8 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 			SLOT,
 		);
 		expect(memberships).toHaveLength(1);
-		expect(memberships[0].rtcBackendIdentity).toBe(RTC_MEMBER_HASH);
+		expect(
+			requiredAt(memberships, 0, "joined sticky membership").rtcBackendIdentity,
+		).toBe(RTC_MEMBER_HASH);
 	});
 });

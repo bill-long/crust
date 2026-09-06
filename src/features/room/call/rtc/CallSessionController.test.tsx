@@ -19,6 +19,7 @@ import {
 	currentCallSession,
 } from "./callSessionStore";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
+import { requiredAt } from "./testAssertions";
 import type { LivekitConnectionStatus, LivekitRoomApi } from "./useLivekitRoom";
 import type { RtcSessionApi, RtcStatus } from "./useRtcSession";
 
@@ -254,7 +255,11 @@ describe("CallSessionController", () => {
 		expect(hooksState.rtcJoin).toHaveBeenCalledTimes(1);
 		// Bridge built first.
 		expect(hooksState.createE2EE.mock.invocationCallOrder[0]).toBeLessThan(
-			hooksState.rtcJoin.mock.invocationCallOrder[0],
+			requiredAt(
+				hooksState.rtcJoin.mock.invocationCallOrder,
+				0,
+				"join call order",
+			),
 		);
 	});
 
