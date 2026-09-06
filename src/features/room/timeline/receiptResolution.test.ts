@@ -21,6 +21,13 @@ describe("createReceiptResolver", () => {
 		);
 	});
 
+	it("walks past sparse window slots", () => {
+		const win = [raw("$a")];
+		win.length = 2;
+		win[2] = raw("$reaction");
+		expect(createReceiptResolver(win, drawn(["$a"]))("$reaction")).toBe("$a");
+	});
+
 	it("gives up when the receipt is outside the window", () => {
 		const win = [raw("$b"), raw("$c")];
 		expect(createReceiptResolver(win, drawn(["$b"]))("$older")).toBeNull();

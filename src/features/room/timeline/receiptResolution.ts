@@ -35,7 +35,9 @@ export function createReceiptResolver(
 		if (!indexById) {
 			indexById = new Map();
 			for (let i = 0; i < windowEvents.length; i++) {
-				const id = windowEvents[i].getId();
+				const event = windowEvents[i];
+				if (event === undefined) continue;
+				const id = event.getId();
 				if (id !== undefined) indexById.set(id, i);
 			}
 		}
@@ -44,7 +46,9 @@ export function createReceiptResolver(
 		if (start === undefined) return null;
 
 		for (let i = start; i >= 0; i--) {
-			const id = windowEvents[i].getId();
+			const event = windowEvents[i];
+			if (event === undefined) continue;
+			const id = event.getId();
 			if (id && isDisplayable(id)) return id;
 		}
 		return null;
