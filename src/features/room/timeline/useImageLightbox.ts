@@ -62,13 +62,15 @@ export function useImageLightbox(events: TimelineEvent[]) {
 	};
 	const goPrev = (): void => {
 		const idx = lightboxIndex();
-		if (idx > 0) setLightboxEventId(imageGallery()[idx - 1].eventId);
+		const previous = idx > 0 ? imageGallery()[idx - 1] : undefined;
+		if (previous) setLightboxEventId(previous.eventId);
 	};
 	const goNext = (): void => {
 		const idx = lightboxIndex();
 		const g = imageGallery();
 		if (idx >= 0 && idx < g.length - 1) {
-			setLightboxEventId(g[idx + 1].eventId);
+			const next = g[idx + 1];
+			if (next) setLightboxEventId(next.eventId);
 		}
 	};
 

@@ -15,25 +15,13 @@ import {
 	encryptedMessage,
 	textMessage,
 } from "../../../test/mockClient";
+import { requiredAt, requiredValue } from "./testAssertions";
 import { mergeRowsByTimestamp } from "./timelineHelpers";
 import type { TimelineEvent } from "./useTimeline";
 import { MEMBER_REBUILD_THROTTLE_MS, useTimeline } from "./useTimeline";
 
 const row = (eventId: string, timestamp: number): TimelineEvent =>
 	({ eventId, timestamp }) as unknown as TimelineEvent;
-
-function requiredValue<T>(value: T | undefined, label: string): T {
-	if (value === undefined) throw new Error(`${label} was missing`);
-	return value;
-}
-
-function requiredAt<T>(
-	items: readonly T[],
-	index: number,
-	label = `timeline item ${index}`,
-): T {
-	return requiredValue(items[index], label);
-}
 
 describe("mergeRowsByTimestamp", () => {
 	const ids = (rows: TimelineEvent[]) => rows.map((r) => r.eventId);

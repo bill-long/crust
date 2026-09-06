@@ -3,6 +3,7 @@ import { EventStatus } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { canForward, forwardMessage } from "./forwardMessage";
+import { requiredAt } from "./testAssertions";
 import type { TimelineEvent } from "./timelineTypes";
 
 const uploadBlobMock = vi.fn();
@@ -454,11 +455,17 @@ describe("forwardMessage - media", () => {
 		});
 		await forwardMessage(client as never, source, "!target:example.com");
 		expect(uploadBlobMock).toHaveBeenCalledOnce();
-		expect(uploadBlobMock.mock.calls[0][2]).toMatchObject({
+		expect(
+			requiredAt(uploadBlobMock.mock.calls, 0, "encrypted upload call")[2],
+		).toMatchObject({
 			encrypted: true,
 			type: "image/png",
 		});
-		const sent = client.sendMessage.mock.calls[0][2] as Record<string, unknown>;
+		const sent = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"encrypted send call",
+		)[2] as Record<string, unknown>;
 		expect(sent.msgtype).toBe("m.image");
 		expect(sent.file).toMatchObject({ url: "mxc://example.com/newcipher" });
 		expect(sent.url).toBeUndefined();
@@ -499,11 +506,17 @@ describe("forwardMessage - media", () => {
 		await forwardMessage(client as never, source, "!target:example.com");
 		expect(decryptAttachmentMock).toHaveBeenCalledOnce();
 		expect(uploadBlobMock).toHaveBeenCalledOnce();
-		expect(uploadBlobMock.mock.calls[0][2]).toMatchObject({
+		expect(
+			requiredAt(uploadBlobMock.mock.calls, 0, "plain upload call")[2],
+		).toMatchObject({
 			encrypted: false,
 			type: "application/pdf",
 		});
-		const sent = client.sendMessage.mock.calls[0][2] as Record<string, unknown>;
+		const sent = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"plain send call",
+		)[2] as Record<string, unknown>;
 		expect(sent.url).toBe("mxc://example.com/reuploaded");
 		expect(sent.file).toBeUndefined();
 		const sentInfo = sent.info as Record<string, unknown>;
@@ -541,7 +554,11 @@ describe("forwardMessage - media", () => {
 			},
 		});
 		await forwardMessage(client as never, source, "!target:example.com");
-		const sent = client.sendMessage.mock.calls[0][2] as Record<string, unknown>;
+		const sent = requiredAt(
+			client.sendMessage.mock.calls,
+			0,
+			"voice send call",
+		)[2] as Record<string, unknown>;
 		expect(sent["org.matrix.msc3245.voice"]).toEqual({});
 		const sentInfo = sent.info as Record<string, unknown>;
 		expect(sentInfo["org.matrix.msc1767.audio"]).toEqual({

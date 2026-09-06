@@ -2,6 +2,7 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { createRoot } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
+import { requiredAt } from "./testAssertions";
 import { useTimeline } from "./useTimeline";
 
 /**
@@ -30,14 +31,6 @@ function withRoot(fn: () => Promise<void>): Promise<void> {
 /** Wait for TimelineWindow.load()'s microtask chain to settle. */
 function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-function requiredAt<T>(items: readonly T[], index: number): T {
-	const item = items[index];
-	if (item === undefined) {
-		throw new Error(`timeline event ${index} was not projected`);
-	}
-	return item;
 }
 
 const HTTP = "https://example.com/_matrix/media/v3/download";

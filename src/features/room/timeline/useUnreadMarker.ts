@@ -160,7 +160,7 @@ export function useUnreadMarker(
 		// reading them.
 		placementGeneration = gen;
 		const index = firstUnreadIndex(rows, resolved, myUserId);
-		placedBoundary = index === -1 ? null : rows[index].eventId;
+		placedBoundary = index === -1 ? null : (rows[index]?.eventId ?? null);
 		return placedBoundary;
 	});
 

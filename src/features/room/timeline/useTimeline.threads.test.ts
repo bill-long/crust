@@ -10,6 +10,7 @@ import {
 	threadReplyEvent,
 } from "../../../test/mockClient";
 import { threadTimelineSource } from "../threads/timelineSource";
+import { requiredAt } from "./testAssertions";
 import { useTimeline } from "./useTimeline";
 
 const ROOM_ID = "!room:test";
@@ -85,7 +86,7 @@ describe("useTimeline thread gating", () => {
 			);
 			await flushPromises();
 			expect(events.map((e) => e.eventId)).toEqual(["$parent", "$reply"]);
-			expect(events[1].replyToId).toBe("$parent");
+			expect(requiredAt(events, 1, "reply event").replyToId).toBe("$parent");
 		}));
 
 	it("ignores live emissions from thread timeline sets", () =>
@@ -169,13 +170,13 @@ describe("useTimeline thread gating", () => {
 				() => ROOM_ID,
 			);
 			await flushPromises();
-			expect(events[0].thread).toMatchObject({
+			expect(requiredAt(events, 0, "thread root").thread).toMatchObject({
 				threadId: "$root",
 				replyCount: 2,
 				latestSender: "@b:hs",
 				provisional: true,
 			});
-			expect(events[1].thread).toBeNull();
+			expect(requiredAt(events, 1, "plain message").thread).toBeNull();
 		}));
 
 	it("windows a thread's timeline with a thread source", () =>
@@ -228,9 +229,9 @@ describe("useTimeline thread gating", () => {
 				"$r2",
 				"$real",
 			]);
-			expect(events[1].replyToId).toBeNull();
+			expect(requiredAt(events, 1, "fallback reply").replyToId).toBeNull();
 			// A REAL in-thread reply (is_falling_back: false) keeps its quote.
-			expect(events[3].replyToId).toBe("$r1");
+			expect(requiredAt(events, 3, "thread reply").replyToId).toBe("$r1");
 			// Main-room events don't leak in via live emissions.
 			const mainEvent = createMatrixEvent(
 				textMessage(ROOM_ID, "$live", "@a:hs", "main live", 4000),
@@ -337,7 +338,9 @@ describe("useTimeline thread gating", () => {
 				"~txn1",
 				"$r2",
 			]);
-			expect(events[2].status).toBe(EventStatus.NOT_SENT);
+			expect(requiredAt(events, 2, "failed thread echo").status).toBe(
+				EventStatus.NOT_SENT,
+			);
 		}));
 
 	it("keeps a SENT-but-unsynced echo across rebuilds (two-step confirm)", () =>
@@ -449,7 +452,9 @@ describe("useTimeline thread gating", () => {
 			);
 			await flushPromises();
 			expect(events.map((e) => e.eventId)).toEqual(["$root", "~txn1"]);
-			expect(events[1].status).toBe(EventStatus.NOT_SENT);
+			expect(requiredAt(events, 1, "reopened thread echo").status).toBe(
+				EventStatus.NOT_SENT,
+			);
 
 			// Once resolved (discarded here), a later reopen shows no stale row.
 			echo.__setStatus(EventStatus.CANCELLED);
@@ -508,7 +513,9 @@ describe("useTimeline thread gating", () => {
 			client.__emit("Room.localEchoUpdated", echo, room);
 			await flushPromises();
 			expect(events.map((e) => e.eventId)).toEqual(["$root", "~txn1"]);
-			expect(events[1].status).toBe(EventStatus.SENDING);
+			expect(requiredAt(events, 1, "sending thread echo").status).toBe(
+				EventStatus.SENDING,
+			);
 
 			// Remote confirmation: the SDK rekeys the same event object and
 			// re-emits with the old id.
@@ -517,7 +524,7 @@ describe("useTimeline thread gating", () => {
 			client.__emit("Room.localEchoUpdated", echo, room, "~txn1");
 			await flushPromises();
 			expect(events.map((e) => e.eventId)).toEqual(["$root", "$confirmed"]);
-			expect(events[1].status).toBeNull();
+			expect(requiredAt(events, 1, "confirmed thread echo").status).toBeNull();
 
 			// A second, discarded echo: CANCELLED drops the injected row.
 			const echo2 = createMatrixEvent({
