@@ -10,10 +10,9 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
-import { trapTabKey } from "../../lib/focusTrap";
+import { Modal } from "../../components/Modal";
 import { validateMatrixUserId } from "../../lib/inviteValidation";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
-import { trackAppModalOpen } from "../../stores/modalStack";
 import { startDm } from "./startDm";
 
 interface NewDmDialogProps {
@@ -23,13 +22,10 @@ interface NewDmDialogProps {
 }
 
 const NewDmDialog: Component<NewDmDialogProps> = (props) => {
-	trackAppModalOpen(props.open);
 	const navigate = useNavigate();
 	const { optimisticallyMarkJoined } = useClient();
 
-	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	onCleanup(() => {
 		mounted = false;
@@ -59,39 +55,14 @@ const NewDmDialog: Component<NewDmDialogProps> = (props) => {
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				reset();
-				queueMicrotask(() => inputRef?.focus());
-			} else if (!isOpen && wasOpen) {
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
 			}
 		}),
 	);
 
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
-	});
-
 	const tryClose = (): void => {
 		if (submitting()) return;
 		props.onClose();
-	};
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			tryClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
 	};
 
 	const handleSubmit = async (e: Event): Promise<void> => {
@@ -140,83 +111,77 @@ const NewDmDialog: Component<NewDmDialogProps> = (props) => {
 	};
 
 	return (
-		<Show when={props.open()}>
-			<div
-				ref={overlayRef}
-				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				inert={cryptoDialogOpen() || undefined}
-				tabIndex={-1}
-				onKeyDown={handleKeyDown}
-				onClick={(e) => {
-					if (e.target === e.currentTarget) tryClose();
-				}}
+		<Modal
+			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 p-4"
+			open={props.open()}
+			onClose={tryClose}
+			dismissible={!submitting()}
+			labelledBy={titleId}
+			suspended={cryptoDialogOpen()}
+			initialFocus={() => inputRef}
+		>
+			<form
+				class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl"
+				onSubmit={handleSubmit}
 			>
-				<form
-					class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl"
-					onSubmit={handleSubmit}
+				<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
+					New direct message
+				</h2>
+				<p class="mb-4 text-sm text-text-muted">
+					Enter a Matrix user ID to start a private conversation.
+				</p>
+
+				<label
+					for={inputId}
+					class="mb-1 block text-xs font-medium text-text-secondary"
 				>
-					<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
-						New direct message
-					</h2>
-					<p class="mb-4 text-sm text-text-muted">
-						Enter a Matrix user ID to start a private conversation.
+					User ID
+				</label>
+				<input
+					id={inputId}
+					ref={(el) => {
+						inputRef = el;
+					}}
+					type="text"
+					value={inputValue()}
+					onInput={(e) => {
+						setInputValue(e.currentTarget.value);
+						if (error()) setError(null);
+					}}
+					placeholder="@alice:server"
+					autocomplete="off"
+					spellcheck={false}
+					disabled={submitting()}
+					aria-describedby={error() ? errorId : undefined}
+					aria-invalid={error() ? true : undefined}
+					class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+				/>
+
+				<Show when={error()}>
+					<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
+						{error()}
 					</p>
+				</Show>
 
-					<label
-						for={inputId}
-						class="mb-1 block text-xs font-medium text-text-secondary"
-					>
-						User ID
-					</label>
-					<input
-						id={inputId}
-						ref={(el) => {
-							inputRef = el;
-						}}
-						type="text"
-						value={inputValue()}
-						onInput={(e) => {
-							setInputValue(e.currentTarget.value);
-							if (error()) setError(null);
-						}}
-						placeholder="@alice:server"
-						autocomplete="off"
-						spellcheck={false}
+				<div class="mt-4 flex justify-end gap-2">
+					<button
+						type="button"
+						onClick={tryClose}
 						disabled={submitting()}
-						aria-describedby={error() ? errorId : undefined}
-						aria-invalid={error() ? true : undefined}
-						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
-					/>
-
-					<Show when={error()}>
-						<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
-							{error()}
-						</p>
-					</Show>
-
-					<div class="mt-4 flex justify-end gap-2">
-						<button
-							type="button"
-							onClick={tryClose}
-							disabled={submitting()}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							Cancel
-						</button>
-						<button
-							type="submit"
-							disabled={submitting()}
-							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							{submitting() ? "Starting…" : "Start chat"}
-						</button>
-					</div>
-				</form>
-			</div>
-		</Show>
+						class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						disabled={submitting()}
+						class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+					>
+						{submitting() ? "Starting…" : "Start chat"}
+					</button>
+				</div>
+			</form>
+		</Modal>
 	);
 };
 

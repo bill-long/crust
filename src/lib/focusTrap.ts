@@ -20,7 +20,9 @@ export const FOCUSABLE_SELECTOR =
 export function trapTabKey(container: HTMLElement, e: KeyboardEvent): void {
 	const focusable = Array.from(
 		container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
-	).filter((el) => el.offsetParent !== null);
+	).filter(
+		(el) => el.offsetParent !== null && !el.hasAttribute("data-focus-trap"),
+	);
 	if (focusable.length === 0) return;
 	const first = focusable[0];
 	const last = focusable[focusable.length - 1];

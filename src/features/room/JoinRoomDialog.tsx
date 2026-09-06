@@ -10,15 +10,14 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { Modal } from "../../components/Modal";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 import {
 	formatJoinAddress,
 	type JoinAddress,
 	parseJoinAddress,
 } from "../../lib/joinAddressParsing";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
-import { trackAppModalOpen } from "../../stores/modalStack";
 import { pushNotice } from "../../stores/notices";
 
 /**
@@ -91,14 +90,11 @@ interface JoinRoomDialogProps {
 }
 
 const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
-	trackAppModalOpen(props.open);
 	const navigate = useNavigate();
 	const { optimisticallyMarkJoined, optimisticallyMarkKnocked } = useClient();
 
-	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
 	let reasonRef: HTMLInputElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	onCleanup(() => {
 		mounted = false;
@@ -142,7 +138,6 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				reset();
 				// Prefill after reset() (which clears the input) so a stale
 				// prefill from an earlier open can't survive a fresh one.
@@ -151,40 +146,14 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 				setPrefillIsSpace(props.isSpace?.() ?? false);
 				if (props.knockOffered?.()) {
 					setKnockOffered(true);
-					queueMicrotask(() => reasonRef?.focus());
-				} else {
-					queueMicrotask(() => inputRef?.focus());
 				}
-			} else if (!isOpen && wasOpen) {
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
 			}
 		}),
 	);
 
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
-	});
-
 	const tryClose = (): void => {
 		if (submitting()) return;
 		props.onClose();
-	};
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			tryClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
 	};
 
 	const handleSubmit = async (e: Event): Promise<void> => {
@@ -320,138 +289,132 @@ const JoinRoomDialog: Component<JoinRoomDialogProps> = (props) => {
 	};
 
 	return (
-		<Show when={props.open()}>
-			<div
-				ref={overlayRef}
-				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				inert={cryptoDialogOpen() || undefined}
-				tabIndex={-1}
-				onKeyDown={handleKeyDown}
-				onClick={(e) => {
-					if (e.target === e.currentTarget) tryClose();
-				}}
+		<Modal
+			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 p-4"
+			open={props.open()}
+			onClose={tryClose}
+			dismissible={!submitting()}
+			labelledBy={titleId}
+			suspended={cryptoDialogOpen()}
+			initialFocus={() => (knockOffered() ? reasonRef : inputRef)}
+		>
+			<form
+				class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl"
+				onSubmit={handleSubmit}
 			>
-				<form
-					class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl"
-					onSubmit={handleSubmit}
+				<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
+					Join a room
+				</h2>
+				<p class="mb-4 text-sm text-text-muted">
+					Enter a room address (#alias:server) or a room ID with servers to try
+					(!id:server example.org), or paste a matrix.to link.
+				</p>
+
+				<label
+					for={inputId}
+					class="mb-1 block text-xs font-medium text-text-secondary"
 				>
-					<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
-						Join a room
-					</h2>
-					<p class="mb-4 text-sm text-text-muted">
-						Enter a room address (#alias:server) or a room ID with servers to
-						try (!id:server example.org), or paste a matrix.to link.
+					Room address or link
+				</label>
+				<input
+					id={inputId}
+					ref={(el) => {
+						inputRef = el;
+					}}
+					type="text"
+					value={inputValue()}
+					onInput={(e) => {
+						setInputValue(e.currentTarget.value);
+						if (error()) setError(null);
+						// Editing the address invalidates the prefill's isSpace
+						// flag - it only described the prefilled target.
+						if (prefillIsSpace()) setPrefillIsSpace(false);
+						// Editing the address after a 403 invalidates the knock
+						// offer - it was for the old address. Clear the typed
+						// reason too, so it can't leak into a re-triggered
+						// offer for a different room.
+						if (knockOffered()) {
+							setKnockOffered(false);
+							setKnockReason("");
+						}
+					}}
+					placeholder="#general:example.org"
+					autocomplete="off"
+					spellcheck={false}
+					disabled={submitting()}
+					aria-describedby={error() ? errorId : undefined}
+					aria-invalid={error() ? true : undefined}
+					class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+				/>
+
+				<Show when={error()}>
+					<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
+						{error()}
 					</p>
+				</Show>
 
-					<label
-						for={inputId}
-						class="mb-1 block text-xs font-medium text-text-secondary"
-					>
-						Room address or link
-					</label>
-					<input
-						id={inputId}
-						ref={(el) => {
-							inputRef = el;
-						}}
-						type="text"
-						value={inputValue()}
-						onInput={(e) => {
-							setInputValue(e.currentTarget.value);
-							if (error()) setError(null);
-							// Editing the address invalidates the prefill's isSpace
-							// flag - it only described the prefilled target.
-							if (prefillIsSpace()) setPrefillIsSpace(false);
-							// Editing the address after a 403 invalidates the knock
-							// offer - it was for the old address. Clear the typed
-							// reason too, so it can't leak into a re-triggered
-							// offer for a different room.
-							if (knockOffered()) {
-								setKnockOffered(false);
-								setKnockReason("");
-							}
-						}}
-						placeholder="#general:example.org"
-						autocomplete="off"
-						spellcheck={false}
-						disabled={submitting()}
-						aria-describedby={error() ? errorId : undefined}
-						aria-invalid={error() ? true : undefined}
-						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
-					/>
-
-					<Show when={error()}>
-						<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
-							{error()}
+				<Show when={knockOffered()}>
+					<div class="mb-2 rounded bg-surface-2 p-3">
+						<p id={offerId} class="mb-2 text-sm text-text-secondary">
+							That room needs an invitation - or send a join request and a
+							moderator can let you in.
 						</p>
-					</Show>
-
-					<Show when={knockOffered()}>
-						<div class="mb-2 rounded bg-surface-2 p-3">
-							<p id={offerId} class="mb-2 text-sm text-text-secondary">
-								That room needs an invitation - or send a join request and a
-								moderator can let you in.
-							</p>
-							<label
-								for={reasonId}
-								class="mb-1 block text-xs font-medium text-text-secondary"
-							>
-								Reason (optional)
-							</label>
-							<input
-								id={reasonId}
-								ref={(el) => {
-									reasonRef = el;
-								}}
-								type="text"
-								value={knockReason()}
-								onInput={(e) => setKnockReason(e.currentTarget.value)}
-								placeholder="Let me in, please"
-								autocomplete="off"
-								disabled={submitting()}
-								aria-describedby={offerId}
-								class="w-full rounded bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
-							/>
-						</div>
-					</Show>
-
-					<div class="mt-4 flex justify-end gap-2">
-						<button
-							type="button"
-							onClick={tryClose}
+						<label
+							for={reasonId}
+							class="mb-1 block text-xs font-medium text-text-secondary"
+						>
+							Reason (optional)
+						</label>
+						<input
+							id={reasonId}
+							ref={(el) => {
+								reasonRef = el;
+							}}
+							type="text"
+							value={knockReason()}
+							onInput={(e) => setKnockReason(e.currentTarget.value)}
+							placeholder="Let me in, please"
+							autocomplete="off"
 							disabled={submitting()}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							Cancel
-						</button>
-						<Show
-							when={knockOffered()}
-							fallback={
-								<button
-									type="submit"
-									disabled={submitting()}
-									class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-								>
-									{submitting() ? "Joining…" : "Join"}
-								</button>
-							}
-						>
+							aria-describedby={offerId}
+							class="w-full rounded bg-surface-3 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+						/>
+					</div>
+				</Show>
+
+				<div class="mt-4 flex justify-end gap-2">
+					<button
+						type="button"
+						onClick={tryClose}
+						disabled={submitting()}
+						class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+					>
+						Cancel
+					</button>
+					<Show
+						when={knockOffered()}
+						fallback={
 							<button
-								type="button"
-								onClick={() => void handleKnock()}
+								type="submit"
 								disabled={submitting()}
 								class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 							>
-								{submitting() ? "Sending…" : "Request to join"}
+								{submitting() ? "Joining…" : "Join"}
 							</button>
-						</Show>
-					</div>
-				</form>
-			</div>
-		</Show>
+						}
+					>
+						<button
+							type="button"
+							onClick={() => void handleKnock()}
+							disabled={submitting()}
+							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+						>
+							{submitting() ? "Sending…" : "Request to join"}
+						</button>
+					</Show>
+				</div>
+			</form>
+		</Modal>
 	);
 };
 

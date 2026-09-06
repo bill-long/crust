@@ -12,13 +12,12 @@ import {
 import { Virtualizer } from "virtua/solid";
 import { useClient } from "../../client/client";
 import { Avatar } from "../../components/Avatar";
+import { Modal } from "../../components/Modal";
 import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 import { createFailedImageUrls } from "../../lib/imageFallback";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { requestJoinDialog } from "../../stores/joinDialog";
-import { trackAppModalOpen } from "../../stores/modalStack";
 
 /** Page size for each `/publicRooms` request. */
 const DIRECTORY_PAGE_LIMIT = 20;
@@ -66,12 +65,9 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 	// the result rows, so per-row error state would be lost on scroll (#457).
 	const brokenAvatars = createFailedImageUrls();
 	const navigate = useNavigate();
-	trackAppModalOpen(props.open);
 
-	let overlayRef!: HTMLDivElement;
 	let inputRef: HTMLInputElement | undefined;
 	let scrollRef: HTMLDivElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	onCleanup(() => {
 		mounted = false;
@@ -114,26 +110,12 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				reset();
-				queueMicrotask(() => inputRef?.focus());
 				// Initial browse: the server's default listing, no filter.
 				void search();
-			} else if (!isOpen && wasOpen) {
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
 			}
 		}),
 	);
-
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
-	});
 
 	const directoryOptions = () => {
 		const term = query().trim();
@@ -277,218 +259,200 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 		}
 	};
 
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			props.onClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
-	};
-
 	return (
-		<Show when={props.open()}>
-			<div
-				ref={overlayRef}
-				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				inert={cryptoDialogOpen() || undefined}
-				tabIndex={-1}
-				onKeyDown={handleKeyDown}
-				onClick={(e) => {
-					if (e.target === e.currentTarget) props.onClose();
-				}}
-			>
-				<div class="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg bg-surface-1 p-6 shadow-xl">
-					<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
-						Explore public rooms
-					</h2>
-					<p class="mb-4 text-sm text-text-muted">
-						Browse and join rooms published in a server's public directory.
-					</p>
+		<Modal
+			open={props.open()}
+			onClose={props.onClose}
+			labelledBy={titleId}
+			suspended={cryptoDialogOpen()}
+			initialFocus={() => inputRef}
+			class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 p-4"
+		>
+			<div class="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg bg-surface-1 p-6 shadow-xl">
+				<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
+					Explore public rooms
+				</h2>
+				<p class="mb-4 text-sm text-text-muted">
+					Browse and join rooms published in a server's public directory.
+				</p>
 
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							void search();
-						}}
-						class="mb-2 flex gap-2"
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						void search();
+					}}
+					class="mb-2 flex gap-2"
+				>
+					<div class="min-w-0 flex-1">
+						<label for={inputId} class="sr-only">
+							Search the room directory
+						</label>
+						<input
+							id={inputId}
+							ref={(el) => {
+								inputRef = el;
+							}}
+							type="text"
+							value={query()}
+							onInput={(e) => setQuery(e.currentTarget.value)}
+							placeholder="Search rooms"
+							autocomplete="off"
+							spellcheck={false}
+							aria-describedby={error() ? errorId : undefined}
+							class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						/>
+					</div>
+					<div class="w-36 shrink-0">
+						<label for={serverId} class="sr-only">
+							Server to search (optional)
+						</label>
+						<input
+							id={serverId}
+							type="text"
+							value={server()}
+							onInput={(e) => setServer(e.currentTarget.value)}
+							placeholder="Server (optional)"
+							autocomplete="off"
+							spellcheck={false}
+							class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						/>
+					</div>
+					<button
+						type="submit"
+						disabled={loading()}
+						class="shrink-0 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
 					>
-						<div class="min-w-0 flex-1">
-							<label for={inputId} class="sr-only">
-								Search the room directory
-							</label>
-							<input
-								id={inputId}
-								ref={(el) => {
-									inputRef = el;
-								}}
-								type="text"
-								value={query()}
-								onInput={(e) => setQuery(e.currentTarget.value)}
-								placeholder="Search rooms"
-								autocomplete="off"
-								spellcheck={false}
-								aria-describedby={error() ? errorId : undefined}
-								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							/>
-						</div>
-						<div class="w-36 shrink-0">
-							<label for={serverId} class="sr-only">
-								Server to search (optional)
-							</label>
-							<input
-								id={serverId}
-								type="text"
-								value={server()}
-								onInput={(e) => setServer(e.currentTarget.value)}
-								placeholder="Server (optional)"
-								autocomplete="off"
-								spellcheck={false}
-								class="w-full rounded bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-disabled focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							/>
-						</div>
-						<button
-							type="submit"
-							disabled={loading()}
-							class="shrink-0 rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							Search
-						</button>
-					</form>
+						Search
+					</button>
+				</form>
 
-					<Show when={error()}>
-						<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
-							{error()}
-						</p>
-					</Show>
+				<Show when={error()}>
+					<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
+						{error()}
+					</p>
+				</Show>
 
-					<div ref={scrollRef} class="min-h-0 flex-1 overflow-y-auto">
+				<div ref={scrollRef} class="min-h-0 flex-1 overflow-y-auto">
+					<Show
+						when={!loading()}
+						fallback={
+							<div class="flex items-center justify-center py-8">
+								<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+							</div>
+						}
+					>
 						<Show
-							when={!loading()}
+							when={results().length > 0}
 							fallback={
-								<div class="flex items-center justify-center py-8">
-									<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />
+								<div class="px-1 py-6 text-center text-sm text-text-disabled">
+									No rooms found
 								</div>
 							}
 						>
-							<Show
-								when={results().length > 0}
-								fallback={
-									<div class="px-1 py-6 text-center text-sm text-text-disabled">
-										No rooms found
-									</div>
-								}
-							>
-								{/* Virtualized: Load-more pages accumulate results
+							{/* Virtualized: Load-more pages accumulate results
 								    unboundedly, so this list crosses the ~50-item
 								    virtualization threshold after three pages. */}
-								<Virtualizer
-									{...(scrollRef ? { scrollRef } : {})}
-									data={results()}
-								>
-									{(room) => {
-										const joinState = () => joinStates()[room.room_id];
-										const alreadyJoined = () =>
-											summaries[room.room_id]?.membership === "join";
-										return (
-											<div class="flex w-full items-center gap-2 rounded px-2 py-2 text-text-muted hover:bg-surface-2/50">
-												<Avatar
-													url={avatarHttpUrl(client, room.avatar_url, 64)}
-													initial={avatarInitial(directoryRoomName(room))}
-													loading="lazy"
-													broken={brokenAvatars}
-												/>
-												<div class="min-w-0 flex-1">
-													<div class="flex items-center gap-1">
-														<Show when={room.room_type === "m.space"}>
-															<DirectorySpaceIcon />
-														</Show>
-														<span class="truncate text-sm font-medium text-text-secondary">
-															{directoryRoomName(room)}
-														</span>
-														<span class="shrink-0 text-[10px] text-text-faint">
-															{room.num_joined_members} members
-														</span>
-													</div>
-													<Show
-														when={
-															room.canonical_alias &&
-															room.canonical_alias !== directoryRoomName(room)
-														}
-													>
-														<p class="truncate text-xs text-text-faint">
-															{room.canonical_alias}
-														</p>
+							<Virtualizer
+								{...(scrollRef ? { scrollRef } : {})}
+								data={results()}
+							>
+								{(room) => {
+									const joinState = () => joinStates()[room.room_id];
+									const alreadyJoined = () =>
+										summaries[room.room_id]?.membership === "join";
+									return (
+										<div class="flex w-full items-center gap-2 rounded px-2 py-2 text-text-muted hover:bg-surface-2/50">
+											<Avatar
+												url={avatarHttpUrl(client, room.avatar_url, 64)}
+												initial={avatarInitial(directoryRoomName(room))}
+												loading="lazy"
+												broken={brokenAvatars}
+											/>
+											<div class="min-w-0 flex-1">
+												<div class="flex items-center gap-1">
+													<Show when={room.room_type === "m.space"}>
+														<DirectorySpaceIcon />
 													</Show>
-													<Show when={room.topic}>
-														<p class="truncate text-xs text-text-faint">
-															{room.topic}
-														</p>
-													</Show>
+													<span class="truncate text-sm font-medium text-text-secondary">
+														{directoryRoomName(room)}
+													</span>
+													<span class="shrink-0 text-[10px] text-text-faint">
+														{room.num_joined_members} members
+													</span>
 												</div>
 												<Show
-													when={!alreadyJoined() && joinState() !== "joined"}
-													fallback={
-														<span class="shrink-0 px-2 text-xs text-text-faint">
-															Joined
-														</span>
+													when={
+														room.canonical_alias &&
+														room.canonical_alias !== directoryRoomName(room)
 													}
 												>
-													<button
-														type="button"
-														onClick={() => void handleJoin(room)}
-														disabled={joinState() === "joining"}
-														aria-label={`Join ${directoryRoomName(room)}`}
-														class={`shrink-0 rounded px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline-hidden focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-															joinState() === "error"
-																? "bg-danger-bg/40 text-danger-text hover:bg-danger-bg/60 focus-visible:ring-danger"
-																: "bg-accent text-text-primary hover:bg-accent-hover focus-visible:ring-accent-hover"
-														}`}
-													>
-														{joinState() === "joining"
-															? "Joining…"
-															: joinState() === "error"
-																? "Retry"
-																: "Join"}
-													</button>
+													<p class="truncate text-xs text-text-faint">
+														{room.canonical_alias}
+													</p>
+												</Show>
+												<Show when={room.topic}>
+													<p class="truncate text-xs text-text-faint">
+														{room.topic}
+													</p>
 												</Show>
 											</div>
-										);
-									}}
-								</Virtualizer>
-								<Show when={nextBatch()}>
-									<div class="flex justify-center py-2">
-										<button
-											type="button"
-											onClick={() => void loadMore()}
-											disabled={loadingMore()}
-											class="rounded px-3 py-1.5 text-sm text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-										>
-											{loadingMore() ? "Loading…" : "Load more rooms"}
-										</button>
-									</div>
-								</Show>
+											<Show
+												when={!alreadyJoined() && joinState() !== "joined"}
+												fallback={
+													<span class="shrink-0 px-2 text-xs text-text-faint">
+														Joined
+													</span>
+												}
+											>
+												<button
+													type="button"
+													onClick={() => void handleJoin(room)}
+													disabled={joinState() === "joining"}
+													aria-label={`Join ${directoryRoomName(room)}`}
+													class={`shrink-0 rounded px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline-hidden focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+														joinState() === "error"
+															? "bg-danger-bg/40 text-danger-text hover:bg-danger-bg/60 focus-visible:ring-danger"
+															: "bg-accent text-text-primary hover:bg-accent-hover focus-visible:ring-accent-hover"
+													}`}
+												>
+													{joinState() === "joining"
+														? "Joining…"
+														: joinState() === "error"
+															? "Retry"
+															: "Join"}
+												</button>
+											</Show>
+										</div>
+									);
+								}}
+							</Virtualizer>
+							<Show when={nextBatch()}>
+								<div class="flex justify-center py-2">
+									<button
+										type="button"
+										onClick={() => void loadMore()}
+										disabled={loadingMore()}
+										class="rounded px-3 py-1.5 text-sm text-accent-text transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										{loadingMore() ? "Loading…" : "Load more rooms"}
+									</button>
+								</div>
 							</Show>
 						</Show>
-					</div>
+					</Show>
+				</div>
 
-					<div class="mt-4 flex justify-end">
-						<button
-							type="button"
-							onClick={props.onClose}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-						>
-							Close
-						</button>
-					</div>
+				<div class="mt-4 flex justify-end">
+					<button
+						type="button"
+						onClick={props.onClose}
+						class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+					>
+						Close
+					</button>
 				</div>
 			</div>
-		</Show>
+		</Modal>
 	);
 };
 
