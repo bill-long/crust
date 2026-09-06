@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createRoot, createSignal, Show } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Avatar } from "../components/Avatar";
+import { requiredAt } from "../test/assertions";
 import { createFailedImageUrls, createImageFallback } from "./imageFallback";
 
 vi.mock("solid-refresh", () => ({
@@ -199,17 +200,19 @@ describe("Avatar rows sharing a registry", () => {
 		const images = (): HTMLImageElement[] =>
 			Array.from(container.querySelectorAll("img"));
 		expect(images()).toHaveLength(2);
+		const paintedImage = requiredAt(images(), 0, "painted image");
+		const inFlightImage = requiredAt(images(), 1, "in-flight image");
 
 		// The first row paints; the second row's request fails and blocks the
 		// url for every row that mounts from here on.
-		fireEvent.load(images()[0]);
-		fireEvent.error(images()[1]);
+		fireEvent.load(paintedImage);
+		fireEvent.error(inFlightImage);
 		expect(images()).toHaveLength(1);
 
 		// Now the painted row's own request fails too. The registry already
 		// knows the url is broken, so nothing changes there - this row still
 		// has to give up its image.
-		fireEvent.error(images()[0]);
+		fireEvent.error(requiredAt(images(), 0, "remaining painted image"));
 		expect(images()).toHaveLength(0);
 	});
 });
@@ -228,10 +231,10 @@ describe("detached elements", () => {
 		));
 		const images = (): HTMLImageElement[] =>
 			Array.from(container.querySelectorAll("img"));
-		const stale = images()[1];
+		const stale = requiredAt(images(), 1, "stale image");
 
 		// One row errors, which retires the image on both rows.
-		fireEvent.error(images()[0]);
+		fireEvent.error(requiredAt(images(), 0, "failed image"));
 		expect(images()).toHaveLength(0);
 
 		// The other row's request completes afterwards. Removing an <img>

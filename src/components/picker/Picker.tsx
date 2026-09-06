@@ -151,7 +151,8 @@ export function createPicker<T>() {
 				e.preventDefault();
 				const idx = highlightIndex();
 				if (idx >= 0 && idx < items.length) {
-					props.onSelect(items[idx]);
+					const item = items[idx];
+					if (item !== undefined) props.onSelect(item);
 				}
 				return true;
 			}

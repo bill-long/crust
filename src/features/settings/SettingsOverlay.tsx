@@ -114,6 +114,7 @@ const SettingsOverlay: Component<SettingsOverlayProps> = (props) => {
 			if (focusable.length === 0) return;
 			const first = focusable[0];
 			const last = focusable[focusable.length - 1];
+			if (!first || !last) return;
 			if (e.shiftKey && document.activeElement === first) {
 				e.preventDefault();
 				last.focus();

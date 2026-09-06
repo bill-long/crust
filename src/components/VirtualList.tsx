@@ -25,10 +25,12 @@ export function computeRowOffsets(
 	rowHeight: RowHeight,
 ): number[] {
 	const offsets = new Array<number>(count + 1);
-	offsets[0] = 0;
+	let offset = 0;
+	offsets[0] = offset;
 	for (let i = 0; i < count; i++) {
 		const h = typeof rowHeight === "number" ? rowHeight : rowHeight(i);
-		offsets[i + 1] = offsets[i] + h;
+		offset += h;
+		offsets[i + 1] = offset;
 	}
 	return offsets;
 }
@@ -39,7 +41,8 @@ function lastAtOrBelow(offsets: number[], target: number, n: number): number {
 	let hi = n;
 	while (lo < hi) {
 		const mid = (lo + hi + 1) >> 1;
-		if (offsets[mid] <= target) lo = mid;
+		const offset = offsets[mid];
+		if (offset !== undefined && offset <= target) lo = mid;
 		else hi = mid - 1;
 	}
 	return lo;
@@ -68,7 +71,8 @@ function firstAtOrAbove(offsets: number[], target: number, n: number): number {
 	let hi = n;
 	while (lo < hi) {
 		const mid = (lo + hi) >> 1;
-		if (offsets[mid] >= target) hi = mid;
+		const offset = offsets[mid];
+		if (offset === undefined || offset >= target) hi = mid;
 		else lo = mid + 1;
 	}
 	return lo;
@@ -243,7 +247,8 @@ export function VirtualList<T>(props: VirtualListProps<T>): JSX.Element {
 	/** Top edge of row `i` (`i === count` gives the total content height). */
 	const rowTop = (i: number): number => {
 		const offs = offsets();
-		return offs ? offs[i] : i * (rowHeight() as number);
+		if (!offs) return i * (rowHeight() as number);
+		return offs[i] ?? offs.at(-1) ?? 0;
 	};
 	const totalHeight = (): number => rowTop(count());
 

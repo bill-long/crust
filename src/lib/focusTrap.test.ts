@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { requiredAt } from "../test/assertions";
 import { FOCUSABLE_SELECTOR, trapTabKey } from "./focusTrap";
 
 // trapTabKey filters candidates by `offsetParent !== null` to approximate
@@ -71,35 +72,40 @@ describe("FOCUSABLE_SELECTOR", () => {
 describe("trapTabKey", () => {
 	it("wraps focus from the last element to the first on Tab", () => {
 		const buttons = mountButtons(3);
-		buttons[2].focus();
-		expect(document.activeElement).toBe(buttons[2]);
+		const first = requiredAt(buttons, 0, "first button");
+		const last = requiredAt(buttons, 2, "last button");
+		last.focus();
+		expect(document.activeElement).toBe(last);
 
 		const e = tabEvent(false);
 		trapTabKey(container as HTMLElement, e);
 
-		expect(document.activeElement).toBe(buttons[0]);
+		expect(document.activeElement).toBe(first);
 		expect(e.defaultPrevented).toBe(true);
 	});
 
 	it("wraps focus from the first element to the last on Shift+Tab", () => {
 		const buttons = mountButtons(3);
-		buttons[0].focus();
+		const first = requiredAt(buttons, 0, "first button");
+		const last = requiredAt(buttons, 2, "last button");
+		first.focus();
 
 		const e = tabEvent(true);
 		trapTabKey(container as HTMLElement, e);
 
-		expect(document.activeElement).toBe(buttons[2]);
+		expect(document.activeElement).toBe(last);
 		expect(e.defaultPrevented).toBe(true);
 	});
 
 	it("does nothing when focus is in the middle (lets the browser advance)", () => {
 		const buttons = mountButtons(3);
-		buttons[1].focus();
+		const middle = requiredAt(buttons, 1, "middle button");
+		middle.focus();
 
 		const e = tabEvent(false);
 		trapTabKey(container as HTMLElement, e);
 
-		expect(document.activeElement).toBe(buttons[1]);
+		expect(document.activeElement).toBe(middle);
 		expect(e.defaultPrevented).toBe(false);
 	});
 
@@ -115,32 +121,36 @@ describe("trapTabKey", () => {
 
 	it("treats a single focusable element as both first and last", () => {
 		const buttons = mountButtons(1);
-		buttons[0].focus();
+		const only = requiredAt(buttons, 0, "only button");
+		only.focus();
 
 		const forward = tabEvent(false);
 		trapTabKey(container as HTMLElement, forward);
-		expect(document.activeElement).toBe(buttons[0]);
+		expect(document.activeElement).toBe(only);
 		expect(forward.defaultPrevented).toBe(true);
 
 		const backward = tabEvent(true);
 		trapTabKey(container as HTMLElement, backward);
-		expect(document.activeElement).toBe(buttons[0]);
+		expect(document.activeElement).toBe(only);
 		expect(backward.defaultPrevented).toBe(true);
 	});
 
 	it("ignores elements hidden via a null offsetParent", () => {
 		const buttons = mountButtons(3);
+		const first = requiredAt(buttons, 0, "first button");
+		const middle = requiredAt(buttons, 1, "middle button");
+		const last = requiredAt(buttons, 2, "last button");
 		// Hide the real last button; the trap should now treat buttons[1] as last.
-		Object.defineProperty(buttons[2], "offsetParent", {
+		Object.defineProperty(last, "offsetParent", {
 			configurable: true,
 			get: () => null,
 		});
-		buttons[1].focus();
+		middle.focus();
 
 		const e = tabEvent(false);
 		trapTabKey(container as HTMLElement, e);
 
-		expect(document.activeElement).toBe(buttons[0]);
+		expect(document.activeElement).toBe(first);
 		expect(e.defaultPrevented).toBe(true);
 	});
 });

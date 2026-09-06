@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { requiredAt } from "../test/assertions";
 import {
 	DEFAULT_SCREEN_SHARE_QUALITY,
 	SCREEN_SHARE_CONTENT_HINT,
@@ -100,8 +101,10 @@ describe("screen-share preset invariants (#385/#388)", () => {
 			return r.width * r.height * r.frameRate;
 		};
 		for (let i = 1; i < SCREEN_SHARE_QUALITIES.length; i++) {
-			expect(cost(SCREEN_SHARE_QUALITIES[i])).toBeGreaterThanOrEqual(
-				cost(SCREEN_SHARE_QUALITIES[i - 1]),
+			expect(
+				cost(requiredAt(SCREEN_SHARE_QUALITIES, i, "current quality")),
+			).toBeGreaterThanOrEqual(
+				cost(requiredAt(SCREEN_SHARE_QUALITIES, i - 1, "previous quality")),
 			);
 		}
 	});
