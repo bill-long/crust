@@ -17,6 +17,7 @@ import {
 } from "./callSessionStore";
 import { FullCallOverlay } from "./FullCallOverlay";
 import { makeFakeCallSession, participant } from "./fakeCallSession.test-utils";
+import { requiredAt } from "./testAssertions";
 import {
 	inboundVideo,
 	makeFakeStatsTrack,
@@ -349,7 +350,9 @@ describe("FullCallOverlay", () => {
 		const grid = screen.getByTestId("participant-grid");
 		const avatars = grid.querySelectorAll("img");
 		expect(avatars.length).toBe(1);
-		expect(avatars[0].getAttribute("src")).toContain("amon");
+		expect(
+			requiredAt(avatars, 0, "participant avatar").getAttribute("src"),
+		).toContain("amon");
 		// The avatar-less participant falls back to the uppercase initial.
 		expect(screen.getByText("B")).toBeTruthy();
 	});

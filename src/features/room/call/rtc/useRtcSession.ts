@@ -195,7 +195,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				}
 			}
 			const fociList = foci();
-			return fociList && fociList.length > 0 ? fociList[0] : null;
+			return fociList?.[0] ?? null;
 		},
 		null,
 		{

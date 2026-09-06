@@ -5,6 +5,7 @@ import type {
 } from "matrix-js-sdk/lib/matrixrtc";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "./testAssertions";
 
 // Hoisted mocks — vi.mock factories run before module imports.
 const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
@@ -1033,7 +1034,7 @@ describe("useLivekitRoom", () => {
 				const rows = result
 					.participants()
 					.filter((p) => p.identity === "hashed-peer");
-				return rows.length === 1 && rows[0].isMuted === false;
+				return rows.length === 1 && rows[0]?.isMuted === false;
 			});
 			const peer = result
 				.participants()
@@ -1109,7 +1110,7 @@ describe("useLivekitRoom", () => {
 				const rows = result
 					.participants()
 					.filter((p) => p.identity === "hashed-peer");
-				return rows.length === 1 && rows[0].isMuted === true;
+				return rows.length === 1 && rows[0]?.isMuted === true;
 			});
 			const rows = result.participants();
 			expect(rows.filter((p) => p.identity === "hashed-peer")).toHaveLength(1);
@@ -2020,8 +2021,16 @@ describe("useLivekitRoom", () => {
 			await waitFor(() => fakeRoom.connect.mock.calls.length === 1);
 			setEnabled(false);
 			await waitFor(() => release.mock.calls.length === 1);
-			const disconnectOrder = fakeRoom.disconnect.mock.invocationCallOrder[0];
-			const releaseOrder = release.mock.invocationCallOrder[0];
+			const disconnectOrder = requiredAt(
+				fakeRoom.disconnect.mock.invocationCallOrder,
+				0,
+				"disconnect call order",
+			);
+			const releaseOrder = requiredAt(
+				release.mock.invocationCallOrder,
+				0,
+				"release call order",
+			);
 			expect(disconnectOrder).toBeLessThan(releaseOrder);
 		});
 
@@ -2045,8 +2054,16 @@ describe("useLivekitRoom", () => {
 			);
 			await waitFor(() => result.status() === "connected");
 			expect(fakeRoom.setE2EEEnabled).toHaveBeenCalledWith(true);
-			const e2eeOrder = fakeRoom.setE2EEEnabled.mock.invocationCallOrder[0];
-			const connectOrder = fakeRoom.connect.mock.invocationCallOrder[0];
+			const e2eeOrder = requiredAt(
+				fakeRoom.setE2EEEnabled.mock.invocationCallOrder,
+				0,
+				"E2EE enable call order",
+			);
+			const connectOrder = requiredAt(
+				fakeRoom.connect.mock.invocationCallOrder,
+				0,
+				"connect call order",
+			);
 			expect(e2eeOrder).toBeLessThan(connectOrder);
 		});
 

@@ -1,6 +1,7 @@
 import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRtcE2EEContext, type RtcE2EEContext } from "./rtcE2EEBridge";
+import { requiredAt } from "./testAssertions";
 
 type Listener = (...args: unknown[]) => void;
 
@@ -172,8 +173,10 @@ describe("rtcE2EEBridge", () => {
 		);
 		await flush();
 		expect(kp.calls).toHaveLength(1);
-		expect(kp.calls[0].participantIdentity).toBe("backend-id-1");
-		expect(kp.calls[0].keyIndex).toBe(7);
+		expect(
+			requiredAt(kp.calls, 0, "key-provider call").participantIdentity,
+		).toBe("backend-id-1");
+		expect(requiredAt(kp.calls, 0, "key-provider call").keyIndex).toBe(7);
 		// importKey was called with the key bytes copied into a fresh buffer.
 		expect(importKeySpy).toHaveBeenCalledWith(
 			"raw",
@@ -365,7 +368,9 @@ describe("rtcE2EEBridge", () => {
 		);
 		await flush();
 		expect(kp1.calls).toHaveLength(1);
-		expect(kp1.calls[0].keyIndex).toBe(3);
+		expect(requiredAt(kp1.calls, 0, "first key-provider call").keyIndex).toBe(
+			3,
+		);
 		// Simulate focus-change reconnect: release old, bind new.
 		b1.release();
 		const b2 = ctx.bindRoom();
@@ -373,8 +378,12 @@ describe("rtcE2EEBridge", () => {
 		// The new binding must observe the cached key WITHOUT a fresh
 		// EncryptionKeyChanged event (the SDK only re-emits on rotation).
 		expect(kp2.calls).toHaveLength(1);
-		expect(kp2.calls[0].participantIdentity).toBe("id-A");
-		expect(kp2.calls[0].keyIndex).toBe(3);
+		expect(
+			requiredAt(kp2.calls, 0, "second key-provider call").participantIdentity,
+		).toBe("id-A");
+		expect(requiredAt(kp2.calls, 0, "second key-provider call").keyIndex).toBe(
+			3,
+		);
 		b2.release();
 		ctx.dispose();
 	});
@@ -499,7 +508,11 @@ describe("rtcE2EEBridge", () => {
 		await flush();
 		const b = ctx.bindRoom({ localIdentity: "@me:hs:DEV" });
 		const kp = b.e2eeOptions.keyProvider as unknown as FakeBaseKeyProvider;
-		const lastCall = kp.calls[kp.calls.length - 1];
+		const lastCall = requiredAt(
+			kp.calls,
+			kp.calls.length - 1,
+			"last key-provider call",
+		);
 		expect(kp.calls).toHaveLength(3);
 		expect(lastCall.participantIdentity).toBe("@me:hs:DEV");
 		expect(lastCall.keyIndex).toBe(1);
