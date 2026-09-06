@@ -1,7 +1,7 @@
 import { type Component, createSignal, Match, Switch } from "solid-js";
 import { useClient } from "../../client/client";
+import { Modal } from "../../components/Modal";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
 import { createUiaDialogFlow } from "./uiaDialogFlow";
 
@@ -117,22 +117,13 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 	const onDismiss = (): void => uia.dismiss(props.onClose);
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Set up secure messaging"
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) onDismiss();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Tab") {
-					trapTabKey(overlayEl, e);
-					return;
-				}
-				if (e.key === "Escape") onDismiss();
+		<Modal
+			open
+			onClose={onDismiss}
+			label="Set up secure messaging"
+			initialFocus={() => overlayEl}
+			contentRef={(element) => {
+				overlayEl = element;
 			}}
 		>
 			{/* The identity prompts render while step() is "working" - the
@@ -237,6 +228,6 @@ export const CrossSigningSetup: Component<CrossSigningSetupProps> = (props) => {
 					</div>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };

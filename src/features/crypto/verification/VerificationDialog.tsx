@@ -3,11 +3,13 @@ import {
 	createEffect,
 	createSignal,
 	Match,
+	on,
 	onCleanup,
 	Show,
 	Switch,
 } from "solid-js";
 import { isRecoveryKeyCancelled } from "../../../client/recoveryKeyCancelled";
+import { Modal } from "../../../components/Modal";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { EmojiDisplay } from "./EmojiDisplay";
 import { QrCodeDisplay } from "./QrCodeDisplay";
@@ -62,10 +64,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	// and Tab (the content behind the dialog is inert). reclaimFocus only
 	// acts when focus was genuinely lost, so a user who moved elsewhere in
 	// the meantime is left alone.
-	createEffect(() => {
-		v.state();
-		reclaimFocus();
-	});
+	createEffect(on(v.state, reclaimFocus, { defer: true }));
 
 	const verifyWithRecoveryKey = async (): Promise<void> => {
 		const run = props.verifyWithRecoveryKey;
@@ -120,21 +119,13 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 	};
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Device verification"
-			tabIndex={-1}
-			ref={(el) => {
-				dialogEl = el;
-				el.focus();
-			}}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) handleClose();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Escape") handleClose();
+		<Modal
+			open
+			onClose={handleClose}
+			label="Device verification"
+			initialFocus={() => dialogEl}
+			contentRef={(element) => {
+				dialogEl = element;
 			}}
 		>
 			<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
@@ -525,7 +516,7 @@ const VerificationDialog: Component<VerificationDialogProps> = (props) => {
 					</Match>
 				</Switch>
 			</div>
-		</div>
+		</Modal>
 	);
 };
 

@@ -7,6 +7,7 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { Modal } from "../../../components/Modal";
 
 /**
  * Recovery key input dialog. Registers as the recovery key resolver via
@@ -159,76 +160,70 @@ const RecoveryKeyInput: Component = () => {
 		resolveWith(null);
 	};
 
+	let inputEl: HTMLInputElement | undefined;
+
 	return (
-		<Show when={isPrompting()}>
-			<div
-				class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-				role="dialog"
-				aria-modal="true"
-				aria-label="Enter recovery key"
-				onClick={(e) => {
-					if (e.target === e.currentTarget) handleCancel();
-				}}
-				onKeyDown={(e) => {
-					if (e.key === "Escape") handleCancel();
-				}}
-			>
-				<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
-					<h2 class="mb-3 text-lg font-semibold text-text-primary">
-						Enter recovery key
-					</h2>
-					<p class="mb-4 text-sm text-text-muted">
-						Enter your recovery key to give this session access to your
-						encryption secrets.
+		<Modal
+			open={isPrompting()}
+			onClose={handleCancel}
+			label="Enter recovery key"
+			initialFocus={() => inputEl}
+		>
+			<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
+				<h2 class="mb-3 text-lg font-semibold text-text-primary">
+					Enter recovery key
+				</h2>
+				<p class="mb-4 text-sm text-text-muted">
+					Enter your recovery key to give this session access to your encryption
+					secrets.
+				</p>
+
+				<input
+					type="text"
+					value={inputValue()}
+					onInput={(e) => {
+						setInputValue(e.currentTarget.value);
+						setErrorText("");
+					}}
+					onKeyDown={(e) => {
+						if (e.key === "Enter") void handleSubmit();
+					}}
+					placeholder="Enter your recovery key"
+					aria-label="Recovery key"
+					aria-describedby={errorText() ? errorId : undefined}
+					autocomplete="off"
+					ref={inputEl}
+					spellcheck={false}
+					class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
+				/>
+
+				<Show when={errorText()}>
+					<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
+						{errorText()}
 					</p>
+				</Show>
 
-					<input
-						type="text"
-						value={inputValue()}
-						onInput={(e) => {
-							setInputValue(e.currentTarget.value);
-							setErrorText("");
-						}}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") void handleSubmit();
-						}}
-						placeholder="Enter your recovery key"
-						aria-label="Recovery key"
-						aria-describedby={errorText() ? errorId : undefined}
-						autocomplete="off"
-						ref={(el) => el.focus()}
-						spellcheck={false}
-						class="mb-2 w-full rounded bg-surface-2 px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-disabled focus:outline-hidden focus:ring-2 focus:ring-accent-hover"
-					/>
-
-					<Show when={errorText()}>
-						<p id={errorId} class="mb-2 text-sm text-danger-text" role="alert">
-							{errorText()}
-						</p>
-					</Show>
-
-					<div class="mt-4 flex justify-end gap-2">
-						<button
-							type="button"
-							onClick={handleCancel}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
-						>
-							Cancel
-						</button>
-						<button
-							type="button"
-							onClick={() => void handleSubmit()}
-							aria-busy={isChecking()}
-							class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
-						>
-							<Show when={isChecking()} fallback="Unlock">
-								Checking…
-							</Show>
-						</button>
-					</div>
+				<div class="mt-4 flex justify-end gap-2">
+					<button
+						type="button"
+						onClick={handleCancel}
+						class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary"
+					>
+						Cancel
+					</button>
+					<button
+						type="button"
+						onClick={() => void handleSubmit()}
+						aria-busy={isChecking()}
+						class="rounded bg-accent px-4 py-2 text-sm font-semibold text-text-primary transition-colors hover:bg-accent-hover"
+					>
+						<Show when={isChecking()} fallback="Unlock">
+							Checking…
+						</Show>
+					</button>
 				</div>
 			</div>
-		</Show>
+		</Modal>
 	);
 };
 
