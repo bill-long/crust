@@ -1,5 +1,6 @@
 import type { MatrixClient, Room } from "matrix-js-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requiredValue } from "../test/assertions";
 import { createMockClient, createMockRoom } from "../test/mockClient";
 import {
 	FAVOURITE_TAG,
@@ -123,9 +124,13 @@ describe("toggleRoomTag", () => {
 		(room as unknown as { tags: Record<string, unknown> }).tags = {};
 		client.setRoomTag.mockRejectedValueOnce(new Error("nope"));
 		toggleRoomTag(ctx, "!r:x", FAVOURITE_TAG);
-		expect(summaries["!r:x"].isFavourite).toBe(true); // optimistic
+		expect(requiredValue(summaries["!r:x"], "room summary").isFavourite).toBe(
+			true,
+		); // optimistic
 		await flush();
-		expect(summaries["!r:x"].isFavourite).toBe(false); // converged back
+		expect(requiredValue(summaries["!r:x"], "room summary").isFavourite).toBe(
+			false,
+		); // converged back
 	});
 
 	it("keeps a mid-flight authoritative echo instead of inverting it", async () => {
@@ -139,7 +144,9 @@ describe("toggleRoomTag", () => {
 			[FAVOURITE_TAG]: {},
 		};
 		await flush();
-		expect(summaries["!r:x"].isFavourite).toBe(true);
+		expect(requiredValue(summaries["!r:x"], "room summary").isFavourite).toBe(
+			true,
+		);
 	});
 
 	it("serializes a rapid double-toggle so PUT and DELETE cannot race", async () => {

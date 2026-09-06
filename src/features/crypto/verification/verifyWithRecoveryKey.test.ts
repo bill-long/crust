@@ -1,5 +1,6 @@
 import type { CrossSigningStatus } from "matrix-js-sdk/lib/crypto-api";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requiredAt, requiredValue } from "../../../test/assertions";
 import {
 	verifySessionWithRecoveryKey,
 	waitForDevicesUpdated,
@@ -66,10 +67,25 @@ describe("verifySessionWithRecoveryKey", () => {
 	it("hands bootstrap an upload callback that refuses to publish a new identity", async () => {
 		const crypto = makeCrypto();
 		await verifySessionWithRecoveryKey(crypto, "DEV");
-		const opts = crypto.bootstrapCrossSigning.mock.calls[0][0];
-		await expect(
-			opts?.authUploadDeviceSigningKeys?.(async () => {}),
-		).rejects.toThrow(/Refusing to replace/);
+		const opts = requiredValue(
+			requiredAt(
+				requiredAt(
+					crypto.bootstrapCrossSigning.mock.calls,
+					0,
+					"bootstrap call",
+				),
+				0,
+				"bootstrap options",
+			),
+			"bootstrap options",
+		);
+		const authUpload = requiredValue(
+			opts.authUploadDeviceSigningKeys,
+			"auth upload callback",
+		);
+		await expect(authUpload(async () => {})).rejects.toThrow(
+			/Refusing to replace/,
+		);
 	});
 
 	it("propagates a failed import (cancelled or wrong recovery key)", async () => {

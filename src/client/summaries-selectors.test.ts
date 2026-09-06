@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { requiredAt } from "../test/assertions";
 import type { RoomSummary, SummariesStore } from "./summaries";
 import {
 	flattenSpaceTree,
@@ -551,7 +552,7 @@ describe("getSpaceTree (#443)", () => {
 		]);
 		const tree = getSpaceTree(s);
 		expect(tree.map((n) => n.space.roomId)).toEqual(["!sub"]);
-		expect(tree[0].children).toEqual([]);
+		expect(requiredAt(tree, 0, "root space").children).toEqual([]);
 	});
 
 	it("places every cycle member exactly once (A<->B)", () => {
@@ -625,9 +626,9 @@ describe("getSpaceTree (#443)", () => {
 		]);
 		const tree = getSpaceTree(s);
 		expect(tree).toHaveLength(1);
-		expect(tree[0].children.map((n) => n.space.roomId)).toEqual([
-			"!joined-sub",
-		]);
+		expect(
+			requiredAt(tree, 0, "root space").children.map((n) => n.space.roomId),
+		).toEqual(["!joined-sub"]);
 	});
 
 	it("flattens depth-first in render order", () => {

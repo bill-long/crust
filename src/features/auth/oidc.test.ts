@@ -1,5 +1,6 @@
 import type { ValidatedAuthMetadata } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../../test/assertions";
 
 // The module under test talks to matrix-js-sdk at two places: createClient
 // (probe + metadata refetch + whoami) and the OAuth2 class (URL generation +
@@ -185,7 +186,11 @@ describe("startOidcLogin", () => {
 		// The URL comes from the SDK's OAuth2 instance, called with query
 		// response mode and our state.
 		expect(generateUrlMock).toHaveBeenCalledTimes(1);
-		const [stateArg, responseMode] = generateUrlMock.mock.calls[0];
+		const [stateArg, responseMode] = requiredAt(
+			generateUrlMock.mock.calls,
+			0,
+			"generate URL call",
+		);
 		expect(responseMode).toBe("query");
 		expect(url).toContain(`state=${stateArg}`);
 
@@ -213,7 +218,9 @@ describe("startOidcLogin", () => {
 		await startOidcLogin(METADATA, "https://matrix.example.com");
 
 		expect(fetchMock).not.toHaveBeenCalled();
-		expect(oauth2Instances.contexts[0].clientId).toBe("cached-client");
+		expect(
+			requiredAt(oauth2Instances.contexts, 0, "OAuth context").clientId,
+		).toBe("cached-client");
 	});
 
 	it("generates a fresh state per login", async () => {

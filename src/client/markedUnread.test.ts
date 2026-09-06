@@ -2,6 +2,7 @@ import type { MatrixClient, Room } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requiredValue } from "../test/assertions";
 import { createMockClient, createMockRoom } from "../test/mockClient";
 import {
 	canMarkRoomUnread,
@@ -191,7 +192,9 @@ describe("markRoomUnread", () => {
 		// Convergent rollback keeps the confirmed value instead of
 		// inverting it (an inverted write would stick - /sync never
 		// re-delivers unchanged account data).
-		expect(summaries["!r:x"].markedUnread).toBe(true);
+		expect(requiredValue(summaries["!r:x"], "room summary").markedUnread).toBe(
+			true,
+		);
 	});
 });
 
@@ -239,7 +242,9 @@ describe("clearRoomMarkedUnread", () => {
 		client.setRoomAccountData.mockClear();
 		clearRoomMarkedUnread(ctx, "!r:x");
 		expect(client.setRoomAccountData).toHaveBeenCalledTimes(1);
-		expect(summaries["!r:x"].markedUnread).toBe(false);
+		expect(requiredValue(summaries["!r:x"], "room summary").markedUnread).toBe(
+			false,
+		);
 	});
 });
 
@@ -302,7 +307,9 @@ describe("useMarkedUnreadConsumer", () => {
 		});
 		setRoomId("!r:x");
 		await flush(); // consumption runs on a microtask (mid-sync-batch guard)
-		expect(summaries["!r:x"].markedUnread).toBe(false);
+		expect(requiredValue(summaries["!r:x"], "room summary").markedUnread).toBe(
+			false,
+		);
 		expect(client.setRoomAccountData).toHaveBeenCalledWith(
 			"!r:x",
 			MARKED_UNREAD_TYPE,
@@ -316,7 +323,9 @@ describe("useMarkedUnreadConsumer", () => {
 		harness.setRoomId("!r:x");
 		// User marks the OPEN room (overflow action / right-click on its row).
 		markRoomUnread(harness.ctx, "!r:x");
-		expect(harness.summaries["!r:x"].markedUnread).toBe(true);
+		expect(
+			requiredValue(harness.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(true);
 		expect(harness.client.setRoomAccountData).toHaveBeenCalledTimes(1);
 		expect(harness.client.setRoomAccountData).toHaveBeenLastCalledWith(
 			"!r:x",
@@ -332,10 +341,14 @@ describe("useMarkedUnreadConsumer", () => {
 		await flush();
 		markRoomUnread(harness.ctx, "!r:x");
 		harness.setRoomId(undefined); // back to the list
-		expect(harness.summaries["!r:x"].markedUnread).toBe(true);
+		expect(
+			requiredValue(harness.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(true);
 		harness.setRoomId("!r:x"); // reopen
 		await flush();
-		expect(harness.summaries["!r:x"].markedUnread).toBe(false);
+		expect(
+			requiredValue(harness.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(false);
 		harness.dispose();
 	});
 
@@ -367,7 +380,9 @@ describe("useMarkedUnreadConsumer", () => {
 		expect(h.client.setRoomAccountData).not.toHaveBeenCalled();
 		h.setSummaries("!r:x", summary("!r:x", { markedUnread: true }));
 		await flush();
-		expect(h.summaries["!r:x"].markedUnread).toBe(false);
+		expect(
+			requiredValue(h.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(false);
 		expect(h.client.setRoomAccountData).toHaveBeenCalledWith(
 			"!r:x",
 			MARKED_UNREAD_TYPE,
@@ -384,7 +399,9 @@ describe("useMarkedUnreadConsumer", () => {
 		// The flag arrives while the room is open (sync echo / other device).
 		h.setSummaries("!r:x", "markedUnread", true);
 		expect(h.client.setRoomAccountData).not.toHaveBeenCalled();
-		expect(h.summaries["!r:x"].markedUnread).toBe(true);
+		expect(
+			requiredValue(h.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(true);
 		h.dispose();
 	});
 
@@ -397,7 +414,9 @@ describe("useMarkedUnreadConsumer", () => {
 		h.setSummaries("!r:x", "markedUnread", true);
 		h.setRoomId("!r:x"); // return: a NEW open, so it must consume
 		await flush();
-		expect(h.summaries["!r:x"].markedUnread).toBe(false);
+		expect(
+			requiredValue(h.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(false);
 		expect(h.client.setRoomAccountData).toHaveBeenCalledWith(
 			"!r:x",
 			MARKED_UNREAD_TYPE,
@@ -422,7 +441,9 @@ describe("useMarkedUnreadConsumer", () => {
 			useMarkedUnreadConsumer(harness.ctx, roomId2);
 			return d;
 		});
-		expect(harness.summaries["!r:x"].markedUnread).toBe(true);
+		expect(
+			requiredValue(harness.summaries["!r:x"], "room summary").markedUnread,
+		).toBe(true);
 		dispose2();
 	});
 });

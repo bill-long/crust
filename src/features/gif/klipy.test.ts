@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../../test/assertions";
 import { createKlipyProvider } from "./klipy";
 
 describe("createKlipyProvider", () => {
@@ -149,8 +150,9 @@ describe("createKlipyProvider", () => {
 		const result = await provider.search("cats", "g");
 
 		expect(result.items).toHaveLength(1);
-		expect(result.items[0].id).toBe("test-gif");
-		expect(result.items[0].url).toBe("https://static.klipy.com/gifs/hd.gif");
+		const item = requiredAt(result.items, 0, "search result");
+		expect(item.id).toBe("test-gif");
+		expect(item.url).toBe("https://static.klipy.com/gifs/hd.gif");
 		expect(result.hasMore).toBe(false);
 	});
 
@@ -194,6 +196,6 @@ describe("createKlipyProvider", () => {
 		const result = await provider.search("cats", "g");
 
 		expect(result.items).toHaveLength(1);
-		expect(result.items[0].id).toBe("valid");
+		expect(requiredAt(result.items, 0, "search result").id).toBe("valid");
 	});
 });
