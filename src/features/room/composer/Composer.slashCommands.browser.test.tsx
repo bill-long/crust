@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../../styles/global.css";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
+import { requiredAt } from "./testAssertions";
 
 vi.mock("../../gif/gifConfig", () => ({
 	useGifConfig: () => ({
@@ -64,7 +65,7 @@ async function sendText(
 	await vi.waitFor(() => {
 		expect(client.sendMessage.mock.calls.length).toBe(before + 1);
 	});
-	const call = client.sendMessage.mock.calls[before];
+	const call = requiredAt(client.sendMessage.mock.calls, before, "send call");
 	// 3-arg overload: (roomId, threadId, content).
 	return call[2] as Record<string, unknown>;
 }

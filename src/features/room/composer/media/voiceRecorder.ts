@@ -69,7 +69,8 @@ export function toWireWaveform(amplitudes: readonly number[]): number[] {
 		);
 		let max = 0;
 		for (let j = start; j < end; j++) {
-			if (amplitudes[j] > max) max = amplitudes[j];
+			const amplitude = amplitudes[j];
+			if (amplitude !== undefined && amplitude > max) max = amplitude;
 		}
 		wire.push(Math.round(Math.min(Math.max(max, 0), 1) * WAVEFORM_SCALE));
 	}
@@ -296,7 +297,7 @@ export function createVoiceRecorder(
 		if (stopInFlight) return stopInFlight;
 		const active = recorder;
 		if (!active || !recording()) return Promise.resolve(null);
-		stopInFlight = (async () => {
+		const stopPromise: Promise<VoiceRecording | null> = (async () => {
 			try {
 				session++;
 				const durationMs = Math.round(performance.now() - startedAt);
@@ -334,7 +335,7 @@ export function createVoiceRecorder(
 				return {
 					blob,
 					// Strip codec parameters: event mimetypes carry the container.
-					mimetype: mimeType.split(";")[0],
+					mimetype: mimeType.split(";", 1)[0] ?? "audio/webm",
 					voice: { durationMs, waveform },
 				};
 			} finally {
@@ -342,7 +343,8 @@ export function createVoiceRecorder(
 				stopInFlight = null;
 			}
 		})();
-		return stopInFlight;
+		stopInFlight = stopPromise;
+		return stopPromise;
 	}
 
 	function cancel(): void {

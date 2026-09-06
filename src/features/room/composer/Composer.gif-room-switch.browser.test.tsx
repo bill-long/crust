@@ -21,6 +21,7 @@ import "../../../styles/global.css";
 import { clearNotices, notices } from "../../../stores/notices";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
+import { requiredAt } from "./testAssertions";
 
 // GifPicker reads gif config (trendingOnOpen, provider) from useConfig; the
 // real ConfigProvider fetches config.json over the network, so stub it.
@@ -219,8 +220,9 @@ describe("Composer GIF send under the keyed-<Show> remount (#310, #382)", () => 
 		await tick();
 
 		expect(notices()).toHaveLength(1);
-		expect(notices()[0].message).toContain("GIF");
-		expect(notices()[0].tone).toBe("error");
+		const notice = requiredAt(notices(), 0, "GIF failure notice");
+		expect(notice.message).toContain("GIF");
+		expect(notice.tone).toBe("error");
 	});
 
 	it("does NOT push a notice when a GIF send fails while still on the room", async () => {
