@@ -212,8 +212,7 @@ export function useMentions(deps: UseMentionsDeps) {
 			const existing = prev.findIndex((m) => m.userId === userId);
 			if (existing < 0) return [...prev, { userId, displayName }];
 			const current = prev[existing];
-			if (current === undefined) return [...prev, { userId, displayName }];
-			if (current.displayName === displayName) return prev;
+			if (current?.displayName === displayName) return prev;
 			const next = [...prev];
 			next[existing] = { userId, displayName };
 			return next;
