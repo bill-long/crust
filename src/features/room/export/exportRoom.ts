@@ -290,24 +290,28 @@ async function runExport(
 	let text: string | null = null;
 	if (opts.format === "json") {
 		const rowObjects: Record<string, unknown>[] = [];
-		for (const [i, row] of rows.entries()) {
-			if (i % SERIALIZE_CHUNK === 0 && i > 0) {
+		let rowIndex = 0;
+		for (const row of rows) {
+			if (rowIndex % SERIALIZE_CHUNK === 0 && rowIndex > 0) {
 				if (isCancelled()) return null;
 				await yieldToMain();
 			}
 			rowObjects.push(jsonRow(row));
+			rowIndex++;
 		}
 		text = assembleJson(bundle, rowObjects);
 	} else {
 		const rowStrings: string[] = [];
-		for (const [i, row] of rows.entries()) {
-			if (i % SERIALIZE_CHUNK === 0 && i > 0) {
+		let rowIndex = 0;
+		for (const row of rows) {
+			if (rowIndex % SERIALIZE_CHUNK === 0 && rowIndex > 0) {
 				if (isCancelled()) return null;
 				await yieldToMain();
 			}
 			rowStrings.push(
 				opts.format === "html" ? htmlRow(row, bundle) : textRow(row),
 			);
+			rowIndex++;
 		}
 		text =
 			opts.format === "html"
