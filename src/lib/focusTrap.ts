@@ -1,12 +1,9 @@
 import { createEffect, onCleanup } from "solid-js";
 
 /**
- * Shared pieces of the hand-rolled modal focus trap used by the app's
- * stay-mounted dialogs (see CreateRoomDialog for the originating pattern).
- *
- * Extracted so new dialogs stop copying the selector + Tab-cycling logic
- * verbatim - CreatePollDialog is the first consumer; migrating the ten
- * older copies is part of the shared-Modal consolidation (#309).
+ * Canonical focus selector and boundary navigation used by Modal.
+ * The non-modal full-call region also uses the selector for initial focus.
+ * New dialogs should use components/Modal rather than wire these directly.
  */
 
 export const FOCUSABLE_SELECTOR =
@@ -54,6 +51,7 @@ export function trapTabKey(container: HTMLElement, e: KeyboardEvent): void {
  *
  * Call from the component body (needs a reactive owner); the listener
  * detaches when `open` flips false or the owner is disposed.
+ * @deprecated All app dialogs now use Modal's Kobalte-backed containment.
  */
 export function containFocusWhileOpen(
 	open: () => boolean,

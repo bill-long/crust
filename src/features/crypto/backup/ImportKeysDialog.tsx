@@ -3,10 +3,12 @@ import {
 	createEffect,
 	createSignal,
 	Match,
+	on,
 	Show,
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { Modal } from "../../../components/Modal";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { decryptMegolmKeyFile, isMegolmKeyExportFile } from "./megolmKeyFile";
 
@@ -36,10 +38,16 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 	// Focus the primary control of the current step: keyboard users land on
 	// the file picker on open; the overlay holds focus on the other steps
 	// so Escape/backdrop handling keeps working.
-	createEffect(() => {
-		if (step() === "intro") fileInput?.focus();
-		else overlayEl.focus();
-	});
+	createEffect(
+		on(
+			step,
+			() => {
+				if (step() === "intro") fileInput?.focus();
+				else overlayEl.focus();
+			},
+			{ defer: true },
+		),
+	);
 
 	const doImport = async (): Promise<void> => {
 		const crypto = client.getCrypto();
@@ -93,24 +101,15 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 	const isBusy = (): boolean => step() === "working";
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Import message keys"
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={(e) => {
-				if (e.target === e.currentTarget && !isBusy()) props.onClose();
-			}}
-			onKeyDown={(e) => {
-				if (e.key !== "Escape") return;
-				// Rendered inside SettingsOverlay, whose root also closes on a
-				// delegated Escape - without this the whole Settings modal
-				// would close too (and, while busy, close behind a running
-				// export/import).
-				e.stopPropagation();
-				if (!isBusy()) props.onClose();
+		<Modal
+			open
+			portaled
+			onClose={props.onClose}
+			dismissible={!isBusy()}
+			label="Import message keys"
+			initialFocus={() => fileInput}
+			contentRef={(element) => {
+				overlayEl = element;
 			}}
 		>
 			<Switch>
@@ -241,7 +240,7 @@ const ImportKeysDialog: Component<ImportKeysDialogProps> = (props) => {
 					</div>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };
 

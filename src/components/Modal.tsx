@@ -1,5 +1,6 @@
 import { Dialog } from "@kobalte/core/dialog";
-import { type JSX, Show } from "solid-js";
+import { type JSX, Show, untrack } from "solid-js";
+import { Portal } from "solid-js/web";
 import { trapTabKey } from "../lib/focusTrap";
 import { trackAppModalOpen } from "../stores/modalStack";
 
@@ -13,6 +14,8 @@ interface ModalProps {
 	/** Layout of the outer surface; focus styling remains shared. */
 	class?: string | undefined;
 	style?: JSX.CSSProperties | undefined;
+	/** Escape an inert ancestor (e.g. key dialogs hosted inside Settings). */
+	portaled?: boolean | undefined;
 	fallbackFocus?: (() => HTMLElement | null | undefined) | undefined;
 	onBackdropClick?: ((event: MouseEvent) => void) | undefined;
 	/** Temporarily yield to a legacy dialog rendered above this one. */
@@ -26,15 +29,18 @@ interface ModalProps {
 
 /**
  * Shared app dialog shell. Feature components own their content and actions.
- * Keep Content in its owner's DOM during the staged migration: body portals
- * would escape #root's zoom/stacking context and cover legacy crypto dialogs.
- * No portal means the existing root scale applies exactly once.
+ * Inline by default to retain #root's zoom and existing stacking contexts.
+ * Opt-in body portals escape inert ancestors and reapply root zoom once.
  */
 export function Modal(props: ModalProps) {
 	trackAppModalOpen(() => props.open);
 	return (
 		<Show when={props.open}>
-			<ModalSurface {...props} />
+			<Show when={props.portaled} fallback={<ModalSurface {...props} />}>
+				<Portal>
+					<ModalSurface {...props} />
+				</Portal>
+			</Show>
 		</Show>
 	);
 }
@@ -62,39 +68,43 @@ function ModalSurface(props: ModalProps) {
 					content = element;
 					props.contentRef?.(element);
 				}}
-				class={`${props.class ?? "fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60"} focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
+				class={`${props.class ?? "fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60"} ${props.portaled ? "portal-scale" : ""} focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover`}
 				style={props.style}
 				aria-label={props.label}
 				aria-labelledby={props.labelledBy}
 				aria-describedby={props.describedBy}
 				aria-modal={props.suspended ? undefined : "true"}
 				inert={props.suspended || undefined}
-				onOpenAutoFocus={(event) => {
-					returnFocus =
-						document.activeElement instanceof HTMLElement
-							? document.activeElement
-							: undefined;
-					if (props.suspended) {
-						event.preventDefault();
-						return;
-					}
-					if (props.initialFocus) {
-						event.preventDefault();
-						const initialTarget = props.initialFocus();
-						initialTarget?.focus();
-						if (!content?.contains(document.activeElement)) content?.focus();
-						// Let the owner's open-time form reset mount its final field
-						// (e.g. the pre-engaged knock reason). Only refocus if that
-						// reset changed the target; ordinary dialogs focus once.
-						queueMicrotask(() => {
-							if (!content?.isConnected || props.suspended) return;
-							const target = props.initialFocus?.();
-							if (target === initialTarget) return;
-							target?.focus();
-							if (!content.contains(document.activeElement)) content.focus();
-						});
-					}
-				}}
+				onOpenAutoFocus={(event) =>
+					untrack(() => {
+						// Kobalte dispatches this from its scope-creation effect.
+						// App signals must not make that scope tear down and remount.
+						returnFocus =
+							document.activeElement instanceof HTMLElement
+								? document.activeElement
+								: undefined;
+						if (props.suspended) {
+							event.preventDefault();
+							return;
+						}
+						if (props.initialFocus) {
+							event.preventDefault();
+							const initialTarget = props.initialFocus();
+							initialTarget?.focus();
+							if (!content?.contains(document.activeElement)) content?.focus();
+							// Let the owner's open-time form reset mount its final field
+							// (e.g. the pre-engaged knock reason). Only refocus if that
+							// reset changed the target; ordinary dialogs focus once.
+							queueMicrotask(() => {
+								if (!content?.isConnected || props.suspended) return;
+								const target = props.initialFocus?.();
+								if (target === initialTarget) return;
+								target?.focus();
+								if (!content.contains(document.activeElement)) content.focus();
+							});
+						}
+					})
+				}
 				onCloseAutoFocus={(event) => {
 					// Respect a newer focus owner (e.g. close-and-open in one turn).
 					if (event.defaultPrevented) return;
@@ -139,6 +149,8 @@ function ModalSurface(props: ModalProps) {
 					// contains pointer/programmatic focus and stacks nested scopes.
 					if (
 						event.key === "Tab" &&
+						!event.defaultPrevented &&
+						!props.suspended &&
 						content &&
 						event.target instanceof Element &&
 						event.target.closest('[role="dialog"]') === content

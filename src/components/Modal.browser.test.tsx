@@ -10,6 +10,114 @@ import { Modal } from "./Modal";
 afterEach(cleanup);
 
 describe("Modal", () => {
+	it("keeps its original return target across suspension", async () => {
+		let suspend!: (value: boolean) => void;
+		render(() => {
+			const [open, setOpen] = createSignal(false);
+			const [suspended, setSuspended] = createSignal(false);
+			suspend = setSuspended;
+			let field: HTMLInputElement | undefined;
+			return (
+				<>
+					<button type="button" onClick={() => setOpen(true)}>
+						Original opener
+					</button>
+					<Modal
+						open={open()}
+						onClose={() => setOpen(false)}
+						suspended={suspended()}
+						label="Resumable"
+						initialFocus={() => field}
+					>
+						<div>
+							<input ref={field} aria-label="Resumable field" />
+						</div>
+					</Modal>
+				</>
+			);
+		});
+		await userEvent.click(screen.getByText("Original opener"));
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByLabelText("Resumable field"));
+		suspend(true);
+		await expect.poll(() => screen.getByRole("dialog").inert).toBe(true);
+		suspend(false);
+		screen.getByLabelText("Resumable field").focus();
+		await userEvent.keyboard("{Escape}");
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByText("Original opener"));
+	});
+	it("portals a child out of its inert parent and applies zoom once", async () => {
+		const parentClose = vi.fn();
+		const previousZoom =
+			document.documentElement.style.getPropertyValue("--app-zoom");
+		document.documentElement.style.setProperty("--app-zoom", "1.3");
+		try {
+			render(() => {
+				const [child, setChild] = createSignal(false);
+				let field: HTMLInputElement | undefined;
+				return (
+					<Modal
+						open
+						onClose={parentClose}
+						suspended={child()}
+						label="Portal parent"
+					>
+						<div>
+							<button type="button" onClick={() => setChild(true)}>
+								Open portaled child
+							</button>
+							<Modal
+								open={child()}
+								portaled
+								onClose={() => setChild(false)}
+								label="Portal child"
+								initialFocus={() => field}
+							>
+								<div style={{ width: "200px" }} data-testid="portal-panel">
+									<input ref={field} aria-label="Portaled field" />
+									<button type="button">Last portaled control</button>
+								</div>
+							</Modal>
+						</div>
+					</Modal>
+				);
+			});
+			await userEvent.click(screen.getByText("Open portaled child"));
+			const parent = screen.getByRole("dialog", {
+				name: "Portal parent",
+				hidden: true,
+			});
+			const child = screen.getByRole("dialog", { name: "Portal child" });
+			expect(parent.inert).toBe(true);
+			expect(parent.contains(child)).toBe(false);
+			await expect
+				.poll(() => document.activeElement)
+				.toBe(screen.getByLabelText("Portaled field"));
+			expect(
+				screen.getByTestId("portal-panel").getBoundingClientRect().width,
+			).toBeCloseTo(260, 0);
+			await userEvent.keyboard("{Shift>}{Tab}{/Shift}");
+			expect(document.activeElement).toBe(
+				screen.getByText("Last portaled control"),
+			);
+			await userEvent.keyboard("{Escape}");
+			await expect
+				.poll(() => screen.queryByRole("dialog", { name: "Portal child" }))
+				.toBeNull();
+			expect(parentClose).not.toHaveBeenCalled();
+			await expect
+				.poll(() => document.activeElement)
+				.toBe(screen.getByText("Open portaled child"));
+		} finally {
+			cleanup();
+			if (previousZoom)
+				document.documentElement.style.setProperty("--app-zoom", previousZoom);
+			else document.documentElement.style.removeProperty("--app-zoom");
+		}
+	});
 	it("replaces a sole dynamic panel without retaining old controls", async () => {
 		render(() => {
 			const [step, setStep] = createSignal(false);
