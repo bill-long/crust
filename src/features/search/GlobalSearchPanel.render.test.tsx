@@ -57,6 +57,16 @@ function hit(id: string, roomId: string, body: string) {
 	};
 }
 
+function requiredOption(
+	options: readonly HTMLElement[],
+	index: number,
+): HTMLElement {
+	const option = options[index];
+	if (!option)
+		throw new Error(`search result option ${index} was not rendered`);
+	return option;
+}
+
 /** A stub hook: the panel is what is under test, not the search itself. */
 function stubSearch(over: Partial<UseGlobalSearch> = {}): UseGlobalSearch {
 	// `total` on both, matching the `RoomHitGroup` contract: it is what the
@@ -164,12 +174,31 @@ describe("GlobalSearchPanel", () => {
 		));
 		const list = screen.getByRole("listbox");
 		const options = screen.getAllByRole("option");
-		options[0].focus();
+		const first = requiredOption(options, 0);
+		const second = requiredOption(options, 1);
+		first.focus();
 
 		fireEvent.keyDown(list, { key: "ArrowDown" });
 
-		expect(document.activeElement).toBe(options[1]);
-		expect(options[1].getAttribute("aria-selected")).toBe("true");
+		expect(document.activeElement).toBe(second);
+		expect(second.getAttribute("aria-selected")).toBe("true");
+	});
+
+	it("moves focus back to the first result on Home", () => {
+		render(() => (
+			<Wrapper>
+				<GlobalSearchPanel search={stubSearch()} />
+			</Wrapper>
+		));
+		const list = screen.getByRole("listbox");
+		const options = screen.getAllByRole("option");
+		const first = requiredOption(options, 0);
+		requiredOption(options, 1).focus();
+
+		fireEvent.keyDown(list, { key: "Home" });
+
+		expect(document.activeElement).toBe(first);
+		expect(first.getAttribute("aria-selected")).toBe("true");
 	});
 
 	it("moves focus to the far end of a full page, not just the neighbour", () => {
@@ -191,11 +220,11 @@ describe("GlobalSearchPanel", () => {
 		const options = screen.getAllByRole("option");
 		// 20 hits across 20 rooms is the worst-case row count for a page.
 		expect(options).toHaveLength(20);
-		options[0].focus();
+		requiredOption(options, 0).focus();
 
 		fireEvent.keyDown(screen.getByRole("listbox"), { key: "End" });
 
-		expect(document.activeElement).toBe(options[19]);
+		expect(document.activeElement).toBe(requiredOption(options, 19));
 	});
 
 	it("reports a mouse activation as such, so focus is not stolen back", () => {
@@ -206,7 +235,7 @@ describe("GlobalSearchPanel", () => {
 			</Wrapper>
 		));
 
-		fireEvent.click(screen.getAllByRole("option")[0]);
+		fireEvent.click(requiredOption(screen.getAllByRole("option"), 0));
 
 		expect(navigate).toHaveBeenCalled();
 		expect(onNavigated).toHaveBeenCalledWith(false);
@@ -223,7 +252,9 @@ describe("GlobalSearchPanel", () => {
 			</Wrapper>
 		));
 
-		fireEvent.keyDown(screen.getAllByRole("option")[0], { key: " " });
+		fireEvent.keyDown(requiredOption(screen.getAllByRole("option"), 0), {
+			key: " ",
+		});
 
 		expect(onNavigated).toHaveBeenCalledWith(true);
 	});
@@ -236,7 +267,9 @@ describe("GlobalSearchPanel", () => {
 			</Wrapper>
 		));
 
-		fireEvent.keyDown(screen.getAllByRole("option")[0], { key: "Enter" });
+		fireEvent.keyDown(requiredOption(screen.getAllByRole("option"), 0), {
+			key: "Enter",
+		});
 
 		expect(onNavigated).toHaveBeenCalledWith(true);
 	});

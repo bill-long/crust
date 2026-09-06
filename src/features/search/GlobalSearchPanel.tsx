@@ -206,13 +206,15 @@ const GlobalSearchPanel: Component<{
 		const list = hitRows();
 		if (list.length === 0) return;
 		const clamped = Math.max(0, Math.min(next, list.length - 1));
+		const row = list[clamped];
+		if (row === undefined) return;
 		setFocusedHit(clamped);
 		// Every row is rendered, so the element is simply there. `isConnected`
 		// is still checked because Solid never re-invokes a ref with null: a
 		// row that has gone leaves a detached node behind, and `focus()` on
 		// one is a silent no-op that drops focus to <body>, where the listbox
 		// stops receiving keys.
-		const el = rowEls.get(list[clamped]);
+		const el = rowEls.get(row);
 		if (el?.isConnected) el.focus();
 		// The browser scrolls a focused element into view on its own.
 	};
