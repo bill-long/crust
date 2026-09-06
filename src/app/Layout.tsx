@@ -801,7 +801,7 @@ const Layout: Component = () => {
 
 			if (childRooms.length > 0) {
 				const outcome = await leaveChildRooms(client, childRooms, {
-					currentRoomId,
+					...(currentRoomId !== undefined ? { currentRoomId } : {}),
 					// End a call hosted in a child before that child's leave is
 					// issued, so the RTC withdrawal is accepted (see
 					// endCallForRoomLeave). At most one child can host the
@@ -948,7 +948,9 @@ const Layout: Component = () => {
 							navigate("/settings", {
 								state: {
 									returnTo: location.pathname + location.search + location.hash,
-									activeRoomId: params.roomId,
+									...(params.roomId !== undefined
+										? { activeRoomId: params.roomId }
+										: {}),
 								} satisfies SettingsState,
 							})
 						}

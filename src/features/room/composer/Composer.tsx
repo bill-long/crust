@@ -10,7 +10,7 @@ import {
 	Show,
 	untrack,
 } from "solid-js";
-import { unwrap } from "solid-js/store";
+import { produce, unwrap } from "solid-js/store";
 import { useClient } from "../../../client/client";
 import { avatarInitial } from "../../../lib/avatar";
 import { displayNameOr } from "../../../lib/displayName";
@@ -278,7 +278,7 @@ const Composer: Component<{
 		stopTyping();
 		try {
 			await uploadAndSend(client, roomId, attachment, {
-				replyTo: replyTo ?? undefined,
+				...(replyTo != null ? { replyTo } : {}),
 				threadId: threadRootId,
 			});
 			// Don't fire onSent while an edit is active: TimelineView
@@ -743,17 +743,22 @@ const Composer: Component<{
 				// The user can remove a still-queued attachment from the tray while
 				// an earlier one uploads; skip anything no longer in the queue.
 				if (!attachments.some((a) => a.id === att.id)) continue;
-				updateAttachment(att.id, {
-					status: "uploading",
-					progress: 0,
-					error: undefined,
-				});
+				setAttachments(
+					(a) => a.id === att.id,
+					produce((pending) => {
+						pending.status = "uploading";
+						pending.progress = 0;
+						delete pending.error;
+					}),
+				);
 				try {
 					// Hand the send path plain data, not the live store proxy: unwrap
 					// so nested fields (e.g. a voice note's waveform number[]) serialize
 					// onto the wire as plain values rather than Solid proxies.
 					await uploadAndSend(client, roomId, unwrap(att), {
-						replyTo: replyConsumed ? null : replyTo,
+						...(replyTo !== undefined
+							? { replyTo: replyConsumed ? null : replyTo }
+							: {}),
 						threadId: threadRootId,
 						onProgress: (p) => updateAttachment(att.id, { progress: p }),
 					});

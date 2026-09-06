@@ -196,9 +196,12 @@ describe("presence publisher", () => {
 		});
 		await settle();
 
-		expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
-			userMessage: expected,
-		});
+		const reportOptions = vi.mocked(reportError).mock.calls.at(-1)?.[1];
+		if (expected === undefined) {
+			expect(reportOptions).not.toHaveProperty("userMessage");
+		} else {
+			expect(reportOptions).toMatchObject({ userMessage: expected });
+		}
 		dispose();
 	});
 
@@ -363,9 +366,9 @@ describe("presence publisher", () => {
 			await settle();
 			expect(setPresence).not.toHaveBeenCalled();
 			expect(presenceOf("@me:x").status).toBe("unknown");
-			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
-				userMessage: undefined,
-			});
+			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).not.toHaveProperty(
+				"userMessage",
+			);
 			dispose();
 		});
 
@@ -427,9 +430,9 @@ describe("presence publisher", () => {
 				setPresenceSharing(true);
 			});
 			await settle();
-			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).toMatchObject({
-				userMessage: undefined,
-			});
+			expect(vi.mocked(reportError).mock.calls.at(-1)?.[1]).not.toHaveProperty(
+				"userMessage",
+			);
 		});
 
 		it("records the status a sharing publish re-sent, ahead of the echo", async () => {

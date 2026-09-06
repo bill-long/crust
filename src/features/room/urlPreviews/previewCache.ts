@@ -97,11 +97,14 @@ function normalizePreview(raw: unknown): UrlPreviewData | null {
 	const rawImage = readString(obj, "og:image");
 	let image: UrlPreviewData["image"];
 	if (rawImage?.startsWith("mxc://")) {
+		const width = readPositiveInt(obj, "og:image:width");
+		const height = readPositiveInt(obj, "og:image:height");
+		const alt = readString(obj, "og:image:alt");
 		image = {
 			mxcUrl: rawImage,
-			width: readPositiveInt(obj, "og:image:width"),
-			height: readPositiveInt(obj, "og:image:height"),
-			alt: readString(obj, "og:image:alt"),
+			...(width !== undefined ? { width } : {}),
+			...(height !== undefined ? { height } : {}),
+			...(alt !== undefined ? { alt } : {}),
 		};
 	}
 

@@ -44,6 +44,6 @@ export function projectEvent(
 		senderName: displayNameOr(member?.name, sender),
 		timestamp: ev.getTs?.() ?? 0,
 		body,
-		threadRootId,
+		...(threadRootId !== undefined ? { threadRootId } : {}),
 	};
 }

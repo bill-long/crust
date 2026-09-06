@@ -98,14 +98,18 @@ export async function uploadBlob(
 		);
 		const resp = await client.uploadContent(new Blob([ciphertext]), {
 			type: "application/octet-stream",
-			progressHandler: opts.progressHandler,
+			...(opts.progressHandler !== undefined
+				? { progressHandler: opts.progressHandler }
+				: {}),
 		});
 		return { file: { ...file, url: resp.content_uri } };
 	}
 	const resp = await client.uploadContent(blob, {
 		type: opts.type,
-		name: opts.name,
-		progressHandler: opts.progressHandler,
+		...(opts.name !== undefined ? { name: opts.name } : {}),
+		...(opts.progressHandler !== undefined
+			? { progressHandler: opts.progressHandler }
+			: {}),
 	});
 	return { contentUri: resp.content_uri };
 }
@@ -190,20 +194,21 @@ export async function uploadAndSend(
 		mimetype,
 		size: file.size,
 		caption: attachment.caption,
-		width,
-		height,
-		thumbnail:
-			thumbnail && thumbUploaded
-				? {
+		...(width !== undefined ? { width } : {}),
+		...(height !== undefined ? { height } : {}),
+		...(thumbnail && thumbUploaded
+			? {
+					thumbnail: {
 						...thumbUploaded,
 						mimetype: thumbnail.mimetype,
 						size: thumbnail.blob.size,
 						w: thumbnail.width,
 						h: thumbnail.height,
-					}
-				: undefined,
-		replyTo: opts.replyTo,
-		voice: attachment.voice,
+					},
+				}
+			: {}),
+		...(opts.replyTo !== undefined ? { replyTo: opts.replyTo } : {}),
+		...(attachment.voice !== undefined ? { voice: attachment.voice } : {}),
 	});
 
 	await client.sendMessage(roomId, opts.threadId ?? null, content);
