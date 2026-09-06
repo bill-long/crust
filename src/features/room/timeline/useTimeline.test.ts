@@ -3803,7 +3803,7 @@ describe("useTimeline", () => {
 
 			// Server confirms — SDK runs makeRedacted: clears
 			// _localRedactionEvent, marks the target truly redacted.
-			target.localRedaction = undefined;
+			delete target.localRedaction;
 			target.redacted = true;
 			redactionEcho.__setStatus(null);
 			client.__emit(
@@ -3862,7 +3862,7 @@ describe("useTimeline", () => {
 			// SDK unmarks (simulated by clearing localRedaction on the
 			// mock target) then fires `Room.timeline(removed=true)` for
 			// the redaction event.
-			target.localRedaction = undefined;
+			delete target.localRedaction;
 			const redactionWrapper = createMatrixEvent(redactionEcho);
 			client.__emit("Room.timeline", redactionWrapper, roomA, false, true, {
 				liveEvent: true,

@@ -132,7 +132,7 @@ afterEach(() => {
 	clearNotices();
 	closeProfileCard();
 	locationState.pathname = "/home";
-	paramsState.roomId = undefined;
+	delete paramsState.roomId;
 });
 
 /** Render the router plus one anchor, then dispatch a real (cancelable) click. */

@@ -29,7 +29,7 @@ const memberEvent = (
 	ts: 1000,
 	stateKey: "@a:x",
 	content,
-	prevContent,
+	...(prevContent !== undefined ? { prevContent } : {}),
 });
 
 describe("membershipTransition implies stateNotice", () => {

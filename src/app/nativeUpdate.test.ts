@@ -76,9 +76,8 @@ vi.mock("../features/room/call/rtc/endCall", () => ({
 
 describe("nativeUpdate", () => {
 	afterEach(() => {
-		(window as { isTauri?: boolean }).isTauri = undefined;
-		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ =
-			undefined;
+		delete (window as { isTauri?: boolean }).isTauri;
+		delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 		_resetNativeUpdateForTests();
 		vi.restoreAllMocks();
 		// restoreAllMocks leaves a vi.mock() factory's call history intact, so

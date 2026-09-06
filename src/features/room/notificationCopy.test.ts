@@ -13,7 +13,9 @@ function ev(
 		sender: "@a:hs",
 		origin_server_ts: 1,
 		content,
-		unsigned: overrides?.unsigned,
+		...(overrides?.unsigned !== undefined
+			? { unsigned: overrides.unsigned }
+			: {}),
 	});
 }
 

@@ -4,7 +4,7 @@ import { isNativeShell, isOverlayWindow } from "./nativeShell";
 
 describe("isNativeShell", () => {
 	afterEach(() => {
-		(window as { isTauri?: boolean }).isTauri = undefined;
+		delete (window as { isTauri?: boolean }).isTauri;
 	});
 
 	it("is false in a plain browser (no window.isTauri)", () => {

@@ -27,7 +27,7 @@ function setup(opts?: {
 }) {
 	const room = createMockRoom(ROOM_ID, [], [], {
 		name: "My Space",
-		membership: opts?.membership,
+		...(opts?.membership !== undefined ? { membership: opts.membership } : {}),
 	});
 	room.__setStateEvent("m.room.power_levels", "", {});
 	room.__setStateEvent("m.room.join_rules", "", { join_rule: "invite" });

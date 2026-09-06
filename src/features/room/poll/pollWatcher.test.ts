@@ -55,7 +55,12 @@ function makeStartEvent(options?: {
 				{ id: "a", text: "Margherita" },
 				{ id: "b", text: "Pepperoni" },
 			],
-			{ ts: 1000, maxSelections: options?.maxSelections },
+			{
+				ts: 1000,
+				...(options?.maxSelections !== undefined
+					? { maxSelections: options.maxSelections }
+					: {}),
+			},
 		),
 	);
 }

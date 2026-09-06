@@ -3,23 +3,44 @@ import { describe, expect, it } from "vitest";
 import type { RoomSummary, SummariesStore } from "../../client/summaries";
 import { extractViaServers, filterDiscoverableRooms } from "./spaceHierarchy";
 
-function makeHierarchyRoom(
-	overrides: Omit<Partial<HierarchyRoom>, "join_rule"> & {
-		room_id: string;
-		join_rule?: string;
+type HierarchyRoomOverrides = Omit<
+	{
+		[K in keyof HierarchyRoom]?: HierarchyRoom[K] | undefined;
 	},
-): HierarchyRoom {
+	"join_rule" | "room_id"
+> & {
+	room_id: string;
+	join_rule?: string | undefined;
+};
+
+function makeHierarchyRoom(overrides: HierarchyRoomOverrides): HierarchyRoom {
 	return {
-		name: "name" in overrides ? overrides.name : overrides.room_id,
-		avatar_url: overrides.avatar_url,
-		topic: overrides.topic,
-		canonical_alias: overrides.canonical_alias,
-		aliases: overrides.aliases,
+		...(!("name" in overrides)
+			? { name: overrides.room_id }
+			: overrides.name !== undefined
+				? { name: overrides.name }
+				: {}),
+		...(overrides.avatar_url !== undefined
+			? { avatar_url: overrides.avatar_url }
+			: {}),
+		...(overrides.topic !== undefined ? { topic: overrides.topic } : {}),
+		...(overrides.canonical_alias !== undefined
+			? { canonical_alias: overrides.canonical_alias }
+			: {}),
+		...(overrides.aliases !== undefined ? { aliases: overrides.aliases } : {}),
 		world_readable: overrides.world_readable ?? false,
 		guest_can_join: overrides.guest_can_join ?? false,
 		num_joined_members: overrides.num_joined_members ?? 5,
-		room_type: overrides.room_type,
-		join_rule: overrides.join_rule as HierarchyRoom["join_rule"],
+		...(overrides.room_type !== undefined
+			? { room_type: overrides.room_type }
+			: {}),
+		...(overrides.join_rule !== undefined
+			? {
+					join_rule: overrides.join_rule as NonNullable<
+						HierarchyRoom["join_rule"]
+					>,
+				}
+			: {}),
 		children_state: overrides.children_state ?? [],
 		room_id: overrides.room_id,
 	};

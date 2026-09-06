@@ -41,9 +41,10 @@ function setup(
 		unknownRoom?: boolean;
 	},
 ) {
+	const sdkMembership = options?.sdkMembership ?? options?.membership;
 	const room = createMockRoom("!room:example.com", [], [], {
 		name: "Test Room",
-		membership: options?.sdkMembership ?? options?.membership,
+		...(sdkMembership !== undefined ? { membership: sdkMembership } : {}),
 	});
 	room.__setStateEvent("m.room.name", "", { name: "Test Room" });
 	room.__setStateEvent("m.room.topic", "", { topic: "Initial topic" });

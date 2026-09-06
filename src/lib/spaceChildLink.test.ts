@@ -135,7 +135,7 @@ describe("linkRoomToSpace", () => {
 
 	it("skips the parent when checkParentPermission is set and the child room is unknown", async () => {
 		// getRoom returns null (room not in SDK) → cannot verify permission.
-		const { client, sendStateEvent } = makeClient({ maySendParent: undefined });
+		const { client, sendStateEvent } = makeClient();
 		const res = await linkRoomToSpace(client, "!space:x", "!child:x", {
 			checkParentPermission: true,
 		});

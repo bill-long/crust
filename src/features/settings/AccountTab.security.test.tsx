@@ -66,7 +66,7 @@ vi.mock("../../client/client", () => ({
 afterEach(() => {
 	cleanup();
 	vi.clearAllMocks();
-	sessionState.oidc = undefined;
+	delete sessionState.oidc;
 	capabilities = {};
 	authMetadata = null;
 });

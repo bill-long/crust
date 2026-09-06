@@ -46,19 +46,21 @@ vi.mock("../crypto/DeviceList", () => ({
 }));
 
 interface StatusOverrides {
-	crossSigningReady?: boolean;
-	thisDeviceVerified?: boolean;
-	backupVersion?: string | null;
-	backupOnServer?: boolean;
-	crossSigningStatus?: {
-		publicKeysOnDevice: boolean;
-		privateKeysInSecretStorage: boolean;
-		privateKeysCachedLocally: {
-			masterKey: boolean;
-			selfSigningKey: boolean;
-			userSigningKey: boolean;
-		};
-	};
+	crossSigningReady?: boolean | undefined;
+	thisDeviceVerified?: boolean | undefined;
+	backupVersion?: string | null | undefined;
+	backupOnServer?: boolean | undefined;
+	crossSigningStatus?:
+		| {
+				publicKeysOnDevice: boolean;
+				privateKeysInSecretStorage: boolean;
+				privateKeysCachedLocally: {
+					masterKey: boolean;
+					selfSigningKey: boolean;
+					userSigningKey: boolean;
+				};
+		  }
+		| undefined;
 }
 
 const HEALTHY: Required<StatusOverrides> = {

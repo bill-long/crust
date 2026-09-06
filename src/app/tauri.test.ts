@@ -16,8 +16,8 @@ interface TauriWindow extends Window {
 const tauriWindow = window as TauriWindow;
 
 afterEach(() => {
-	tauriWindow.__TAURI_INTERNALS__ = undefined;
-	tauriWindow.__TAURI__ = undefined;
+	delete tauriWindow.__TAURI_INTERNALS__;
+	delete tauriWindow.__TAURI__;
 	vi.restoreAllMocks();
 });
 
@@ -34,7 +34,7 @@ describe("tauriIpcAvailable", () => {
 		tauriWindow.__TAURI_INTERNALS__ = { invoke: vi.fn() };
 		expect(tauriIpcAvailable()).toBe(true);
 
-		tauriWindow.__TAURI_INTERNALS__ = undefined;
+		delete tauriWindow.__TAURI_INTERNALS__;
 		tauriWindow.__TAURI__ = { core: { invoke: vi.fn() } };
 		expect(tauriIpcAvailable()).toBe(true);
 	});
@@ -65,7 +65,7 @@ describe("invokeTauri", () => {
 		expect(await invokeTauri<string>("fallback")).toBe("fallback result");
 		expect(globalInvoke).toHaveBeenCalledWith("fallback", undefined);
 
-		tauriWindow.__TAURI__ = undefined;
+		delete tauriWindow.__TAURI__;
 		expect(await invokeTauri("plain_browser")).toBeUndefined();
 	});
 });

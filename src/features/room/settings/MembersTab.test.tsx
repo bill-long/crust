@@ -81,7 +81,9 @@ function setup(options?: {
 			userId: "@alice:example.com",
 			name: "Alice",
 			powerLevel: 0,
-			avatarUrl: options?.aliceAvatarMxc,
+			...(options?.aliceAvatarMxc !== undefined
+				? { avatarUrl: options.aliceAvatarMxc }
+				: {}),
 		},
 	];
 	if (options?.includeInvite) {
@@ -101,7 +103,9 @@ function setup(options?: {
 		});
 	}
 	const room = createMockRoom("!room:example.com", [], members, {
-		membership: options?.membership,
+		...(options?.membership !== undefined
+			? { membership: options.membership }
+			: {}),
 	});
 	if (options?.includeKnock && options?.knockReason !== undefined) {
 		// Attach the knock's member event the way the SDK's

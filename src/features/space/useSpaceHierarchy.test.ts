@@ -1,4 +1,4 @@
-import type { HierarchyRoom } from "matrix-js-sdk";
+import { type HierarchyRoom, JoinRule } from "matrix-js-sdk";
 import { createRoot, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
@@ -56,15 +56,21 @@ function makeHierarchyRoom(
 	return {
 		room_id: roomId,
 		name: overrides.name ?? roomId,
-		avatar_url: overrides.avatar_url,
-		topic: overrides.topic,
-		canonical_alias: overrides.canonical_alias,
-		aliases: overrides.aliases,
+		...(overrides.avatar_url !== undefined
+			? { avatar_url: overrides.avatar_url }
+			: {}),
+		...(overrides.topic !== undefined ? { topic: overrides.topic } : {}),
+		...(overrides.canonical_alias !== undefined
+			? { canonical_alias: overrides.canonical_alias }
+			: {}),
+		...(overrides.aliases !== undefined ? { aliases: overrides.aliases } : {}),
 		world_readable: overrides.world_readable ?? false,
 		guest_can_join: overrides.guest_can_join ?? false,
 		num_joined_members: overrides.num_joined_members ?? 5,
-		room_type: overrides.room_type,
-		join_rule: overrides.join_rule ?? ("public" as HierarchyRoom["join_rule"]),
+		...(overrides.room_type !== undefined
+			? { room_type: overrides.room_type }
+			: {}),
+		join_rule: overrides.join_rule ?? JoinRule.Public,
 		children_state: overrides.children_state ?? [],
 	};
 }
@@ -733,7 +739,7 @@ describe("useSpaceHierarchy", () => {
 			rooms: [
 				makeHierarchyRoom("!space:x", { room_type: "m.space" }),
 				makeHierarchyRoom("!room:x", {
-					join_rule: "knock" as HierarchyRoom["join_rule"],
+					join_rule: JoinRule.Knock,
 				}),
 			],
 		});

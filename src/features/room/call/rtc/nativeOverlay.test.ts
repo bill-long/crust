@@ -16,8 +16,8 @@ function installTauri(invoke: InvokeMock): void {
 
 describe("nativeOverlay", () => {
 	afterEach(() => {
-		(window as { isTauri?: boolean }).isTauri = undefined;
-		(window as { __TAURI__?: unknown }).__TAURI__ = undefined;
+		delete (window as { isTauri?: boolean }).isTauri;
+		delete (window as { __TAURI__?: unknown }).__TAURI__;
 		_resetNativeOverlayForTests();
 		vi.restoreAllMocks();
 	});

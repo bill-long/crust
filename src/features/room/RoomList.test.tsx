@@ -132,8 +132,8 @@ function renderRoomList(seed: RoomSummary[]): void {
 afterEach(() => {
 	cleanup();
 	navigateMock.mockReset();
-	paramsState.spaceId = undefined;
-	paramsState.roomId = undefined;
+	delete paramsState.spaceId;
+	delete paramsState.roomId;
 	_resetExploreDialogForTests();
 	_resetLastChannelsForTests();
 });

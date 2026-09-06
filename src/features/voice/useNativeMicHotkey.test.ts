@@ -57,9 +57,8 @@ describe("useNativeMicHotkey", () => {
 	afterEach(() => {
 		for (const d of disposers) d();
 		disposers = [];
-		(window as { isTauri?: boolean }).isTauri = undefined;
-		(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ =
-			undefined;
+		delete (window as { isTauri?: boolean }).isTauri;
+		delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 		_resetVoiceForTests();
 		updateSetting("micMode", prevMode);
 		updateSetting("micHotkey", prevHotkey);
@@ -73,7 +72,7 @@ describe("useNativeMicHotkey", () => {
 	}
 
 	it("does nothing outside the native shell", () => {
-		(window as { isTauri?: boolean }).isTauri = undefined;
+		delete (window as { isTauri?: boolean }).isTauri;
 		updateSetting("micMode", "push-to-mute");
 		updateSetting("micHotkey", HOTKEY_ALT);
 		mount();
