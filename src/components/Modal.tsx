@@ -60,18 +60,32 @@ function ModalSurface(props: ModalProps) {
 				aria-label={props.label}
 				aria-labelledby={props.labelledBy}
 				aria-describedby={props.describedBy}
-				aria-modal="true"
+				aria-modal={props.suspended ? undefined : "true"}
 				inert={props.suspended || undefined}
 				onOpenAutoFocus={(event) => {
 					returnFocus =
 						document.activeElement instanceof HTMLElement
 							? document.activeElement
 							: undefined;
-					const target = props.initialFocus?.();
-					if (target) {
+					if (props.suspended) {
 						event.preventDefault();
-						target.focus();
+						return;
+					}
+					if (props.initialFocus) {
+						event.preventDefault();
+						const initialTarget = props.initialFocus();
+						initialTarget?.focus();
 						if (!content?.contains(document.activeElement)) content?.focus();
+						// Let the owner's open-time form reset mount its final field
+						// (e.g. the pre-engaged knock reason). Only refocus if that
+						// reset changed the target; ordinary dialogs focus once.
+						queueMicrotask(() => {
+							if (!content?.isConnected || props.suspended) return;
+							const target = props.initialFocus?.();
+							if (target === initialTarget) return;
+							target?.focus();
+							if (!content.contains(document.activeElement)) content.focus();
+						});
 					}
 				}}
 				onCloseAutoFocus={(event) => {

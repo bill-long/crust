@@ -1,6 +1,6 @@
 import { Popover } from "@kobalte/core/popover";
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import { appModalOpen } from "../stores/modalStack";
@@ -10,6 +10,61 @@ import { Modal } from "./Modal";
 afterEach(cleanup);
 
 describe("Modal", () => {
+	it("restores focus when the parent unmounts an open dialog", async () => {
+		let unmount!: () => void;
+		render(() => {
+			const [mounted, setMounted] = createSignal(false);
+			unmount = () => setMounted(false);
+			return (
+				<>
+					<button type="button" onClick={() => setMounted(true)}>
+						Mount
+					</button>
+					<Show when={mounted()}>
+						<Modal open onClose={() => {}} label="Unmount test">
+							<div>
+								<button type="button">Inside mounted</button>
+							</div>
+						</Modal>
+					</Show>
+				</>
+			);
+		});
+		await userEvent.click(screen.getByText("Mount"));
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByText("Inside mounted"));
+		unmount();
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByText("Mount"));
+		expect(appModalOpen()).toBe(false);
+	});
+
+	it("focuses a field mounted by the owner's open-time effect", async () => {
+		render(() => {
+			const [ready, setReady] = createSignal(false);
+			let field: HTMLInputElement | undefined;
+			createEffect(() => setReady(true));
+			return (
+				<Modal
+					open
+					onClose={() => {}}
+					label="Late field"
+					initialFocus={() => field}
+				>
+					<div>
+						<Show when={ready()}>
+							<input ref={field} aria-label="Ready field" />
+						</Show>
+					</div>
+				</Modal>
+			);
+		});
+		await expect
+			.poll(() => document.activeElement)
+			.toBe(screen.getByLabelText("Ready field"));
+	});
 	it("does not close when a legacy child clears suspension during Escape", async () => {
 		const close = vi.fn();
 		render(() => {
@@ -296,5 +351,10 @@ describe("Modal", () => {
 		screen.getByText("Legacy action").focus();
 		expect(document.activeElement).toBe(screen.getByText("Legacy action"));
 		expect(screen.getByRole("dialog", { name: "Pending" }).inert).toBe(true);
+		expect(
+			screen
+				.getByRole("dialog", { name: "Pending" })
+				.hasAttribute("aria-modal"),
+		).toBe(false);
 	});
 });
