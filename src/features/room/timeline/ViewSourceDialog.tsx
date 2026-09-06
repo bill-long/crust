@@ -1,15 +1,7 @@
 import type { MatrixEvent } from "matrix-js-sdk";
-import {
-	type Component,
-	createEffect,
-	createUniqueId,
-	on,
-	onCleanup,
-	Show,
-} from "solid-js";
-import { containFocusWhileOpen, trapTabKey } from "../../../lib/focusTrap";
+import { type Component, createUniqueId, Show } from "solid-js";
+import { Modal } from "../../../components/Modal";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
-import { trackAppModalOpen } from "../../../stores/modalStack";
 import type { TimelineEvent } from "./timelineTypes";
 
 interface ViewSourceDialogProps {
@@ -37,51 +29,8 @@ function pretty(value: unknown): string {
  * the wire-format `m.room.encrypted` envelope.
  */
 const ViewSourceDialog: Component<ViewSourceDialogProps> = (props) => {
-	const open = () => props.target() !== null;
-	trackAppModalOpen(open);
-
-	let overlayRef!: HTMLDivElement;
 	let closeRef: HTMLButtonElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	const titleId = createUniqueId();
-
-	createEffect(
-		on(open, (isOpen, wasOpen) => {
-			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
-				queueMicrotask(() => closeRef?.focus());
-			} else if (!isOpen && wasOpen) {
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
-			}
-		}),
-	);
-
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
-	});
-
-	containFocusWhileOpen(
-		open,
-		() => overlayRef,
-		() => closeRef,
-	);
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			props.onClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
-	};
 
 	const sourceEvent = () => {
 		const target = props.target();
@@ -91,18 +40,13 @@ const ViewSourceDialog: Component<ViewSourceDialogProps> = (props) => {
 	return (
 		<Show when={props.target()}>
 			{(target) => (
-				<div
-					ref={overlayRef}
-					class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-					role="dialog"
-					aria-modal="true"
-					aria-labelledby={titleId}
-					inert={cryptoDialogOpen() || undefined}
-					tabIndex={-1}
-					onKeyDown={handleKeyDown}
-					onClick={(e) => {
-						if (e.target === e.currentTarget) props.onClose();
-					}}
+				<Modal
+					open
+					onClose={props.onClose}
+					labelledBy={titleId}
+					suspended={cryptoDialogOpen()}
+					initialFocus={() => closeRef}
+					class="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/60 p-4"
 				>
 					<div class="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-lg bg-surface-1 p-6 shadow-xl">
 						<h2
@@ -151,7 +95,7 @@ const ViewSourceDialog: Component<ViewSourceDialogProps> = (props) => {
 							</button>
 						</div>
 					</div>
-				</div>
+				</Modal>
 			)}
 		</Show>
 	);

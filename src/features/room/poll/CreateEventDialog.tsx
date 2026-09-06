@@ -10,9 +10,8 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
-import { trapTabKey } from "../../../lib/focusTrap";
+import { Modal } from "../../../components/Modal";
 import { cryptoDialogOpen } from "../../../stores/cryptoActions";
-import { trackAppModalOpen } from "../../../stores/modalStack";
 import { uploadEventImage } from "../composer/media/uploadMedia";
 import {
 	buildEventBlock,
@@ -52,11 +51,7 @@ interface RoomChoice {
  * follows the same optimistic close pattern as polls.
  */
 const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
-	trackAppModalOpen(props.open);
-
-	let overlayRef!: HTMLDivElement;
 	let titleRef: HTMLInputElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	let imageInputRef: HTMLInputElement | undefined;
 
 	const titleId = createUniqueId();
@@ -156,37 +151,16 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				resetForm();
 				setSnapshotRoomId(props.roomId);
-				queueMicrotask(() => titleRef?.focus());
 			} else if (!isOpen && wasOpen) {
 				clearImage();
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
 			}
 		}),
 	);
 	onCleanup(() => {
 		clearImage();
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
 	});
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			if (!sending()) props.onClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
-	};
 
 	const onImageChosen = (e: Event): void => {
 		const input = e.currentTarget as HTMLInputElement;
@@ -260,201 +234,193 @@ const CreateEventDialog: Component<CreateEventDialogProps> = (props) => {
 	};
 
 	return (
-		<Show when={props.open()}>
-			<div
-				ref={overlayRef}
-				class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				inert={cryptoDialogOpen() || undefined}
-				tabIndex={-1}
-				onKeyDown={handleKeyDown}
-				onClick={(e) => {
-					if (e.target === e.currentTarget && !sending()) props.onClose();
-				}}
+		<Modal
+			open={props.open()}
+			onClose={props.onClose}
+			dismissible={!sending()}
+			labelledBy={titleId}
+			suspended={cryptoDialogOpen()}
+			initialFocus={() => titleRef}
+			class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-surface-0/60 p-4"
+		>
+			<form
+				class="my-auto max-h-full w-full max-w-md overflow-y-auto rounded-lg bg-surface-1 p-6 shadow-xl"
+				onSubmit={handleSubmit}
 			>
-				<form
-					class="my-auto max-h-full w-full max-w-md overflow-y-auto rounded-lg bg-surface-1 p-6 shadow-xl"
-					onSubmit={handleSubmit}
-				>
-					<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
-						Create event
-					</h2>
-					<p class="mb-4 text-sm text-text-muted">
-						A card in chat with the time, place, and RSVPs.
-					</p>
+				<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
+					Create event
+				</h2>
+				<p class="mb-4 text-sm text-text-muted">
+					A card in chat with the time, place, and RSVPs.
+				</p>
 
-					<label class="mb-3 block text-sm">
+				<label class="mb-3 block text-sm">
+					<span class="mb-1 block font-medium text-text-secondary">Title</span>
+					<input
+						ref={titleRef}
+						type="text"
+						required
+						maxLength={140}
+						value={title()}
+						onInput={(e) => setTitle(e.currentTarget.value)}
+						class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						placeholder="Game night"
+					/>
+				</label>
+
+				<div class="mb-3 flex gap-3">
+					<label class="block min-w-0 flex-1 text-sm">
 						<span class="mb-1 block font-medium text-text-secondary">
-							Title
+							Starts
 						</span>
 						<input
-							ref={titleRef}
-							type="text"
+							type="datetime-local"
 							required
-							maxLength={140}
-							value={title()}
-							onInput={(e) => setTitle(e.currentTarget.value)}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							placeholder="Game night"
+							value={startRaw()}
+							onInput={(e) => setStartRaw(e.currentTarget.value)}
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						/>
 					</label>
-
-					<div class="mb-3 flex gap-3">
-						<label class="block min-w-0 flex-1 text-sm">
-							<span class="mb-1 block font-medium text-text-secondary">
-								Starts
-							</span>
-							<input
-								type="datetime-local"
-								required
-								value={startRaw()}
-								onInput={(e) => setStartRaw(e.currentTarget.value)}
-								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							/>
-						</label>
-						<label class="block min-w-0 flex-1 text-sm">
-							<span class="mb-1 block font-medium text-text-secondary">
-								Ends <span class="text-text-faint">(optional)</span>
-							</span>
-							<input
-								type="datetime-local"
-								value={endRaw()}
-								min={startRaw() || undefined}
-								onInput={(e) => setEndRaw(e.currentTarget.value)}
-								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							/>
-						</label>
-					</div>
-
-					<fieldset class="mb-3">
-						<legend class="mb-1 block text-sm font-medium text-text-secondary">
-							Location <span class="text-text-faint">(optional)</span>
-						</legend>
-						<Show
-							when={chosenRoomId() === null}
-							fallback={
-								<div class="flex items-center gap-2">
-									<span class="min-w-0 flex-1 truncate rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary">
-										{chosenRoomName()}
-									</span>
-									<button
-										type="button"
-										class="rounded px-2 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-										onClick={() => setChosenRoomId(null)}
-									>
-										Change
-									</button>
-								</div>
-							}
-						>
-							<input
-								type="text"
-								value={roomQuery()}
-								onInput={(e) => setRoomQuery(e.currentTarget.value)}
-								placeholder="Search rooms…"
-								aria-label="Search rooms for the event location"
-								class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-							/>
-							<Show when={filteredRooms().length > 0}>
-								<ul
-									class="mt-1 max-h-40 overflow-y-auto rounded border border-border-subtle bg-surface-2"
-									aria-label="Matching rooms"
-								>
-									<For each={filteredRooms()}>
-										{(room) => (
-											<li>
-												<button
-													type="button"
-													class="w-full truncate px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-													onClick={() => {
-														setChosenRoomId(room.roomId);
-														setRoomQuery("");
-													}}
-												>
-													{room.name}
-												</button>
-											</li>
-										)}
-									</For>
-								</ul>
-							</Show>
-						</Show>
-					</fieldset>
-
-					<div class="mb-3">
-						<span class="mb-1 block text-sm font-medium text-text-secondary">
-							Cover image <span class="text-text-faint">(optional)</span>
+					<label class="block min-w-0 flex-1 text-sm">
+						<span class="mb-1 block font-medium text-text-secondary">
+							Ends <span class="text-text-faint">(optional)</span>
 						</span>
-						<Show
-							when={imagePreviewUrl()}
-							fallback={
+						<input
+							type="datetime-local"
+							value={endRaw()}
+							min={startRaw() || undefined}
+							onInput={(e) => setEndRaw(e.currentTarget.value)}
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+						/>
+					</label>
+				</div>
+
+				<fieldset class="mb-3">
+					<legend class="mb-1 block text-sm font-medium text-text-secondary">
+						Location <span class="text-text-faint">(optional)</span>
+					</legend>
+					<Show
+						when={chosenRoomId() === null}
+						fallback={
+							<div class="flex items-center gap-2">
+								<span class="min-w-0 flex-1 truncate rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary">
+									{chosenRoomName()}
+								</span>
 								<button
 									type="button"
-									class="rounded border border-dashed border-border-default px-3 py-2 text-sm text-text-muted transition-colors hover:border-border-strong hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-									onClick={() => imageInputRef?.click()}
+									class="rounded px-2 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={() => setChosenRoomId(null)}
 								>
-									Choose an image…
+									Change
 								</button>
-							}
-						>
-							{(url) => (
-								<div class="flex items-center gap-3">
-									<img
-										src={url()}
-										alt="Selected cover preview"
-										class="h-16 w-28 rounded object-cover"
-									/>
-									<button
-										type="button"
-										class="rounded px-1 text-sm text-text-muted transition-colors hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
-										onClick={clearImage}
-									>
-										Remove
-									</button>
-								</div>
-							)}
-						</Show>
+							</div>
+						}
+					>
 						<input
-							ref={imageInputRef}
-							type="file"
-							accept="image/*"
-							class="hidden"
-							aria-hidden="true"
-							tabIndex={-1}
-							onChange={onImageChosen}
+							type="text"
+							value={roomQuery()}
+							onInput={(e) => setRoomQuery(e.currentTarget.value)}
+							placeholder="Search rooms…"
+							aria-label="Search rooms for the event location"
+							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
 						/>
-					</div>
+						<Show when={filteredRooms().length > 0}>
+							<ul
+								class="mt-1 max-h-40 overflow-y-auto rounded border border-border-subtle bg-surface-2"
+								aria-label="Matching rooms"
+							>
+								<For each={filteredRooms()}>
+									{(room) => (
+										<li>
+											<button
+												type="button"
+												class="w-full truncate px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-surface-3 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+												onClick={() => {
+													setChosenRoomId(room.roomId);
+													setRoomQuery("");
+												}}
+											>
+												{room.name}
+											</button>
+										</li>
+									)}
+								</For>
+							</ul>
+						</Show>
+					</Show>
+				</fieldset>
 
-					<Show when={sendError()}>
-						{(msg) => (
-							<p class="mb-3 text-sm text-danger-text" role="alert">
-								{msg()}
-							</p>
+				<div class="mb-3">
+					<span class="mb-1 block text-sm font-medium text-text-secondary">
+						Cover image <span class="text-text-faint">(optional)</span>
+					</span>
+					<Show
+						when={imagePreviewUrl()}
+						fallback={
+							<button
+								type="button"
+								class="rounded border border-dashed border-border-default px-3 py-2 text-sm text-text-muted transition-colors hover:border-border-strong hover:text-text-secondary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+								onClick={() => imageInputRef?.click()}
+							>
+								Choose an image…
+							</button>
+						}
+					>
+						{(url) => (
+							<div class="flex items-center gap-3">
+								<img
+									src={url()}
+									alt="Selected cover preview"
+									class="h-16 w-28 rounded object-cover"
+								/>
+								<button
+									type="button"
+									class="rounded px-1 text-sm text-text-muted transition-colors hover:text-danger-text focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+									onClick={clearImage}
+								>
+									Remove
+								</button>
+							</div>
 						)}
 					</Show>
+					<input
+						ref={imageInputRef}
+						type="file"
+						accept="image/*"
+						class="hidden"
+						aria-hidden="true"
+						tabIndex={-1}
+						onChange={onImageChosen}
+					/>
+				</div>
 
-					<div class="mt-4 flex justify-end gap-2">
-						<button
-							type="button"
-							disabled={sending()}
-							onClick={() => props.onClose()}
-							class="rounded px-4 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
-						>
-							Cancel
-						</button>
-						<button
-							type="submit"
-							disabled={!canSubmit()}
-							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
-						>
-							{sending() ? "Uploading…" : "Create event"}
-						</button>
-					</div>
-				</form>
-			</div>
-		</Show>
+				<Show when={sendError()}>
+					{(msg) => (
+						<p class="mb-3 text-sm text-danger-text" role="alert">
+							{msg()}
+						</p>
+					)}
+				</Show>
+
+				<div class="mt-4 flex justify-end gap-2">
+					<button
+						type="button"
+						disabled={sending()}
+						onClick={() => props.onClose()}
+						class="rounded px-4 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						disabled={!canSubmit()}
+						class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+					>
+						{sending() ? "Uploading…" : "Create event"}
+					</button>
+				</div>
+			</form>
+		</Modal>
 	);
 };
 
