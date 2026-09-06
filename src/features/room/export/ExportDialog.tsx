@@ -4,14 +4,12 @@ import {
 	createSignal,
 	Match,
 	onCleanup,
-	onMount,
 	Show,
 	Switch,
 } from "solid-js";
+import { Modal } from "../../../components/Modal";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
-import { containFocusWhileOpen, trapTabKey } from "../../../lib/focusTrap";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
-import { trackAppModalOpen } from "../../../stores/modalStack";
 import { type ExportFormat, exportRoom } from "./exportRoom";
 
 interface ExportDialogProps {
@@ -43,8 +41,6 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 	const [progressText, setProgressText] = createSignal("");
 	const [error, setError] = createSignal("");
 
-	trackAppModalOpen(() => true);
-
 	let cancelled = false;
 	let aborter: AbortController | null = null;
 	onCleanup(() => {
@@ -53,21 +49,6 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 	});
 
 	let overlayEl!: HTMLDivElement;
-	// Both entry points open this dialog from a Kobalte menu item, whose
-	// trigger refocuses itself on a timer after the menu unmounts - the
-	// containment recaptures focus for the overlay so its Escape/Tab
-	// handling keeps working (same as every sibling dialog).
-	containFocusWhileOpen(
-		() => true,
-		() => overlayEl,
-		() => overlayEl,
-	);
-	const previousFocus =
-		document.activeElement instanceof HTMLElement
-			? document.activeElement
-			: null;
-	onMount(() => overlayEl.focus());
-	onCleanup(() => previousFocus?.focus());
 
 	const parsedLimit = (): number | null => {
 		if (wholeHistory()) return null;
@@ -143,22 +124,13 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 	};
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Export chat"
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={(e) => {
-				if (e.target === e.currentTarget) dismiss();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Tab") {
-					trapTabKey(overlayEl, e);
-					return;
-				}
-				if (e.key === "Escape") dismiss();
+		<Modal
+			open
+			onClose={dismiss}
+			label="Export chat"
+			initialFocus={() => overlayEl}
+			contentRef={(element) => {
+				overlayEl = element;
 			}}
 		>
 			<div class="w-full max-w-md rounded-lg bg-surface-1 p-6 shadow-xl">
@@ -324,7 +296,7 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 					</Match>
 				</Switch>
 			</div>
-		</div>
+		</Modal>
 	);
 };
 
