@@ -91,6 +91,14 @@ const OIDC_SESSION: Session = {
 	},
 };
 
+const SECRET_STORAGE_KEY_INFO: SecretStorageKeyDescription = {
+	name: "Recovery key",
+	algorithm: "m.secret_storage.v1.aes-hmac-sha2",
+	iv: "iv==",
+	mac: "mac==",
+	passphrase: { algorithm: "m.pbkdf2", iterations: 1, salt: "salt" },
+};
+
 function setup(session: Session): void {
 	createClientMock.mockReturnValue(mockSdkClient);
 	render(() => (
@@ -147,7 +155,19 @@ describe("ClientProvider session wiring (#460)", () => {
 				},
 				"m.cross_signing.master",
 			),
-		).rejects.toThrow("No usable secret-storage key metadata is available");
+		).rejects.toThrow(
+			"Your recovery key information is missing or invalid. Try again later, or use another verified session to restore encryption.",
+		);
+
+		clientContext.setRecoveryKeyResolver(async () => new Uint8Array([1, 2, 3]));
+		await expect(
+			getSecretStorageKey(
+				{ keys: { valid: SECRET_STORAGE_KEY_INFO } },
+				"m.cross_signing.master",
+			),
+		).rejects.toThrow(
+			"Couldn't verify your recovery key. Try again, or use another verified session to restore encryption.",
+		);
 	});
 
 	it("passes refreshToken and a tokenRefreshFunction for an OIDC session", async () => {

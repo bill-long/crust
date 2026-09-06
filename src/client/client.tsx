@@ -325,7 +325,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 						// Missing/tombstoned metadata is an account-data failure, not
 						// evidence that the user entered the wrong recovery key.
 						throw new Error(
-							"No usable secret-storage key metadata is available",
+							"Your recovery key information is missing or invalid. Try again later, or use another verified session to restore encryption.",
 						);
 					}
 					// No try/catch around checkKey: a throw here is infrastructure
@@ -345,7 +345,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				if (!key) throw new RecoveryKeyCancelledError();
 				if (!validatedChoice) {
 					throw new Error(
-						"Recovery key resolver returned a key without validating its metadata",
+						"Couldn't verify your recovery key. Try again, or use another verified session to restore encryption.",
 					);
 				}
 
