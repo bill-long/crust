@@ -74,6 +74,46 @@ describe("resolveSecretStorageKey", () => {
 		expect(choice).toEqual({ keyId: "only-key", keyInfo: KEY_INFO });
 	});
 
+	it("uses the first usable offered entry", async () => {
+		const choice = await resolveSecretStorageKey({
+			offeredKeys: {
+				missing: undefined,
+				tombstoned: {},
+				valid: KEY_INFO,
+			} as unknown as Record<string, SecretStorageKeyDescription>,
+			getDefaultKeyId: async () => null,
+			fetchKeyInfo: vi.fn(async () => null),
+		});
+
+		expect(choice).toEqual({ keyId: "valid", keyInfo: KEY_INFO });
+	});
+
+	it("returns null when no offered entry can validate a raw key", async () => {
+		const choice = await resolveSecretStorageKey({
+			offeredKeys: {
+				missing: undefined,
+				tombstoned: {},
+			} as unknown as Record<string, SecretStorageKeyDescription>,
+			getDefaultKeyId: async () => null,
+			fetchKeyInfo: vi.fn(async () => null),
+		});
+
+		expect(choice).toBeNull();
+	});
+
+	it("ignores an empty offered key id after an unusable entry", async () => {
+		const choice = await resolveSecretStorageKey({
+			offeredKeys: {
+				tombstoned: {},
+				"": KEY_INFO,
+			} as unknown as Record<string, SecretStorageKeyDescription>,
+			getDefaultKeyId: async () => null,
+			fetchKeyInfo: vi.fn(async () => null),
+		});
+
+		expect(choice).toBeNull();
+	});
+
 	it("returns null when there are no keys at all", async () => {
 		const choice = await resolveSecretStorageKey({
 			offeredKeys: {},

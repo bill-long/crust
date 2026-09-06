@@ -43,6 +43,9 @@ export function encodeVerificationQr(bytes: Uint8ClampedArray): QrCodeSvg {
 	const parts: string[] = [];
 	for (let row = 0; row < result.size; row++) {
 		const cells = result.data[row];
+		if (!cells) {
+			throw new Error(`QR encoder omitted row ${row}`);
+		}
 		let col = 0;
 		while (col < result.size) {
 			if (!cells[col]) {

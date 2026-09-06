@@ -321,7 +321,13 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 					| undefined;
 				const key = await requestRecoveryKey(async (candidate) => {
 					const choice = await resolveChoice();
-					if (!choice) return false;
+					if (!choice) {
+						// Missing/tombstoned metadata is an account-data failure, not
+						// evidence that the user entered the wrong recovery key.
+						throw new Error(
+							"Your recovery key information is missing or invalid. Try again later, or use another verified session to restore encryption.",
+						);
+					}
 					// No try/catch around checkKey: a throw here is infrastructure
 					// failure (crypto store, SDK state), not a key mismatch — let it
 					// propagate so RecoveryKeyInput can report a connection problem
@@ -337,13 +343,16 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 				// a real failure (the SDK would otherwise report a null here as
 				// "callback returned falsey").
 				if (!key) throw new RecoveryKeyCancelledError();
-
-				const keyId = validatedChoice?.keyId ?? Object.keys(opts.keys)[0];
+				if (!validatedChoice) {
+					throw new Error(
+						"Couldn't verify your recovery key. Try again, or use another verified session to restore encryption.",
+					);
+				}
 
 				// Cache for successive calls within the same operation
-				cachedSecretStorageKeyId = keyId;
+				cachedSecretStorageKeyId = validatedChoice.keyId;
 				cachedSecretStorageKey = key;
-				return [keyId, key];
+				return [validatedChoice.keyId, key];
 			},
 			cacheSecretStorageKey: (
 				keyId: string,
