@@ -262,7 +262,7 @@ export function partitionByPresence(
  */
 function mergeSorted(runs: MemberEntry[][]): MemberEntry[] {
 	if (runs.length === 0) return [];
-	if (runs.length === 1) return runs[0];
+	if (runs.length === 1) return runs[0] ?? [];
 
 	let total = 0;
 	for (const run of runs) total += run.length;
@@ -271,14 +271,29 @@ function mergeSorted(runs: MemberEntry[][]): MemberEntry[] {
 	const out: MemberEntry[] = [];
 	for (let taken = 0; taken < total; taken++) {
 		let best = -1;
+		let bestMember: MemberEntry | undefined;
 		for (let i = 0; i < runs.length; i++) {
-			if (heads[i] >= runs[i].length) continue;
-			if (best === -1 || cmp(runs[i][heads[i]], runs[best][heads[best]]) < 0) {
+			const run = runs[i];
+			let head = heads[i];
+			if (run === undefined || head === undefined || head >= run.length)
+				continue;
+			let member = run[head];
+			if (member === undefined) {
+				do {
+					head++;
+					member = run[head];
+				} while (member === undefined && head < run.length);
+				heads[i] = head;
+			}
+			if (member === undefined) continue;
+			if (bestMember === undefined || cmp(member, bestMember) < 0) {
 				best = i;
+				bestMember = member;
 			}
 		}
-		out.push(runs[best][heads[best]]);
-		heads[best]++;
+		if (best < 0 || bestMember === undefined) break;
+		out.push(bestMember);
+		heads[best] = (heads[best] ?? 0) + 1;
 	}
 	return out;
 }
