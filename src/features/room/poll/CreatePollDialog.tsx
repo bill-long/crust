@@ -30,7 +30,7 @@ interface CreatePollDialogProps {
 	roomId: string;
 	/** Thread scope: the poll start is sent into this thread via the SDK's
 	 *  thread-aware overload (issue #332). Absent for the main composer. */
-	threadRootId?: string;
+	threadRootId?: string | undefined;
 	open: () => boolean;
 	onClose: () => void;
 }

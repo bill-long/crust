@@ -5,8 +5,8 @@ interface ToggleProps {
 	checked: boolean;
 	onChange: (checked: boolean) => void;
 	label: string;
-	describedBy?: string;
-	disabled?: boolean;
+	describedBy?: string | undefined;
+	disabled?: boolean | undefined;
 }
 
 const Toggle: Component<ToggleProps> = (props) => (

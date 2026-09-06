@@ -324,22 +324,22 @@ const HoverToolbar: Component<{
 	onReactPick: (key: string) => void;
 	onReply: () => void;
 	/** Open (or start) this message's thread. Absent inside the panel. */
-	onReplyInThread?: () => void;
+	onReplyInThread?: (() => void) | undefined;
 	onEdit: () => void;
 	onDelete: () => void;
 	onTogglePin: () => void;
 	/** Forward the message to another room. Absent for non-forwardable
 	    events (polls, echoes, decryption failures, stickers). */
-	onForward?: () => void;
+	onForward?: (() => void) | undefined;
 	/** Open the raw-event viewer for this message. */
 	onViewSource: () => void;
 	/** Copy the message text to the clipboard. Absent when `copyableText`
 	    offers nothing (polls, stickers, uncaptioned media, decryption
 	    failures). */
-	onCopyText?: () => void;
+	onCopyText?: (() => void) | undefined;
 	/** Report the message to the homeserver admins. Absent for the user's
 	    own messages. */
-	onReport?: () => void;
+	onReport?: (() => void) | undefined;
 }> = (props) => {
 	const [pickerOpen, setPickerOpen] = createSignal(false);
 	const [menuOpen, setMenuOpen] = createSignal(false);
@@ -605,13 +605,13 @@ const TimelineItem: Component<{
 	onVote: (answerIds: string[]) => void;
 	/** Open the thread panel for this event's thread (chip click). Absent
 	 *  inside the panel itself, where the chip is a plain summary. */
-	onOpenThread?: (threadId: string) => void;
+	onOpenThread?: ((threadId: string) => void) | undefined;
 	/** Close the poll (only offered when the snapshot says canEnd). */
 	onEndPoll: () => void;
 	onReply: () => void;
 	/** Open the Forward dialog for this event. Absent for
 	    non-forwardable events (see `canForward`). */
-	onForward?: () => void;
+	onForward?: (() => void) | undefined;
 	onJumpToReply: (eventId: string) => void;
 	onEdit: () => void;
 	onDelete: () => void;
@@ -624,12 +624,12 @@ const TimelineItem: Component<{
 	 * The toolbar item renders only when this is wired AND the event has
 	 * user-authored text per `copyableText`.
 	 */
-	onCopyText?: (text: string) => void;
+	onCopyText?: ((text: string) => void) | undefined;
 	/** Report the message to the homeserver admins (#447). Absent for the
 	    user's own messages and local echoes. */
-	onReport?: () => void;
+	onReport?: (() => void) | undefined;
 	onTogglePin?: () => void;
-	canPin?: boolean;
+	canPin?: boolean | undefined;
 	isPinned?: boolean;
 	onRetry?: () => void;
 	onDiscard?: () => void;
@@ -637,7 +637,7 @@ const TimelineItem: Component<{
 	onRetryRedaction?: () => void;
 	onDiscardRedaction?: () => void;
 	onCancelRedaction?: () => void;
-	pendingRedactionStatus?: EventStatus;
+	pendingRedactionStatus?: EventStatus | undefined;
 	/** Reaction keys whose latest local echo is NOT_SENT for this event. */
 	failedReactionKeys?: string[];
 	/** Retry the last failed reaction echo for `(this event, key)`. */
@@ -650,10 +650,10 @@ const TimelineItem: Component<{
 	 * failed. Empty string is rendered as "(empty)" so the surface
 	 * stays discoverable.
 	 */
-	failedEditAttempt?: string;
+	failedEditAttempt?: string | undefined;
 	onRetryEdit?: () => void;
 	onDiscardEdit?: () => void;
-	readReceipts?: { userId: string; displayName: string }[];
+	readReceipts?: { userId: string; displayName: string }[] | undefined;
 	client: MatrixClient;
 	shortcodeLookup: Map<string, ResolvedEmote>;
 	emoteLookup: Map<string, ResolvedEmote>;

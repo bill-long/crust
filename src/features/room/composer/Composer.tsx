@@ -98,7 +98,7 @@ const Composer: Component<{
 	roomId: string;
 	/** Thread scope: sends target this thread (SDK 3-arg overload builds
 	 *  the MSC3440 relation). Absent for the main room composer. */
-	threadRootId?: string;
+	threadRootId?: string | undefined;
 	replyTo?: TimelineEvent | null;
 	editingEvent?: TimelineEvent | null;
 	onCancelReply?: () => void;

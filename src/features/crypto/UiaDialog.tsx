@@ -14,7 +14,7 @@ interface UiaDialogProps {
 	onSubmit: (password: string) => void;
 	onCancel: () => void;
 	/** Refusal from a previous attempt (e.g. wrong password). */
-	error?: string;
+	error?: string | undefined;
 }
 
 /**

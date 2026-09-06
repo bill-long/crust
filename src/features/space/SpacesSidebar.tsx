@@ -75,9 +75,9 @@ interface SpaceTileProps {
 	/** Nesting depth in the sidebar tree (0 = root tile). Accessor so a
 	    tree restructure re-indents the row without remounting it. */
 	depth: Accessor<number>;
-	onOpenSpaceSettings?: (spaceId: string) => void;
-	onLeaveSpace?: (spaceId: string) => void;
-	onInviteSpace?: (spaceId: string) => void;
+	onOpenSpaceSettings?: ((spaceId: string) => void) | undefined;
+	onLeaveSpace?: ((spaceId: string) => void) | undefined;
+	onInviteSpace?: ((spaceId: string) => void) | undefined;
 	/**
 	 * This tile's position among the rail's ROOT tiles, or null for a
 	 * nested subspace tile. Root ordering is the user's manual m.space_order
@@ -282,18 +282,18 @@ interface SpacesSidebarProps {
 	 * Called when the user opens settings for a space via the right-click
 	 * "Space settings" item.
 	 */
-	onOpenSpaceSettings?: (spaceId: string) => void;
+	onOpenSpaceSettings?: ((spaceId: string) => void) | undefined;
 	/**
 	 * Called when the user picks the right-click "Leave space" item.
 	 * Callers should open the leave confirmation flow.
 	 */
-	onLeaveSpace?: (spaceId: string) => void;
+	onLeaveSpace?: ((spaceId: string) => void) | undefined;
 	/**
 	 * Called when the user picks the right-click "Invite people" item.
 	 * Only shown when the local user has permission to invite to the
 	 * space. Callers should open the invite dialog targeting the space.
 	 */
-	onInviteSpace?: (spaceId: string) => void;
+	onInviteSpace?: ((spaceId: string) => void) | undefined;
 }
 
 const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {

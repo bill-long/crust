@@ -23,7 +23,7 @@ interface VerificationDialogProps {
 	 * whether the option applies - it only makes sense for self-verification
 	 * on an account whose cross-signing keys are in secret storage.
 	 */
-	verifyWithRecoveryKey?: () => Promise<void>;
+	verifyWithRecoveryKey?: (() => Promise<void>) | undefined;
 }
 
 type RecoveryStep = "idle" | "working" | "done" | "error";

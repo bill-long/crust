@@ -310,7 +310,7 @@ const PinnedMessagesPanel: Component<{
 									ref={(h) => {
 										virtRef = h ?? undefined;
 									}}
-									scrollRef={scrollRef}
+									{...(scrollRef ? { scrollRef } : {})}
 									data={items()}
 								>
 									{(id) => <div class="py-0.5">{renderRow(id)}</div>}

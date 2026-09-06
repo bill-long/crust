@@ -53,7 +53,7 @@ export function deviceLabel(
 
 interface DeviceItemProps {
 	device: DeviceInfo;
-	onVerify?: (deviceId: string) => void;
+	onVerify?: ((deviceId: string) => void) | undefined;
 	/**
 	 * Revoke this session (#556). Never offered for the current device -
 	 * signing THAT out is logging out, which the app already has - so the

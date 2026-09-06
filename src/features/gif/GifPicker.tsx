@@ -28,7 +28,7 @@ const GifPicker: Component<{
 	/** Called when picker should close. focusTrigger=true for keyboard/select closes. */
 	onClose: (focusTrigger: boolean) => void;
 	/** The trigger element — excluded from outside-click detection. */
-	triggerRef?: HTMLElement;
+	triggerRef?: HTMLElement | undefined;
 }> = (props) => {
 	const config = useConfig();
 

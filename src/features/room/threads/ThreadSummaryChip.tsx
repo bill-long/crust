@@ -12,7 +12,7 @@ import type { ThreadSummary } from "./threadSummary";
 export const ThreadSummaryChip: Component<{
 	thread: ThreadSummary;
 	/** Opens the thread panel; when absent the chip is non-interactive. */
-	onOpen?: () => void;
+	onOpen?: (() => void) | undefined;
 	/** Injectable clock for tests; when set, the ticker isn't subscribed. */
 	now?: number;
 }> = (props) => {

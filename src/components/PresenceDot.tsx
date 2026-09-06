@@ -9,7 +9,7 @@ interface PresenceDotProps {
 	 * passes its own, or the dot gets a near-black halo that reads as part of
 	 * the picture - the opposite of what the ring is for.
 	 */
-	ringClass?: string;
+	ringClass?: string | undefined;
 	/**
 	 * Box size of the avatar this sits on. The dot scales with it so the
 	 * 64px profile portrait does not get a dot sized for a 32px list row.

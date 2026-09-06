@@ -387,7 +387,10 @@ const ExploreDialog: Component<ExploreDialogProps> = (props) => {
 								{/* Virtualized: Load-more pages accumulate results
 								    unboundedly, so this list crosses the ~50-item
 								    virtualization threshold after three pages. */}
-								<Virtualizer scrollRef={scrollRef} data={results()}>
+								<Virtualizer
+									{...(scrollRef ? { scrollRef } : {})}
+									data={results()}
+								>
 									{(room) => {
 										const joinState = () => joinStates()[room.room_id];
 										const alreadyJoined = () =>

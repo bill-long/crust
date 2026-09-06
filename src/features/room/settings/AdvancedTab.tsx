@@ -16,11 +16,11 @@ import { useMyMembership } from "./useRoomPermissions";
 interface AdvancedTabProps {
 	client: MatrixClient;
 	roomId: string;
-	onLeft?: (roomId: string) => void;
+	onLeft?: ((roomId: string) => void) | undefined;
 	/** Called when the Forget action completes (room purged server-side). */
-	onForgot?: (roomId: string) => void;
+	onForgot?: ((roomId: string) => void) | undefined;
 	/** When true, label copy uses "space" instead of "room". */
-	isSpace?: boolean;
+	isSpace?: boolean | undefined;
 }
 
 const AdvancedTab: Component<AdvancedTabProps> = (props) => {

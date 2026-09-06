@@ -44,16 +44,16 @@ interface RoomSettingsOverlayProps {
 	onTabChange: (tab: RoomSettingsTab) => void;
 	onClose: () => void;
 	/** Called when the Advanced tab finishes a Leave action. */
-	onLeft?: (roomId: string) => void;
+	onLeft?: ((roomId: string) => void) | undefined;
 	/** Called when the Advanced tab finishes a Forget action. */
-	onForgot?: (roomId: string) => void;
+	onForgot?: ((roomId: string) => void) | undefined;
 	/**
 	 * Hint from the caller that the target is a space. Used to switch
 	 * labels ("Room Settings" → "Space Settings", etc). When omitted,
 	 * we fall back to `room.isSpaceRoom()` which may report false during
 	 * initial sync before the m.room.create event lands.
 	 */
-	isSpace?: boolean;
+	isSpace?: boolean | undefined;
 }
 
 const FOCUSABLE =

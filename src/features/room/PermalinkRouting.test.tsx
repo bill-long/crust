@@ -85,7 +85,7 @@ function makeClient(opts: FakeClientOptions = {}) {
 
 const Wrapper: ParentComponent<{
 	client: MatrixClient;
-	summaries?: Record<string, unknown>;
+	summaries?: Record<string, unknown> | undefined;
 }> = (props) => {
 	const [syncState] = createSignal<AppSyncState>("live");
 	const [cryptoState] = createSignal<CryptoState>("ready");
