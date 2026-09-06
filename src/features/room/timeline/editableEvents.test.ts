@@ -64,6 +64,12 @@ describe("findLastEditableEvent", () => {
 		expect(findLastEditableEvent([], ME)).toBeNull();
 	});
 
+	it("skips sparse timeline slots", () => {
+		const events = [ev({ senderId: ME, msgtype: "m.text", eventId: "$1" })];
+		events.length = 2;
+		expect(findLastEditableEvent(events, ME)?.eventId).toBe("$1");
+	});
+
 	it("returns the user's most recent own m.text message", () => {
 		const events = [
 			ev({ senderId: ME, msgtype: "m.text", eventId: "$1" }),

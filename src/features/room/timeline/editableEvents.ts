@@ -72,6 +72,7 @@ export function findLastEditableEvent(
 ): TimelineEvent | null {
 	for (let i = events.length - 1; i >= 0; i--) {
 		const ev = events[i];
+		if (ev === undefined) continue;
 		if (ev.senderId !== myUserId) continue;
 		// Own membership/state notice: not a message, skip past it.
 		if (ev.stateNotice !== null) continue;
