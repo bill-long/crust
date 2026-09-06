@@ -17,11 +17,10 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../client/client";
+import { Modal } from "../../components/Modal";
 import { avatarHttpUrl } from "../../lib/avatar";
-import { trapTabKey } from "../../lib/focusTrap";
 import { parseInvites } from "../../lib/inviteParsing";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
-import { trackAppModalOpen } from "../../stores/modalStack";
 
 /** Local-part of a Matrix room alias. Server adds ":server" + leading "#". */
 const ALIAS_LOCAL_PART_RE = /^[A-Za-z0-9._=/+-]+$/;
@@ -35,14 +34,11 @@ interface CreateSpaceDialogProps {
 }
 
 const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
-	trackAppModalOpen(props.open);
 	const navigate = useNavigate();
 	const { optimisticallyMarkJoined } = useClient();
 
-	let overlayRef!: HTMLDivElement;
 	let nameRef: HTMLInputElement | undefined;
 	let fileInputRef: HTMLInputElement | undefined;
-	let previousFocus: HTMLElement | null = null;
 	let mounted = true;
 	/**
 	 * Monotonic counter bumped on every reset (open transition). An async
@@ -122,39 +118,14 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 	createEffect(
 		on(props.open, (isOpen, wasOpen) => {
 			if (isOpen && !wasOpen) {
-				previousFocus = document.activeElement as HTMLElement | null;
 				resetForm();
-				queueMicrotask(() => nameRef?.focus());
-			} else if (!isOpen && wasOpen) {
-				if (previousFocus && document.body.contains(previousFocus)) {
-					previousFocus.focus();
-				}
-				previousFocus = null;
 			}
 		}),
 	);
 
-	onCleanup(() => {
-		if (previousFocus && document.body.contains(previousFocus)) {
-			previousFocus.focus();
-		}
-		previousFocus = null;
-	});
-
 	const tryClose = (): void => {
 		if (submitting()) return;
 		props.onClose();
-	};
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape") {
-			e.stopPropagation();
-			tryClose();
-			return;
-		}
-		if (e.key === "Tab") {
-			trapTabKey(overlayRef, e);
-		}
 	};
 
 	async function uploadAvatar(file: File): Promise<void> {
@@ -291,270 +262,264 @@ const CreateSpaceDialog: Component<CreateSpaceDialogProps> = (props) => {
 	}
 
 	return (
-		<Show when={props.open()}>
-			<div
-				ref={overlayRef}
-				class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby={titleId}
-				inert={cryptoDialogOpen() || undefined}
-				tabIndex={-1}
-				onKeyDown={handleKeyDown}
-				onClick={(e) => {
-					if (e.target === e.currentTarget) tryClose();
-				}}
+		<Modal
+			class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-surface-0/60 p-4"
+			open={props.open()}
+			onClose={tryClose}
+			dismissible={!submitting()}
+			labelledBy={titleId}
+			suspended={cryptoDialogOpen()}
+			initialFocus={() => nameRef}
+		>
+			<form
+				class="my-auto max-h-full w-full max-w-md overflow-y-auto rounded-lg bg-surface-1 p-6 shadow-xl"
+				onSubmit={handleSubmit}
 			>
-				<form
-					class="my-auto max-h-full w-full max-w-md overflow-y-auto rounded-lg bg-surface-1 p-6 shadow-xl"
-					onSubmit={handleSubmit}
-				>
-					<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
-						Create space
-					</h2>
-					<p class="mb-4 text-sm text-text-muted">
-						Spaces group rooms and people. You can add rooms later.
-					</p>
+				<h2 id={titleId} class="mb-1 text-lg font-semibold text-text-primary">
+					Create space
+				</h2>
+				<p class="mb-4 text-sm text-text-muted">
+					Spaces group rooms and people. You can add rooms later.
+				</p>
 
-					<div class="mb-4 flex items-center gap-3">
-						<Show
-							when={avatarHttp()}
-							fallback={
-								<div class="flex h-16 w-16 items-center justify-center rounded-full bg-surface-3 text-text-secondary">
-									<svg
-										class="h-7 w-7"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-										stroke-width="2"
-										aria-hidden="true"
-									>
-										<title>Avatar placeholder</title>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="M4 7h3l2-2h6l2 2h3v12H4V7z"
-										/>
-										<circle cx="12" cy="13" r="3.5" />
-									</svg>
-								</div>
-							}
-						>
-							<img
-								src={avatarHttp() ?? ""}
-								alt=""
-								class="h-16 w-16 rounded-full object-cover"
+				<div class="mb-4 flex items-center gap-3">
+					<Show
+						when={avatarHttp()}
+						fallback={
+							<div class="flex h-16 w-16 items-center justify-center rounded-full bg-surface-3 text-text-secondary">
+								<svg
+									class="h-7 w-7"
+									fill="none"
+									viewBox="0 0 24 24"
+									stroke="currentColor"
+									stroke-width="2"
+									aria-hidden="true"
+								>
+									<title>Avatar placeholder</title>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										d="M4 7h3l2-2h6l2 2h3v12H4V7z"
+									/>
+									<circle cx="12" cy="13" r="3.5" />
+								</svg>
+							</div>
+						}
+					>
+						<img
+							src={avatarHttp() ?? ""}
+							alt=""
+							class="h-16 w-16 rounded-full object-cover"
+						/>
+					</Show>
+					<div class="flex flex-col gap-1">
+						<div class="flex gap-2">
+							<input
+								ref={fileInputRef}
+								type="file"
+								accept="image/*"
+								class="hidden"
+								tabIndex={-1}
+								onChange={onFileSelect}
 							/>
-						</Show>
-						<div class="flex flex-col gap-1">
-							<div class="flex gap-2">
-								<input
-									ref={fileInputRef}
-									type="file"
-									accept="image/*"
-									class="hidden"
-									tabIndex={-1}
-									onChange={onFileSelect}
-								/>
+							<button
+								type="button"
+								onClick={() => fileInputRef?.click()}
+								disabled={submitting() || avatarUploading()}
+								aria-describedby={avatarHintId}
+								class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+							>
+								<Show when={avatarHttp()} fallback="Add avatar">
+									Replace
+								</Show>
+							</button>
+							<Show when={avatarHttp()}>
 								<button
 									type="button"
-									onClick={() => fileInputRef?.click()}
-									disabled={submitting() || avatarUploading()}
-									aria-describedby={avatarHintId}
-									class="rounded border border-border-subtle bg-surface-2 px-3 py-1 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+									onClick={removeAvatar}
+									disabled={submitting()}
+									class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
 								>
-									<Show when={avatarHttp()} fallback="Add avatar">
-										Replace
-									</Show>
+									Remove
 								</button>
-								<Show when={avatarHttp()}>
-									<button
-										type="button"
-										onClick={removeAvatar}
-										disabled={submitting()}
-										class="rounded px-3 py-1 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60 any-pointer-coarse:min-h-11"
+							</Show>
+						</div>
+						<span
+							id={avatarHintId}
+							class={`text-xs ${avatarError() ? "text-danger-text" : "text-text-faint"}`}
+							role={avatarError() ? "alert" : undefined}
+						>
+							<Show
+								when={avatarError()}
+								fallback={
+									<Show
+										when={avatarUploading()}
+										fallback="Optional. PNG, JPG, GIF, or WEBP up to 10 MB."
 									>
-										Remove
-									</button>
-								</Show>
-							</div>
-							<span
-								id={avatarHintId}
-								class={`text-xs ${avatarError() ? "text-danger-text" : "text-text-faint"}`}
-								role={avatarError() ? "alert" : undefined}
+										Uploading…
+									</Show>
+								}
 							>
-								<Show
-									when={avatarError()}
-									fallback={
-										<Show
-											when={avatarUploading()}
-											fallback="Optional. PNG, JPG, GIF, or WEBP up to 10 MB."
-										>
-											Uploading…
-										</Show>
-									}
-								>
-									{avatarError()}
-								</Show>
-							</span>
-						</div>
+								{avatarError()}
+							</Show>
+						</span>
 					</div>
+				</div>
 
-					<label class="mb-3 block text-sm">
-						<span class="mb-1 block font-medium text-text-secondary">Name</span>
+				<label class="mb-3 block text-sm">
+					<span class="mb-1 block font-medium text-text-secondary">Name</span>
+					<input
+						ref={nameRef}
+						type="text"
+						required
+						maxLength={255}
+						value={name()}
+						onInput={(e) => setName(e.currentTarget.value)}
+						disabled={submitting()}
+						class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+						placeholder="My space"
+					/>
+				</label>
+
+				<label class="mb-3 block text-sm">
+					<span class="mb-1 block font-medium text-text-secondary">
+						Topic <span class="text-text-faint font-normal">(optional)</span>
+					</span>
+					<textarea
+						rows={2}
+						maxLength={1000}
+						value={topic()}
+						onInput={(e) => setTopic(e.currentTarget.value)}
+						disabled={submitting()}
+						class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+						placeholder="What's this space about?"
+					/>
+				</label>
+
+				<label class="mb-3 block text-sm">
+					<span class="mb-1 block font-medium text-text-secondary">
+						Alias <span class="text-text-faint font-normal">(optional)</span>
+					</span>
+					<div class="flex items-center gap-1 rounded border border-border-subtle bg-surface-2 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-hover">
+						<span class="pl-3 text-text-faint" aria-hidden="true">
+							#
+						</span>
 						<input
-							ref={nameRef}
 							type="text"
-							required
-							maxLength={255}
-							value={name()}
-							onInput={(e) => setName(e.currentTarget.value)}
+							value={alias()}
+							onInput={(e) => setAlias(e.currentTarget.value)}
 							disabled={submitting()}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-							placeholder="My space"
+							aria-describedby={aliasHintId}
+							aria-invalid={!aliasValid()}
+							class="flex-1 bg-transparent py-2 text-text-primary placeholder-text-faint focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
+							placeholder="my-space"
 						/>
-					</label>
-
-					<label class="mb-3 block text-sm">
-						<span class="mb-1 block font-medium text-text-secondary">
-							Topic <span class="text-text-faint font-normal">(optional)</span>
-						</span>
-						<textarea
-							rows={2}
-							maxLength={1000}
-							value={topic()}
-							onInput={(e) => setTopic(e.currentTarget.value)}
-							disabled={submitting()}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-							placeholder="What's this space about?"
-						/>
-					</label>
-
-					<label class="mb-3 block text-sm">
-						<span class="mb-1 block font-medium text-text-secondary">
-							Alias <span class="text-text-faint font-normal">(optional)</span>
-						</span>
-						<div class="flex items-center gap-1 rounded border border-border-subtle bg-surface-2 focus-within:border-accent focus-within:ring-2 focus-within:ring-accent-hover">
-							<span class="pl-3 text-text-faint" aria-hidden="true">
-								#
+						<Show when={homeserverDomain()}>
+							<span class="pr-3 text-text-faint" aria-hidden="true">
+								:{homeserverDomain()}
 							</span>
-							<input
-								type="text"
-								value={alias()}
-								onInput={(e) => setAlias(e.currentTarget.value)}
-								disabled={submitting()}
-								aria-describedby={aliasHintId}
-								aria-invalid={!aliasValid()}
-								class="flex-1 bg-transparent py-2 text-text-primary placeholder-text-faint focus:outline-hidden disabled:cursor-not-allowed disabled:opacity-60"
-								placeholder="my-space"
-							/>
-							<Show when={homeserverDomain()}>
-								<span class="pr-3 text-text-faint" aria-hidden="true">
-									:{homeserverDomain()}
-								</span>
-							</Show>
-						</div>
-						<span
-							id={aliasHintId}
-							class={`mt-1 block text-xs ${aliasValid() ? "text-text-faint" : "text-danger-text"}`}
-						>
-							<Show
-								when={aliasValid()}
-								fallback="Aliases may contain letters, numbers, and . _ = - / +"
-							>
-								Letters, numbers, and . _ = - / + only. Server adds the suffix.
-							</Show>
-						</span>
-					</label>
-
-					<fieldset class="mb-3 text-sm">
-						<legend class="mb-1 font-medium text-text-secondary">
-							Visibility
-						</legend>
-						<label class="mr-4 inline-flex items-center gap-2">
-							<input
-								type="radio"
-								name="visibility"
-								checked={!isPublic()}
-								onChange={() => setIsPublic(false)}
-								disabled={submitting()}
-								class="accent-accent"
-							/>
-							<span class="text-text-primary">Invite-only</span>
-						</label>
-						<label class="inline-flex items-center gap-2">
-							<input
-								type="radio"
-								name="visibility"
-								checked={isPublic()}
-								onChange={() => setIsPublic(true)}
-								disabled={submitting()}
-								class="accent-accent"
-							/>
-							<span class="text-text-primary">Public</span>
-						</label>
-					</fieldset>
-
-					<label class="mb-3 block text-sm">
-						<span class="mb-1 block font-medium text-text-secondary">
-							Invite users{" "}
-							<span class="text-text-faint font-normal">(optional)</span>
-						</span>
-						<textarea
-							rows={2}
-							value={inviteRaw()}
-							onInput={(e) => setInviteRaw(e.currentTarget.value)}
-							disabled={submitting()}
-							aria-describedby={inviteHintId}
-							aria-invalid={parsedInvites().error !== null}
-							class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-							placeholder="@alice:server, @bob:server"
-						/>
-						<span
-							id={inviteHintId}
-							class={`mt-1 block text-xs ${parsedInvites().error ? "text-danger-text" : "text-text-faint"}`}
-						>
-							<Show
-								when={parsedInvites().error}
-								fallback="Separate Matrix IDs with spaces, commas, or newlines."
-							>
-								{parsedInvites().error}
-							</Show>
-						</span>
-					</label>
-
-					<Show when={error()}>
-						<div
-							id={errorId}
-							role="alert"
-							class="mb-3 rounded border border-danger/30 bg-danger-bg/30 px-3 py-2 text-sm text-danger-text"
-						>
-							{error()}
-						</div>
-					</Show>
-
-					<div class="mt-2 flex justify-end gap-2">
-						<button
-							type="button"
-							onClick={tryClose}
-							disabled={submitting()}
-							class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							Cancel
-						</button>
-						<button
-							type="submit"
-							disabled={!canSubmit()}
-							class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-						>
-							<Show when={!submitting()} fallback="Creating…">
-								Create
-							</Show>
-						</button>
+						</Show>
 					</div>
-				</form>
-			</div>
-		</Show>
+					<span
+						id={aliasHintId}
+						class={`mt-1 block text-xs ${aliasValid() ? "text-text-faint" : "text-danger-text"}`}
+					>
+						<Show
+							when={aliasValid()}
+							fallback="Aliases may contain letters, numbers, and . _ = - / +"
+						>
+							Letters, numbers, and . _ = - / + only. Server adds the suffix.
+						</Show>
+					</span>
+				</label>
+
+				<fieldset class="mb-3 text-sm">
+					<legend class="mb-1 font-medium text-text-secondary">
+						Visibility
+					</legend>
+					<label class="mr-4 inline-flex items-center gap-2">
+						<input
+							type="radio"
+							name="visibility"
+							checked={!isPublic()}
+							onChange={() => setIsPublic(false)}
+							disabled={submitting()}
+							class="accent-accent"
+						/>
+						<span class="text-text-primary">Invite-only</span>
+					</label>
+					<label class="inline-flex items-center gap-2">
+						<input
+							type="radio"
+							name="visibility"
+							checked={isPublic()}
+							onChange={() => setIsPublic(true)}
+							disabled={submitting()}
+							class="accent-accent"
+						/>
+						<span class="text-text-primary">Public</span>
+					</label>
+				</fieldset>
+
+				<label class="mb-3 block text-sm">
+					<span class="mb-1 block font-medium text-text-secondary">
+						Invite users{" "}
+						<span class="text-text-faint font-normal">(optional)</span>
+					</span>
+					<textarea
+						rows={2}
+						value={inviteRaw()}
+						onInput={(e) => setInviteRaw(e.currentTarget.value)}
+						disabled={submitting()}
+						aria-describedby={inviteHintId}
+						aria-invalid={parsedInvites().error !== null}
+						class="w-full rounded border border-border-subtle bg-surface-2 px-3 py-2 text-text-primary placeholder-text-faint focus-visible:border-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+						placeholder="@alice:server, @bob:server"
+					/>
+					<span
+						id={inviteHintId}
+						class={`mt-1 block text-xs ${parsedInvites().error ? "text-danger-text" : "text-text-faint"}`}
+					>
+						<Show
+							when={parsedInvites().error}
+							fallback="Separate Matrix IDs with spaces, commas, or newlines."
+						>
+							{parsedInvites().error}
+						</Show>
+					</span>
+				</label>
+
+				<Show when={error()}>
+					<div
+						id={errorId}
+						role="alert"
+						class="mb-3 rounded border border-danger/30 bg-danger-bg/30 px-3 py-2 text-sm text-danger-text"
+					>
+						{error()}
+					</div>
+				</Show>
+
+				<div class="mt-2 flex justify-end gap-2">
+					<button
+						type="button"
+						onClick={tryClose}
+						disabled={submitting()}
+						class="rounded px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						disabled={!canSubmit()}
+						class="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-foreground transition-colors hover:bg-accent-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+					>
+						<Show when={!submitting()} fallback="Creating…">
+							Create
+						</Show>
+					</button>
+				</div>
+			</form>
+		</Modal>
 	);
 };
 

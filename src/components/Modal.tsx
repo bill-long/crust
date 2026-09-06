@@ -1,5 +1,6 @@
 import { Dialog } from "@kobalte/core/dialog";
 import { type JSX, Show } from "solid-js";
+import { trapTabKey } from "../lib/focusTrap";
 import { trackAppModalOpen } from "../stores/modalStack";
 
 interface ModalProps {
@@ -134,6 +135,15 @@ function ModalSurface(props: ModalProps) {
 					if (!content?.contains(document.activeElement)) content?.focus();
 				}}
 				onKeyDown={(event: KeyboardEvent) => {
+					// Handle boundary navigation directly; Kobalte additionally
+					// contains pointer/programmatic focus and stacks nested scopes.
+					if (
+						event.key === "Tab" &&
+						content &&
+						event.target instanceof Element &&
+						event.target.closest('[role="dialog"]') === content
+					)
+						trapTabKey(content, event);
 					// Solid delegates through owners before Kobalte's
 					// document Escape listener. Stop an old parent dialog here;
 					// Kobalte still decides which dismissable layer owns Escape.
