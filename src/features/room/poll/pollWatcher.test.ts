@@ -243,7 +243,7 @@ describe("createPollWatcher", () => {
 		// named `Admin` plus 95 zero-width spaces collides with the real
 		// Admin, earns the suffix, and sliced back to a bare `Admin` in this
 		// tooltip. The user ID is bounded too, so the label stays short.
-		expect(snapshot?.voters.a[0].name).toBe("@frank:example.com");
+		expect(snapshot?.voters.a?.[0]?.name).toBe("@frank:example.com");
 	});
 
 	it("resolves each voter once and reuses the object across recomputes", async () => {
@@ -269,7 +269,7 @@ describe("createPollWatcher", () => {
 		watcher.getSnapshot(rootEvent, room as unknown as Room);
 		await flushPromises();
 		const first = watcher.getSnapshot(rootEvent, room as unknown as Room);
-		const firstBob = first?.voters.a.find(
+		const firstBob = first?.voters.a?.find(
 			(v) => v.userId === "@bob:example.com",
 		);
 		expect(firstBob).toBeTruthy();
@@ -286,7 +286,7 @@ describe("createPollWatcher", () => {
 			}),
 		);
 		const second = watcher.getSnapshot(rootEvent, room as unknown as Room);
-		const secondBob = second?.voters.a.find(
+		const secondBob = second?.voters.a?.find(
 			(v) => v.userId === "@bob:example.com",
 		);
 		expect(secondBob).toBe(firstBob);
@@ -734,7 +734,9 @@ describe("createPollWatcher", () => {
 		expect(threadId).toBeNull();
 		expect(type).toBe("org.matrix.msc3381.poll.response");
 		// A spoiled ballot omits the answers array entirely.
-		expect(content["org.matrix.msc3381.poll.response"].answers).toBeUndefined();
+		expect(
+			content["org.matrix.msc3381.poll.response"]?.answers,
+		).toBeUndefined();
 	});
 
 	it("ignores votes on polls without a watched SDK model", async () => {
@@ -755,7 +757,7 @@ describe("createPollWatcher", () => {
 
 		await watcher.votePoll(POLL_ID, ["a"]);
 		expect(client.sendEvent).toHaveBeenCalledTimes(1);
-		expect(client.sendEvent.mock.calls[0][1]).toBeNull();
+		expect(client.sendEvent.mock.calls[0]?.[1]).toBeNull();
 	});
 
 	it("routes votes and ends of a thread poll through the SDK thread overload (#332)", async () => {
@@ -793,15 +795,15 @@ describe("createPollWatcher", () => {
 
 		await watcher.votePoll(POLL_ID, ["a"]);
 		expect(client.sendEvent).toHaveBeenCalledTimes(1);
-		expect(client.sendEvent.mock.calls[0][1]).toBe("$threadroot:example.com");
-		expect(client.sendEvent.mock.calls[0][2]).toBe(
+		expect(client.sendEvent.mock.calls[0]?.[1]).toBe("$threadroot:example.com");
+		expect(client.sendEvent.mock.calls[0]?.[2]).toBe(
 			"org.matrix.msc3381.poll.response",
 		);
 
 		await watcher.endPoll(POLL_ID);
 		expect(client.sendEvent).toHaveBeenCalledTimes(2);
-		expect(client.sendEvent.mock.calls[1][1]).toBe("$threadroot:example.com");
-		expect(client.sendEvent.mock.calls[1][2]).toBe(
+		expect(client.sendEvent.mock.calls[1]?.[1]).toBe("$threadroot:example.com");
+		expect(client.sendEvent.mock.calls[1]?.[2]).toBe(
 			"org.matrix.msc3381.poll.end",
 		);
 	});
