@@ -1,10 +1,12 @@
 import type {
 	Room as LivekitRoom,
 	LocalVideoTrack,
+	Participant,
 	RemoteAudioTrack,
 	RemoteTrack,
 	RemoteTrackPublication,
 	RemoteVideoTrack,
+	TrackPublication,
 } from "livekit-client";
 import type { MatrixClient } from "matrix-js-sdk";
 import type {
@@ -1115,22 +1117,26 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			const localUserId = opts.client.getUserId();
 			const localBinding =
 				e2eeCtx?.bindRoom({
-					localIdentity: localUserId ? `${localUserId}:${deviceId}` : undefined,
+					...(localUserId
+						? { localIdentity: `${localUserId}:${deviceId}` }
+						: {}),
 				}) ?? null;
 			pendingBinding = localBinding;
+			const audioDeviceId = opts.audioDeviceId();
+			const videoDeviceId = opts.videoDeviceId();
 			const r = new lk.Room({
 				adaptiveStream: true,
 				dynacast: true,
 				audioCaptureDefaults: {
-					deviceId: opts.audioDeviceId() || undefined,
+					...(audioDeviceId ? { deviceId: audioDeviceId } : {}),
 				},
 				videoCaptureDefaults: {
-					deviceId: opts.videoDeviceId() || undefined,
+					...(videoDeviceId ? { deviceId: videoDeviceId } : {}),
 				},
 				// Phase 4 invariant 1: E2EE options MUST be passed at
 				// construction time so the Room sets up its E2EEManager
 				// before any track publish path runs.
-				e2ee: localBinding?.e2eeOptions,
+				...(localBinding ? { e2ee: localBinding.e2eeOptions } : {}),
 			});
 			// Track for catch-path cleanup: if `r.connect()` rejects (or
 			// anything below throws), we still need to disconnect this
@@ -1165,45 +1171,25 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			);
 			r.on(
 				lk.RoomEvent.TrackMuted,
-				ifLive(
-					(
-						publication: {
-							source?: string;
-							isMuted?: boolean;
-							trackSid: string;
-							videoTrack?: LocalVideoTrack | RemoteVideoTrack;
-						},
-						participant: { identity: string },
-					) => {
-						reconcileCameraMute(
-							publication,
-							publication.videoTrack,
-							participant.identity,
-						);
-						snapshotParticipants(r);
-					},
-				),
+				ifLive((publication: TrackPublication, participant: Participant) => {
+					reconcileCameraMute(
+						publication,
+						publication.videoTrack,
+						participant.identity,
+					);
+					snapshotParticipants(r);
+				}),
 			);
 			r.on(
 				lk.RoomEvent.TrackUnmuted,
-				ifLive(
-					(
-						publication: {
-							source?: string;
-							isMuted?: boolean;
-							trackSid: string;
-							videoTrack?: LocalVideoTrack | RemoteVideoTrack;
-						},
-						participant: { identity: string },
-					) => {
-						reconcileCameraMute(
-							publication,
-							publication.videoTrack,
-							participant.identity,
-						);
-						snapshotParticipants(r);
-					},
-				),
+				ifLive((publication: TrackPublication, participant: Participant) => {
+					reconcileCameraMute(
+						publication,
+						publication.videoTrack,
+						participant.identity,
+					);
+					snapshotParticipants(r);
+				}),
 			);
 			r.on(
 				lk.RoomEvent.LocalTrackPublished,
@@ -1672,9 +1658,11 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				if (actual === desired) return;
 				const myAttempt = attempt;
 				try {
-					await r2.localParticipant.setCameraEnabled(desired, {
-						deviceId: opts.videoDeviceId() || undefined,
-					});
+					const videoDeviceId = opts.videoDeviceId();
+					await r2.localParticipant.setCameraEnabled(
+						desired,
+						videoDeviceId ? { deviceId: videoDeviceId } : {},
+					);
 				} catch (e) {
 					if (disposed || myAttempt !== attempt || room !== r2) return;
 					// Revert the optimistic flip to actual SDK state, surface error.

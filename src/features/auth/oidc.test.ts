@@ -460,6 +460,28 @@ describe("completeOidcLogin", () => {
 		);
 	});
 
+	it("omits refreshToken when the provider does not issue one", async () => {
+		seedSigninState();
+		completeGrantMock.mockResolvedValue({
+			access_token: "access-123",
+			token_type: "Bearer",
+		});
+		createClientMock.mockImplementation((opts: Record<string, unknown>) =>
+			opts.accessToken
+				? {
+						whoami: vi.fn(async () => ({
+							user_id: "@alice:example.com",
+							device_id: "DEVICE42",
+						})),
+					}
+				: { getAuthMetadata: vi.fn(async () => METADATA) },
+		);
+
+		const result = await completeOidcLogin("?code=abc&state=state-123");
+
+		expect(result).not.toHaveProperty("refreshToken");
+	});
+
 	it("swaps platform jargon from the exchange leg for the curated fallback", async () => {
 		seedSigninState();
 		completeGrantMock.mockRejectedValue(new TypeError("Failed to fetch"));

@@ -215,7 +215,7 @@ describe("ClientProvider session wiring (#460)", () => {
 		]);
 	});
 
-	it("leaves refresh options undefined for a password session", async () => {
+	it("omits refresh options for a password session", async () => {
 		setup(PASSWORD_SESSION);
 
 		await screen.findByText("provider-child");
@@ -224,8 +224,8 @@ describe("ClientProvider session wiring (#460)", () => {
 			0,
 			"createClient options",
 		);
-		expect(opts.refreshToken).toBeUndefined();
-		expect(opts.tokenRefreshFunction).toBeUndefined();
+		expect(opts).not.toHaveProperty("refreshToken");
+		expect(opts).not.toHaveProperty("tokenRefreshFunction");
 	});
 
 	it("stops a client that was stopped while it was still starting (#551)", async () => {

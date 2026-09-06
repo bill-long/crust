@@ -1275,7 +1275,7 @@ describe("useLivekitRoom", () => {
 		await result.setLocalCamEnabled(false);
 		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenLastCalledWith(
 			false,
-			{ deviceId: undefined },
+			{},
 		);
 		// Simulate LiveKit removing the camera publication and emitting unpublished.
 		fakeRoom.localParticipant.videoTrackPublications.clear();
@@ -1948,7 +1948,7 @@ describe("useLivekitRoom", () => {
 		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenCalledTimes(2);
 		expect(fakeRoom.localParticipant.setCameraEnabled).toHaveBeenLastCalledWith(
 			false,
-			{ deviceId: undefined },
+			{},
 		);
 		expect(result.localCamEnabled()).toBe(false);
 	});

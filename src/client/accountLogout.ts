@@ -90,6 +90,7 @@ export async function revokeSession(client: MatrixClient): Promise<void> {
 export function createAccountClient(
 	account: Session,
 ): ReturnType<typeof createClient> {
+	const tokenRefreshFunction = createOidcTokenRefreshFn(account);
 	return createClient({
 		baseUrl: account.homeserverUrl,
 		accessToken: account.accessToken,
@@ -101,8 +102,10 @@ export function createAccountClient(
 		// revoke below 401s and the device survives on the server, still listed
 		// and still push-capable, after Crust has thrown the credentials away.
 		// BOTH are needed: the function has nothing to present without the token.
-		refreshToken: account.refreshToken,
-		tokenRefreshFunction: createOidcTokenRefreshFn(account),
+		...(account.refreshToken !== undefined
+			? { refreshToken: account.refreshToken }
+			: {}),
+		...(tokenRefreshFunction !== undefined ? { tokenRefreshFunction } : {}),
 	});
 }
 

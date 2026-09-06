@@ -138,7 +138,7 @@ export function parseEncryptedFile(value: unknown): EncryptedFileInfo | null {
 		key: { k: key.k },
 		iv,
 		hashes: { sha256: hashes.sha256 },
-		v: typeof v === "string" ? v : undefined,
+		...(typeof v === "string" ? { v } : {}),
 	};
 }
 

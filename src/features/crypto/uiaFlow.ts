@@ -275,7 +275,11 @@ export function createUiaFlow(
 			// entries re-prompt.
 			let error: string | undefined;
 			for (;;) {
-				const password = (await ask({ kind: "password", error })) ?? "";
+				const password =
+					(await ask({
+						kind: "password",
+						...(error !== undefined ? { error } : {}),
+					})) ?? "";
 				try {
 					await probe(
 						passwordAuthDict(client.getUserId() ?? "", password, uia.session),
@@ -337,7 +341,11 @@ export function createUiaFlow(
 			// the same loop preflight runs when IT does the collecting.
 			let error: string | undefined;
 			for (;;) {
-				const password = (await ask({ kind: "password", error })) ?? "";
+				const password =
+					(await ask({
+						kind: "password",
+						...(error !== undefined ? { error } : {}),
+					})) ?? "";
 				try {
 					await makeRequest(
 						passwordAuthDict(client.getUserId() ?? "", password, uia.session),

@@ -228,16 +228,19 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		return null;
 	};
 
+	const tokenRefreshFunction = createOidcTokenRefreshFn(props.session);
 	const matrixClient = createClient({
 		baseUrl: props.session.homeserverUrl,
 		accessToken: props.session.accessToken,
 		userId: props.session.userId,
 		deviceId: props.session.deviceId,
 		// OAuth2 (MSC3861) sessions only: rotate access tokens at the OP instead
-		// of dying at expiry. Undefined for password sessions (no refresh
+		// of dying at expiry. Omitted for password sessions (no refresh
 		// token), leaving their behavior unchanged (#460).
-		refreshToken: props.session.refreshToken,
-		tokenRefreshFunction: createOidcTokenRefreshFn(props.session),
+		...(props.session.refreshToken !== undefined
+			? { refreshToken: props.session.refreshToken }
+			: {}),
+		...(tokenRefreshFunction !== undefined ? { tokenRefreshFunction } : {}),
 		// Required for MatrixClient.getEventTimeline and
 		// TimelineWindow.load(eventId) - both throw synchronously without it.
 		// Off-cache pinned messages (#485) and jump-to-event for messages

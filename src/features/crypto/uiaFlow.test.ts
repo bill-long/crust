@@ -430,7 +430,7 @@ describe("createUiaFlow uiaCallback", () => {
 				.mockResolvedValueOnce(undefined);
 			const done = flow.uiaCallback(makeRequest);
 			await vi.waitFor(() =>
-				expect(flow.prompt()).toEqual({ kind: "password", error: undefined }),
+				expect(flow.prompt()).toEqual({ kind: "password" }),
 			);
 			flow.submitPassword("hunter2");
 			await done;

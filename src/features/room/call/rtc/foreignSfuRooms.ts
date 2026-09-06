@@ -1,10 +1,12 @@
 import type {
 	Room as LivekitRoom,
 	LocalVideoTrack,
+	Participant,
 	RemoteAudioTrack,
 	RemoteTrack,
 	RemoteTrackPublication,
 	RemoteVideoTrack,
+	TrackPublication,
 } from "livekit-client";
 import type { MatrixClient } from "matrix-js-sdk";
 import type { LivekitTransport } from "matrix-js-sdk/lib/matrixrtc";
@@ -285,7 +287,9 @@ export function createForeignSfuRooms(
 			const localUserId = deps.client.getUserId();
 			const binding =
 				e2eeCtx?.bindRoom({
-					localIdentity: localUserId ? `${localUserId}:${deviceId}` : undefined,
+					...(localUserId
+						? { localIdentity: `${localUserId}:${deviceId}` }
+						: {}),
 				}) ?? null;
 			pendingBinding = binding;
 			const r = new lk.Room({
@@ -293,7 +297,7 @@ export function createForeignSfuRooms(
 				// adaptiveStream keeps foreign video from wasting bandwidth
 				// on tiles the layout renders small, same as the primary.
 				adaptiveStream: true,
-				e2ee: binding?.e2eeOptions ?? undefined,
+				...(binding ? { e2ee: binding.e2eeOptions } : {}),
 			});
 			pendingRoom = r;
 
@@ -389,15 +393,7 @@ export function createForeignSfuRooms(
 			// Camera mute/unmute flips the tile between video and avatar,
 			// mirroring the primary room's `reconcileCameraMute`.
 			const onMuteFlip = ifLive(
-				(
-					publication: {
-						source?: string;
-						isMuted?: boolean;
-						trackSid: string;
-						videoTrack?: LocalVideoTrack | RemoteVideoTrack;
-					},
-					participant: { identity: string },
-				) => {
+				(publication: TrackPublication, participant: Participant) => {
 					if (publication.source === "camera") {
 						if (publication.isMuted || !publication.videoTrack) {
 							deps.removeVideoTrackIfMatches(
