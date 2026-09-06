@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { requiredAt } from "../test/assertions";
 import {
 	carryNoticeIntoSession,
 	clearNotices,
@@ -19,12 +20,15 @@ describe("notices store", () => {
 	it("appends a pushed notice with the given message and tone", () => {
 		pushNotice("hello", "error");
 		expect(notices()).toHaveLength(1);
-		expect(notices()[0]).toMatchObject({ message: "hello", tone: "error" });
+		expect(requiredAt(notices(), 0, "pushed notice")).toMatchObject({
+			message: "hello",
+			tone: "error",
+		});
 	});
 
 	it("defaults the tone to info", () => {
 		pushNotice("plain");
-		expect(notices()[0].tone).toBe("info");
+		expect(requiredAt(notices(), 0, "plain notice").tone).toBe("info");
 	});
 
 	it("returns a unique id per notice and preserves order", () => {
@@ -101,7 +105,7 @@ describe("session handover", () => {
 	it("defaults a carried notice to the info tone", () => {
 		carryNoticeIntoSession("plain");
 		startSession();
-		expect(notices()[0].tone).toBe("info");
+		expect(requiredAt(notices(), 0, "carried notice").tone).toBe("info");
 	});
 
 	it("delivers a carried notice instead of the previous session's", () => {
@@ -125,7 +129,7 @@ describe("session handover", () => {
 		pushNotice("first");
 		carryNoticeIntoSession("carried");
 		startSession();
-		const id = notices()[0].id;
+		const id = requiredAt(notices(), 0, "carried notice").id;
 		dismissNotice(id);
 		expect(notices()).toEqual([]);
 	});

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { requiredAt } from "../test/assertions";
 import { type CacheLike, staleWhileRevalidate } from "./swrCache";
 
 /** A minimal fake Response: only `ok` and `clone()` are read by the helper. */
@@ -123,7 +124,8 @@ describe("staleWhileRevalidate", () => {
 		// Wired to event.waitUntil in the SW so the worker isn't terminated before
 		// the background cache.put completes.
 		expect(keepAlive).toHaveBeenCalledTimes(1);
-		expect(keepAlive.mock.calls[0][0]).toBeInstanceOf(Promise);
+		const call = requiredAt(keepAlive.mock.calls, 0, "keepAlive call");
+		expect(requiredAt(call, 0, "keepAlive promise")).toBeInstanceOf(Promise);
 		await flush();
 		expect(tagOf(cache.store.get("/icon") as Response)).toBe("new");
 	});

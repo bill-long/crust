@@ -9,6 +9,7 @@ vi.mock("solid-refresh", () => ({
 	$$refresh: () => undefined,
 }));
 
+import { requiredAt } from "../test/assertions";
 import { stubViewport, triggerStubbedResize } from "../test/stubViewport";
 import {
 	computeRowOffsets,
@@ -27,7 +28,9 @@ describe("computeRowOffsets", () => {
 
 	it("builds a prefix sum for per-row heights", () => {
 		const h = [5, 10, 15, 20];
-		expect(computeRowOffsets(4, (i) => h[i])).toEqual([0, 5, 15, 30, 50]);
+		expect(computeRowOffsets(4, (i) => requiredAt(h, i, "row height"))).toEqual(
+			[0, 5, 15, 30, 50],
+		);
 	});
 
 	it("returns [0] for an empty list", () => {
@@ -70,7 +73,10 @@ describe("visibleRowRange", () => {
 	});
 
 	it("handles variable row heights", () => {
-		const offs = computeRowOffsets(4, (i) => [5, 10, 15, 20][i]); // [0,5,15,30,50]
+		const heights = [5, 10, 15, 20];
+		const offs = computeRowOffsets(4, (i) =>
+			requiredAt(heights, i, "row height"),
+		); // [0,5,15,30,50]
 		// viewport [12,22] overlaps rows 1 (5-15) and 2 (15-30).
 		expect(visibleRowRange(offs, 12, 10, 0)).toEqual([1, 3]);
 	});
