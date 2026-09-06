@@ -97,7 +97,7 @@ vi.mock("../../client/client", () => ({
 					? statusOverrides.thisDeviceVerified
 					: HEALTHY.thisDeviceVerified,
 			backupVersion: () =>
-				statusOverrides.backupVersion !== undefined
+				"backupVersion" in statusOverrides
 					? statusOverrides.backupVersion
 					: HEALTHY.backupVersion,
 			backupOnServer: () =>
