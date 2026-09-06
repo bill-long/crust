@@ -3,6 +3,7 @@ import {
 	createEffect,
 	createSignal,
 	Match,
+	on,
 	onMount,
 	Show,
 	Switch,
@@ -228,13 +229,14 @@ const UiaPrompts: Component<UiaPromptsProps> = (props) => {
 };
 
 /**
- * The parent dialog's half of the UIA focus contract: grab the overlay on
- * mount, and whenever a view swap (a `step` change or a prompt clearing)
+ * The parent dialog's half of the UIA focus contract: whenever a view swap
+ * (a `step` change or a prompt clearing)
  * unmounts whatever held focus, reclaim it for the overlay so its
  * Escape/Tab handling keeps working - but only when focus actually fell
  * to the body, so a user who moved elsewhere is not yanked back (same
  * rule as VerificationDialog). While a prompt shows, its panel owns
- * focus. Call from the dialog's component body.
+ * focus. Modal owns initial focus and restoration. Call from the dialog's
+ * component body.
  */
 function createUiaOverlayFocus(opts: {
 	flow: UiaFlow;
@@ -243,13 +245,17 @@ function createUiaOverlayFocus(opts: {
 	 *  (intro -> working, error -> working) re-run the reclaim. */
 	step: () => unknown;
 }): void {
-	onMount(() => opts.overlay()?.focus());
-	createEffect(() => {
-		opts.step();
-		if (opts.flow.prompt()) return;
-		const active = document.activeElement;
-		if (!active || active === document.body) opts.overlay()?.focus();
-	});
+	createEffect(
+		on(
+			[opts.step, opts.flow.prompt],
+			() => {
+				if (opts.flow.prompt()) return;
+				const active = document.activeElement;
+				if (!active || active === document.body) opts.overlay()?.focus();
+			},
+			{ defer: true },
+		),
+	);
 }
 
 export { createUiaOverlayFocus, UiaDialog, UiaOauthDialog, UiaPrompts };

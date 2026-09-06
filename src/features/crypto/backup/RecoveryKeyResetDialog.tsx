@@ -8,6 +8,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { Modal } from "../../../components/Modal";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { RecoveryKeyDisplay } from "./RecoveryKeyDisplay";
 import {
@@ -132,29 +133,18 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 		}
 	};
 
-	const handleBackdropClick = (e: MouseEvent): void => {
-		if (e.target === e.currentTarget && step() !== "working") {
-			if (step() === "show-key") return; // Don't dismiss while showing key
-			props.onClose();
-		}
-	};
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape" && step() !== "working" && step() !== "show-key") {
-			props.onClose();
-		}
-	};
+	let overlayEl: HTMLDivElement | undefined;
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Reset recovery key"
-			tabIndex={-1}
-			ref={(el) => el.focus()}
-			onClick={handleBackdropClick}
-			onKeyDown={handleKeyDown}
+		<Modal
+			open
+			onClose={props.onClose}
+			dismissible={step() !== "working" && step() !== "show-key"}
+			label="Reset recovery key"
+			initialFocus={() => overlayEl}
+			contentRef={(element) => {
+				overlayEl = element;
+			}}
 		>
 			<Switch>
 				{/* Intro / confirm */}
@@ -266,7 +256,7 @@ const RecoveryKeyResetDialog: Component<RecoveryKeyResetDialogProps> = (
 					</div>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };
 
