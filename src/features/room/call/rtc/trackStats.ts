@@ -178,9 +178,8 @@ export function readVideoTrackStats(
 		if (typeof e.id !== "string") return;
 		entries.push(e);
 	});
-	if (entries.length === 0) return emptyVideoTrackStats();
-
 	let top = entries[0];
+	if (top === undefined) return emptyVideoTrackStats();
 	for (const e of entries) {
 		if (e !== top && preferEntry(e, top, direction)) top = e;
 	}
