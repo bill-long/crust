@@ -87,6 +87,7 @@ export function useAttachments(
 		// DataTransferItemList is index-accessed, not reliably iterable.
 		for (let i = 0; i < items.length; i++) {
 			const item = items[i];
+			if (!item) continue;
 			if (item.kind === "string") hasText = true;
 			if (item.kind === "file" && item.type.startsWith("image/")) {
 				const file = item.getAsFile();
