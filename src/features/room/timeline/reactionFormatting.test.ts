@@ -9,8 +9,8 @@ describe("formatReactors", () => {
 				["Alice", "Bob", "Carol", "Dan", "Eve", "Frank", "Grace"][i] ?? `U${i}`,
 		}));
 
-	it("returns empty string for no senders", () => {
-		expect(formatReactors([], "🎉")).toBe("");
+	it("returns a generic label for no senders", () => {
+		expect(formatReactors([], "🎉")).toBe("Someone reacted with 🎉");
 	});
 
 	it("formats one sender", () => {
@@ -60,7 +60,9 @@ describe("formatReactors", () => {
 		missingMiddle.length = 4;
 		missingMiddle[3] = carol;
 
-		expect(formatReactors(missingFirst, ":ok:")).toBe("");
+		expect(formatReactors(missingFirst, ":ok:")).toBe(
+			"Someone reacted with :ok:",
+		);
 		expect(formatReactors(missingSecond, ":ok:")).toBe(
 			"Alice reacted with :ok:",
 		);

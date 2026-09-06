@@ -1,6 +1,7 @@
 /**
  * Format a list of reaction senders into a Discord-style tooltip string:
  *
+ *   no sender   → "Someone reacted with X"
  *   1 sender    → "Alice reacted with X"
  *   2 senders   → "Alice and Bob reacted with X"
  *   3-5 senders → "Alice, Bob, and Carol reacted with X"  (Oxford comma)
@@ -31,7 +32,7 @@ export function formatReactors(
 	const safeLabel = sanitizeLabel(label);
 	const n = senders.length;
 	const first = senders[0];
-	if (first === undefined) return "";
+	if (first === undefined) return `Someone reacted with ${safeLabel}`;
 	if (n === 1) return `${first.name} reacted with ${safeLabel}`;
 	const second = senders[1];
 	if (second === undefined) return `${first.name} reacted with ${safeLabel}`;
