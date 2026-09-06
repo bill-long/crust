@@ -35,6 +35,12 @@ function flushPromises(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function requiredAt<T>(items: readonly T[], index: number): T {
+	const item = items[index];
+	if (item === undefined) throw new Error(`item ${index} was not resolved`);
+	return item;
+}
+
 describe("useImagePacks", () => {
 	it("returns empty array when no account data or room state exists", async () => {
 		const room = createMockRoom("!room:x");
@@ -69,14 +75,17 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].id).toBe("user");
-			expect(packs()[0].displayName).toBe("My Custom Emoji");
-			expect(packs()[0].emotes).toHaveLength(2);
-			expect(packs()[0].emotes[0].shortcode).toBe("wave");
-			expect(packs()[0].emotes[0].mxcUrl).toBe("mxc://example.com/wave");
-			expect(packs()[0].emotes[0].body).toBe(":wave:");
-			expect(packs()[0].emotes[1].shortcode).toBe("smile");
-			expect(packs()[0].emotes[1].body).toBe("smiley");
+			const pack = requiredAt(packs(), 0);
+			const wave = requiredAt(pack.emotes, 0);
+			const smile = requiredAt(pack.emotes, 1);
+			expect(pack.id).toBe("user");
+			expect(pack.displayName).toBe("My Custom Emoji");
+			expect(pack.emotes).toHaveLength(2);
+			expect(wave.shortcode).toBe("wave");
+			expect(wave.mxcUrl).toBe("mxc://example.com/wave");
+			expect(wave.body).toBe(":wave:");
+			expect(smile.shortcode).toBe("smile");
+			expect(smile.body).toBe("smiley");
 		});
 	});
 
@@ -100,10 +109,11 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].id).toBe("room:!room:x:");
-			expect(packs()[0].displayName).toBe("Room Pack");
-			expect(packs()[0].emotes).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("roomoji");
+			const pack = requiredAt(packs(), 0);
+			expect(pack.id).toBe("room:!room:x:");
+			expect(pack.displayName).toBe("Room Pack");
+			expect(pack.emotes).toHaveLength(1);
+			expect(requiredAt(pack.emotes, 0).shortcode).toBe("roomoji");
 		});
 	});
 
@@ -136,10 +146,11 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].id).toBe("emote-room:!emotes:x:");
-			expect(packs()[0].displayName).toBe("Lounge Pack");
-			expect(packs()[0].emotes).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("cool");
+			const pack = requiredAt(packs(), 0);
+			expect(pack.id).toBe("emote-room:!emotes:x:");
+			expect(pack.displayName).toBe("Lounge Pack");
+			expect(pack.emotes).toHaveLength(1);
+			expect(requiredAt(pack.emotes, 0).shortcode).toBe("cool");
 		});
 	});
 
@@ -168,7 +179,8 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("emoji");
+			const pack = requiredAt(packs(), 0);
+			expect(requiredAt(pack.emotes, 0).shortcode).toBe("emoji");
 		});
 	});
 
@@ -192,7 +204,7 @@ describe("useImagePacks", () => {
 
 			// Only one pack (room), not duplicated via emote rooms
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].id).toBe("room:!room:x:");
+			expect(requiredAt(packs(), 0).id).toBe("room:!room:x:");
 		});
 	});
 
@@ -220,11 +232,15 @@ describe("useImagePacks", () => {
 
 			expect(packs()).toHaveLength(2);
 			// User pack has :wave:
-			expect(packs()[0].emotes).toHaveLength(1);
-			expect(packs()[0].emotes[0].mxcUrl).toBe("mxc://example.com/user-wave");
+			const userPack = requiredAt(packs(), 0);
+			const roomPack = requiredAt(packs(), 1);
+			expect(userPack.emotes).toHaveLength(1);
+			expect(requiredAt(userPack.emotes, 0).mxcUrl).toBe(
+				"mxc://example.com/user-wave",
+			);
 			// Room pack only has :unique: (wave was deduped)
-			expect(packs()[1].emotes).toHaveLength(1);
-			expect(packs()[1].emotes[0].shortcode).toBe("unique");
+			expect(roomPack.emotes).toHaveLength(1);
+			expect(requiredAt(roomPack.emotes, 0).shortcode).toBe("unique");
 		});
 	});
 
@@ -254,7 +270,7 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			const shortcodes = packs()[0].emotes.map((e) => e.shortcode);
+			const shortcodes = requiredAt(packs(), 0).emotes.map((e) => e.shortcode);
 			expect(shortcodes).toContain("valid");
 			expect(shortcodes).toContain("emoticonOk");
 			expect(shortcodes).not.toContain("httpUrl");
@@ -284,7 +300,8 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("wave");
+			const pack = requiredAt(packs(), 0);
+			expect(requiredAt(pack.emotes, 0).shortcode).toBe("wave");
 		});
 	});
 
@@ -311,7 +328,8 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("star");
+			const pack = requiredAt(packs(), 0);
+			expect(requiredAt(pack.emotes, 0).shortcode).toBe("star");
 		});
 	});
 
@@ -347,7 +365,8 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("fire");
+			const pack = requiredAt(packs(), 0);
+			expect(requiredAt(pack.emotes, 0).shortcode).toBe("fire");
 		});
 	});
 
@@ -403,13 +422,15 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("emojiA");
+			const firstPack = requiredAt(packs(), 0);
+			expect(requiredAt(firstPack.emotes, 0).shortcode).toBe("emojiA");
 
 			setRoomId("!b:x");
 			await flushPromises();
 
 			expect(packs()).toHaveLength(1);
-			expect(packs()[0].emotes[0].shortcode).toBe("emojiB");
+			const secondPack = requiredAt(packs(), 0);
+			expect(requiredAt(secondPack.emotes, 0).shortcode).toBe("emojiB");
 		});
 	});
 
@@ -445,7 +466,7 @@ describe("useImagePacks", () => {
 			await flushPromises();
 
 			// Packs should still have the old value (1 emote, not 2)
-			expect(packs()[0].emotes).toHaveLength(1);
+			expect(requiredAt(packs(), 0).emotes).toHaveLength(1);
 		});
 	});
 });
