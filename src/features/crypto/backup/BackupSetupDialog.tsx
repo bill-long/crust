@@ -8,6 +8,7 @@ import {
 	Switch,
 } from "solid-js";
 import { useClient } from "../../../client/client";
+import { Modal } from "../../../components/Modal";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import {
 	activateExistingKeyBackup,
@@ -180,29 +181,18 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 
 	const isBusy = (): boolean => step() === "working";
 
-	const handleBackdropClick = (e: MouseEvent): void => {
-		if (e.target === e.currentTarget && !isBusy()) {
-			if (step() === "show-key") return; // Don't dismiss while showing key
-			props.onClose();
-		}
-	};
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Escape" && !isBusy() && step() !== "show-key") {
-			props.onClose();
-		}
-	};
+	let overlayEl: HTMLDivElement | undefined;
 
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Set up key backup"
-			tabIndex={-1}
-			ref={(el) => el.focus()}
-			onClick={handleBackdropClick}
-			onKeyDown={handleKeyDown}
+		<Modal
+			open
+			onClose={props.onClose}
+			dismissible={!isBusy() && step() !== "show-key"}
+			label="Set up key backup"
+			initialFocus={() => overlayEl}
+			contentRef={(element) => {
+				overlayEl = element;
+			}}
 		>
 			<Switch>
 				{/* Intro */}
@@ -387,7 +377,7 @@ const BackupSetupDialog: Component<BackupSetupDialogProps> = (props) => {
 					</div>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };
 

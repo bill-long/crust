@@ -1,8 +1,8 @@
 import type { GeneratedSecretStorageKey } from "matrix-js-sdk/lib/crypto-api";
 import { type Component, createSignal, Match, Show, Switch } from "solid-js";
 import { useClient } from "../../client/client";
+import { Modal } from "../../components/Modal";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { trapTabKey } from "../../lib/focusTrap";
 import { ensureKeyBackup, fetchServerKeyBackup } from "./backup/keyBackupSetup";
 import { RecoveryKeyDisplay } from "./backup/RecoveryKeyDisplay";
 import { createUiaOverlayFocus, UiaPrompts } from "./UiaDialog";
@@ -199,30 +199,15 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 		uia.dismiss(props.onClose);
 	};
 
-	const handleBackdropClick = (e: MouseEvent): void => {
-		if (e.target !== e.currentTarget) return;
-		dismiss();
-	};
-
-	const handleKeyDown = (e: KeyboardEvent): void => {
-		if (e.key === "Tab") {
-			trapTabKey(overlayEl, e);
-			return;
-		}
-		if (e.key !== "Escape") return;
-		dismiss();
-	};
-
 	return (
-		<div
-			class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-			role="dialog"
-			aria-modal="true"
-			aria-label="Reset encryption"
-			tabIndex={-1}
-			ref={overlayEl}
-			onClick={handleBackdropClick}
-			onKeyDown={handleKeyDown}
+		<Modal
+			open
+			onClose={dismiss}
+			label="Reset encryption"
+			initialFocus={() => overlayEl}
+			contentRef={(element) => {
+				overlayEl = element;
+			}}
 		>
 			<Switch>
 				{/* Intro / warning */}
@@ -385,7 +370,7 @@ const ResetEncryptionDialog: Component<ResetEncryptionDialogProps> = (
 					</div>
 				</Match>
 			</Switch>
-		</div>
+		</Modal>
 	);
 };
 
