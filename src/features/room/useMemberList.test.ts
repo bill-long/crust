@@ -15,7 +15,9 @@ import {
 function requireAt<T>(items: readonly T[], index: number): T {
 	const item = items[index];
 	if (item === undefined) {
-		throw new Error(`Expected item at index ${index}`);
+		throw new Error(
+			`Expected item at index ${index}; received ${items.length} items`,
+		);
 	}
 	return item;
 }
@@ -59,10 +61,10 @@ describe("groupMembers", () => {
 		];
 
 		const groups = groupMembers(entries);
+		expect(groups).toHaveLength(3);
 		const admins = requireAt(groups, 0);
 		const moderators = requireAt(groups, 1);
 		const members = requireAt(groups, 2);
-		expect(groups).toHaveLength(3);
 		expect(admins.role).toBe("Admin");
 		expect(admins.members).toHaveLength(1);
 		expect(moderators.role).toBe("Moderator");
@@ -631,9 +633,8 @@ describe("partitionByPresence ordering", () => {
 			{ role: "Member" as const, members: [entry("Bob"), entry("Yan")] },
 		];
 		const out = partitionByPresence(groups, () => "offline");
-		const offline = requireAt(out, 0);
-
 		expect(out).toHaveLength(1);
+		const offline = requireAt(out, 0);
 		expect(offline.role).toBe("Offline");
 		expect(offline.members.map((m) => m.displayName)).toEqual([
 			"Ana",
