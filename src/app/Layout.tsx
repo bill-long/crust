@@ -78,6 +78,7 @@ import {
 	MAX_ACCOUNTS,
 	rememberAccountDisplayName,
 } from "../stores/session";
+import { withSessionLock } from "../stores/sessionLock";
 import { isMobile } from "../stores/viewport";
 import type { CryptoAction } from "../types/crypto";
 import { endSessionForAccountExit, switchToAccount } from "./accountSwitch";
@@ -556,7 +557,14 @@ const Layout: Component = () => {
 		// Forwarded as-is: `profileName` is undefined until the profile loads,
 		// which the store reads as "not known yet" and leaves the remembered
 		// label alone (see rememberAccountDisplayName).
-		rememberAccountDisplayName(uid, profileName());
+		const name = profileName();
+		void withSessionLock(() => rememberAccountDisplayName(uid, name)).catch(
+			(error) => {
+				reportError(error, {
+					logLabel: "Could not remember the account display name",
+				});
+			},
+		);
 	});
 
 	const cryptoAction = createMemo(

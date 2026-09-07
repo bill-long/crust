@@ -8,16 +8,8 @@ import {
 import { type Component, createSignal, Match, Show, Switch } from "solid-js";
 import { basePrefix } from "../../app/basePath";
 import { useConfig } from "../../app/ConfigProvider";
-import { revokeAccountToken } from "../../client/accountLogout";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import {
-	addSession,
-	freezeAccountScope,
-	MAX_ACCOUNTS,
-	type Session,
-	saveSession,
-	unfreezeAccountScope,
-} from "../../stores/session";
+import { loadSessions, type Session } from "../../stores/session";
 import { discoverHomeserver } from "./discovery";
 import {
 	probeDelegatedAuth,
@@ -25,6 +17,7 @@ import {
 	stashOidcAddAccount,
 	stashOidcReturnTo,
 } from "./oidc";
+import { persistLogin } from "./persistLogin";
 import { isAddAccountState, sanitizeReturnTo } from "./returnTo";
 
 /** What a homeserver supports, probed once before the user picks a method. */
@@ -45,6 +38,7 @@ const LoginPage: Component = () => {
 	const [username, setUsername] = createSignal("");
 	const [password, setPassword] = createSignal("");
 	const [error, setError] = createSignal("");
+	const [canReturnToApp, setCanReturnToApp] = createSignal(false);
 	const [loading, setLoading] = createSignal(false);
 	const [redirecting, setRedirecting] = createSignal(false);
 	const [capabilities, setCapabilities] =
@@ -59,56 +53,7 @@ const LoginPage: Component = () => {
 			(location.state as { returnTo?: unknown } | null)?.returnTo,
 		);
 
-	// Add-account mode (#533): entered only from the switcher, via router state.
-	// A plain visit to /login stays a plain login, which REPLACES whatever is
-	// stored - appending on an unguarded route would leave the previous
-	// account's live token behind with no UI to revoke it.
 	const addingAccount = (): boolean => isAddAccountState(location.state);
-
-	/**
-	 * Persist a completed login. Adding returns false when the install is at the
-	 * account cap - the credential is then dropped rather than silently
-	 * replacing an account the user did not choose.
-	 */
-	const persistSession = (session: Session): boolean => {
-		if (!addingAccount()) {
-			saveSession(session);
-			return true;
-		}
-		// Adding flips the active-account pointer and then RELOADS, and
-		// `location.assign` only starts that - so the account-scoped stores must
-		// not rebind to the new account in the meantime, exactly as on a switch
-		// (see `app/accountSwitch.ts`). Lifted again if the add is refused,
-		// because this document then stays on the login page.
-		freezeAccountScope();
-		let added = false;
-		try {
-			added = addSession(session);
-		} finally {
-			// `finally`, not just the false branch: addSession persists with a RAW
-			// setItem so a failed login write surfaces, and a throw would otherwise
-			// leave this document frozen - unable to persist any account-scoped
-			// state - while it stays on the login page.
-			if (!added) unfreezeAccountScope();
-		}
-		return added;
-	};
-
-	/**
-	 * Land in the app as the account that just logged in. Adding an account
-	 * reloads the document rather than navigating: the app is still mounted as
-	 * (or was just torn down from) another account, and a reload is what
-	 * guarantees no module-scope state crosses the boundary - the same reason
-	 * `app/accountSwitch.ts` reloads. `returnTo` belongs to the account that
-	 * sent us here, so an added account starts at its own root instead.
-	 */
-	const enterApp = (target: string): void => {
-		if (addingAccount()) {
-			window.location.assign(`${basePrefix}/`);
-			return;
-		}
-		navigate(target, { replace: true });
-	};
 
 	/** Stage 1: discover the homeserver and probe its login methods. */
 	const handleServerSubmit = async (e: Event): Promise<void> => {
@@ -183,6 +128,7 @@ const LoginPage: Component = () => {
 	/** Password path: unchanged from the pre-OAuth flow. */
 	const handlePasswordSubmit = async (e: Event): Promise<void> => {
 		e.preventDefault();
+		if (loading() || redirecting()) return;
 		const caps = capabilities();
 		if (!caps) return;
 		setError("");
@@ -228,18 +174,11 @@ const LoginPage: Component = () => {
 				deviceId: response.device_id,
 				homeserverUrl: resolvedUrl,
 			};
-			if (!persistSession(session)) {
-				// The login already minted a device on the homeserver. Revoke it
-				// rather than orphaning a token this app will never hold again.
-				await revokeAccountToken(session);
-				setError(
-					`You can be logged into ${MAX_ACCOUNTS} accounts at once. Log out of one first.`,
-				);
-				return;
-			}
-
-			enterApp(returnTo());
+			const reload = await persistLogin(session, addingAccount());
+			if (reload) window.location.assign(`${basePrefix}/`);
+			else navigate(returnTo(), { replace: true });
 		} catch (err: unknown) {
+			setCanReturnToApp(loadSessions().length > 0);
 			setError(userFacingErrorMessage(err, "Login failed"));
 		} finally {
 			setLoading(false);
@@ -425,6 +364,15 @@ const LoginPage: Component = () => {
 						</div>
 					</Match>
 				</Switch>
+				<Show when={error() && canReturnToApp()}>
+					<button
+						type="button"
+						onClick={() => window.location.assign(`${basePrefix}/`)}
+						class="mt-3 rounded px-3 py-2 text-sm text-text-secondary hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+					>
+						Back to app
+					</button>
+				</Show>
 			</div>
 		</div>
 	);

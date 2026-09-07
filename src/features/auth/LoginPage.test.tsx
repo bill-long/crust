@@ -73,6 +73,7 @@ import {
 	type Session,
 	saveSession,
 } from "../../stores/session";
+import { mockLoginLocks } from "../../test/loginLocks";
 import { LoginPage } from "./LoginPage";
 
 const METADATA = {
@@ -89,6 +90,7 @@ const METADATA = {
 const assignMock = vi.fn();
 
 beforeEach(() => {
+	mockLoginLocks();
 	locationState.value = null;
 	localStorage.clear();
 	sessionStorage.clear();
@@ -425,20 +427,30 @@ describe("LoginPage add-account mode", () => {
 		expect(navigateMock).not.toHaveBeenCalled();
 	});
 
-	it("replaces, and routes, for a plain login on the same page", async () => {
-		// A bare visit to /login must NOT append: the route is outside the auth
-		// guard, so appending would strand the previous account's live token.
+	it("preserves the existing account and reloads for a stale plain login", async () => {
 		saveSession(EXISTING);
 		locationState.value = null;
 
 		await logInAsAlice();
 
-		await waitFor(() =>
-			expect(navigateMock).toHaveBeenCalledWith("/", { replace: true }),
-		);
+		await waitFor(() => expect(assignMock).toHaveBeenCalled());
+		expect(navigateMock).not.toHaveBeenCalled();
 		expect(loadSessions().map((a) => a.userId)).toEqual([
+			EXISTING.userId,
 			"@alice:strange.pizza",
 		]);
+	});
+
+	it("offers the app and revokes the new device when the same account is already stored", async () => {
+		const existing = { ...EXISTING, userId: "@alice:strange.pizza" };
+		saveSession(existing);
+		await logInAsAlice();
+		await screen.findByText(/already signed in to this account/);
+		expect(loadSession()?.accessToken).toBe(existing.accessToken);
+		expect(revokeAccountTokenMock).toHaveBeenCalledOnce();
+		expect(assignMock).not.toHaveBeenCalled();
+		fireEvent.click(screen.getByRole("button", { name: "Back to app" }));
+		expect(assignMock).toHaveBeenCalledOnce();
 	});
 
 	it("says so rather than dropping the credential at the account cap", async () => {

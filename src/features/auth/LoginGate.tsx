@@ -12,45 +12,15 @@ import {
 
 /**
  * Keep an already-signed-in visitor off the login form (#549).
+ * The account switcher is the deliberate add-account entry point. A logout
+ * landing is also exempt so storage failures cannot trap a revoked session in
+ * a login/logout loop (see takeLogoutLanding).
  *
- * `/login` renders OUTSIDE the auth guard - it has to, since it is what creates
- * the session - so it stays reachable while accounts are logged in: a typed
- * URL, a stale bookmark, or an add-account flow whose router state was lost.
- * Logging in there REPLACES the stored accounts rather than appending to them
- * (`saveSession`, #532), and replacing is what strands the accounts it drops:
- * their tokens are never revoked, so their devices stay alive and push-capable
- * on the homeserver, and there is no UI left to reach them. Turning the visitor
- * around is cheaper and safer than cleaning up after them - a login that
- * silently revoked another account's device would be a surprising thing for a
- * login form to do, and it would need network calls on a path that has none.
- *
- * So: accounts in storage means this visitor already has a session, and the
- * app - not the login form - is where they belong. Two arrivals are exempt:
- *
- *  - `addAccount`, the switcher's deliberate append entry point (#533), in
- *    router state, which a crafted link cannot set;
- *  - the logout tail's landing, which may find residue in storage and must
- *    never be bounced back into it - see {@link takeLogoutLanding}, which is a
- *    module flag rather than router state precisely so the waiver cannot
- *    outlive the navigation that armed it.
- *
- * This reaches `/login/callback` too, without guarding it: every OAuth login
- * that gets to the callback was started on `/login`, so a plain (replacing)
- * OAuth login can only begin where this gate has already let the visitor
- * through. Guarding the callback itself would be worse than useless - it holds
- * a code that has already minted a device, and the exempt `afterLogout` arrival
- * is one where replacing IS the intended outcome.
- *
- * **This is an arrival check, not a persist-time one.** It is decided once at
- * setup, like `AuthGuard`, and deliberately does not track storage: it must not
- * re-evaluate after a successful login on this very page, and the page's own
- * navigation would race it. So it answers "was anyone signed in when this
- * document reached /login", which is the question that stops a user walking
- * into a replacing login - but a form left open in a background tab while
- * another tab signs in is still submittable, and `saveSession` will still
- * replace. Do not build anything destructive on the assumption that a replace
- * can only drop accounts the app has already given up on; closing that window
- * needs a check where the credential is persisted, not here (#551).
+ * This is an arrival check, decided once at setup. Tracking storage here would
+ * race the form's own successful-login navigation. A stale form or an OAuth
+ * callback may still finish after another tab signs in; persistLogin protects
+ * those accounts at commit time (#551), including accounts with no running tab.
+ * Only credentials identified by this tab's logout tail may be replaced.
  */
 const LoginGate: Component<{ children: JSX.Element }> = (props) => {
 	const navigate = useNavigate();

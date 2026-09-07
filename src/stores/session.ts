@@ -28,6 +28,24 @@ import {
 	LEGACY_STORAGE_KEYS,
 	STORAGE_KEYS,
 } from "../lib/storageKeys";
+import { isSessionLockHeld, withSessionLock } from "./sessionLock";
+
+let migrationQueued = false;
+
+function mayMigrateNow(): boolean {
+	if (!navigator.locks || isSessionLockHeld()) return true;
+	if (!migrationQueued) {
+		migrationQueued = true;
+		void withSessionLock(() => readStore())
+			.catch((error) => {
+				console.warn("Could not migrate session storage:", error);
+			})
+			.finally(() => {
+				migrationQueued = false;
+			});
+	}
+	return false;
+}
 
 const SESSION_KEY = STORAGE_KEYS.session;
 const LEGACY_SESSION_KEY = LEGACY_STORAGE_KEYS.session;
@@ -247,9 +265,15 @@ function readStore(): SessionStore {
 			// A pre-multi-account bare Session: rewrite it in the store shape and
 			// hand it the install-global per-account values. Best-effort - a failed
 			// write just repeats the migration on the next load.
-			migrateInto(current.store);
+			if (mayMigrateNow()) migrateInto(current.store);
+			else if (current.store.activeUserId !== null)
+				adoptUnscopedAccountKeys(current.store.activeUserId);
 		}
-		if (safeLocalStorage.get(SESSION_KEY) !== null) {
+		if (
+			safeLocalStorage.get(LEGACY_SESSION_KEY) !== null &&
+			mayMigrateNow() &&
+			safeLocalStorage.get(SESSION_KEY) !== null
+		) {
 			// A usable value lives under the new key, so a coexisting legacy token is
 			// stale: drop it rather than leave a valid credential readable. Guarded on
 			// the new key actually holding it - a failed migration write leaves it
@@ -263,7 +287,10 @@ function readStore(): SessionStore {
 	// logged out, and heal the split state by promoting it.
 	const legacy = readKey(LEGACY_SESSION_KEY);
 	if (legacy === null) return emptyStore();
-	if (migrateInto(legacy.store)) safeLocalStorage.remove(LEGACY_SESSION_KEY);
+	if (mayMigrateNow()) {
+		if (migrateInto(legacy.store)) safeLocalStorage.remove(LEGACY_SESSION_KEY);
+	} else if (legacy.store.activeUserId !== null)
+		adoptUnscopedAccountKeys(legacy.store.activeUserId);
 	return legacy.store;
 }
 
@@ -404,7 +431,8 @@ function pushActiveMediaAuth(store: SessionStore): void {
 }
 
 /**
- * Add (or replace) an account and make it the active one - the login path.
+ * Low-level replacement of the account store. Interactive login must use
+ * commitLoginSession instead, so a stale form cannot drop live accounts.
  * Re-logging in as an existing account keeps that account's crypto prefix: its
  * store is still on disk, so a new prefix would orphan it.
  */
@@ -504,8 +532,8 @@ export function clearSession(userId: string): boolean {
 
 /**
  * Add an account alongside the ones already logged in and make it active - the
- * switcher's add-account path, and the ONLY way a second account comes into
- * being (a plain login replaces; see {@link saveSession}).
+ * low-level append operation. Interactive logins use commitLoginSession to
+ * also reject duplicate live devices and recover exact logout residue.
  *
  * Returns false when the install is already at {@link MAX_ACCOUNTS} and the
  * account is not one of them, so the caller can say so rather than silently
@@ -541,6 +569,66 @@ export function addSession(session: Session): boolean {
 	publish(next);
 	notifyScopeChange(previousActive, entry.userId);
 	return true;
+}
+
+/**
+ * Commit an authenticated login without discarding another account (#551).
+ * `departed` contains exact credentials authorized by this tab's logout tail.
+ * Re-read after asynchronous work: a refreshed/replaced credential cannot be
+ * removed using an earlier snapshot. Call under the shared login Web Lock.
+ */
+export function commitLoginSession(
+	session: Session,
+	departed: Session[],
+): void {
+	if (!isSession(session))
+		throw new Error("Refusing to persist invalid session data");
+	const store = readStore();
+	const removed = store.sessions.filter((candidate) =>
+		departed.some(
+			(old) =>
+				old.userId === candidate.userId &&
+				old.deviceId === candidate.deviceId &&
+				old.homeserverUrl === candidate.homeserverUrl &&
+				old.accessToken === candidate.accessToken &&
+				old.refreshToken === candidate.refreshToken &&
+				old.oidc?.issuer === candidate.oidc?.issuer &&
+				old.oidc?.clientId === candidate.oidc?.clientId,
+		),
+	);
+	const kept = store.sessions.filter(
+		(candidate) => !removed.includes(candidate),
+	);
+	if (kept.some((candidate) => candidate.userId === session.userId)) {
+		throw new Error(
+			"You're already signed in to this account. Return to the app to use it, or log out of it first.",
+		);
+	}
+	if (kept.length >= MAX_ACCOUNTS) {
+		throw new Error(
+			`You can be logged into ${MAX_ACCOUNTS} accounts at once. Log out of one first.`,
+		);
+	}
+	const entry: Session = {
+		...session,
+		cryptoPrefix:
+			store.sessions.find((candidate) => candidate.userId === session.userId)
+				?.cryptoPrefix ?? accountCryptoDbPrefix(session.userId),
+	};
+	const next: SessionStore = {
+		activeUserId: entry.userId,
+		sessions: [...kept, entry],
+	};
+	localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+	// Only a successful commit can remove the departed accounts' preferences.
+	for (const old of removed) {
+		for (const base of ACCOUNT_SCOPED_KEYS) {
+			safeLocalStorage.remove(accountScopedKey(base, old.userId));
+		}
+	}
+	if (store.sessions.length === 0) adoptUnscopedAccountKeys(entry.userId);
+	publish(next);
+	notifyScopeChange(store.activeUserId, entry.userId);
 }
 
 /**

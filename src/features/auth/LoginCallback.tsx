@@ -1,21 +1,14 @@
 import { useNavigate } from "@solidjs/router";
 import { type Component, createSignal, onMount, Show } from "solid-js";
 import { basePrefix } from "../../app/basePath";
-import { revokeAccountToken } from "../../client/accountLogout";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import {
-	addSession,
-	freezeAccountScope,
-	loadSessions,
-	MAX_ACCOUNTS,
-	saveSession,
-	unfreezeAccountScope,
-} from "../../stores/session";
+import { loadSessions } from "../../stores/session";
 import {
 	completeOidcLogin,
 	takeOidcAddAccount,
 	takeOidcReturnTo,
 } from "./oidc";
+import { persistLogin } from "./persistLogin";
 import { sanitizeReturnTo } from "./returnTo";
 
 /**
@@ -26,21 +19,8 @@ import { sanitizeReturnTo } from "./returnTo";
 const LoginCallback: Component = () => {
 	const navigate = useNavigate();
 	const [error, setError] = createSignal("");
-	// Whether an account is still signed in on this device, read when the
-	// callback lands. It decides where the error state's way out goes: with an
-	// account still live, `/login` is not it - the guard there turns a
-	// signed-in visitor around anyway (#549), and a plain login there REPLACES.
-	// Adding an account is the usual way to be in that position but not the only
-	// one, so this asks storage rather than asking whether we were adding: a
-	// plain login that failed while another tab signed in belongs back in the
-	// app too.
-	//
-	// It deliberately does NOT gate the persist below. Refusing a login because
-	// storage lists an account would trap the case that most needs to get
-	// through: an account a logout revoked but could not remove, where replacing
-	// it IS the way out. Closing the window where a successful plain login
-	// replaces a LIVE account needs to tell those two apart, which nothing here
-	// can - see LoginGate's docblock, and #551.
+	// Read storage on arrival and failure so a stale callback offers the app
+	// when another tab signed in during the exchange.
 	const [signedIn, setSignedIn] = createSignal(false);
 
 	onMount(async () => {
@@ -59,37 +39,11 @@ const LoginCallback: Component = () => {
 			// here so a tampered sessionStorage value can't redirect us.
 			const target = sanitizeReturnTo(takeOidcReturnTo());
 			const session = { ...result };
-			if (isAdding) {
-				// Same as the password path: the pointer moves and a reload follows,
-				// so the account-scoped stores must not rebind in the window before
-				// the replacement document takes over.
-				freezeAccountScope();
-				let added = false;
-				try {
-					added = addSession(session);
-				} finally {
-					// `finally`: addSession persists with a RAW setItem and can throw,
-					// which would leave this document frozen on the error screen.
-					if (!added) unfreezeAccountScope();
-				}
-				if (!added) {
-					// The login already minted a device on the homeserver. Revoke it
-					// rather than orphaning a token this app will never hold again.
-					await revokeAccountToken(session);
-					setError(
-						`You can be logged into ${MAX_ACCOUNTS} accounts at once. Log out of one first.`,
-					);
-					return;
-				}
-				// Reload rather than navigate: the added account starts at its own
-				// root with no module-scope state carried over, exactly as a switch
-				// does (see `app/accountSwitch.ts`).
-				window.location.assign(`${basePrefix}/`);
-				return;
-			}
-			saveSession(session);
-			navigate(target, { replace: true });
+			const reload = await persistLogin(session, isAdding);
+			if (reload) window.location.assign(`${basePrefix}/`);
+			else navigate(target, { replace: true });
 		} catch (err: unknown) {
+			setSignedIn(loadSessions().length > 0);
 			setError(userFacingErrorMessage(err, "Login failed"));
 		}
 	});
