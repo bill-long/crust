@@ -9,7 +9,9 @@ import {
 	type Room,
 	RoomEvent,
 	RoomStateEvent,
+	RoomStickyEventsEvent,
 } from "matrix-js-sdk";
+import { CallMembership } from "matrix-js-sdk/lib/matrixrtc/CallMembership";
 import { createStore, produce, type SetStoreFunction } from "solid-js/store";
 import { readDirectMap } from "../lib/directMap";
 import {
@@ -99,8 +101,10 @@ const DEFAULT_CALL_MEMBERSHIP_EXPIRE_MS = 4 * 60 * 60 * 1000;
  *    shape commonly linger in room state and would otherwise produce a
  *    permanent "call active" indicator.
  *
- * Derived directly from room state rather than via `client.matrixRTC` so it is
- * robust to SDK startup ordering.
+ * MSC4354 memberships are read from the SDK's sticky store, validated with
+ * its membership parser, and expire on its local-clock TTL. Matching sticky
+ * keys supersede legacy state (including sticky leave tombstones).
+ * Read directly from the room so this is robust to SDK session startup order.
  *
  * A stuck-active indicator caused by silently-expiring memberships (no
  * follow-up state event) is mitigated by the per-room expiry timer in
@@ -146,9 +150,57 @@ function* iterValidCallMemberships(
 	room: Room,
 	now: number,
 ): Generator<{ expiresAt: number }> {
+	const localNow = Date.now();
+	const slot = room.currentState
+		.getStateEvents(EventType.RTCSlot, "m.call#ROOM")
+		?.getContent();
+	const slotOpen =
+		!slot || (slot.status === "open" && slot.application?.type === "m.call");
+	const stickyEvents = slotOpen
+		? [...(room._unstable_getStickyEvents?.() ?? [])].filter(
+				(ev) =>
+					ev.getType() === EventType.RTCMembership &&
+					ev.unstableStickyExpiresAt > localNow,
+			)
+		: [];
+	// Include leave tombstones, but preserve the sticky store's sender scope:
+	// one participant cannot withdraw another participant's legacy membership.
+	const supersededKeys = new Map<string, Set<string>>();
+	for (const ev of stickyEvents) {
+		const sender = ev.getSender();
+		const key = ev.getContent().msc4354_sticky_key;
+		if (!sender || typeof key !== "string") continue;
+		let keys = supersededKeys.get(sender);
+		if (!keys) {
+			keys = new Set();
+			supersededKeys.set(sender, keys);
+		}
+		keys.add(key);
+	}
+	for (const ev of stickyEvents) {
+		try {
+			const membership = CallMembership.membershipDataFromMatrixEvent(ev);
+			if (
+				membership.kind !== "rtc" ||
+				membership.data.slot_id !== "m.call#ROOM"
+			)
+				continue;
+			if (room.getMember(membership.data.member.user_id)?.membership !== "join")
+				continue;
+			// SDK sticky expiry is on the local clock (server TTL + receipt time).
+			// Convert to the caller's clock for the shared expiry scheduler.
+			yield { expiresAt: now + ev.unstableStickyExpiresAt - localNow };
+		} catch {
+			// Malformed or leave-only content is not an active membership.
+		}
+	}
 	const events = room.currentState.getStateEvents(CALL_MEMBER_EVENT_TYPE);
 	if (events.length === 0) return;
 	for (const ev of events) {
+		const sender = ev.getSender();
+		const key = ev.getStateKey();
+		if (sender && key !== undefined && supersededKeys.get(sender)?.has(key))
+			continue;
 		const expiresAt = callMembershipExpiresAt(ev);
 		// Not a valid modern flat ROOM-slot membership (empty/tombstone,
 		// legacy shape, or malformed) — ignore.
@@ -161,7 +213,6 @@ function* iterValidCallMemberships(
 		// Skip memberships from users who are no longer joined to the room.
 		// Also skip events with no sender (SDK rejects these in
 		// `CallMembership.membershipDataFromMatrixEvent`).
-		const sender = ev.getSender();
 		if (!sender || room.getMember(sender)?.membership !== "join") continue;
 		yield { expiresAt };
 	}
@@ -484,6 +535,27 @@ export function createSummariesStore(client: MatrixClient): {
 	// follow-up call-member state event arrives. Re-armed on every relevant
 	// state change, cleared on cleanup / room deletion.
 	const callExpiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	const stickyListeners = new Map<string, { room: Room; update: () => void }>();
+	const pendingMemberRefreshes = new Set<string>();
+	let memberRefreshQueued = false;
+	let memberRefreshGeneration = 0;
+	function refreshCallActive(room: Room): void {
+		if (!summaries[room.roomId] || client.getRoom(room.roomId) !== room) return;
+		setSummaries(
+			room.roomId,
+			"callActive",
+			isCallActive(room, serverTime.now()),
+		);
+		scheduleCallExpiryRefresh(room);
+	}
+	function watchStickyEvents(room: Room): void {
+		const previous = stickyListeners.get(room.roomId);
+		if (previous?.room === room) return;
+		previous?.room.off(RoomStickyEventsEvent.Update, previous.update);
+		const update = () => refreshCallActive(room);
+		room.on(RoomStickyEventsEvent.Update, update);
+		stickyListeners.set(room.roomId, { room, update });
+	}
 	// `setTimeout` delays must fit in a signed 32-bit int. Memberships near
 	// the cap (4-hour default) are well under it, but clamp defensively.
 	const MAX_TIMEOUT_DELAY = 2_147_483_647;
@@ -743,6 +815,7 @@ export function createSummariesStore(client: MatrixClient): {
 		// (its entry persists with membership "leave"); only forget
 		// deletes entries for rooms that can still emit.
 		if (!client.getRoom(room.roomId)) return;
+		watchStickyEvents(room);
 		setSummaries(
 			produce((s) => {
 				s[room.roomId] = buildSummary(
@@ -787,6 +860,9 @@ export function createSummariesStore(client: MatrixClient): {
 
 	function onDeleteRoom(roomId: string): void {
 		clearCallExpiryTimer(roomId);
+		const listener = stickyListeners.get(roomId);
+		listener?.room.off(RoomStickyEventsEvent.Update, listener.update);
+		stickyListeners.delete(roomId);
 		setSummaries(
 			produce((s) => {
 				delete s[roomId];
@@ -1005,7 +1081,7 @@ export function createSummariesStore(client: MatrixClient): {
 			if (createEv?.getContent()?.type === "m.space") {
 				setSummaries(room.roomId, "children", getSpaceChildren(room));
 			}
-		} else if (type === CALL_MEMBER_EVENT_TYPE) {
+		} else if (type === CALL_MEMBER_EVENT_TYPE || type === EventType.RTCSlot) {
 			const active = isCallActive(room, serverTime.now());
 			if (summary.callActive !== active) {
 				setSummaries(room.roomId, "callActive", active);
@@ -1023,6 +1099,27 @@ export function createSummariesStore(client: MatrixClient): {
 		if (offsetChanged) {
 			refreshAllCallActive(currentRoomRefreshed ? room.roomId : undefined);
 		}
+	}
+
+	function onRoomMember(event: MatrixEvent): void {
+		// Members also fires for power-level updates, which cannot change call
+		// participation. Coalesce actual member updates after the SDK's batch.
+		if (event.getType() !== EventType.RoomMember) return;
+		const roomId = event.getRoomId();
+		if (!roomId || !summaries[roomId]) return;
+		pendingMemberRefreshes.add(roomId);
+		if (memberRefreshQueued) return;
+		memberRefreshQueued = true;
+		const generation = memberRefreshGeneration;
+		queueMicrotask(() => {
+			if (generation !== memberRefreshGeneration) return;
+			memberRefreshQueued = false;
+			for (const id of pendingMemberRefreshes) {
+				const room = client.getRoom(id);
+				if (room) refreshCallActive(room);
+			}
+			pendingMemberRefreshes.clear();
+		});
 	}
 
 	function init(): void {
@@ -1065,9 +1162,16 @@ export function createSummariesStore(client: MatrixClient): {
 		client.on(RoomEvent.Tags, onRoomTags);
 		client.on(ClientEvent.AccountData, onAccountData);
 		client.on(RoomStateEvent.Events, onRoomStateEvents);
+		client.on(RoomStateEvent.Members, onRoomMember);
 	}
 
 	function cleanup(): void {
+		memberRefreshGeneration++;
+		memberRefreshQueued = false;
+		pendingMemberRefreshes.clear();
+		for (const { room, update } of stickyListeners.values())
+			room.off(RoomStickyEventsEvent.Update, update);
+		stickyListeners.clear();
 		for (const id of callExpiryTimers.values()) clearTimeout(id);
 		callExpiryTimers.clear();
 		client.off(ClientEvent.Room, onNewRoom);
@@ -1080,6 +1184,7 @@ export function createSummariesStore(client: MatrixClient): {
 		client.off(RoomEvent.Tags, onRoomTags);
 		client.off(ClientEvent.AccountData, onAccountData);
 		client.off(RoomStateEvent.Events, onRoomStateEvents);
+		client.off(RoomStateEvent.Members, onRoomMember);
 	}
 
 	return {

@@ -167,7 +167,8 @@ CI runs `pnpm lint`, `pnpm typecheck`, `pnpm test:unit`, and `pnpm build` (with 
 
 ### Local code review is required before every agent push
 
-Run the code-review skill, address its findings, then push. Every push means
+In Codex, use `/review`; in Claude Code, use `/code-review`. Address the
+findings, then push. Every push means
 every push - fix commits answering a review comment are the ones most often
 skipped, and they are how findings leak through to the (paid) PR bot that a
 local pass would have caught for free.
