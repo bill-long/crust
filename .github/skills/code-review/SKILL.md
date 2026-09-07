@@ -1,64 +1,27 @@
 ---
 name: code-review
 description: >
-  Enforces the mandatory 4-pass local code review workflow before every push.
-  Use this skill when performing code reviews, preparing to push code, creating
-  PRs, or completing any code change task. This skill must be invoked before
-  any git push operation.
+  Local review before every push: use /review in Codex and /code-review in
+  Claude Code. Includes PR and Copilot review follow-up guidance.
 ---
 
-# Code Review Prompt Guidelines
+# Code Review
 
-When running local code reviews (via the code-review agent), use these prompt
-templates. They encode lessons learned from prior review rounds on this project.
+Before every push, including review fixes and integration commits:
 
-## MANDATORY: Local Code Review Before Every Push
+- In Codex, use `/review`.
+- In Claude Code, use `/code-review`.
 
-**No code may be pushed to a PR branch without a full 4-pass local code review
-first.** This applies to ALL changes — including "trivial" one-liners, formatting
-fixes, documentation updates, and Copilot review comment fixes. No exceptions.
+Address the findings before pushing. Use the command for the environment
+you are running in; no additional model or scoped/blind passes are required.
+A review that fails before inspecting the diff does not count as completed.
 
-### Pre-Push Gate (execute in this exact order)
+Run the project checks required by AGENTS.md. After pushing review fixes,
+reply to every Copilot finding with the fix commit and explanation, or
+explain with evidence why no change is needed. Request fresh Copilot reviews
+until there are no new comments and the verdict is green.
 
-This is a blocking checklist. Do NOT skip steps. Do NOT reorder steps.
-Do NOT call `git push` until step 5 says "push".
-
-1. **Edit** — make your code changes
-2. **Build** — run `pnpm typecheck && pnpm lint && pnpm build` (all must pass)
-3. **Review** — launch all 4 code-review passes (scoped Claude, scoped GPT,
-   blind Claude, blind GPT). Wait for ALL 4 to complete.
-4. **Fix loop** — if ANY pass found a substantive issue, fix it, go back to
-   step 2. Do NOT push the unfixed code "to save time".
-5. **Push** — all 4 passes agree with no substantive findings → `git push`
-6. **Reply** — reply to **every** Copilot PR review comment with the fix
-   commit SHA and a brief description of what changed. Do not leave any
-   thread without a reply — even outdated threads should get a reply so
-   the reviewer can see the fix was addressed.
-
-**Common failure mode:** "It's just a comment / one-liner / TODO, I'll push
-and review after." This is the #1 cause of wasted Copilot review round-trips.
-The review exists to catch issues *before* they reach the remote. Pushing
-first defeats the purpose.
-
-**Copilot comment fix cycle:** When addressing Copilot PR review comments,
-the workflow is: fix → build → 4-pass review → push → reply. Do NOT skip
-the review just because "Copilot asked for this change." Copilot-requested
-fixes are code changes and follow the same gate. This is the #2 failure
-mode — it has been violated repeatedly in this project.
-
-The 4 passes are:
-1. **Scoped (Claude)** — describes intent, lists verification items
-2. **Scoped (GPT)** — same context, different model
-3. **Scope-blind (Claude)** — cold read, full category sweep
-4. **Scope-blind (GPT)** — same template, different model
-
-All 4 models must agree with no substantive findings before pushing. If any
-model finds an issue, fix it and re-run ALL 4 passes.
-
-**Why this is non-negotiable:** Each skipped local review causes a Copilot
-round-trip that costs 5+ minutes of wall time. Issues caught by Copilot that
-the local review should have caught waste the user's time waiting for the
-review cycle. Two skips in one session is unacceptable.
+The review considerations below are reference material, not extra passes.
 
 ## Creating PR Descriptions
 

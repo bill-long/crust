@@ -37,7 +37,7 @@ Acceptable user phrasing that grants pre-approval:
 - "I'm giving you approval right now to push"
 
 If the user did NOT pre-approve, ask once: "Should I push each PR as soon as
-the local 4-pass review is clean, without waiting for your approval per PR?
+the local review is clean, without waiting for your approval per PR?
 You'll see all the PRs at once when the chain is done."
 
 If the user declines, exit this skill and direct them to run the
@@ -126,8 +126,8 @@ the current row is `done`):
    Adopt findings that prevent bugs; set aside ones that bloat scope.
 4. **Implement.**
 5. **Pre-push gate via the `code-review` skill** — `pnpm typecheck && pnpm lint && pnpm build`,
-   then 4-pass review (scoped + blind × Claude + GPT), iterate until
-   all four agree.
+   then `/review` in Codex or `/code-review` in Claude Code, iterate until
+   the findings are addressed.
 6. **Commit and push** — the user pre-approved push.
 7. **Open the PR** with `--base <previous-branch> --body-file <temp.md>`
    (never inline `--body`; backticks get mangled in PowerShell).
@@ -196,7 +196,7 @@ After all rows are `done` and the user has merged the chain:
 
 ## What this skill explicitly defers to other skills
 
-- The 4-pass local review template lives in `code-review` skill — call it,
+- The local review guidance lives in `code-review` skill — follow it,
   don't duplicate it.
 - The Copilot poll-and-reply mechanics live in `code-review` skill.
 
