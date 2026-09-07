@@ -77,6 +77,9 @@ const devCsp = (): Plugin => ({
 
 export default defineConfig(({ command, mode, isPreview }) => ({
 	base: basePath,
+	// Summaries use the SDK membership validator. Prebundle this deep import
+	// up front so browser tests and dev pages don't reload during SDK startup.
+	optimizeDeps: { include: ["matrix-js-sdk/lib/matrixrtc/CallMembership"] },
 	// `pnpm dev:https` is `vite --mode https` (#468): the dev server over TLS
 	// with a self-signed localhost certificate kept in .dev-certs/, because
 	// Continuwuity rejects an OAuth client_uri that is not https and the

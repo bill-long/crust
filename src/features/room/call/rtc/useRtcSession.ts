@@ -109,10 +109,10 @@ export function oldestMembership(
  * flips `manageMediaKeys: true`, and pumps already-negotiated keys via
  * `reemitEncryptionKeys()` after the manager has spun up.
  *
- * `unstableSendStickyEvents` MUST stay `false` until `summaries.ts`
- * callActive detection and `CallButton.tsx` learn the newer
- * `m.rtc.member` event format. Current Element Call still accepts the
- * legacy non-hashed identity, so this is non-urgent (tracked in #122).
+ * Receiving sticky memberships is handled by the SDK; summaries also track
+ * them (#504). Publishing stays legacy until #505 migrates our own membership
+ * identity, JWT request, and call-button permissions together. Enabling sticky
+ * sending alone would mismatch the identity used for encrypted media.
  */
 export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const [status, setStatus] = createSignal<RtcStatus>("idle");
@@ -410,10 +410,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			//   manageMediaKeys: false (no e2ee) keeps the Phase-1 quiet
 			//     path so callers without a bridge don't accidentally
 			//     start the crypto path.
-			//   unstableSendStickyEvents: false stays until Phase 5 lands
-			//     the newer m.rtc.member format in summaries.ts /
-			//     CallButton.tsx — keeps legacy callActive detection
-			//     working.
+			//   unstableSendStickyEvents: false preserves our legacy publishing
+			//     identity until the coordinated membership/JWT migration (#505).
 			// joinRoomSession is fire-and-forget; this try/catch only covers
 			// synchronous validation throws. Async join failures arrive via
 			// MembershipManagerError → onManagerError.
