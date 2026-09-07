@@ -554,10 +554,10 @@ const Layout: Component = () => {
 	createEffect(() => {
 		const uid = userId();
 		if (!uid) return;
-		// Forwarded as-is: `profileName` is undefined until the profile loads,
-		// which the store reads as "not known yet" and leaves the remembered
-		// label alone (see rememberAccountDisplayName).
+		// Wait for the profile before acquiring the cross-tab session lock.
+		// An undefined name means there is no label update to persist yet.
 		const name = profileName();
+		if (name === undefined) return;
 		void withSessionLock(() => rememberAccountDisplayName(uid, name)).catch(
 			(error) => {
 				reportError(error, {
