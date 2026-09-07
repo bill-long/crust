@@ -14,16 +14,31 @@ export async function withSessionLock<T>(
 		// refuses to mint a stored login without cross-window coordination.
 		return operation();
 	}
-	return navigator.locks.request(
-		"crust:session",
-		{ signal: AbortSignal.timeout(5_000) },
-		async () => {
-			held++;
-			try {
-				return await operation();
-			} finally {
-				held--;
-			}
-		},
+	const controller = new AbortController();
+	const timer = setTimeout(
+		() =>
+			controller.abort(
+				new Error("Another tab is busy saving account changes. Try again."),
+			),
+		5_000,
 	);
+	try {
+		return await navigator.locks.request(
+			"crust:session",
+			{ signal: controller.signal },
+			async () => {
+				// The deadline bounds acquisition, not work performed under the lock.
+				clearTimeout(timer);
+				held++;
+				try {
+					return await operation();
+				} finally {
+					held--;
+				}
+			},
+		);
+	} finally {
+		// Includes rejected requests and synchronous request() failures.
+		clearTimeout(timer);
+	}
 }
