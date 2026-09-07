@@ -6,6 +6,7 @@ import {
 	waitFor,
 } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mockLoginLocks } from "../../test/loginLocks";
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -31,8 +32,13 @@ vi.mock("../../client/accountLogout", () => ({
 	revokeAccountToken: (...args: unknown[]) => revokeAccountTokenMock(...args),
 }));
 vi.mock("../../stores/session", () => ({
-	saveSession: (...args: unknown[]) => saveSessionMock(...args),
-	addSession: (...args: unknown[]) => addSessionMock(...args),
+	commitLoginSession: (session: unknown) => {
+		if (!addSessionMock(session))
+			throw new Error(
+				"You can be logged into 5 accounts at once. Log out of one first.",
+			);
+		saveSessionMock(session);
+	},
 	MAX_ACCOUNTS: 5,
 	freezeAccountScope: () => freezeMock(),
 	unfreezeAccountScope: () => unfreezeMock(),
@@ -63,6 +69,9 @@ const GRANT_RESULT = {
 };
 
 beforeEach(() => {
+	loadSessionsMock.mockReturnValue([]);
+	mockLoginLocks();
+	sessionStorage.clear();
 	takeOidcReturnToMock.mockReturnValue(null);
 });
 afterEach(() => {
@@ -170,7 +179,7 @@ describe("LoginCallback add-account mode", () => {
 		// The failure happened WITH an account still logged in. /login replaces
 		// on a plain login, so routing there invites destroying it (#549) - and
 		// its guard would turn the visitor around anyway.
-		loadSessionsMock.mockReturnValueOnce([{ userId: "@alice:strange.pizza" }]);
+		loadSessionsMock.mockReturnValue([{ userId: "@alice:strange.pizza" }]);
 		takeOidcAddAccountMock.mockReturnValueOnce(true);
 		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
 		const assign = vi.fn();
@@ -202,7 +211,7 @@ describe("LoginCallback add-account mode", () => {
 		// at the OP, or a logout left an account storage could not remove. Either
 		// way `/login` would bounce this visitor straight back (#549), so offer
 		// the app directly rather than routing them through it.
-		loadSessionsMock.mockReturnValueOnce([{ userId: "@alice:strange.pizza" }]);
+		loadSessionsMock.mockReturnValue([{ userId: "@alice:strange.pizza" }]);
 		takeOidcAddAccountMock.mockReturnValueOnce(false);
 		completeOidcLoginMock.mockRejectedValueOnce(new Error("bad state"));
 		const assign = vi.fn();

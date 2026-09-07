@@ -49,6 +49,7 @@ import {
 	setActiveAccount,
 	unfreezeAccountScope,
 } from "../stores/session";
+import { withSessionLock } from "../stores/sessionLock";
 import type { PushConfig } from "../types/config";
 import { basePrefix } from "./basePath";
 import { quiesceLiveSession } from "./quiesceSession";
@@ -104,7 +105,7 @@ export interface AccountExit {
  */
 export async function endSessionForAccountExit(
 	exit: AccountExit,
-	commit?: () => boolean,
+	commit?: () => boolean | Promise<boolean>,
 ): Promise<boolean> {
 	// The chime, the call teardown and the global call signal, shared with the
 	// logout (`quiesceSession.ts`): a withdrawal that cannot land must not trap
@@ -119,7 +120,7 @@ export async function endSessionForAccountExit(
 	// dropped.
 	await releaseWebPush(exit.client, exit.pushConfig);
 	if (commit) {
-		if (!commit()) {
+		if (!(await commit())) {
 			await restoreWebPush(exit.client, exit.pushConfig);
 			return false;
 		}
@@ -187,16 +188,22 @@ export async function switchToAccount(
 	if (!loadSessions().some((account) => account.userId === userId)) {
 		return "unknown-account";
 	}
-	const committed = await endSessionForAccountExit(exit, () => {
-		// Freeze BEFORE the pointer moves: the account-scoped stores must not
-		// rebind to the incoming account while the outgoing one is still on
-		// screen. It also silences this document's badge writes, so the clear
-		// that follows the commit is not undone by its next sync update.
-		freezeAccountScope();
-		if (setActiveAccount(userId)) return true;
-		unfreezeAccountScope();
-		return false;
-	});
+	const committed = await endSessionForAccountExit(exit, () =>
+		withSessionLock(() => {
+			// Freeze BEFORE the pointer moves: the account-scoped stores must not
+			// rebind to the incoming account while the outgoing one is still on
+			// screen. It also silences this document's badge writes, so the clear
+			// that follows the commit is not undone by its next sync update.
+			freezeAccountScope();
+			if (setActiveAccount(userId)) return true;
+			unfreezeAccountScope();
+			return false;
+		}).catch((error) => {
+			unfreezeAccountScope();
+			reportError(error, { logLabel: "Could not commit the account switch" });
+			return false;
+		}),
+	);
 	if (!committed) return "failed";
 	reloadIntoActiveAccount();
 	return "switching";
@@ -217,9 +224,8 @@ export async function switchToAccount(
  *
  * Where "leave" goes is the other rule. A route change is not enough when
  * another account remains: `/login` renders outside the auth guard, so the user
- * would be looking at a login form with a perfectly good session live in
- * storage, and logging in there REPLACES, silently discarding that account's
- * unrevoked token. So a remaining account is reloaded into instead.
+ * would be looking at a login form despite having another usable account.
+ * A remaining account is reloaded into instead.
  *
  * A logout that never reaches storage leaves the account still listed. The
  * account still there is the one whose token was just revoked, so reloading
@@ -232,14 +238,10 @@ export async function switchToAccount(
  * also covers the benign race where another tab adds an account between the
  * clear and the navigation.
  *
- * The waiver is blunt: in the rejected-write case storage may ALSO hold a
- * perfectly healthy sibling account, and a plain login on the page this opens
- * replaces that one too, unrevoked. Promoting the sibling instead is the
- * obvious tighter answer and does not work - `setActiveAccount` writes through
- * the same `writeStore` that just refused, with a LARGER payload (it keeps
- * every account, where the removal dropped one), so it fails wherever this
- * branch is reached. Storage is refusing writes; there is no state to move to.
- * So the loop is what gets avoided, and #551 is where doing better belongs.
+ * A healthy sibling may remain when the storage write fails. The login
+ * persistence path preserves it (#551); only the exact departing credential
+ * recorded by rememberClientLogout can be replaced. No storage pointer write
+ * is required to get the user out of the revoked session.
  *
  * Returns "reloading" when the document is being replaced. `location.assign`
  * only STARTS that, so this document keeps running: a caller that clears a
@@ -292,19 +294,29 @@ export async function finishAccountLogout(
 	clearNotices();
 	// Storage-backed: another tab may have written it since this document booted,
 	// and it is the authority on what will be left.
-	const remaining = loadSessions().some((a) => a.userId !== userId);
-	// Freeze only when a reload is coming: `reloadIntoActiveAccount` merely
-	// STARTS the navigation, so the account-scoped stores would otherwise rebind
-	// to the promoted account - re-zooming a UI that is still on screen - and any
-	// write until unload would be filed under it. On the way to `/login` the
-	// notification has to reach them instead: this document survives, and the
-	// stores must actually let go of the account that just left.
-	if (remaining) freezeAccountScope();
-	if (clearSession(userId) && activeAccountId() !== null) {
+	const reloading = await withSessionLock(() => {
+		const remaining = loadSessions().some((a) => a.userId !== userId);
+		// Freeze only when a reload is coming: `reloadIntoActiveAccount` merely
+		// STARTS the navigation, so the account-scoped stores would otherwise rebind
+		// to the promoted account - re-zooming a UI that is still on screen - and any
+		// write until unload would be filed under it. On the way to `/login` the
+		// notification has to reach them instead: this document survives, and the
+		// stores must actually let go of the account that just left.
+		if (remaining) freezeAccountScope();
+		if (clearSession(userId) && activeAccountId() !== null) {
+			return true;
+		}
+		if (remaining) unfreezeAccountScope();
+		return false;
+	}).catch((error) => {
+		unfreezeAccountScope();
+		reportError(error, { logLabel: "Could not clear the logged-out account" });
+		return false;
+	});
+	if (reloading) {
 		reloadIntoActiveAccount();
 		return "reloading";
 	}
-	if (remaining) unfreezeAccountScope();
 	markLogoutLanding();
 	goToLogin();
 	return "left";

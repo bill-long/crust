@@ -42,6 +42,7 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { revokeSession } from "../client/accountLogout";
 import { clearCryptoStores } from "../client/cryptoRecovery";
+import { rememberClientLogout } from "../client/rememberLogout";
 import { disableBackgroundNotifications } from "../features/notifications/accountPush";
 import { closeNotificationSound } from "../features/room/notificationSound";
 import { reportError } from "../lib/reportError";
@@ -134,6 +135,9 @@ export async function finishSessionExit(
 	opts: LogoutOptions,
 ): Promise<"reloading" | "left"> {
 	const { client, pushConfig, session } = opts;
+	// Only the credential this document is ending may later be replaced if
+	// storage refuses the clear. A sibling or a newer login remains protected.
+	await rememberClientLogout(client, session);
 	// Caught like every other write to it: a Solid setter runs its subscribers
 	// synchronously, and a throwing effect here would abort the wipe and the
 	// clear - leaving an account still on this device with no UI to reach it.

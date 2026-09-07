@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../stores/session";
-import { loadSession, loadSessions, saveSession } from "../../stores/session";
+import {
+	addSession,
+	loadSession,
+	loadSessions,
+	saveSession,
+} from "../../stores/session";
 
 // Mock the SDK boundary: a fake TokenRefresher that captures constructor
 // args and lets each test script what a refresh yields. What stays under
@@ -99,6 +104,39 @@ afterEach(() => {
 });
 
 describe("createOidcTokenRefreshFn", () => {
+	it("waits for a concurrent login before reading and updating the account list", async () => {
+		saveSession(OIDC_SESSION);
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const request = vi.fn(
+			async (
+				_name: string,
+				_options: unknown,
+				operation: () => Promise<unknown>,
+			) => {
+				await gate;
+				return operation();
+			},
+		);
+		vi.stubGlobal("navigator", { locks: { request } });
+		const refresh = createOidcTokenRefreshFn(OIDC_SESSION);
+		if (!refresh) throw new Error("expected a refresh function");
+		const pending = refresh("refresh-old");
+		await vi.waitFor(() => expect(request).toHaveBeenCalled());
+		expect(stored()?.accessToken).toBe("access-old");
+		addSession({
+			...PASSWORD_SESSION,
+			userId: "@bob:example.com",
+			deviceId: "B",
+		});
+		release();
+		await pending;
+		expect(loadSessions()).toHaveLength(2);
+		expect(stored()?.accessToken).toBe("new-access");
+		expect(loadSession()?.userId).toBe("@bob:example.com");
+	});
 	it("returns undefined for a password session", () => {
 		expect(createOidcTokenRefreshFn(PASSWORD_SESSION)).toBeUndefined();
 	});

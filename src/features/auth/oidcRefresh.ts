@@ -28,6 +28,7 @@ import {
 	type SessionOidc,
 	updateSession,
 } from "../../stores/session";
+import { withSessionLock } from "../../stores/sessionLock";
 import { oidcRedirectUri } from "./oidc";
 
 /** Identity of a boot-time session, for the clobber guard below. */
@@ -62,29 +63,31 @@ function identityOf(session: Session & { oidc: SessionOidc }): SessionIdentity {
  * disturbing which account is active. An account removed meanwhile is not
  * resurrected - `updateSession` only ever replaces an existing entry.
  */
-function persistRefreshedTokens(
+async function persistRefreshedTokens(
 	identity: SessionIdentity,
 	tokens: { accessToken: string; refreshToken?: string },
-): void {
-	// Reload from storage rather than closing over the boot-time session:
-	// another tab may have rotated the refresh token since this window
-	// loaded, and we must not resurrect the stale one.
-	const session = loadSessions().find((s) => s.userId === identity.userId);
-	if (!session?.oidc) return;
-	if (
-		session.deviceId !== identity.deviceId ||
-		session.oidc.issuer !== identity.issuer ||
-		session.oidc.clientId !== identity.clientId
-	) {
-		return;
-	}
-	const rotated: Session = { ...session, accessToken: tokens.accessToken };
-	// Truthiness, not `??`: an OP that answers with an EMPTY refresh_token has not
-	// rotated it, and storing "" would fail session validation - losing the new
-	// access token too, for a forced re-login on the next reload.
-	if (tokens.refreshToken) rotated.refreshToken = tokens.refreshToken;
+): Promise<void> {
 	try {
-		updateSession(rotated);
+		await withSessionLock(() => {
+			// Reload from storage rather than closing over the boot-time session:
+			// another tab may have rotated the refresh token since this window
+			// loaded, and we must not resurrect the stale one.
+			const session = loadSessions().find((s) => s.userId === identity.userId);
+			if (!session?.oidc) return;
+			if (
+				session.deviceId !== identity.deviceId ||
+				session.oidc.issuer !== identity.issuer ||
+				session.oidc.clientId !== identity.clientId
+			) {
+				return;
+			}
+			const rotated: Session = { ...session, accessToken: tokens.accessToken };
+			// Truthiness, not `??`: an OP that answers with an EMPTY refresh_token has not
+			// rotated it, and storing "" would fail session validation - losing the new
+			// access token too, for a forced re-login on the next reload.
+			if (tokens.refreshToken) rotated.refreshToken = tokens.refreshToken;
+			updateSession(rotated);
+		});
 	} catch (e) {
 		console.warn("Failed to persist refreshed OAuth2 tokens:", e);
 	}
@@ -121,7 +124,7 @@ export function createOidcTokenRefreshFn(
 				redirectUri: oidcRedirectUri(),
 			});
 			return new TokenRefresher(auth, async (tokens) => {
-				persistRefreshedTokens(identity, tokens);
+				await persistRefreshedTokens(identity, tokens);
 			});
 		})());
 

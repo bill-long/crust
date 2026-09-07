@@ -20,11 +20,13 @@ import { createClient, type MatrixClient, Method } from "matrix-js-sdk";
 import { createOidcTokenRefreshFn } from "../features/auth/oidcRefresh";
 import { reportError } from "../lib/reportError";
 import { removeAccount, type Session } from "../stores/session";
+import { withSessionLock } from "../stores/sessionLock";
 import {
 	CRYPTO_INIT_TIMEOUT_MS,
 	clearCryptoStores,
 	withTimeout,
 } from "./cryptoRecovery";
+import { rememberClientLogout } from "./rememberLogout";
 import { stopClientFully } from "./stopClientFully";
 
 /**
@@ -143,6 +145,7 @@ export async function logOutAccount(account: Session): Promise<boolean> {
 			logLabel: `Failed to revoke the token for ${account.userId}`,
 		});
 	}
+	await rememberClientLogout(client, account);
 	try {
 		// Bounded, like the foreground logout's wipe: `deleteDatabase` BLOCKS
 		// while another window still has that account's store open and the SDK's
@@ -159,5 +162,10 @@ export async function logOutAccount(account: Session): Promise<boolean> {
 			logLabel: `Failed to clear the crypto store for ${account.userId}`,
 		});
 	}
-	return removeAccount(account.userId);
+	try {
+		return await withSessionLock(() => removeAccount(account.userId));
+	} catch (error) {
+		reportError(error, { logLabel: "Could not remove the logged-out account" });
+		return false;
+	}
 }
