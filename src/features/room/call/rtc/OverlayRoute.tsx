@@ -1,14 +1,16 @@
-import { type Component, onCleanup, onMount } from "solid-js";
+import { type Component, createSignal, onCleanup, onMount } from "solid-js";
 import { isNativeShell } from "../../../../app/nativeShell";
+import { invokeTauri, tauriIpcAvailable } from "../../../../app/tauri";
+import { reportError } from "../../../../lib/reportError";
 import { CallOverlayView } from "./CallOverlayView";
 import { createCallOverlayConsumer } from "./callOverlayBridge";
 
 /**
  * The `/overlay` route: the entire contents of the separate, always-on-top
- * desktop overlay window. It boots no MatrixClient of its own — it consumes the
+ * desktop overlay window. It boots no MatrixClient of its own - it consumes the
  * call snapshot the main window publishes over the `crust:call-overlay`
- * BroadcastChannel and renders it, sending a "leave" command back when the user
- * hangs up.
+ * BroadcastChannel and renders it. Hang-up uses native IPC so the shell can
+ * verify the requesting window's identity.
  *
  * Rendered top-level (outside the auth/sync gates) so it works without a session
  * in this window. In the native shell the document background is made
@@ -17,6 +19,7 @@ import { createCallOverlayConsumer } from "./callOverlayBridge";
  */
 export const OverlayRoute: Component = () => {
 	const consumer = createCallOverlayConsumer();
+	const [hangUpError, setHangUpError] = createSignal<string | null>(null);
 	onCleanup(() => consumer.dispose());
 
 	onMount(() => {
@@ -36,8 +39,29 @@ export const OverlayRoute: Component = () => {
 	return (
 		<CallOverlayView
 			snapshot={consumer.snapshot()}
-			onHangUp={consumer.sendLeave}
+			onHangUp={
+				isNativeShell()
+					? () => {
+							setHangUpError(null);
+							if (!tauriIpcAvailable()) {
+								setHangUpError(
+									"Couldn't disconnect. Use the main Crust window.",
+								);
+								return;
+							}
+							void invokeTauri("leave_overlay_call").catch((error) => {
+								reportError(error, {
+									logLabel: "Overlay hang-up",
+								});
+								setHangUpError(
+									"Couldn't disconnect. Use the main Crust window.",
+								);
+							});
+						}
+					: undefined
+			}
 			translucent={isNativeShell()}
+			hangUpError={hangUpError()}
 		/>
 	);
 };

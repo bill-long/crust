@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	type CallOverlaySnapshot,
 	createCallOverlayConsumer,
@@ -47,7 +47,6 @@ describe("callOverlayBridge", () => {
 	it("delivers published snapshots from producer to consumer", async () => {
 		const producer = createCallOverlayProducer({
 			getSnapshot: () => snapshot(),
-			onLeave: () => {},
 		});
 		cleanups.push(producer.dispose);
 		const consumer = createCallOverlayConsumer();
@@ -67,7 +66,6 @@ describe("callOverlayBridge", () => {
 	it("answers a new consumer's request handshake with the current snapshot", async () => {
 		const producer = createCallOverlayProducer({
 			getSnapshot: () => snapshot({ roomName: "Already running" }),
-			onLeave: () => {},
 		});
 		cleanups.push(producer.dispose);
 
@@ -78,25 +76,6 @@ describe("callOverlayBridge", () => {
 		await until(() => consumer.snapshot().roomName === "Already running");
 
 		expect(consumer.snapshot().roomName).toBe("Already running");
-	});
-
-	it("forwards a consumer leave command to the producer's onLeave", async () => {
-		const onLeave = vi.fn();
-		const producer = createCallOverlayProducer({
-			getSnapshot: () => snapshot(),
-			onLeave,
-		});
-		cleanups.push(producer.dispose);
-		const consumer = createCallOverlayConsumer();
-		cleanups.push(consumer.dispose);
-		// The consumer must bind to the producer (via the active handshake)
-		// before its leave is addressed to that producer's id.
-		await until(() => consumer.snapshot().active);
-
-		consumer.sendLeave();
-		await until(() => onLeave.mock.calls.length > 0);
-
-		expect(onLeave).toHaveBeenCalledTimes(1);
 	});
 
 	it("starts the consumer at the inactive snapshot", () => {
@@ -201,7 +180,6 @@ describe("callOverlayBridge", () => {
 	it("does not answer a handshake from an idle (inactive) producer", async () => {
 		const producer = createCallOverlayProducer({
 			getSnapshot: () => snapshot({ active: false }),
-			onLeave: () => {},
 		});
 		cleanups.push(producer.dispose);
 		const consumer = createCallOverlayConsumer();
@@ -236,24 +214,5 @@ describe("callOverlayBridge", () => {
 
 		expect(consumer.snapshot().active).toBe(true);
 		expect(consumer.snapshot().roomName).toBe("A-call");
-	});
-
-	it("ignores a leave command addressed to a different producer", async () => {
-		const onLeave = vi.fn();
-		const producer = createCallOverlayProducer({
-			getSnapshot: () => snapshot(),
-			onLeave,
-		});
-		cleanups.push(producer.dispose);
-		const rogue = new BroadcastChannel("crust:call-overlay");
-		cleanups.push(() => rogue.close());
-		rogue.postMessage({
-			kind: "command",
-			command: "leave",
-			producerId: "someone-else",
-		});
-		await until(() => false);
-
-		expect(onLeave).not.toHaveBeenCalled();
 	});
 });

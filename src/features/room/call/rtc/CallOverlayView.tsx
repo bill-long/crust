@@ -16,7 +16,8 @@ interface CallOverlayViewProps {
 	snapshot: CallOverlaySnapshot;
 	/** Invoked when the user hangs up from the overlay (bridged to the main
 	 *  window). Omit to hide the hang-up control. */
-	onHangUp?: () => void;
+	onHangUp?: (() => void) | undefined;
+	hangUpError?: string | null;
 	/** When true, use a translucent surface + backdrop blur so the chromeless,
 	 *  transparent native overlay window lets the game behind it show through.
 	 *  Defaults to an opaque panel (e.g. for a plain browser preview tab). */
@@ -96,6 +97,11 @@ export const CallOverlayView: Component<CallOverlayViewProps> = (props) => {
 					)}
 				</Show>
 			</header>
+			<Show when={props.hangUpError}>
+				<p class="shrink-0 px-2 py-1 text-xs text-danger-text" role="alert">
+					{props.hangUpError}
+				</p>
+			</Show>
 
 			<Show
 				when={active()}

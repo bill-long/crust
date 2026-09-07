@@ -1,4 +1,5 @@
 import type { IPusher, IPusherRequest, MatrixClient } from "matrix-js-sdk";
+import { isNativeShell } from "../../app/nativeShell";
 import { reportError } from "../../lib/reportError";
 import { isPushConfigured, type PushConfig } from "../../types/config";
 
@@ -15,9 +16,10 @@ interface WebPushPusherData {
 
 const SW_READY_TIMEOUT_MS = 10_000;
 
-/** True when the browser exposes the APIs needed for background Web Push. */
+/** WebView2 exposes PushManager but does not support Web Push. */
 export function isPushSupported(): boolean {
 	return (
+		!isNativeShell() &&
 		typeof window !== "undefined" &&
 		typeof navigator !== "undefined" &&
 		"serviceWorker" in navigator &&
