@@ -179,8 +179,9 @@ deliberately. Read `docs/review-gate-history.md` for why before proposing a new
 gate. The failure being prevented is an accidental skip, so: remember to run
 the review.
 
-This covers the review only; `lint`/`typecheck`/`test` are covered by CI and by
-the review flow.
+A review that fails before inspecting the diff does not count as completed.
+For PR creation and Copilot follow-up, use [docs/pr-workflow.md](docs/pr-workflow.md).
+The required checks are listed in the Commands section above.
 
 **On a clone that predates this change**, run `git config --unset
 core.hooksPath` once. The deleted `prepare` script pointed git at `.githooks/`,

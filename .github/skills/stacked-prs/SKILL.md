@@ -21,8 +21,7 @@ single batched human review at the end of the chain.
   conflict (touch the same files in incompatible ways), the chain still
   works, but flag the conflict to the user before starting.
 
-If only one issue is open, just do the normal single-PR flow with the
-`code-review` skill — no need to stack.
+For one issue, follow the [PR workflow](../../../docs/pr-workflow.md). A stack is unnecessary.
 
 ## MANDATORY: Pre-approved push
 
@@ -32,7 +31,7 @@ is that the agent doesn't block between commit and push waiting for "OK
 to push" — that single ack per PR destroys the time savings.
 
 Acceptable user phrasing that grants pre-approval:
-- "Push and follow the code-review loop"
+- "Push each PR and address Copilot findings"
 - "Don't wait for confirmation, just push"
 - "I'm giving you approval right now to push"
 
@@ -40,9 +39,7 @@ If the user did NOT pre-approve, ask once: "Should I push each PR as soon as
 the local review is clean, without waiting for your approval per PR?
 You'll see all the PRs at once when the chain is done."
 
-If the user declines, exit this skill and direct them to run the
-`code-review` skill per PR instead — do not start the chain under per-PR
-approval, since that defeats the time-saving premise.
+If the user declines, exit this skill and follow the [PR workflow](../../../docs/pr-workflow.md) for each PR. Do not start a chain that needs separate push approval for each PR.
 
 ## MANDATORY: One PR reaches a clean Copilot review before the next is started
 
@@ -50,9 +47,7 @@ approval, since that defeats the time-saving premise.
 
 The chain is built **strictly one PR at a time, in order**. You may NOT
 create the next issue's branch, implement it, push it, or open its PR until
-the *current* PR has a **confirmed-clean Copilot review** (per the §2 step-9
-definition: a summary saying "generated no new comments", OR an empty-body
-review on HEAD with no unreplied Copilot threads across 3 scans).
+the *current* PR meets the [review completion criteria](../../../docs/pr-workflow.md#verify-completion-on-the-current-head).
 
 Non-negotiable rules:
 
@@ -125,9 +120,8 @@ the current row is `done`):
    anything involving multiple files, new state, or architectural choices.
    Adopt findings that prevent bugs; set aside ones that bloat scope.
 4. **Implement.**
-5. **Pre-push gate via the `code-review` skill** — `pnpm typecheck && pnpm lint && pnpm build`,
-   then `/review` in Codex or `/code-review` in Claude Code, iterate until
-   the findings are addressed.
+5. **Complete the checks and local review required by [AGENTS.md](../../../AGENTS.md).**
+   Address findings before pushing.
 6. **Commit and push** — the user pre-approved push.
 7. **Open the PR** with `--base <previous-branch> --body-file <temp.md>`
    (never inline `--body`; backticks get mangled in PowerShell).
@@ -138,12 +132,12 @@ the current row is `done`):
      use `Addresses #N` in the PR body and list what's deferred in an
      "Out of scope" section. `Addresses` is not a closing keyword, so
      the issue stays open as intended.
-8. **Request Copilot review** with `[bot]` syntax — see `code-review` skill.
+8. **Request Copilot review** with `[bot]` syntax - see [PR workflow](../../../docs/pr-workflow.md).
 9. **Poll for Copilot review** using the CLI runtime's `manage_schedule`
    tool at 90s intervals — Copilot review submissions do NOT generate
    completion notifications, so a passive wait (e.g. `read_agent`) will
    not return. `manage_schedule` is a CLI built-in for recurring prompts;
-   the `code-review` skill itself assumes an interactively-active agent
+   the PR workflow document assumes an interactively-active agent
    and so documents only the REST/GraphQL queries. This skill uses the
    same queries from inside the scheduled poll. **Record the schedule
    id returned by `manage_schedule` with `action: "create"`** — you'll
@@ -153,15 +147,10 @@ the current row is `done`):
    `Start-Sleep -Seconds 90` in PowerShell, or `sleep 90` in
    bash/zsh — adapt to the local shell) between the same REST/GraphQL
    polls; this blocks the agent on each PR but still completes the
-   workflow. Clean when **either**:
-   - A non-empty Copilot summary review on the new HEAD SHA says "generated
-     no new comments", OR
-   - An empty-body Copilot review exists on the new HEAD SHA AND no
-     unreplied Copilot threads appear across 3 consecutive scans (≥10s
-     apart).
-
+   workflow. Use the completion criteria and verification scans in the
+   [PR workflow](../../../docs/pr-workflow.md#verify-completion-on-the-current-head).
    If unreplied threads exist: address them, push, reply, re-request
-   review, continue polling. See `code-review` skill for the exact GraphQL
+   review, continue polling. See [PR workflow](../../../docs/pr-workflow.md) for the GraphQL
    query and reply mechanics. **As soon as the review is clean, call
    `manage_schedule` with `action: "stop"` and the recorded schedule
    id** — otherwise the recurring poll keeps firing across subsequent
@@ -194,11 +183,10 @@ After all rows are `done` and the user has merged the chain:
    explicitly stated: "we can't just skip features." Better to have an open
    tracking issue than a silent gap.
 
-## What this skill explicitly defers to other skills
+## Shared guidance
 
-- The local review guidance lives in `code-review` skill — follow it,
-  don't duplicate it.
-- The Copilot poll-and-reply mechanics live in `code-review` skill.
+- The local review requirements live in [AGENTS.md](../../../AGENTS.md).
+- The Copilot poll-and-reply mechanics live in [PR workflow](../../../docs/pr-workflow.md).
 
 ## What this skill explicitly does NOT cover
 
