@@ -31,7 +31,7 @@ is that the agent doesn't block between commit and push waiting for "OK
 to push" — that single ack per PR destroys the time savings.
 
 Acceptable user phrasing that grants pre-approval:
-- "Push and follow the code-review loop"
+- "Push each PR and address Copilot findings"
 - "Don't wait for confirmation, just push"
 - "I'm giving you approval right now to push"
 
