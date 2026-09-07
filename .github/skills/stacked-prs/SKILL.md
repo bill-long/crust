@@ -21,8 +21,7 @@ single batched human review at the end of the chain.
   conflict (touch the same files in incompatible ways), the chain still
   works, but flag the conflict to the user before starting.
 
-If only one issue is open, just do the normal single-PR flow with the
-[PR workflow](../../../docs/pr-workflow.md) - no need to stack.
+For one issue, follow the [PR workflow](../../../docs/pr-workflow.md). A stack is unnecessary.
 
 ## MANDATORY: Pre-approved push
 
@@ -40,9 +39,7 @@ If the user did NOT pre-approve, ask once: "Should I push each PR as soon as
 the local review is clean, without waiting for your approval per PR?
 You'll see all the PRs at once when the chain is done."
 
-If the user declines, exit this skill and direct them to run the
-[PR workflow](../../../docs/pr-workflow.md) per PR instead - do not start the chain under per-PR
-approval, since that defeats the time-saving premise.
+If the user declines, exit this skill and follow the [PR workflow](../../../docs/pr-workflow.md) for each PR. Do not start a chain that needs separate push approval for each PR.
 
 ## MANDATORY: One PR reaches a clean Copilot review before the next is started
 
@@ -50,8 +47,7 @@ approval, since that defeats the time-saving premise.
 
 The chain is built **strictly one PR at a time, in order**. You may NOT
 create the next issue's branch, implement it, push it, or open its PR until
-the *current* PR has a **confirmed-clean Copilot review** (per the §2 step-9
-definition in [PR workflow](../../../docs/pr-workflow.md#verify-completion-on-the-current-head)).
+the *current* PR meets the [review completion criteria](../../../docs/pr-workflow.md#verify-completion-on-the-current-head).
 
 Non-negotiable rules:
 

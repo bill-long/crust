@@ -25,9 +25,10 @@ gh api repos/bill-long/crust/pulls/PR_NUMBER/requested_reviewers --jq '.users[].
 ```
 
 Verify Copilot was requested. The request list may become empty when work starts.
-If it is empty, check the timeline for a recent Copilot `review_requested` or
-`copilot_work_started` event and check for a completed review on the current HEAD
-before retrying. An active review is not a dropped request.
+If it is empty, check the timeline for a recent Copilot `review_requested` event
+and check for a completed review on the current HEAD before retrying. A recent
+request may still be in progress; allow the polling window below before deciding
+it was dropped. Do not depend on undocumented worker event names.
 
 ```sh
 gh api --paginate repos/bill-long/crust/issues/PR_NUMBER/timeline
