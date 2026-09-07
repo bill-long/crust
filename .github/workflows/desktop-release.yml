@@ -229,8 +229,9 @@ jobs:
 
       # The Tauri project (desktop/) is a separate pnpm package; install its
       # @tauri-apps/cli so tauri-action can run `pnpm tauri build`.
+      # Ignore the root workspace so this uses desktop/pnpm-lock.yaml.
       - name: Install desktop dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --ignore-workspace --frozen-lockfile
         working-directory: desktop
 
       - uses: dtolnay/rust-toolchain@stable

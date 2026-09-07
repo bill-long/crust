@@ -56,6 +56,7 @@ From the repo root, build the web app, then run the shell from `desktop/`:
 ```sh
 pnpm build            # repo root: produces dist/
 cd desktop
+pnpm install --ignore-workspace --frozen-lockfile
 pnpm tauri dev        # or: pnpm tauri build  -> installer under src-tauri/target
 ```
 
