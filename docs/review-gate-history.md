@@ -1,7 +1,7 @@
 # Why the pre-push review gate is a convention, not a mechanism
 
 The rule (see AGENTS.md "Local code review is required before every agent push"):
-use the environment-specific review command from AGENTS.md, address its
+use the environment-specific review command, address its
 findings, then push - every push,
 including fix commits answering a review comment.
 
