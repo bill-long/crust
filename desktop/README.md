@@ -54,6 +54,7 @@ The push-to-talk / mute key itself is configured in the web app's settings.
 From the repo root, build the web app, then run the shell from `desktop/`:
 
 ```sh
+pnpm install --frozen-lockfile
 pnpm build            # repo root: produces dist/
 cd desktop
 pnpm install --ignore-workspace --frozen-lockfile
