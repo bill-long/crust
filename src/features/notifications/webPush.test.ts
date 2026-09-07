@@ -1,7 +1,7 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PushConfig } from "../../types/config";
-import { currentPushKey, disableWebPush } from "./webPush";
+import { currentPushKey, disableWebPush, isPushSupported } from "./webPush";
 
 const CONFIG: PushConfig = {
 	vapidPublicKey: "key",
@@ -58,6 +58,14 @@ afterEach(() => {
 });
 
 describe("currentPushKey", () => {
+	it("does not treat WebView2's exposed PushManager as working Web Push", async () => {
+		const getSubscription = vi.fn(async () => subscription("P256DH"));
+		stubPushEnvironment(getSubscription);
+		vi.stubGlobal("isTauri", true);
+		expect(isPushSupported()).toBe(false);
+		await expect(currentPushKey()).resolves.toBeNull();
+		expect(getSubscription).not.toHaveBeenCalled();
+	});
 	it("is the pushkey the device's pusher is registered under", async () => {
 		stubPushEnvironment(async () => subscription("P256DH"));
 

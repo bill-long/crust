@@ -17,6 +17,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 mod mic_hotkey;
+mod shutdown;
 mod update_install_marker;
 pub use mic_hotkey::run_helper;
 
@@ -59,8 +60,8 @@ struct OverlayState {
 /// installing at exit means the session is never interrupted: the installer
 /// takes over an app that is already going away.
 ///
-/// Every quit applies it, however the app was closed - so an update is never
-/// downloaded twice. Note what that implies on Windows: the plugin passes the
+/// A coordinated app quit applies it; OS session teardown does not.
+/// Note what that implies on Windows: the plugin passes the
 /// install mode's NSIS args, and every unattended mode includes `/R` (Passive
 /// is `["/P", "/R"]`, Quiet is `["/S", "/R"]`), with no way to drop it per
 /// call. So a quit that applies an update relaunches the app afterwards. The
@@ -151,13 +152,23 @@ fn overlay_is_open(app: AppHandle) -> bool {
     app.get_webview_window(OVERLAY_LABEL).is_some()
 }
 
+/// The caller identity is supplied by Tauri, never by BroadcastChannel data.
+#[tauri::command]
+fn leave_overlay_call(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != OVERLAY_LABEL {
+        return Err("Only the overlay window can request this action".into());
+    }
+    app.emit_to("main", "crust://overlay-leave", ())
+        .map_err(|error| error.to_string())
+}
+
 /// Quit so a staged update can be applied now rather than whenever the app
 /// next closes. Exiting is the whole mechanism: the exit hook runs the
 /// installer, which relaunches the app when it finishes. A no-op beyond a quit
 /// when nothing is staged.
 #[tauri::command]
 fn restart_for_update(app: AppHandle) {
-    app.exit(0);
+    shutdown::request(&app);
 }
 
 /// The version waiting to be applied, if any. The webview asks once on mount:
@@ -329,6 +340,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(OverlayState::default())
         .manage(StagedUpdate::default())
+        .manage(shutdown::Shutdown::default())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -347,7 +360,7 @@ pub fn run() {
                             let _ = win.close();
                         }
                     } else if printable.contains("keyq") {
-                        app.exit(0);
+                        shutdown::request(app);
                     }
                 })
                 .build(),
@@ -356,11 +369,14 @@ pub fn run() {
             open_overlay,
             close_overlay,
             overlay_is_open,
+            leave_overlay_call,
             restart_for_update,
+            shutdown::complete_shutdown,
             pending_update_version,
             pending_update_install_failure,
             dismiss_update_install_failure,
-            mic_hotkey::set_mic_hotkey
+            mic_hotkey::set_mic_hotkey,
+            mic_hotkey::mic_hotkey_supported
         ])
         // A plugin init script reaches every webview the shell creates (the
         // config-defined main window and the overlay alike), before the page's
@@ -439,11 +455,22 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        // `build` + `run` rather than `run(context)`: the exit hook is where a
-        // staged update gets applied.
-        .run(|app, event| {
-            if let RunEvent::Exit = event {
+        // Keep the main webview alive for call withdrawal, and apply updates
+        // only on the coordinator's completed quit request.
+        .run(|app, event| match event {
+            RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } if label == "main" => {
+                api.prevent_close();
+                shutdown::request(app);
+            }
+            RunEvent::ExitRequested { code: Some(0), .. }
+                if app.state::<shutdown::Shutdown>().take_exit() =>
+            {
                 install_staged_update(app);
             }
+            _ => {}
         });
 }

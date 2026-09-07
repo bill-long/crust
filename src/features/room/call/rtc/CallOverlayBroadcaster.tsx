@@ -1,4 +1,7 @@
-import { type Component, createEffect, onCleanup } from "solid-js";
+import { type Component, createEffect, onCleanup, onMount } from "solid-js";
+import { isNativeShell } from "../../../../app/nativeShell";
+import { listenTauri } from "../../../../app/tauri";
+import { reportError } from "../../../../lib/reportError";
 import { micEnabled as voiceMicEnabled } from "../../../../stores/voice";
 import {
 	type CallOverlaySnapshot,
@@ -51,14 +54,30 @@ export const CallOverlayBroadcaster: Component = () => {
 
 	const producer = createCallOverlayProducer({
 		getSnapshot: buildSnapshot,
-		onLeave: () => {
+	});
+	onMount(() => {
+		if (!isNativeShell()) return;
+		let disposed = false;
+		let unlisten: (() => void) | undefined;
+		void listenTauri("crust://overlay-leave", () => {
 			void currentCallSession()
 				?.requestLeave()
 				.catch(() => {
 					// The session controller surfaces leave errors in its own
 					// dialog; nothing actionable from the broadcaster.
 				});
-		},
+		}).then(
+			(stop) => {
+				if (disposed) stop();
+				else unlisten = stop;
+			},
+			(error) =>
+				reportError(error, { logLabel: "Listening for overlay hang-up" }),
+		);
+		onCleanup(() => {
+			disposed = true;
+			unlisten?.();
+		});
 	});
 
 	// Republish whenever the call's participants, name, mic state, or the
@@ -69,9 +88,8 @@ export const CallOverlayBroadcaster: Component = () => {
 	// to one producer by id, so even with two tabs each in a call, one tab's
 	// inactive emit cannot blank an overlay bound to the other.
 	//
-	// Remaining gap (Phase 2): a producer whose tab is hard-closed mid-call
-	// sends no inactive emit, so a bound overlay shows a stale call until a
-	// heartbeat/lease is added.
+	// The bridge's heartbeat lease expires if the producer disappears without
+	// getting a chance to publish its final inactive snapshot.
 	let wasActive = false;
 	createEffect(() => {
 		const snapshot = buildSnapshot();

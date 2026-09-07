@@ -235,6 +235,22 @@ function emitLive(
 }
 
 describe("useNotifications event handling", () => {
+	it("delivers through native IPC despite WebView2 permission and dedupes repeated events", async () => {
+		vi.stubGlobal("isTauri", true);
+		FakeNotification.permission = "denied";
+		const invoke = vi.fn(async () => {});
+		vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+		const handle = mount();
+		const event = makeEvent().event;
+		emitLive(handle, event);
+		emitLive(handle, event);
+		await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+		expect(invoke).toHaveBeenCalledWith("plugin:notification|notify", {
+			options: { title: "Test room", body: "Sender: hello" },
+		});
+		expect(FakeNotification.instances).toHaveLength(0);
+		handle.dispose();
+	});
 	it("primes audio, subscribes, and cleans up listeners and browser resources", () => {
 		const handle = mount();
 		expect(mocks.primeAudioContext).toHaveBeenCalledTimes(1);

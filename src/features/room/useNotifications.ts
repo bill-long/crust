@@ -8,6 +8,9 @@ import {
 	RoomEvent,
 } from "matrix-js-sdk";
 import { onCleanup } from "solid-js";
+import { sendNativeNotification } from "../../app/nativeNotifications";
+import { isNativeShell } from "../../app/nativeShell";
+import { tauriIpcAvailable } from "../../app/tauri";
 import type { AppSyncState } from "../../client/client";
 import type { SummariesStore } from "../../client/summaries";
 import { stripBidiControls, stripLineBreakers } from "../../lib/controlChars";
@@ -20,6 +23,7 @@ import {
 	type NotifyPing,
 } from "../../lib/notifyChannel";
 import { isPollStartType, isRenderablePollContent } from "../../lib/pollCopy";
+import { reportError } from "../../lib/reportError";
 import {
 	isThreadReply,
 	isThreadTimelineData,
@@ -116,6 +120,7 @@ export function useNotifications(
 	function shouldShowDesktopNotification(): boolean {
 		const s = userSettings();
 		if (!s.desktopNotifications) return false;
+		if (isNativeShell()) return tauriIpcAvailable() && !isAppFocused();
 		if (!("Notification" in window)) return false;
 		if (Notification.permission !== "granted") return false;
 		if (isAppFocused()) return false;
@@ -140,13 +145,21 @@ export function useNotifications(
 			// for an unnamed DM the SDK derives this from the peer's member
 			// name and removes neither C0 nor the bidi embeddings and
 			// isolates - and an OS title has nothing to contain a stray one.
-			const notif = new Notification(
-				stripBidiControls(stripLineBreakers(room.name ?? "")).trim() || "Room",
-				{
-					body: buildBody(event, room),
-					tag: room.roomId,
-				},
-			);
+			const title =
+				stripBidiControls(stripLineBreakers(room.name ?? "")).trim() || "Room";
+			if (isNativeShell()) {
+				void sendNativeNotification(title, buildBody(event, room)).catch(
+					(error) =>
+						reportError(error, { logLabel: "Native notification delivery" }),
+				);
+				// Native notifications have no browser close/click handle and no
+				// Web Push worker to coordinate with. Never track the plugin shim.
+				return false;
+			}
+			const notif = new Notification(title, {
+				body: buildBody(event, room),
+				tag: room.roomId,
+			});
 
 			activeNotifications.add(notif);
 			notif.onclose = () => activeNotifications.delete(notif);

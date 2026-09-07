@@ -314,24 +314,6 @@ describe("nativeUpdate", () => {
 		// Tearing the call down first would have cost the call for nothing.
 		expect(vi.mocked(endActiveCall)).not.toHaveBeenCalled();
 	});
-	it("ends an active call before quitting, so the withdrawal lands", async () => {
-		// Quitting kills the process: a call still joined at that moment leaves
-		// other participants seeing this user until the membership expires, the
-		// same failure logout was fixed for in #474.
-		const { invoke } = installTauri();
-		const order: string[] = [];
-		vi.mocked(endActiveCall).mockImplementation(async () => {
-			order.push("endActiveCall");
-		});
-		invoke.mockImplementation(async (cmd: string) => {
-			order.push(cmd);
-			return undefined;
-		});
-
-		await restartForUpdate();
-
-		expect(order).toEqual(["endActiveCall", "restart_for_update"]);
-	});
 
 	it("refuses a second restart while one is in flight", async () => {
 		// Ending a call can take up to endCall's 10s cap, during which the card
@@ -339,7 +321,7 @@ describe("nativeUpdate", () => {
 		// another quit.
 		const { invoke } = installTauri();
 		let release: (() => void) | undefined;
-		vi.mocked(endActiveCall).mockImplementation(
+		invoke.mockImplementation(
 			() =>
 				new Promise<void>((resolve) => {
 					release = resolve;
@@ -349,7 +331,7 @@ describe("nativeUpdate", () => {
 		const first = restartForUpdate();
 		expect(restartingForUpdate()).toBe(true);
 		await restartForUpdate();
-		expect(invoke).not.toHaveBeenCalledWith("restart_for_update", undefined);
+		expect(invoke).toHaveBeenCalledTimes(1);
 
 		release?.();
 		await first;

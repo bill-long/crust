@@ -192,10 +192,7 @@ fn code_to_key(code: &str) -> Option<rdev::Key> {
         "ScrollLock" => ScrollLock,
         "Pause" => Pause,
         "NumLock" => NumLock,
-        // TODO: the web picker (HotkeyCaptureButton) can bind ANY
-        // KeyboardEvent.code, but some can't be honored on desktop, so binding
-        // one is silently dead. Either teach the picker to reject codes this
-        // table can't support, or share one supported-key list across web+Rust.
+        // The picker validates through mic_hotkey_supported before saving.
         // Unsupported here:
         //  - keys rdev 0.5 has no variant for: media keys, ContextMenu/Menu,
         //    IntlRo, IntlYen, Fn.
@@ -204,6 +201,15 @@ fn code_to_key(code: &str) -> Option<rdev::Key> {
         //    from the main Enter — we can't map it without also hijacking Enter.
         _ => return None,
     })
+}
+
+/// Use the same mapper for capture validation and the actual keyboard hook.
+#[tauri::command]
+pub fn mic_hotkey_supported(hotkey: MicHotkey) -> bool {
+    match hotkey.code.as_deref() {
+        Some(code) => code_to_key(code).is_some(),
+        None => hotkey.ctrl || hotkey.shift || hotkey.alt || hotkey.meta,
+    }
 }
 
 fn combo_is_held(c: &MicHotkey, pressed: &HashSet<rdev::Key>) -> bool {

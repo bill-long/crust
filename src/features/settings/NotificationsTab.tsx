@@ -12,7 +12,10 @@ import {
 	Show,
 } from "solid-js";
 import { useConfig } from "../../app/ConfigProvider";
+import { requestNativeNotificationPermission } from "../../app/nativeNotifications";
+import { isNativeShell } from "../../app/nativeShell";
 import { useClient } from "../../client/client";
+import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { accounts } from "../../stores/session";
 import { updateSetting, userSettings } from "../../stores/settings";
 import { isPushConfigured } from "../../types/config";
@@ -25,32 +28,78 @@ const NotificationsTab: Component = () => {
 	const config = useConfig();
 
 	const notificationsSupported =
-		typeof window !== "undefined" && "Notification" in window;
+		isNativeShell() ||
+		(typeof window !== "undefined" && "Notification" in window);
+	const [notificationBusy, setNotificationBusy] = createSignal(false);
+	const [notificationError, setNotificationError] = createSignal<string | null>(
+		null,
+	);
+	let disposed = false;
+	let permissionTimer: ReturnType<typeof setTimeout> | undefined;
+	onCleanup(() => {
+		disposed = true;
+		clearTimeout(permissionTimer);
+	});
 
 	const handleDesktopNotifToggle = (checked: boolean): void => {
-		if (!notificationsSupported) {
-			if (!checked) updateSetting("desktopNotifications", false);
-			return;
-		}
-		if (checked && Notification.permission === "denied") {
+		if (notificationBusy()) return;
+		setNotificationError(null);
+		if (!checked) {
 			updateSetting("desktopNotifications", false);
 			return;
 		}
-		if (checked && Notification.permission === "default") {
-			Notification.requestPermission()
-				.then((result) => {
-					updateSetting("desktopNotifications", result === "granted");
-				})
-				.catch(() => {
-					updateSetting("desktopNotifications", false);
-				});
-		} else {
-			updateSetting("desktopNotifications", checked);
-		}
+		if (!notificationsSupported) return;
+		setNotificationBusy(true);
+		void (async () => {
+			try {
+				const request = isNativeShell()
+					? requestNativeNotificationPermission()
+					: Notification.permission === "granted"
+						? Promise.resolve(true)
+						: Notification.requestPermission().then(
+								(result) => result === "granted",
+							);
+				const granted = await Promise.race([
+					request,
+					new Promise<never>((_, reject) => {
+						permissionTimer = setTimeout(
+							() =>
+								reject(
+									new Error(
+										"Notification permission did not respond. Try again.",
+									),
+								),
+							30_000,
+						);
+					}),
+				]);
+				if (disposed) return;
+				if (!granted)
+					throw new Error(
+						isNativeShell()
+							? "Notifications are blocked. Check your system notification settings."
+							: "Notification permission was not granted. Check your browser settings.",
+					);
+				updateSetting("desktopNotifications", true);
+			} catch (error) {
+				if (!disposed)
+					setNotificationError(
+						userFacingErrorMessage(
+							error,
+							"Couldn't enable notifications. Try again.",
+						),
+					);
+			} finally {
+				clearTimeout(permissionTimer);
+				if (!disposed) setNotificationBusy(false);
+			}
+		})();
 	};
 
 	const permissionDenied =
-		notificationsSupported && Notification.permission === "denied";
+		!isNativeShell() &&
+		notificationsSupported &&
+		Notification.permission === "denied";
 
 	// Background Web Push (notifications while the app is closed).
 	const pushSupported = isPushSupported();
@@ -89,6 +138,9 @@ const NotificationsTab: Component = () => {
 	};
 
 	const backgroundPushDescription = (): string => {
+		if (isNativeShell()) {
+			return "Background notifications are unavailable in the desktop app. Use the web app to receive notifications while Crust is closed.";
+		}
 		if (!pushSupported) {
 			return "Background notifications are not supported in this browser";
 		}
@@ -184,14 +236,23 @@ const NotificationsTab: Component = () => {
 					label="Enable desktop notifications"
 					description={
 						permissionDenied
-							? "Permission denied — enable notifications in your browser settings"
+							? "Permission denied - enable notifications in your browser settings"
 							: notificationsSupported
 								? "Show system notifications when the app is in the background"
 								: "Desktop notifications are not supported in this browser"
 					}
 					checked={userSettings().desktopNotifications}
 					onChange={handleDesktopNotifToggle}
+					disabled={
+						notificationBusy() ||
+						(!notificationsSupported && !userSettings().desktopNotifications)
+					}
 				/>
+				<Show when={notificationError()}>
+					<p class="mt-1 text-xs text-danger-text" role="alert">
+						{notificationError()}
+					</p>
+				</Show>
 			</section>
 
 			{/* Background (Web Push) */}
@@ -200,9 +261,10 @@ const NotificationsTab: Component = () => {
 				<ToggleRow
 					label="Enable background notifications"
 					description={backgroundPushDescription()}
-					checked={userSettings().backgroundNotifications}
+					checked={!isNativeShell() && userSettings().backgroundNotifications}
 					onChange={handleBackgroundPushToggle}
 					disabled={
+						isNativeShell() ||
 						pushBusy() ||
 						(!pushAvailable && !userSettings().backgroundNotifications)
 					}

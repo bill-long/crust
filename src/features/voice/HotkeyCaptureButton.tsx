@@ -6,6 +6,9 @@ import {
 	onCleanup,
 	Show,
 } from "solid-js";
+import { isNativeShell } from "../../app/nativeShell";
+import { invokeTauri } from "../../app/tauri";
+import { userFacingErrorMessage } from "../../lib/errorMessage";
 import {
 	type MicHotkey,
 	updateSetting,
@@ -58,6 +61,14 @@ function formatCode(code: string): string {
 
 export const HotkeyCaptureButton: Component = () => {
 	const [capturing, setCapturing] = createSignal(false);
+	const [validating, setValidating] = createSignal(false);
+	const [error, setError] = createSignal<string | null>(null);
+	let validationAttempt = 0;
+	let validationTimer: ReturnType<typeof setTimeout> | undefined;
+	onCleanup(() => {
+		validationAttempt++;
+		clearTimeout(validationTimer);
+	});
 	// Pending capture outcome. `value` is the new combo to commit; `null` for
 	// `value` means "user cancelled (Esc / blur)" — the existing binding is
 	// preserved. Use the Clear Binding button to remove a binding entirely.
@@ -149,25 +160,72 @@ export const HotkeyCaptureButton: Component = () => {
 	createEffect(() => {
 		const pending = pendingCommit();
 		if (!pending) return;
-		if (pending.value !== null) updateSetting("micHotkey", pending.value);
 		setPendingCommit(null);
+		if (pending.value === null) return;
+		const combo = pending.value;
+		if (!isNativeShell()) {
+			updateSetting("micHotkey", combo);
+			return;
+		}
+		const attempt = ++validationAttempt;
+		setValidating(true);
+		void (async () => {
+			try {
+				const supported = await Promise.race([
+					invokeTauri<boolean>("mic_hotkey_supported", { hotkey: combo }),
+					new Promise<never>((_, reject) => {
+						validationTimer = setTimeout(
+							() =>
+								reject(new Error("Couldn't check this shortcut. Try again.")),
+							5_000,
+						);
+					}),
+				]);
+				if (attempt !== validationAttempt) return;
+				if (supported === true) updateSetting("micHotkey", combo);
+				else
+					setError(
+						supported === false
+							? "This key is not supported by the desktop app. Choose another key."
+							: "Couldn't check this shortcut. Try again.",
+					);
+			} catch (error) {
+				if (attempt === validationAttempt)
+					setError(
+						userFacingErrorMessage(
+							error,
+							"Couldn't check this shortcut. Try again.",
+						),
+					);
+			} finally {
+				if (attempt === validationAttempt) {
+					clearTimeout(validationTimer);
+					setValidating(false);
+				}
+			}
+		})();
 	});
 
 	const startCapture = (): void => {
-		if (capturing()) return;
+		if (capturing() || validating()) return;
+		setError(null);
 		setCapturing(true);
 	};
 
 	const clearBinding = (): void => {
+		validationAttempt++;
+		clearTimeout(validationTimer);
+		setValidating(false);
+		setError(null);
 		updateSetting("micHotkey", null);
 	};
 
 	return (
-		<div class="flex items-center gap-1">
+		<div class="flex flex-wrap items-center gap-1">
 			<button
 				type="button"
 				onClick={startCapture}
-				disabled={capturing()}
+				disabled={capturing() || validating()}
 				class="flex-1 rounded bg-surface-2 px-2 py-1 text-left text-xs text-text-primary transition-colors hover:bg-surface-1 disabled:cursor-default focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover any-pointer-coarse:min-h-11 any-pointer-coarse:py-3 any-pointer-coarse:text-sm"
 				aria-label={
 					capturing()
@@ -192,6 +250,11 @@ export const HotkeyCaptureButton: Component = () => {
 				>
 					×
 				</button>
+			</Show>
+			<Show when={error()}>
+				<p class="w-full text-xs text-danger-text" role="alert">
+					{error()}
+				</p>
 			</Show>
 		</div>
 	);

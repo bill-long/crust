@@ -1,5 +1,4 @@
 import { createSignal } from "solid-js";
-import { endActiveCall } from "../features/room/call/rtc/endCall";
 import { reportError } from "../lib/reportError";
 import { isNativeShell, isOverlayWindow } from "./nativeShell";
 import {
@@ -175,33 +174,11 @@ export async function restartForUpdate(): Promise<void> {
 		clearTimeout(watchdog);
 		return;
 	}
-	// Quitting kills the process outright, so an active call has to be torn down
-	// FIRST or its MatrixRTC withdrawal never lands - the same rule logout
-	// follows (#474). Otherwise the other participants keep seeing this user in
-	// the call until the membership expires, and the installer relaunches them
-	// into a room they still appear to be in.
-	//
-	// This covers the Restart button only. Closing the window mid-call has the
-	// same weakness and predates this feature (the shell exits without waiting
-	// for the webview), so it belongs in the shell's exit path rather than here;
-	// tracked separately.
-	//
-	// Wrapped, like every other caller: `endCall` swallows its own failures and
-	// timeouts, but it writes `activeCallRoomId` outside them and a Solid setter
-	// runs its subscribers synchronously, so a throwing subscriber surfaces here
-	// (#551). Unguarded it would abort the restart before `restart_for_update`,
-	// leaving the watchdog armed and the button stuck restarting while nothing
-	// restarts.
-	try {
-		await endActiveCall();
-	} catch (e) {
-		reportError(e, {
-			logLabel: "Failed to end the call before restarting for an update",
-		});
-	}
+	// All quit routes share the shell coordinator. Its prepare event asks
+	// nativeShutdown to await the call withdrawal before acknowledging exit.
 	// Nothing clears the flag on the success path: `restart_for_update` is
-	// `app.exit(0)`, which only REQUESTS the exit, so the promise resolves while
-	// the app is still tearing down. Clearing it there re-enabled the button
+	// a coordinated exit request, so the promise resolves while the app is still
+	// tearing down. Clearing it there re-enabled the button
 	// mid-quit and let a second click start another teardown.
 	//
 	// The watchdog armed above bounds it, at far longer than any real quit takes

@@ -2,24 +2,15 @@ import type { Accessor } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 
 /**
- * Cross-window state bridge for the desktop call overlay (the "two-window"
- * model). The main app window owns the MatrixClient and the live call, but the
- * floating always-on-top overlay lives in a *separate* native window that has no
- * client of its own. Because both windows are served from the same origin, a
- * `BroadcastChannel` lets the main window publish a small, serialisable snapshot
- * of the call and lets the overlay mirror it — and lets the overlay send a
- * "leave" command back without ever touching the SDK directly.
- *
- * This is deliberately framework-light: a producer (main window) and a consumer
- * (overlay window) talking over one channel. It is also useful in a plain
- * browser for testing — open `/overlay` in a second tab while in a call.
- *
- * Note: `BroadcastChannel` never delivers a message to the same context that
- * posted it, so the producer's snapshots never echo back to itself, and the
- * consumer's "request"/"leave" messages are only seen by the producer.
+ * Read-only cross-window display state. BroadcastChannel peers are untrusted:
+ * call control travels through native IPC, whose caller window Tauri verifies.
+ * The producer heartbeat expires stale state after a main-window crash.
  */
 
 const CHANNEL_NAME = "crust:call-overlay";
+const HEARTBEAT_MS = 5_000;
+// Tolerate the one-minute timer throttling of a background browser preview.
+export const OVERLAY_LEASE_MS = 90_000;
 
 /** One participant as mirrored to the overlay window. */
 export interface CallOverlayParticipant {
@@ -91,7 +82,7 @@ export const INACTIVE_SNAPSHOT: CallOverlaySnapshot = {
 type BridgeMessage =
 	| { kind: "snapshot"; producerId: string; snapshot: CallOverlaySnapshot }
 	| { kind: "request" }
-	| { kind: "command"; command: "leave"; producerId: string };
+	| { kind: "heartbeat"; producerId: string };
 
 /** Random id identifying one producer (one main-app window/tab) on the shared
  *  channel, so a consumer can bind to a single producer and ignore others. */
@@ -196,17 +187,12 @@ function asBridgeMessage(data: unknown): BridgeMessage | null {
 	if (typeof data !== "object" || data === null) return null;
 	const msg = data as {
 		kind?: unknown;
-		command?: unknown;
 		producerId?: unknown;
 		snapshot?: unknown;
 	};
 	if (msg.kind === "request") return { kind: "request" };
-	if (
-		msg.kind === "command" &&
-		msg.command === "leave" &&
-		typeof msg.producerId === "string"
-	) {
-		return { kind: "command", command: "leave", producerId: msg.producerId };
+	if (msg.kind === "heartbeat" && typeof msg.producerId === "string") {
+		return { kind: "heartbeat", producerId: msg.producerId };
 	}
 	if (
 		msg.kind === "snapshot" &&
@@ -225,8 +211,6 @@ function asBridgeMessage(data: unknown): BridgeMessage | null {
 export interface CallOverlayProducerHandlers {
 	/** Build the current snapshot on demand (used to answer a late "request"). */
 	getSnapshot: () => CallOverlaySnapshot;
-	/** Invoked when an overlay window asks to leave the call. */
-	onLeave: () => void;
 }
 
 export interface CallOverlayProducer {
@@ -239,8 +223,7 @@ export interface CallOverlayProducer {
 /**
  * Create the producer side (main app window). Answers "request" handshakes with
  * the latest snapshot so a newly-opened overlay populates immediately, and
- * honours a "leave" command only when it is addressed to THIS producer's id —
- * so hanging up from an overlay can never end a different tab's call.
+ * sends heartbeats while active. It never accepts call-control commands.
  */
 export function createCallOverlayProducer(
 	handlers: CallOverlayProducerHandlers,
@@ -250,7 +233,18 @@ export function createCallOverlayProducer(
 		return { publish: () => {}, dispose: () => {} };
 	}
 	const producerId = newProducerId();
+	let active = false;
+	let disposed = false;
+	const heartbeat = setInterval(() => {
+		if (active)
+			channel.postMessage({
+				kind: "heartbeat",
+				producerId,
+			} satisfies BridgeMessage);
+	}, HEARTBEAT_MS);
 	const post = (snapshot: CallOverlaySnapshot): void => {
+		if (disposed) return;
+		active = snapshot.active;
 		channel.postMessage({
 			kind: "snapshot",
 			producerId,
@@ -267,13 +261,13 @@ export function createCallOverlayProducer(
 			// races the calling tab's active one.
 			const snapshot = handlers.getSnapshot();
 			if (snapshot.active) post(snapshot);
-		} else if (msg.kind === "command" && msg.producerId === producerId) {
-			handlers.onLeave();
 		}
 	};
 	return {
 		publish: post,
 		dispose: () => {
+			disposed = true;
+			clearInterval(heartbeat);
 			channel.onmessage = null;
 			channel.close();
 		},
@@ -283,8 +277,6 @@ export function createCallOverlayProducer(
 export interface CallOverlayConsumer {
 	/** Reactive latest snapshot. Starts at `INACTIVE_SNAPSHOT`. */
 	snapshot: Accessor<CallOverlaySnapshot>;
-	/** Ask the main window to leave the call. */
-	sendLeave: () => void;
 	/** Tear down the channel. Idempotent. */
 	dispose: () => void;
 }
@@ -301,8 +293,7 @@ export interface CallOverlayConsumer {
  * dropping CSS transitions.
  *
  * The consumer binds to the first producer that reports an active call and then
- * ignores other producers, so a second main-app tab (idle or ending its own
- * call) can neither blank the overlay nor receive its "leave". When the bound
+ * ignores other producers, so a second main-app tab cannot blank it. When the bound
  * producer reports inactive, the consumer unbinds and re-requests state to
  * rediscover any other still-active producer.
  */
@@ -314,24 +305,40 @@ export function createCallOverlayConsumer(): CallOverlayConsumer {
 	});
 	const channel = openChannel();
 	if (!channel) {
-		return { snapshot: () => snapshot, sendLeave: () => {}, dispose: () => {} };
+		return { snapshot: () => snapshot, dispose: () => {} };
 	}
 	let boundProducerId: string | null = null;
+	let lease: ReturnType<typeof setTimeout> | undefined;
+	const renewLease = (): void => {
+		clearTimeout(lease);
+		lease = setTimeout(() => {
+			boundProducerId = null;
+			setSnapshot(reconcile(INACTIVE_SNAPSHOT));
+			requestState();
+		}, OVERLAY_LEASE_MS);
+	};
 	const requestState = (): void => {
 		channel.postMessage({ kind: "request" } satisfies BridgeMessage);
 	};
 	channel.onmessage = (ev: MessageEvent): void => {
 		const msg = asBridgeMessage(ev.data);
+		if (msg?.kind === "heartbeat") {
+			if (msg.producerId === boundProducerId) renewLease();
+			else if (boundProducerId === null) requestState();
+			return;
+		}
 		if (msg?.kind !== "snapshot") return;
 		if (msg.snapshot.active) {
 			// Bind to the first active producer; ignore any others.
 			if (boundProducerId === null) boundProducerId = msg.producerId;
 			if (msg.producerId !== boundProducerId) return;
+			renewLease();
 			setSnapshot(reconcile(msg.snapshot, { key: "identity" }));
 		} else {
 			// Only the producer we're bound to may clear us.
 			if (msg.producerId !== boundProducerId) return;
 			boundProducerId = null;
+			clearTimeout(lease);
 			setSnapshot(reconcile(msg.snapshot, { key: "identity" }));
 			requestState();
 		}
@@ -339,15 +346,8 @@ export function createCallOverlayConsumer(): CallOverlayConsumer {
 	requestState();
 	return {
 		snapshot: () => snapshot,
-		sendLeave: () => {
-			if (boundProducerId === null) return;
-			channel.postMessage({
-				kind: "command",
-				command: "leave",
-				producerId: boundProducerId,
-			} satisfies BridgeMessage);
-		},
 		dispose: () => {
+			clearTimeout(lease);
 			channel.onmessage = null;
 			channel.close();
 		},

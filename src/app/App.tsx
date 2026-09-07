@@ -6,6 +6,7 @@ import {
 	createSignal,
 	lazy,
 	Match,
+	onCleanup,
 	onMount,
 	Show,
 	Suspense,
@@ -24,6 +25,7 @@ import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
 import { accountTransitionInFlight, Layout } from "./Layout";
 import { finishSessionExit, runLogout } from "./logout";
+import { watchNativeShutdown } from "./nativeShutdown";
 import { UpdatePrompt } from "./UpdatePrompt";
 import { useDecodedParams } from "./useDecodedParams";
 
@@ -386,6 +388,21 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 const HomePage: Component = () => <Layout />;
 
 const App: Component = () => {
+	onMount(() => {
+		let disposed = false;
+		let unlisten: (() => void) | undefined;
+		void watchNativeShutdown().then(
+			(stop) => {
+				if (disposed) stop();
+				else unlisten = stop;
+			},
+			(error) => reportError(error, { logLabel: "Watching desktop shutdown" }),
+		);
+		onCleanup(() => {
+			disposed = true;
+			unlisten?.();
+		});
+	});
 	// `BASE_URL` is set by Vite from the `base` config option (default `/`,
 	// overridable via `VITE_BASE_PATH` at build time). The router wants the
 	// base without a trailing slash; "/" becomes "" which the router treats

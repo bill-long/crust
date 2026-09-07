@@ -192,7 +192,9 @@ already held. A failed check (offline, DNS not up yet) retries from one minute,
 quadrupling up to the six-hour cadence.
 
 The update is then held until the app exits, so a session is never interrupted:
-`src/app/UpdatePrompt.tsx` offers Restart, and quitting by any route applies it. The whole mechanism lives in Rust (`stage_update` /
+`src/app/UpdatePrompt.tsx` offers Restart. Closing the main window, using the
+quit shortcut, or choosing Restart first awaits call withdrawal, then applies
+the staged update. The whole mechanism lives in Rust (`stage_update` /
 `install_staged_update` in `src-tauri/src/lib.rs`) so the web bundle stays free
 of Tauri imports; the app only listens for `crust://update-ready`.
 
@@ -204,11 +206,25 @@ that installs unattended includes `/R` (`passive` is `["/P", "/R"]`, `quiet` is
 choice is a brief progress window followed by a relaunch, or an installer the
 user has to click through; this app takes the former.
 
-One consequence of applying on *every* exit: a Windows logoff or shutdown also
-fires the exit hook, so the installer is spawned into a session that is tearing
-down and may be killed mid-write. The update itself is recoverable - the next
-launch re-checks and re-downloads - but a half-written install directory is
-not. Diagnostics for that path land in `updater.log` (see `log_update`).
+Shutdown is coordinated by `src-tauri/src/shutdown.rs` and
+`src/app/nativeShutdown.ts`. The main window remains alive during the existing
+bounded call teardown. Repeated quit requests share one attempt; a 15-second
+native fallback exits even if the renderer never responds. Call withdrawal may
+remain incomplete on that fallback, just as on a process crash.
+
+Only the explicit, completed quit request can hand off an installer. The
+unconditional exit event does not install anything: Windows logoff/shutdown
+and unexpected window destruction must not start an installer during session
+teardown. A downloaded update is checked and downloaded again on next launch
+if the process exits without applying it.
+
+The floating overlay closes with the process. Its read-only BroadcastChannel
+bridge also uses a heartbeat lease to clear stale display state after a producer
+disappears; the 90-second lease tolerates background browser timer throttling.
+Hang-up uses a native IPC command that validates Tauri's caller window as
+`overlay` and targets only `main`. Producer IDs are display routing metadata,
+not authority to end a call. Browser `/overlay` previews are read-only. This
+uses native window identity instead of distributing a reusable capability token.
 
 Immediately before handing the verified installer to Windows, the shell writes
 `pending-update-install.json` in its app-data directory with the running and
@@ -273,6 +289,58 @@ Notes:
   web release - or one made by hand - would become "latest", and the asset
   fetch would 404, silently freezing updates for every installed client. Mark
   any non-desktop release as a prerelease, or move the feed to a dedicated tag.
+
+## Desktop quality validation (#263)
+
+The hotkey picker asks the native `mic_hotkey_supported` command before saving.
+That command uses the keyboard hook's existing mapper, so unsupported codes
+cannot silently replace a working binding. Browser-only bindings retain browser
+support. Failed validation preserves the old binding and shows an inline error.
+
+Desktop notifications use `tauri-plugin-notification` through explicit IPC in
+`src/app/nativeNotifications.ts`; only the main window has notification access.
+The permission toggle reports failures inline and bounds unresponsive requests.
+Incoming messages keep the existing focus, push-rule, and event-deduplication
+gates. The browser/PWA retains its Notification API and click-to-room behavior.
+
+The plugin's desktop implementation does not expose notification click/close
+callbacks or room-tag replacement. Native notifications therefore do not yet
+deep-link to rooms, and stay under OS notification-center control. A successful
+IPC response confirms dispatch to the plugin, not visible delivery: the plugin
+spawns OS delivery without returning its final result, and system notification
+settings can suppress presentation. Its Windows permission result is always
+granted; the in-app preference controls whether Crust requests notifications.
+Background Web Push is disabled in the native shell, including registration and
+account-switch synchronization, because WebView2 does not support it. Use the
+browser/PWA for notifications after Crust exits.
+
+Validation on Windows on 2026-09-07:
+
+- Reproduced the orphaned overlay by closing the installed app during a call.
+  With the fix, closing the main window sent an empty MatrixRTC membership
+  state event (HTTP 200) before the process disconnected, and both windows closed.
+- Browser regressions cover unsupported hotkeys, clearing during validation,
+  browser-only bindings, and visible overlay hang-up IPC failures. Lease tests
+  cover quiet calls, producer loss, replacement, and timer disposal.
+- WebView2 152 exposes `Notification`, `PushManager`, and an activated service
+  worker on the secure native origin. Notification permission was `default`.
+  The user reproduced a no-op desktop notification toggle, while both web-app
+  notification settings enabled without errors (delivery still untested).
+  [Microsoft's permission documentation](https://learn.microsoft.com/en-us/microsoft-edge/webview2/reference/winrt/microsoft_web_webview2_core/corewebview2permissionkind)
+  specifies that hosts must handle notification permission requests themselves:
+  WebView2 shows no notification permission prompt, and Web Push is unavailable.
+  The fix routes notifications through the native plugin and marks desktop
+  background push unsupported. Browser regressions verify enabling without
+  WebView2 permission, error/retry feedback, and the disabled background toggle.
+  Unit tests verify native message dispatch and the shared Web Push gate.
+  A live smoke test of the rebuilt debug app returned `granted` from the native
+  permission command and accepted the notification IPC. The user confirmed the
+  test notification appeared. The test app was stopped and its temporary local
+  debugging port was verified closed afterward. Installed-release branding and
+  PWA push delivery remain untested; this debug smoke test proves native toast
+  delivery, not those separate acceptance cases.
+- The OS-session exit guard is covered by coordinator tests and the native
+  event path review; a live Windows logoff/shutdown was not performed.
 
 ## Rust checks
 
