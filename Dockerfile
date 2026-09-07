@@ -13,11 +13,12 @@ WORKDIR /app
 # Defaults to `/` (root-hosted).
 ARG VITE_BASE_PATH=/
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ ./patches/
 # --ignore-scripts: there is no install lifecycle script today (the root
 # `prepare` that installed git hooks is gone), but the flag stays as a guard:
-# any future `prepare` would run at this layer, where only package.json and
-# pnpm-lock.yaml have been copied, and would break the publish with "Cannot
+# any future `prepare` would run at this layer, before application sources
+# have been copied, and would break the publish with "Cannot
 # find module". pnpm 10 already blocks
 # dependency build scripts by default (no onlyBuiltDependencies is configured),
 # so this skips nothing the Vite build needs.
