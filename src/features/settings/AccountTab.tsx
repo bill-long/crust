@@ -327,7 +327,7 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 
 	const onFileSelect = (): void => {
 		const file = fileInputRef.files?.[0];
-		if (file) handleAvatarFile(file);
+		if (file) void handleAvatarFile(file);
 		// Reset so re-selecting the same file triggers onChange
 		fileInputRef.value = "";
 	};
