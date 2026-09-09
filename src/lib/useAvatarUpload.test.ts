@@ -50,6 +50,7 @@ describe("useAvatarUpload", () => {
 		"invalidates an outstanding upload on %s",
 		async (action) => {
 			const f = fixture();
+			let disposed = false;
 			try {
 				const old = deferred<{ content_uri: string }>();
 				f.uploadContent.mockReturnValueOnce(old.promise);
@@ -66,14 +67,17 @@ describe("useAvatarUpload", () => {
 					);
 				if (action === "remove") f.upload.remove();
 				if (action === "scope") f.setScope("room-b");
-				if (action === "dispose") f.dispose();
+				if (action === "dispose") {
+					f.dispose();
+					disposed = true;
+				}
 				old.resolve({ content_uri: "mxc://server/old" });
 				await pending;
 				expect(f.upload.mxc()).toBeNull();
 				expect(f.onUploaded).not.toHaveBeenCalled();
 				if (action !== "dispose") expect(f.upload.uploading()).toBe(false);
 			} finally {
-				f.dispose();
+				if (!disposed) f.dispose();
 			}
 		},
 	);

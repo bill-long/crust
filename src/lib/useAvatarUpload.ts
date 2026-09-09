@@ -51,8 +51,6 @@ export function useAvatarUpload(
 		const scope = options.scope?.();
 		const isCurrent = () =>
 			!disposed && gen === generation && scope === options.scope?.();
-		if (file !== lastFile) uploadedMxc = null;
-		lastFile = file;
 		setError(null);
 		if (!file.type.startsWith("image/") || file.size > MAX_AVATAR_BYTES) {
 			setError(
@@ -63,6 +61,10 @@ export function useAvatarUpload(
 			setUploading(false);
 			return;
 		}
+		// A rejected replacement cancels stale work, but Retry still belongs
+		// to the last valid selection and can reuse its completed upload.
+		if (file !== lastFile) uploadedMxc = null;
+		lastFile = file;
 		setUploading(true);
 		try {
 			const url = uploadedMxc ?? (await client.uploadContent(file)).content_uri;
