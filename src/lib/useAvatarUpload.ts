@@ -66,15 +66,16 @@ export function useAvatarUpload(
 		if (file !== lastFile) uploadedMxc = null;
 		lastFile = file;
 		setUploading(true);
+		let failureMessage = "Failed to upload avatar";
 		try {
 			const url = uploadedMxc ?? (await client.uploadContent(file)).content_uri;
 			if (!isCurrent()) return;
 			uploadedMxc = url;
 			setMxc(url);
+			failureMessage = "Failed to save avatar";
 			await options.onUploaded?.(url, isCurrent);
 		} catch (e) {
-			if (isCurrent())
-				setError(userFacingErrorMessage(e, "Failed to upload avatar"));
+			if (isCurrent()) setError(userFacingErrorMessage(e, failureMessage));
 		} finally {
 			if (isCurrent()) setUploading(false);
 		}

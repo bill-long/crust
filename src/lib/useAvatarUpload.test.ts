@@ -82,20 +82,26 @@ describe("useAvatarUpload", () => {
 		},
 	);
 
-	it("reuses an uploaded file when retrying a failed profile save", async () => {
-		const f = fixture();
-		try {
-			f.onUploaded.mockRejectedValueOnce(new TypeError("Failed to fetch"));
-			await f.upload.pickFile(file());
-			expect(f.upload.error()).toBe("Failed to upload avatar");
-			await f.upload.retry();
-			expect(f.uploadContent).toHaveBeenCalledTimes(1);
-			expect(f.onUploaded).toHaveBeenCalledTimes(2);
-			expect(f.upload.error()).toBeNull();
-		} finally {
-			f.dispose();
-		}
-	});
+	it.each(["upload", "save"] as const)(
+		"retries a failed %s with the correct message and upload cache",
+		async (stage) => {
+			const f = fixture();
+			try {
+				const failingStep = stage === "upload" ? f.uploadContent : f.onUploaded;
+				failingStep.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+				await f.upload.pickFile(file());
+				expect(f.upload.error()).toBe(`Failed to ${stage} avatar`);
+				await f.upload.retry();
+				expect(f.uploadContent).toHaveBeenCalledTimes(
+					stage === "upload" ? 2 : 1,
+				);
+				expect(f.onUploaded).toHaveBeenCalledTimes(stage === "upload" ? 1 : 2);
+				expect(f.upload.error()).toBeNull();
+			} finally {
+				f.dispose();
+			}
+		},
+	);
 
 	it("lets callers update optimistically while an earlier save is pending", async () => {
 		const f = fixture();
