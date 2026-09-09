@@ -9,6 +9,7 @@ import {
 import { avatarHttpUrl } from "../../lib/avatar";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
 import { parseInvites } from "../../lib/inviteParsing";
+import { useAvatarUpload } from "../../lib/useAvatarUpload";
 import type {
 	CreateEntityFormProps,
 	CreateEntitySubmission,
@@ -16,7 +17,6 @@ import type {
 
 /** Local-part of a Matrix room alias. Server adds ":server" + leading "#". */
 const ALIAS_LOCAL_PART_RE = /^[A-Za-z0-9._=/+-]+$/;
-const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
 
 export function useCreateEntityForm(props: CreateEntityFormProps) {
 	let mounted = true;
@@ -27,13 +27,6 @@ export function useCreateEntityForm(props: CreateEntityFormProps) {
 	 * flight submit to commit side effects.
 	 */
 	let submitGeneration = 0;
-	/**
-	 * Separate counter for avatar uploads. Bumped on every file selection
-	 * AND on every form reset, so a stale upload that resolves after the
-	 * user picks a different file or reopens the dialog cannot overwrite
-	 * the current avatar mxc.
-	 */
-	let uploadGeneration = 0;
 	onCleanup(() => {
 		mounted = false;
 	});
@@ -47,9 +40,10 @@ export function useCreateEntityForm(props: CreateEntityFormProps) {
 	const [encryptionTouched, setEncryptionTouched] = createSignal(false);
 	const [addToSpace, setAddToSpace] = createSignal(true);
 	const [inviteRaw, setInviteRaw] = createSignal("");
-	const [avatarMxc, setAvatarMxc] = createSignal<string | null>(null);
-	const [avatarUploading, setAvatarUploading] = createSignal(false);
-	const [avatarError, setAvatarError] = createSignal<string | null>(null);
+	const avatarUpload = useAvatarUpload(props.client, { scope: props.open });
+	const avatarMxc = avatarUpload.mxc;
+	const avatarUploading = avatarUpload.uploading;
+	const avatarError = avatarUpload.error;
 	const [submitting, setSubmitting] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
 	/** spaceId captured at dialog-open time so route changes don't poison submit. */
@@ -93,7 +87,6 @@ export function useCreateEntityForm(props: CreateEntityFormProps) {
 
 	function resetForm(): void {
 		submitGeneration++;
-		uploadGeneration++;
 		setName("");
 		setTopic("");
 		setAlias("");
@@ -102,9 +95,7 @@ export function useCreateEntityForm(props: CreateEntityFormProps) {
 		setEncryptionTouched(false);
 		setAddToSpace(true);
 		setInviteRaw("");
-		setAvatarMxc(null);
-		setAvatarUploading(false);
-		setAvatarError(null);
+		avatarUpload.remove();
 		setError(null);
 		setSubmitting(false);
 	}
@@ -123,45 +114,8 @@ export function useCreateEntityForm(props: CreateEntityFormProps) {
 		props.onClose();
 	};
 
-	async function uploadAvatar(file: File): Promise<void> {
-		// Bump generation BEFORE validation so a previous in-flight upload's
-		// resolution is dropped even when the new selection is rejected
-		// (non-image / too large). Otherwise the stale upload would still
-		// repopulate avatarMxc after the user's latest pick was discarded.
-		const myGen = ++uploadGeneration;
-		if (!file.type.startsWith("image/")) {
-			setAvatarError("File must be an image");
-			setAvatarUploading(false);
-			return;
-		}
-		if (file.size > MAX_AVATAR_BYTES) {
-			setAvatarError("Image must be under 10 MB");
-			setAvatarUploading(false);
-			return;
-		}
-		setAvatarError(null);
-		setAvatarUploading(true);
-		try {
-			const response = await props.client.uploadContent(file);
-			if (!mounted || !props.open() || myGen !== uploadGeneration) return;
-			setAvatarMxc(response.content_uri);
-		} catch (e) {
-			if (!mounted || !props.open() || myGen !== uploadGeneration) return;
-			setAvatarError(userFacingErrorMessage(e, "Failed to upload avatar"));
-		} finally {
-			if (mounted && props.open() && myGen === uploadGeneration) {
-				setAvatarUploading(false);
-			}
-		}
-	}
-
-	const removeAvatar = (): void => {
-		// Bump upload generation so any in-flight upload's result is dropped.
-		uploadGeneration++;
-		setAvatarMxc(null);
-		setAvatarError(null);
-		setAvatarUploading(false);
-	};
+	const uploadAvatar = avatarUpload.pickFile;
+	const removeAvatar = avatarUpload.remove;
 
 	async function handleSubmit(e: Event): Promise<void> {
 		e.preventDefault();

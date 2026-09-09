@@ -1,9 +1,7 @@
-import { type Component, createMemo, For, Show } from "solid-js";
+import { type Component, createMemo, For } from "solid-js";
+import { Avatar } from "../../../components/Avatar";
 import { avatarInitial } from "../../../lib/avatar";
-import {
-	createImageFallback,
-	type FailedImageUrls,
-} from "../../../lib/imageFallback";
+import type { FailedImageUrls } from "../../../lib/imageFallback";
 import { userSettings } from "../../../stores/settings";
 import { formatFullDateTime, formatTime } from "./dateFormatting";
 import { summarizeMembershipGroup } from "./membershipGrouping";
@@ -88,33 +86,15 @@ const GroupedMembershipNotice: Component<GroupedMembershipNoticeProps> = (
 			>
 				<span class="flex shrink-0 -space-x-1.5" aria-hidden="true">
 					<For each={stack()}>
-						{(m) => {
-							const avatar = createImageFallback(
-								() => m.avatarUrl,
-								props.brokenAvatars,
-							);
-							return (
-								<Show
-									when={!avatar.failed() && m.avatarUrl}
-									fallback={
-										<span class="flex h-4 w-4 items-center justify-center rounded-full bg-surface-3 text-[8px] font-semibold text-text-secondary ring-2 ring-surface-0">
-											{avatarInitial(m.name)}
-										</span>
-									}
-								>
-									{(url) => (
-										<img
-											ref={avatar.ref}
-											src={url()}
-											alt=""
-											class="h-4 w-4 rounded-full object-cover ring-2 ring-surface-0"
-											onError={avatar.onError}
-											onLoad={avatar.onLoad}
-										/>
-									)}
-								</Show>
-							);
-						}}
+						{(m) => (
+							<Avatar
+								url={m.avatarUrl}
+								initial={avatarInitial(m.name)}
+								size="xs"
+								class="ring-2 ring-surface-0"
+								broken={props.brokenAvatars}
+							/>
+						)}
 					</For>
 				</span>
 				<span class="min-w-0 truncate">{summary()}</span>

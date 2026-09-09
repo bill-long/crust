@@ -7,11 +7,11 @@ import {
 	onMount,
 	Show,
 } from "solid-js";
+import { Avatar } from "../../../../components/Avatar";
 import { avatarInitial } from "../../../../lib/avatar";
 import { FOCUSABLE_SELECTOR } from "../../../../lib/focusTrap";
 import {
 	createFailedImageUrls,
-	createImageFallback,
 	type FailedImageUrls,
 } from "../../../../lib/imageFallback";
 import { cryptoDialogOpen } from "../../../../stores/cryptoActions";
@@ -567,11 +567,6 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 		props.livekit.videoTracks().get(props.participant.identity),
 	);
 
-	const avatar = createImageFallback(
-		() => props.participant.avatarUrlLarge,
-		props.brokenAvatars,
-	);
-
 	createEffect(() => {
 		const e = entry();
 		const el = videoEl;
@@ -607,29 +602,13 @@ const ParticipantTile: Component<ParticipantTileProps> = (props) => {
 				muted
 			/>
 			<Show when={!entry()}>
-				<Show
-					when={!avatar.failed() && props.participant.avatarUrlLarge}
-					fallback={
-						<div
-							aria-hidden="true"
-							class="flex aspect-square w-[clamp(3rem,45cqmin,14rem)] items-center justify-center rounded-full bg-surface-3 font-semibold text-text-emphasis text-[clamp(1rem,18cqmin,4rem)]"
-						>
-							{avatarInitial(props.participant.displayName)}
-						</div>
-					}
-				>
-					{(url) => (
-						<img
-							ref={avatar.ref}
-							src={url()}
-							alt=""
-							aria-hidden="true"
-							class="aspect-square w-[clamp(3rem,45cqmin,14rem)] rounded-full object-cover"
-							onError={avatar.onError}
-							onLoad={avatar.onLoad}
-						/>
-					)}
-				</Show>
+				<Avatar
+					url={props.participant.avatarUrlLarge}
+					initial={avatarInitial(props.participant.displayName)}
+					size="tile"
+					appearanceClass="rounded-full bg-surface-3 text-text-emphasis"
+					broken={props.brokenAvatars}
+				/>
 			</Show>
 			<Show when={entry()}>
 				{(e) => (

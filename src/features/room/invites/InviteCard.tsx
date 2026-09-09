@@ -1,6 +1,6 @@
 import { type Component, Show } from "solid-js";
+import { Avatar } from "../../../components/Avatar";
 import { avatarInitial } from "../../../lib/avatar";
-import { createImageFallback } from "../../../lib/imageFallback";
 import type { InvitePending } from "./useInviteActions";
 
 interface InviteCardProps {
@@ -24,32 +24,16 @@ interface InviteCardProps {
  * (`InvitePane`) and the space-invite panel in `RoomList`.
  */
 const InviteCard: Component<InviteCardProps> = (props) => {
-	const avatar = createImageFallback(() => props.avatarUrl);
-
 	const what = (): string =>
 		props.isSpace ? "space" : props.isDirect ? "direct message" : "room";
 
 	return (
 		<div class="flex w-full max-w-sm flex-col items-center gap-4 rounded-lg border border-border-subtle bg-surface-1 p-6 text-center">
-			<Show
-				when={!avatar.failed() && props.avatarUrl}
-				fallback={
-					<div class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-surface-3 text-xl font-semibold text-text-secondary">
-						{avatarInitial(props.name)}
-					</div>
-				}
-			>
-				{(url) => (
-					<img
-						ref={avatar.ref}
-						src={url()}
-						alt=""
-						class="h-16 w-16 shrink-0 rounded-full object-cover"
-						onError={avatar.onError}
-						onLoad={avatar.onLoad}
-					/>
-				)}
-			</Show>
+			<Avatar
+				url={props.avatarUrl}
+				initial={avatarInitial(props.name)}
+				size="xl"
+			/>
 
 			<div class="flex min-w-0 flex-col gap-1">
 				<span class="truncate text-lg font-semibold text-text-emphasis">

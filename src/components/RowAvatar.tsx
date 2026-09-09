@@ -1,8 +1,6 @@
-import { type Component, Show } from "solid-js";
-import {
-	createImageFallback,
-	type FailedImageUrls,
-} from "../lib/imageFallback";
+import type { Component } from "solid-js";
+import type { FailedImageUrls } from "../lib/imageFallback";
+import { Avatar } from "./Avatar";
 
 interface RowAvatarProps {
 	url: string | null;
@@ -23,31 +21,13 @@ interface RowAvatarProps {
  * Fail-closed - a URL that 404s or fails to decode falls back to the initial
  * instead of the browser's broken-image icon (#457).
  */
-const RowAvatar: Component<RowAvatarProps> = (props) => {
-	const avatar = createImageFallback(() => props.url, props.broken);
-	const rounding = () =>
-		props.shape === "square" ? "rounded-md" : "rounded-full";
-	return (
-		<div
-			class={`flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden ${rounding()} bg-surface-2 text-xs font-semibold text-text-secondary`}
-		>
-			<Show
-				when={!avatar.failed() && props.url}
-				fallback={<span>{props.initial}</span>}
-			>
-				{(url) => (
-					<img
-						ref={avatar.ref}
-						src={url()}
-						alt=""
-						class="h-full w-full object-cover"
-						onError={avatar.onError}
-						onLoad={avatar.onLoad}
-					/>
-				)}
-			</Show>
-		</div>
-	);
-};
+const RowAvatar: Component<RowAvatarProps> = (props) => (
+	<Avatar
+		url={props.url}
+		initial={props.initial}
+		broken={props.broken}
+		appearanceClass={`${props.shape === "square" ? "rounded-md" : "rounded-full"} bg-surface-2 text-text-secondary`}
+	/>
+);
 
 export { RowAvatar };
