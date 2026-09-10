@@ -1,4 +1,4 @@
-import { type Component, Show } from "solid-js";
+import { type Component, type JSX, Show } from "solid-js";
 import {
 	createImageFallback,
 	type FailedImageUrls,
@@ -8,7 +8,7 @@ import { PresenceDot } from "./PresenceDot";
 
 interface AvatarProps {
 	url: string | null;
-	initial: string;
+	initial: JSX.Element;
 	alt?: string;
 	/**
 	 * Presence indicator to overlay (#445). Omit where presence has no
@@ -18,11 +18,12 @@ interface AvatarProps {
 	presence?: PresenceStatus;
 	/** Ring colour for the presence cut-out; see PresenceDot. */
 	presenceRingClass?: string;
-	/**
-	 * Box size: "md" is the 32px list/header avatar (default), "xl" the
-	 * 64px profile-card portrait. Both share the fail-closed behavior.
-	 */
-	size?: "md" | "xl";
+	/** Fixed box sizes, or a container-relative portrait for call tiles. */
+	size?: "xs" | "md" | "lg" | "xl" | "2xl" | "3xl" | "tile";
+	/** Replaces the default rounding and colors; geometry stays size-controlled. */
+	appearanceClass?: string;
+	/** Decorations shared by the image and fallback, such as stacked-avatar rings. */
+	class?: string;
 	/**
 	 * Image loading strategy. Omitted by default (eager), matching the browser
 	 * default for above-the-fold avatars like UserBar. Lists pass "lazy".
@@ -34,20 +35,27 @@ interface AvatarProps {
 	 * re-mint their entries), so a broken URL isn't re-attempted per remount.
 	 * Omit for a standalone avatar - it then keeps private state.
 	 */
-	broken?: FailedImageUrls;
+	broken?: FailedImageUrls | undefined;
 }
 
 const SIZE_CLASS = {
+	xs: "h-4 w-4 text-[8px]",
 	md: "h-8 w-8 text-xs",
+	lg: "h-10 w-10 text-sm",
 	xl: "h-16 w-16 text-xl",
+	"2xl": "h-20 w-20 text-2xl",
+	"3xl": "h-24 w-24 text-2xl",
+	tile: "aspect-square w-[clamp(3rem,45cqmin,14rem)] text-[clamp(1rem,18cqmin,4rem)]",
 } as const;
 
 /** Compact circular avatar with automatic image-error fallback. */
 const Avatar: Component<AvatarProps> = (props) => {
 	const avatar = createImageFallback(() => props.url, props.broken);
 	const sizeClass = () => SIZE_CLASS[props.size ?? "md"];
+	const sharedClass = () =>
+		`${sizeClass()} shrink-0 ${props.appearanceClass ?? "rounded-full bg-surface-3 text-text-secondary"} ${props.class ?? ""}`;
 	const fallbackClass = () =>
-		`flex ${sizeClass()} shrink-0 items-center justify-center rounded-full bg-surface-3 font-semibold text-text-secondary`;
+		`flex items-center justify-center font-semibold ${sharedClass()}`;
 
 	// A function, not a value: as a bare identifier the compiler emits the
 	// same nodes into both <Show> branches, so a call site that ever toggled
@@ -83,7 +91,7 @@ const Avatar: Component<AvatarProps> = (props) => {
 					alt={props.alt ?? ""}
 					// bg paints the circle while the image is still in flight, so
 					// a lazy avatar never leaves a transparent gap in the layout.
-					class={`${sizeClass()} shrink-0 rounded-full bg-surface-3 object-cover`}
+					class={`${sharedClass()} object-cover`}
 					loading={props.loading}
 					onError={avatar.onError}
 					onLoad={avatar.onLoad}
@@ -101,7 +109,14 @@ const Avatar: Component<AvatarProps> = (props) => {
 				{inner()}
 				<PresenceDot
 					status={props.presence ?? "unknown"}
-					size={props.size ?? "md"}
+					size={
+						props.size === "md" ||
+						props.size === "xs" ||
+						props.size === "lg" ||
+						!props.size
+							? "md"
+							: "xl"
+					}
 					ringClass={props.presenceRingClass}
 				/>
 			</span>

@@ -25,10 +25,11 @@ import {
 	fetchStatusMessage,
 	setStatusMessage,
 } from "../../client/presencePublish";
+import { Avatar } from "../../components/Avatar";
 import { avatarHttpUrl, avatarInitial } from "../../lib/avatar";
 import { displayNameOr } from "../../lib/displayName";
 import { userFacingErrorMessage } from "../../lib/errorMessage";
-import { createImageFallback } from "../../lib/imageFallback";
+import { useAvatarUpload } from "../../lib/useAvatarUpload";
 import { loadSession } from "../../stores/session";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { DeactivateAccountDialog } from "./DeactivateAccountDialog";
@@ -307,40 +308,26 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 	};
 
 	// --- Avatar upload ---
-	const [avatarUploading, setAvatarUploading] = createSignal(false);
-	const [avatarError, setAvatarError] = createSignal("");
-	const avatarImg = createImageFallback(currentAvatarUrl);
+	let avatarSaveChain = Promise.resolve();
+	const avatarUpload = useAvatarUpload(client, {
+		onUploaded: async (url, isCurrent) => {
+			const save = avatarSaveChain.then(async () => {
+				if (!isCurrent()) return;
+				await client.setAvatarUrl(url);
+				if (isCurrent()) setProfileVersion((v) => v + 1);
+			});
+			avatarSaveChain = save.catch(() => undefined);
+			await save;
+		},
+	});
+	const avatarUploading = avatarUpload.uploading;
+	const avatarError = avatarUpload.error;
+	const handleAvatarFile = avatarUpload.pickFile;
 	let fileInputRef!: HTMLInputElement;
-
-	const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10 MB
-
-	const handleAvatarFile = async (file: File): Promise<void> => {
-		if (!file.type.startsWith("image/")) {
-			setAvatarError("File must be an image");
-			return;
-		}
-		if (file.size > MAX_AVATAR_BYTES) {
-			setAvatarError("Image must be under 10 MB");
-			return;
-		}
-		setAvatarUploading(true);
-		setAvatarError("");
-		try {
-			const response = await client.uploadContent(file);
-			await client.setAvatarUrl(response.content_uri);
-			setProfileVersion((v) => v + 1);
-		} catch (e) {
-			setAvatarError(
-				e instanceof Error ? e.message : "Failed to upload avatar",
-			);
-		} finally {
-			setAvatarUploading(false);
-		}
-	};
 
 	const onFileSelect = (): void => {
 		const file = fileInputRef.files?.[0];
-		if (file) handleAvatarFile(file);
+		if (file) void handleAvatarFile(file);
 		// Reset so re-selecting the same file triggers onChange
 		fileInputRef.value = "";
 	};
@@ -421,21 +408,12 @@ const AccountTab: Component<AccountTabProps> = (props) => {
 							aria-label="Change avatar"
 							aria-describedby={avatarError() ? "avatar-error" : undefined}
 						>
-							<Show
-								when={!avatarImg.failed() && currentAvatarUrl()}
-								fallback={<span>{initial()}</span>}
-							>
-								{(url) => (
-									<img
-										ref={avatarImg.ref}
-										src={url()}
-										alt="Avatar"
-										class="h-full w-full object-cover"
-										onError={avatarImg.onError}
-										onLoad={avatarImg.onLoad}
-									/>
-								)}
-							</Show>
+							<Avatar
+								url={currentAvatarUrl()}
+								initial={initial()}
+								size="2xl"
+								alt="Avatar"
+							/>
 							<Show when={avatarUploading()}>
 								<div class="absolute inset-0 flex items-center justify-center bg-black/40">
 									<div class="h-5 w-5 animate-spin rounded-full border-2 border-border-default border-t-accent-hover" />

@@ -7,10 +7,11 @@ import {
 	on,
 	Show,
 } from "solid-js";
+import { Avatar } from "../../../components/Avatar";
 import { Tooltip } from "../../../components/Tooltip";
 import { avatarHttpUrl, avatarInitial } from "../../../lib/avatar";
-import { createImageFallback } from "../../../lib/imageFallback";
 import { roomTopicText } from "../../../lib/roomTopic";
+import { useAvatarUpload } from "../../../lib/useAvatarUpload";
 import { FieldStatus } from "./FieldStatus";
 import { useOptimisticState } from "./useOptimisticState";
 import { useRoomPermissions } from "./useRoomPermissions";
@@ -20,8 +21,6 @@ interface RoomGeneralTabProps {
 	client: MatrixClient;
 	roomId: string;
 }
-
-const MAX_AVATAR_BYTES = 10 * 1024 * 1024;
 
 const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 	const roomId = () => props.roomId;
@@ -151,67 +150,32 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 	const avatarOpt = useOptimisticState<string>({
 		serverValue: serverAvatarMxc,
 	});
-	const [avatarError, setAvatarError] = createSignal<string | null>(null);
-	let lastFile: File | null = null;
-	// Cached content_uri from the most recent successful upload of `lastFile`.
-	// Lets a retry skip the (potentially large) re-upload when only
-	// sendStateEvent failed. Cleared whenever a new file is selected.
-	let lastUploadedUrl: string | null = null;
-	// Monotonic counter that lets out-of-order upload completions be
-	// dropped. If the user picks file A, then quickly picks file B,
-	// A's promise (even if it resolves later) must not clobber B.
-	let uploadGen = 0;
-	let fileInputRef!: HTMLInputElement;
-
-	const avatarHttp = createMemo<string | null>(() =>
-		avatarHttpUrl(props.client, avatarOpt.value(), 96),
-	);
-
-	// Fail-closed preview: a 404/decode failure falls back to the room's
-	// initial instead of the browser's broken-image icon (#457).
-	const avatarImg = createImageFallback(avatarHttp);
-
-	const uploadAvatar = async (file: File): Promise<void> => {
-		if (!file.type.startsWith("image/")) {
-			setAvatarError("File must be an image");
-			return;
-		}
-		if (file.size > MAX_AVATAR_BYTES) {
-			setAvatarError("Image must be under 10 MB");
-			return;
-		}
-		setAvatarError(null);
-		// New file invalidates any cached upload from a previous selection.
-		if (lastFile !== file) lastUploadedUrl = null;
-		lastFile = file;
-		const myGen = ++uploadGen;
-		try {
-			let url = lastUploadedUrl;
-			if (url === null) {
-				const response = await props.client.uploadContent(file);
-				if (myGen !== uploadGen) return;
-				url = response.content_uri;
-				lastUploadedUrl = url;
-			}
+	const avatarUpload = useAvatarUpload(props.client, {
+		scope: roomId,
+		onUploaded: async (url) => {
+			const targetRoomId = props.roomId;
+			// Once previewed, finish the queued save even if a newer upload fails.
+			// The upload hook rejects stale results before they reach this boundary.
 			await avatarOpt.apply(url, async () => {
 				await props.client.sendStateEvent(
-					props.roomId,
+					targetRoomId,
 					EventType.RoomAvatar,
 					{ url },
 					"",
 				);
 			});
-		} catch (e) {
-			if (myGen !== uploadGen) return;
-			setAvatarError(
-				e instanceof Error ? e.message : "Failed to upload avatar",
-			);
-		}
+		},
+	});
+	createEffect(on(roomId, () => avatarOpt.reset(), { defer: true }));
+	const avatarError = avatarUpload.error;
+	const uploadAvatar = avatarUpload.pickFile;
+	const retryAvatar = () => {
+		void avatarUpload.retry();
 	};
-
-	const retryAvatar = (): void => {
-		if (lastFile) void uploadAvatar(lastFile);
-	};
+	let fileInputRef!: HTMLInputElement;
+	const avatarHttp = createMemo<string | null>(() =>
+		avatarHttpUrl(props.client, avatarOpt.value(), 96),
+	);
 
 	const onFileSelect = (): void => {
 		const file = fileInputRef.files?.[0];
@@ -220,7 +184,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 	};
 
 	const avatarState = (): "idle" | "saving" | "error" => {
-		if (avatarOpt.pending()) return "saving";
+		if (avatarUpload.uploading() || avatarOpt.pending()) return "saving";
 		if (avatarOpt.lastError() || avatarError()) return "error";
 		return "idle";
 	};
@@ -251,27 +215,14 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 				</h3>
 				<div class="flex items-center gap-4">
 					<div class="flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg bg-surface-2">
-						<Show
-							when={!avatarImg.failed() && avatarHttp()}
-							fallback={
-								<span class="text-2xl font-semibold text-text-muted">
-									{avatarInitial(
-										props.client.getRoom(props.roomId)?.name ?? "",
-									)}
-								</span>
-							}
-						>
-							{(url) => (
-								<img
-									ref={avatarImg.ref}
-									src={url()}
-									alt=""
-									class="h-full w-full object-cover"
-									onError={avatarImg.onError}
-									onLoad={avatarImg.onLoad}
-								/>
+						<Avatar
+							url={avatarHttp()}
+							initial={avatarInitial(
+								props.client.getRoom(props.roomId)?.name ?? "",
 							)}
-						</Show>
+							size="3xl"
+							appearanceClass="rounded-lg bg-surface-2 text-text-muted"
+						/>
 					</div>
 					<div class="flex-1">
 						<input
@@ -301,7 +252,7 @@ const RoomGeneralTab: Component<RoomGeneralTabProps> = (props) => {
 							error={avatarError() ?? avatarOpt.lastError()}
 							onRetry={perms.canSetAvatar() ? retryAvatar : undefined}
 							onDismiss={() => {
-								setAvatarError(null);
+								avatarUpload.clearError();
 								avatarOpt.clearError();
 							}}
 						/>

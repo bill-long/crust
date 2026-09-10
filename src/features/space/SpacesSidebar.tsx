@@ -22,6 +22,7 @@ import {
 	getSpaceTree,
 	getSpaceUnreadRollup,
 } from "../../client/summaries-selectors";
+import { Avatar } from "../../components/Avatar";
 import {
 	menuContentClass,
 	menuItemClass,
@@ -32,7 +33,6 @@ import { UnreadBadge } from "../../components/UnreadBadge";
 import { avatarInitial } from "../../lib/avatar";
 import {
 	createFailedImageUrls,
-	createImageFallback,
 	type FailedImageUrls,
 } from "../../lib/imageFallback";
 import { spaceLandingPath } from "../../lib/spaceLanding";
@@ -153,10 +153,6 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 	// instead of the browser's broken-image icon. Shares the rail's registry,
 	// so one broken URL is recorded once for the whole sidebar; a synced-in
 	// avatar arrives under a new URL, which no block covers.
-	const avatar = createImageFallback(
-		() => props.space.avatarUrl,
-		props.brokenAvatars,
-	);
 
 	const triggerInner = (
 		<>
@@ -172,25 +168,14 @@ const SpaceTile: Component<SpaceTileProps> = (props) => {
 				aria-label={props.space.name.trim() || "Unnamed space"}
 				aria-current={isSelected() ? "page" : undefined}
 			>
-				<Show
-					when={!avatar.failed() && props.space.avatarUrl}
-					fallback={
-						<span class={`font-semibold ${nested() ? "text-xs" : "text-sm"}`}>
-							{avatarInitial(props.space.name)}
-						</span>
-					}
-				>
-					{(url) => (
-						<img
-							ref={avatar.ref}
-							src={url()}
-							alt={props.space.name.trim() || "Space"}
-							class={`${sizeClass()} rounded-[inherit] object-cover transition-[border-radius]`}
-							onError={avatar.onError}
-							onLoad={avatar.onLoad}
-						/>
-					)}
-				</Show>
+				<Avatar
+					url={props.space.avatarUrl}
+					initial={avatarInitial(props.space.name)}
+					size={nested() ? "md" : "lg"}
+					appearanceClass="rounded-[inherit] text-inherit transition-[border-radius]"
+					broken={props.brokenAvatars}
+					alt={props.space.name.trim() || "Space"}
+				/>
 
 				{/* Unread badge */}
 				<UnreadBadge
@@ -554,10 +539,6 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 						const isSelected = () => params.spaceId === space.roomId;
 						// Fail-closed avatar: a 404/decode failure falls back to the
 						// initial instead of the browser's broken-image icon (#457).
-						const avatar = createImageFallback(
-							() => space.avatarUrl,
-							brokenAvatars,
-						);
 						return (
 							<SidebarItem selected={isSelected}>
 								<button
@@ -574,25 +555,14 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									aria-label={`${space.name.trim() || "Unnamed space"} (invitation pending)`}
 									aria-current={isSelected() ? "page" : undefined}
 								>
-									<Show
-										when={!avatar.failed() && space.avatarUrl}
-										fallback={
-											<span class="text-sm font-semibold">
-												{avatarInitial(space.name)}
-											</span>
-										}
-									>
-										{(url) => (
-											<img
-												ref={avatar.ref}
-												src={url()}
-												alt={space.name.trim() || "Space"}
-												class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
-												onError={avatar.onError}
-												onLoad={avatar.onLoad}
-											/>
-										)}
-									</Show>
+									<Avatar
+										url={space.avatarUrl}
+										initial={avatarInitial(space.name)}
+										size="lg"
+										appearanceClass="rounded-[inherit] text-inherit transition-[border-radius]"
+										broken={brokenAvatars}
+										alt={space.name.trim() || "Space"}
+									/>
 									<span
 										aria-hidden="true"
 										class="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface-1 bg-accent"
@@ -613,10 +583,6 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 						const isSelected = () => params.spaceId === space.roomId;
 						// Fail-closed avatar: a 404/decode failure falls back to the
 						// initial instead of the browser's broken-image icon (#457).
-						const avatar = createImageFallback(
-							() => space.avatarUrl,
-							brokenAvatars,
-						);
 						return (
 							<SidebarItem selected={isSelected}>
 								<button
@@ -633,25 +599,14 @@ const SpacesSidebar: Component<SpacesSidebarProps> = (props) => {
 									aria-label={`${space.name.trim() || "Unnamed space"} (join request pending)`}
 									aria-current={isSelected() ? "page" : undefined}
 								>
-									<Show
-										when={!avatar.failed() && space.avatarUrl}
-										fallback={
-											<span class="text-sm font-semibold">
-												{avatarInitial(space.name)}
-											</span>
-										}
-									>
-										{(url) => (
-											<img
-												ref={avatar.ref}
-												src={url()}
-												alt={space.name.trim() || "Space"}
-												class="h-10 w-10 rounded-[inherit] object-cover transition-[border-radius]"
-												onError={avatar.onError}
-												onLoad={avatar.onLoad}
-											/>
-										)}
-									</Show>
+									<Avatar
+										url={space.avatarUrl}
+										initial={avatarInitial(space.name)}
+										size="lg"
+										appearanceClass="rounded-[inherit] text-inherit transition-[border-radius]"
+										broken={brokenAvatars}
+										alt={space.name.trim() || "Space"}
+									/>
 									<span
 										aria-hidden="true"
 										class="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface-1 bg-text-disabled"

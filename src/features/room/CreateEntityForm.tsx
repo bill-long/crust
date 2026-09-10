@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { createUniqueId, Show } from "solid-js";
+import { Avatar } from "../../components/Avatar";
 import { Modal } from "../../components/Modal";
 import { cryptoDialogOpen } from "../../stores/cryptoActions";
 import { useCreateEntityForm } from "./useCreateEntityForm";
@@ -67,35 +68,28 @@ export function CreateEntityForm(props: CreateEntityFormProps) {
 				<p class="mb-4 text-sm text-text-muted">{props.description}</p>
 
 				<div class="mb-4 flex items-center gap-3">
-					<Show
-						when={form.avatarHttp()}
-						fallback={
-							<div class="flex h-16 w-16 items-center justify-center rounded-full bg-surface-3 text-text-secondary">
-								<svg
-									class="h-7 w-7"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="2"
-									aria-hidden="true"
-								>
-									<title>Avatar placeholder</title>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M4 7h3l2-2h6l2 2h3v12H4V7z"
-									/>
-									<circle cx="12" cy="13" r="3.5" />
-								</svg>
-							</div>
+					<Avatar
+						url={form.avatarHttp()}
+						size="xl"
+						initial={
+							<svg
+								class="h-7 w-7"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+								stroke-width="2"
+								aria-hidden="true"
+							>
+								<title>Avatar placeholder</title>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M4 7h3l2-2h6l2 2h3v12H4V7z"
+								/>
+								<circle cx="12" cy="13" r="3.5" />
+							</svg>
 						}
-					>
-						<img
-							src={form.avatarHttp() ?? ""}
-							alt=""
-							class="h-16 w-16 rounded-full object-cover"
-						/>
-					</Show>
+					/>
 					<div class="flex flex-col gap-1">
 						<div class="flex gap-2">
 							<input

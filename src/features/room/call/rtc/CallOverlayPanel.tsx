@@ -1,9 +1,7 @@
 import { type Component, createMemo, For, Show } from "solid-js";
+import { Avatar } from "../../../../components/Avatar";
 import { avatarInitial } from "../../../../lib/avatar";
-import {
-	createFailedImageUrls,
-	createImageFallback,
-} from "../../../../lib/imageFallback";
+import { createFailedImageUrls } from "../../../../lib/imageFallback";
 import { micEnabled as voiceMicEnabled } from "../../../../stores/voice";
 import { currentCallSession } from "./callSessionStore";
 import { MicStatusIcon } from "./MicStatusIcon";
@@ -108,36 +106,15 @@ export const CallOverlayPanel: Component = () => {
 						{(p) => {
 							const muted = createMemo(() => isMuted(p));
 							const speaking = createMemo(() => p.isSpeaking && !muted());
-							const avatar = createImageFallback(
-								() => p.avatarUrl,
-								brokenAvatars,
-							);
 							return (
 								<li class="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-1">
 									<span class="relative shrink-0">
-										<Show
-											when={!avatar.failed() && p.avatarUrl}
-											fallback={
-												<span
-													aria-hidden="true"
-													class="flex h-8 w-8 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-emphasis"
-												>
-													{avatarInitial(p.displayName)}
-												</span>
-											}
-										>
-											{(url) => (
-												<img
-													ref={avatar.ref}
-													src={url()}
-													alt=""
-													aria-hidden="true"
-													class="h-8 w-8 rounded-full object-cover"
-													onError={avatar.onError}
-													onLoad={avatar.onLoad}
-												/>
-											)}
-										</Show>
+										<Avatar
+											url={p.avatarUrl}
+											initial={avatarInitial(p.displayName)}
+											appearanceClass="rounded-full bg-surface-3 text-text-emphasis"
+											broken={brokenAvatars}
+										/>
 										{/* Speaking ring — color only (no motion), so it is safe
 										    under prefers-reduced-motion. */}
 										<span
