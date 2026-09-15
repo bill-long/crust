@@ -212,16 +212,15 @@ export interface LivekitRoomApi {
 	screenShareSupported: boolean;
 	/**
 	 * Map of LiveKit participant identity → its camera VideoTrack entry.
-	 * Only camera-source publications are stored; screen-share lives in the
-	 * separate `screenShareTracks` map so a participant can show both at once.
-	 * Tiles consume this and attach the track to their own `<video>` ref.
+	 * Camera publications stay available while sharing so the participant's
+	 * tile can resume its camera when the screen-share entry disappears.
 	 */
 	videoTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/**
 	 * Map of LiveKit participant identity → its screen-share VideoTrack entry.
 	 * Populated for both remote `Track.Source.ScreenShare` publications and the
-	 * local participant's own outgoing share, so the call UI can render a
-	 * dedicated screen-share tile for each.
+	 * local participant's own outgoing share. The call grid prefers this entry
+	 * over the camera/avatar, keeping one tile per participant.
 	 */
 	screenShareTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/** Disconnects, stops local mic, detaches all audio. Idempotent. */
@@ -385,9 +384,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		setVideoTracks(new Map(videoTrackMap));
 	};
 	// Separate mirror for screen-share video, keyed by participant identity.
-	// Kept apart from the camera map so a participant can have BOTH a camera
-	// tile and a screen-share tile at once, and so screen-share rendering
-	// (object-contain, dedicated tile) is independent of the camera path.
+	// Keep publication lifecycles independent; the call grid chooses which
+	// track to display using the screenShareTracks API contract above.
 	const screenShareTrackMap = new Map<string, VideoTrackEntry>();
 	const publishScreenShareTracks = (): void => {
 		setScreenShareTracks(new Map(screenShareTrackMap));
