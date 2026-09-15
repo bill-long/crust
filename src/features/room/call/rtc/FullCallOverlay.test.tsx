@@ -399,8 +399,8 @@ describe("FullCallOverlay", () => {
 		render(() => <FullCallOverlay />);
 
 		const grid = screen.getByTestId("participant-grid");
-		// One participant tile + one screen-share tile, each with a <video>.
-		expect(grid.querySelectorAll("video").length).toBe(2);
+		// The share occupies the participant's tile.
+		expect(grid.querySelectorAll("video").length).toBe(1);
 		// The screen-share tile attaches the shared track to its element.
 		expect(attach).toHaveBeenCalledTimes(1);
 		// The tile is labelled with the sharer's name and carries an indicator.

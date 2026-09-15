@@ -206,21 +206,21 @@ export interface LivekitRoomApi {
 	 * screen-share control rather than offering a dead button. Presence alone
 	 * doesn't guarantee success: an insecure context or a user-cancelled picker
 	 * still rejects at call time, which {@link setLocalScreenShareEnabled}
-	 * handles by reverting the toggle + surfacing the error.
+	 * handles by reverting the toggle. Chromium's user-dismissal error is
+	 * silent; system, policy, and unrecognized failures remain visible.
 	 */
 	screenShareSupported: boolean;
 	/**
 	 * Map of LiveKit participant identity → its camera VideoTrack entry.
-	 * Only camera-source publications are stored; screen-share lives in the
-	 * separate `screenShareTracks` map so a participant can show both at once.
-	 * Tiles consume this and attach the track to their own `<video>` ref.
+	 * Camera publications stay available while sharing so the participant's
+	 * tile can resume its camera when the screen-share entry disappears.
 	 */
 	videoTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/**
 	 * Map of LiveKit participant identity → its screen-share VideoTrack entry.
 	 * Populated for both remote `Track.Source.ScreenShare` publications and the
-	 * local participant's own outgoing share, so the call UI can render a
-	 * dedicated screen-share tile for each.
+	 * local participant's own outgoing share. The call grid prefers this entry
+	 * over the camera/avatar, keeping one tile per participant.
 	 */
 	screenShareTracks: Accessor<ReadonlyMap<string, VideoTrackEntry>>;
 	/** Disconnects, stops local mic, detaches all audio. Idempotent. */
@@ -287,8 +287,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// Coarse capability check: is `getDisplayMedia` even present? It's absent on
 	// most mobile browsers, so the UI hides the screen-share button. Presence
 	// doesn't guarantee a successful capture (an insecure context or cancelled
-	// picker still rejects at call time) — `setLocalScreenShareEnabled` handles
-	// that by reverting the toggle and surfacing the error.
+	// picker still rejects at call time). See screenShareSupported's API contract
+	// for how setLocalScreenShareEnabled handles those failures.
 	const screenShareSupported =
 		typeof navigator !== "undefined" &&
 		typeof navigator.mediaDevices?.getDisplayMedia === "function";
@@ -384,9 +384,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		setVideoTracks(new Map(videoTrackMap));
 	};
 	// Separate mirror for screen-share video, keyed by participant identity.
-	// Kept apart from the camera map so a participant can have BOTH a camera
-	// tile and a screen-share tile at once, and so screen-share rendering
-	// (object-contain, dedicated tile) is independent of the camera path.
+	// Keep publication lifecycles independent; the call grid chooses which
+	// track to display using the screenShareTracks API contract above.
 	const screenShareTrackMap = new Map<string, VideoTrackEntry>();
 	const publishScreenShareTracks = (): void => {
 		setScreenShareTracks(new Map(screenShareTrackMap));
@@ -1730,12 +1729,24 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					);
 				} catch (e) {
 					if (disposed || myAttempt !== attempt || room !== r2) return;
-					// Revert the optimistic flip to actual SDK state, surface error.
-					// A user-cancelled display picker rejects here and correctly
-					// settles the toggle back to off.
+					// Revert intent even when the display picker was cancelled.
 					setLocalScreenShareEnabledSignal(
 						r2.localParticipant.isScreenShareEnabled === true,
 					);
+					// No standardized cancellation code exists. Match Chromium's
+					// user-dismissal message observed in the desktop picker, not
+					// every NotAllowedError: OS/policy denials use that name too.
+					// Unknown messages stay visible; existing call errors stay intact.
+					if (
+						desired &&
+						e !== null &&
+						typeof e === "object" &&
+						"name" in e &&
+						e.name === "NotAllowedError" &&
+						"message" in e &&
+						e.message === "Permission denied by user"
+					)
+						return;
 					setError(e instanceof Error ? e : new Error(String(e)));
 					return;
 				}

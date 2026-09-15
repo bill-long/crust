@@ -2,12 +2,14 @@ import {
 	type Component,
 	createEffect,
 	createMemo,
+	createSignal,
 	For,
 	onCleanup,
 	onMount,
 	Show,
 } from "solid-js";
 import { Avatar } from "../../../../components/Avatar";
+import { Modal } from "../../../../components/Modal";
 import { avatarInitial } from "../../../../lib/avatar";
 import { FOCUSABLE_SELECTOR } from "../../../../lib/focusTrap";
 import {
@@ -65,35 +67,26 @@ export const FullCallOverlay: Component = () => {
 	// outlives the participant tiles - see ParticipantTileProps (#457).
 	const brokenAvatars = createFailedImageUrls();
 
-	// Active remote screen shares, one labelled tile each. Intentionally depends
-	// ONLY on `screenShareTracks()` (not `participants()`): the sharer's display
-	// name is resolved reactively inside `ScreenShareTile`, so this memo — and
-	// thus the `<For>` row identities — stays stable across active-speaker / mute
-	// snapshots. Recomputing here on every snapshot would make `<For>` dispose
-	// and rebuild each tile, detaching/reattaching the screen <video> (the same
-	// flicker the hook's `participantCache` avoids for camera tiles). Empty (and
-	// thus invisible) until a participant publishes a `Track.Source.ScreenShare`.
-	const screenShares = createMemo<
-		{ identity: string; entry: VideoTrackEntry }[]
-	>(() => {
-		const s = session();
-		if (!s) return [];
-		const shares = s.livekit.screenShareTracks();
-		if (shares.size === 0) return [];
-		return [...shares.entries()].map(([identity, entry]) => ({
-			identity,
-			entry,
-		}));
-	});
-
-	// Total tiles rendered in the grid (camera/avatar tiles + screen shares),
-	// used to pick the column count.
-	const tileCount = createMemo(
+	const participantsByIdentity = createMemo(
 		() =>
-			(session()?.livekit.participants().length ?? 0) + screenShares().length,
+			new Map(
+				session()
+					?.livekit.participants()
+					.map((p) => [p.identity, p]),
+			),
 	);
+	// One tile per identity, stable across participant snapshots. Include shares
+	// that arrive before their participant metadata so video is never hidden.
+	const tileIdentities = createMemo(() => [
+		...new Set([
+			...participantsByIdentity().keys(),
+			...(session()?.livekit.screenShareTracks().keys() ?? []),
+		]),
+	]);
+	const tileCount = () => tileIdentities().length;
 
 	let regionRef: HTMLElement | undefined;
+	let closeButtonRef: HTMLButtonElement | undefined;
 	let leaveButtonRef: HTMLButtonElement | undefined;
 	let previousFocus: HTMLElement | null = null;
 
@@ -183,6 +176,7 @@ export const FullCallOverlay: Component = () => {
 							</span>
 						</div>
 						<button
+							ref={closeButtonRef}
 							type="button"
 							onClick={() => {
 								if (s().leaving() || s().rtc.status() === "leaving") return;
@@ -442,7 +436,7 @@ export const FullCallOverlay: Component = () => {
 								role="alert"
 								class="rounded border border-danger-border bg-danger-bg/60 p-3 text-xs text-danger-text"
 							>
-								Audio: {s().livekit.error()?.message}
+								Call: {s().livekit.error()?.message}
 							</div>
 						</Show>
 
@@ -468,10 +462,7 @@ export const FullCallOverlay: Component = () => {
 						<div class="flex min-h-64 flex-1 flex-col rounded border border-border-subtle bg-surface-1 p-4">
 							<div class="flex items-center justify-between">
 								<div class="text-xs uppercase tracking-wide text-text-disabled">
-									Participants (
-									{s().livekit.participants().length ||
-										s().rtc.memberships().length}
-									)
+									Participants ({tileCount() || s().rtc.memberships().length})
 								</div>
 								<Show when={s().livekit.status() !== "idle"}>
 									<div class="text-[10px] uppercase tracking-wide text-text-disabled">
@@ -480,7 +471,7 @@ export const FullCallOverlay: Component = () => {
 								</Show>
 							</div>
 							<Show
-								when={s().livekit.participants().length > 0}
+								when={tileCount() > 0}
 								fallback={
 									<Show
 										when={s().rtc.memberships().length > 0}
@@ -511,22 +502,31 @@ export const FullCallOverlay: Component = () => {
 										"grid-cols-3": tileCount() >= 5,
 									}}
 								>
-									<For each={s().livekit.participants()}>
-										{(p) => (
-											<ParticipantTile
-												participant={p}
-												livekit={s().livekit}
-												brokenAvatars={brokenAvatars}
-											/>
-										)}
-									</For>
-									<For each={screenShares()}>
-										{(share) => (
-											<ScreenShareTile
-												identity={share.identity}
-												entry={share.entry}
-												livekit={s().livekit}
-											/>
+									<For each={tileIdentities()}>
+										{(identity) => (
+											<Show
+												when={s().livekit.screenShareTracks().get(identity)}
+												fallback={
+													<Show when={participantsByIdentity().get(identity)}>
+														{(p) => (
+															<ParticipantTile
+																participant={p()}
+																livekit={s().livekit}
+																brokenAvatars={brokenAvatars}
+															/>
+														)}
+													</Show>
+												}
+											>
+												{(entry) => (
+													<ScreenShareTile
+														identity={identity}
+														entry={entry()}
+														livekit={s().livekit}
+														fallbackFocus={() => closeButtonRef}
+													/>
+												)}
+											</Show>
 										)}
 									</For>
 								</div>
@@ -542,8 +542,7 @@ export const FullCallOverlay: Component = () => {
 interface ParticipantTileProps {
 	participant: RtcParticipant;
 	livekit: LivekitRoomApi;
-	/** Fail-closed avatar state, owned by the overlay - useLivekitRoom re-mints
-	 *  a participant on every speaking/mute flip, which remounts this tile. */
+	/** Owned by the overlay so failures survive switching to a screen share. */
 	brokenAvatars: FailedImageUrls;
 }
 
@@ -646,10 +645,11 @@ interface ScreenShareTileProps {
 	identity: string;
 	entry: VideoTrackEntry;
 	livekit: LivekitRoomApi;
+	fallbackFocus: () => HTMLElement | undefined;
 }
 
 /**
- * Renders a remote participant's screen-share track as its own tile in the
+ * Renders a participant's screen-share track in place of their camera in the
  * call grid. Unlike {@link ParticipantTile} (which crops camera video with
  * `object-cover`), the shared screen is shown with `object-contain` on a black
  * backdrop so no content is clipped, matching how Element/Cinny present a
@@ -663,7 +663,7 @@ interface ScreenShareTileProps {
  * sinks, so this `<video>` stays `muted` to avoid double playback.
  */
 const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
-	let videoEl: HTMLVideoElement | undefined;
+	const [expanded, setExpanded] = createSignal(false);
 
 	const sharer = createMemo(() =>
 		props.livekit
@@ -681,36 +681,69 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 		return `${p?.displayName ?? "Unknown"}’s screen`;
 	});
 
-	createEffect(() => {
-		// Track `props.entry` reactively so a replaced screen-share publication
-		// (e.g. the sharer restarts the share) re-attaches to the same element.
-		const track = props.entry.track;
-		const el = videoEl;
-		if (!el) return;
-		track.attach(el);
-		onCleanup(() => {
-			try {
-				track.detach(el);
-			} catch {
-				// Track may already be stopped during teardown; safe to ignore.
-			}
-		});
-	});
-
 	return (
-		<div class="relative flex min-h-0 items-center justify-center overflow-hidden rounded border border-border-subtle bg-black [container-type:size]">
-			<video
-				ref={videoEl}
-				class="h-full w-full object-contain"
-				autoplay
-				playsinline
-				muted
-			/>
-			<TrackStatsOverlay
-				track={props.entry.track}
-				isLocal={sharer()?.isLocal}
-			/>
-			<div class="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-black/40 px-2 py-1 text-xs text-white">
+		<div
+			class="relative flex min-h-0 items-center justify-center overflow-hidden rounded border bg-surface-0 [container-type:size]"
+			classList={{
+				"border-success": sharer()?.isSpeaking,
+				"border-border-subtle": !sharer()?.isSpeaking,
+			}}
+		>
+			<ScreenShareVideo entry={props.entry} />
+			<button
+				type="button"
+				aria-label={`Expand ${label()}`}
+				title="Expand screen share"
+				onClick={() => setExpanded(true)}
+				class="absolute right-2 top-2 z-10 flex h-8 items-center gap-2 rounded bg-surface-1/90 px-2 text-xs text-text-primary transition-colors hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+			>
+				<svg
+					class="h-4 w-4"
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					stroke-width="2"
+					aria-hidden="true"
+				>
+					<path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5" />
+				</svg>
+				Expand
+			</button>
+			<Modal
+				open={expanded()}
+				onClose={() => setExpanded(false)}
+				portaled
+				label={label()}
+				fallbackFocus={props.fallbackFocus}
+				class="fixed inset-0 z-50 flex flex-col bg-surface-0"
+			>
+				<div class="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border-subtle px-4">
+					<span class="min-w-0 truncate text-sm font-semibold text-text-primary">
+						{label()}
+					</span>
+					<button
+						type="button"
+						onClick={() => setExpanded(false)}
+						class="shrink-0 rounded bg-surface-2 px-3 py-2 text-sm text-text-primary transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover"
+					>
+						Back to call
+					</button>
+				</div>
+				<div class="relative min-h-0 flex-1">
+					<ScreenShareVideo entry={props.entry} />
+					<TrackStatsOverlay
+						track={props.entry.track}
+						isLocal={sharer()?.isLocal}
+					/>
+				</div>
+			</Modal>
+			<Show when={!expanded()}>
+				<TrackStatsOverlay
+					track={props.entry.track}
+					isLocal={sharer()?.isLocal}
+				/>
+			</Show>
+			<div class="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-surface-0/80 px-2 py-1 text-xs text-text-primary">
 				<svg
 					class="h-3.5 w-3.5 shrink-0"
 					viewBox="0 0 24 24"
@@ -726,8 +759,47 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 					<line x1="8" y1="21" x2="16" y2="21" />
 					<line x1="12" y1="17" x2="12" y2="21" />
 				</svg>
-				<span class="min-w-0 truncate">{label()}</span>
+				<span class="min-w-0 flex-1 truncate">{label()}</span>
+				<Show when={sharer()}>
+					{(p) => (
+						<MicStatusIcon
+							muted={p().isLocal ? !voiceMicEnabled() : p().isMuted}
+							micUnavailable={p().micUnavailable}
+							isForeignSfu={p().isForeignSfu}
+						/>
+					)}
+				</Show>
 			</div>
 		</div>
 	);
 };
+
+interface ScreenShareVideoProps {
+	entry: VideoTrackEntry;
+}
+
+function ScreenShareVideo(props: ScreenShareVideoProps) {
+	let videoEl: HTMLVideoElement | undefined;
+	createEffect(() => {
+		const track = props.entry.track;
+		const el = videoEl;
+		if (!el) return;
+		track.attach(el);
+		onCleanup(() => {
+			try {
+				track.detach(el);
+			} catch {
+				// Track may already be stopped during teardown.
+			}
+		});
+	});
+	return (
+		<video
+			ref={videoEl}
+			class="h-full w-full object-contain"
+			autoplay
+			playsinline
+			muted
+		/>
+	);
+}
