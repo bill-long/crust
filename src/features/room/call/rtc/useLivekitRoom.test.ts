@@ -1542,6 +1542,11 @@ describe("useLivekitRoom", () => {
 			visible: false,
 		},
 		{
+			failure: new DOMException("Permission denied by user", "NotAllowedError"),
+			visible: true,
+			desired: false,
+		},
+		{
 			failure: new DOMException(
 				"Permission denied by system",
 				"NotAllowedError",
@@ -1565,7 +1570,7 @@ describe("useLivekitRoom", () => {
 		{ failure: new Error("Publication failed"), visible: true },
 	])(
 		"settles screen sharing after $failure.name (visible: $visible)",
-		async ({ failure, visible }) => {
+		async ({ failure, visible, desired = true }) => {
 			const fakeRoom = createFakeRoom();
 			fakeRoom.localParticipant.setScreenShareEnabled.mockImplementation(
 				async () => {
@@ -1587,8 +1592,9 @@ describe("useLivekitRoom", () => {
 				}),
 			);
 			await waitFor(() => result.status() === "connected");
-			await result.setLocalScreenShareEnabled(true);
-			expect(result.localScreenShareEnabled()).toBe(false);
+			fakeRoom.localParticipant.isScreenShareEnabled = !desired;
+			await result.setLocalScreenShareEnabled(desired);
+			expect(result.localScreenShareEnabled()).toBe(!desired);
 			if (visible) expect(result.error()?.message).toContain(failure.message);
 			else expect(result.error()).toBeNull();
 			expect(result.status()).toBe("connected");
@@ -1597,8 +1603,8 @@ describe("useLivekitRoom", () => {
 					fakeRoom.localParticipant.isScreenShareEnabled = enabled;
 				},
 			);
-			await result.setLocalScreenShareEnabled(true);
-			expect(result.localScreenShareEnabled()).toBe(true);
+			await result.setLocalScreenShareEnabled(desired);
+			expect(result.localScreenShareEnabled()).toBe(desired);
 		},
 	);
 

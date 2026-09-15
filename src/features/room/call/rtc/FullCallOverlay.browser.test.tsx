@@ -47,12 +47,17 @@ it("expands a shared screen inside the window and returns to the call with Escap
 		);
 		publishCallSession(fake.api);
 		render(() => <FullCallOverlay />);
-		const grid = screen.getByTestId("participant-grid");
 		expect(cameraAttach).toHaveBeenCalledTimes(1);
+		fake.setLivekitParticipants([]);
 		fake.setLivekitScreenShareTracks(
 			new Map([["a", { track: share.track, sid: "ss-1" }]]),
 		);
+		const grid = screen.getByTestId("participant-grid");
 		expect(grid.children).toHaveLength(1);
+		expect(screen.getByText("Participants (1)")).toBeTruthy();
+		fake.setLivekitParticipants([
+			participant({ identity: "a", displayName: "Amon" }),
+		]);
 		expect(cameraDetach).toHaveBeenCalledTimes(1);
 		const expand = screen.getByRole("button", { name: "Expand Amon’s screen" });
 		const closeCall = screen.getByRole("button", { name: "Close call" });

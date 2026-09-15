@@ -462,10 +462,7 @@ export const FullCallOverlay: Component = () => {
 						<div class="flex min-h-64 flex-1 flex-col rounded border border-border-subtle bg-surface-1 p-4">
 							<div class="flex items-center justify-between">
 								<div class="text-xs uppercase tracking-wide text-text-disabled">
-									Participants (
-									{s().livekit.participants().length ||
-										s().rtc.memberships().length}
-									)
+									Participants ({tileCount() || s().rtc.memberships().length})
 								</div>
 								<Show when={s().livekit.status() !== "idle"}>
 									<div class="text-[10px] uppercase tracking-wide text-text-disabled">
