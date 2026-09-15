@@ -1730,12 +1730,22 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					);
 				} catch (e) {
 					if (disposed || myAttempt !== attempt || room !== r2) return;
-					// Revert the optimistic flip to actual SDK state, surface error.
-					// A user-cancelled display picker rejects here and correctly
-					// settles the toggle back to off.
+					// Revert intent even when the display picker was cancelled.
 					setLocalScreenShareEnabledSignal(
 						r2.localParticipant.isScreenShareEnabled === true,
 					);
+					// getDisplayMedia uses NotAllowedError when the user dismisses
+					// its picker (and also for denial). Treat no selection as a
+					// quiet opt-out, only on start; capture/publish/stop failures
+					// still surface below, and existing call errors stay intact.
+					if (
+						desired &&
+						e !== null &&
+						typeof e === "object" &&
+						"name" in e &&
+						e.name === "NotAllowedError"
+					)
+						return;
 					setError(e instanceof Error ? e : new Error(String(e)));
 					return;
 				}

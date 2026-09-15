@@ -1536,32 +1536,57 @@ describe("useLivekitRoom", () => {
 		expect(result.screenShareTracks().has("local-id")).toBe(false);
 	});
 
-	it("setLocalScreenShareEnabled reverts the optimistic flag and surfaces error when the picker is cancelled", async () => {
-		const fakeRoom = createFakeRoom();
-		fakeRoom.localParticipant.setScreenShareEnabled.mockImplementation(
-			async () => {
-				throw new Error("Permission denied");
-			},
-		);
-		roomFactory.current = () => fakeRoom;
-		const { client } = createClient();
-		const { result } = renderHook(() =>
-			useLivekitRoom({
-				client: client as never,
-				focus: () => livekitFocus,
-				enabled: () => true,
-				memberships: () => [],
-				audioDeviceId: () => "",
-				videoDeviceId: () => "",
-				micEnabled: () => true,
-				loadLivekit,
-			}),
-		);
-		await waitFor(() => result.status() === "connected");
-		await result.setLocalScreenShareEnabled(true);
-		expect(result.localScreenShareEnabled()).toBe(false);
-		expect(result.error()?.message).toContain("Permission denied");
-	});
+	it.each([
+		{
+			failure: new DOMException("Permission denied by user", "NotAllowedError"),
+			visible: false,
+		},
+		{
+			failure: new DOMException(
+				"Could not start video source",
+				"NotReadableError",
+			),
+			visible: true,
+		},
+		{ failure: new Error("Publication failed"), visible: true },
+	])(
+		"settles screen sharing after $failure.name (visible: $visible)",
+		async ({ failure, visible }) => {
+			const fakeRoom = createFakeRoom();
+			fakeRoom.localParticipant.setScreenShareEnabled.mockImplementation(
+				async () => {
+					throw failure;
+				},
+			);
+			roomFactory.current = () => fakeRoom;
+			const { client } = createClient();
+			const { result } = renderHook(() =>
+				useLivekitRoom({
+					client: client as never,
+					focus: () => livekitFocus,
+					enabled: () => true,
+					memberships: () => [],
+					audioDeviceId: () => "",
+					videoDeviceId: () => "",
+					micEnabled: () => true,
+					loadLivekit,
+				}),
+			);
+			await waitFor(() => result.status() === "connected");
+			await result.setLocalScreenShareEnabled(true);
+			expect(result.localScreenShareEnabled()).toBe(false);
+			if (visible) expect(result.error()?.message).toContain(failure.message);
+			else expect(result.error()).toBeNull();
+			expect(result.status()).toBe("connected");
+			fakeRoom.localParticipant.setScreenShareEnabled.mockImplementation(
+				async (enabled: boolean) => {
+					fakeRoom.localParticipant.isScreenShareEnabled = enabled;
+				},
+			);
+			await result.setLocalScreenShareEnabled(true);
+			expect(result.localScreenShareEnabled()).toBe(true);
+		},
+	);
 
 	it("reports screenShareSupported=false and fails closed when getDisplayMedia is absent", async () => {
 		// Simulate a browser without display capture (most mobile browsers).
