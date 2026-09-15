@@ -740,10 +740,12 @@ const ScreenShareTile: Component<ScreenShareTileProps> = (props) => {
 					/>
 				</div>
 			</Modal>
-			<TrackStatsOverlay
-				track={props.entry.track}
-				isLocal={sharer()?.isLocal}
-			/>
+			<Show when={!expanded()}>
+				<TrackStatsOverlay
+					track={props.entry.track}
+					isLocal={sharer()?.isLocal}
+				/>
+			</Show>
 			<div class="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-surface-0/80 px-2 py-1 text-xs text-text-primary">
 				<svg
 					class="h-3.5 w-3.5 shrink-0"

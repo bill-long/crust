@@ -1543,6 +1543,20 @@ describe("useLivekitRoom", () => {
 		},
 		{
 			failure: new DOMException(
+				"Permission denied by system",
+				"NotAllowedError",
+			),
+			visible: true,
+		},
+		{
+			failure: new DOMException(
+				"Disallowed by permissions policy",
+				"NotAllowedError",
+			),
+			visible: true,
+		},
+		{
+			failure: new DOMException(
 				"Could not start video source",
 				"NotReadableError",
 			),

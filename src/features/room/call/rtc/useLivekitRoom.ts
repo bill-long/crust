@@ -206,7 +206,8 @@ export interface LivekitRoomApi {
 	 * screen-share control rather than offering a dead button. Presence alone
 	 * doesn't guarantee success: an insecure context or a user-cancelled picker
 	 * still rejects at call time, which {@link setLocalScreenShareEnabled}
-	 * handles by reverting the toggle + surfacing the error.
+	 * handles by reverting the toggle. Chromium's user-dismissal error is
+	 * silent; system, policy, and unrecognized failures remain visible.
 	 */
 	screenShareSupported: boolean;
 	/**
@@ -287,8 +288,8 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// Coarse capability check: is `getDisplayMedia` even present? It's absent on
 	// most mobile browsers, so the UI hides the screen-share button. Presence
 	// doesn't guarantee a successful capture (an insecure context or cancelled
-	// picker still rejects at call time) — `setLocalScreenShareEnabled` handles
-	// that by reverting the toggle and surfacing the error.
+	// picker still rejects at call time). See screenShareSupported's API contract
+	// for how setLocalScreenShareEnabled handles those failures.
 	const screenShareSupported =
 		typeof navigator !== "undefined" &&
 		typeof navigator.mediaDevices?.getDisplayMedia === "function";
@@ -1734,16 +1735,18 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					setLocalScreenShareEnabledSignal(
 						r2.localParticipant.isScreenShareEnabled === true,
 					);
-					// getDisplayMedia uses NotAllowedError when the user dismisses
-					// its picker (and also for denial). Treat no selection as a
-					// quiet opt-out, only on start; capture/publish/stop failures
-					// still surface below, and existing call errors stay intact.
+					// No standardized cancellation code exists. Match Chromium's
+					// user-dismissal message observed in the desktop picker, not
+					// every NotAllowedError: OS/policy denials use that name too.
+					// Unknown messages stay visible; existing call errors stay intact.
 					if (
 						desired &&
 						e !== null &&
 						typeof e === "object" &&
 						"name" in e &&
-						e.name === "NotAllowedError"
+						e.name === "NotAllowedError" &&
+						"message" in e &&
+						e.message === "Permission denied by user"
 					)
 						return;
 					setError(e instanceof Error ? e : new Error(String(e)));

@@ -2,22 +2,32 @@ import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import "../../../../styles/global.css";
+import { updateSetting } from "../../../../stores/settings";
 import {
 	_resetCallSessionForTests,
 	publishCallSession,
 } from "./callSessionStore";
 import { FullCallOverlay } from "./FullCallOverlay";
 import { makeFakeCallSession, participant } from "./fakeCallSession.test-utils";
+import {
+	inboundVideo,
+	makeFakeStatsTrack,
+	vp9Codec,
+} from "./trackStats.test-utils";
 
 afterEach(() => {
 	cleanup();
+	updateSetting("rtcShowCallStats", false);
 	_resetCallSessionForTests();
 });
 
 it("expands a shared screen inside the window and returns to the call with Escape", async () => {
 	const fake = makeFakeCallSession();
-	const attach = vi.fn();
-	const detach = vi.fn();
+	const share = makeFakeStatsTrack({
+		statsEntries: [inboundVideo(), vp9Codec],
+	});
+	const { attach, detach } = share;
+	updateSetting("rtcShowCallStats", true);
 	const cameraAttach = vi.fn();
 	const cameraDetach = vi.fn();
 	try {
@@ -40,14 +50,21 @@ it("expands a shared screen inside the window and returns to the call with Escap
 		const grid = screen.getByTestId("participant-grid");
 		expect(cameraAttach).toHaveBeenCalledTimes(1);
 		fake.setLivekitScreenShareTracks(
-			new Map([["a", { track: { attach, detach } as never, sid: "ss-1" }]]),
+			new Map([["a", { track: share.track, sid: "ss-1" }]]),
 		);
 		expect(grid.children).toHaveLength(1);
 		expect(cameraDetach).toHaveBeenCalledTimes(1);
 		const expand = screen.getByRole("button", { name: "Expand Amon’s screen" });
 		const closeCall = screen.getByRole("button", { name: "Close call" });
+		await expect
+			.poll(() => screen.queryAllByTestId("track-stats").length)
+			.toBe(1);
 		await userEvent.click(expand);
 		const viewer = screen.getByRole("dialog", { name: "Amon’s screen" });
+		await expect
+			.poll(() => screen.queryAllByTestId("track-stats").length)
+			.toBe(1);
+		expect(viewer.querySelector('[data-testid="track-stats"]')).not.toBeNull();
 		expect(viewer.getBoundingClientRect().width).toBeCloseTo(
 			window.innerWidth,
 			0,
