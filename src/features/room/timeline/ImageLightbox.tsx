@@ -30,6 +30,8 @@ export interface LightboxImage {
 	timestamp: number | null;
 	/** Original page or direct image URL, separate from a cached display URL. */
 	externalUrl?: string;
+	/** Direct third-party images can display without permitting download fetches. */
+	canDownload?: boolean;
 	isEncrypted: boolean;
 	/**
 	 * EncryptedFile descriptor when `isEncrypted`. `fullUrl` then points at the
@@ -484,9 +486,10 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	// images, or a fetched Blob of the http URL for plain ones. On failure,
 	// surface an inline error; the user can still use "Open in browser"
 	// or right-click → Save As as a fallback.
+	const canDownload = () => props.image()?.canDownload !== false;
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
-		if (!img) return;
+		if (!img || !canDownload()) return;
 		setDownloadError(null);
 		try {
 			// Encrypted: use the already-decrypted Blob directly — never the
@@ -667,34 +670,36 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 					<Show when={props.image()}>
 						{(img) => (
 							<>
-								<button
-									type="button"
-									onClick={handleDownload}
-									disabled={img().isEncrypted && !displaySrc()}
-									title={
-										img().isEncrypted &&
-										(!img().encryptedFile || decrypted.failed())
-											? "Image can't be decrypted"
-											: img().isEncrypted && !displaySrc()
-												? "Decrypting…"
-												: "Download"
-									}
-									class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-									aria-label="Download image"
-								>
-									<svg
-										class="h-5 w-5"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										aria-hidden="true"
+								<Show when={canDownload()}>
+									<button
+										type="button"
+										onClick={handleDownload}
+										disabled={img().isEncrypted && !displaySrc()}
+										title={
+											img().isEncrypted &&
+											(!img().encryptedFile || decrypted.failed())
+												? "Image can't be decrypted"
+												: img().isEncrypted && !displaySrc()
+													? "Decrypting…"
+													: "Download"
+										}
+										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+										aria-label="Download image"
 									>
-										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-										<polyline points="7 10 12 15 17 10" />
-										<line x1="12" y1="15" x2="12" y2="3" />
-									</svg>
-								</button>
+										<svg
+											class="h-5 w-5"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											aria-hidden="true"
+										>
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" y1="15" x2="12" y2="3" />
+										</svg>
+									</button>
+								</Show>
 								<Show
 									when={
 										isNativeShell() && props.image()?.isEncrypted
@@ -851,7 +856,10 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<p>The full-resolution image failed to load.</p>
 									<button
 										type="button"
-										onClick={() => setImgLoadError(false)}
+										onClick={() => {
+											closeBtnRef?.focus();
+											setImgLoadError(false);
+										}}
 										class="mt-3 rounded px-3 py-2 text-accent-text hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
 									>
 										Retry

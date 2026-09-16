@@ -13,6 +13,7 @@ export function LinkedImageViewer() {
 	createEffect(() => {
 		location.pathname;
 		location.search;
+		location.hash;
 		setLinkedImage(null);
 	});
 	onMount(() => {
@@ -59,6 +60,8 @@ export function LinkedImageViewer() {
 			eventId: current.sourceUrl,
 			fullUrl: current.fullUrl,
 			externalUrl: current.sourceUrl,
+			// Only cached media has a download endpoint with Matrix CORS support.
+			canDownload: current.fullUrl !== current.sourceUrl,
 			filename: isImageLink(current.sourceUrl)
 				? url.pathname.split("/").pop() || null
 				: null,

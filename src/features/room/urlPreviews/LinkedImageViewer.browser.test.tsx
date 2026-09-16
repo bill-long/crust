@@ -26,6 +26,7 @@ const client = {
 const [location, setLocation] = createStore({
 	pathname: "/room/general",
 	search: "",
+	hash: "",
 });
 vi.mock("../../../client/client", () => ({ useClient: () => ({ client }) }));
 vi.mock("@solidjs/router", () => ({ useLocation: () => location }));
@@ -40,6 +41,16 @@ afterEach(() => {
 });
 
 describe("linked image viewer", () => {
+	it.each(["pathname", "search", "hash"] as const)(
+		"closes when navigation changes %s",
+		async (part) => {
+			render(() => <LinkedImageViewer />);
+			setLinkedImage({ sourceUrl: source, fullUrl: picture });
+			expect(screen.getByRole("dialog")).toBeTruthy();
+			setLocation(part, `${location[part]}changed`);
+			await expect.poll(() => screen.queryByRole("dialog")).toBeNull();
+		},
+	);
 	it.each([false, true])(
 		"enlarges the linked JPG and restores keyboard focus (desktop=%s)",
 		async (native) => {
@@ -69,6 +80,9 @@ describe("linked image viewer", () => {
 				window.innerWidth,
 			);
 			expect(image.getAttribute("src")).toBe(picture);
+			expect(
+				screen.getByRole("button", { name: "Download image" }),
+			).toBeTruthy();
 			expect(invoke).not.toHaveBeenCalled();
 			expect(
 				screen
@@ -101,13 +115,16 @@ describe("linked image viewer", () => {
 			fireEvent.error(screen.getByAltText("wtd.jpg"));
 			expect(screen.getByText("Couldn't load image")).toBeTruthy();
 			await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+			expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(
+				true,
+			);
 			await expect
 				.poll(
 					() =>
 						(screen.getByAltText("wtd.jpg") as HTMLImageElement).naturalWidth,
 				)
 				.toBe(1600);
-			setLocation("pathname", `/room/other-${native}`);
+			await userEvent.keyboard("{Escape}");
 			await expect.poll(() => screen.queryByRole("dialog")).toBeNull();
 		},
 	);
@@ -167,5 +184,7 @@ describe("linked image viewer", () => {
 		expect(invoke).toHaveBeenCalledTimes(1);
 		fireEvent.click(screen.getByText("Uncached"));
 		expect(linkedImage()?.fullUrl).toBe(source);
+		expect(screen.queryByRole("button", { name: "Download image" })).toBeNull();
+		expect(screen.getByRole("link", { name: "Open in browser" })).toBeTruthy();
 	});
 });
