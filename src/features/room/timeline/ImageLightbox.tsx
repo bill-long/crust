@@ -10,7 +10,6 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
-import { isNativeShell } from "../../../app/nativeShell";
 import { Modal } from "../../../components/Modal";
 import { formatBytes } from "../../../lib/formatBytes";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
@@ -24,14 +23,11 @@ export interface LightboxImage {
 	mimetype: string | null;
 	size: number | null;
 	filename: string | null;
-	alt?: string;
 	width: number | null;
 	height: number | null;
 	senderName: string;
 	timestamp: number | null;
-	/** Original page or direct image URL, separate from a cached display URL. */
-	externalUrl?: string;
-	/** Direct third-party images can display without permitting download fetches. */
+	/** External image origins need not allow cross-origin download requests. */
 	canDownload?: boolean;
 	isEncrypted: boolean;
 	/**
@@ -487,11 +483,15 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	// images, or a fetched Blob of the http URL for plain ones. On failure,
 	// surface an inline error; the user can still use "Open in browser"
 	// or right-click → Save As as a fallback.
-	const canDownload = () => props.image()?.canDownload !== false;
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
-		if (!img || !canDownload()) return;
+		if (!img || img.canDownload === false) return;
 		setDownloadError(null);
+		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
+		const filename = sanitizeFilename(
+			img.filename ?? fallbackName,
+			fallbackName,
+		);
 		try {
 			// Encrypted: use the already-decrypted Blob directly — never the
 			// ciphertext, and no fetch of the managed `blob:` URL (which is
@@ -510,15 +510,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				blob = await res.blob();
 			}
-			// A webpage URL is not an image filename. Preview downloads use the
-			// fetched image type, without including URL paths or query tokens.
-			const fallbackName = img.externalUrl
-				? `image.${extFromMime(blob.type.startsWith("image/") ? blob.type : img.mimetype)}`
-				: `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
-			const filename = sanitizeFilename(
-				img.filename ?? fallbackName,
-				fallbackName,
-			);
 			// saveBlobToDisk mints its own object URL, independent of the
 			// hook's managed one, so it can't be revoked out from under the
 			// download.
@@ -671,7 +662,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 					<Show when={props.image()}>
 						{(img) => (
 							<>
-								<Show when={canDownload()}>
+								<Show when={img().canDownload !== false}>
 									<button
 										type="button"
 										onClick={handleDownload}
@@ -701,13 +692,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										</svg>
 									</button>
 								</Show>
-								<Show
-									when={
-										isNativeShell() && props.image()?.isEncrypted
-											? null
-											: displaySrc()
-									}
-								>
+								<Show when={displaySrc()}>
 									{(src) => {
 										// New nodes per call — a single shared JSX node can't live
 										// in both Show branches.
@@ -748,7 +733,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 												}
 											>
 												<a
-													href={props.image()?.externalUrl ?? src()}
+													href={src()}
 													target="_blank"
 													rel="noopener noreferrer"
 													class={openClass}
@@ -855,16 +840,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										Couldn't load image
 									</div>
 									<p>The full-resolution image failed to load.</p>
-									<button
-										type="button"
-										onClick={() => {
-											closeBtnRef?.focus();
-											setImgLoadError(false);
-										}}
-										class="mt-3 rounded px-3 py-2 text-accent-text hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
-									>
-										Retry
-									</button>
 								</div>
 							</Match>
 							<Match when={displaySrc()}>
@@ -873,7 +848,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										ref={imgRef}
 										src={src()}
 										referrerPolicy="no-referrer"
-										alt={img().alt || img().filename || "Image"}
+										alt={img().filename ?? "Image"}
 										onLoad={onImgLoad}
 										onError={onImgError}
 										draggable={false}

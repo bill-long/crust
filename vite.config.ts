@@ -224,6 +224,15 @@ export default defineConfig(({ command, mode, isPreview }) => ({
 					setupFiles: ["src/test/browserSetup.ts"],
 					browser: {
 						enabled: true,
+						commands: {
+							async mockLinkedImage({ page }, url: string, svg: string | null) {
+								await page.unroute(url);
+								if (svg !== null)
+									await page.route(url, (route) =>
+										route.fulfill({ contentType: "image/svg+xml", body: svg }),
+									);
+							},
+						},
 						provider: playwright({
 							launchOptions: {
 								// Realtime AudioContexts otherwise stay suspended

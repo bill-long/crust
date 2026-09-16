@@ -1,29 +1,18 @@
 import { useLocation } from "@solidjs/router";
-import { createEffect, createMemo, onCleanup, onMount } from "solid-js";
-import { useClient } from "../../../client/client";
-import { imageViewerSource, isImageLink } from "../../../lib/imageLink";
-import {
-	linkedImage,
-	openLinkedImage,
-	setLinkedImage,
-} from "../../../stores/linkedImage";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { isImageLink } from "../../../lib/imageLink";
 import { ImageLightbox, type LightboxImage } from "../timeline/ImageLightbox";
-import { peekPreview } from "./previewCache";
 
-/** One viewer outside recycled timeline rows, also covering threads and search. */
+/** Keep the viewer outside recycled message rows. Preview metadata is not involved. */
 export function LinkedImageViewer() {
-	const { client } = useClient();
 	const location = useLocation();
-	let focusFallbacks: HTMLElement[] = [];
-	createEffect(() => {
-		const current = linkedImage();
-		if (current) focusFallbacks = current.focusFallbacks ?? [];
-	});
+	const [image, setImage] = createSignal<LightboxImage | null>(null);
+	let focusFallbacks: WeakRef<HTMLElement>[] = [];
 	createEffect(() => {
 		location.pathname;
 		location.search;
 		location.hash;
-		setLinkedImage(null);
+		setImage(null);
 	});
 	onMount(() => {
 		const onClick = (event: MouseEvent) => {
@@ -38,68 +27,56 @@ export function LinkedImageViewer() {
 				return;
 			const anchor =
 				event.target instanceof Element
-					? event.target.closest<HTMLAnchorElement>(".message-body a[href]")
+					? event.target.closest<HTMLAnchorElement>(
+							".message-body a[href], a[data-link-preview]",
+						)
 					: null;
-			if (!anchor) return;
-			const metadata = peekPreview(anchor.href);
-			if (!isImageLink(anchor.href, metadata?.type)) return;
-			const preview = metadata?.image;
-			const fullUrl = imageViewerSource(
-				anchor.href,
-				preview ? client.mxcUrlToHttp(preview.mxcUrl) : null,
-				metadata?.type,
-			);
-			if (!fullUrl) return;
+			if (
+				!anchor ||
+				anchor.hasAttribute("download") ||
+				!isImageLink(anchor.href)
+			)
+				return;
 			event.preventDefault();
-			// No automatic remote fetch: a direct origin is contacted only on click
-			// when no homeserver-cached image is available.
-			openLinkedImage(
-				{
-					sourceUrl: anchor.href,
-					fullUrl,
-					...(metadata?.type ? { previewType: metadata.type } : {}),
-					...(preview?.alt ? { alt: preview.alt } : {}),
-					...(preview?.width !== undefined ? { width: preview.width } : {}),
-					...(preview?.height !== undefined ? { height: preview.height } : {}),
-				},
-				anchor,
-			);
+			focusFallbacks = [];
+			for (
+				let parent = anchor.parentElement;
+				parent;
+				parent = parent.parentElement
+			) {
+				if (parent.hasAttribute("tabindex"))
+					focusFallbacks.push(new WeakRef(parent));
+			}
+			const url = new URL(anchor.href);
+			// Contact the linked origin only after an explicit click. An image can
+			// display cross-origin without granting the fetch access a download needs.
+			setImage({
+				eventId: url.href,
+				fullUrl: url.href,
+				filename: url.pathname.split("/").pop() || "Image",
+				canDownload: false,
+				senderName: url.hostname,
+				timestamp: null,
+				width: null,
+				height: null,
+				size: null,
+				mimetype: null,
+				isEncrypted: false,
+				encryptedFile: null,
+			});
 		};
 		document.addEventListener("click", onClick);
 		onCleanup(() => document.removeEventListener("click", onClick));
-	});
-	onCleanup(() => setLinkedImage(null));
-	const image = createMemo<LightboxImage | null>(() => {
-		const current = linkedImage();
-		if (!current) return null;
-		const url = new URL(current.sourceUrl);
-		return {
-			eventId: current.sourceUrl,
-			fullUrl: current.fullUrl,
-			...(current.alt ? { alt: current.alt } : {}),
-			externalUrl: current.sourceUrl,
-			// Only cached media has a download endpoint with Matrix CORS support.
-			canDownload: current.fullUrl !== current.sourceUrl,
-			filename: isImageLink(current.sourceUrl, current.previewType)
-				? url.pathname.split("/").pop() || null
-				: null,
-			width: current.width ?? null,
-			height: current.height ?? null,
-			senderName: url.hostname,
-			timestamp: null,
-			size: null,
-			mimetype: null,
-			isEncrypted: false,
-			encryptedFile: null,
-		};
 	});
 	return (
 		<ImageLightbox
 			open={() => image() !== null}
 			image={image}
-			onClose={() => setLinkedImage(null)}
+			onClose={() => setImage(null)}
 			fallbackFocus={() => {
-				const target = focusFallbacks.find((element) => element.isConnected);
+				const target = focusFallbacks
+					.map((ref) => ref.deref())
+					.find((element) => element?.isConnected);
 				focusFallbacks = [];
 				return (
 					target ??

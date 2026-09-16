@@ -1,34 +1,12 @@
-/** Recognize direct raster-image links without contacting the remote site. */
-export function isImageLink(value: string, previewType?: string): boolean {
-	if (previewType === "article" || previewType?.startsWith("video"))
-		return false;
+/** Recognize direct image URLs; HTTP images keep normal navigation under our CSP. */
+export function isImageLink(value: string): boolean {
 	try {
 		const url = new URL(value);
 		return (
-			(url.protocol === "https:" || url.protocol === "http:") &&
+			url.protocol === "https:" &&
 			/\.(?:jpe?g|png|webp|gif|avif)$/i.test(url.pathname)
 		);
 	} catch {
 		return false;
 	}
-}
-
-/** Match production image CSP; insecure sources keep their external link fallback. */
-export function imageViewerSource(
-	sourceUrl: string,
-	cachedUrl?: string | null,
-	previewType?: string,
-): string | null {
-	if (cachedUrl) {
-		try {
-			if (["https:", "blob:", "data:"].includes(new URL(cachedUrl).protocol))
-				return cachedUrl;
-		} catch {
-			// Invalid cached metadata must not swallow the original link.
-		}
-	}
-	return isImageLink(sourceUrl, previewType) &&
-		new URL(sourceUrl).protocol === "https:"
-		? sourceUrl
-		: null;
 }

@@ -1,11 +1,9 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { type Component, onCleanup, Show } from "solid-js";
+import { type Component, Show } from "solid-js";
 import {
 	createImageFallback,
 	type FailedImageUrls,
 } from "../../../lib/imageFallback";
-import { imageViewerSource, isImageLink } from "../../../lib/imageLink";
-import { openLinkedImage } from "../../../stores/linkedImage";
 import type { UrlPreviewData } from "./previewCache";
 
 interface UrlPreviewCardProps {
@@ -26,13 +24,34 @@ interface UrlPreviewCardProps {
 // reserved aspect-ratio box never produces an over-tall card.
 const HERO_MIN_WIDTH = 300;
 
-// One stable title link survives image failure and layout changes.
+// Split so both layouts hang off ONE <a> - see the render path for why the
+// element has to be stable across a layout change.
 const CARD_BASE =
-	"mt-1 flex rounded-md border border-border-subtle bg-surface-2";
+	"mt-1 flex rounded-md border border-border-subtle bg-surface-2 no-underline transition-colors hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus";
 const CARD_COMPACT = "min-h-11 max-w-xl items-center gap-3 p-2";
 const CARD_HERO = "max-w-md flex-col overflow-hidden";
 
-/** Homeserver-proxied preview; images enlarge, titles navigate to the source. */
+/**
+ * OpenGraph preview card. Rendered below a message body when the
+ * homeserver's `/preview_url` endpoint returns useful metadata.
+ *
+ * Two layouts, both built only from homeserver-proxied data:
+ * - Large hero-image card (Element parity) when the OG image is a
+ *   sufficiently large landscape image — full-width banner above the
+ *   text, with `video*` `og:type` getting a play overlay.
+ * - Compact card with a 96×96 side thumbnail otherwise (small/missing
+ *   image).
+ *
+ * The whole card is a single `<a>` so click-anywhere navigates to the
+ * source URL in a new tab. Images are always `mxc://` (the
+ * homeserver-cached image) — see `previewCache.ts` for why.
+ *
+ * Images are fail-closed: a homeserver can hand back a non-image body for an
+ * OG image (continuwuity caches whatever the remote origin returned, rate
+ * limit pages included), and that must not paint the browser's broken-image
+ * icon. A card renders at most one image, so one failure retires it and the
+ * card degrades to text-only.
+ */
 const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 	const isVideo = (): boolean => !!props.data.type?.startsWith("video");
 
@@ -110,140 +129,85 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 		</div>
 	);
 
-	const openImage = (opener: HTMLElement) => {
-		const img = props.data.image;
-		const fullUrl = imageViewerSource(
-			props.url,
-			(img ? props.client.mxcUrlToHttp(img.mxcUrl) : null) || imageUrl(),
-			props.data.type,
-		);
-		if (!fullUrl) return false;
-		openLinkedImage(
-			{
-				sourceUrl: props.url,
-				fullUrl,
-				...(props.data.type ? { previewType: props.data.type } : {}),
-				...(img?.alt ? { alt: img.alt } : {}),
-				...(img?.width !== undefined ? { width: img.width } : {}),
-				...(img?.height !== undefined ? { height: img.height } : {}),
-			},
-			opener,
-		);
-		return true;
-	};
-	const onTitleClick = (event: MouseEvent) => {
-		if (
-			event.button !== 0 ||
-			event.ctrlKey ||
-			event.metaKey ||
-			event.shiftKey ||
-			event.altKey ||
-			!isImageLink(props.url, props.data.type)
-		)
-			return;
-		if (openImage(event.currentTarget as HTMLElement)) event.preventDefault();
-	};
-	const onImageClick = (event: MouseEvent) => {
-		if (
-			event.button !== 0 ||
-			event.ctrlKey ||
-			event.metaKey ||
-			event.shiftKey ||
-			event.altKey ||
-			isVideo()
-		)
-			return;
-		if (openImage(event.currentTarget as HTMLElement)) event.preventDefault();
-	};
-	let titleLink: HTMLAnchorElement | undefined;
-	let imageLink: HTMLAnchorElement | undefined;
-
+	// ONE <a> whose class varies, not one <a> per layout: `isHero()` can flip
+	// after mount when the image errors, and swapping the element would drop
+	// the focus of a keyboard user who had already tabbed onto the link.
 	return (
-		<div class={`${CARD_BASE} ${isHero() ? CARD_HERO : CARD_COMPACT}`}>
-			<a
-				ref={titleLink}
-				href={props.url}
-				target="_blank"
-				rel="noreferrer noopener"
-				aria-label={ariaLabel()}
-				onClick={onTitleClick}
-				class={`min-w-0 flex-1 rounded no-underline hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus ${isHero() ? "w-full p-2" : "self-stretch content-center"}`}
+		<a
+			data-link-preview
+			href={props.url}
+			target="_blank"
+			rel="noreferrer noopener"
+			aria-label={ariaLabel()}
+			class={`${CARD_BASE} ${isHero() ? CARD_HERO : CARD_COMPACT}`}
+		>
+			<Show
+				when={isHero()}
+				fallback={
+					<>
+						<TextColumn />
+						<Show when={!image.failed() && imageUrl()}>
+							{(src) => (
+								<img
+									ref={image.ref}
+									src={src()}
+									alt={props.data.image?.alt ?? ""}
+									width={96}
+									height={96}
+									loading="lazy"
+									class="h-24 w-24 shrink-0 rounded object-cover"
+									onError={image.onError}
+									onLoad={image.onLoad}
+								/>
+							)}
+						</Show>
+					</>
+				}
 			>
-				<TextColumn />
-				<Show
-					when={
-						!props.data.title && !props.data.site && !props.data.description
-					}
+				{/* Reserve aspect-ratio space from intrinsic w/h so the hero
+				    image loading does not shift layout. */}
+				<div
+					class="relative w-full bg-surface-3"
+					style={{
+						"aspect-ratio": `${props.data.image?.width} / ${props.data.image?.height}`,
+					}}
 				>
-					<span class="block truncate text-xs text-text-muted">
-						{new URL(props.url).hostname}
-					</span>
-				</Show>
-			</a>
-			<Show when={!image.failed() && imageUrl()}>
-				{(src) => {
-					onCleanup(() => {
-						if (
-							image.failed() &&
-							titleLink?.isConnected &&
-							document.activeElement === imageLink
-						)
-							titleLink.focus();
-					});
-					return (
-						<a
-							ref={imageLink}
-							href={props.url}
-							target="_blank"
-							rel="noreferrer noopener"
-							onClick={onImageClick}
-							aria-label={
-								isVideo()
-									? "Open video in browser"
-									: "Open preview image in full-screen viewer"
-							}
-							class={`relative shrink-0 bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${isHero() ? "w-full" : "h-24 w-24 rounded"}`}
-							style={
-								isHero()
-									? {
-											"aspect-ratio": `${props.data.image?.width} / ${props.data.image?.height}`,
-										}
-									: undefined
-							}
-						>
+					<Show when={imageUrl()}>
+						{(src) => (
 							<img
 								ref={image.ref}
 								src={src()}
 								alt={props.data.image?.alt ?? ""}
-								width={isHero() ? undefined : 96}
-								height={isHero() ? undefined : 96}
 								loading="lazy"
+								class="absolute inset-0 h-full w-full object-cover"
 								onError={image.onError}
 								onLoad={image.onLoad}
-								class="absolute inset-0 h-full w-full rounded object-cover"
 							/>
-							<Show when={isVideo() && isHero()}>
-								<span
+						)}
+					</Show>
+					<Show when={isVideo()}>
+						<span
+							aria-hidden="true"
+							class="absolute inset-0 flex items-center justify-center"
+						>
+							<span class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-0/70 text-text-primary">
+								<svg
+									class="h-6 w-6"
+									viewBox="0 0 24 24"
+									fill="currentColor"
 									aria-hidden="true"
-									class="absolute inset-0 flex items-center justify-center"
 								>
-									<span class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-0/70 text-text-primary">
-										<svg
-											class="h-6 w-6"
-											viewBox="0 0 24 24"
-											fill="currentColor"
-											aria-hidden="true"
-										>
-											<path d="M8 5v14l11-7z" />
-										</svg>
-									</span>
-								</span>
-							</Show>
-						</a>
-					);
-				}}
+									<path d="M8 5v14l11-7z" />
+								</svg>
+							</span>
+						</span>
+					</Show>
+				</div>
+				<div class="p-2">
+					<TextColumn />
+				</div>
 			</Show>
-		</div>
+		</a>
 	);
 };
 

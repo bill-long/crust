@@ -1,421 +1,183 @@
-import {
-	cleanup,
-	fireEvent,
-	render,
-	screen,
-	within,
-} from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createStore } from "solid-js/store";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { userEvent } from "vitest/browser";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { commands, userEvent } from "vitest/browser";
 import { watchExternalLinks } from "../../../app/externalLinks";
-import { createFailedImageUrls } from "../../../lib/imageFallback";
-import { linkedImage, setLinkedImage } from "../../../stores/linkedImage";
 import "../../../styles/global.css";
 import { LinkedImageViewer } from "./LinkedImageViewer";
-import { _resetPreviewCacheForTests, getOrFetchPreview } from "./previewCache";
 import { UrlPreviewCard } from "./UrlPreviewCard";
-import { UrlPreviewList } from "./UrlPreviewList";
 
-const source = "https://english.eve-guides.fr/images/wtd.jpg";
-const picture = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="black"/></svg>')}`;
-const data = {
-	image: { mxcUrl: "mxc://server/image", width: 1600, height: 900 },
-};
-const client = {
-	mxcUrlToHttp: () => picture,
-	getUrlPreview: async () => ({
-		"og:image": data.image.mxcUrl,
-		"og:image:width": 1600,
-		"og:image:height": 900,
-	}),
-} as unknown as MatrixClient;
+const source = "https://images.invalid/map.jpg";
+const svg =
+	'<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="black"/></svg>';
+const picture = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+declare module "vitest/browser" {
+	interface BrowserCommands {
+		mockLinkedImage(url: string, svg: string | null): Promise<void>;
+	}
+}
+const client = { mxcUrlToHttp: () => picture } as unknown as MatrixClient;
 const [location, setLocation] = createStore({
 	pathname: "/room/general",
 	search: "",
 	hash: "",
 });
-vi.mock("../../../client/client", () => ({ useClient: () => ({ client }) }));
 vi.mock("@solidjs/router", () => ({ useLocation: () => location }));
-
 let stop = () => {};
-afterEach(() => {
+beforeEach(() => commands.mockLinkedImage(source, svg));
+afterEach(async () => {
 	stop();
 	cleanup();
-	setLinkedImage(null);
-	_resetPreviewCacheForTests();
 	vi.unstubAllGlobals();
+	await commands.mockLinkedImage(source, null);
 });
 
-describe("linked image viewer", () => {
-	it.each(["text", "preview"])(
-		"restores recycled %s openers to their originating timeline",
-		async (entry) => {
-			await getOrFetchPreview(client, source, 0);
-			render(() => (
-				<>
-					<div data-testid="timeline-scroller" tabindex="-1">
-						Main timeline
-					</div>
-					<section tabindex="-1" aria-label="Thread timeline">
-						<div data-testid="opener-row">
-							<div class="message-body">
-								<a href={source}>Thread image</a>
-							</div>
-							<UrlPreviewCard client={client} url={source} data={data} />
-						</div>
-					</section>
-					<LinkedImageViewer />
-				</>
-			));
-			const origin = screen.getByRole("region", { name: "Thread timeline" });
-			const opener =
-				entry === "text"
-					? screen.getByRole("link", { name: "Thread image" })
-					: screen.getByRole("link", {
-							name: "Open preview image in full-screen viewer",
-						});
-			opener.focus();
-			await userEvent.keyboard("{Enter}");
-			expect(screen.getByRole("dialog")).toBeTruthy();
-			screen.getByTestId("opener-row").remove();
-			await userEvent.keyboard("{Escape}");
-			await expect.poll(() => document.activeElement).toBe(origin);
-		},
-	);
-	it("restores focus when another card marks a shared thumbnail as failed", () => {
-		const broken = createFailedImageUrls();
-		render(() => (
-			<>
-				<UrlPreviewCard
-					client={client}
-					url={source}
-					data={{ ...data, title: "First" }}
-					broken={broken}
-				/>
-				<UrlPreviewCard
-					client={client}
-					url={source}
-					data={{ ...data, title: "Second" }}
-					broken={broken}
-				/>
-			</>
-		));
-		const thumbnails = screen.getAllByRole("link", {
-			name: "Open preview image in full-screen viewer",
-		});
-		thumbnails[1]?.focus();
-		fireEvent.error(thumbnails[0]?.querySelector("img") as HTMLImageElement);
-		expect(
-			screen.queryAllByRole("link", {
-				name: "Open preview image in full-screen viewer",
-			}),
-		).toHaveLength(0);
-		expect(document.activeElement).toBe(
-			screen.getByRole("link", { name: "Link preview: Second" }),
-		);
-	});
-	it.each([true, false])(
-		"keeps preview visual and keyboard order aligned (hero=%s)",
-		async (hero) => {
-			render(() => (
-				<UrlPreviewCard
-					client={client}
-					url={source}
-					data={{
-						title: "Map",
-						image: { ...data.image, width: hero ? 1600 : 100 },
-					}}
-				/>
-			));
-			const title = screen.getByRole("link", { name: "Link preview: Map" });
-			const thumbnail = screen.getByRole("link", {
-				name: "Open preview image in full-screen viewer",
-			});
-			const titleRect = title.getBoundingClientRect();
-			const imageRect = thumbnail.getBoundingClientRect();
-			if (hero) expect(titleRect.bottom).toBeLessThanOrEqual(imageRect.top);
-			else expect(titleRect.right).toBeLessThanOrEqual(imageRect.left);
-			title.focus();
-			await userEvent.keyboard("{Tab}");
-			expect(document.activeElement).toBe(thumbnail);
-		},
-	);
-	it.each(["article", "video.other"])(
-		"retains %s metadata without displaying an empty preview card",
-		async (type) => {
-			const invoke = vi.fn().mockResolvedValue(undefined);
-			vi.stubGlobal("isTauri", true);
-			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
-			stop = watchExternalLinks();
-			const metadataClient = {
-				...client,
-				getUrlPreview: async () => ({ "og:type": type }),
-			} as unknown as MatrixClient;
-			await getOrFetchPreview(metadataClient, source, 0);
-			render(() => (
-				<>
+function nativeLinks(native: boolean) {
+	const invoke = vi.fn().mockResolvedValue(undefined);
+	vi.stubGlobal("isTauri", native);
+	vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+	stop = watchExternalLinks();
+	return invoke;
+}
+
+function Example() {
+	return (
+		<>
+			<div data-testid="timeline-scroller" tabindex="-1">
+				Main timeline
+			</div>
+			<section tabindex="-1" aria-label="Thread timeline">
+				<div data-testid="opener-row">
 					<div class="message-body">
-						<a href={source}>Metadata-only page</a>
+						<a href={source}>Linked JPG</a>
 					</div>
-					<UrlPreviewList
-						client={metadataClient}
-						urls={() => [source]}
-						ts={() => 0}
-						disabled={() => false}
-						broken={createFailedImageUrls()}
+					<UrlPreviewCard
+						client={client}
+						url={source}
+						data={{
+							title: "Map",
+							image: { mxcUrl: "mxc://server/map", width: 1600, height: 900 },
+						}}
 					/>
-					<LinkedImageViewer />
-				</>
-			));
-			await userEvent.click(
-				screen.getByRole("link", { name: "Metadata-only page" }),
-			);
-			expect(linkedImage()).toBeNull();
-			expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
-				url: source,
-			});
-			expect(screen.queryByRole("link", { name: /^Link preview/ })).toBeNull();
+				</div>
+			</section>
+			<LinkedImageViewer />
+		</>
+	);
+}
+
+describe("direct linked image viewer", () => {
+	it.each([false, true])(
+		"opens message and preview links with the existing viewer (desktop=%s)",
+		async (native) => {
+			const invoke = nativeLinks(native);
+			render(() => <Example />);
+			for (const label of ["Linked JPG", "Link preview: Map"]) {
+				const opener = screen.getByRole("link", { name: label });
+				opener.focus();
+				await userEvent.keyboard("{Enter}");
+				expect(screen.getByRole("dialog")).toBeTruthy();
+				const displayed = screen.getByAltText("map.jpg") as HTMLImageElement;
+				expect(displayed.getAttribute("src")).toBe(source);
+				await expect
+					.poll(() => displayed.complete && displayed.naturalWidth === 1600)
+					.toBe(true);
+				await expect
+					.poll(() => displayed.getBoundingClientRect().width)
+					.toBeLessThanOrEqual(window.innerWidth);
+				expect(
+					screen.getByRole("button", { name: "Fit to viewport" }),
+				).toBeTruthy();
+				expect(
+					screen.queryByRole("button", { name: "Download image" }),
+				).toBeNull();
+				expect(invoke).not.toHaveBeenCalled();
+				const external = screen.getByRole("link", { name: "Open in browser" });
+				expect(external.getAttribute("href")).toBe(source);
+				fireEvent.error(screen.getByAltText("map.jpg"));
+				expect(screen.getByText("Couldn't load image")).toBeTruthy();
+				expect(screen.getByRole("link", { name: "Open in browser" })).toBe(
+					external,
+				);
+				if (native) {
+					await userEvent.click(external);
+					expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
+						url: source,
+					});
+					invoke.mockClear();
+				}
+				await userEvent.keyboard("{Escape}");
+				await expect.poll(() => document.activeElement).toBe(opener);
+				await expect
+					.poll(() => screen.queryByRole("link", { name: "Link preview: Map" }))
+					.not.toBeNull();
+			}
 		},
 	);
 	it.each(["pathname", "search", "hash"] as const)(
-		"closes when navigation changes %s",
+		"closes on %s navigation",
 		async (part) => {
-			render(() => <LinkedImageViewer />);
-			setLinkedImage({ sourceUrl: source, fullUrl: picture });
+			render(() => <Example />);
+			fireEvent.click(screen.getByRole("link", { name: "Linked JPG" }));
 			expect(screen.getByRole("dialog")).toBeTruthy();
 			setLocation(part, `${location[part]}changed`);
 			await expect.poll(() => screen.queryByRole("dialog")).toBeNull();
 		},
 	);
-	it.each([false, true])(
-		"enlarges the linked JPG and restores keyboard focus (desktop=%s)",
-		async (native) => {
-			const invoke = vi.fn().mockResolvedValue(undefined);
-			vi.stubGlobal("isTauri", native);
-			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
-			stop = watchExternalLinks();
-			await getOrFetchPreview(client, source, 0);
-			render(() => (
-				<>
-					<div class="message-body">
-						<a href={source} target="_blank" rel="noopener">
-							Linked JPG
-						</a>
-					</div>
-					<UrlPreviewCard client={client} url={source} data={data} />
-					<LinkedImageViewer />
-				</>
-			));
-			const link = screen.getByText("Linked JPG");
-			link.focus();
-			await userEvent.keyboard("{Enter}");
-			await expect.poll(() => screen.queryByRole("dialog")).not.toBeNull();
-			const image = screen.getByAltText("wtd.jpg") as HTMLImageElement;
-			await expect.poll(() => image.naturalWidth).toBe(1600);
-			expect(image.getBoundingClientRect().width).toBeLessThanOrEqual(
-				window.innerWidth,
-			);
-			expect(image.getAttribute("src")).toBe(picture);
-			expect(
-				screen.getByRole("button", { name: "Download image" }),
-			).toBeTruthy();
-			expect(invoke).not.toHaveBeenCalled();
-			expect(
-				screen
-					.getByRole("link", { name: "Open in browser" })
-					.getAttribute("href"),
-			).toBe(source);
-			if (native) {
-				await userEvent.click(
-					screen.getByRole("link", { name: "Open in browser" }),
-				);
-				expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
-					url: source,
-				});
-			}
-			await userEvent.keyboard("{Escape}");
-			await expect.poll(() => document.activeElement).toBe(link);
-			await expect
-				.poll(() =>
-					screen.queryByRole("link", {
-						name: "Open preview image in full-screen viewer",
-					}),
-				)
-				.not.toBeNull();
-			await userEvent.click(
-				screen.getByRole("link", {
-					name: "Open preview image in full-screen viewer",
-				}),
-			);
-			await expect.poll(() => screen.queryByRole("dialog")).not.toBeNull();
-			fireEvent.error(screen.getByAltText("wtd.jpg"));
-			expect(screen.getByText("Couldn't load image")).toBeTruthy();
-			await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-			expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(
-				true,
-			);
-			await expect
-				.poll(
-					() =>
-						(screen.getByAltText("wtd.jpg") as HTMLImageElement).naturalWidth,
-				)
-				.toBe(1600);
-			await userEvent.keyboard("{Escape}");
-			await expect.poll(() => screen.queryByRole("dialog")).toBeNull();
-		},
-	);
-
-	it("keeps article titles external and enlarges their cached thumbnail", async () => {
-		const invoke = vi.fn().mockResolvedValue(undefined);
-		vi.stubGlobal("isTauri", true);
-		vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
-		stop = watchExternalLinks();
-		render(() => (
-			<>
-				<UrlPreviewCard
-					client={client}
-					url="https://example.org/story.html"
-					data={{
-						...data,
-						title: "Article",
-						image: { ...data.image, alt: "EVE career map" },
-					}}
-				/>
-				<LinkedImageViewer />
-			</>
-		));
-		await userEvent.click(
-			screen.getByRole("link", { name: "Link preview: Article" }),
-		);
-		expect(invoke).toHaveBeenCalledTimes(1);
-		expect(linkedImage()).toBeNull();
-		await userEvent.click(
-			screen.getByRole("link", {
-				name: "Open preview image in full-screen viewer",
-			}),
-		);
-		expect(linkedImage()?.fullUrl).toBe(picture);
-		expect(
-			within(screen.getByRole("dialog")).getByAltText("EVE career map"),
-		).toBeTruthy();
-		expect(invoke).toHaveBeenCalledTimes(1);
+	it("restores a recycled opener to its originating timeline", async () => {
+		render(() => <Example />);
+		const origin = screen.getByRole("region", { name: "Thread timeline" });
+		screen.getByRole("link", { name: "Linked JPG" }).focus();
+		await userEvent.keyboard("{Enter}");
+		screen.getByTestId("opener-row").remove();
+		await userEvent.keyboard("{Escape}");
+		await expect.poll(() => document.activeElement).toBe(origin);
 	});
-	it.each(["video.other", "article"])(
-		"opens %s text and titles externally even with an image suffix",
-		async (type) => {
-			const invoke = vi.fn().mockResolvedValue(undefined);
-			vi.stubGlobal("isTauri", true);
-			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
-			stop = watchExternalLinks();
-			const videoClient = {
-				...client,
-				getUrlPreview: async () => ({
-					"og:type": type,
-					"og:image": data.image.mxcUrl,
-				}),
-			} as unknown as MatrixClient;
-			await getOrFetchPreview(videoClient, source, 0);
-			render(() => (
-				<>
-					<div class="message-body">
-						<a href={source}>Video URL</a>
-					</div>
-					<UrlPreviewCard
-						client={client}
-						url={source}
-						data={{ ...data, title: "Page", type }}
-					/>
-					<LinkedImageViewer />
-				</>
-			));
-			await userEvent.click(screen.getByRole("link", { name: "Video URL" }));
-			await userEvent.click(
-				screen.getByRole("link", { name: /^Link preview: Page/ }),
-			);
-			expect(invoke).toHaveBeenCalledTimes(2);
-			expect(linkedImage()).toBeNull();
-			await userEvent.click(
-				screen.getByRole("link", {
-					name:
-						type === "article"
-							? "Open preview image in full-screen viewer"
-							: "Open video in browser",
-				}),
-			);
-			if (type === "article") {
-				expect(linkedImage()?.fullUrl).toBe(picture);
-				expect(
-					within(screen.getByRole("dialog")).getByAltText("Image"),
-				).toBeTruthy();
-				expect(invoke).toHaveBeenCalledTimes(2);
-			} else {
-				expect(invoke).toHaveBeenCalledTimes(3);
-				expect(linkedImage()).toBeNull();
-			}
-		},
-	);
-	it.each([undefined, "video.other"])(
-		"preserves modified and middle thumbnail clicks (%s)",
-		(type) => {
-			const invoke = vi.fn().mockResolvedValue(undefined);
-			vi.stubGlobal("isTauri", true);
-			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
-			stop = watchExternalLinks();
-			render(() => (
-				<>
-					<UrlPreviewCard
-						client={client}
-						url={source}
-						data={{ ...data, ...(type ? { type } : {}) }}
-					/>
-					<LinkedImageViewer />
-				</>
-			));
-			const thumbnail = screen.getByRole("link", { name: /^Open / });
-			for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
-				fireEvent.click(thumbnail, { [modifier]: true });
-			}
+	it("preserves modified and middle clicks on both entry points", () => {
+		const invoke = nativeLinks(true);
+		render(() => <Example />);
+		for (const label of ["Linked JPG", "Link preview: Map"]) {
+			const link = screen.getByRole("link", { name: label });
+			for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"])
+				fireEvent.click(link, { [modifier]: true });
 			fireEvent(
-				thumbnail,
+				link,
 				new MouseEvent("auxclick", {
 					button: 1,
 					bubbles: true,
 					cancelable: true,
 				}),
 			);
-			expect(invoke).toHaveBeenCalledTimes(5);
-			expect(linkedImage()).toBeNull();
+		}
+		expect(invoke).toHaveBeenCalledTimes(10);
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+	it.each(["article", "video.other"])(
+		"keeps ordinary %s preview cards as one external link",
+		async (type) => {
+			const invoke = nativeLinks(true);
+			const url = "https://example.org/page";
+			render(() => (
+				<>
+					<UrlPreviewCard
+						client={client}
+						url={url}
+						data={{
+							type,
+							title: "Page",
+							image: { mxcUrl: "mxc://server/preview" },
+						}}
+					/>
+					<LinkedImageViewer />
+				</>
+			));
+			expect(screen.getAllByRole("link")).toHaveLength(1);
+			await userEvent.click(
+				screen.getByRole("link").querySelector("img") as HTMLImageElement,
+			);
+			expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", { url });
+			expect(screen.queryByRole("dialog")).toBeNull();
 		},
 	);
-	it("opens uncached image links only on click and leaves modified clicks external", () => {
-		const invoke = vi.fn().mockResolvedValue(undefined);
-		vi.stubGlobal("isTauri", true);
-		vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
-		stop = watchExternalLinks();
-		render(() => (
-			<>
-				<div class="message-body">
-					<a href={source}>Uncached</a>
-					<a href="http://example.org/insecure.jpg">Insecure image</a>
-				</div>
-				<LinkedImageViewer />
-			</>
-		));
-		expect(linkedImage()).toBeNull();
-		fireEvent.click(screen.getByText("Insecure image"));
-		expect(linkedImage()).toBeNull();
-		expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
-			url: "http://example.org/insecure.jpg",
-		});
-		invoke.mockClear();
-		fireEvent.click(screen.getByText("Uncached"), { ctrlKey: true });
-		expect(linkedImage()).toBeNull();
-		expect(invoke).toHaveBeenCalledTimes(1);
-		fireEvent.click(screen.getByText("Uncached"));
-		expect(linkedImage()?.fullUrl).toBe(source);
-		expect(screen.queryByRole("button", { name: "Download image" })).toBeNull();
-		expect(screen.getByRole("link", { name: "Open in browser" })).toBeTruthy();
-	});
 });

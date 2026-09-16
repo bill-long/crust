@@ -132,11 +132,9 @@ describe("UrlPreviewCard", () => {
 			type: "video.other",
 			image: { mxcUrl: "mxc://h/v", width: 1280, height: 720 },
 		});
-		expect(
-			screen
-				.getByRole("link", { name: /^Link preview/ })
-				.getAttribute("aria-label"),
-		).toContain("(video)");
+		expect(screen.getByRole("link").getAttribute("aria-label")).toContain(
+			"(video)",
+		);
 		// Play triangle svg present inside the hero.
 		expect(document.querySelector("svg path")).not.toBeNull();
 	});
@@ -147,11 +145,9 @@ describe("UrlPreviewCard", () => {
 			type: "article",
 			image: { mxcUrl: "mxc://h/a", width: 1280, height: 720 },
 		});
-		expect(
-			screen
-				.getByRole("link", { name: /^Link preview/ })
-				.getAttribute("aria-label"),
-		).not.toContain("(video)");
+		expect(screen.getByRole("link").getAttribute("aria-label")).not.toContain(
+			"(video)",
+		);
 		expect(document.querySelector("svg path")).toBeNull();
 	});
 
@@ -192,7 +188,7 @@ describe("UrlPreviewCard", () => {
 			title: "Focus me",
 			image: { mxcUrl: "mxc://h/fh", width: 1280, height: 720 },
 		});
-		const link = screen.getByRole("link", { name: /^Link preview/ });
+		const link = screen.getByRole("link");
 		link.focus();
 		expect(document.activeElement).toBe(link);
 
@@ -200,7 +196,7 @@ describe("UrlPreviewCard", () => {
 
 		// The layout swap must vary one <a>'s class, not replace the <a>:
 		// destroying the focused element drops a keyboard user to <body>.
-		expect(screen.getByRole("link", { name: /^Link preview/ })).toBe(link);
+		expect(screen.getByRole("link")).toBe(link);
 		expect(document.activeElement).toBe(link);
 	});
 
