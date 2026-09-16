@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { imageViewerSource, isImageLink } from "./imageLink";
 
 describe("direct image links", () => {
+	it("honors video metadata over an image URL suffix", () => {
+		expect(isImageLink("https://example.org/video.jpg", "video.other")).toBe(
+			false,
+		);
+	});
 	it.each([
 		["http://example.org/image.jpg", null, null],
 		[

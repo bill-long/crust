@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	within,
+} from "@solidjs/testing-library";
 import type { MatrixClient } from "matrix-js-sdk";
 import { createStore } from "solid-js/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -101,13 +107,13 @@ describe("linked image viewer", () => {
 			await expect.poll(() => document.activeElement).toBe(link);
 			await expect
 				.poll(() =>
-					screen.queryByRole("button", {
+					screen.queryByRole("link", {
 						name: "Open preview image in full-screen viewer",
 					}),
 				)
 				.not.toBeNull();
 			await userEvent.click(
-				screen.getByRole("button", {
+				screen.getByRole("link", {
 					name: "Open preview image in full-screen viewer",
 				}),
 			);
@@ -139,7 +145,11 @@ describe("linked image viewer", () => {
 				<UrlPreviewCard
 					client={client}
 					url="https://example.org/story.html"
-					data={{ ...data, title: "Article" }}
+					data={{
+						...data,
+						title: "Article",
+						image: { ...data.image, alt: "EVE career map" },
+					}}
 				/>
 				<LinkedImageViewer />
 			</>
@@ -150,14 +160,103 @@ describe("linked image viewer", () => {
 		expect(invoke).toHaveBeenCalledTimes(1);
 		expect(linkedImage()).toBeNull();
 		await userEvent.click(
-			screen.getByRole("button", {
+			screen.getByRole("link", {
 				name: "Open preview image in full-screen viewer",
 			}),
 		);
 		expect(linkedImage()?.fullUrl).toBe(picture);
-		expect(screen.getByAltText("Image")).toBeTruthy();
+		expect(
+			within(screen.getByRole("dialog")).getByAltText("EVE career map"),
+		).toBeTruthy();
 		expect(invoke).toHaveBeenCalledTimes(1);
 	});
+	it.each(["video.other", "article"])(
+		"opens %s text and titles externally even with an image suffix",
+		async (type) => {
+			const invoke = vi.fn().mockResolvedValue(undefined);
+			vi.stubGlobal("isTauri", true);
+			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+			stop = watchExternalLinks();
+			const videoClient = {
+				...client,
+				getUrlPreview: async () => ({
+					"og:type": type,
+					"og:image": data.image.mxcUrl,
+				}),
+			} as unknown as MatrixClient;
+			await getOrFetchPreview(videoClient, source, 0);
+			render(() => (
+				<>
+					<div class="message-body">
+						<a href={source}>Video URL</a>
+					</div>
+					<UrlPreviewCard
+						client={client}
+						url={source}
+						data={{ ...data, title: "Page", type }}
+					/>
+					<LinkedImageViewer />
+				</>
+			));
+			await userEvent.click(screen.getByRole("link", { name: "Video URL" }));
+			await userEvent.click(
+				screen.getByRole("link", { name: /^Link preview: Page/ }),
+			);
+			expect(invoke).toHaveBeenCalledTimes(2);
+			expect(linkedImage()).toBeNull();
+			await userEvent.click(
+				screen.getByRole("link", {
+					name:
+						type === "article"
+							? "Open preview image in full-screen viewer"
+							: "Open video in browser",
+				}),
+			);
+			if (type === "article") {
+				expect(linkedImage()?.fullUrl).toBe(picture);
+				expect(
+					within(screen.getByRole("dialog")).getByAltText("Image"),
+				).toBeTruthy();
+				expect(invoke).toHaveBeenCalledTimes(2);
+			} else {
+				expect(invoke).toHaveBeenCalledTimes(3);
+				expect(linkedImage()).toBeNull();
+			}
+		},
+	);
+	it.each([undefined, "video.other"])(
+		"preserves modified and middle thumbnail clicks (%s)",
+		(type) => {
+			const invoke = vi.fn().mockResolvedValue(undefined);
+			vi.stubGlobal("isTauri", true);
+			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+			stop = watchExternalLinks();
+			render(() => (
+				<>
+					<UrlPreviewCard
+						client={client}
+						url={source}
+						data={{ ...data, ...(type ? { type } : {}) }}
+					/>
+					<LinkedImageViewer />
+				</>
+			));
+			const thumbnail = screen.getByRole("link", { name: /^Open / });
+			for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) {
+				fireEvent.click(thumbnail, { [modifier]: true });
+			}
+			fireEvent(
+				thumbnail,
+				new MouseEvent("auxclick", {
+					button: 1,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+			expect(invoke).toHaveBeenCalledTimes(5);
+			expect(linkedImage()).toBeNull();
+		},
+	);
 	it("opens uncached image links only on click and leaves modified clicks external", () => {
 		const invoke = vi.fn().mockResolvedValue(undefined);
 		vi.stubGlobal("isTauri", true);

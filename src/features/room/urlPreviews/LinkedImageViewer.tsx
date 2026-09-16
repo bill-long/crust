@@ -31,8 +31,10 @@ export function LinkedImageViewer() {
 				event.target instanceof Element
 					? event.target.closest<HTMLAnchorElement>(".message-body a[href]")
 					: null;
-			if (!anchor || !isImageLink(anchor.href)) return;
-			const preview = peekPreview(anchor.href)?.image;
+			if (!anchor) return;
+			const metadata = peekPreview(anchor.href);
+			if (!isImageLink(anchor.href, metadata?.type)) return;
+			const preview = metadata?.image;
 			const fullUrl = imageViewerSource(
 				anchor.href,
 				preview ? client.mxcUrlToHttp(preview.mxcUrl) : null,
@@ -44,6 +46,8 @@ export function LinkedImageViewer() {
 			setLinkedImage({
 				sourceUrl: anchor.href,
 				fullUrl,
+				...(metadata?.type ? { previewType: metadata.type } : {}),
+				...(preview?.alt ? { alt: preview.alt } : {}),
 				...(preview?.width !== undefined ? { width: preview.width } : {}),
 				...(preview?.height !== undefined ? { height: preview.height } : {}),
 			});
@@ -59,10 +63,11 @@ export function LinkedImageViewer() {
 		return {
 			eventId: current.sourceUrl,
 			fullUrl: current.fullUrl,
+			...(current.alt ? { alt: current.alt } : {}),
 			externalUrl: current.sourceUrl,
 			// Only cached media has a download endpoint with Matrix CORS support.
 			canDownload: current.fullUrl !== current.sourceUrl,
-			filename: isImageLink(current.sourceUrl)
+			filename: isImageLink(current.sourceUrl, current.previewType)
 				? url.pathname.split("/").pop() || null
 				: null,
 			width: current.width ?? null,

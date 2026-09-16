@@ -1,12 +1,10 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { type Component, Show } from "solid-js";
-import { openExternalUrl } from "../../../app/externalLinks";
 import {
 	createImageFallback,
 	type FailedImageUrls,
 } from "../../../lib/imageFallback";
 import { imageViewerSource, isImageLink } from "../../../lib/imageLink";
-import { reportError } from "../../../lib/reportError";
 import { setLinkedImage } from "../../../stores/linkedImage";
 import type { UrlPreviewData } from "./previewCache";
 
@@ -122,6 +120,8 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 		setLinkedImage({
 			sourceUrl: props.url,
 			fullUrl,
+			...(props.data.type ? { previewType: props.data.type } : {}),
+			...(img?.alt ? { alt: img.alt } : {}),
 			...(img?.width !== undefined ? { width: img.width } : {}),
 			...(img?.height !== undefined ? { height: img.height } : {}),
 		});
@@ -134,25 +134,27 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			event.metaKey ||
 			event.shiftKey ||
 			event.altKey ||
-			!isImageLink(props.url)
+			!isImageLink(props.url, props.data.type)
 		)
 			return;
 		if (openImage()) event.preventDefault();
 	};
-	const onImageClick = () => {
-		if (isVideo() || !openImage()) {
-			void openExternalUrl(props.url).catch((error) =>
-				reportError(error, {
-					userMessage: "Couldn't open the link in your browser.",
-					logLabel: "Opening preview video",
-				}),
-			);
-		}
+	const onImageClick = (event: MouseEvent) => {
+		if (
+			event.button !== 0 ||
+			event.ctrlKey ||
+			event.metaKey ||
+			event.shiftKey ||
+			event.altKey ||
+			isVideo()
+		)
+			return;
+		if (openImage()) event.preventDefault();
 	};
 	let titleLink: HTMLAnchorElement | undefined;
-	let imageButton: HTMLButtonElement | undefined;
+	let imageLink: HTMLAnchorElement | undefined;
 	const onImageError = (event: Event & { currentTarget: HTMLImageElement }) => {
-		if (document.activeElement === imageButton) titleLink?.focus();
+		if (document.activeElement === imageLink) titleLink?.focus();
 		image.onError(event);
 	};
 
@@ -180,9 +182,11 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			</a>
 			<Show when={!image.failed() && imageUrl()}>
 				{(src) => (
-					<button
-						ref={imageButton}
-						type="button"
+					<a
+						ref={imageLink}
+						href={props.url}
+						target="_blank"
+						rel="noreferrer noopener"
 						onClick={onImageClick}
 						aria-label={
 							isVideo()
@@ -226,7 +230,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 								</span>
 							</span>
 						</Show>
-					</button>
+					</a>
 				)}
 			</Show>
 		</div>

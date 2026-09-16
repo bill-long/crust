@@ -1,5 +1,7 @@
 /** Recognize direct raster-image links without contacting the remote site. */
-export function isImageLink(value: string): boolean {
+export function isImageLink(value: string, previewType?: string): boolean {
+	if (previewType === "article" || previewType?.startsWith("video"))
+		return false;
 	try {
 		const url = new URL(value);
 		return (

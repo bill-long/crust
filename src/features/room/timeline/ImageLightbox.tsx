@@ -24,6 +24,7 @@ export interface LightboxImage {
 	mimetype: string | null;
 	size: number | null;
 	filename: string | null;
+	alt?: string;
 	width: number | null;
 	height: number | null;
 	senderName: string;
@@ -872,7 +873,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										ref={imgRef}
 										src={src()}
 										referrerPolicy="no-referrer"
-										alt={img().filename ?? "Image"}
+										alt={img().alt || img().filename || "Image"}
 										onLoad={onImgLoad}
 										onError={onImgError}
 										draggable={false}
