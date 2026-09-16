@@ -2,7 +2,11 @@ import { useLocation } from "@solidjs/router";
 import { createEffect, createMemo, onCleanup, onMount } from "solid-js";
 import { useClient } from "../../../client/client";
 import { imageViewerSource, isImageLink } from "../../../lib/imageLink";
-import { linkedImage, setLinkedImage } from "../../../stores/linkedImage";
+import {
+	linkedImage,
+	openLinkedImage,
+	setLinkedImage,
+} from "../../../stores/linkedImage";
 import { ImageLightbox, type LightboxImage } from "../timeline/ImageLightbox";
 import { peekPreview } from "./previewCache";
 
@@ -10,6 +14,11 @@ import { peekPreview } from "./previewCache";
 export function LinkedImageViewer() {
 	const { client } = useClient();
 	const location = useLocation();
+	let focusFallbacks: HTMLElement[] = [];
+	createEffect(() => {
+		const current = linkedImage();
+		if (current) focusFallbacks = current.focusFallbacks ?? [];
+	});
 	createEffect(() => {
 		location.pathname;
 		location.search;
@@ -44,14 +53,17 @@ export function LinkedImageViewer() {
 			event.preventDefault();
 			// No automatic remote fetch: a direct origin is contacted only on click
 			// when no homeserver-cached image is available.
-			setLinkedImage({
-				sourceUrl: anchor.href,
-				fullUrl,
-				...(metadata?.type ? { previewType: metadata.type } : {}),
-				...(preview?.alt ? { alt: preview.alt } : {}),
-				...(preview?.width !== undefined ? { width: preview.width } : {}),
-				...(preview?.height !== undefined ? { height: preview.height } : {}),
-			});
+			openLinkedImage(
+				{
+					sourceUrl: anchor.href,
+					fullUrl,
+					...(metadata?.type ? { previewType: metadata.type } : {}),
+					...(preview?.alt ? { alt: preview.alt } : {}),
+					...(preview?.width !== undefined ? { width: preview.width } : {}),
+					...(preview?.height !== undefined ? { height: preview.height } : {}),
+				},
+				anchor,
+			);
 		};
 		document.addEventListener("click", onClick);
 		onCleanup(() => document.removeEventListener("click", onClick));
@@ -86,9 +98,16 @@ export function LinkedImageViewer() {
 			open={() => image() !== null}
 			image={image}
 			onClose={() => setLinkedImage(null)}
-			fallbackFocus={() =>
-				document.querySelector<HTMLElement>('[data-testid="timeline-scroller"]')
-			}
+			fallbackFocus={() => {
+				const target = focusFallbacks.find((element) => element.isConnected);
+				focusFallbacks = [];
+				return (
+					target ??
+					document.querySelector<HTMLElement>(
+						'[data-testid="timeline-scroller"]',
+					)
+				);
+			}}
 		/>
 	);
 }

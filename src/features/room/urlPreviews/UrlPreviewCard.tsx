@@ -5,7 +5,7 @@ import {
 	type FailedImageUrls,
 } from "../../../lib/imageFallback";
 import { imageViewerSource, isImageLink } from "../../../lib/imageLink";
-import { setLinkedImage } from "../../../stores/linkedImage";
+import { openLinkedImage } from "../../../stores/linkedImage";
 import type { UrlPreviewData } from "./previewCache";
 
 interface UrlPreviewCardProps {
@@ -110,7 +110,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 		</div>
 	);
 
-	const openImage = () => {
+	const openImage = (opener: HTMLElement) => {
 		const img = props.data.image;
 		const fullUrl = imageViewerSource(
 			props.url,
@@ -118,14 +118,17 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			props.data.type,
 		);
 		if (!fullUrl) return false;
-		setLinkedImage({
-			sourceUrl: props.url,
-			fullUrl,
-			...(props.data.type ? { previewType: props.data.type } : {}),
-			...(img?.alt ? { alt: img.alt } : {}),
-			...(img?.width !== undefined ? { width: img.width } : {}),
-			...(img?.height !== undefined ? { height: img.height } : {}),
-		});
+		openLinkedImage(
+			{
+				sourceUrl: props.url,
+				fullUrl,
+				...(props.data.type ? { previewType: props.data.type } : {}),
+				...(img?.alt ? { alt: img.alt } : {}),
+				...(img?.width !== undefined ? { width: img.width } : {}),
+				...(img?.height !== undefined ? { height: img.height } : {}),
+			},
+			opener,
+		);
 		return true;
 	};
 	const onTitleClick = (event: MouseEvent) => {
@@ -138,7 +141,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			!isImageLink(props.url, props.data.type)
 		)
 			return;
-		if (openImage()) event.preventDefault();
+		if (openImage(event.currentTarget as HTMLElement)) event.preventDefault();
 	};
 	const onImageClick = (event: MouseEvent) => {
 		if (
@@ -150,7 +153,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			isVideo()
 		)
 			return;
-		if (openImage()) event.preventDefault();
+		if (openImage(event.currentTarget as HTMLElement)) event.preventDefault();
 	};
 	let titleLink: HTMLAnchorElement | undefined;
 	let imageLink: HTMLAnchorElement | undefined;
@@ -180,7 +183,12 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 			<Show when={!image.failed() && imageUrl()}>
 				{(src) => {
 					onCleanup(() => {
-						if (document.activeElement === imageLink) titleLink?.focus();
+						if (
+							image.failed() &&
+							titleLink?.isConnected &&
+							document.activeElement === imageLink
+						)
+							titleLink.focus();
 					});
 					return (
 						<a

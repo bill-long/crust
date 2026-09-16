@@ -49,6 +49,41 @@ afterEach(() => {
 });
 
 describe("linked image viewer", () => {
+	it.each(["text", "preview"])(
+		"restores recycled %s openers to their originating timeline",
+		async (entry) => {
+			await getOrFetchPreview(client, source, 0);
+			render(() => (
+				<>
+					<div data-testid="timeline-scroller" tabindex="-1">
+						Main timeline
+					</div>
+					<section tabindex="-1" aria-label="Thread timeline">
+						<div data-testid="opener-row">
+							<div class="message-body">
+								<a href={source}>Thread image</a>
+							</div>
+							<UrlPreviewCard client={client} url={source} data={data} />
+						</div>
+					</section>
+					<LinkedImageViewer />
+				</>
+			));
+			const origin = screen.getByRole("region", { name: "Thread timeline" });
+			const opener =
+				entry === "text"
+					? screen.getByRole("link", { name: "Thread image" })
+					: screen.getByRole("link", {
+							name: "Open preview image in full-screen viewer",
+						});
+			opener.focus();
+			await userEvent.keyboard("{Enter}");
+			expect(screen.getByRole("dialog")).toBeTruthy();
+			screen.getByTestId("opener-row").remove();
+			await userEvent.keyboard("{Escape}");
+			await expect.poll(() => document.activeElement).toBe(origin);
+		},
+	);
 	it("restores focus when another card marks a shared thumbnail as failed", () => {
 		const broken = createFailedImageUrls();
 		render(() => (
