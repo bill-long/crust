@@ -10,11 +10,13 @@ import { createStore } from "solid-js/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import { watchExternalLinks } from "../../../app/externalLinks";
+import { createFailedImageUrls } from "../../../lib/imageFallback";
 import { linkedImage, setLinkedImage } from "../../../stores/linkedImage";
 import "../../../styles/global.css";
 import { LinkedImageViewer } from "./LinkedImageViewer";
 import { _resetPreviewCacheForTests, getOrFetchPreview } from "./previewCache";
 import { UrlPreviewCard } from "./UrlPreviewCard";
+import { UrlPreviewList } from "./UrlPreviewList";
 
 const source = "https://english.eve-guides.fr/images/wtd.jpg";
 const picture = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="black"/></svg>')}`;
@@ -47,6 +49,43 @@ afterEach(() => {
 });
 
 describe("linked image viewer", () => {
+	it.each(["article", "video.other"])(
+		"retains %s metadata without displaying an empty preview card",
+		async (type) => {
+			const invoke = vi.fn().mockResolvedValue(undefined);
+			vi.stubGlobal("isTauri", true);
+			vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+			stop = watchExternalLinks();
+			const metadataClient = {
+				...client,
+				getUrlPreview: async () => ({ "og:type": type }),
+			} as unknown as MatrixClient;
+			await getOrFetchPreview(metadataClient, source, 0);
+			render(() => (
+				<>
+					<div class="message-body">
+						<a href={source}>Metadata-only page</a>
+					</div>
+					<UrlPreviewList
+						client={metadataClient}
+						urls={() => [source]}
+						ts={() => 0}
+						disabled={() => false}
+						broken={createFailedImageUrls()}
+					/>
+					<LinkedImageViewer />
+				</>
+			));
+			await userEvent.click(
+				screen.getByRole("link", { name: "Metadata-only page" }),
+			);
+			expect(linkedImage()).toBeNull();
+			expect(invoke).toHaveBeenCalledWith("plugin:opener|open_url", {
+				url: source,
+			});
+			expect(screen.queryByRole("link", { name: /^Link preview/ })).toBeNull();
+		},
+	);
 	it.each(["pathname", "search", "hash"] as const)(
 		"closes when navigation changes %s",
 		async (part) => {

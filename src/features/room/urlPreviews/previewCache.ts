@@ -2,9 +2,8 @@ import type { MatrixClient } from "matrix-js-sdk";
 import { canonicalizeUrl } from "../../../lib/extractUrls";
 
 /**
- * Normalized OpenGraph data we render. Only fields we display are
- * captured; raw `IPreviewUrlResponse` keys (`og:*`) are mapped at
- * fetch time.
+ * Normalized OpenGraph data for preview rendering and link handling.
+ * Raw `IPreviewUrlResponse` keys (`og:*`) are mapped at fetch time.
  */
 export interface UrlPreviewData {
 	title?: string;
@@ -77,8 +76,8 @@ function readPositiveInt(
 
 /**
  * Map a raw homeserver preview response into our normalized shape.
- * Returns null if nothing useful is present (no title, no description,
- * no usable mxc image).
+ * Type-only responses remain useful for link handling even when there
+ * is no title, description, or usable mxc image to render as a card.
  *
  * The thumbnail is mxc-only on purpose: rendering an external https
  * image would bypass the homeserver proxy and leak the user's IP to
@@ -108,7 +107,7 @@ function normalizePreview(raw: unknown): UrlPreviewData | null {
 		};
 	}
 
-	if (!title && !description && !image) return null;
+	if (!title && !description && !image && !type) return null;
 
 	const data: UrlPreviewData = {};
 	if (title) data.title = title;

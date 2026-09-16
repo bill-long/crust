@@ -45,9 +45,13 @@ const PreviewItemView: Component<{
 		() => (props.disabled ? null : props.url),
 		(url) => getOrFetchPreview(props.client, url, props.ts),
 	);
+	const cardData = () => {
+		const data = resource();
+		return data && (data.title || data.description || data.image) ? data : null;
+	};
 
 	return (
-		<Show when={!props.disabled && resource()}>
+		<Show when={!props.disabled && cardData()}>
 			{(data) => (
 				<UrlPreviewCard
 					client={props.client}
