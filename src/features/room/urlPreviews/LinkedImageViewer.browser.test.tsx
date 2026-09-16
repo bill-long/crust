@@ -49,6 +49,64 @@ afterEach(() => {
 });
 
 describe("linked image viewer", () => {
+	it("restores focus when another card marks a shared thumbnail as failed", () => {
+		const broken = createFailedImageUrls();
+		render(() => (
+			<>
+				<UrlPreviewCard
+					client={client}
+					url={source}
+					data={{ ...data, title: "First" }}
+					broken={broken}
+				/>
+				<UrlPreviewCard
+					client={client}
+					url={source}
+					data={{ ...data, title: "Second" }}
+					broken={broken}
+				/>
+			</>
+		));
+		const thumbnails = screen.getAllByRole("link", {
+			name: "Open preview image in full-screen viewer",
+		});
+		thumbnails[1]?.focus();
+		fireEvent.error(thumbnails[0]?.querySelector("img") as HTMLImageElement);
+		expect(
+			screen.queryAllByRole("link", {
+				name: "Open preview image in full-screen viewer",
+			}),
+		).toHaveLength(0);
+		expect(document.activeElement).toBe(
+			screen.getByRole("link", { name: "Link preview: Second" }),
+		);
+	});
+	it.each([true, false])(
+		"keeps preview visual and keyboard order aligned (hero=%s)",
+		async (hero) => {
+			render(() => (
+				<UrlPreviewCard
+					client={client}
+					url={source}
+					data={{
+						title: "Map",
+						image: { ...data.image, width: hero ? 1600 : 100 },
+					}}
+				/>
+			));
+			const title = screen.getByRole("link", { name: "Link preview: Map" });
+			const thumbnail = screen.getByRole("link", {
+				name: "Open preview image in full-screen viewer",
+			});
+			const titleRect = title.getBoundingClientRect();
+			const imageRect = thumbnail.getBoundingClientRect();
+			if (hero) expect(titleRect.bottom).toBeLessThanOrEqual(imageRect.top);
+			else expect(titleRect.right).toBeLessThanOrEqual(imageRect.left);
+			title.focus();
+			await userEvent.keyboard("{Tab}");
+			expect(document.activeElement).toBe(thumbnail);
+		},
+	);
 	it.each(["article", "video.other"])(
 		"retains %s metadata without displaying an empty preview card",
 		async (type) => {

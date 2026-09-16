@@ -1,5 +1,5 @@
 import type { MatrixClient } from "matrix-js-sdk";
-import { type Component, Show } from "solid-js";
+import { type Component, onCleanup, Show } from "solid-js";
 import {
 	createImageFallback,
 	type FailedImageUrls,
@@ -154,10 +154,6 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 	};
 	let titleLink: HTMLAnchorElement | undefined;
 	let imageLink: HTMLAnchorElement | undefined;
-	const onImageError = (event: Event & { currentTarget: HTMLImageElement }) => {
-		if (document.activeElement === imageLink) titleLink?.focus();
-		image.onError(event);
-	};
 
 	return (
 		<div class={`${CARD_BASE} ${isHero() ? CARD_HERO : CARD_COMPACT}`}>
@@ -168,7 +164,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 				rel="noreferrer noopener"
 				aria-label={ariaLabel()}
 				onClick={onTitleClick}
-				class={`min-w-0 flex-1 rounded no-underline hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus ${isHero() ? "order-2 w-full p-2" : "self-stretch content-center"}`}
+				class={`min-w-0 flex-1 rounded no-underline hover:bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus ${isHero() ? "w-full p-2" : "self-stretch content-center"}`}
 			>
 				<TextColumn />
 				<Show
@@ -182,57 +178,62 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 				</Show>
 			</a>
 			<Show when={!image.failed() && imageUrl()}>
-				{(src) => (
-					<a
-						ref={imageLink}
-						href={props.url}
-						target="_blank"
-						rel="noreferrer noopener"
-						onClick={onImageClick}
-						aria-label={
-							isVideo()
-								? "Open video in browser"
-								: "Open preview image in full-screen viewer"
-						}
-						class={`relative shrink-0 bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${isHero() ? "order-1 w-full" : "h-24 w-24 rounded"}`}
-						style={
-							isHero()
-								? {
-										"aspect-ratio": `${props.data.image?.width} / ${props.data.image?.height}`,
-									}
-								: undefined
-						}
-					>
-						<img
-							ref={image.ref}
-							src={src()}
-							alt={props.data.image?.alt ?? ""}
-							width={isHero() ? undefined : 96}
-							height={isHero() ? undefined : 96}
-							loading="lazy"
-							onError={onImageError}
-							onLoad={image.onLoad}
-							class="absolute inset-0 h-full w-full rounded object-cover"
-						/>
-						<Show when={isVideo() && isHero()}>
-							<span
-								aria-hidden="true"
-								class="absolute inset-0 flex items-center justify-center"
-							>
-								<span class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-0/70 text-text-primary">
-									<svg
-										class="h-6 w-6"
-										viewBox="0 0 24 24"
-										fill="currentColor"
-										aria-hidden="true"
-									>
-										<path d="M8 5v14l11-7z" />
-									</svg>
+				{(src) => {
+					onCleanup(() => {
+						if (document.activeElement === imageLink) titleLink?.focus();
+					});
+					return (
+						<a
+							ref={imageLink}
+							href={props.url}
+							target="_blank"
+							rel="noreferrer noopener"
+							onClick={onImageClick}
+							aria-label={
+								isVideo()
+									? "Open video in browser"
+									: "Open preview image in full-screen viewer"
+							}
+							class={`relative shrink-0 bg-surface-3 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${isHero() ? "w-full" : "h-24 w-24 rounded"}`}
+							style={
+								isHero()
+									? {
+											"aspect-ratio": `${props.data.image?.width} / ${props.data.image?.height}`,
+										}
+									: undefined
+							}
+						>
+							<img
+								ref={image.ref}
+								src={src()}
+								alt={props.data.image?.alt ?? ""}
+								width={isHero() ? undefined : 96}
+								height={isHero() ? undefined : 96}
+								loading="lazy"
+								onError={image.onError}
+								onLoad={image.onLoad}
+								class="absolute inset-0 h-full w-full rounded object-cover"
+							/>
+							<Show when={isVideo() && isHero()}>
+								<span
+									aria-hidden="true"
+									class="absolute inset-0 flex items-center justify-center"
+								>
+									<span class="flex h-12 w-12 items-center justify-center rounded-full bg-surface-0/70 text-text-primary">
+										<svg
+											class="h-6 w-6"
+											viewBox="0 0 24 24"
+											fill="currentColor"
+											aria-hidden="true"
+										>
+											<path d="M8 5v14l11-7z" />
+										</svg>
+									</span>
 								</span>
-							</span>
-						</Show>
-					</a>
-				)}
+							</Show>
+						</a>
+					);
+				}}
 			</Show>
 		</div>
 	);
