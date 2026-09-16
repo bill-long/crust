@@ -17,6 +17,7 @@ export function isImageLink(value: string, previewType?: string): boolean {
 export function imageViewerSource(
 	sourceUrl: string,
 	cachedUrl?: string | null,
+	previewType?: string,
 ): string | null {
 	if (cachedUrl) {
 		try {
@@ -26,7 +27,8 @@ export function imageViewerSource(
 			// Invalid cached metadata must not swallow the original link.
 		}
 	}
-	return isImageLink(sourceUrl) && new URL(sourceUrl).protocol === "https:"
+	return isImageLink(sourceUrl, previewType) &&
+		new URL(sourceUrl).protocol === "https:"
 		? sourceUrl
 		: null;
 }

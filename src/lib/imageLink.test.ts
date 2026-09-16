@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { imageViewerSource, isImageLink } from "./imageLink";
 
 describe("direct image links", () => {
+	it.each(["article", "video.other"])(
+		"keeps %s metadata authoritative when cached media is unusable",
+		(type) => {
+			expect(
+				imageViewerSource(
+					"https://example.org/story.jpg",
+					"http://server/cached",
+					type,
+				),
+			).toBeNull();
+		},
+	);
 	it("honors video metadata over an image URL suffix", () => {
 		expect(isImageLink("https://example.org/video.jpg", "video.other")).toBe(
 			false,

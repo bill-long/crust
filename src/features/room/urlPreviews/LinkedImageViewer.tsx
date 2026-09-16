@@ -38,6 +38,7 @@ export function LinkedImageViewer() {
 			const fullUrl = imageViewerSource(
 				anchor.href,
 				preview ? client.mxcUrlToHttp(preview.mxcUrl) : null,
+				metadata?.type,
 			);
 			if (!fullUrl) return;
 			event.preventDefault();

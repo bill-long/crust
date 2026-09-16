@@ -115,6 +115,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 		const fullUrl = imageViewerSource(
 			props.url,
 			(img ? props.client.mxcUrlToHttp(img.mxcUrl) : null) || imageUrl(),
+			props.data.type,
 		);
 		if (!fullUrl) return false;
 		setLinkedImage({
