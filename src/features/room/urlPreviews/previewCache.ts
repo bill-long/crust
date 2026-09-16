@@ -174,8 +174,7 @@ export function getOrFetchPreview(
  * Returns `undefined` if not yet cached, `null` if we know there's
  * no useful preview, or the data otherwise.
  *
- * Currently unused by the UI (which goes through `createResource`),
- * but kept for potential prefetch / debugging use.
+ * Used by linked-image clicks to reuse the homeserver-cached full image.
  */
 export function peekPreview(rawUrl: string): UrlPreviewData | null | undefined {
 	const canonical = canonicalizeUrl(rawUrl);

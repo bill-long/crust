@@ -342,6 +342,12 @@ pub fn run() {
         .manage(StagedUpdate::default())
         .manage(shutdown::Shutdown::default())
         .plugin(tauri_plugin_notification::init())
+        // The app routes image and Matrix links first, then opens remaining links.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()

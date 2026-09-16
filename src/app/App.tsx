@@ -23,6 +23,7 @@ import { loadSession, loadSessions } from "../stores/session";
 import { basePrefix } from "./basePath";
 import { createBootStall } from "./bootStall";
 import { ConfigProvider, useConfig } from "./ConfigProvider";
+import { watchExternalLinks } from "./externalLinks";
 import { accountTransitionInFlight, Layout } from "./Layout";
 import { finishSessionExit, runLogout } from "./logout";
 import { watchNativeShutdown } from "./nativeShutdown";
@@ -388,6 +389,7 @@ const SyncGate: Component<RouteSectionProps> = (props) => {
 const HomePage: Component = () => <Layout />;
 
 const App: Component = () => {
+	onMount(() => onCleanup(watchExternalLinks()));
 	onMount(() => {
 		let disposed = false;
 		let unlisten: (() => void) | undefined;

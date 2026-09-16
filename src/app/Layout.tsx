@@ -47,6 +47,7 @@ import { RoomList } from "../features/room/RoomList";
 import { buildRoomLinkUrl } from "../features/room/roomLink";
 import { ConfirmDialog } from "../features/room/settings/ConfirmDialog";
 import type { RoomSettingsTab } from "../features/room/settings/RoomSettingsOverlay";
+import { LinkedImageViewer } from "../features/room/urlPreviews/LinkedImageViewer";
 import { createCopyLink } from "../features/room/useCopyLink";
 import { useNotifications } from "../features/room/useNotifications";
 import { GlobalSearchPane } from "../features/search/GlobalSearchPane";
@@ -888,6 +889,7 @@ const Layout: Component = () => {
 		<div class="flex min-h-0 flex-1 bg-surface-0 text-text-primary">
 			{/* Document-level matrix.to / matrix: permalink routing (renders nothing) */}
 			<PermalinkRouting />
+			<LinkedImageViewer />
 			{/* Session-long join-room dialog host (store-driven open; renders
 				the dialog only while open) */}
 			<JoinRoomDialogHost client={client} />

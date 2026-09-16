@@ -10,6 +10,7 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
+import { isNativeShell } from "../../../app/nativeShell";
 import { Modal } from "../../../components/Modal";
 import { formatBytes } from "../../../lib/formatBytes";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
@@ -26,7 +27,9 @@ export interface LightboxImage {
 	width: number | null;
 	height: number | null;
 	senderName: string;
-	timestamp: number;
+	timestamp: number | null;
+	/** Original page or direct image URL, separate from a cached display URL. */
+	externalUrl?: string;
 	isEncrypted: boolean;
 	/**
 	 * EncryptedFile descriptor when `isEncrypted`. `fullUrl` then points at the
@@ -479,7 +482,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 
 	// Download with a sanitized filename: the decrypted Blob for encrypted
 	// images, or a fetched Blob of the http URL for plain ones. On failure,
-	// surface an inline error; the user can still use "Open in new tab"
+	// surface an inline error; the user can still use "Open in browser"
 	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
@@ -688,13 +691,19 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										<line x1="12" y1="15" x2="12" y2="3" />
 									</svg>
 								</button>
-								<Show when={displaySrc()}>
+								<Show
+									when={
+										isNativeShell() && props.image()?.isEncrypted
+											? null
+											: displaySrc()
+									}
+								>
 									{(src) => {
 										// New nodes per call — a single shared JSX node can't live
 										// in both Show branches.
 										const renderOpenIcon = () => (
 											<>
-												<span class="sr-only">Open in new tab</span>
+												<span class="sr-only">Open in browser</span>
 												<svg
 													class="h-5 w-5"
 													viewBox="0 0 24 24"
@@ -722,18 +731,18 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 														type="button"
 														onClick={openInNewTab}
 														class={openClass}
-														aria-label="Open in new tab"
+														aria-label="Open in browser"
 													>
 														{renderOpenIcon()}
 													</button>
 												}
 											>
 												<a
-													href={src()}
+													href={props.image()?.externalUrl ?? src()}
 													target="_blank"
 													rel="noopener noreferrer"
 													class={openClass}
-													aria-label="Open in new tab"
+													aria-label="Open in browser"
 												>
 													{renderOpenIcon()}
 												</a>
@@ -836,6 +845,13 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										Couldn't load image
 									</div>
 									<p>The full-resolution image failed to load.</p>
+									<button
+										type="button"
+										onClick={() => setImgLoadError(false)}
+										class="mt-3 rounded px-3 py-2 text-accent-text hover:bg-surface-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-border-focus"
+									>
+										Retry
+									</button>
 								</div>
 							</Match>
 							<Match when={displaySrc()}>
@@ -843,6 +859,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<img
 										ref={imgRef}
 										src={src()}
+										referrerPolicy="no-referrer"
 										alt={img().filename ?? "Image"}
 										onLoad={onImgLoad}
 										onError={onImgError}
@@ -872,10 +889,15 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 								<span class="truncate text-text-secondary">
 									{img().senderName}
 								</span>
-								<span aria-hidden="true">·</span>
-								<span>
-									{formatTimestamp(img().timestamp, userSettings().timeFormat)}
-								</span>
+								<Show when={img().timestamp !== null}>
+									<span aria-hidden="true">·</span>
+									<span>
+										{formatTimestamp(
+											img().timestamp as number,
+											userSettings().timeFormat,
+										)}
+									</span>
+								</Show>
 								<Show when={naturalSize()}>
 									{(n) => (
 										<>
