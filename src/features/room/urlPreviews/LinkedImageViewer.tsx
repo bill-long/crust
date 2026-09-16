@@ -59,7 +59,9 @@ export function LinkedImageViewer() {
 			eventId: current.sourceUrl,
 			fullUrl: current.fullUrl,
 			externalUrl: current.sourceUrl,
-			filename: url.pathname.split("/").pop() || "Image",
+			filename: isImageLink(current.sourceUrl)
+				? url.pathname.split("/").pop() || null
+				: null,
 			width: current.width ?? null,
 			height: current.height ?? null,
 			senderName: url.hostname,

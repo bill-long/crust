@@ -121,7 +121,7 @@ describe("linked image viewer", () => {
 			<>
 				<UrlPreviewCard
 					client={client}
-					url="https://example.org/article"
+					url="https://example.org/story.html"
 					data={{ ...data, title: "Article" }}
 				/>
 				<LinkedImageViewer />
@@ -138,6 +138,7 @@ describe("linked image viewer", () => {
 			}),
 		);
 		expect(linkedImage()?.fullUrl).toBe(picture);
+		expect(screen.getByAltText("Image")).toBeTruthy();
 		expect(invoke).toHaveBeenCalledTimes(1);
 	});
 	it("opens uncached image links only on click and leaves modified clicks external", () => {

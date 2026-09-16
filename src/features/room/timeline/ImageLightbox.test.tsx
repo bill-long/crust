@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { saveBlobToDisk } from "../../../lib/saveBlob";
+
+vi.mock("../../../lib/saveBlob", () => ({ saveBlobToDisk: vi.fn() }));
 
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
@@ -63,6 +66,7 @@ function setup(
 afterEach(() => {
 	cleanup();
 	vi.unstubAllGlobals();
+	vi.clearAllMocks();
 });
 
 /** A structurally-valid EncryptedFile descriptor (not used for real crypto here). */
@@ -75,6 +79,32 @@ const SAMPLE_ENCRYPTED_FILE = {
 };
 
 describe("ImageLightbox", () => {
+	it.each([
+		[null, "image/jpeg", "image.jpg"],
+		[null, "image/png", "image.png"],
+		[null, "application/octet-stream", "image.bin"],
+		["photo.jpg", "image/jpeg", "photo.jpg"],
+	])(
+		"downloads a linked image with filename %s and type %s as %s",
+		async (filename, type, expected) => {
+			const blob = new Blob(["image"], { type: type as string });
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue({ ok: true, blob: async () => blob }),
+			);
+			setup({
+				image: mkImage({
+					externalUrl: "https://example.org/story.html?secret=token",
+					filename,
+					mimetype: null,
+				}),
+			});
+			fireEvent.click(screen.getByRole("button", { name: "Download image" }));
+			await vi.waitFor(() =>
+				expect(saveBlobToDisk).toHaveBeenCalledWith(blob, expected),
+			);
+		},
+	);
 	it("renders the image and metadata when open", () => {
 		setup();
 		expect(screen.getByRole("dialog")).toBeTruthy();

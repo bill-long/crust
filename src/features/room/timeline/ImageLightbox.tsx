@@ -488,11 +488,6 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		const img = props.image();
 		if (!img) return;
 		setDownloadError(null);
-		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
-		const filename = sanitizeFilename(
-			img.filename ?? fallbackName,
-			fallbackName,
-		);
 		try {
 			// Encrypted: use the already-decrypted Blob directly — never the
 			// ciphertext, and no fetch of the managed `blob:` URL (which is
@@ -511,6 +506,15 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				blob = await res.blob();
 			}
+			// A webpage URL is not an image filename. Preview downloads use the
+			// fetched image type, without including URL paths or query tokens.
+			const fallbackName = img.externalUrl
+				? `image.${extFromMime(blob.type.startsWith("image/") ? blob.type : img.mimetype)}`
+				: `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
+			const filename = sanitizeFilename(
+				img.filename ?? fallbackName,
+				fallbackName,
+			);
 			// saveBlobToDisk mints its own object URL, independent of the
 			// hook's managed one, so it can't be revoked out from under the
 			// download.

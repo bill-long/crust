@@ -2,10 +2,23 @@ import { reportError } from "../lib/reportError";
 import { isNativeShell } from "./nativeShell";
 import { invokeTauri, tauriIpcAvailable } from "./tauri";
 
+// External applications for the schemes accepted in Matrix message links.
+// mxc is a media identifier, not an external application protocol.
+export const EXTERNAL_PROTOCOLS = [
+	"http:",
+	"https:",
+	"mailto:",
+	"tel:",
+	"xmpp:",
+	"geo:",
+	"magnet:",
+	"matrix:",
+];
+
 function externalUrl(value: string): URL | null {
 	try {
 		const url = new URL(value);
-		return ["http:", "https:", "mailto:"].includes(url.protocol) ? url : null;
+		return EXTERNAL_PROTOCOLS.includes(url.protocol) ? url : null;
 	} catch {
 		return null;
 	}
