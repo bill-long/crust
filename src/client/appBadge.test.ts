@@ -3,6 +3,16 @@ import { freezeAccountScope, unfreezeAccountScope } from "../stores/session";
 import { releaseAppBadge, updateAppBadge } from "./appBadge";
 
 const BADGE_METHODS = ["setAppBadge", "clearAppBadge"] as const;
+const native = vi.hoisted(() => ({
+	enabled: false,
+	overlay: false,
+	write: vi.fn(),
+}));
+vi.mock("../app/nativeShell", () => ({
+	isNativeShell: () => native.enabled,
+	isOverlayWindow: () => native.overlay,
+}));
+vi.mock("../app/nativeBadge", () => ({ writeNativeBadge: native.write }));
 type BadgeMethod = (typeof BADGE_METHODS)[number];
 
 /**
@@ -28,6 +38,9 @@ function stubBadge(
 }
 
 afterEach(() => {
+	native.enabled = false;
+	native.overlay = false;
+	native.write.mockReset();
 	unfreezeAccountScope();
 	for (const name of BADGE_METHODS) {
 		if (Object.hasOwn(navigator, name)) {
@@ -35,6 +48,39 @@ afterEach(() => {
 		}
 	}
 	vi.restoreAllMocks();
+});
+
+describe("desktop badge routing", () => {
+	it("uses the native badge for unread changes and clears on account release", () => {
+		native.enabled = true;
+		native.write.mockResolvedValue(undefined);
+		const browserBadge = stubBadge("setAppBadge");
+		updateAppBadge(5);
+		updateAppBadge(0);
+		freezeAccountScope();
+		updateAppBadge(9);
+		releaseAppBadge();
+		expect(native.write.mock.calls).toEqual([[5], [0], [0]]);
+		expect(browserBadge).not.toHaveBeenCalled();
+	});
+
+	it("does not let the voice overlay write or clear the main window badge", () => {
+		native.enabled = true;
+		native.overlay = true;
+		updateAppBadge(5);
+		releaseAppBadge();
+		expect(native.write).not.toHaveBeenCalled();
+	});
+
+	it("logs a native failure without surfacing a toast or rejecting", async () => {
+		native.enabled = true;
+		const error = new Error("Taskbar unavailable");
+		native.write.mockRejectedValue(error);
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+		updateAppBadge(5);
+		await Promise.resolve();
+		expect(log).toHaveBeenCalledWith("Failed to update desktop badge:", error);
+	});
 });
 
 describe("updateAppBadge", () => {

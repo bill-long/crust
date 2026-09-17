@@ -1,3 +1,6 @@
+import { writeNativeBadge } from "../app/nativeBadge";
+import { isNativeShell, isOverlayWindow } from "../app/nativeShell";
+import { reportError } from "../lib/reportError";
 import { isAccountScopeFrozen } from "../stores/session";
 
 /**
@@ -13,6 +16,8 @@ import { isAccountScopeFrozen } from "../stores/session";
  *
  * The Badging API (`navigator.setAppBadge` / `clearAppBadge`) is only present
  * for installed PWAs on supporting browsers; calls are guarded and best-effort.
+ * The desktop shell instead receives the same count through Tauri, where
+ * Windows uses a taskbar overlay icon. Only its main window owns the badge.
  */
 function badgeNav(): {
 	setAppBadge?: (n?: number) => Promise<void>;
@@ -26,6 +31,14 @@ function badgeNav(): {
 }
 
 function writeBadge(count: number): void {
+	if (isNativeShell()) {
+		if (!isOverlayWindow()) {
+			writeNativeBadge(count).catch((error) =>
+				reportError(error, { logLabel: "Failed to update desktop badge" }),
+			);
+		}
+		return;
+	}
 	const nav = badgeNav();
 	if (!nav) return;
 	if (count > 0) nav.setAppBadge?.(count).catch(() => {});
@@ -34,8 +47,8 @@ function writeBadge(count: number): void {
 
 /**
  * Set the app badge to `count`, clearing it when `count` is zero (or negative).
- * Mirrors the service worker's `setBadge`. Promise rejections are swallowed —
- * a failed badge update is never worth surfacing.
+ * Mirrors the service worker's `setBadge`. Failures never interrupt the user;
+ * native failures are logged for diagnosis.
  *
  * Silent once an account switch has committed. `location.assign` only STARTS
  * the navigation (#533), so this document keeps syncing the OUTGOING account
