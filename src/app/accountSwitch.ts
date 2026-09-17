@@ -88,8 +88,8 @@ export interface AccountExit {
  * wholly the outgoing account: once the pointer moves, the service worker holds
  * the incoming account's media token and account-scoped writes are frozen out,
  * so a multi-second round trip there would leave a still-visible UI fetching
- * media it can no longer authenticate. What follows the commit is synchronous
- * and immediately precedes the reload.
+ * media it can no longer authenticate. After the commit, only the local native
+ * badge clear is awaited before reloading.
  *
  * The price is that a commit which FAILS has already given the registration
  * back, on a document that goes on running that account - so the failure path
@@ -128,16 +128,16 @@ export async function endSessionForAccountExit(
 		// account's unread count must not greet the incoming one. Clearing rather
 		// than recomputing is the honest state: this document is on its way out
 		// and the only authority on the incoming count is that account's first
-		// sync, which sets the badge from `client/client.tsx`. Synchronous, and
-		// after a commit that has frozen the scope, so nothing can put the old
-		// count back between here and the reload.
+		// sync, which sets the badge from `client/client.tsx`. The scope is frozen;
+		// await the native write queue so no outgoing count or clear can arrive
+		// after the incoming document's first sync.
 		//
 		// Only an exit that HAS committed: leaving to add an account moves no
 		// pointer and freezes nothing, and this document goes on running - and
 		// syncing - the same account until `/login` unmounts it. That account is
 		// still logged in and those unreads are still its own, so a clear there
 		// would be both wrong and immediately undone.
-		releaseAppBadge();
+		await releaseAppBadge();
 	}
 	return true;
 }
@@ -284,7 +284,7 @@ export async function finishAccountLogout(
 	// the promoted account's, and the OS badge is one number for the install. The
 	// promoted account's first sync sets it (`client/client.tsx`); on the way to
 	// `/login` there is nothing left to count.
-	releaseAppBadge();
+	await releaseAppBadge();
 	// And the same for anything it had to say. A toast belongs to the session
 	// that raised it, and on the way to `/login` there is no session left to read
 	// it - notably the login route's own "you're already signed in" (#549), which

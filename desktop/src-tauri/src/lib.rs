@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuil
 use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
+mod app_badge;
 mod mic_hotkey;
 mod shutdown;
 mod update_install_marker;
@@ -372,6 +373,7 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            app_badge::set_app_badge,
             open_overlay,
             close_overlay,
             overlay_is_open,

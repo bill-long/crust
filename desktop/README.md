@@ -1,7 +1,7 @@
 # Crust desktop shell
 
 A [Tauri 2](https://tauri.app/) shell (Windows-first) that wraps the Crust PWA as
-a native desktop app. It adds two things the browser can't do:
+a native desktop app. Native integrations include:
 
 - **Native call overlay** — a transparent, chromeless, always-on-top second
   window (the app's `/overlay` route) that can be made click-through to float
@@ -14,6 +14,17 @@ a native desktop app. It adds two things the browser can't do:
 
 The shell bundles the built web app (`frontendDist: "../../dist"`), so build the
 web app first.
+
+## Unread taskbar badge
+
+The main window sends the same live unread total as the PWA to `set_app_badge`.
+Windows uses Tauri's taskbar overlay icon API (its numeric badge API is not
+supported on Windows), with counts above 99 displayed as `99+`. Other desktop
+platforms use Tauri's numeric badge API where the OS supports it.
+
+Reading all messages, signing out, or switching accounts clears the badge.
+The voice overlay cannot overwrite it. The web app renders the tiny icon using
+the existing danger/foreground theme tokens; no native font dependency is needed.
 
 ## Origin: https://tauri.localhost
 
