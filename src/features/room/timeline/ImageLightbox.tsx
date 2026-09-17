@@ -26,7 +26,9 @@ export interface LightboxImage {
 	width: number | null;
 	height: number | null;
 	senderName: string;
-	timestamp: number;
+	timestamp: number | null;
+	/** External image origins need not allow cross-origin download requests. */
+	canDownload?: boolean;
 	isEncrypted: boolean;
 	/**
 	 * EncryptedFile descriptor when `isEncrypted`. `fullUrl` then points at the
@@ -479,11 +481,11 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 
 	// Download with a sanitized filename: the decrypted Blob for encrypted
 	// images, or a fetched Blob of the http URL for plain ones. On failure,
-	// surface an inline error; the user can still use "Open in new tab"
+	// surface an inline error; the user can still use "Open in browser"
 	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
-		if (!img) return;
+		if (!img || img.canDownload === false) return;
 		setDownloadError(null);
 		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
 		const filename = sanitizeFilename(
@@ -660,41 +662,43 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 					<Show when={props.image()}>
 						{(img) => (
 							<>
-								<button
-									type="button"
-									onClick={handleDownload}
-									disabled={img().isEncrypted && !displaySrc()}
-									title={
-										img().isEncrypted &&
-										(!img().encryptedFile || decrypted.failed())
-											? "Image can't be decrypted"
-											: img().isEncrypted && !displaySrc()
-												? "Decrypting…"
-												: "Download"
-									}
-									class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-									aria-label="Download image"
-								>
-									<svg
-										class="h-5 w-5"
-										viewBox="0 0 24 24"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
-										aria-hidden="true"
+								<Show when={img().canDownload !== false}>
+									<button
+										type="button"
+										onClick={handleDownload}
+										disabled={img().isEncrypted && !displaySrc()}
+										title={
+											img().isEncrypted &&
+											(!img().encryptedFile || decrypted.failed())
+												? "Image can't be decrypted"
+												: img().isEncrypted && !displaySrc()
+													? "Decrypting…"
+													: "Download"
+										}
+										class="rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+										aria-label="Download image"
 									>
-										<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-										<polyline points="7 10 12 15 17 10" />
-										<line x1="12" y1="15" x2="12" y2="3" />
-									</svg>
-								</button>
+										<svg
+											class="h-5 w-5"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											aria-hidden="true"
+										>
+											<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+											<polyline points="7 10 12 15 17 10" />
+											<line x1="12" y1="15" x2="12" y2="3" />
+										</svg>
+									</button>
+								</Show>
 								<Show when={displaySrc()}>
 									{(src) => {
 										// New nodes per call — a single shared JSX node can't live
 										// in both Show branches.
 										const renderOpenIcon = () => (
 											<>
-												<span class="sr-only">Open in new tab</span>
+												<span class="sr-only">Open in browser</span>
 												<svg
 													class="h-5 w-5"
 													viewBox="0 0 24 24"
@@ -722,7 +726,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 														type="button"
 														onClick={openInNewTab}
 														class={openClass}
-														aria-label="Open in new tab"
+														aria-label="Open in browser"
 													>
 														{renderOpenIcon()}
 													</button>
@@ -733,7 +737,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 													target="_blank"
 													rel="noopener noreferrer"
 													class={openClass}
-													aria-label="Open in new tab"
+													aria-label="Open in browser"
 												>
 													{renderOpenIcon()}
 												</a>
@@ -843,6 +847,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<img
 										ref={imgRef}
 										src={src()}
+										referrerPolicy="no-referrer"
 										alt={img().filename ?? "Image"}
 										onLoad={onImgLoad}
 										onError={onImgError}
@@ -872,10 +877,15 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 								<span class="truncate text-text-secondary">
 									{img().senderName}
 								</span>
-								<span aria-hidden="true">·</span>
-								<span>
-									{formatTimestamp(img().timestamp, userSettings().timeFormat)}
-								</span>
+								<Show when={img().timestamp !== null}>
+									<span aria-hidden="true">·</span>
+									<span>
+										{formatTimestamp(
+											img().timestamp as number,
+											userSettings().timeFormat,
+										)}
+									</span>
+								</Show>
 								<Show when={naturalSize()}>
 									{(n) => (
 										<>

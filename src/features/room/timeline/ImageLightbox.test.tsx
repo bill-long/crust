@@ -175,7 +175,7 @@ describe("ImageLightbox", () => {
 		expect(screen.getByText(/couldn't decrypt image/i)).toBeTruthy();
 		const btn = screen.getByLabelText("Download image") as HTMLButtonElement;
 		expect(btn.disabled).toBe(true);
-		expect(screen.queryByLabelText("Open in new tab")).toBeNull();
+		expect(screen.queryByLabelText("Open in browser")).toBeNull();
 		expect(fetchSpy).not.toHaveBeenCalled();
 	});
 
@@ -195,7 +195,7 @@ describe("ImageLightbox", () => {
 
 	it("Open-in-new-tab anchor has rel=noopener noreferrer", () => {
 		setup();
-		const a = screen.getByLabelText("Open in new tab") as HTMLAnchorElement;
+		const a = screen.getByLabelText("Open in browser") as HTMLAnchorElement;
 		expect(a.getAttribute("rel")).toBe("noopener noreferrer");
 		expect(a.getAttribute("target")).toBe("_blank");
 	});
@@ -211,6 +211,6 @@ describe("ImageLightbox", () => {
 				encryptedFile: SAMPLE_ENCRYPTED_FILE,
 			}),
 		});
-		expect(screen.queryByLabelText("Open in new tab")).toBeNull();
+		expect(screen.queryByLabelText("Open in browser")).toBeNull();
 	});
 });

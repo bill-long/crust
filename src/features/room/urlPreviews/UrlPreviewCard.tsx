@@ -134,6 +134,7 @@ const UrlPreviewCard: Component<UrlPreviewCardProps> = (props) => {
 	// the focus of a keyboard user who had already tabbed onto the link.
 	return (
 		<a
+			data-link-preview
 			href={props.url}
 			target="_blank"
 			rel="noreferrer noopener"
