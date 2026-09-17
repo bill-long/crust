@@ -30,12 +30,19 @@ function badgeNav(): {
 	};
 }
 
-function writeBadge(count: number): void {
+let nativeBadgeWrite = Promise.resolve();
+
+function writeBadge(count: number): Promise<void> | void {
 	if (isNativeShell()) {
 		if (!isOverlayWindow()) {
-			writeNativeBadge(count).catch((error) =>
-				reportError(error, { logLabel: "Failed to update desktop badge" }),
-			);
+			// IPC requests can arrive out of order. Keep the clear behind any
+			// outgoing count, and let account exits await it before reloading.
+			nativeBadgeWrite = nativeBadgeWrite
+				.then(() => writeNativeBadge(count))
+				.catch((error) =>
+					reportError(error, { logLabel: "Failed to update desktop badge" }),
+				);
+			return nativeBadgeWrite;
 		}
 		return;
 	}
@@ -71,6 +78,6 @@ export function updateAppBadge(count: number): void {
  * that silences ordinary writes is already set by the time this runs, and
  * silencing the clear too would leave exactly the count it exists to remove.
  */
-export function releaseAppBadge(): void {
-	writeBadge(0);
+export function releaseAppBadge(): Promise<void> | void {
+	return writeBadge(0);
 }

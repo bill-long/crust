@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe("desktop badge routing", () => {
-	it("uses the native badge for unread changes and clears on account release", () => {
+	it("uses the native badge for unread changes and clears on account release", async () => {
 		native.enabled = true;
 		native.write.mockResolvedValue(undefined);
 		const browserBadge = stubBadge("setAppBadge");
@@ -59,7 +59,7 @@ describe("desktop badge routing", () => {
 		updateAppBadge(0);
 		freezeAccountScope();
 		updateAppBadge(9);
-		releaseAppBadge();
+		await releaseAppBadge();
 		expect(native.write.mock.calls).toEqual([[5], [0], [0]]);
 		expect(browserBadge).not.toHaveBeenCalled();
 	});
@@ -78,8 +78,33 @@ describe("desktop badge routing", () => {
 		native.write.mockRejectedValue(error);
 		const log = vi.spyOn(console, "error").mockImplementation(() => {});
 		updateAppBadge(5);
-		await Promise.resolve();
+		await vi.waitFor(() => expect(log).toHaveBeenCalled());
 		expect(log).toHaveBeenCalledWith("Failed to update desktop badge:", error);
+	});
+
+	it("serializes counts and clears, and keeps the queue usable after failure", async () => {
+		native.enabled = true;
+		let rejectWrite!: (error: Error) => void;
+		native.write
+			.mockImplementationOnce(
+				() =>
+					new Promise<void>((_, reject) => {
+						rejectWrite = reject;
+					}),
+			)
+			.mockResolvedValue(undefined);
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		updateAppBadge(5);
+		const cleared = releaseAppBadge();
+		updateAppBadge(2);
+		await vi.waitFor(() => expect(native.write).toHaveBeenCalledOnce());
+		expect(native.write).toHaveBeenLastCalledWith(5);
+		rejectWrite(new Error("Taskbar unavailable"));
+		await cleared;
+		await vi.waitFor(() =>
+			expect(native.write.mock.calls).toEqual([[5], [0], [2]]),
+		);
+		await releaseAppBadge();
 	});
 });
 

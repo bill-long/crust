@@ -126,7 +126,9 @@ beforeEach(() => {
 		calls.push("restoreWebPush");
 	});
 	releaseAppBadgeMock.mockClear();
-	releaseAppBadgeMock.mockImplementation(() => {
+	releaseAppBadgeMock.mockImplementation(async () => {
+		await Promise.resolve();
+		await Promise.resolve();
 		calls.push("badge:cleared");
 	});
 	vi.stubGlobal("location", { assign });

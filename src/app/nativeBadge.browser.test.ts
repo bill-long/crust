@@ -34,11 +34,17 @@ it("renders readable badge pixels and sends count changes and removal to the she
 		).toBe(true);
 	}
 	updateAppBadge(0);
+	await vi.waitFor(() =>
+		expect(invoke).toHaveBeenLastCalledWith("set_app_badge", {
+			count: 0,
+			rgba: null,
+		}),
+	);
 	expect(invoke).toHaveBeenLastCalledWith("set_app_badge", {
 		count: 0,
 		rgba: null,
 	});
-	releaseAppBadge();
+	await releaseAppBadge();
 	expect(invoke).toHaveBeenLastCalledWith("set_app_badge", {
 		count: 0,
 		rgba: null,
