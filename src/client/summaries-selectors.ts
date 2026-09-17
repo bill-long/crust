@@ -417,29 +417,26 @@ export function getOrphanRooms(summaries: SummariesStore): RoomSummary[] {
 }
 
 /**
- * Total unread notification count across every joined room — the same quantity
- * the push gateway reports as `counts.unread` and sends in the push payload's
- * `unread` field (see `PushPayload`). Used to drive the OS/taskbar app badge
- * from in-app state so it updates the moment unread counts change (e.g. a
- * message is read), rather than only when a push arrives. See the
- * service-worker badge path in `src/sw.ts`.
+ * OS/taskbar badge count: unread notifications in joined rooms plus one for
+ * each pending room or space invitation. Both the desktop and PWA use this
+ * count while open, so invitations remain visible outside the app and clear
+ * when accepted or declined.
  *
- * Spaces are skipped (their own notification count is not shown to the user;
- * unread for a space's rooms is counted on the rooms themselves), but unlike
- * `getHomeUnreadRollup` this counts space-child rooms too — the badge reflects
+ * Joined spaces' own unread counts are skipped; unread for their rooms is
+ * counted on the rooms themselves. Unlike
+ * `getHomeUnreadRollup` this counts space-child rooms too - the badge reflects
  * everything unread, not just what's visible under Home.
  *
  * A room that is only marked unread (MSC2867) contributes nothing here: the
- * OS badge is a numeric message count and the flag carries no count, matching
- * how the push gateway (which knows nothing of the flag) computes `unread`.
+ * flag carries no notification count.
  */
-export function getTotalUnread(summaries: SummariesStore): number {
-	let unread = 0;
+export function getAppBadgeCount(summaries: SummariesStore): number {
+	let count = 0;
 	for (const s of Object.values(summaries)) {
-		if (s.membership !== "join" || s.isSpace) continue;
-		unread += s.unreadCount;
+		if (s.membership === "invite") count++;
+		else if (s.membership === "join" && !s.isSpace) count += s.unreadCount;
 	}
-	return unread;
+	return count;
 }
 
 /**
