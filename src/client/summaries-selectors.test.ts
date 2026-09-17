@@ -3,6 +3,7 @@ import { requiredAt } from "../test/assertions";
 import type { RoomSummary, SummariesStore } from "./summaries";
 import {
 	flattenSpaceTree,
+	getAppBadgeCount,
 	getDmRooms,
 	getFavoriteRooms,
 	getForwardableRooms,
@@ -19,7 +20,6 @@ import {
 	getSpaceSubspaces,
 	getSpaceTree,
 	getSpaceUnreadRollup,
-	getTotalUnread,
 	MAX_SIDEBAR_SPACE_DEPTH,
 } from "./summaries-selectors";
 
@@ -302,9 +302,9 @@ describe("getKnockedSpaces", () => {
 	});
 });
 
-describe("getTotalUnread", () => {
+describe("getAppBadgeCount", () => {
 	it("returns zero for an empty store", () => {
-		expect(getTotalUnread(store([]))).toBe(0);
+		expect(getAppBadgeCount(store([]))).toBe(0);
 	});
 
 	it("sums unread across all joined rooms, including space children", () => {
@@ -315,18 +315,31 @@ describe("getTotalUnread", () => {
 			room({ roomId: "!orphan", unreadCount: 3 }),
 		]);
 		// Unlike getHomeUnreadRollup, the space child is counted here.
-		expect(getTotalUnread(s)).toBe(10);
+		expect(getAppBadgeCount(s)).toBe(10);
 	});
 
-	it("excludes spaces' own count and non-joined rooms", () => {
+	it("counts each pending invitation once, alongside unread messages", () => {
 		const s = store([
 			room({ roomId: "!space", isSpace: true, unreadCount: 7 }),
 			room({ roomId: "!invited", membership: "invite", unreadCount: 9 }),
+			room({ roomId: "!invited-space", membership: "invite", isSpace: true }),
 			room({ roomId: "!left", membership: "leave", unreadCount: 9 }),
+			room({ roomId: "!knocked", membership: "knock", unreadCount: 9 }),
 			room({ roomId: "!dm", isDirect: true, unreadCount: 4 }),
 		]);
-		expect(getTotalUnread(s)).toBe(4);
+		expect(getAppBadgeCount(s)).toBe(6);
 	});
+
+	it.each(["join", "leave"])(
+		"clears an invitation-only badge when membership becomes %s",
+		(membership) => {
+			const invitation = room({ roomId: "!invited", membership: "invite" });
+			const s = store([invitation]);
+			expect(getAppBadgeCount(s)).toBe(1);
+			invitation.membership = membership;
+			expect(getAppBadgeCount(s)).toBe(0);
+		},
+	);
 });
 
 describe("getSpaceSubspaces (#443)", () => {

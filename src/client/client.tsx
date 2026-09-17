@@ -56,7 +56,7 @@ import {
 	type OptimisticJoinInfo,
 	type SummariesStore,
 } from "./summaries";
-import { getTotalUnread } from "./summaries-selectors";
+import { getAppBadgeCount } from "./summaries-selectors";
 import { attachUrlPreviewAccountDataSync } from "./urlPreviewSync";
 
 export type AppSyncState =
@@ -408,7 +408,8 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		if (myUserId) recordSelfPresence(myUserId, sharing);
 	});
 
-	// Keep the OS/taskbar app badge in sync with live unread state while this
+	// Keep the OS/taskbar app badge in sync with unread messages and pending
+	// invitations while this
 	// window is open, so it clears the moment a message is read rather than
 	// staying stale until the next push (see #269). The service worker handles
 	// the closed-app case from push payloads (`src/sw.ts`).
@@ -419,11 +420,11 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 			return;
 		}
 		// Until the first /sync has prepared, `summaries` is empty and
-		// getTotalUnread would be 0 — writing that would wrongly clear a badge
+		// getAppBadgeCount would be 0 - writing that would wrongly clear a badge
 		// the service worker set from a background push before we know the real
 		// count. Leave the badge untouched until we have authoritative data.
 		if (!hasPrepared()) return;
-		updateAppBadge(getTotalUnread(summaries));
+		updateAppBadge(getAppBadgeCount(summaries));
 	});
 
 	// The OS app badge is a single resource shared by every window/tab. Another
@@ -438,7 +439,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		// Mirror the effect: once the session has ended the badge stays cleared,
 		// so a tab switch between logout and unmount can't flash the stale count.
 		if (syncState() === "logged-out") return;
-		updateAppBadge(getTotalUnread(summaries));
+		updateAppBadge(getAppBadgeCount(summaries));
 	};
 	if (typeof document !== "undefined") {
 		document.addEventListener("visibilitychange", reassertBadgeOnVisible);
