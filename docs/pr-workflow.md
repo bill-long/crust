@@ -37,12 +37,33 @@ gh api --paginate repos/bill-long/crust/issues/PR_NUMBER/timeline
 ## Address findings
 
 Read both the summary and individual comments, including actionable findings
-listed as suppressed in the summary. For each finding, fix the problem and check
-for the same mistake elsewhere, or reply with evidence explaining why no change
-is needed. After a fix, complete the checks and local review required by AGENTS.md
-before pushing. Reply to each finding with the fix commit and explanation, then
-request another Copilot review. Do not treat replies or a pending review request
-as proof that the updated code is clean.
+listed as suppressed or previously missed. After the first finding, do one
+comprehensive audit of the related behavior before the next push:
+
+1. Reproduce the user-visible failure, then identify the violated invariant and
+   the existing test that should protect it.
+2. Sweep sibling paths and callers for the same failure class. For cross-boundary
+   work, check success, failure, cancellation, retries or repeated input, and
+   resource cleanup at each boundary. Use the
+   [media action guide](media-action-invariants.md) for media-specific cases.
+3. Trace the proposed fix in both directions: the failure it prevents and the
+   previously valid behavior it could break. For example, cancellation must
+   stop stale actions while preserving work during unrelated state updates.
+4. Batch the related corrections, extend the owning regression tests, and run
+   the required checks. In the review handoff, name the failure scenarios actually
+   exercised and any untested platforms or manual-only checks. A test count does
+   not establish coverage of a security boundary or a user interaction.
+5. Complete the local review required by AGENTS.md before pushing. Reply to each
+   finding with the fix commit and evidence, or explain why no change is needed,
+   then request another Copilot review.
+
+This audit is part of addressing feedback, not an additional review pass or gate.
+Repeat the relevant part when later findings expose a different failure class.
+Do not treat replies or a pending review request as proof the updated code is clean.
+If a summary gives no concrete location or scenario, inspect the named area and
+request that detail rather than inventing changes to obtain a favorable verdict.
+A generic recommendation for human review with no remaining actionable findings
+is a separate review status to report, not a reason to keep changing the code.
 
 ## Verify completion on the current HEAD
 
