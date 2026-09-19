@@ -375,6 +375,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             image_preview::open_image_preview,
+            image_preview::close_image_preview,
             app_badge::set_app_badge,
             open_overlay,
             close_overlay,

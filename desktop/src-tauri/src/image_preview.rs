@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 static NEXT_PREVIEW: AtomicU64 = AtomicU64::new(0);
 
@@ -30,7 +30,7 @@ pub async fn open_image_preview(
     app: AppHandle,
     window: WebviewWindow,
     data_url: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     if window.label() != "main" {
         return Err("Image previews must be opened from the main window".into());
     }
@@ -41,7 +41,7 @@ pub async fn open_image_preview(
     );
     let viewer = WebviewWindowBuilder::new(
         &app,
-        label,
+        &label,
         WebviewUrl::External("about:blank".parse().map_err(|_| "Invalid preview URL")?),
     )
     .title("Image - Crust")
@@ -56,6 +56,21 @@ pub async fn open_image_preview(
             eprintln!("[crust] failed to close an uninitialized preview: {close_error}");
         }
         return Err(error.to_string());
+    }
+    Ok(label)
+}
+
+#[tauri::command]
+pub fn close_image_preview(
+    app: AppHandle,
+    window: WebviewWindow,
+    label: String,
+) -> Result<(), String> {
+    if window.label() != "main" || !label.starts_with("image-preview-") {
+        return Err("Image previews must be closed from the main window".into());
+    }
+    if let Some(viewer) = app.get_webview_window(&label) {
+        viewer.close().map_err(|error| error.to_string())?;
     }
     Ok(())
 }

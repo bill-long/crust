@@ -32,7 +32,13 @@ export async function openImagePreview(
 		if (native) {
 			if (!tauriIpcAvailable())
 				throw new Error("Image preview is unavailable.");
-			await invokeTauri("open_image_preview", { dataUrl });
+			const label = await invokeTauri<string>("open_image_preview", {
+				dataUrl,
+			});
+			if (signal.aborted) {
+				await invokeTauri("close_image_preview", { label });
+				signal.throwIfAborted();
+			}
 		} else if (tab && !tab.closed) {
 			const img = tab.document.createElement("img");
 			img.alt = "Image";

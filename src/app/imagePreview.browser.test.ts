@@ -129,3 +129,33 @@ it("keeps an image opened as a document isolated from the app origin", async () 
 		window.removeEventListener("message", receive);
 	}
 });
+
+it("closes a native preview created after its action was cancelled", async () => {
+	vi.stubGlobal("isTauri", true);
+	let created!: (label: string) => void;
+	const invoke = vi.fn(async (command: string) =>
+		command === "open_image_preview"
+			? new Promise<string>((resolve) => {
+					created = resolve;
+				})
+			: undefined,
+	);
+	vi.stubGlobal("__TAURI_INTERNALS__", { invoke });
+	const abort = new AbortController();
+	const pending = openImagePreview(
+		async () => new Blob(["bytes"], { type: "image/png" }),
+		abort.signal,
+	);
+	await waitFor(() =>
+		expect(invoke).toHaveBeenCalledWith(
+			"open_image_preview",
+			expect.anything(),
+		),
+	);
+	abort.abort();
+	created("image-preview-123");
+	await expect(pending).rejects.toThrow();
+	expect(invoke).toHaveBeenLastCalledWith("close_image_preview", {
+		label: "image-preview-123",
+	});
+});

@@ -46,7 +46,7 @@ try {
 		'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8"><script>window.pwned=true</script></svg>';
 	const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
 	const opened = context.waitForEvent("page");
-	await main.evaluate(
+	const label = await main.evaluate(
 		(dataUrl) =>
 			window.__TAURI_INTERNALS__.invoke("open_image_preview", { dataUrl }),
 		dataUrl,
@@ -83,9 +83,28 @@ try {
 		}
 	}, dataUrl);
 	assert.equal(denied, true);
-	await viewer.close();
+	await assert.rejects(
+		main.evaluate(() =>
+			window.__TAURI_INTERNALS__.invoke("close_image_preview", {
+				label: "main",
+			}),
+		),
+	);
+	const closed = viewer.waitForEvent("close");
+	await main.evaluate(
+		(label) =>
+			window.__TAURI_INTERNALS__.invoke("close_image_preview", { label }),
+		label,
+	);
+	await closed;
+	// Cleanup is idempotent if the user already closed the viewer.
+	await main.evaluate(
+		(label) =>
+			window.__TAURI_INTERNALS__.invoke("close_image_preview", { label }),
+		label,
+	);
 	console.log(
-		"Native image preview: decoded image, script isolation, opaque origin, and IPC denial passed.",
+		"Native image preview: decoded image, script isolation, opaque origin, IPC denial, and preview cleanup passed.",
 	);
 } finally {
 	await browser?.close();
