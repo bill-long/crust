@@ -100,6 +100,8 @@ export async function exportRoom(
 	/** Aborts in-flight attachment downloads when cancelling. */
 	signal?: AbortSignal,
 ): Promise<ExportResult | null> {
+	const cancelled = () => signal?.aborted === true || isCancelled();
+	if (cancelled()) return null;
 	const pollWatcher = createPollWatcher(client, () => {});
 	try {
 		return await runExport(
@@ -107,12 +109,12 @@ export async function exportRoom(
 			room,
 			opts,
 			onProgress,
-			isCancelled,
+			cancelled,
 			pollWatcher,
 			signal,
 		);
 	} catch (error) {
-		if (signal?.aborted || isCancelled()) return null;
+		if (cancelled()) return null;
 		throw error;
 	} finally {
 		pollWatcher.dispose();

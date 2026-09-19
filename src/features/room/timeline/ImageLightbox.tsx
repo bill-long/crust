@@ -105,8 +105,24 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	onCleanup(() => abort.abort());
 	const [opening, setOpening] = createSignal(false);
 	const [downloading, setDownloading] = createSignal(false);
+	// Timeline projection recreates objects on unrelated updates. Only changes
+	// to the media or saved filename should cancel an in-flight action.
+	const actionDescriptor = createMemo(() => {
+		const img = props.image();
+		if (!img) return null;
+		const file = img.encryptedFile;
+		return JSON.stringify([
+			img.eventId,
+			img.fullUrl,
+			img.mimetype,
+			img.filename,
+			img.isEncrypted,
+			img.canDownload ?? true,
+			file ? [file.url, file.iv, file.key.k, file.hashes.sha256, file.v] : null,
+		]);
+	});
 	createEffect(
-		on([props.open, props.image], () => {
+		on([props.open, actionDescriptor], () => {
 			abort.abort();
 			abort = new AbortController();
 			setOpening(false);

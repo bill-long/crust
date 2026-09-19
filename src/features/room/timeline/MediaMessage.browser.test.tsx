@@ -535,6 +535,9 @@ it.each(["close", "switch", "descriptor"])(
 			fireEvent.click(view.getByRole("button", { name: "Download image" }));
 			fireEvent.click(view.getByRole("button", { name: "Download image" }));
 			await waitFor(() => expect(signals).toHaveLength(2));
+			setImage({ ...image(), senderName: "Updated display name" });
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(signals.every((signal) => !signal.aborted)).toBe(true);
 			if (action === "close") setOpen(false);
 			else if (action === "descriptor")
 				setImage({

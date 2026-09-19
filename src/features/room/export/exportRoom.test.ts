@@ -439,3 +439,37 @@ function textOf(blob: Blob | undefined): Promise<string> {
 		reader.readAsText(blob);
 	});
 }
+
+it("returns no partial archive when its signal aborts during an attachment fetch", async () => {
+	setEvents(1);
+	projected.mockImplementation((id: string) =>
+		makeTimelineEvent({
+			eventId: id,
+			body: "file",
+			status: null,
+			mediaFullUrl: "https://hs/_matrix/media/v3/download/hs/id",
+			mediaFilename: "file.bin",
+		}),
+	);
+	const abort = new AbortController();
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async () => {
+			abort.abort();
+			throw new DOMException("Cancelled", "AbortError");
+		}),
+	);
+	try {
+		const result = await exportRoom(
+			fakeClient(),
+			fakeRoom(),
+			{ format: "json", limit: null, includeAttachments: true },
+			noProgress,
+			never,
+			abort.signal,
+		);
+		expect(result).toBeNull();
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
