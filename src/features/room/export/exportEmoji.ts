@@ -1,5 +1,6 @@
 import type { MatrixClient } from "matrix-js-sdk";
 import { createMediaFetcher } from "../../../client/media";
+import { imageExtension } from "../../../lib/imageExtension";
 import { sanitizeMatrixHtmlToDiv } from "../../../lib/matrixHtml";
 import type { ExportRow } from "./serializers";
 
@@ -46,8 +47,13 @@ export async function exportEmoji(
 		if (!url) continue;
 		try {
 			const response = await fetchMedia(url, signal);
+			const extension = imageExtension(response.headers.get("Content-Type"));
+			if (!extension) {
+				await response.body?.cancel();
+				continue;
+			}
 			const data = new Uint8Array(await response.arrayBuffer());
-			const path = `media/emoji-${files.length + 1}`;
+			const path = `media/emoji-${files.length + 1}.${extension}`;
 			files.push({ path, data });
 			paths.set(mxc, path);
 		} catch {

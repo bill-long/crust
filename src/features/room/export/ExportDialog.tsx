@@ -262,8 +262,11 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 							<span>
 								Include attachments
 								<span class="block text-xs text-text-muted">
-									Saves files and custom emoji in a zip. Without this, the
-									export contains text and attachment names only.
+									{format() === "html"
+										? "Saves files and custom emoji in a zip."
+										: "Saves files in a zip."}{" "}
+									Without this, the export contains text and attachment names
+									only.
 								</span>
 							</span>
 						</label>

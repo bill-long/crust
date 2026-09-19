@@ -16,6 +16,7 @@ import { createMediaFetcher } from "../../../client/media";
 import { Modal } from "../../../components/Modal";
 import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { formatBytes } from "../../../lib/formatBytes";
+import { imageExtension } from "../../../lib/imageExtension";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
 import { userSettings } from "../../../stores/settings";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
@@ -76,18 +77,6 @@ function formatTimestamp(ts: number, hourFmt: "12h" | "24h"): string {
 		minute: "2-digit",
 		hour12: hourFmt === "12h",
 	});
-}
-
-function extFromMime(mime: string | null): string {
-	if (!mime) return "bin";
-	const lower = mime.toLowerCase();
-	if (lower === "image/jpeg" || lower === "image/jpg") return "jpg";
-	const slash = lower.indexOf("/");
-	if (slash === -1) return "bin";
-	const sub = lower.slice(slash + 1);
-	// Strip parameters like "; charset=…"
-	const semi = sub.indexOf(";");
-	return (semi === -1 ? sub : sub.slice(0, semi)).trim() || "bin";
 }
 
 function sanitizeFilename(name: string, fallback: string): string {
@@ -510,7 +499,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		if (!img || img.canDownload === false) return;
 		const signal = abort.signal;
 		setDownloadError(null);
-		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
+		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${imageExtension(img.mimetype) ?? "bin"}`;
 		const filename = sanitizeFilename(
 			img.filename ?? fallbackName,
 			fallbackName,

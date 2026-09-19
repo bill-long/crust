@@ -29,7 +29,9 @@ it("bundles each sanitized emoji once and keeps failed images readable", async (
 		expect(new Headers(init.headers).get("Authorization")).toBe("Bearer token");
 		expect(url).toContain("/_matrix/client/v1/media/thumbnail/");
 		return url.endsWith("/ok")
-			? new Response("image bytes")
+			? new Response("image bytes", {
+					headers: { "Content-Type": "image/svg+xml; charset=utf-8" },
+				})
 			: new Response(null, { status: 404 });
 	});
 	vi.stubGlobal("fetch", fetchMock);
@@ -40,7 +42,7 @@ it("bundles each sanitized emoji once and keeps failed images readable", async (
 	const html = htmlRow(row, {
 		emojiPath: (mxc: string) => result.paths.get(mxc) ?? null,
 	} as ExportBundle);
-	expect(html).toContain('src="media/emoji-1"');
+	expect(html).toContain('src="media/emoji-1.svg"');
 	expect(html).toContain(":missing:");
 	expect(html).not.toContain("https://");
 	expect(html).not.toContain("mxc://");
