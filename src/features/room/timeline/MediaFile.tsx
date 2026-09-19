@@ -1,5 +1,6 @@
-import { type Component, createSignal, Show } from "solid-js";
-import { sanitizeFilename } from "../../../lib/filename";
+import { type Component, createSignal, onCleanup, Show } from "solid-js";
+import { useClient } from "../../../client/client";
+import { createMediaFetcher } from "../../../client/media";
 import { formatBytes } from "../../../lib/formatBytes";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
 import {
@@ -7,19 +8,8 @@ import {
 	type EncryptedFileInfo,
 } from "../composer/media/attachmentCrypto";
 
-/**
- * Timeline render of a received `m.file` attachment: a download chip showing
- * the filename and human-readable size. For plain files the chip is a normal
- * download anchor. For encrypted files clicking downloads the ciphertext,
- * verifies + decrypts it (via {@link decryptAttachment} — the same fail-closed
- * verify path the image/lightbox use), and saves the plaintext blob; a
- * malformed descriptor or a hash/decrypt failure shows an inline error rather
- * than ever exposing the ciphertext.
- *
- * The chip is a fixed-height row so it reserves its layout box immediately and
- * the virtualizer doesn't reflow when (for encrypted files) the decrypt
- * resolves.
- */
+/** Download attachments through the owning account before saving. Encrypted
+ * files are verified and decrypted first; failures stay beside the chip. */
 export const MediaFile: Component<{
 	/** Full (unscaled) http URL — plaintext for plain files, ciphertext for encrypted. */
 	httpUrl: string | null;
@@ -32,6 +22,9 @@ export const MediaFile: Component<{
 	/** Authoritative: when true, `httpUrl` is ciphertext and must be decrypted, never linked directly. */
 	isEncrypted: boolean;
 }> = (props) => {
+	const fetchMedia = createMediaFetcher(useClient().client);
+	const abort = new AbortController();
+	onCleanup(() => abort.abort());
 	const [busy, setBusy] = createSignal(false);
 	const [error, setError] = createSignal<string | null>(null);
 
@@ -46,7 +39,7 @@ export const MediaFile: Component<{
 	// Encrypted download: fetch ciphertext → verify+decrypt → save the
 	// plaintext blob. Fail closed (inline error) on a missing descriptor,
 	// download failure, hash mismatch, or decrypt error.
-	const downloadEncrypted = async (): Promise<void> => {
+	const download = async (): Promise<void> => {
 		if (busy()) return;
 		setError(null);
 		// Snapshot every input before the first await: the descriptor, URL,
@@ -56,26 +49,32 @@ export const MediaFile: Component<{
 		// type/name).
 		const url = props.httpUrl;
 		const file = props.file;
+		const encrypted = props.isEncrypted;
 		const mimetype = props.mimetype;
 		const filename = props.filename;
 		// `isEncrypted` is authoritative, so a null descriptor means a malformed
 		// `content.file` — there is nothing safe to download.
-		if (!url || !file) {
+		if (!url || (encrypted && !file)) {
 			setError("This file can't be decrypted.");
 			return;
 		}
 		setBusy(true);
 		try {
-			const res = await fetch(url, { credentials: "omit" });
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const ciphertext = await res.arrayBuffer();
-			const plaintext = await decryptAttachment(ciphertext, file);
-			triggerSave(
-				new Blob([plaintext], mimetype ? { type: mimetype } : undefined),
-				filename,
-			);
+			const res = await fetchMedia(url, abort.signal);
+			let blob: Blob;
+			if (encrypted && file) {
+				const plaintext = await decryptAttachment(
+					await res.arrayBuffer(),
+					file,
+				);
+				blob = new Blob([plaintext], mimetype ? { type: mimetype } : undefined);
+			} else {
+				blob = await res.blob();
+			}
+			abort.signal.throwIfAborted();
+			triggerSave(blob, filename);
 		} catch {
-			setError("Couldn't download file.");
+			if (!abort.signal.aborted) setError("Couldn't download file.");
 		} finally {
 			setBusy(false);
 		}
@@ -112,43 +111,20 @@ export const MediaFile: Component<{
 
 	return (
 		<Show
-			when={props.isEncrypted}
+			when={props.httpUrl || props.isEncrypted}
 			fallback={
-				// Plain file: a direct download anchor. `httpUrl` is the plaintext
-				// media URL (same source the inline <img> uses for plain images).
-				// A malformed/empty MXC leaves no URL, so show an unavailable chip
-				// rather than a dead `href="#"` link (matching the audio/video paths).
-				<Show
-					when={props.httpUrl}
-					fallback={
-						<div class={`${chipClass} cursor-default hover:bg-surface-2`}>
-							<DownloadIcon />
-							<FileMeta />
-							<span class="ml-auto text-xs text-text-disabled">
-								Unavailable
-							</span>
-						</div>
-					}
-				>
-					{(url) => (
-						<a
-							href={url()}
-							download={sanitizeFilename(props.filename)}
-							class={chipClass}
-							aria-label={`Download ${props.filename}${sizeLabel() ? `, ${sizeLabel()}` : ""}`}
-						>
-							<DownloadIcon />
-							<FileMeta />
-						</a>
-					)}
-				</Show>
+				<div class={`${chipClass} cursor-default hover:bg-surface-2`}>
+					<DownloadIcon />
+					<FileMeta />
+					<span class="ml-auto text-xs text-text-disabled">Unavailable</span>
+				</div>
 			}
 		>
 			<div class="mt-1 flex max-w-[min(100%,24rem)] flex-col gap-1">
 				<button
 					type="button"
 					class={`${chipClass} mt-0 disabled:cursor-progress disabled:opacity-70`}
-					onClick={downloadEncrypted}
+					onClick={download}
 					disabled={busy()}
 					aria-label={`Download ${props.filename}${sizeLabel() ? `, ${sizeLabel()}` : ""}`}
 				>
@@ -156,7 +132,7 @@ export const MediaFile: Component<{
 					<FileMeta />
 					<Show when={busy()}>
 						<span class="ml-auto text-xs text-text-disabled" aria-busy="true">
-							Decrypting…
+							Downloading…
 						</span>
 					</Show>
 				</button>

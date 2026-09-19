@@ -1,3 +1,15 @@
+import type { MatrixClient } from "matrix-js-sdk";
+
+vi.mock("../../../client/client", () => ({
+	useClient: () => ({
+		client: {
+			baseUrl: "https://example.com",
+			getAccessToken: () => "test-token",
+			isVersionSupported: async () => true,
+		} as unknown as MatrixClient,
+	}),
+}));
+
 /**
  * Browser-mode round-trip for the encrypted non-image media renderers
  * (Media Phase 5, #279): download ciphertext → verify → decrypt → play /
@@ -318,5 +330,82 @@ describe("encrypted MediaFile", () => {
 		fireEvent.click(await findByLabelText(/download report\.pdf/i));
 		await findByText(/couldn't download file/i);
 		expect(anchorClick).not.toHaveBeenCalled();
+	});
+});
+
+describe("authenticated plain MediaFile", () => {
+	it("downloads through client/v1 when legacy access is disabled and prevents duplicate clicks", async () => {
+		let release!: () => void;
+		const requested: string[] = [];
+		const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+			requested.push(url);
+			if (
+				!url.includes("/_matrix/client/v1/media/") ||
+				new Headers(init.headers).get("Authorization") !== "Bearer test-token"
+			)
+				return new Response(null, { status: 404 });
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			return new Response("file bytes");
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const urls = vi.spyOn(URL, "createObjectURL");
+		const click = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
+		const view = render(() => (
+			<MediaFile
+				httpUrl="https://example.com/_matrix/media/v3/download/example.com/file"
+				file={null}
+				mimetype="text/plain"
+				filename="notes.txt"
+				size={10}
+				isEncrypted={false}
+			/>
+		));
+		const button = view.getByRole("button", { name: /Download notes/ });
+		fireEvent.click(button);
+		await waitFor(() => expect(requested).toHaveLength(1));
+		fireEvent.click(button);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		release();
+		await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+		const blob = urls.mock.calls[0]?.[0];
+		expect(blob).toBeInstanceOf(Blob);
+		expect(await (blob as Blob).text()).toBe("file bytes");
+		expect(requested[0]).toContain("/_matrix/client/v1/media/download/");
+	});
+
+	it("cancels a pending download when its owning component is removed", async () => {
+		let signal: AbortSignal | null | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				(_url: string, init: RequestInit) =>
+					new Promise((_resolve, reject) => {
+						signal = init.signal;
+						signal?.addEventListener("abort", () => reject(signal?.reason));
+					}),
+			),
+		);
+		const click = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
+		const view = render(() => (
+			<MediaFile
+				httpUrl="https://example.com/_matrix/media/v3/download/example.com/file"
+				file={null}
+				mimetype={null}
+				filename="file"
+				size={null}
+				isEncrypted={false}
+			/>
+		));
+		fireEvent.click(view.getByRole("button"));
+		await waitFor(() => expect(signal).toBeTruthy());
+		view.unmount();
+		expect(signal?.aborted).toBe(true);
+		expect(click).not.toHaveBeenCalled();
 	});
 });

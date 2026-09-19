@@ -17,6 +17,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 mod app_badge;
+mod image_preview;
 mod mic_hotkey;
 mod shutdown;
 mod update_install_marker;
@@ -373,6 +374,7 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
+            image_preview::open_image_preview,
             app_badge::set_app_badge,
             open_overlay,
             close_overlay,

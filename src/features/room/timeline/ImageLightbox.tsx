@@ -10,7 +10,11 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
+import { openImagePreview } from "../../../app/imagePreview";
+import { useClient } from "../../../client/client";
+import { createMediaFetcher } from "../../../client/media";
 import { Modal } from "../../../components/Modal";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { formatBytes } from "../../../lib/formatBytes";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
 import { userSettings } from "../../../stores/settings";
@@ -105,6 +109,10 @@ function normalizeWheelDelta(e: WheelEvent): number {
 }
 
 const ImageLightbox: Component<ImageLightboxProps> = (props) => {
+	const fetchMedia = createMediaFetcher(useClient().client);
+	const abort = new AbortController();
+	onCleanup(() => abort.abort());
+	const [opening, setOpening] = createSignal(false);
 	let imgRef: HTMLImageElement | undefined;
 	let panSurfaceRef: HTMLDivElement | undefined;
 	let closeBtnRef: HTMLButtonElement | undefined;
@@ -139,24 +147,27 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		return img.encryptedFile ? decrypted.url() : null;
 	};
 
-	/**
-	 * Open the image in a new tab. For encrypted images, mint a *fresh* object
-	 * URL from the decrypted blob and revoke it on a delay — the lightbox's own
-	 * managed URL is revoked on unmount / image change, which would break a tab
-	 * still loading it. Plain images just open their http URL.
-	 */
-	const openInNewTab = (): void => {
+	const openInNewTab = async (): Promise<void> => {
 		const img = props.image();
-		if (!img) return;
-		if (img.isEncrypted) {
-			const blob = decrypted.blob();
-			if (!blob) return;
-			const url = URL.createObjectURL(blob);
-			window.open(url, "_blank", "noopener,noreferrer");
-			// Long enough for the new tab to fetch the blob into its own context.
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
-		} else {
-			window.open(img.fullUrl, "_blank", "noopener,noreferrer");
+		if (!img || opening()) return;
+		const decryptedBlob = decrypted.blob();
+		setOpening(true);
+		setDownloadError(null);
+		try {
+			await openImagePreview(async () => {
+				if (img.isEncrypted) {
+					if (!decryptedBlob) throw new Error("Image is not ready.");
+					return decryptedBlob;
+				}
+				return (await fetchMedia(img.fullUrl, abort.signal)).blob();
+			}, abort.signal);
+		} catch (error) {
+			if (!abort.signal.aborted)
+				setDownloadError(
+					userFacingErrorMessage(error, "Couldn't open this image."),
+				);
+		} finally {
+			setOpening(false);
 		}
 	};
 
@@ -506,17 +517,19 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				}
 				blob = decryptedBlob;
 			} else {
-				const res = await fetch(img.fullUrl, { credentials: "omit" });
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				const res = await fetchMedia(img.fullUrl, abort.signal);
 				blob = await res.blob();
 			}
 			// saveBlobToDisk mints its own object URL, independent of the
 			// hook's managed one, so it can't be revoked out from under the
 			// download.
+			abort.signal.throwIfAborted();
 			saveBlobToDisk(blob, filename);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			setDownloadError(`Download failed: ${msg}`);
+			if (!abort.signal.aborted)
+				setDownloadError(
+					userFacingErrorMessage(err, "Couldn't download this image."),
+				);
 		}
 	};
 
@@ -693,12 +706,11 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									</button>
 								</Show>
 								<Show when={displaySrc()}>
-									{(src) => {
+									{(_src) => {
 										// New nodes per call — a single shared JSX node can't live
 										// in both Show branches.
 										const renderOpenIcon = () => (
 											<>
-												<span class="sr-only">Open in browser</span>
 												<svg
 													class="h-5 w-5"
 													viewBox="0 0 24 24"
@@ -715,25 +727,23 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 										);
 										const openClass =
 											"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
-										// Encrypted: a button minting a fresh, independently-revoked
-										// blob URL (the displaySrc blob is revoked on unmount and
-										// would break the opened tab). Plain: a normal anchor.
 										return (
 											<Show
-												when={!props.image()?.isEncrypted}
+												when={props.image()?.canDownload === false}
 												fallback={
 													<button
 														type="button"
 														onClick={openInNewTab}
+														disabled={opening()}
 														class={openClass}
-														aria-label="Open in browser"
+														aria-label="Open image in new window"
 													>
 														{renderOpenIcon()}
 													</button>
 												}
 											>
 												<a
-													href={src()}
+													href={props.image()?.fullUrl}
 													target="_blank"
 													rel="noopener noreferrer"
 													class={openClass}

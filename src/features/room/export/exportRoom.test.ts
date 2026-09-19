@@ -73,6 +73,9 @@ const getEventTimeline = vi.fn(async () => null);
 function fakeClient(): MatrixClient {
 	return {
 		decryptEventIfNeeded: async () => {},
+		baseUrl: "https://hs",
+		getAccessToken: () => "test-token",
+		isVersionSupported: async () => true,
 		mxcUrlToHttp: () => null,
 		getEventTimeline,
 	} as unknown as MatrixClient;
@@ -213,9 +216,10 @@ describe("exportRoom", () => {
 			// Only the plaintext attachment was fetched; the keyless
 			// encrypted one was refused without a network call.
 			expect(fetchMock).toHaveBeenCalledTimes(1);
-			expect(fetchMock).toHaveBeenCalledWith("https://hs/plain", {
-				credentials: "omit",
-			});
+			expect(fetchMock).toHaveBeenCalledWith(
+				"https://hs/plain",
+				expect.objectContaining({ credentials: "omit" }),
+			);
 		} finally {
 			vi.unstubAllGlobals();
 		}

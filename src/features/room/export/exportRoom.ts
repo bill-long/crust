@@ -5,6 +5,7 @@ import {
 	type Room,
 	TimelineWindow,
 } from "matrix-js-sdk";
+import { createMediaFetcher } from "../../../client/media";
 import {
 	stripBidiControls,
 	stripLineBreakers,
@@ -19,6 +20,7 @@ import {
 import { createPollWatcher } from "../poll/pollWatcher";
 import { eventToTimelineEvent } from "../timeline/eventProjection";
 import type { TimelineEvent } from "../timeline/timelineTypes";
+import { exportEmoji } from "./exportEmoji";
 import {
 	assembleHtml,
 	assembleJson,
@@ -40,7 +42,7 @@ export interface ExportOptions {
 }
 
 export interface ExportProgress {
-	phase: "history" | "attachments" | "assembling";
+	phase: "history" | "attachments" | "emoji" | "assembling";
 	/** Exportable messages collected so far. */
 	events: number;
 	attachmentsDone: number;
@@ -109,6 +111,9 @@ export async function exportRoom(
 			pollWatcher,
 			signal,
 		);
+	} catch (error) {
+		if (signal?.aborted || isCancelled()) return null;
+		throw error;
 	} finally {
 		pollWatcher.dispose();
 	}
@@ -245,7 +250,7 @@ async function runExport(
 		for (const row of mediaRows) {
 			if (isCancelled()) return null;
 			const path = `media/${attachments.length + 1}_${sanitizeFilename(row.te.mediaFilename)}`;
-			const data = await fetchAttachment(row.te, signal);
+			const data = await fetchAttachment(client, row.te, signal);
 			if (data) {
 				attachments.push({ path, data });
 				row.attachmentPath = path;
@@ -257,6 +262,17 @@ async function runExport(
 			await yieldToMain();
 		}
 	}
+
+	if (opts.includeAttachments && opts.format === "html") {
+		progress.phase = "emoji";
+		report();
+	}
+	const emoji =
+		opts.includeAttachments && opts.format === "html"
+			? await exportEmoji(client, rows, signal, isCancelled)
+			: { paths: new Map<string, string>(), files: [] };
+	if (isCancelled()) return null;
+	attachments.push(...emoji.files);
 
 	// --- Serialize row-by-row in main-thread slices, then assemble.
 	progress.phase = "assembling";
@@ -284,7 +300,7 @@ async function runExport(
 			opts.limit === null ? "entire history" : `last ${opts.limit} messages`,
 		encryptedRoom: room.hasEncryptionStateEvent(),
 		messageCount: rows.length,
-		mxcToHttp: (mxcUrl) => client.mxcUrlToHttp(mxcUrl, 64, 64, "scale"),
+		mxcToHttp: (mxcUrl) => emoji.paths.get(mxcUrl) ?? null,
 	};
 
 	let text: string | null = null;
@@ -359,6 +375,7 @@ async function runExport(
  * emitted as ciphertext.
  */
 async function fetchAttachment(
+	client: MatrixClient,
 	te: TimelineEvent,
 	signal?: AbortSignal,
 ): Promise<Uint8Array | null> {
@@ -370,10 +387,7 @@ async function fetchAttachment(
 		if (!file) return null;
 	}
 	try {
-		const init: RequestInit = { credentials: "omit" };
-		if (signal) init.signal = signal;
-		const res = await fetch(url, init);
-		if (!res.ok) return null;
+		const res = await createMediaFetcher(client)(url, signal);
 		const bytes = await res.arrayBuffer();
 		if (!file) return new Uint8Array(bytes);
 		return new Uint8Array(await decryptAttachment(bytes, file));

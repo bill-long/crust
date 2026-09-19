@@ -1,3 +1,15 @@
+import type { MatrixClient } from "matrix-js-sdk";
+
+vi.mock("../../../client/client", () => ({
+	useClient: () => ({
+		client: {
+			baseUrl: "https://example.com",
+			getAccessToken: () => "test-token",
+			isVersionSupported: async () => true,
+		} as unknown as MatrixClient,
+	}),
+}));
+
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -193,11 +205,12 @@ describe("ImageLightbox", () => {
 		expect(fitBtn.getAttribute("aria-current")).toBe("true");
 	});
 
-	it("Open-in-new-tab anchor has rel=noopener noreferrer", () => {
+	it("opens previews through a button, without a direct media navigation", () => {
 		setup();
-		const a = screen.getByLabelText("Open in browser") as HTMLAnchorElement;
-		expect(a.getAttribute("rel")).toBe("noopener noreferrer");
-		expect(a.getAttribute("target")).toBe("_blank");
+		expect(
+			screen.getByRole("button", { name: "Open image in new window" }),
+		).toBeTruthy();
+		expect(screen.queryByRole("link", { name: /Open/ })).toBeNull();
 	});
 
 	it("Open-in-new-tab is hidden while an encrypted image is decrypting", () => {
