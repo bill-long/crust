@@ -22,31 +22,26 @@ export async function openImagePreview(
 		signal.throwIfAborted();
 		const blob = await load();
 		signal.throwIfAborted();
+		const dataUrl = await new Promise<string>((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(String(reader.result));
+			reader.onerror = () => reject(new Error("Couldn't open this image."));
+			reader.readAsDataURL(blob);
+		});
+		signal.throwIfAborted();
 		if (native) {
 			if (!tauriIpcAvailable())
 				throw new Error("Image preview is unavailable.");
-			const dataUrl = await new Promise<string>((resolve, reject) => {
-				const reader = new FileReader();
-				reader.onload = () => resolve(String(reader.result));
-				reader.onerror = () => reject(new Error("Couldn't open this image."));
-				reader.readAsDataURL(blob);
-			});
-			signal.throwIfAborted();
 			await invokeTauri("open_image_preview", { dataUrl });
 		} else if (tab && !tab.closed) {
-			const urls = (tab as Window & Pick<typeof globalThis, "URL">).URL;
-			const url = urls.createObjectURL(blob);
 			const img = tab.document.createElement("img");
 			img.alt = "Image";
-			// The viewer owns the URL so it survives closing the source tab.
-			// Keep it usable for Save image as until the viewer closes.
-			const release = () => urls.revokeObjectURL(url);
+			// Data URLs have an opaque origin even if opened as SVG documents from
+			// the image context menu. App-origin Blob URLs would expose app storage.
 			img.onerror = () => {
-				release();
 				tab.document.body.textContent = "Couldn't display this image.";
 			};
-			tab.addEventListener("pagehide", release, { once: true });
-			img.src = url;
+			img.src = dataUrl;
 			tab.document.body.replaceChildren(img);
 		}
 	} catch (error) {

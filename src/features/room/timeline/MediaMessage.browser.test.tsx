@@ -460,7 +460,9 @@ it("opens a lightbox image through authenticated media when legacy downloads fai
 		expect(fetchMock).toHaveBeenCalledTimes(1);
 		expect(open.mock.calls[0]?.[0]).toBe("about:blank");
 		expect(windows[0]?.location.href).toBe("about:blank");
-		expect(windows[0]?.document.querySelector("img")?.src).toMatch(/^blob:/);
+		expect(windows[0]?.document.querySelector("img")?.src).toMatch(
+			/^data:image\/svg\+xml;base64,/,
+		);
 	} finally {
 		for (const tab of windows) tab.close();
 	}

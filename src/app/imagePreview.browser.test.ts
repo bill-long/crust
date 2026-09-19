@@ -45,8 +45,7 @@ it("reserves a tab before a slow fetch and renders SVG only as an image", async 
 	const url = tab.document.querySelector("img")?.src;
 	if (!url) throw new Error("Missing image URL");
 	expect((await fetch(url)).ok).toBe(true);
-	tab.dispatchEvent(new Event("pagehide"));
-	await expect(fetch(url)).rejects.toThrow();
+	expect(url).toMatch(/^data:image\/svg\+xml;base64,/);
 });
 
 it("closes an unfinished tab on cancellation and surfaces blocked popups", async () => {
@@ -89,4 +88,44 @@ it("hands bytes to the desktop viewer without opening an external media URL", as
 		dataUrl: "data:image/png;base64,Ynl0ZXM=",
 	});
 	expect(open).not.toHaveBeenCalled();
+});
+
+it("keeps an image opened as a document isolated from the app origin", async () => {
+	const realOpen = window.open.bind(window);
+	vi.spyOn(window, "open").mockImplementation((...args) => {
+		const tab = realOpen(...args);
+		if (tab) windows.push(tab);
+		return tab;
+	});
+	await openImagePreview(
+		async () =>
+			new Blob(
+				[
+					`<svg xmlns="http://www.w3.org/2000/svg"><script>parent.postMessage({kind:"preview-origin-check"},"*")</script></svg>`,
+				],
+				{ type: "image/svg+xml" },
+			),
+		new AbortController().signal,
+	);
+	const src = windows[0]?.document.querySelector("img")?.src;
+	if (!src) throw new Error("Missing preview image");
+	const frame = document.createElement("iframe");
+	let origin: string | undefined;
+	const receive = (event: MessageEvent) => {
+		if (
+			event.source === frame.contentWindow &&
+			event.data?.kind === "preview-origin-check"
+		)
+			origin = event.origin;
+	};
+	window.addEventListener("message", receive);
+	try {
+		frame.src = src;
+		document.body.append(frame);
+		await waitFor(() => expect(origin).toBeDefined());
+		expect(origin).toBe("null");
+	} finally {
+		frame.remove();
+		window.removeEventListener("message", receive);
+	}
 });
