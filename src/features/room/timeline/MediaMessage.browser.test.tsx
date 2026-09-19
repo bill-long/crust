@@ -1,4 +1,5 @@
 import type { MatrixClient } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
 
 vi.mock("../../../client/client", () => ({
 	useClient: () => ({
@@ -467,3 +468,89 @@ it("opens a lightbox image through authenticated media when legacy downloads fai
 		for (const tab of windows) tab.close();
 	}
 });
+
+it.each(["close", "switch"])(
+	"cancels pending lightbox actions on %s without unmounting",
+	async (action) => {
+		const windows: Window[] = [];
+		const realOpen = window.open.bind(window);
+		vi.spyOn(window, "open").mockImplementation((...args) => {
+			const tab = realOpen(...args);
+			if (tab) windows.push(tab);
+			return tab;
+		});
+		const signals: AbortSignal[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				(_url: string, init: RequestInit) =>
+					new Promise<Response>((_resolve, reject) => {
+						const signal = init.signal;
+						if (!signal) throw new Error("Missing cancellation signal");
+						signals.push(signal);
+						signal.addEventListener(
+							"abort",
+							() => reject(new DOMException("Cancelled", "AbortError")),
+							{ once: true },
+						);
+					}),
+			),
+		);
+		const [open, setOpen] = createSignal(true);
+		const [image, setImage] = createSignal<LightboxImage>({
+			eventId: "$image",
+			fullUrl:
+				"https://example.com/_matrix/media/v3/download/remote.example/image",
+			filename: "image.svg",
+			mimetype: "image/svg+xml",
+			size: 100,
+			width: 16,
+			height: 16,
+			senderName: "Alice",
+			timestamp: 1700000000000,
+			isEncrypted: false,
+			encryptedFile: null,
+		});
+		try {
+			const view = render(() => (
+				<ImageLightbox
+					open={open}
+					image={image}
+					onClose={() => setOpen(false)}
+				/>
+			));
+			fireEvent.click(
+				view.getByRole("button", { name: "Open image in new window" }),
+			);
+			fireEvent.click(view.getByRole("button", { name: "Download image" }));
+			await waitFor(() => expect(signals).toHaveLength(2));
+			if (action === "close") setOpen(false);
+			else
+				setImage({
+					...image(),
+					eventId: "$next",
+					fullUrl: `${image().fullUrl}2`,
+				});
+			await waitFor(() =>
+				expect(signals.every((signal) => signal.aborted)).toBe(true),
+			);
+			expect(windows[0]?.closed).toBe(true);
+			setOpen(true);
+			await waitFor(() =>
+				expect(
+					view
+						.getByRole("button", { name: "Open image in new window" })
+						.hasAttribute("disabled"),
+				).toBe(false),
+			);
+			fireEvent.click(
+				view.getByRole("button", { name: "Open image in new window" }),
+			);
+			await waitFor(() => expect(signals).toHaveLength(3));
+			expect(signals[2]?.aborted).toBe(false);
+		} finally {
+			cleanup();
+			for (const tab of windows) tab.close();
+		}
+	},
+);

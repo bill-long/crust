@@ -110,9 +110,19 @@ function normalizeWheelDelta(e: WheelEvent): number {
 
 const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	const fetchMedia = createMediaFetcher(useClient().client);
-	const abort = new AbortController();
+	let abort = new AbortController();
 	onCleanup(() => abort.abort());
 	const [opening, setOpening] = createSignal(false);
+	createEffect(
+		on(
+			[props.open, () => props.image()?.eventId, () => props.image()?.fullUrl],
+			() => {
+				abort.abort();
+				abort = new AbortController();
+				setOpening(false);
+			},
+		),
+	);
 	let imgRef: HTMLImageElement | undefined;
 	let panSurfaceRef: HTMLDivElement | undefined;
 	let closeBtnRef: HTMLButtonElement | undefined;
@@ -150,6 +160,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	const openInNewTab = async (): Promise<void> => {
 		const img = props.image();
 		if (!img || opening()) return;
+		const signal = abort.signal;
 		const decryptedBlob = decrypted.blob();
 		setOpening(true);
 		setDownloadError(null);
@@ -159,15 +170,15 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 					if (!decryptedBlob) throw new Error("Image is not ready.");
 					return decryptedBlob;
 				}
-				return (await fetchMedia(img.fullUrl, abort.signal)).blob();
-			}, abort.signal);
+				return (await fetchMedia(img.fullUrl, signal)).blob();
+			}, signal);
 		} catch (error) {
-			if (!abort.signal.aborted)
+			if (!signal.aborted)
 				setDownloadError(
 					userFacingErrorMessage(error, "Couldn't open this image."),
 				);
 		} finally {
-			setOpening(false);
+			if (signal === abort.signal) setOpening(false);
 		}
 	};
 
@@ -497,6 +508,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
 		if (!img || img.canDownload === false) return;
+		const signal = abort.signal;
 		setDownloadError(null);
 		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
 		const filename = sanitizeFilename(
@@ -517,16 +529,16 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				}
 				blob = decryptedBlob;
 			} else {
-				const res = await fetchMedia(img.fullUrl, abort.signal);
+				const res = await fetchMedia(img.fullUrl, signal);
 				blob = await res.blob();
 			}
 			// saveBlobToDisk mints its own object URL, independent of the
 			// hook's managed one, so it can't be revoked out from under the
 			// download.
-			abort.signal.throwIfAborted();
+			signal.throwIfAborted();
 			saveBlobToDisk(blob, filename);
 		} catch (err) {
-			if (!abort.signal.aborted)
+			if (!signal.aborted)
 				setDownloadError(
 					userFacingErrorMessage(err, "Couldn't download this image."),
 				);

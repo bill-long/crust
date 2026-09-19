@@ -185,7 +185,8 @@ describe("exportRoom", () => {
 						eventId: id,
 						body: "",
 						status: null,
-						mediaFullUrl: "https://hs/plain",
+						mediaFullUrl:
+							"https://hs/_matrix/media/v3/download/remote.example/plain",
 						mediaFilename: "a.bin",
 					})
 				: makeTimelineEvent({
@@ -199,9 +200,13 @@ describe("exportRoom", () => {
 						mediaEncryptedFile: null,
 					}),
 		);
-		const fetchMock = vi.fn(async () => ({
-			ok: true,
-			arrayBuffer: async () => new Uint8Array([7, 8, 9]).buffer,
+		const fetchMock = vi.fn(async (url: string, init: RequestInit) => ({
+			ok:
+				url ===
+					"https://hs/_matrix/client/v1/media/download/remote.example/plain" &&
+				new Headers(init.headers).get("Authorization") === "Bearer test-token",
+			arrayBuffer: async () =>
+				new TextEncoder().encode("authenticated attachment bytes").buffer,
 		}));
 		vi.stubGlobal("fetch", fetchMock);
 		try {
@@ -216,8 +221,11 @@ describe("exportRoom", () => {
 			// Only the plaintext attachment was fetched; the keyless
 			// encrypted one was refused without a network call.
 			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(await textOf(result?.blob)).toContain(
+				"authenticated attachment bytes",
+			);
 			expect(fetchMock).toHaveBeenCalledWith(
-				"https://hs/plain",
+				"https://hs/_matrix/client/v1/media/download/remote.example/plain",
 				expect.objectContaining({ credentials: "omit" }),
 			);
 		} finally {
