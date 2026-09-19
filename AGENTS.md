@@ -159,6 +159,21 @@ Explore `src/` for the current tree (top-level: `app/` shell, `client/` SDK wrap
 
 ---
 
+## Change design and review
+
+Before changing behavior across client, browser, native, or export boundaries,
+identify who owns the operation, when it ends, what data may cross each boundary,
+and which observable failures the tests must catch. For media work, read
+[Media action invariants](docs/media-action-invariants.md).
+
+After the first review finding, audit the whole related failure class and trace
+how the proposed fix affects its callers before pushing. Follow the comprehensive
+audit in [PR workflow](docs/pr-workflow.md#address-findings); do not reduce review
+to fixing reported lines. Extend the existing test that owns an invariant instead
+of duplicating its rule, and describe coverage limits alongside passing checks.
+
+---
+
 ## Commands
 
 This repo uses **pnpm**; the scripts live in `package.json` (the source of truth - don't trust any doc's enumeration of them). Gotchas: `pnpm build` does NOT type-check (run `pnpm typecheck` separately), and it wraps the CSP-sync and vendor-chunk check scripts around Vite - `build:vite` is the bare Vite build.
