@@ -469,7 +469,7 @@ it("opens a lightbox image through authenticated media when legacy downloads fai
 	}
 });
 
-it.each(["close", "switch"])(
+it.each(["close", "switch", "descriptor"])(
 	"cancels pending lightbox actions on %s without unmounting",
 	async (action) => {
 		const windows: Window[] = [];
@@ -523,8 +523,15 @@ it.each(["close", "switch"])(
 				view.getByRole("button", { name: "Open image in new window" }),
 			);
 			fireEvent.click(view.getByRole("button", { name: "Download image" }));
+			fireEvent.click(view.getByRole("button", { name: "Download image" }));
 			await waitFor(() => expect(signals).toHaveLength(2));
 			if (action === "close") setOpen(false);
+			else if (action === "descriptor")
+				setImage({
+					...image(),
+					mimetype: "image/png",
+					filename: "updated.png",
+				});
 			else
 				setImage({
 					...image(),

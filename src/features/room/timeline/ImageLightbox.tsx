@@ -102,15 +102,14 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	let abort = new AbortController();
 	onCleanup(() => abort.abort());
 	const [opening, setOpening] = createSignal(false);
+	const [downloading, setDownloading] = createSignal(false);
 	createEffect(
-		on(
-			[props.open, () => props.image()?.eventId, () => props.image()?.fullUrl],
-			() => {
-				abort.abort();
-				abort = new AbortController();
-				setOpening(false);
-			},
-		),
+		on([props.open, props.image], () => {
+			abort.abort();
+			abort = new AbortController();
+			setOpening(false);
+			setDownloading(false);
+		}),
 	);
 	let imgRef: HTMLImageElement | undefined;
 	let panSurfaceRef: HTMLDivElement | undefined;
@@ -496,7 +495,8 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
-		if (!img || img.canDownload === false) return;
+		if (!img || img.canDownload === false || downloading()) return;
+		setDownloading(true);
 		const signal = abort.signal;
 		setDownloadError(null);
 		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${imageExtension(img.mimetype) ?? "bin"}`;
@@ -531,6 +531,8 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				setDownloadError(
 					userFacingErrorMessage(err, "Couldn't download this image."),
 				);
+		} finally {
+			if (signal === abort.signal) setDownloading(false);
 		}
 	};
 
@@ -680,7 +682,10 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<button
 										type="button"
 										onClick={handleDownload}
-										disabled={img().isEncrypted && !displaySrc()}
+										disabled={
+											downloading() || (img().isEncrypted && !displaySrc())
+										}
+										aria-busy={downloading()}
 										title={
 											img().isEncrypted &&
 											(!img().encryptedFile || decrypted.failed())
