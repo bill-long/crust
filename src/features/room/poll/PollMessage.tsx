@@ -431,9 +431,13 @@ export const PollMessage: Component<PollMessageProps> = (props) => {
 					<path d="M18 20v-6" />
 				</svg>
 				<div class="min-w-0">
-					<p class="whitespace-pre-wrap break-words text-sm font-medium text-text-primary">
-						{props.poll.question}
-					</p>
+					{/* Event questions are fallback text in the creator's timezone.
+					    The event header already shows the viewer-local time. */}
+					<Show when={!props.poll.event}>
+						<p class="whitespace-pre-wrap break-words text-sm font-medium text-text-primary">
+							{props.poll.question}
+						</p>
+					</Show>
 					<p class="text-xs text-text-muted">
 						{statusLine()}
 						<Show when={isMultiSelect() && !props.poll.isEnded}>
