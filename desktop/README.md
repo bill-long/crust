@@ -363,3 +363,21 @@ cargo build
 cargo clippy
 cargo test
 ```
+
+
+## Authenticated image previews
+
+Matrix images opened outside the lightbox are fetched with the owning account
+before display. The desktop shell opens the bytes in an isolated `about:blank`
+window using an image element. It does not hand private URLs to the external
+browser, execute SVG/HTML attachments, or write decrypted preview files to disk.
+Ordinary external image links still open in the system browser.
+
+Validate changes to this path on Windows:
+
+1. Run `pnpm build` in the repository root.
+2. Run `cargo fmt --all --check`, `cargo test --locked`, and
+   `cargo build --locked --features tauri/custom-protocol` in `desktop/src-tauri`.
+3. Run `node scripts/check-native-media.mjs` from the repository root. This
+   launches only the test executable with a separate empty WebView2 profile,
+   checks decoding and isolation, and stops that process when finished.

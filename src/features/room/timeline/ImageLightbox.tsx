@@ -10,8 +10,13 @@ import {
 	Show,
 	Switch,
 } from "solid-js";
+import { openImagePreview } from "../../../app/imagePreview";
+import { useClient } from "../../../client/client";
+import { createMediaFetcher } from "../../../client/media";
 import { Modal } from "../../../components/Modal";
+import { userFacingErrorMessage } from "../../../lib/errorMessage";
 import { formatBytes } from "../../../lib/formatBytes";
+import { imageExtension } from "../../../lib/imageExtension";
 import { saveBlobToDisk } from "../../../lib/saveBlob";
 import { userSettings } from "../../../stores/settings";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
@@ -74,18 +79,6 @@ function formatTimestamp(ts: number, hourFmt: "12h" | "24h"): string {
 	});
 }
 
-function extFromMime(mime: string | null): string {
-	if (!mime) return "bin";
-	const lower = mime.toLowerCase();
-	if (lower === "image/jpeg" || lower === "image/jpg") return "jpg";
-	const slash = lower.indexOf("/");
-	if (slash === -1) return "bin";
-	const sub = lower.slice(slash + 1);
-	// Strip parameters like "; charset=…"
-	const semi = sub.indexOf(";");
-	return (semi === -1 ? sub : sub.slice(0, semi)).trim() || "bin";
-}
-
 function sanitizeFilename(name: string, fallback: string): string {
 	// Strip path separators and control chars; collapse whitespace.
 	const cleaned = name
@@ -105,6 +98,37 @@ function normalizeWheelDelta(e: WheelEvent): number {
 }
 
 const ImageLightbox: Component<ImageLightboxProps> = (props) => {
+	const client = useClient().client;
+	const fetchMedia = createMediaFetcher(client);
+	const fetchPreview = createMediaFetcher(client, "open");
+	let abort = new AbortController();
+	onCleanup(() => abort.abort());
+	const [opening, setOpening] = createSignal(false);
+	const [downloading, setDownloading] = createSignal(false);
+	// Timeline projection recreates objects on unrelated updates. Only changes
+	// to the media or saved filename should cancel an in-flight action.
+	const actionDescriptor = createMemo(() => {
+		const img = props.image();
+		if (!img) return null;
+		const file = img.encryptedFile;
+		return JSON.stringify([
+			img.eventId,
+			img.fullUrl,
+			img.mimetype,
+			img.filename,
+			img.isEncrypted,
+			img.canDownload ?? true,
+			file ? [file.url, file.iv, file.key.k, file.hashes.sha256, file.v] : null,
+		]);
+	});
+	createEffect(
+		on([props.open, actionDescriptor], () => {
+			abort.abort();
+			abort = new AbortController();
+			setOpening(false);
+			setDownloading(false);
+		}),
+	);
 	let imgRef: HTMLImageElement | undefined;
 	let panSurfaceRef: HTMLDivElement | undefined;
 	let closeBtnRef: HTMLButtonElement | undefined;
@@ -139,24 +163,28 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 		return img.encryptedFile ? decrypted.url() : null;
 	};
 
-	/**
-	 * Open the image in a new tab. For encrypted images, mint a *fresh* object
-	 * URL from the decrypted blob and revoke it on a delay — the lightbox's own
-	 * managed URL is revoked on unmount / image change, which would break a tab
-	 * still loading it. Plain images just open their http URL.
-	 */
-	const openInNewTab = (): void => {
+	const openInNewTab = async (): Promise<void> => {
 		const img = props.image();
-		if (!img) return;
-		if (img.isEncrypted) {
-			const blob = decrypted.blob();
-			if (!blob) return;
-			const url = URL.createObjectURL(blob);
-			window.open(url, "_blank", "noopener,noreferrer");
-			// Long enough for the new tab to fetch the blob into its own context.
-			setTimeout(() => URL.revokeObjectURL(url), 60_000);
-		} else {
-			window.open(img.fullUrl, "_blank", "noopener,noreferrer");
+		if (!img || opening()) return;
+		const signal = abort.signal;
+		const decryptedBlob = decrypted.blob();
+		setOpening(true);
+		setDownloadError(null);
+		try {
+			await openImagePreview(async () => {
+				if (img.isEncrypted) {
+					if (!decryptedBlob) throw new Error("Image is not ready.");
+					return decryptedBlob;
+				}
+				return (await fetchPreview(img.fullUrl, signal)).blob();
+			}, signal);
+		} catch (error) {
+			if (!signal.aborted)
+				setDownloadError(
+					userFacingErrorMessage(error, "Couldn't open this image."),
+				);
+		} finally {
+			if (signal === abort.signal) setOpening(false);
 		}
 	};
 
@@ -485,9 +513,11 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 	// or right-click → Save As as a fallback.
 	const handleDownload = async (): Promise<void> => {
 		const img = props.image();
-		if (!img || img.canDownload === false) return;
+		if (!img || img.canDownload === false || downloading()) return;
+		setDownloading(true);
+		const signal = abort.signal;
 		setDownloadError(null);
-		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extFromMime(img.mimetype)}`;
+		const fallbackName = `image-${img.eventId.replace(/[^a-zA-Z0-9_-]/g, "_")}.${imageExtension(img.mimetype) ?? "bin"}`;
 		const filename = sanitizeFilename(
 			img.filename ?? fallbackName,
 			fallbackName,
@@ -506,17 +536,21 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 				}
 				blob = decryptedBlob;
 			} else {
-				const res = await fetch(img.fullUrl, { credentials: "omit" });
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				const res = await fetchMedia(img.fullUrl, signal);
 				blob = await res.blob();
 			}
 			// saveBlobToDisk mints its own object URL, independent of the
 			// hook's managed one, so it can't be revoked out from under the
 			// download.
+			signal.throwIfAborted();
 			saveBlobToDisk(blob, filename);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			setDownloadError(`Download failed: ${msg}`);
+			if (!signal.aborted)
+				setDownloadError(
+					userFacingErrorMessage(err, "Couldn't download this image."),
+				);
+		} finally {
+			if (signal === abort.signal) setDownloading(false);
 		}
 	};
 
@@ -666,7 +700,10 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									<button
 										type="button"
 										onClick={handleDownload}
-										disabled={img().isEncrypted && !displaySrc()}
+										disabled={
+											downloading() || (img().isEncrypted && !displaySrc())
+										}
+										aria-busy={downloading()}
 										title={
 											img().isEncrypted &&
 											(!img().encryptedFile || decrypted.failed())
@@ -693,12 +730,11 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 									</button>
 								</Show>
 								<Show when={displaySrc()}>
-									{(src) => {
+									{(_src) => {
 										// New nodes per call — a single shared JSX node can't live
 										// in both Show branches.
 										const renderOpenIcon = () => (
 											<>
-												<span class="sr-only">Open in browser</span>
 												<svg
 													class="h-5 w-5"
 													viewBox="0 0 24 24"
@@ -714,26 +750,25 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 											</>
 										);
 										const openClass =
-											"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
-										// Encrypted: a button minting a fresh, independently-revoked
-										// blob URL (the displaySrc blob is revoked on unmount and
-										// would break the opened tab). Plain: a normal anchor.
+											"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-progress disabled:opacity-50";
 										return (
 											<Show
-												when={!props.image()?.isEncrypted}
+												when={props.image()?.canDownload === false}
 												fallback={
 													<button
 														type="button"
 														onClick={openInNewTab}
+														disabled={opening()}
+														aria-busy={opening()}
 														class={openClass}
-														aria-label="Open in browser"
+														aria-label="Open image in new window"
 													>
 														{renderOpenIcon()}
 													</button>
 												}
 											>
 												<a
-													href={src()}
+													href={props.image()?.fullUrl}
 													target="_blank"
 													rel="noopener noreferrer"
 													class={openClass}

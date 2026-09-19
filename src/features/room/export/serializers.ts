@@ -28,8 +28,8 @@ export interface ExportBundle {
 	rangeLabel: string;
 	encryptedRoom: boolean;
 	messageCount: number;
-	/** Rewrites an mxc:// URL to HTTP for inline custom emotes. */
-	mxcToHttp: (mxcUrl: string) => string | null;
+	/** Archive-relative path of a bundled custom emoji, or null when omitted. */
+	emojiPath: (mxcUrl: string) => string | null;
 }
 
 const UNDECRYPTABLE_TEXT = "[Unable to decrypt this message]";
@@ -45,17 +45,26 @@ function reactionSummary(te: TimelineEvent): { key: string; count: number }[] {
 	}));
 }
 
-/**
- * The attachment's link target: the bundled path when it was exported.
- * An unbundled ENCRYPTED attachment gets no link at all - mediaFullUrl
- * is ciphertext, and a link named like the real file that downloads
- * AES-CTR garbage (or 401s) must never be emitted. Fail closed, same
- * rule as fetchAttachment.
- */
+/** Only bundled files can be opened without an authenticated Crust session. */
 function attachmentHref(row: ExportRow): string | null {
-	if (row.attachmentPath) return row.attachmentPath;
-	if (row.te.mediaIsEncrypted) return null;
-	return row.te.mediaFullUrl;
+	return row.attachmentPath;
+}
+
+/** A source identifier is useful to JSON consumers, but is not a download link. */
+function sourceMxc(row: ExportRow): string | null {
+	if (!row.te.mediaFullUrl) return null;
+	try {
+		const path = new URL(row.te.mediaFullUrl).pathname;
+		const match =
+			/^\/_matrix\/(?:media\/v3|client\/v1\/media)\/download\/([^/]+)\/([^/]+)/.exec(
+				path,
+			);
+		return match
+			? `mxc://${decodeURIComponent(match[1] ?? "")}/${decodeURIComponent(match[2] ?? "")}`
+			: null;
+	} catch {
+		return null;
+	}
 }
 
 /** Media with a resolved URL keeps the existing export behavior (including
@@ -117,7 +126,7 @@ export function jsonRow(row: ExportRow): Record<string, unknown> {
 		out.reactions = Object.fromEntries(reactions.map((r) => [r.key, r.count]));
 	}
 	if (hasMediaRecord(row)) {
-		const href = attachmentHref(row);
+		const source = sourceMxc(row);
 		out.media = {
 			filename: te.mediaFilename,
 			mimetype: te.mediaMimetype,
@@ -125,9 +134,8 @@ export function jsonRow(row: ExportRow): Record<string, unknown> {
 			encrypted: te.mediaIsEncrypted,
 			...(row.attachmentPath
 				? { path: row.attachmentPath }
-				: href
-					? { url: href }
-					: { exported: false }),
+				: { exported: false }),
+			...(source ? { source_mxc: source } : {}),
 			...(row.attachmentFailed ? { export_failed: true } : {}),
 		};
 	}
@@ -199,7 +207,9 @@ export function textRow(row: ExportRow): string {
 				? href
 				: te.mediaIsEncrypted
 					? "not exported (encrypted)"
-					: "unavailable";
+					: te.mediaFullUrl
+						? "Attachment not included"
+						: "unavailable";
 		const header = bodyText ? "    " : `[${ts}] ${te.senderName}: `;
 		lines.push(
 			`${header}[attachment: ${name} -> ${target}]${bodyText ? "" : edited}`,
@@ -261,9 +271,22 @@ function exportBodyHtml(row: ExportRow, bundle: ExportBundle): string {
 	if (!(te.format === "org.matrix.custom.html" && formattedBody)) {
 		return escapeHtml(bodyText).split("\n").join("<br>");
 	}
-	const div = sanitizeMatrixHtmlToDiv(formattedBody, bundle.mxcToHttp);
+	const div = sanitizeMatrixHtmlToDiv(
+		formattedBody,
+		(mxc) => bundle.emojiPath(mxc) ?? mxc,
+	);
 	for (const img of div.querySelectorAll("img")) {
-		img.classList.add("emoji-inline");
+		if (img.getAttribute("src")?.startsWith("mxc://")) {
+			img.replaceWith(
+				document.createTextNode(
+					img.getAttribute("alt")?.trim() ||
+						img.getAttribute("title")?.trim() ||
+						"[emoji]",
+				),
+			);
+		} else {
+			img.classList.add("emoji-inline");
+		}
 	}
 	for (const a of div.querySelectorAll("a")) {
 		a.setAttribute("target", "_blank");
@@ -293,7 +316,7 @@ function attachmentHtml(row: ExportRow): string {
 		if (te.mediaIsEncrypted) {
 			return `<p class="meta">[encrypted attachment "${name}" - not exported]</p>`;
 		}
-		return `<p class="meta">[attachment "${name}" - unavailable]</p>`;
+		return `<p class="meta">[attachment "${name}" - ${te.mediaFullUrl ? "Attachment not included" : "unavailable"}]</p>`;
 	}
 	if (row.attachmentPath && te.mediaMimetype?.startsWith("image/")) {
 		return `<a href="${escapeAttr(href)}"><img class="attachment" src="${escapeAttr(href)}" alt="${name}"></a>`;

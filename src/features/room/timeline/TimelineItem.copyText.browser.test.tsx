@@ -16,6 +16,10 @@ import { makeTimelineEvent } from "../../../test/timelineEvent";
 import { TimelineItem } from "./TimelineItem";
 import type { TimelineEvent } from "./timelineTypes";
 
+vi.mock("../../../client/client", () => ({
+	useClient: () => ({ client: createMockClient() }),
+}));
+
 function renderItem(event: TimelineEvent, onCopyText?: (text: string) => void) {
 	const client = createMockClient();
 	return render(() => (

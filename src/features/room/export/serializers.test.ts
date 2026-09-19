@@ -34,7 +34,7 @@ function bundle(count = 1, encrypted = false): ExportBundle {
 		rangeLabel: "last 100 messages",
 		encryptedRoom: encrypted,
 		messageCount: count,
-		mxcToHttp: (mxc) => `https://hs.example/media/${mxc.slice(6)}`,
+		emojiPath: (mxc) => `https://hs.example/media/${mxc.slice(6)}`,
 	};
 }
 
@@ -88,7 +88,8 @@ describe("JSON export", () => {
 			),
 		]);
 		expect(out.messages[0].media.path).toBe("media/1_a.png");
-		expect(out.messages[1].media.url).toBe("https://hs/y");
+		expect(out.messages[1].media.url).toBeUndefined();
+		expect(out.messages[1].media.exported).toBe(false);
 		expect(out.messages[1].media.export_failed).toBe(true);
 	});
 
@@ -283,7 +284,7 @@ describe("text export", () => {
 			}),
 		]);
 		expect(text).toContain(
-			"[attachment: report.pdf -> https://hs/file] (edited)",
+			"[attachment: report.pdf -> Attachment not included] (edited)",
 		);
 	});
 
@@ -401,4 +402,48 @@ describe("HTML export", () => {
 	it("marks the export of an encrypted room", () => {
 		expect(htmlOf([], true)).toContain("end-to-end encrypted");
 	});
+});
+
+it("exports attachment identifiers without dead links and falls back to emoji labels", () => {
+	const r = row({
+		mediaFullUrl:
+			"https://hs/_matrix/media/v3/download/remote.example/id?access_token=never-export",
+		mediaFilename: "image.png",
+		format: "org.matrix.custom.html",
+		formattedBody:
+			'<img data-mx-emoticon src="mxc://remote.example/emoji" alt=":wave:"><img data-mx-emoticon src="mxc://remote.example/empty" alt="" title=":title:"><img data-mx-emoticon src="mxc://remote.example/blank" alt="  " title="">',
+		body: ":wave:",
+	});
+	const b = { ...bundle(), emojiPath: () => null };
+	const html = htmlRow(r, b);
+	expect(html).toContain(":wave:");
+	expect(html).toContain(":title:");
+	expect(html).toContain("[emoji]");
+	expect(html).toContain("Attachment not included");
+	expect(html).not.toContain("<img");
+	expect(html).not.toContain("https://hs");
+	const json = jsonRow(r);
+	expect(json.media).toMatchObject({
+		source_mxc: "mxc://remote.example/id",
+		exported: false,
+	});
+	expect(JSON.stringify(json)).not.toContain("never-export");
+});
+
+it("preserves encrypted attachment source identifiers without ciphertext links or keys", () => {
+	const r = row({
+		mediaFullUrl:
+			"https://hs/_matrix/media/v3/download/remote.example/ciphertext?access_token=secret",
+		mediaIsEncrypted: true,
+		mediaFilename: "private.png",
+	});
+	const out = jsonRow(r);
+	expect(out.media).toMatchObject({
+		source_mxc: "mxc://remote.example/ciphertext",
+		exported: false,
+	});
+	expect(out.media).not.toHaveProperty("url");
+	expect(JSON.stringify(out)).not.toContain("secret");
+	expect(htmlOf([r])).not.toContain("ciphertext");
+	expect(textOf([r])).not.toContain("ciphertext");
 });

@@ -83,7 +83,9 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 							? `Fetching history… ${p.events} messages`
 							: p.phase === "attachments"
 								? `Exporting attachments… ${p.attachmentsDone}/${p.attachmentsTotal}`
-								: "Assembling export…",
+								: p.phase === "emoji"
+									? "Exporting custom emoji…"
+									: "Assembling export…",
 					);
 				},
 				() => cancelled,
@@ -260,7 +262,11 @@ const ExportDialog: Component<ExportDialogProps> = (props) => {
 							<span>
 								Include attachments
 								<span class="block text-xs text-text-muted">
-									Downloads every file into a zip alongside the export.
+									{format() === "html"
+										? "Saves files and custom emoji in a zip."
+										: "Saves files in a zip."}{" "}
+									Without this, the export contains text and attachment names
+									only.
 								</span>
 							</span>
 						</label>

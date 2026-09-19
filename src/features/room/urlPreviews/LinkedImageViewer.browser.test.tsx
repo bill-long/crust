@@ -8,6 +8,8 @@ import "../../../styles/global.css";
 import { LinkedImageViewer } from "./LinkedImageViewer";
 import { UrlPreviewCard } from "./UrlPreviewCard";
 
+vi.mock("../../../client/client", () => ({ useClient: () => ({ client }) }));
+
 const source = "https://images.invalid/map.jpg";
 const svg =
 	'<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="black"/></svg>';

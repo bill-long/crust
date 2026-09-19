@@ -1,3 +1,16 @@
+import type { MatrixClient } from "matrix-js-sdk";
+import { createSignal } from "solid-js";
+
+vi.mock("../../../client/client", () => ({
+	useClient: () => ({
+		client: {
+			baseUrl: "https://example.com",
+			getAccessToken: () => "test-token",
+			isVersionSupported: async () => true,
+		} as unknown as MatrixClient,
+	}),
+}));
+
 /**
  * Browser-mode round-trip for the encrypted non-image media renderers
  * (Media Phase 5, #279): download ciphertext → verify → decrypt → play /
@@ -9,6 +22,7 @@
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
+import { ImageLightbox, type LightboxImage } from "./ImageLightbox";
 import { MediaAudio } from "./MediaAudio";
 import { MediaFile } from "./MediaFile";
 import { MediaVideo } from "./MediaVideo";
@@ -320,3 +334,243 @@ describe("encrypted MediaFile", () => {
 		expect(anchorClick).not.toHaveBeenCalled();
 	});
 });
+
+describe("authenticated plain MediaFile", () => {
+	it("downloads through client/v1 when legacy access is disabled and prevents duplicate clicks", async () => {
+		let release!: () => void;
+		const requested: string[] = [];
+		const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+			requested.push(url);
+			if (
+				!url.includes("/_matrix/client/v1/media/") ||
+				new Headers(init.headers).get("Authorization") !== "Bearer test-token"
+			)
+				return new Response(null, { status: 404 });
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			return new Response("file bytes");
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		const urls = vi.spyOn(URL, "createObjectURL");
+		const click = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
+		const view = render(() => (
+			<MediaFile
+				httpUrl="https://example.com/_matrix/media/v3/download/example.com/file"
+				file={null}
+				mimetype="text/plain"
+				filename="notes.txt"
+				size={10}
+				isEncrypted={false}
+			/>
+		));
+		const button = view.getByRole("button", { name: /Download notes/ });
+		fireEvent.click(button);
+		await waitFor(() => expect(requested).toHaveLength(1));
+		fireEvent.click(button);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		release();
+		await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+		const blob = urls.mock.calls[0]?.[0];
+		expect(blob).toBeInstanceOf(Blob);
+		expect(await (blob as Blob).text()).toBe("file bytes");
+		expect(requested[0]).toContain("/_matrix/client/v1/media/download/");
+	});
+
+	it("cancels a pending download when its owning component is removed", async () => {
+		let signal: AbortSignal | null | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				(_url: string, init: RequestInit) =>
+					new Promise((_resolve, reject) => {
+						signal = init.signal;
+						signal?.addEventListener("abort", () => reject(signal?.reason));
+					}),
+			),
+		);
+		const click = vi
+			.spyOn(HTMLAnchorElement.prototype, "click")
+			.mockImplementation(() => {});
+		const view = render(() => (
+			<MediaFile
+				httpUrl="https://example.com/_matrix/media/v3/download/example.com/file"
+				file={null}
+				mimetype={null}
+				filename="file"
+				size={null}
+				isEncrypted={false}
+			/>
+		));
+		fireEvent.click(view.getByRole("button"));
+		await waitFor(() => expect(signal).toBeTruthy());
+		view.unmount();
+		expect(signal?.aborted).toBe(true);
+		expect(click).not.toHaveBeenCalled();
+	});
+});
+
+it("opens a lightbox image through authenticated media when legacy downloads fail", async () => {
+	const windows: Window[] = [];
+	const realOpen = window.open.bind(window);
+	const open = vi.spyOn(window, "open").mockImplementation((...args) => {
+		const tab = realOpen(...args);
+		if (tab) windows.push(tab);
+		return tab;
+	});
+	const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+		if (
+			url !==
+				"https://example.com/_matrix/client/v1/media/download/remote.example/image" ||
+			new Headers(init?.headers).get("Authorization") !== "Bearer test-token"
+		) {
+			return new Response(null, { status: 404 });
+		}
+		return new Response(
+			'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>',
+			{ headers: { "Content-Type": "image/svg+xml" } },
+		);
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	const image: LightboxImage = {
+		eventId: "$image",
+		fullUrl:
+			"https://example.com/_matrix/media/v3/download/remote.example/image",
+		filename: "image.svg",
+		mimetype: "image/svg+xml",
+		size: 100,
+		width: 16,
+		height: 16,
+		senderName: "Alice",
+		timestamp: 1700000000000,
+		isEncrypted: false,
+		encryptedFile: null,
+	};
+	try {
+		const view = render(() => (
+			<ImageLightbox open={() => true} image={() => image} onClose={() => {}} />
+		));
+		fireEvent.click(
+			view.getByRole("button", { name: "Open image in new window" }),
+		);
+		await waitFor(() =>
+			expect(windows[0]?.document.querySelector("img")?.naturalWidth).toBe(16),
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(open.mock.calls[0]?.[0]).toBe("about:blank");
+		expect(windows[0]?.location.href).toBe("about:blank");
+		expect(windows[0]?.document.querySelector("img")?.src).toMatch(
+			/^data:image\/svg\+xml;base64,/,
+		);
+		fetchMock.mockImplementation(
+			async () => new Response(null, { status: 404 }),
+		);
+		fireEvent.click(
+			view.getByRole("button", { name: "Open image in new window" }),
+		);
+		await waitFor(() =>
+			expect(view.getByText("Couldn't open this image.")).toBeTruthy(),
+		);
+		expect(windows[1]?.closed).toBe(true);
+	} finally {
+		for (const tab of windows) tab.close();
+	}
+});
+
+it.each(["close", "switch", "descriptor"])(
+	"cancels pending lightbox actions on %s without unmounting",
+	async (action) => {
+		const windows: Window[] = [];
+		const realOpen = window.open.bind(window);
+		vi.spyOn(window, "open").mockImplementation((...args) => {
+			const tab = realOpen(...args);
+			if (tab) windows.push(tab);
+			return tab;
+		});
+		const signals: AbortSignal[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				(_url: string, init: RequestInit) =>
+					new Promise<Response>((_resolve, reject) => {
+						const signal = init.signal;
+						if (!signal) throw new Error("Missing cancellation signal");
+						signals.push(signal);
+						signal.addEventListener(
+							"abort",
+							() => reject(new DOMException("Cancelled", "AbortError")),
+							{ once: true },
+						);
+					}),
+			),
+		);
+		const [open, setOpen] = createSignal(true);
+		const [image, setImage] = createSignal<LightboxImage>({
+			eventId: "$image",
+			fullUrl:
+				"https://example.com/_matrix/media/v3/download/remote.example/image",
+			filename: "image.svg",
+			mimetype: "image/svg+xml",
+			size: 100,
+			width: 16,
+			height: 16,
+			senderName: "Alice",
+			timestamp: 1700000000000,
+			isEncrypted: false,
+			encryptedFile: null,
+		});
+		try {
+			const view = render(() => (
+				<ImageLightbox
+					open={open}
+					image={image}
+					onClose={() => setOpen(false)}
+				/>
+			));
+			fireEvent.click(
+				view.getByRole("button", { name: "Open image in new window" }),
+			);
+			fireEvent.click(view.getByRole("button", { name: "Download image" }));
+			fireEvent.click(view.getByRole("button", { name: "Download image" }));
+			await waitFor(() => expect(signals).toHaveLength(2));
+			setImage({ ...image(), senderName: "Updated display name" });
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(signals.every((signal) => !signal.aborted)).toBe(true);
+			if (action === "close") setOpen(false);
+			else if (action === "descriptor")
+				setImage({
+					...image(),
+					mimetype: "image/png",
+					filename: "updated.png",
+				});
+			else
+				setImage({
+					...image(),
+					eventId: "$next",
+					fullUrl: `${image().fullUrl}2`,
+				});
+			await waitFor(() =>
+				expect(signals.every((signal) => signal.aborted)).toBe(true),
+			);
+			expect(windows[0]?.closed).toBe(true);
+			setOpen(true);
+			await waitFor(() =>
+				expect(
+					view
+						.getByRole("button", { name: "Open image in new window" })
+						.hasAttribute("disabled"),
+				).toBe(false),
+			);
+			fireEvent.click(
+				view.getByRole("button", { name: "Open image in new window" }),
+			);
+			await waitFor(() => expect(signals).toHaveLength(3));
+			expect(signals[2]?.aborted).toBe(false);
+		} finally {
+			cleanup();
+			for (const tab of windows) tab.close();
+		}
+	},
+);

@@ -73,6 +73,9 @@ const getEventTimeline = vi.fn(async () => null);
 function fakeClient(): MatrixClient {
 	return {
 		decryptEventIfNeeded: async () => {},
+		baseUrl: "https://hs",
+		getAccessToken: () => "test-token",
+		isVersionSupported: async () => true,
 		mxcUrlToHttp: () => null,
 		getEventTimeline,
 	} as unknown as MatrixClient;
@@ -182,7 +185,8 @@ describe("exportRoom", () => {
 						eventId: id,
 						body: "",
 						status: null,
-						mediaFullUrl: "https://hs/plain",
+						mediaFullUrl:
+							"https://hs/_matrix/media/v3/download/remote.example/plain",
 						mediaFilename: "a.bin",
 					})
 				: makeTimelineEvent({
@@ -196,9 +200,13 @@ describe("exportRoom", () => {
 						mediaEncryptedFile: null,
 					}),
 		);
-		const fetchMock = vi.fn(async () => ({
-			ok: true,
-			arrayBuffer: async () => new Uint8Array([7, 8, 9]).buffer,
+		const fetchMock = vi.fn(async (url: string, init: RequestInit) => ({
+			ok:
+				url ===
+					"https://hs/_matrix/client/v1/media/download/remote.example/plain" &&
+				new Headers(init.headers).get("Authorization") === "Bearer test-token",
+			arrayBuffer: async () =>
+				new TextEncoder().encode("authenticated attachment bytes").buffer,
 		}));
 		vi.stubGlobal("fetch", fetchMock);
 		try {
@@ -213,9 +221,13 @@ describe("exportRoom", () => {
 			// Only the plaintext attachment was fetched; the keyless
 			// encrypted one was refused without a network call.
 			expect(fetchMock).toHaveBeenCalledTimes(1);
-			expect(fetchMock).toHaveBeenCalledWith("https://hs/plain", {
-				credentials: "omit",
-			});
+			expect(await textOf(result?.blob)).toContain(
+				"authenticated attachment bytes",
+			);
+			expect(fetchMock).toHaveBeenCalledWith(
+				"https://hs/_matrix/client/v1/media/download/remote.example/plain",
+				expect.objectContaining({ credentials: "omit" }),
+			);
 		} finally {
 			vi.unstubAllGlobals();
 		}
@@ -427,3 +439,37 @@ function textOf(blob: Blob | undefined): Promise<string> {
 		reader.readAsText(blob);
 	});
 }
+
+it("returns no partial archive when its signal aborts during an attachment fetch", async () => {
+	setEvents(1);
+	projected.mockImplementation((id: string) =>
+		makeTimelineEvent({
+			eventId: id,
+			body: "file",
+			status: null,
+			mediaFullUrl: "https://hs/_matrix/media/v3/download/hs/id",
+			mediaFilename: "file.bin",
+		}),
+	);
+	const abort = new AbortController();
+	vi.stubGlobal(
+		"fetch",
+		vi.fn(async () => {
+			abort.abort();
+			throw new DOMException("Cancelled", "AbortError");
+		}),
+	);
+	try {
+		const result = await exportRoom(
+			fakeClient(),
+			fakeRoom(),
+			{ format: "json", limit: null, includeAttachments: true },
+			noProgress,
+			never,
+			abort.signal,
+		);
+		expect(result).toBeNull();
+	} finally {
+		vi.unstubAllGlobals();
+	}
+});
