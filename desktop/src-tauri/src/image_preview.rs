@@ -51,7 +51,12 @@ pub async fn open_image_preview(
     .map_err(|e| e.to_string())?;
     // about:blank is WebView2's initial document and emits no navigation
     // completion callback. Evaluate after creation instead of waiting for one.
-    viewer.eval(&script).map_err(|e| e.to_string())?;
+    if let Err(error) = viewer.eval(&script) {
+        if let Err(close_error) = viewer.close() {
+            eprintln!("[crust] failed to close an uninitialized preview: {close_error}");
+        }
+        return Err(error.to_string());
+    }
     Ok(())
 }
 

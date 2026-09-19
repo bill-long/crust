@@ -21,6 +21,7 @@ vi.mock("../../../client/client", () => ({
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EncryptedFileInfo } from "../composer/media/attachmentCrypto";
+import { ImageLightbox, type LightboxImage } from "./ImageLightbox";
 import { MediaAudio } from "./MediaAudio";
 import { MediaFile } from "./MediaFile";
 import { MediaVideo } from "./MediaVideo";
@@ -408,4 +409,59 @@ describe("authenticated plain MediaFile", () => {
 		expect(signal?.aborted).toBe(true);
 		expect(click).not.toHaveBeenCalled();
 	});
+});
+
+it("opens a lightbox image through authenticated media when legacy downloads fail", async () => {
+	const windows: Window[] = [];
+	const realOpen = window.open.bind(window);
+	const open = vi.spyOn(window, "open").mockImplementation((...args) => {
+		const tab = realOpen(...args);
+		if (tab) windows.push(tab);
+		return tab;
+	});
+	const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+		if (
+			url !==
+				"https://example.com/_matrix/client/v1/media/download/remote.example/image" ||
+			new Headers(init?.headers).get("Authorization") !== "Bearer test-token"
+		) {
+			return new Response(null, { status: 404 });
+		}
+		return new Response(
+			'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>',
+			{ headers: { "Content-Type": "image/svg+xml" } },
+		);
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	const image: LightboxImage = {
+		eventId: "$image",
+		fullUrl:
+			"https://example.com/_matrix/media/v3/download/remote.example/image",
+		filename: "image.svg",
+		mimetype: "image/svg+xml",
+		size: 100,
+		width: 16,
+		height: 16,
+		senderName: "Alice",
+		timestamp: 1700000000000,
+		isEncrypted: false,
+		encryptedFile: null,
+	};
+	try {
+		const view = render(() => (
+			<ImageLightbox open={() => true} image={() => image} onClose={() => {}} />
+		));
+		fireEvent.click(
+			view.getByRole("button", { name: "Open image in new window" }),
+		);
+		await waitFor(() =>
+			expect(windows[0]?.document.querySelector("img")?.naturalWidth).toBe(16),
+		);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(open.mock.calls[0]?.[0]).toBe("about:blank");
+		expect(windows[0]?.location.href).toBe("about:blank");
+		expect(windows[0]?.document.querySelector("img")?.src).toMatch(/^blob:/);
+	} finally {
+		for (const tab of windows) tab.close();
+	}
 });

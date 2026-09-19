@@ -28,8 +28,8 @@ export interface ExportBundle {
 	rangeLabel: string;
 	encryptedRoom: boolean;
 	messageCount: number;
-	/** Rewrites an mxc:// URL to HTTP for inline custom emotes. */
-	mxcToHttp: (mxcUrl: string) => string | null;
+	/** Archive-relative path of a bundled custom emoji, or null when omitted. */
+	emojiPath: (mxcUrl: string) => string | null;
 }
 
 const UNDECRYPTABLE_TEXT = "[Unable to decrypt this message]";
@@ -52,7 +52,7 @@ function attachmentHref(row: ExportRow): string | null {
 
 /** A source identifier is useful to JSON consumers, but is not a download link. */
 function sourceMxc(row: ExportRow): string | null {
-	if (row.te.mediaIsEncrypted || !row.te.mediaFullUrl) return null;
+	if (!row.te.mediaFullUrl) return null;
 	try {
 		const path = new URL(row.te.mediaFullUrl).pathname;
 		const match =
@@ -273,7 +273,7 @@ function exportBodyHtml(row: ExportRow, bundle: ExportBundle): string {
 	}
 	const div = sanitizeMatrixHtmlToDiv(
 		formattedBody,
-		(mxc) => bundle.mxcToHttp(mxc) ?? mxc,
+		(mxc) => bundle.emojiPath(mxc) ?? mxc,
 	);
 	for (const img of div.querySelectorAll("img")) {
 		if (img.getAttribute("src")?.startsWith("mxc://")) {

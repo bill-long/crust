@@ -10,6 +10,8 @@ export function createMediaFetcher(client: MatrixClient) {
 		const target = toAuthedMediaUrl(url, client.baseUrl);
 		const headers = new Headers();
 		let requestUrl = url;
+		// A failed capability probe is not evidence that legacy media is supported.
+		// Surface the failure so retry can authenticate with the owning client.
 		if (target && (await client.isVersionSupported("v1.11"))) {
 			const token = client.getAccessToken();
 			if (!token) throw new Error("Sign in again to download this file.");

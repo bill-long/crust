@@ -38,7 +38,7 @@ it("bundles each sanitized emoji once and keeps failed images readable", async (
 	expect(result.files).toHaveLength(1);
 	expect(new TextDecoder().decode(result.files[0]?.data)).toBe("image bytes");
 	const html = htmlRow(row, {
-		mxcToHttp: (mxc: string) => result.paths.get(mxc) ?? null,
+		emojiPath: (mxc: string) => result.paths.get(mxc) ?? null,
 	} as ExportBundle);
 	expect(html).toContain('src="media/emoji-1"');
 	expect(html).toContain(":missing:");

@@ -300,7 +300,7 @@ async function runExport(
 			opts.limit === null ? "entire history" : `last ${opts.limit} messages`,
 		encryptedRoom: room.hasEncryptionStateEvent(),
 		messageCount: rows.length,
-		mxcToHttp: (mxcUrl) => emoji.paths.get(mxcUrl) ?? null,
+		emojiPath: (mxcUrl) => emoji.paths.get(mxcUrl) ?? null,
 	};
 
 	let text: string | null = null;

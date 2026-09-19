@@ -68,3 +68,19 @@ it("does not retry failed authenticated requests through legacy media", async ()
 	).rejects.toThrow();
 	expect(fetchMock).toHaveBeenCalledTimes(1);
 });
+
+it("does not downgrade to legacy media when the version probe fails", async () => {
+	const client = {
+		baseUrl: "https://hs",
+		getAccessToken: () => "token",
+		isVersionSupported: async () => {
+			throw new TypeError("Failed to fetch");
+		},
+	} as unknown as MatrixClient;
+	const fetchMock = vi.fn();
+	vi.stubGlobal("fetch", fetchMock);
+	await expect(
+		createMediaFetcher(client)("https://hs/_matrix/media/v3/download/hs/id"),
+	).rejects.toThrow("Failed to fetch");
+	expect(fetchMock).not.toHaveBeenCalled();
+});

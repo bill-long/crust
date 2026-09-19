@@ -726,7 +726,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 											</>
 										);
 										const openClass =
-											"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover";
+											"rounded p-2 text-text-primary hover:bg-white/10 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:cursor-progress disabled:opacity-50";
 										return (
 											<Show
 												when={props.image()?.canDownload === false}
@@ -735,6 +735,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 														type="button"
 														onClick={openInNewTab}
 														disabled={opening()}
+														aria-busy={opening()}
 														class={openClass}
 														aria-label="Open image in new window"
 													>
