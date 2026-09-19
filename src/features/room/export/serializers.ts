@@ -279,7 +279,9 @@ function exportBodyHtml(row: ExportRow, bundle: ExportBundle): string {
 		if (img.getAttribute("src")?.startsWith("mxc://")) {
 			img.replaceWith(
 				document.createTextNode(
-					img.getAttribute("alt") ?? img.getAttribute("title") ?? "[emoji]",
+					img.getAttribute("alt")?.trim() ||
+						img.getAttribute("title")?.trim() ||
+						"[emoji]",
 				),
 			);
 		} else {

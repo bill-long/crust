@@ -98,7 +98,9 @@ function normalizeWheelDelta(e: WheelEvent): number {
 }
 
 const ImageLightbox: Component<ImageLightboxProps> = (props) => {
-	const fetchMedia = createMediaFetcher(useClient().client);
+	const client = useClient().client;
+	const fetchMedia = createMediaFetcher(client);
+	const fetchPreview = createMediaFetcher(client, "open");
 	let abort = new AbortController();
 	onCleanup(() => abort.abort());
 	const [opening, setOpening] = createSignal(false);
@@ -158,7 +160,7 @@ const ImageLightbox: Component<ImageLightboxProps> = (props) => {
 					if (!decryptedBlob) throw new Error("Image is not ready.");
 					return decryptedBlob;
 				}
-				return (await fetchMedia(img.fullUrl, signal)).blob();
+				return (await fetchPreview(img.fullUrl, signal)).blob();
 			}, signal);
 		} catch (error) {
 			if (!signal.aborted)

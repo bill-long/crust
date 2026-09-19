@@ -411,12 +411,14 @@ it("exports attachment identifiers without dead links and falls back to emoji la
 		mediaFilename: "image.png",
 		format: "org.matrix.custom.html",
 		formattedBody:
-			'<img data-mx-emoticon src="mxc://remote.example/emoji" alt=":wave:">',
+			'<img data-mx-emoticon src="mxc://remote.example/emoji" alt=":wave:"><img data-mx-emoticon src="mxc://remote.example/empty" alt="" title=":title:"><img data-mx-emoticon src="mxc://remote.example/blank" alt="  " title="">',
 		body: ":wave:",
 	});
 	const b = { ...bundle(), emojiPath: () => null };
 	const html = htmlRow(r, b);
 	expect(html).toContain(":wave:");
+	expect(html).toContain(":title:");
+	expect(html).toContain("[emoji]");
 	expect(html).toContain("Attachment not included");
 	expect(html).not.toContain("<img");
 	expect(html).not.toContain("https://hs");

@@ -464,6 +464,16 @@ it("opens a lightbox image through authenticated media when legacy downloads fai
 		expect(windows[0]?.document.querySelector("img")?.src).toMatch(
 			/^data:image\/svg\+xml;base64,/,
 		);
+		fetchMock.mockImplementation(
+			async () => new Response(null, { status: 404 }),
+		);
+		fireEvent.click(
+			view.getByRole("button", { name: "Open image in new window" }),
+		);
+		await waitFor(() =>
+			expect(view.getByText("Couldn't open this image.")).toBeTruthy(),
+		);
+		expect(windows[1]?.closed).toBe(true);
 	} finally {
 		for (const tab of windows) tab.close();
 	}

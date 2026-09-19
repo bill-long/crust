@@ -44,6 +44,9 @@ it("binds media authentication to its owning client and uses refreshed tokens", 
 		"Sign in again",
 	);
 	expect(requests).toHaveLength(3);
+	await expect(
+		createMediaFetcher(client, "open")(client.baseUrl + media),
+	).rejects.toThrow("Sign in again to open this image.");
 });
 
 it("does not retry failed authenticated requests through legacy media", async () => {
