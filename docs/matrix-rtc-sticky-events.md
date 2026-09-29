@@ -33,7 +33,11 @@ the `homeserver` service. Startup completed and the public
 `/_matrix/client/versions` endpoint now advertises `org.matrix.msc4354: true`.
 The configuration backup is
 `/root/continuwuity-new/conduwuit.toml.bak-sticky-504-20260929T150512Z`.
-To revert this change, restore that backup and restart the same service.
+To revert only this change, set `allow_sticky_events = false` in the current
+`[global]` section, validate Compose, and restart the same service. Verify the
+server is healthy and no longer advertises MSC4354. Keep other configuration
+edits intact; the backup is a comparison reference, not a replacement for a
+configuration that may have changed since enablement.
 
 ## Earlier investigation (2026-09-07 UTC)
 
