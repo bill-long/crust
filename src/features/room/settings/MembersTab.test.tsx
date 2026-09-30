@@ -176,13 +176,13 @@ afterEach(cleanup);
 describe("MembersTab", () => {
 	it("renders joined members sorted by power level descending", () => {
 		setup();
-		const rows = screen.getAllByText(/^@.+ · PL \d+$/);
+		const rows = screen.getAllByText(/^@.+ · Level \d+$/);
 		const labels = rows.map((r) => r.textContent ?? "");
 		expect(labels).toEqual([
-			"@admin:example.com · PL 100",
-			"@test:example.com · PL 100",
-			"@mod:example.com · PL 50",
-			"@alice:example.com · PL 0",
+			"@admin:example.com · Level 100",
+			"@test:example.com · Level 100",
+			"@mod:example.com · Level 50",
+			"@alice:example.com · Level 0",
 		]);
 	});
 
@@ -544,4 +544,16 @@ describe("MembersTab avatar fallback (#457)", () => {
 		expect(aliceRow().querySelector("img")).toBeNull();
 		expect(within(aliceRow()).getByText("A")).toBeTruthy();
 	});
+});
+it("labels the permanent room creator privilege without showing Infinity", () => {
+	setup({
+		myPower: Infinity,
+		powerLevels: {
+			users: { "@admin:example.com": 100, "@mod:example.com": 50 },
+		},
+	});
+	expect(
+		screen.getByText("@test:example.com · Room creator (permanent privileges)"),
+	).toBeTruthy();
+	expect(screen.queryByText(/Infinity/)).toBeNull();
 });

@@ -329,7 +329,10 @@ const MembersTab: Component<MembersTabProps> = (props) => {
 												{m.displayName}
 											</div>
 											<div class="truncate font-mono text-xs text-text-muted">
-												{m.userId} · PL {m.powerLevel}
+												{m.userId} ·{" "}
+												{m.powerLevel === Infinity
+													? "Room creator (permanent privileges)"
+													: `Level ${m.powerLevel}`}
 											</div>
 										</div>
 									</div>
