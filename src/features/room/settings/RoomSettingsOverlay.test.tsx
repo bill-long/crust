@@ -103,7 +103,9 @@ describe("RoomSettingsOverlay", () => {
 		setActive("permissions");
 		await Promise.resolve();
 		expect(screen.getByRole("heading", { name: "Permissions" })).toBeTruthy();
-		expect(screen.getByText(/Choose who can perform each action/)).toBeTruthy();
+		expect(
+			screen.getByText(/Choose the minimum level for each action/),
+		).toBeTruthy();
 	});
 
 	it("calls onClose when Escape is pressed", () => {
