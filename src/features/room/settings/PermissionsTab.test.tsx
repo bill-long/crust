@@ -58,6 +58,61 @@ function setup(content: Record<string, unknown> = {}, level = 100) {
 }
 const press = (name: string) =>
 	fireEvent.click(screen.getByRole("button", { name }));
+it.each([
+	["Change room settings: Members", { state_default: 75 }, false],
+	["Default member level: Moderators", { users_default: 25 }, false],
+	[
+		"Manage permissions: Members",
+		{ events: { "m.room.power_levels": 75 } },
+		false,
+	],
+	["@test:example.com: Members", { users: { "@test:example.com": 75 } }, true],
+	[
+		"@test:example.com: reset",
+		{ users_default: 25, users: { "@test:example.com": 100 } },
+		true,
+	],
+] as const)(
+	"rejects changes during confirmation for %s",
+	async (button, update, member) => {
+		const { client, room } = setup({ users: { "@test:example.com": 100 } });
+		if (member)
+			fireEvent.change(screen.getByLabelText("Override type"), {
+				target: { value: "users" },
+			});
+		press(button);
+		expect(screen.getByRole("dialog")).toBeTruthy();
+		room.__setStateEvent("m.room.power_levels", "", update);
+		client.__emit(
+			RoomStateEvent.Events,
+			room.currentState.getStateEvents("m.room.power_levels", ""),
+		);
+		press("Save permission");
+		await waitFor(() =>
+			expect(screen.getByRole("alert").textContent).toContain(
+				"another session",
+			),
+		);
+		expect(client.sendStateEvent).not.toHaveBeenCalled();
+	},
+);
+it("preserves unrelated updates during confirmation", async () => {
+	const { client, room } = setup();
+	press("Change room settings: Members");
+	room.__setStateEvent("m.room.power_levels", "", {
+		notifications: { room: 75 },
+	});
+	client.__emit(
+		RoomStateEvent.Events,
+		room.currentState.getStateEvents("m.room.power_levels", ""),
+	);
+	press("Save permission");
+	await waitFor(() => expect(client.sendStateEvent).toHaveBeenCalledTimes(1));
+	expect(client.sendStateEvent.mock.calls[0]?.[2]).toEqual({
+		state_default: 0,
+		notifications: { room: 75 },
+	});
+});
 it("enables member calls without altering unrelated overrides or defaults", async () => {
 	const original = {
 		state_default: 50,

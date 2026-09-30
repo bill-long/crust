@@ -60,6 +60,7 @@ export function PermissionsTab(props: PermissionsTabProps) {
 	const [confirmation, setConfirmation] = createSignal<{
 		target: PermissionTarget;
 		level: number | null;
+		original: PowerLevelContent;
 	} | null>(null);
 	const [section, setSection] =
 		createSignal<Exclude<PermissionSection, "defaults">>("events");
@@ -102,7 +103,11 @@ export function PermissionsTab(props: PermissionsTabProps) {
 				props.client.getRoom(props.roomId)?.getMember(target.key)
 					?.powerLevel === Infinity,
 		);
-	const save = async (target: PermissionTarget, level: number | null) => {
+	const save = async (
+		target: PermissionTarget,
+		level: number | null,
+		original: PowerLevelContent,
+	) => {
 		if (disabled()) return;
 		const invalid = editError(target, level);
 		if (invalid) {
@@ -112,8 +117,7 @@ export function PermissionsTab(props: PermissionsTabProps) {
 		setError(null);
 		const roomId = props.roomId;
 		const operation = generation;
-		const original = opt.value();
-		const next = withPermission(original, target, level);
+		const next = withPermission(opt.value(), target, level);
 		activeTarget = target;
 		await opt.apply(next, async () => {
 			if (
@@ -194,7 +198,10 @@ export function PermissionsTab(props: PermissionsTabProps) {
 			setError(invalid);
 			return;
 		}
-		const next = level ?? inheritedPermission(opt.value(), target);
+		// Keep the values the user reviewed, even if sync updates the editor
+		// while the confirmation is open. Power-level content is plain JSON.
+		const original = structuredClone(opt.value());
+		const next = level ?? inheritedPermission(original, target);
 		if (
 			(target.section === "defaults" &&
 				(target.key === "state_default" || target.key === "users_default")) ||
@@ -204,8 +211,8 @@ export function PermissionsTab(props: PermissionsTabProps) {
 				next !== undefined &&
 				next < perms.myPowerLevel())
 		) {
-			setConfirmation({ target, level });
-		} else void save(target, level);
+			setConfirmation({ target, level, original });
+		} else void save(target, level, original);
 	};
 	const row = (target: PermissionTarget, label: string) => (
 		<PermissionLevelControl
@@ -350,7 +357,8 @@ export function PermissionsTab(props: PermissionsTabProps) {
 				onConfirm={() => {
 					const pending = confirmation();
 					setConfirmation(null);
-					if (pending) void save(pending.target, pending.level);
+					if (pending)
+						void save(pending.target, pending.level, pending.original);
 				}}
 			/>
 		</div>

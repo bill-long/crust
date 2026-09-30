@@ -24,6 +24,19 @@ describe("permission editor authorization", () => {
 		expect(edit("@me:s", 50)).toBeNull();
 		expect(edit("@other:s", 0, true)).toContain("permanent");
 		expect(edit("not-a-user", 0)).toContain("Matrix user ID");
+		for (const id of [
+			"@alice:server/path",
+			"@a b:server",
+			" @alice:server",
+			"@alice:server?query",
+		])
+			expect(edit(id, 0)).toContain("Matrix user ID");
+		for (const id of [
+			"@alice:server",
+			"@alice:server:8448",
+			"@alice:[::1]:8448",
+		])
+			expect(edit(id, 0)).toBeNull();
 	});
 	it("accepts only exact safe integers, including negative levels", () => {
 		for (const input of ["", "2.5", "Infinity", "1e2", "9007199254740992"])

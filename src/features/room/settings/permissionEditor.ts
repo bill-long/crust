@@ -1,3 +1,4 @@
+import { validateMatrixUserId } from "../../../lib/inviteValidation";
 import {
 	effectiveLevel,
 	type PowerLevelContent,
@@ -228,7 +229,8 @@ export function permissionEditError(
 	const current = explicitPermission(content, target);
 	const next = level;
 	if (target.section === "users") {
-		if (!/^@[^:]+:.+$/.test(target.key))
+		const userId = validateMatrixUserId(target.key);
+		if (!userId.ok || userId.userId !== target.key)
 			return "Enter a complete Matrix user ID.";
 		if (targetIsCreator)
 			return "Room creators have permanent privileges and cannot be assigned a level.";
