@@ -167,6 +167,71 @@ describe("Composer attach-file button", () => {
 });
 
 describe("Composer caption input", () => {
+	it.each([
+		["attachment", "success"],
+		["attachment and text", "success"],
+		["text", "success"],
+		["attachment and text", "failure"],
+		["text", "failure"],
+	])(
+		"preserves an edit started while sending %s (%s)",
+		async (mode, outcome) => {
+			const client = makeClient();
+			let finishSend!: () => void;
+			client.sendMessage.mockImplementationOnce(
+				() =>
+					new Promise((resolve, reject) => {
+						finishSend = () =>
+							outcome === "failure"
+								? reject(new Error("Send failed"))
+								: resolve({ event_id: "$sent" });
+					}),
+			);
+			const [editing, setEditing] = createSignal<TimelineEvent | null>(null);
+			const onSent = vi.fn(() => setEditing(null));
+			const { container, getByLabelText, findByLabelText } = render(() => (
+				<TestClientProvider client={client}>
+					<Composer
+						roomId={ROOM}
+						packs={[]}
+						editingEvent={editing()}
+						onSent={onSent}
+					/>
+				</TestClientProvider>
+			));
+			if (mode !== "text") {
+				const input = container.querySelector<HTMLInputElement>(
+					"input[data-composer-file-input]",
+				);
+				if (!input) throw new Error("file input missing");
+				pickFiles(input, [
+					new File(["notes"], "notes.txt", { type: "text/plain" }),
+				]);
+				await findByLabelText("Caption for notes.txt");
+			}
+			const message = getByLabelText("Message");
+			if (mode !== "attachment")
+				await userEvent.fill(message, "Original draft");
+			await userEvent.click(message);
+			await userEvent.keyboard("{Enter}");
+			await expect.poll(() => client.sendMessage.mock.calls.length).toBe(1);
+			const editBody = outcome === "failure" ? "" : "Unfinished edit";
+			setEditing({
+				eventId: "$editing",
+				body: editBody,
+			} as TimelineEvent);
+			const edit = await findByLabelText("Edit message");
+			finishSend();
+			await expect
+				.poll(() => client.sendMessage.mock.calls.length)
+				.toBe(mode === "attachment and text" && outcome === "success" ? 2 : 1);
+			await tick();
+			expect(onSent).not.toHaveBeenCalled();
+			expect(getByLabelText("Edit message")).toBe(edit);
+			expect((edit as HTMLTextAreaElement).value).toBe(editBody);
+		},
+	);
+
 	it("waits for editing to end before retrying a voice upload that failed mid-edit", async () => {
 		const ctx = new AudioContext();
 		const oscillator = ctx.createOscillator();
