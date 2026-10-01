@@ -208,10 +208,19 @@ describe("Composer caption input", () => {
 				eventId: "$editing",
 				body: "Unfinished edit",
 			} as TimelineEvent);
+			// Entering edit mode focuses the message on the next frame. Let that
+			// finish before filling the caption, or browser fill can type into
+			// the message when focus moves between selecting and inserting text.
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
 			rejectUpload(new Error("Upload failed"));
 			const caption = await findByLabelText("Caption for Voice message.webm");
 			await userEvent.fill(caption, "Keep the recording");
-			await userEvent.click(caption);
+			expect((caption as HTMLInputElement).value).toBe("Keep the recording");
+			expect(
+				(getByLabelText("Edit message") as HTMLTextAreaElement).value,
+			).toBe("Unfinished edit");
 			expect(document.activeElement).toBe(caption);
 			await userEvent.keyboard("{Enter}");
 			expect(client.sendMessage).not.toHaveBeenCalled();
