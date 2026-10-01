@@ -229,6 +229,14 @@ const Composer: Component<{
 		}
 	};
 
+	// Completing an older new-message send must not close an edit started
+	// while the request was pending. TimelineView treats onSent as edit done.
+	const notifyNewMessageSent = (clearReply = false): void => {
+		if (props.editingEvent) return;
+		if (clearReply) props.onCancelReply?.();
+		props.onSent?.();
+	};
+
 	/** Stop the recording and send it as an MSC3245 voice note through the
 	 *  regular upload pipeline (encrypts in E2EE rooms). Same room/reply
 	 *  pinning as send(); a failed upload lands the attachment in the tray
@@ -281,13 +289,7 @@ const Composer: Component<{
 				...(replyTo != null ? { replyTo } : {}),
 				threadId: threadRootId,
 			});
-			// Don't fire onSent while an edit is active: TimelineView
-			// reads it as "edit complete" and would clear the edit the
-			// user is composing.
-			if (!props.editingEvent) {
-				props.onCancelReply?.();
-				props.onSent?.();
-			}
+			notifyNewMessageSent(true);
 		} catch (e) {
 			// Deliberately NOT gated on room or edit mode: parking a failed
 			// upload in the tray beats silently losing the recording. Within the
@@ -453,7 +455,7 @@ const Composer: Component<{
 				gifThreadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
-			props.onSent?.();
+			notifyNewMessageSent();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : "Failed to send GIF");
 			// The GIF path has no draft/tray to fall back on. If the user has since
@@ -723,7 +725,7 @@ const Composer: Component<{
 		// Restore the trailing text on failure, but only if the user hasn't
 		// already started a new message.
 		const restoreDraft = (): void => {
-			if (!text()) {
+			if (!text() && !props.editingEvent) {
 				setText(draft);
 				setMentions(draftMentions);
 				setRoomMentionIntent(draftRoomMention);
@@ -788,7 +790,7 @@ const Composer: Component<{
 			}
 			if (!hasText) {
 				setSending(false);
-				props.onSent?.();
+				notifyNewMessageSent();
 				restoreFocus();
 				return;
 			}
@@ -819,7 +821,7 @@ const Composer: Component<{
 				threadRootId,
 				content as unknown as RoomMessageEventContent,
 			);
-			props.onSent?.();
+			notifyNewMessageSent();
 		} catch (e) {
 			restoreDraft();
 			setError(e instanceof Error ? e.message : "Failed to send message");
@@ -837,6 +839,20 @@ const Composer: Component<{
 		resetMentionState();
 		requestAnimationFrame(autoResize);
 		props.onCancelEdit?.();
+	};
+
+	const attachmentSendDisabled = (): boolean =>
+		sending() || !!props.editingEvent || voiceRecorder.recording();
+	const sendAttachments = async (): Promise<void> => {
+		if (attachmentSendDisabled()) return;
+		await send();
+	};
+
+	const onSendKeyDown = (e: KeyboardEvent, submit = send): void => {
+		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+			e.preventDefault();
+			void submit();
+		}
 	};
 
 	const onKeyDown = (e: KeyboardEvent): void => {
@@ -893,10 +909,7 @@ const Composer: Component<{
 			props.onEditLast();
 			return;
 		}
-		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-			e.preventDefault();
-			send();
-		}
+		onSendKeyDown(e);
 	};
 
 	return (
@@ -918,6 +931,9 @@ const Composer: Component<{
 			<Show when={attachments.length > 0}>
 				<AttachmentTray
 					attachments={attachments}
+					sendDisabled={attachmentSendDisabled()}
+					onSend={() => void sendAttachments()}
+					onCaptionKeyDown={(e) => onSendKeyDown(e, sendAttachments)}
 					onRemove={removeAttachment}
 					onCaptionChange={(id, caption) => updateAttachment(id, { caption })}
 				/>
