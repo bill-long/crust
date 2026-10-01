@@ -839,6 +839,20 @@ const Composer: Component<{
 		props.onCancelEdit?.();
 	};
 
+	const attachmentSendDisabled = (): boolean =>
+		sending() || !!props.editingEvent || voiceRecorder.recording();
+	const sendAttachments = async (): Promise<void> => {
+		if (attachmentSendDisabled()) return;
+		await send();
+	};
+
+	const onSendKeyDown = (e: KeyboardEvent, submit = send): void => {
+		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+			e.preventDefault();
+			void submit();
+		}
+	};
+
 	const onKeyDown = (e: KeyboardEvent): void => {
 		// Picker gets first dibs on keyboard events
 		if (handlePickerKey(e)) return;
@@ -893,10 +907,7 @@ const Composer: Component<{
 			props.onEditLast();
 			return;
 		}
-		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-			e.preventDefault();
-			send();
-		}
+		onSendKeyDown(e);
 	};
 
 	return (
@@ -918,6 +929,9 @@ const Composer: Component<{
 			<Show when={attachments.length > 0}>
 				<AttachmentTray
 					attachments={attachments}
+					sendDisabled={attachmentSendDisabled()}
+					onSend={() => void sendAttachments()}
+					onCaptionKeyDown={(e) => onSendKeyDown(e, sendAttachments)}
 					onRemove={removeAttachment}
 					onCaptionChange={(id, caption) => updateAttachment(id, { caption })}
 				/>

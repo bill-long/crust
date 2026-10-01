@@ -23,6 +23,9 @@ function kindIcon(kind: PendingAttachment["kind"]): string {
  */
 const AttachmentTray: Component<{
 	attachments: PendingAttachment[];
+	sendDisabled: boolean;
+	onSend: () => void;
+	onCaptionKeyDown: (event: KeyboardEvent) => void;
 	onRemove: (id: string) => void;
 	onCaptionChange: (id: string, caption: string) => void;
 }> = (props) => {
@@ -79,6 +82,7 @@ const AttachmentTray: Component<{
 								</div>
 								<input
 									type="text"
+									onKeyDown={props.onCaptionKeyDown}
 									value={att.caption}
 									onInput={(e) =>
 										props.onCaptionChange(att.id, e.currentTarget.value)
@@ -113,6 +117,15 @@ const AttachmentTray: Component<{
 					);
 				}}
 			</For>
+			<button
+				type="button"
+				class="self-end rounded bg-accent px-3 py-1.5 text-sm text-accent-foreground transition-colors hover:bg-accent/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-hover disabled:opacity-60"
+				onClick={() => props.onSend()}
+				disabled={props.sendDisabled}
+				aria-label="Send attachments"
+			>
+				Send
+			</button>
 		</div>
 	);
 };
