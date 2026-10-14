@@ -351,7 +351,7 @@ export async function startOidcLogin(
 
 	// The OAuth2 instance generates the PKCE verifier; we persist it (keyed
 	// by our state) so the callback can complete the exchange.
-	const auth = new OAuth2(metadata, { clientId, redirectUri });
+	const auth = new OAuth2(metadata, { clientId });
 	const signin: OidcSigninState = {
 		state: secureRandomBase64Url(16),
 		codeVerifier: auth.context.codeVerifier,
@@ -365,6 +365,7 @@ export async function startOidcLogin(
 	// keeps the callback handler trivial.
 	const authorizationUrl = await auth.generateAuthorizationCodeGrantUrl(
 		signin.state,
+		redirectUri,
 		"query",
 	);
 
@@ -459,9 +460,11 @@ export async function completeOidcLogin(
 		const auth = new OAuth2(metadata, {
 			clientId: signin.clientId,
 			codeVerifier: signin.codeVerifier,
-			redirectUri: oidcRedirectUri(),
 		});
-		tokenResponse = await auth.completeAuthorizationCodeGrant(code);
+		tokenResponse = await auth.completeAuthorizationCodeGrant(
+			code,
+			oidcRedirectUri(),
+		);
 	} catch (e) {
 		throw new Error(
 			userFacingErrorMessage(

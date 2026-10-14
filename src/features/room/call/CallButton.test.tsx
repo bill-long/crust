@@ -20,6 +20,12 @@ import {
 } from "./rtc/callSessionStore";
 import { _resetSwitchCallEpochForTests } from "./rtc/switchCall";
 
+const { discoverMock } = vi.hoisted(() => ({ discoverMock: vi.fn() }));
+vi.mock("./rtc/discoverFoci", () => ({ discoverLivekitFoci: discoverMock }));
+vi.mock("../../../app/ConfigProvider", () => ({
+	useConfig: () => ({ elementCall: { url: "https://call.example.com" } }),
+}));
+
 vi.mock("solid-refresh", () => ({
 	$$registry: () => new Map(),
 	$$component: (_registry: unknown, _id: string, component: unknown) =>
@@ -32,6 +38,7 @@ vi.mock("solid-refresh", () => ({
 interface MockRoomOpts {
 	roomId: string;
 	canSendCallMember: boolean;
+	canSendSticky?: boolean;
 	membership?: string;
 }
 
@@ -41,6 +48,8 @@ function makeMockRoom(opts: MockRoomOpts) {
 		roomId: opts.roomId,
 		getMyMembership: () => opts.membership ?? "join",
 		currentState: {
+			getStateEvents: () => [],
+			maySendEvent: () => opts.canSendSticky ?? false,
 			maySendStateEvent: (_type: string, _uid: string): boolean =>
 				opts.canSendCallMember,
 		},
@@ -56,12 +65,20 @@ function makeMockRoom(opts: MockRoomOpts) {
 interface MockClientOpts {
 	userId: string;
 	rooms: Record<string, ReturnType<typeof makeMockRoom>>;
+	sticky?: boolean;
+	capabilityFailure?: boolean;
 }
 
 function makeMockClient(opts: MockClientOpts) {
 	const clientListeners = new Set<(room: unknown) => void>();
+	let capabilityAttempts = 0;
 	return {
 		getUserId: () => opts.userId,
+		doesServerSupportUnstableFeature: async () => {
+			if (opts.capabilityFailure && capabilityAttempts++ === 0)
+				throw new Error("temporary versions failure");
+			return opts.sticky ?? false;
+		},
 		getRoom: (rid: string) => opts.rooms[rid] ?? null,
 		on: (_evt: unknown, fn: (room: unknown) => void) => {
 			clientListeners.add(fn);
@@ -72,19 +89,36 @@ function makeMockClient(opts: MockClientOpts) {
 	};
 }
 
-function renderButton(opts: {
+async function renderButton(opts: {
 	canSendCallMember: boolean;
+	canSendSticky?: boolean;
+	transport?: "url" | "service" | "dual";
+	capabilityFailure?: boolean;
 	summaries?: SummariesStore;
 }) {
+	discoverMock.mockResolvedValue([
+		{
+			type: "livekit",
+			livekit_alias: "!room:example.com",
+			livekit_service_url:
+				opts.transport === "url" ? "" : "https://sfu.example.com",
+			...(opts.transport !== "service" ? { url: "wss://sfu.example.com" } : {}),
+		},
+	]);
 	const room = makeMockRoom({
 		roomId: "!room:example.com",
 		canSendCallMember: opts.canSendCallMember,
+		...(opts.canSendSticky !== undefined
+			? { canSendSticky: opts.canSendSticky }
+			: {}),
 	});
 	const client = makeMockClient({
 		userId: "@me:example.com",
+		sticky: opts.canSendSticky ?? false,
+		...(opts.capabilityFailure ? { capabilityFailure: true } : {}),
 		rooms: { "!room:example.com": room },
 	});
-	const [syncState] = createSignal<AppSyncState>("live");
+	const [syncState, setSyncState] = createSignal<AppSyncState>("live");
 	const [cryptoState] = createSignal<CryptoState>("ready");
 	const summaries = opts.summaries ?? ({} as SummariesStore);
 	const onStart = vi.fn();
@@ -125,7 +159,8 @@ function renderButton(opts: {
 			/>
 		</ClientContext.Provider>
 	));
-	return { ...result, onStart };
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	return { ...result, onStart, setSyncState };
 }
 
 describe("CallButton visibility", () => {
@@ -136,18 +171,118 @@ describe("CallButton visibility", () => {
 		_resetSwitchCallEpochForTests();
 	});
 
-	it("visible when the user can send the call-member state event", () => {
-		renderButton({ canSendCallMember: true });
+	it("offers Join to a sticky-capable member without legacy state permission", async () => {
+		await renderButton({ canSendCallMember: false, canSendSticky: true });
+		await vi.waitFor(() =>
+			expect(
+				screen.queryByRole("button", { name: "Start a call" }),
+			).toBeTruthy(),
+		);
+	});
+
+	it("reserves the same disabled control while availability loads", async () => {
+		let resolve!: (value: unknown) => void;
+		discoverMock.mockImplementationOnce(
+			() =>
+				new Promise((r) => {
+					resolve = r;
+				}),
+		);
+		await renderButton({ canSendCallMember: true });
+		const button = screen.getByRole("button", {
+			name: "Checking call availability",
+		}) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		resolve([{ type: "livekit", livekit_service_url: "https://sfu.example" }]);
+		expect(await screen.findByRole("button", { name: "Start a call" })).toBe(
+			button,
+		);
+		expect(button.disabled).toBe(false);
+	});
+
+	it.each([
+		{ recovery: "manual", failure: "transports" },
+		{ recovery: "manual", failure: "fallback" },
+		{ recovery: "reconnect", failure: "fallback" },
+		{ recovery: "reconnect", failure: "transports" },
+		{ recovery: "manual", failure: "versions" },
+		{ recovery: "reconnect", failure: "versions" },
+	])(
+		"recovers failed discovery via %s without navigating",
+		async ({ recovery, failure }) => {
+			const before = discoverMock.mock.calls.length;
+			if (failure === "transports") discoverMock.mockResolvedValueOnce([]);
+			if (failure === "fallback")
+				discoverMock.mockResolvedValueOnce([
+					{ type: "livekit", livekit_service_url: "https://fallback.example" },
+				]);
+			const { setSyncState, onStart } = await renderButton({
+				canSendCallMember: false,
+				canSendSticky: true,
+				transport: "url",
+				capabilityFailure: failure === "versions",
+			});
+			const retry = screen.getByRole("button", {
+				name: "Retry call discovery",
+			});
+			if (recovery === "manual") retry.click();
+			else {
+				setSyncState("error");
+				setSyncState("live");
+			}
+			await screen.findByRole("button", { name: "Start a call" });
+			expect(discoverMock.mock.calls.length).toBe(before + 2);
+			expect(onStart).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		{
+			transport: "service",
+			canSendSticky: true,
+			canSendCallMember: false,
+			visible: false,
+		},
+		{
+			transport: "url",
+			canSendSticky: false,
+			canSendCallMember: true,
+			visible: false,
+		},
+		{
+			transport: "dual",
+			canSendSticky: false,
+			canSendCallMember: true,
+			visible: true,
+		},
+		{
+			transport: "url",
+			canSendSticky: true,
+			canSendCallMember: false,
+			visible: true,
+		},
+	] as const)(
+		"matches eligibility to the resolved transport: %j",
+		async (scenario) => {
+			await renderButton(scenario);
+			expect(
+				screen.queryByRole("button", { name: "Start a call" }) !== null,
+			).toBe(scenario.visible);
+		},
+	);
+
+	it("visible when the user can send the call-member state event", async () => {
+		await renderButton({ canSendCallMember: true });
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeTruthy();
 	});
 
-	it("hidden when the user lacks the power level for the call-member state event", () => {
-		renderButton({ canSendCallMember: false });
+	it("hidden when the user lacks the power level for the call-member state event", async () => {
+		await renderButton({ canSendCallMember: false });
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
 	});
 
-	it("hidden for a summaries-marked left room even when admin power survives", () => {
-		renderButton({
+	it("hidden for a summaries-marked left room even when admin power survives", async () => {
+		await renderButton({
 			canSendCallMember: true,
 			summaries: {
 				"!room:example.com": { membership: "leave" },
@@ -156,9 +291,9 @@ describe("CallButton visibility", () => {
 		expect(screen.queryByRole("button", { name: "Start a call" })).toBeNull();
 	});
 
-	it("shows the Switch label when another room has an active call", () => {
+	it("shows the Switch label when another room has an active call", async () => {
 		setActiveCallRoomId("!other:example.com");
-		renderButton({ canSendCallMember: true });
+		await renderButton({ canSendCallMember: true });
 		const btn = screen.queryByRole("button", {
 			name: "Switch to call in this room",
 		}) as HTMLButtonElement | null;
@@ -169,9 +304,9 @@ describe("CallButton visibility", () => {
 		expect(btn?.disabled).toBe(false);
 	});
 
-	it("uses the Start label when the active call is in this room", () => {
+	it("uses the Start label when the active call is in this room", async () => {
 		setActiveCallRoomId("!room:example.com");
-		renderButton({ canSendCallMember: true });
+		await renderButton({ canSendCallMember: true });
 		const btn = screen.queryByRole("button", {
 			name: "Start a call",
 		}) as HTMLButtonElement | null;
@@ -179,9 +314,9 @@ describe("CallButton visibility", () => {
 		expect(btn?.disabled).toBe(false);
 	});
 
-	it("clicking the Switch button opens the Switch calls? dialog and does not call onStart", () => {
+	it("clicking the Switch button opens the Switch calls? dialog and does not call onStart", async () => {
 		setActiveCallRoomId("!other:example.com");
-		const { onStart } = renderButton({ canSendCallMember: true });
+		const { onStart } = await renderButton({ canSendCallMember: true });
 		const btn = screen.queryByRole("button", {
 			name: "Switch to call in this room",
 		}) as HTMLButtonElement | null;
@@ -192,9 +327,9 @@ describe("CallButton visibility", () => {
 		).toBeTruthy();
 	});
 
-	it("clicking Cancel in the Switch dialog closes it and does not switch", () => {
+	it("clicking Cancel in the Switch dialog closes it and does not switch", async () => {
 		setActiveCallRoomId("!other:example.com");
-		renderButton({ canSendCallMember: true });
+		await renderButton({ canSendCallMember: true });
 		const btn = screen.getByRole("button", {
 			name: "Switch to call in this room",
 		});
@@ -205,7 +340,7 @@ describe("CallButton visibility", () => {
 		expect(screen.queryByRole("dialog", { name: "Switch calls?" })).toBeNull();
 	});
 
-	it("dialog body names the current and target rooms from summaries", () => {
+	it("dialog body names the current and target rooms from summaries", async () => {
 		const summaries: SummariesStore = {
 			"!room:example.com": {
 				roomId: "!room:example.com",
@@ -251,7 +386,7 @@ describe("CallButton visibility", () => {
 			},
 		};
 		setActiveCallRoomId("!other:example.com");
-		renderButton({ canSendCallMember: true, summaries });
+		await renderButton({ canSendCallMember: true, summaries });
 		const btn = screen.getByRole("button", {
 			name: "Switch to call in this room",
 		});
@@ -261,9 +396,9 @@ describe("CallButton visibility", () => {
 		expect(dialog.textContent).toContain("New Room");
 	});
 
-	it("falls back to generic names when summaries are missing", () => {
+	it("falls back to generic names when summaries are missing", async () => {
 		setActiveCallRoomId("!other:example.com");
-		renderButton({ canSendCallMember: true });
+		await renderButton({ canSendCallMember: true });
 		const btn = screen.getByRole("button", {
 			name: "Switch to call in this room",
 		});
@@ -273,7 +408,7 @@ describe("CallButton visibility", () => {
 		expect(dialog.textContent).toContain("this room");
 	});
 
-	it("treats whitespace-only summary names as missing for dialog fallback", () => {
+	it("treats whitespace-only summary names as missing for dialog fallback", async () => {
 		const summaries: SummariesStore = {
 			"!room:example.com": {
 				roomId: "!room:example.com",
@@ -319,7 +454,7 @@ describe("CallButton visibility", () => {
 			},
 		};
 		setActiveCallRoomId("!other:example.com");
-		renderButton({ canSendCallMember: true, summaries });
+		await renderButton({ canSendCallMember: true, summaries });
 		const btn = screen.getByRole("button", {
 			name: "Switch to call in this room",
 		});
@@ -329,15 +464,15 @@ describe("CallButton visibility", () => {
 		expect(dialog.textContent).toContain("this room");
 	});
 
-	it("calls onStart directly when no other call is active", () => {
-		const { onStart } = renderButton({ canSendCallMember: true });
+	it("calls onStart directly when no other call is active", async () => {
+		const { onStart } = await renderButton({ canSendCallMember: true });
 		const btn = screen.getByRole("button", { name: "Start a call" });
 		btn.click();
 		expect(onStart).toHaveBeenCalledTimes(1);
 		expect(screen.queryByRole("dialog", { name: "Switch calls?" })).toBeNull();
 	});
 
-	it("calls onStart directly when the active call is in this room (not a switch)", () => {
+	it("calls onStart directly when the active call is in this room (not a switch)", async () => {
 		setActiveCallRoomId("!room:example.com");
 		// Publishing a session for this room so otherCallActive() === false.
 		publishCallSession({
@@ -355,7 +490,7 @@ describe("CallButton visibility", () => {
 			requestClose: () => {},
 			requestLeave: async () => {},
 		});
-		const { onStart } = renderButton({ canSendCallMember: true });
+		const { onStart } = await renderButton({ canSendCallMember: true });
 		const btn = screen.getByRole("button", { name: "Start a call" });
 		btn.click();
 		expect(onStart).toHaveBeenCalledTimes(1);

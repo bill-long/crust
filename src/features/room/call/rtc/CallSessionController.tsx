@@ -236,6 +236,7 @@ export const CallSessionController: Component<CallSessionControllerProps> = (
 				(!roomEncrypted() || e2ee() !== null),
 		),
 		memberships: rtc.memberships,
+		localMembership: rtc.localMembership,
 		audioDeviceId: createMemo(() => userSettings().rtcMicDeviceId),
 		videoDeviceId: createMemo(() => userSettings().rtcCamDeviceId),
 		screenShareQuality: createMemo(() => userSettings().rtcScreenShareQuality),

@@ -13,18 +13,18 @@ import type {
 	CallMembership,
 	LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
-import { isLivekitTransport } from "matrix-js-sdk/lib/matrixrtc/LivekitTransport";
+import { computeRtcIdentityRaw } from "matrix-js-sdk/lib/matrixrtc/membershipData/rtc";
 import {
 	type Accessor,
 	createEffect,
 	createMemo,
+	createResource,
 	createSignal,
 	on,
 	onCleanup,
 } from "solid-js";
 import { avatarHttpUrl } from "../../../../lib/avatar";
 import { displayNameOr } from "../../../../lib/displayName";
-import { reportError } from "../../../../lib/reportError";
 import {
 	SCREEN_SHARE_CONTENT_HINT,
 	SCREEN_SHARE_PUBLISH_OPTIONS,
@@ -36,7 +36,12 @@ import { playPresenceCue } from "../../notificationSound";
 import { createPresenceCue, type PresenceCueDeps } from "./callPresenceCue";
 import { fetchLivekitToken, LivekitJwtError } from "./fetchLivekitToken";
 import { createForeignSfuRooms } from "./foreignSfuRooms";
-import { oldestMembership } from "./useRtcSession";
+import {
+	type LocalRtcMembership,
+	membershipTransport,
+	standaloneSubscriberIdentity,
+	transportAddress,
+} from "./rtcProtocol";
 
 export type LivekitConnectionStatus =
 	| "idle"
@@ -94,6 +99,7 @@ export interface RtcParticipant {
 }
 
 export interface UseLivekitRoomOptions {
+	localMembership?: Accessor<LocalRtcMembership | null>;
 	client: MatrixClient;
 	/** Active LiveKit transport to dial (or null = don't connect). */
 	focus: Accessor<LivekitTransport | null>;
@@ -445,7 +451,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		if (!url) return null;
 		try {
 			const parsed = new URL(url.trim());
-			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+			if (!["https:", "http:", "wss:", "ws:"].includes(parsed.protocol)) {
 				return null;
 			}
 			return parsed.origin;
@@ -475,24 +481,15 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// snapshot.
 	const publishedLivekitTransport = (
 		membership: CallMembership,
-		oldest: CallMembership,
+		members: readonly CallMembership[],
 	): LivekitTransport | null => {
-		let published: ReturnType<CallMembership["getTransport"]>;
-		try {
-			published = membership.getTransport(oldest);
-		} catch (e) {
-			// Console-only: expected for event-authored holes, but an SDK
-			// upgrade changing getTransport's contract would otherwise
-			// silently classify every peer "not foreign" with no trace.
-			reportError(e, {
-				logLabel: `rtc: getTransport failed for membership of ${membership.userId}`,
-			});
-			return null;
-		}
-		if (published === undefined || !isLivekitTransport(published)) {
-			return null;
-		}
-		return published;
+		return membershipTransport(
+			opts.client,
+			opts.localMembership?.()?.roomId ??
+				String(opts.focus()?.livekit_alias ?? ""),
+			membership,
+			members,
+		);
 	};
 
 	interface MembershipEntry {
@@ -515,27 +512,62 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// legacy membership deep-compares event content, far too heavy for the
 	// active-speaker tick. Also feeds `desiredForeignSfus`, the set of
 	// foreign SFUs the receive-only connections (#495) should dial.
+	const [subscriberAliases] = createResource(
+		opts.memberships,
+		async (members) =>
+			Promise.all(
+				members
+					.filter((m) => typeof m.memberId === "string")
+					.map(
+						async (m) =>
+							[
+								m,
+								await computeRtcIdentityRaw(m.userId, m.memberId),
+								await standaloneSubscriberIdentity(
+									m.userId,
+									m.deviceId,
+									m.memberId,
+								),
+							] as const,
+					),
+			),
+	);
 	const membershipInfo = createMemo(() => {
 		const list = opts.memberships();
-		const focusUrl = canonicalSfuUrl(opts.focus()?.livekit_service_url);
-		const oldest = oldestMembership(list);
+		const focusUrl = canonicalSfuUrl(transportAddress(opts.focus()));
 		const map = new Map<string, MembershipEntry>();
 		for (const membership of list) {
-			const publishedTransport = oldest
-				? publishedLivekitTransport(membership, oldest)
-				: null;
+			const publishedTransport = publishedLivekitTransport(membership, list);
 			const publishedOrigin = publishedTransport
-				? canonicalSfuUrl(publishedTransport.livekit_service_url)
+				? canonicalSfuUrl(transportAddress(publishedTransport))
 				: null;
-			map.set(membership.rtcBackendIdentity, {
-				membership,
-				publishedTransport,
-				publishedOrigin,
-				isForeignSfu:
-					publishedOrigin !== null &&
-					focusUrl !== null &&
-					publishedOrigin !== focusUrl,
-			});
+			for (const identity of membership.backendIdentities ?? [
+				membership.rtcBackendIdentity,
+			])
+				map.set(identity, {
+					membership,
+					publishedTransport,
+					publishedOrigin,
+					isForeignSfu:
+						publishedOrigin !== null &&
+						focusUrl !== null &&
+						publishedOrigin !== focusUrl &&
+						!(
+							publishedTransport?.livekit_service_url &&
+							opts.focus()?.livekit_service_url &&
+							canonicalSfuUrl(publishedTransport.livekit_service_url) ===
+								canonicalSfuUrl(opts.focus()?.livekit_service_url)
+						),
+				});
+		}
+		for (const [member, currentAlias, standaloneAlias] of subscriberAliases() ??
+			[]) {
+			if (!list.includes(member)) continue;
+			const entry = [...map.values()].find((e) => e.membership === member);
+			if (entry) {
+				map.set(currentAlias, entry);
+				map.set(standaloneAlias, entry);
+			}
 		}
 		return map;
 	});
@@ -667,14 +699,16 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				false,
 			),
 		);
-		// Roster union across rooms, keyed by identity. For a duplicate
-		// (multi-SFU peers connect to every SFU, subscriber-only except
-		// their own) the record WITH a microphone publication wins - that
-		// is the room they publish to, and its mute state is the real one.
+		// Merge membership aliases, preferring the advertised publishing room.
+		// Camera-only and screen-only publishers must keep their media identity.
 		const localIdentity = r.localParticipant.identity;
 		const mergedRemotes = new Map<
-			string,
-			{ micPub: { isMuted?: boolean } | undefined }
+			string | CallMembership,
+			{
+				identity: string;
+				micPub: { isMuted?: boolean } | undefined;
+				publishing: boolean;
+			}
 		>();
 		const collectRemotes = (source: LivekitRoom): void => {
 			for (const p of source.remoteParticipants.values()) {
@@ -682,21 +716,37 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				// remote peer. (lk-jwt-service derives the same
 				// `userId:deviceId` identity everywhere for us.)
 				if (p.identity === localIdentity) continue;
+				const entry = membershipInfo().get(p.identity);
+				const member = entry?.membership;
+				if (
+					member &&
+					member.userId === opts.client.getUserId() &&
+					member.deviceId === opts.client.getDeviceId()
+				)
+					continue;
 				const micPub = Array.from(p.audioTrackPublications.values()).find(
 					(pub) => pub.source === "microphone",
 				);
-				const existing = mergedRemotes.get(p.identity);
-				if (
-					!existing ||
-					(micPub !== undefined && existing.micPub === undefined)
-				) {
-					mergedRemotes.set(p.identity, { micPub });
+				const publishing = entry
+					? source === r
+						? !entry.isForeignSfu
+						: foreign
+								.rooms()
+								.some(
+									(h) =>
+										h.room === source && h.origin === entry.publishedOrigin,
+								)
+					: micPub !== undefined || p.videoTrackPublications.size > 0;
+				const key = member ?? p.identity;
+				const existing = mergedRemotes.get(key);
+				if (!existing || (publishing && !existing.publishing)) {
+					mergedRemotes.set(key, { identity: p.identity, micPub, publishing });
 				}
 			}
 		};
 		collectRemotes(r);
 		for (const fr of foreignRooms) collectRemotes(fr);
-		for (const [identity, { micPub }] of mergedRemotes) {
+		for (const { identity, micPub } of mergedRemotes.values()) {
 			const info = resolveIdentity(identity, false);
 			// "Audio unavailable" only when no room delivers a mic
 			// publication AND we can't expect one: the peer is unmapped, or
@@ -833,6 +883,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// works unchanged; `snapshotParticipants` merges rosters across rooms.
 	const foreign = createForeignSfuRooms({
 		client: opts.client,
+		localMembership: opts.localMembership,
 		loadLivekit: opts.loadLivekit ?? (() => import("livekit-client")),
 		e2ee: () => opts.e2ee?.() ?? null,
 		attachAudioTrack,
@@ -1076,17 +1127,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 			// can compare against the SDK's own enum value instead of a copy.
 			livekitConnectedState = lk.ConnectionState.Connected;
 
-			const openIdToken = await opts.client.getOpenIdToken();
-			if (disposed || myAttempt !== attempt) return;
-
-			// lk-jwt-service builds the LiveKit participant identity as
-			// `<userId>:<deviceId>`. That string MUST match matrix-js-sdk's
-			// `rtcBackendIdentity` (also `<userId>:<deviceId>`, computed
-			// from `client.getDeviceId()` inside RTCEncryptionManager) so
-			// the bridge's keyProvider entries line up with the identity
-			// LiveKit assigns to participants. A missing device_id
-			// silently breaks outbound E2EE for other participants — fail
-			// fast instead.
+			// The token request and published membership must identify the same device.
 			const deviceId = opts.client.getDeviceId();
 			if (!deviceId) {
 				throw new LivekitJwtError(
@@ -1094,30 +1135,22 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				);
 			}
 
-			const { url, jwt } = await fetchLivekitToken(
+			const { url, jwt, localIdentity } = await fetchLivekitToken(
 				focus,
-				openIdToken,
+				() => opts.client.getOpenIdToken(),
 				deviceId,
+				{ client: opts.client, membership: opts.localMembership?.() },
 			);
 			if (disposed || myAttempt !== attempt) return;
 
 			const e2eeCtx = opts.e2ee?.() ?? null;
-			// Acquire a fresh per-Room binding BEFORE constructing the
-			// `lk.Room`. The binding owns this Room's keyProvider+worker
-			// pair so focus-change reconnects don't reuse a keyProvider
-			// across Rooms (LiveKit's E2EEManager attaches non-cleanup
-			// listeners on it, leaking per Room instance). `localIdentity`
-			// (the same `userId:deviceId` lk-jwt-service assigns us) lets
-			// the cache replay end on OUR latest key so a rebound Room
-			// never encrypts under a stale current index. A logged-in
-			// client always has a userId, but guard anyway - a bogus
-			// "null:DEV" identity would silently never match the cache,
-			// while omitting it falls back to the documented order.
+			// Bind before Room construction and replay our latest key last, using
+			// the identity selected by the successful authentication route.
 			const localUserId = opts.client.getUserId();
 			const localBinding =
 				e2eeCtx?.bindRoom({
 					...(localUserId
-						? { localIdentity: `${localUserId}:${deviceId}` }
+						? { localIdentity: localIdentity ?? `${localUserId}:${deviceId}` }
 						: {}),
 				}) ?? null;
 			pendingBinding = localBinding;
@@ -1569,7 +1602,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					const current = opts.focus();
 					if (
 						opts.enabled() &&
-						current?.livekit_service_url === targetFocus.livekit_service_url
+						transportAddress(current) === transportAddress(targetFocus)
 					) {
 						void doConnect(targetFocus);
 					} else {
@@ -1585,9 +1618,12 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// Re-resolve display names when the membership list changes (a new joiner
 	// adds a `rtcBackendIdentity → userId` mapping we couldn't resolve before).
 	createEffect(
-		on(opts.memberships, () => {
-			if (room) snapshotParticipants(room);
-		}),
+		on(
+			() => [opts.memberships(), subscriberAliases()] as const,
+			() => {
+				if (room) snapshotParticipants(room);
+			},
+		),
 	);
 
 	// Mic single-flight reconcile loop. Driven by `createEffect` on

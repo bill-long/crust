@@ -13,7 +13,7 @@ vi.mock("solid-refresh", () => ({
 }));
 
 // Capture createClient's options while keeping the rest of the SDK real:
-// the OIDC refresh wiring under test (createOidcTokenRefreshFn) runs for
+// the OIDC refresh wiring under test (createOidcTokenRefreshCallback) runs for
 // real, so the test proves the whole hop from session shape to SDK
 // options, not a mock's shape.
 const createClientMock = vi.hoisted(() => vi.fn());
@@ -170,7 +170,7 @@ describe("ClientProvider session wiring (#460)", () => {
 		);
 	});
 
-	it("passes refreshToken and a tokenRefreshFunction for an OIDC session", async () => {
+	it("passes refreshToken and an onTokenRefresh for an OIDC session", async () => {
 		setup(OIDC_SESSION);
 
 		await screen.findByText("provider-child");
@@ -193,7 +193,8 @@ describe("ClientProvider session wiring (#460)", () => {
 			// can never catch the flag regressing.
 			timelineSupport: true,
 		});
-		expect(opts.tokenRefreshFunction).toBeTypeOf("function");
+		expect(opts.onTokenRefresh).toBeTypeOf("function");
+		expect(opts.oauthClientId).toBe(OIDC_SESSION.oidc?.clientId);
 	});
 
 	it("advertises only the verification methods Crust can complete (#452)", () => {
@@ -225,7 +226,7 @@ describe("ClientProvider session wiring (#460)", () => {
 			"createClient options",
 		);
 		expect(opts).not.toHaveProperty("refreshToken");
-		expect(opts).not.toHaveProperty("tokenRefreshFunction");
+		expect(opts).not.toHaveProperty("onTokenRefresh");
 	});
 
 	it("stops a client that was stopped while it was still starting (#551)", async () => {

@@ -1,6 +1,7 @@
 import { ClientPrefix, type MatrixClient, Method } from "matrix-js-sdk";
 import type { LivekitTransport } from "matrix-js-sdk/lib/matrixrtc";
 import { meansEndpointUnsupported } from "../../../../lib/endpointUnsupported";
+import { livekitTransport } from "./rtcProtocol";
 
 /**
  * Builds the EC-bundled fallback LiveKit foci list. Derives the
@@ -56,36 +57,8 @@ function parseLivekitTransports(
 	if (!Array.isArray(raw)) return [];
 	const out: LivekitTransport[] = [];
 	for (const entry of raw) {
-		if (typeof entry !== "object" || entry === null) continue;
-		const e = entry as Record<string, unknown>;
-		if (e.type !== "livekit") continue;
-		const serviceUrl = e.livekit_service_url;
-		if (typeof serviceUrl !== "string") continue;
-		const trimmed = serviceUrl.trim();
-		if (trimmed.length === 0) continue;
-		// External data: validate that the URL is absolute and uses an
-		// http(s) scheme before propagating to fetchLivekitToken — a
-		// malformed or hostile well-known could otherwise direct the
-		// OpenID token POST at the app origin (relative URL) or a
-		// non-http scheme (javascript:, file:, etc.). Skip invalid
-		// entries so discovery can fall through to other valid foci or
-		// the EC fallback.
-		let parsed: URL;
-		try {
-			parsed = new URL(trimmed);
-		} catch {
-			continue;
-		}
-		if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-			continue;
-		}
-		// MatrixRTC membership events carry one transport per focus; the
-		// `livekit_alias` is the per-call room handle the SFU keys on.
-		out.push({
-			type: "livekit",
-			livekit_service_url: trimmed,
-			livekit_alias: roomId,
-		});
+		const transport = livekitTransport(entry, roomId);
+		if (transport) out.push(transport);
 	}
 	return out;
 }

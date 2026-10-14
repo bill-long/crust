@@ -75,12 +75,13 @@ describe("logOutAccount", () => {
 		void logOutAccount(oidc);
 		expect(createClientMock.mock.calls[0]?.[0]).toMatchObject({
 			accessToken: oidc.accessToken,
+			oauthClientId: "client-1",
 		});
 		const opts = createClientMock.mock.calls[0]?.[0] as {
-			tokenRefreshFunction?: unknown;
+			onTokenRefresh?: unknown;
 			refreshToken?: unknown;
 		};
-		expect(opts?.tokenRefreshFunction).toBeTypeOf("function");
+		expect(opts?.onTokenRefresh).toBeTypeOf("function");
 		// Both halves are needed: the function has nothing to present without
 		// the token, so omitting it makes the refresher dead weight.
 		expect(opts?.refreshToken).toBe(oidc.refreshToken);

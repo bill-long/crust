@@ -13,6 +13,7 @@ import type { LivekitTransport } from "matrix-js-sdk/lib/matrixrtc";
 import { reportError } from "../../../../lib/reportError";
 import { fetchLivekitToken } from "./fetchLivekitToken";
 import type { RtcE2EEContext, RtcE2EERoomBinding } from "./rtcE2EEBridge";
+import type { LocalRtcMembership } from "./rtcProtocol";
 
 /**
  * Subscriber-only LiveKit connections to *foreign* SFUs - the receive half
@@ -67,7 +68,9 @@ export interface ForeignRoomHandle {
 }
 
 export interface ForeignSfuRoomsDeps {
-	client: Pick<MatrixClient, "getOpenIdToken" | "getDeviceId" | "getUserId">;
+	localMembership?: (() => LocalRtcMembership | null) | undefined;
+	client: Pick<MatrixClient, "getOpenIdToken" | "getDeviceId" | "getUserId"> &
+		Partial<Pick<MatrixClient, "http">>;
 	loadLivekit: () => Promise<typeof import("livekit-client")>;
 	/** Current E2EE context, or null for unencrypted rooms. Read at
 	 *  connect time per origin (matches the primary connect path). */
@@ -266,21 +269,24 @@ export function createForeignSfuRooms(
 		try {
 			const lk = await deps.loadLivekit();
 			if (stale()) return;
-			const openIdToken = await getToken();
-			if (stale()) return;
 			const deviceId = deps.client.getDeviceId();
 			if (!deviceId) {
 				throw new Error("Matrix client has no device ID");
 			}
-			const { url, jwt } = await fetchLivekitToken(
+			const { url, jwt, localIdentity } = await fetchLivekitToken(
 				entry.transport,
-				openIdToken,
+				getToken,
 				deviceId,
+				{
+					...(deps.client.http ? { client: { http: deps.client.http } } : {}),
+					membership: deps.localMembership?.(),
+					subscriber: true,
+				},
 			);
 			if (stale()) return;
 
 			const e2eeCtx = deps.e2ee();
-			// localIdentity: same `userId:deviceId` lk-jwt-service assigns us,
+			// localIdentity: the identity selected by the successful JWT route,
 			// so the key-cache replay ends on OUR latest key (see bindRoom).
 			// Guard a null userId (mirrors the primary connect path): omit
 			// rather than build a bogus "null:DEV" identity.
@@ -288,7 +294,7 @@ export function createForeignSfuRooms(
 			const binding =
 				e2eeCtx?.bindRoom({
 					...(localUserId
-						? { localIdentity: `${localUserId}:${deviceId}` }
+						? { localIdentity: localIdentity ?? `${localUserId}:${deviceId}` }
 						: {}),
 				}) ?? null;
 			pendingBinding = binding;

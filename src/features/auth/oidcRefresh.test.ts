@@ -1,3 +1,4 @@
+import { createClient } from "matrix-js-sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../../stores/session";
 import {
@@ -7,64 +8,14 @@ import {
 	saveSession,
 } from "../../stores/session";
 
-// Mock the SDK boundary: a fake TokenRefresher that captures constructor
-// args and lets each test script what a refresh yields. What stays under
-// test is OUR wiring: lazy construction (metadata fetch + OAuth2 context),
-// the password-session no-op, and the identity-guarded persistence.
-const oauth2Contexts = vi.hoisted(() => ({
-	args: [] as Array<Record<string, unknown>>,
-}));
-const tokenRefresherInstances = vi.hoisted(() => ({
-	instances: [] as Array<{
-		auth: unknown;
-		onRefresh: (tokens: {
-			accessToken: string;
-			refreshToken?: string;
-		}) => Promise<void>;
-	}>,
+import { createOidcTokenRefreshCallback } from "./oidcRefresh";
+
+const refreshFixture = {
 	nextTokens: { accessToken: "new-access", refreshToken: "new-refresh" } as {
 		accessToken: string;
 		refreshToken?: string;
 	},
-}));
-const createClientMock = vi.hoisted(() => vi.fn());
-vi.mock("matrix-js-sdk", () => ({
-	createClient: (...args: unknown[]) => createClientMock(...args),
-	OAuth2: class FakeOAuth2 {
-		constructor(
-			public metadata: unknown,
-			public context: Record<string, unknown>,
-		) {
-			oauth2Contexts.args.push(context);
-		}
-	},
-	TokenRefresher: class FakeTokenRefresher {
-		constructor(
-			public auth: unknown,
-			public onRefresh: (tokens: {
-				accessToken: string;
-				refreshToken?: string;
-			}) => Promise<void>,
-		) {
-			tokenRefresherInstances.instances.push({ auth, onRefresh });
-		}
-		tokenRefreshFunction = async (_refreshToken: string) => {
-			const tokens = { ...tokenRefresherInstances.nextTokens };
-			await this.onRefresh(tokens);
-			// Faithful to the real SDK (tokenRefresher.js getNewTokens): the
-			// returned refreshToken is undefined when the OP did not rotate it.
-			return { ...tokens, refreshToken: tokens.refreshToken };
-		};
-	},
-}));
-
-import { createOidcTokenRefreshFn } from "./oidcRefresh";
-
-const METADATA = {
-	issuer: "https://auth.example.com/",
-	token_endpoint: "https://auth.example.com/token",
 };
-
 const PASSWORD_SESSION: Session = {
 	accessToken: "access-old",
 	userId: "@alice:example.com",
@@ -87,15 +38,10 @@ const stored = (userId = PASSWORD_SESSION.userId): Session | undefined =>
 
 beforeEach(() => {
 	localStorage.clear();
-	oauth2Contexts.args.length = 0;
-	tokenRefresherInstances.instances.length = 0;
-	tokenRefresherInstances.nextTokens = {
+	refreshFixture.nextTokens = {
 		accessToken: "new-access",
 		refreshToken: "new-refresh",
 	};
-	createClientMock.mockReturnValue({
-		getAuthMetadata: vi.fn(async () => METADATA),
-	});
 });
 afterEach(() => {
 	vi.clearAllMocks();
@@ -103,7 +49,7 @@ afterEach(() => {
 	localStorage.clear();
 });
 
-describe("createOidcTokenRefreshFn", () => {
+describe("createOidcTokenRefreshCallback", () => {
 	it("waits for a concurrent login before reading and updating the account list", async () => {
 		saveSession(OIDC_SESSION);
 		let release!: () => void;
@@ -121,9 +67,9 @@ describe("createOidcTokenRefreshFn", () => {
 			},
 		);
 		vi.stubGlobal("navigator", { locks: { request } });
-		const refresh = createOidcTokenRefreshFn(OIDC_SESSION);
+		const refresh = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!refresh) throw new Error("expected a refresh function");
-		const pending = refresh("refresh-old");
+		const pending = refresh(refreshFixture.nextTokens);
 		await vi.waitFor(() => expect(request).toHaveBeenCalled());
 		expect(stored()?.accessToken).toBe("access-old");
 		addSession({
@@ -138,43 +84,20 @@ describe("createOidcTokenRefreshFn", () => {
 		expect(loadSession()?.userId).toBe("@bob:example.com");
 	});
 	it("returns undefined for a password session", () => {
-		expect(createOidcTokenRefreshFn(PASSWORD_SESSION)).toBeUndefined();
+		expect(createOidcTokenRefreshCallback(PASSWORD_SESSION)).toBeUndefined();
 	});
 
-	it("returns undefined when the OIDC session has no refresh token", () => {
-		const session: Session = { ...OIDC_SESSION };
+	it("provides persistence for OAuth sessions even without a refresh token", () => {
+		const session = { ...OIDC_SESSION };
 		delete session.refreshToken;
-		expect(createOidcTokenRefreshFn(session)).toBeUndefined();
+		expect(createOidcTokenRefreshCallback(session)).toBeTypeOf("function");
 	});
-
-	it("builds the SDK refresher lazily on first refresh with the right context", async () => {
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
-		if (!fn) throw new Error("expected a refresh function");
-
-		// Nothing constructed until the first refresh actually fires.
-		expect(oauth2Contexts.args).toHaveLength(0);
-
-		const tokens = await fn("refresh-old");
-
-		expect(oauth2Contexts.args).toHaveLength(1);
-		expect(oauth2Contexts.args[0]).toEqual({
-			clientId: "client-xyz",
-			redirectUri: `${window.location.origin}/login/callback`,
-		});
-		expect(createClientMock).toHaveBeenCalledWith({
-			baseUrl: "https://matrix.example.com",
-		});
-		expect(tokenRefresherInstances.instances).toHaveLength(1);
-		expect(tokens.accessToken).toBe("new-access");
-		expect(tokens.refreshToken).toBe("new-refresh");
-	});
-
 	it("persists rotated tokens back into the stored session on refresh", async () => {
 		saveSession(OIDC_SESSION);
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 
-		await fn("refresh-old");
+		await fn(refreshFixture.nextTokens);
 
 		expect(stored()?.accessToken).toBe("new-access");
 		expect(stored()?.refreshToken).toBe("new-refresh");
@@ -184,12 +107,12 @@ describe("createOidcTokenRefreshFn", () => {
 	});
 
 	it("keeps the stored refresh token when the OP does not rotate it", async () => {
-		tokenRefresherInstances.nextTokens = { accessToken: "new-access" };
+		refreshFixture.nextTokens = { accessToken: "new-access" };
 		saveSession(OIDC_SESSION);
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 
-		await fn("refresh-old");
+		await fn(refreshFixture.nextTokens);
 
 		expect(stored()?.accessToken).toBe("new-access");
 		expect(stored()?.refreshToken).toBe("refresh-old");
@@ -198,15 +121,15 @@ describe("createOidcTokenRefreshFn", () => {
 	it("keeps the stored refresh token when the OP rotates it to empty", async () => {
 		// An empty refresh_token is "not rotated", not a new value: storing "" would
 		// fail session validation and lose the new access token with it.
-		tokenRefresherInstances.nextTokens = {
+		refreshFixture.nextTokens = {
 			accessToken: "new-access",
 			refreshToken: "",
 		};
 		saveSession(OIDC_SESSION);
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 
-		await fn("refresh-old");
+		await fn(refreshFixture.nextTokens);
 
 		expect(stored()?.accessToken).toBe("new-access");
 		expect(stored()?.refreshToken).toBe("refresh-old");
@@ -214,10 +137,10 @@ describe("createOidcTokenRefreshFn", () => {
 
 	it("does not persist into a password session that replaced the OIDC one", async () => {
 		saveSession(PASSWORD_SESSION);
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 
-		await fn("refresh-old");
+		await fn(refreshFixture.nextTokens);
 
 		expect(stored()?.accessToken).toBe("access-old");
 		expect(stored()?.refreshToken).toBeUndefined();
@@ -230,10 +153,10 @@ describe("createOidcTokenRefreshFn", () => {
 			deviceId: "DEVICE99",
 		};
 		saveSession(otherSession);
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 
-		await fn("refresh-old");
+		await fn(refreshFixture.nextTokens);
 
 		// The refreshing account is not logged in at all any more, so nothing is
 		// written - and in particular the account that IS logged in keeps its own
@@ -262,10 +185,10 @@ describe("createOidcTokenRefreshFn", () => {
 				sessions: [OIDC_SESSION, other],
 			}),
 		);
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 
-		await fn("refresh-old");
+		await fn(refreshFixture.nextTokens);
 
 		expect(stored()?.accessToken).toBe("new-access");
 		expect(stored("@bob:example.com")?.accessToken).toBe("bob-access");
@@ -273,25 +196,93 @@ describe("createOidcTokenRefreshFn", () => {
 	});
 
 	it("does not throw when the session was cleared before a refresh lands", async () => {
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
+		const fn = createOidcTokenRefreshCallback(OIDC_SESSION);
 		if (!fn) throw new Error("expected a refresh function");
 		localStorage.clear();
 
-		await expect(fn("refresh-old")).resolves.toBeDefined();
+		await expect(fn(refreshFixture.nextTokens)).resolves.toBeUndefined();
 		expect(localStorage.getItem("crust:session")).toBeNull();
 		expect(loadSession()).toBeNull();
 	});
-
-	it("propagates a metadata-fetch failure as a transient error", async () => {
-		createClientMock.mockReturnValue({
-			getAuthMetadata: vi.fn(async () => {
-				throw new TypeError("Failed to fetch");
-			}),
-		});
-		const fn = createOidcTokenRefreshFn(OIDC_SESSION);
-		if (!fn) throw new Error("expected a refresh function");
-
-		// Not a TokenRefreshLogoutError: the SDK treats this as transient.
-		await expect(fn("refresh-old")).rejects.toThrow("Failed to fetch");
-	});
 });
+
+it.each([
+	[undefined, undefined],
+	["", ""],
+	["new-refresh", undefined],
+	["new-refresh", ""],
+])(
+	"keeps SDK refresh working for consecutive rotations %j",
+	async (first, second) => {
+		const rotations = [first, second, undefined];
+		let refreshCount = 0;
+		let latestRefresh = "refresh-old";
+		const expired = new Set(["Bearer access-old"]);
+		saveSession(OIDC_SESSION);
+		const fetchImpl = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url === "https://auth.example.com/token") {
+					expect(String(init?.body)).toContain(
+						`refresh_token=${latestRefresh}`,
+					);
+					const rotated = rotations[refreshCount++];
+					if (rotated) latestRefresh = rotated;
+					return new Response(
+						JSON.stringify({
+							access_token: `new-access-${refreshCount}`,
+							...(rotated !== undefined ? { refresh_token: rotated } : {}),
+							token_type: "Bearer",
+						}),
+						{ headers: { "Content-Type": "application/json" } },
+					);
+				}
+				if (expired.has(new Headers(init?.headers).get("Authorization") ?? ""))
+					return new Response(
+						JSON.stringify({ errcode: "M_UNKNOWN_TOKEN", error: "expired" }),
+						{ status: 401, headers: { "Content-Type": "application/json" } },
+					);
+				return new Response(
+					JSON.stringify({
+						user_id: OIDC_SESSION.userId,
+						device_id: OIDC_SESSION.deviceId,
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			},
+		);
+		vi.stubGlobal("fetch", fetchImpl);
+		const callback = createOidcTokenRefreshCallback(OIDC_SESSION);
+		if (!callback) throw new Error("Missing callback");
+		const client = createClient({
+			baseUrl: OIDC_SESSION.homeserverUrl,
+			userId: OIDC_SESSION.userId,
+			deviceId: OIDC_SESSION.deviceId,
+			accessToken: OIDC_SESSION.accessToken,
+			refreshToken: "refresh-old",
+			oauthClientId: "client-xyz",
+			onTokenRefresh: callback,
+			fetchFn: fetchImpl,
+		});
+		client.http.opts.authMetadataCallback = async () =>
+			({
+				issuer: "https://auth.example.com/",
+				token_endpoint: "https://auth.example.com/token",
+			}) as never;
+		await expect(client.whoami()).resolves.toMatchObject({
+			user_id: OIDC_SESSION.userId,
+		});
+		await vi.waitFor(() => expect(stored()?.accessToken).toBe("new-access-1"));
+		expired.add("Bearer new-access-1");
+		await expect(client.whoami()).resolves.toMatchObject({
+			user_id: OIDC_SESSION.userId,
+		});
+		expired.add("Bearer new-access-2");
+		await expect(client.whoami()).resolves.toMatchObject({
+			user_id: OIDC_SESSION.userId,
+		});
+		expect(refreshCount).toBe(3);
+		await vi.waitFor(() => expect(stored()?.accessToken).toBe("new-access-3"));
+		expect(stored()?.refreshToken).toBe(latestRefresh);
+	},
+);

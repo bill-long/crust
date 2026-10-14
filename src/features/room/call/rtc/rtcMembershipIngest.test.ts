@@ -10,7 +10,7 @@ import { requiredAt } from "./testAssertions";
  *     `rtcBackendIdentity` is the plain `userId:deviceId` pair, and
  *   - MSC4143 `org.matrix.msc4143.rtc.member` sticky events (MSC4354),
  *     whose `rtcBackendIdentity` is the MSC4195 hash
- *     `unpaddedBase64(sha256(canonicalJSON([user_id, device_id, member.id])))`
+ *     `unpaddedBase64(sha256(canonicalJSON([user_id, member.id])))`
  *     - the value lk-jwt-service's new endpoint puts on the LiveKit wire.
  *
  * `useLivekitRoom.resolveIdentity` matches LiveKit `participant.identity`
@@ -98,13 +98,13 @@ const legacyMemberEvent = (over?: { sender?: string; deviceId?: string }) => {
 };
 
 // Fixture triple + independently computed MSC4195 identity:
-// unpaddedBase64(sha256('["@bob:example.org","DEVICE1","member-uuid-1"]'))
+// unpaddedBase64(sha256('["@bob:example.org","member-uuid-1"]'))
 const RTC_MEMBER = {
 	user_id: "@bob:example.org",
 	device_id: "DEVICE1",
 	id: "member-uuid-1",
 };
-const RTC_MEMBER_HASH = "c53v4dTzaQzS4pI/jouU5eCVHNPFYvNSUhL6V6MFrEA";
+const RTC_MEMBER_HASH = "AyZaG60WWydC7rhYEHaXKbZ3dxTdM329LJ39cpaWl1U";
 
 const rtcMemberEvent = (over?: { stickyKey?: string }) =>
 	fakeEvent({
@@ -119,7 +119,7 @@ const rtcMemberEvent = (over?: { stickyKey?: string }) =>
 				published: [
 					{
 						type: "livekit",
-						livekit_service_url: "https://livekit-jwt.call.matrix.org",
+						url: "wss://sfu.example.org",
 						livekit_alias: "!room:example.org",
 					},
 				],
@@ -145,7 +145,7 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 			"@alice:example.org",
 		);
 		expect(
-			requiredAt(memberships, 0, "legacy membership").rtcBackendIdentity,
+			requiredAt(memberships, 0, "legacy membership").backendIdentities[0],
 		).toBe("@alice:example.org:DEVA");
 	});
 
@@ -163,7 +163,7 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 			RTC_MEMBER.user_id,
 		);
 		expect(
-			requiredAt(memberships, 0, "sticky membership").rtcBackendIdentity,
+			requiredAt(memberships, 0, "sticky membership").backendIdentities[0],
 		).toBe(RTC_MEMBER_HASH);
 	});
 
@@ -177,7 +177,7 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 			room as never,
 			SLOT,
 		);
-		expect(memberships.map((m) => m.rtcBackendIdentity).sort()).toEqual(
+		expect(memberships.map((m) => m.backendIdentities[0]).sort()).toEqual(
 			["@alice:example.org:DEVA", RTC_MEMBER_HASH].sort(),
 		);
 	});
@@ -211,7 +211,8 @@ describe("MatrixRTCSession membership ingest (#488)", () => {
 		);
 		expect(memberships).toHaveLength(1);
 		expect(
-			requiredAt(memberships, 0, "joined sticky membership").rtcBackendIdentity,
+			requiredAt(memberships, 0, "joined sticky membership")
+				.backendIdentities[0],
 		).toBe(RTC_MEMBER_HASH);
 	});
 });

@@ -93,7 +93,7 @@ export interface RtcE2EEContext {
 	 * for.
 	 *
 	 * `localIdentity` is the LOCAL participant's rtcBackendIdentity
-	 * (`userId:deviceId` under the legacy membership format Crust sends).
+	 * (hashed for current RTC transports, `userId:deviceId` for legacy).
 	 * Pass it whenever known: livekit-client keeps ONE
 	 * `latestManuallySetKeyIndex` per provider (not per participant), and
 	 * on SignalConnected it re-posts cached keys to the worker marking

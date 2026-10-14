@@ -1,28 +1,28 @@
 import { RoomStateEvent } from "matrix-js-sdk";
+import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
 import {
 	type Component,
 	createEffect,
 	createMemo,
+	createResource,
 	createSignal,
+	on,
 	onCleanup,
 	Show,
 } from "solid-js";
+import { useConfig } from "../../../app/ConfigProvider";
 import { useClient } from "../../../client/client";
-import { canSendStateEvent } from "../../../client/stateEventPermission";
 import { activeCallRoomId } from "../../../stores/activeCall";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import { currentCallSession } from "./rtc/callSessionStore";
+import { discoverLivekitFoci } from "./rtc/discoverFoci";
+import {
+	canDiscoverRtcTransport,
+	selectRtcTransport,
+	supportsRtcMembership,
+} from "./rtc/rtcProtocol";
 import { switchCall } from "./rtc/switchCall";
-
-/**
- * State event type that matrix-js-sdk + Element Call currently write for
- * MatrixRTC memberships (legacy MSC3401 form). We gate the call button on
- * the user's ability to send this specific event type — checking the stable
- * `m.call.member` instead would over-restrict against Conduwuity, which
- * doesn't power-level it.
- */
-const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
 
 interface CallButtonProps {
 	roomId: string;
@@ -44,7 +44,41 @@ interface CallButtonProps {
  * controller surfaces the error inside its own leave-error dialog.
  */
 export const CallButton: Component<CallButtonProps> = (props) => {
-	const { client, summaries } = useClient();
+	const { client, summaries, syncState } = useClient();
+	const config = useConfig();
+	let discoveryAbort: AbortController | undefined;
+	onCleanup(() => discoveryAbort?.abort());
+	const [transportOptions, { refetch }] = createResource(
+		() => props.roomId,
+		async (roomId) => {
+			discoveryAbort?.abort();
+			const controller = new AbortController();
+			discoveryAbort = controller;
+			const [sticky, foci] = await Promise.all([
+				supportsRtcMembership(client),
+				discoverLivekitFoci(client, config.elementCall.url, roomId, {
+					signal: controller.signal,
+				}),
+			]);
+			return { sticky, foci };
+		},
+	);
+
+	createEffect(
+		on(
+			syncState,
+			(current, previous) => {
+				if (
+					current === "live" &&
+					previous !== "live" &&
+					canRetryDiscovery() &&
+					!transportOptions.loading
+				)
+					void refetch();
+			},
+			{ defer: true },
+		),
+	);
 
 	// Bump on RoomStateEvent.Update so canStartCall recomputes when power
 	// levels or membership change. Same pattern as Layout.tsx canInviteHere.
@@ -63,23 +97,47 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 			setBump((n) => n + 1);
 		};
 		room.on(RoomStateEvent.Update, onUpdate);
+		const session = client.matrixRTC?.getRoomSession(room);
+		session?.on(MatrixRTCSessionEvent.MembershipsChanged, onUpdate);
 		onCleanup(() => {
 			room.removeListener(RoomStateEvent.Update, onUpdate);
+			session?.off(MatrixRTCSessionEvent.MembershipsChanged, onUpdate);
 		});
 	});
 
 	const canStartCall = createMemo((): boolean => {
 		bump();
 		roomAvailableTick();
-		return canSendStateEvent(
-			client,
-			props.roomId,
-			CALL_MEMBER_EVENT_TYPE,
-			summaries,
+		const available = transportOptions();
+		const room = client.getRoom(props.roomId);
+		if (!available || !room) return false;
+		return (
+			selectRtcTransport(
+				client,
+				props.roomId,
+				available.foci,
+				available.sticky,
+				client.matrixRTC?.getRoomSession(room).memberships ?? [],
+				summaries,
+			) !== null
 		);
 	});
 
-	const visible = (): boolean => canStartCall();
+	const canRetryDiscovery = createMemo(() => {
+		bump();
+		roomAvailableTick();
+		const available = transportOptions();
+		return (
+			!!available &&
+			!canStartCall() &&
+			canDiscoverRtcTransport(client, props.roomId, available.sticky, summaries)
+		);
+	});
+	const visible = createMemo(() => {
+		bump();
+		roomAvailableTick();
+		return canDiscoverRtcTransport(client, props.roomId, null, summaries);
+	});
 
 	// True when the user is in another room's call. With B-2c the
 	// button stays enabled — clicking opens a "Switch calls?" confirm
@@ -99,6 +157,9 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		summaries[props.roomId]?.name?.trim() || "this room";
 
 	const buttonLabel = (): string => {
+		if (!transportOptions()) return "Checking call availability";
+		if (!canStartCall() && !canRetryDiscovery()) return "Calls unavailable";
+		if (!canStartCall() && canRetryDiscovery()) return "Retry call discovery";
 		if (otherCallActive()) return "Switch to call in this room";
 		return props.callActive() ? "Join call" : "Start a call";
 	};
@@ -106,6 +167,12 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const [switchOpen, setSwitchOpen] = createSignal(false);
 
 	const handleClick = (): void => {
+		if (!transportOptions() || (!canStartCall() && !canRetryDiscovery()))
+			return;
+		if (!canStartCall() && canRetryDiscovery()) {
+			if (!transportOptions.loading) void refetch();
+			return;
+		}
 		if (otherCallActive()) {
 			setSwitchOpen(true);
 			return;
@@ -130,6 +197,11 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 				<button
 					type="button"
 					onClick={handleClick}
+					disabled={
+						!transportOptions() ||
+						(!canStartCall() &&
+							(!canRetryDiscovery() || transportOptions.loading))
+					}
 					class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					title={buttonLabel()}
 					aria-label={buttonLabel()}

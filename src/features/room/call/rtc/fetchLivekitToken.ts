@@ -1,7 +1,15 @@
-import type { IOpenIDToken } from "matrix-js-sdk";
+import {
+	ClientPrefix,
+	type IOpenIDToken,
+	type MatrixClient,
+	Method,
+} from "matrix-js-sdk";
 import type { LivekitTransport } from "matrix-js-sdk/lib/matrixrtc";
+import { meansEndpointUnsupported } from "../../../../lib/endpointUnsupported";
+import { type LocalRtcMembership, RTC_SLOT } from "./rtcProtocol";
 
 export interface LivekitJwtResponse {
+	localIdentity?: string;
 	/** wss:// URL of the LiveKit SFU. */
 	url: string;
 	/** Signed access token to pass to `Room.connect`. */
@@ -90,7 +98,7 @@ export class LivekitJwtError extends Error {
  * @throws {LivekitJwtError} On non-2xx, malformed response, network error,
  *   or when `deviceId` is empty.
  */
-export async function fetchLivekitToken(
+async function fetchLegacyToken(
 	focus: LivekitTransport,
 	openIdToken: IOpenIDToken,
 	deviceId: string,
@@ -168,4 +176,120 @@ export async function fetchLivekitToken(
 		url: (body as { url: string }).url,
 		jwt: (body as { jwt: string }).jwt,
 	};
+}
+
+interface TokenOptions {
+	signal?: AbortSignal;
+	fetchImpl?: typeof fetch;
+	client?: Pick<MatrixClient, "http">;
+	membership?: LocalRtcMembership | null | undefined;
+	subscriber?: boolean;
+}
+
+/** Select authentication to match the identities advertised by the publishing membership.
+ * Current C-S uses member_id; the deprecated standalone route still uses member.
+ * A publisher never uses the old three-component hash returned by /get_token.
+ */
+export async function fetchLivekitToken(
+	focus: LivekitTransport,
+	openIdToken: IOpenIDToken | (() => Promise<IOpenIDToken>),
+	deviceId: string,
+	options?: TokenOptions,
+): Promise<LivekitJwtResponse> {
+	const own = options?.membership;
+	let tokenPromise: Promise<IOpenIDToken> | undefined;
+	const getOpenId = () =>
+		(tokenPromise ??=
+			typeof openIdToken === "function"
+				? openIdToken()
+				: Promise.resolve(openIdToken));
+	if (!deviceId || (own && own.deviceId !== deviceId))
+		throw new LivekitJwtError(
+			"Cannot request LiveKit JWT without a matching Matrix device ID",
+		);
+	if (
+		own &&
+		typeof focus.url === "string" &&
+		(own.modern || options?.subscriber)
+	) {
+		if (!options?.client)
+			throw new LivekitJwtError("Matrix client required for RTC token request");
+		const parsed = new URL(focus.url);
+		if (!["wss:", "ws:"].includes(parsed.protocol))
+			throw new LivekitJwtError("Invalid LiveKit WebSocket URL");
+		try {
+			// SDK 44's convenience method still types the pre-v0.8 request body.
+			// Keep this wire adaptation here until the SDK accepts flat member_id.
+			const response = await options.client.http.authedRequest<{ jwt: string }>(
+				Method.Post,
+				"/rtc/livekit/get_token",
+				undefined,
+				{
+					url: focus.url,
+					room_id: own.roomId,
+					slot_id: RTC_SLOT,
+					member_id: own.memberId,
+					...(focus.server_name ? { server_name: focus.server_name } : {}),
+				},
+				{
+					prefix: `${ClientPrefix.Unstable}/io.element.msc4195`,
+					...(options.signal ? { abortSignal: options.signal } : {}),
+				},
+			);
+			if (typeof response.jwt !== "string" || !response.jwt)
+				throw new LivekitJwtError("RTC token response missing jwt");
+			return {
+				url: focus.url,
+				jwt: response.jwt,
+				localIdentity: own.backendIdentity,
+			};
+		} catch (e) {
+			if (!meansEndpointUnsupported(e) || !focus.livekit_service_url) throw e;
+		}
+	}
+	if (own && options?.subscriber && focus.livekit_service_url) {
+		const url = new URL(normaliseJwtServiceUrl(focus.livekit_service_url));
+		url.pathname = url.pathname.replace(/\/sfu\/get$/, "/get_token");
+		const response = await (options.fetchImpl ?? fetch)(url.toString(), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			...(options.signal ? { signal: options.signal } : {}),
+			body: JSON.stringify({
+				room_id: own.roomId,
+				slot_id: RTC_SLOT,
+				openid_token: await getOpenId(),
+				member: {
+					id: own.memberId,
+					claimed_user_id: own.userId,
+					claimed_device_id: deviceId,
+				},
+			}),
+		});
+		if (response.ok) {
+			const body = await response.json();
+			if (typeof body?.url !== "string" || typeof body?.jwt !== "string")
+				throw new LivekitJwtError(
+					"lk-jwt-service response missing url/jwt fields",
+				);
+			// Subscriber connections never publish, so their own identity does not
+			// participate in remote decryption. Only received peers need key bindings.
+			return { url: body.url, jwt: body.jwt };
+		}
+		if (![404, 405].includes(response.status))
+			throw new LivekitJwtError(
+				`lk-jwt-service returned ${response.status}`,
+				response.status,
+			);
+	}
+	if (!focus.livekit_service_url)
+		throw new LivekitJwtError("No compatible LiveKit token endpoint");
+	const response = await fetchLegacyToken(
+		{ ...focus, livekit_alias: focus.livekit_alias || own?.roomId },
+		await getOpenId(),
+		deviceId,
+		options,
+	);
+	return own
+		? { ...response, localIdentity: `${own.userId}:${deviceId}` }
+		: response;
 }
