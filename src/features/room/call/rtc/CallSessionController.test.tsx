@@ -96,6 +96,8 @@ vi.mock("./useRtcSession", () => ({
 		memberships: () => [],
 		error: hooksState.rtcError,
 		canJoin: () => true,
+		canRetryDiscovery: () => false,
+		retryDiscovery: async () => {},
 		joinBlockReason: () => null,
 		activeFocus: () => null,
 		localMembership: () => null,

@@ -26,8 +26,10 @@ bind the same media key to both identities. URL-only transports never invent an
 OpenID fallback. Internal normalized transports use an empty service string for
 URL-only inputs; publishedTransport removes it before the SDK sees the wire data.
 
-The call button considers both permission forms, and join rechecks the permission
-for the selected form. Sticky memberships require ordinary event permission;
+The header and join path share transport-and-permission selection. The header
+reserves its control while availability loads. Header and dialog retry discovery
+when a failed probe or an incompatible fallback leaves no usable transport; retry
+never publishes membership. Join rechecks permission for the selected form. Sticky memberships require ordinary event permission;
 legacy memberships require state-event permission. Both require room membership.
 SDK 44's removal of oldest-membership election is adapted in rtcProtocol so older
 peers' unused offers are not mistaken for their publishing SFU.
@@ -66,7 +68,8 @@ and onTokenRefresh, with the existing account-identity and storage-lock protecti
 
 ## Validation boundaries
 
-The browser Join regression uses Chromium, a real MatrixRTCSession, serialized
+The browser Join regressions, including recovery from an incompatible fallback,
+use Chromium, a real MatrixRTCSession, serialized
 membership events, simulated sync delivery, real SDK media-key generation, and a
 mocked token response. It checks the member ID and both key identities across the
 membership/JWT boundary. It does not connect to a live Matrix server or LiveKit SFU,

@@ -394,16 +394,22 @@ export const FullCallOverlay: Component = () => {
 									type="button"
 									ref={leaveButtonRef}
 									onClick={() => {
-										void s().requestJoin();
+										if (!s().rtc.canJoin() && s().rtc.canRetryDiscovery())
+											void s().rtc.retryDiscovery();
+										else void s().requestJoin();
 									}}
 									disabled={
-										!s().rtc.canJoin() ||
+										(!s().rtc.canJoin() && !s().rtc.canRetryDiscovery()) ||
 										s().rtc.status() === "joining" ||
 										s().bridgeInitializing()
 									}
 									class="rounded bg-accent px-4 py-2 text-sm font-semibold text-accent-foreground disabled:opacity-50 any-pointer-coarse:min-h-11 any-pointer-coarse:py-3"
 								>
-									{s().bridgeInitializing() ? "Preparing…" : "Join call"}
+									{s().bridgeInitializing()
+										? "Preparing…"
+										: !s().rtc.canJoin() && s().rtc.canRetryDiscovery()
+											? "Retry call setup"
+											: "Join call"}
 								</button>
 							</Show>
 						</div>

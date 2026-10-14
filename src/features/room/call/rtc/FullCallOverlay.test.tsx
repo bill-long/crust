@@ -539,4 +539,19 @@ describe("FullCallOverlay", () => {
 		expect(document.activeElement).toBe(prev);
 		document.body.removeChild(prev);
 	});
+
+	it("offers discovery retry without publishing when no compatible transport is ready", () => {
+		const fake = track(makeFakeCallSession());
+		fake.setRtcCanJoin(false);
+		fake.api.rtc.canRetryDiscovery = () => true;
+		publishCallSession(fake.api);
+		render(() => <FullCallOverlay />);
+		const retry = screen.getByRole("button", {
+			name: "Retry call setup",
+		}) as HTMLButtonElement;
+		expect(retry.disabled).toBe(false);
+		retry.click();
+		expect(fake.api.rtc.retryDiscovery).toHaveBeenCalledTimes(1);
+		expect(fake.requestJoin).not.toHaveBeenCalled();
+	});
 });

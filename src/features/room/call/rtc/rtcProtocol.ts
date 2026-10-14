@@ -196,3 +196,16 @@ export function selectRtcTransport(
 		: foci.find((f) => f.livekit_service_url);
 	return focus ? { focus: { ...focus, url: undefined }, modern: false } : null;
 }
+
+/** Whether discovery could find a transport this member may publish. */
+export function canDiscoverRtcTransport(
+	client: MatrixClient,
+	roomId: string,
+	sticky: boolean | null,
+	summaries?: SummariesStore,
+): boolean {
+	return (
+		canPublishMembership(client, roomId, false, summaries) ||
+		(sticky !== false && canPublishMembership(client, roomId, true, summaries))
+	);
+}

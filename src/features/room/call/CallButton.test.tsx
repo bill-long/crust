@@ -180,8 +180,30 @@ describe("CallButton visibility", () => {
 		);
 	});
 
+	it("reserves the same disabled control while availability loads", async () => {
+		let resolve!: (value: unknown) => void;
+		discoverMock.mockImplementationOnce(
+			() =>
+				new Promise((r) => {
+					resolve = r;
+				}),
+		);
+		await renderButton({ canSendCallMember: true });
+		const button = screen.getByRole("button", {
+			name: "Checking call availability",
+		}) as HTMLButtonElement;
+		expect(button.disabled).toBe(true);
+		resolve([{ type: "livekit", livekit_service_url: "https://sfu.example" }]);
+		expect(await screen.findByRole("button", { name: "Start a call" })).toBe(
+			button,
+		);
+		expect(button.disabled).toBe(false);
+	});
+
 	it.each([
 		{ recovery: "manual", failure: "transports" },
+		{ recovery: "manual", failure: "fallback" },
+		{ recovery: "reconnect", failure: "fallback" },
 		{ recovery: "reconnect", failure: "transports" },
 		{ recovery: "manual", failure: "versions" },
 		{ recovery: "reconnect", failure: "versions" },
@@ -190,6 +212,10 @@ describe("CallButton visibility", () => {
 		async ({ recovery, failure }) => {
 			const before = discoverMock.mock.calls.length;
 			if (failure === "transports") discoverMock.mockResolvedValueOnce([]);
+			if (failure === "fallback")
+				discoverMock.mockResolvedValueOnce([
+					{ type: "livekit", livekit_service_url: "https://fallback.example" },
+				]);
 			const { setSyncState, onStart } = await renderButton({
 				canSendCallMember: false,
 				canSendSticky: true,

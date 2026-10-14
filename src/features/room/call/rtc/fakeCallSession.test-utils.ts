@@ -150,6 +150,8 @@ function makeFakeCallSessionImpl(
 		memberships: () => [],
 		error: rtcError,
 		canJoin: rtcCanJoin,
+		canRetryDiscovery: () => false,
+		retryDiscovery: vi.fn(async () => {}),
 		joinBlockReason: rtcJoinBlockReason,
 		activeFocus: () => null,
 		localMembership: () => null,

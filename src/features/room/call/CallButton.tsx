@@ -18,7 +18,7 @@ import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import { currentCallSession } from "./rtc/callSessionStore";
 import { discoverLivekitFoci } from "./rtc/discoverFoci";
 import {
-	canPublishMembership,
+	canDiscoverRtcTransport,
 	selectRtcTransport,
 	supportsRtcMembership,
 } from "./rtc/rtcProtocol";
@@ -71,8 +71,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 				if (
 					current === "live" &&
 					previous !== "live" &&
-					(transportOptions.latest?.foci.length === 0 ||
-						transportOptions.latest?.sticky === null) &&
+					canRetryDiscovery() &&
 					!transportOptions.loading
 				)
 					void refetch();
@@ -127,14 +126,18 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const canRetryDiscovery = createMemo(() => {
 		bump();
 		roomAvailableTick();
+		const available = transportOptions();
 		return (
-			(transportOptions()?.foci.length === 0 ||
-				transportOptions()?.sticky === null) &&
-			(canPublishMembership(client, props.roomId, false, summaries) ||
-				canPublishMembership(client, props.roomId, true, summaries))
+			!!available &&
+			!canStartCall() &&
+			canDiscoverRtcTransport(client, props.roomId, available.sticky, summaries)
 		);
 	});
-	const visible = (): boolean => canStartCall() || canRetryDiscovery();
+	const visible = createMemo(() => {
+		bump();
+		roomAvailableTick();
+		return canDiscoverRtcTransport(client, props.roomId, null, summaries);
+	});
 
 	// True when the user is in another room's call. With B-2c the
 	// button stays enabled — clicking opens a "Switch calls?" confirm
@@ -154,6 +157,8 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		summaries[props.roomId]?.name?.trim() || "this room";
 
 	const buttonLabel = (): string => {
+		if (!transportOptions()) return "Checking call availability";
+		if (!canStartCall() && !canRetryDiscovery()) return "Calls unavailable";
 		if (!canStartCall() && canRetryDiscovery()) return "Retry call discovery";
 		if (otherCallActive()) return "Switch to call in this room";
 		return props.callActive() ? "Join call" : "Start a call";
@@ -162,6 +167,8 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const [switchOpen, setSwitchOpen] = createSignal(false);
 
 	const handleClick = (): void => {
+		if (!transportOptions() || (!canStartCall() && !canRetryDiscovery()))
+			return;
 		if (!canStartCall() && canRetryDiscovery()) {
 			if (!transportOptions.loading) void refetch();
 			return;
@@ -191,7 +198,9 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 					type="button"
 					onClick={handleClick}
 					disabled={
-						!canStartCall() && canRetryDiscovery() && transportOptions.loading
+						!transportOptions() ||
+						(!canStartCall() &&
+							(!canRetryDiscovery() || transportOptions.loading))
 					}
 					class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					title={buttonLabel()}

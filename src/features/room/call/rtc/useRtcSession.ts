@@ -19,6 +19,7 @@ import {
 import { buildFallbackLivekitFoci, discoverLivekitFoci } from "./discoverFoci";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
 import {
+	canDiscoverRtcTransport,
 	type LocalRtcMembership,
 	publishedTransport,
 	selectRtcTransport,
@@ -67,21 +68,14 @@ export interface RtcSessionApi {
 	status: Accessor<RtcStatus>;
 	memberships: Accessor<readonly CallMembership[]>;
 	error: Accessor<Error | null>;
-	/** True when the room exists and at least one focus is configured.
-	 * Phase 4 lifted the unencrypted-only restriction: encrypted rooms
-	 * are joinable once the consumer supplies the E2EE bridge via
-	 * `opts.e2ee`. The hook itself does not block on encryption — that
-	 * gate lived in Phase 1/2 only. Stays `false` while async foci
-	 * discovery is in flight (see `fociReady`). */
+	/** True when resolved transports and capabilities permit a membership. */
 	canJoin: Accessor<boolean>;
+	/** Discovery can be retried without publishing or remounting the controller. */
+	canRetryDiscovery: Accessor<boolean>;
+	retryDiscovery: () => Promise<void>;
 	/** Human-readable reason Join is blocked, or null when joinable. */
 	joinBlockReason: Accessor<string | null>;
-	/**
-	 * The LiveKit transport that Phase 2 media should dial. Resolves to the
-	 * oldest existing member's transport when joining an in-progress call,
-	 * or our offered fallback when we are the first participant. Null until
-	 * we have joined (no transport to dial before then).
-	 */
+	/** Fixed publishing transport for this join; null until joined. */
 	activeFocus: Accessor<LivekitTransport | null>;
 	/**
 	 * Resolves once the async foci discovery (transports endpoint,
@@ -106,10 +100,6 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const [publishedFocus, setPublishedFocus] =
 		createSignal<LivekitTransport | null>(null);
 	const [stickySupport, setStickySupport] = createSignal<boolean | null>(null);
-	const stickyReady = supportsRtcMembership(opts.client).then((value) => {
-		setStickySupport(value);
-		return value;
-	});
 	const [permissionsTick, setPermissionsTick] = createSignal(0);
 	const [status, setStatus] = createSignal<RtcStatus>("idle");
 	const [memberships, setMemberships] = createSignal<readonly CallMembership[]>(
@@ -142,24 +132,49 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	// a rejection and caught by the fallback arm below. A raw
 	// `discoverImpl(...)` call would otherwise throw out of hook
 	// construction.
-	const fociReady: Promise<void> = Promise.resolve()
-		.then(() =>
-			discoverImpl(opts.client, opts.elementCallUrl, opts.roomId, {
-				signal: discoveryAbort.signal,
-			}),
+	const discover = (): Promise<void> => {
+		setFoci(null);
+		return Promise.resolve()
+			.then(() =>
+				Promise.all([
+					discoverImpl(opts.client, opts.elementCallUrl, opts.roomId, {
+						signal: discoveryAbort.signal,
+					}),
+					supportsRtcMembership(opts.client),
+				]),
+			)
+			.then(([resolved, sticky]) => {
+				if (disposed) return;
+				setStickySupport(sticky);
+				setFoci(resolved);
+			})
+			.catch(() => {
+				// `discoverLivekitFoci` never throws, but a custom override
+				// might (sync throw or async rejection). Fall back to the
+				// EC-bundled derivation rather than leaving `foci()`
+				// permanently null and blocking Join.
+				if (disposed) return;
+				setFoci(buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId));
+			});
+	};
+	let discoveryInFlight: Promise<void> | null = null;
+	const retryDiscovery = (): Promise<void> => {
+		if (
+			disposed ||
+			status() === "joined" ||
+			status() === "joining" ||
+			status() === "leaving"
 		)
-		.then((resolved) => {
-			if (disposed) return;
-			setFoci(resolved);
-		})
-		.catch(() => {
-			// `discoverLivekitFoci` never throws, but a custom override
-			// might (sync throw or async rejection). Fall back to the
-			// EC-bundled derivation rather than leaving `foci()`
-			// permanently null and blocking Join.
-			if (disposed) return;
-			setFoci(buildFallbackLivekitFoci(opts.elementCallUrl, opts.roomId));
+			return Promise.resolve();
+		if (discoveryInFlight) return discoveryInFlight;
+		setError(null);
+		const pending = discover().finally(() => {
+			if (discoveryInFlight === pending) discoveryInFlight = null;
 		});
+		discoveryInFlight = pending;
+		return pending;
+	};
+	const fociReady = retryDiscovery();
 	let leavePending = false;
 
 	const joinBlockReason = createMemo((): string | null => {
@@ -177,7 +192,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				opts.client,
 				opts.roomId,
 				list,
-				stickySupport() ?? true,
+				stickySupport(),
 				memberships(),
 			)
 		)
@@ -186,6 +201,15 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	});
 
 	const canJoin = createMemo(() => joinBlockReason() === null);
+	const canRetryDiscovery = createMemo(() => {
+		permissionsTick();
+		return (
+			foci() !== null &&
+			!canJoin() &&
+			status() !== "joined" &&
+			canDiscoverRtcTransport(opts.client, opts.roomId, stickySupport())
+		);
+	});
 
 	const activeFocus = createMemo<LivekitTransport | null>(
 		() => {
@@ -377,11 +401,10 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// block reason - otherwise a quick Join click would race discovery
 		// and hit the "Discovering…" block path.
 		if (foci() === null) {
-			await fociReady;
+			await (discoveryInFlight ?? fociReady);
 		}
-		await stickyReady;
-		if (stickySupport() === null && joinEpoch === startEpoch && !disposed)
-			setStickySupport(await supportsRtcMembership(opts.client));
+		if (canRetryDiscovery() && joinEpoch === startEpoch && !disposed)
+			await retryDiscovery();
 		// Cancelled while we were parked: leave() or onCleanup bumped
 		// joinEpoch. Bail before publishing a membership the user
 		// already asked us not to.
@@ -598,6 +621,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 
 	return {
 		localMembership,
+		canRetryDiscovery,
+		retryDiscovery,
 		status,
 		memberships,
 		error,

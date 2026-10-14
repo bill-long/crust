@@ -1022,9 +1022,56 @@ it("retries a failed capability probe when joining without remounting", async ()
 		}),
 	);
 	await result.fociReady;
-	expect(result.canJoin()).toBe(true);
+	expect(result.canJoin()).toBe(false);
+	expect(result.canRetryDiscovery()).toBe(true);
+	await result.retryDiscovery();
 	await result.join();
 	expect(capability).toHaveBeenCalledTimes(2);
 	expect(result.localMembership()?.modern).toBe(true);
 	expect(result.status()).toBe("joined");
+});
+
+it("retries an incompatible fallback in the controller before publishing", async () => {
+	const session = createFakeSession();
+	const { client } = createClient({ session });
+	client.getRoom.mockReturnValue({
+		getMyMembership: () => "join",
+		currentState: {
+			maySendEvent: () => true,
+			maySendStateEvent: () => false,
+			getStateEvents: () => [],
+		},
+	} as never);
+	const discover = vi
+		.fn()
+		.mockResolvedValueOnce([
+			{ type: "livekit", livekit_service_url: "https://fallback.example" },
+		])
+		.mockResolvedValue([
+			{
+				type: "livekit",
+				livekit_service_url: "",
+				url: "wss://current.example",
+			},
+		]);
+	const { result } = renderHook(() =>
+		useRtcSession({
+			client: {
+				...client,
+				doesServerSupportUnstableFeature: async () => true,
+			} as never,
+			roomId: "!room:example.com",
+			elementCallUrl: "https://fallback.example",
+			discoverFoci: discover,
+		}),
+	);
+	await result.fociReady;
+	expect(result.canJoin()).toBe(false);
+	expect(result.canRetryDiscovery()).toBe(true);
+	await Promise.all([result.retryDiscovery(), result.retryDiscovery()]);
+	expect(discover).toHaveBeenCalledTimes(2);
+	expect(session.join).not.toHaveBeenCalled();
+	expect(result.canJoin()).toBe(true);
+	await result.join();
+	expect(result.localMembership()?.modern).toBe(true);
 });
