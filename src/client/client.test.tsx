@@ -170,7 +170,7 @@ describe("ClientProvider session wiring (#460)", () => {
 		);
 	});
 
-	it("passes refreshToken and a onTokenRefresh for an OIDC session", async () => {
+	it("passes refreshToken and an onTokenRefresh for an OIDC session", async () => {
 		setup(OIDC_SESSION);
 
 		await screen.findByText("provider-child");

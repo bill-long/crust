@@ -5,6 +5,7 @@ import type {
 } from "matrix-js-sdk/lib/matrixrtc";
 import { createEffect, createRoot, createSignal } from "solid-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LocalRtcMembership } from "./rtcProtocol";
 import { requiredAt } from "./testAssertions";
 
 // Hoisted mocks — vi.mock factories run before module imports.
@@ -182,6 +183,7 @@ function createFakeRoom(opts?: {
 
 function createClient(): {
 	client: {
+		http: { authedRequest: ReturnType<typeof vi.fn> };
 		getOpenIdToken: ReturnType<typeof vi.fn>;
 		getUser: ReturnType<typeof vi.fn>;
 		getUserId: ReturnType<typeof vi.fn>;
@@ -192,6 +194,7 @@ function createClient(): {
 } {
 	return {
 		client: {
+			http: { authedRequest: vi.fn(async () => ({ jwt: "current-jwt" })) },
 			getOpenIdToken: vi.fn(async () => ({
 				access_token: "tok",
 				token_type: "Bearer",
@@ -981,7 +984,9 @@ describe("useLivekitRoom", () => {
 
 		const renderWithForeignPeer = (opts?: {
 			memberships?: CallMembership[];
+			localMembership?: LocalRtcMembership;
 		}): {
+			client: ReturnType<typeof createClient>["client"];
 			primary: ReturnType<typeof createFakeRoom>;
 			foreignRoom: ReturnType<typeof createFakeRoom>;
 			result: ReturnType<typeof useLivekitRoom>;
@@ -1006,17 +1011,35 @@ describe("useLivekitRoom", () => {
 					focus: () => livekitFocus,
 					enabled: () => true,
 					memberships: () => memberships,
+					localMembership: () => opts?.localMembership ?? null,
 					audioDeviceId: () => "",
 					videoDeviceId: () => "",
 					micEnabled: () => true,
 					loadLivekit,
 				}),
 			);
-			return { primary, foreignRoom, result };
+			return { client, primary, foreignRoom, result };
 		};
 
 		it("connects an alias-less current-protocol foreign SFU", async () => {
-			const { foreignRoom } = renderWithForeignPeer({
+			const actual = await vi.importActual<
+				typeof import("./fetchLivekitToken")
+			>("./fetchLivekitToken");
+			const fallbackMock = jwtMock.getMockImplementation();
+			if (!fallbackMock) throw new Error("Missing token fixture");
+			jwtMock.mockImplementation((...args) =>
+				args[0].url ? actual.fetchLivekitToken(...args) : fallbackMock(...args),
+			);
+			const localMembership: LocalRtcMembership = {
+				roomId: "!room:example.com",
+				userId: "@me:example.com",
+				deviceId: "DEVABC123",
+				memberId: "local-member",
+				backendIdentity: "local-hash",
+				modern: true,
+			};
+			const { client, foreignRoom } = renderWithForeignPeer({
+				localMembership,
 				memberships: [
 					makeMembership({
 						rtcBackendIdentity: "current-peer",
@@ -1038,7 +1061,27 @@ describe("useLivekitRoom", () => {
 				}),
 				expect.anything(),
 				"DEVABC123",
-				expect.objectContaining({ subscriber: true }),
+				expect.objectContaining({
+					subscriber: true,
+					membership: localMembership,
+				}),
+			);
+			expect(client.http.authedRequest).toHaveBeenCalledWith(
+				"POST",
+				"/rtc/livekit/get_token",
+				undefined,
+				{
+					url: "wss://foreign.example.org",
+					room_id: "!room:example.com",
+					slot_id: "m.call#ROOM",
+					member_id: "local-member",
+					server_name: "matrix.org",
+				},
+				expect.anything(),
+			);
+			expect(foreignRoom.connect).toHaveBeenCalledWith(
+				"wss://foreign.example.org",
+				"current-jwt",
 			);
 			expect(
 				foreignRoom.localParticipant.setMicrophoneEnabled,
