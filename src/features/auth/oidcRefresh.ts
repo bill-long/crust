@@ -1,27 +1,4 @@
-/**
- * Access-token refresh wiring for OAuth2 (MSC3861) sessions.
- *
- * Password sessions never carry a refresh token, so this is a no-op for
- * them. OAuth sessions get the SDK's TokenRefresher, built lazily on first
- * use (constructing it needs the OP metadata, which is a network fetch),
- * with an onRefresh that persists rotated tokens back into the session
- * store - identity-guarded, so a replaced session is never clobbered.
- *
- * Caveats, documented so their symptoms aren't mysteries:
- *
- *  - If the OP does NOT rotate refresh tokens (response without a new
- *    refresh_token), the SDK's http-api ends up with no refresh token for
- *    the RUNNING client at the second expiry, ending the session via the
- *    normal SessionLoggedOut flow. The persisted store keeps the old
- *    token, so a reload recovers.
- *  - Two open tabs each hold their own in-memory refresh token; when both
- *    refresh, the slower tab presents a rotated-out token and is logged
- *    out (invalid_grant). The guarded persistence prevents the losing tab
- *    from resurrecting the stale token in storage, but cannot save the
- *    tab itself.
- */
-import { createClient, OAuth2, TokenRefresher } from "matrix-js-sdk";
-import type { TokenRefreshFunction } from "matrix-js-sdk/lib/http-api";
+import type { AccessTokens } from "matrix-js-sdk/lib/http-api";
 import {
 	loadSessions,
 	type Session,
@@ -29,7 +6,6 @@ import {
 	updateSession,
 } from "../../stores/session";
 import { withSessionLock } from "../../stores/sessionLock";
-import { oidcRedirectUri } from "./oidc";
 
 /** Identity of a boot-time session, for the clobber guard below. */
 interface SessionIdentity {
@@ -93,43 +69,11 @@ async function persistRefreshedTokens(
 	}
 }
 
-/**
- * Build the SDK `tokenRefreshFunction` for a session, or undefined when the
- * session has nothing to refresh with (password sessions, or OAuth2 sessions
- * whose OP issued no refresh token). The SDK TokenRefresher is constructed
- * lazily because it needs the OP's auth metadata (a network fetch); the
- * refresh mapping is the SDK's. Since matrix-js-sdk 42.3 only a 4xx whose
- * body is an OAuth 2.0 error (RFC 6749) or a Matrix error ends the session
- * (TokenRefreshLogoutError); any other 4xx - a proxy's HTML 403, an empty
- * 400 - is a transient failure like a 5xx or a network error, retried by
- * the sync loop rather than logging the user out. A refresh that keeps
- * failing that way leaves the client in the sync-error state, where the
- * escape hatch (#551) is the way out.
- */
-export function createOidcTokenRefreshFn(
+/** Persist SDK-managed OAuth refreshes without overwriting a replaced account. */
+export function createOidcTokenRefreshCallback(
 	session: Session,
-): TokenRefreshFunction | undefined {
-	if (!session.oidc || !session.refreshToken) return undefined;
-	const oidcSession = session as Session & { oidc: SessionOidc };
-	const identity = identityOf(oidcSession);
-
-	let refresherPromise: Promise<TokenRefresher> | null = null;
-	const getRefresher = (): Promise<TokenRefresher> =>
-		(refresherPromise ??= (async () => {
-			const metadata = await createClient({
-				baseUrl: session.homeserverUrl,
-			}).getAuthMetadata();
-			const auth = new OAuth2(metadata, {
-				clientId: oidcSession.oidc.clientId,
-				redirectUri: oidcRedirectUri(),
-			});
-			return new TokenRefresher(auth, async (tokens) => {
-				await persistRefreshedTokens(identity, tokens);
-			});
-		})());
-
-	return async (refreshToken) => {
-		const refresher = await getRefresher();
-		return refresher.tokenRefreshFunction(refreshToken);
-	};
+): ((tokens: AccessTokens) => Promise<void>) | undefined {
+	if (!session.oidc) return undefined;
+	const identity = identityOf(session as Session & { oidc: SessionOidc });
+	return (tokens) => persistRefreshedTokens(identity, tokens);
 }

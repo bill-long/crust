@@ -3,11 +3,11 @@ import type {
 	CallMembership,
 	LivekitTransport,
 } from "matrix-js-sdk/lib/matrixrtc";
-import { isLivekitTransport } from "matrix-js-sdk/lib/matrixrtc/LivekitTransport";
 import {
 	type MatrixRTCSession,
 	MatrixRTCSessionEvent,
 } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
+import { computeRtcIdentityRaw } from "matrix-js-sdk/lib/matrixrtc/membershipData/rtc";
 import {
 	type Accessor,
 	createEffect,
@@ -18,6 +18,19 @@ import {
 } from "solid-js";
 import { buildFallbackLivekitFoci, discoverLivekitFoci } from "./discoverFoci";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
+import {
+	canPublishMembership,
+	type LocalRtcMembership,
+	livekitTransport,
+	membershipTransport,
+	publishedTransport,
+	supportsRtcMembership,
+} from "./rtcProtocol";
+
+const joinedMemberships = new WeakMap<
+	MatrixRTCSession,
+	{ own: LocalRtcMembership; focus: LivekitTransport }
+>();
 
 export type RtcStatus = "idle" | "joining" | "joined" | "leaving" | "error";
 
@@ -29,7 +42,7 @@ export interface UseRtcSessionOptions {
 	elementCallUrl: string;
 	/**
 	 * Phase 4 E2EE bridge. When present and non-null, the hook attaches
-	 * the bridge listener BEFORE `joinRoomSession`, flips
+	 * the bridge listener BEFORE `join`, flips
 	 * `manageMediaKeys: true` so the SDK runs the to-device key
 	 * transport, and calls `reemitEncryptionKeys()` AFTER attach to
 	 * flush any already-negotiated keys through the wire. When null/
@@ -52,6 +65,7 @@ export interface UseRtcSessionOptions {
 }
 
 export interface RtcSessionApi {
+	localMembership: Accessor<LocalRtcMembership | null>;
 	status: Accessor<RtcStatus>;
 	memberships: Accessor<readonly CallMembership[]>;
 	error: Accessor<Error | null>;
@@ -98,23 +112,17 @@ export function oldestMembership(
 }
 
 /**
- * Native MatrixRTC client hook (issue #122).
- *
- * Wraps `client.matrixRTC.getRoomSession(room)` in a SolidJS hook that
- * exposes join status and the current membership list. Without the
- * Phase-4 `e2ee` option the hook stays on the legacy
- * `org.matrix.msc3401.call.member` state event with the to-device key
- * path quiet — preserving the Phase-1/2 isolation. When `e2ee` is
- * supplied, the hook attaches the bridge before joinRoomSession,
- * flips `manageMediaKeys: true`, and pumps already-negotiated keys via
- * `reemitEncryptionKeys()` after the manager has spun up.
- *
- * Receiving sticky memberships is handled by the SDK; summaries also track
- * them (#504). Publishing stays legacy until #505 migrates our own membership
- * identity, JWT request, and call-button permissions together. Enabling sticky
- * sending alone would mismatch the identity used for encrypted media.
+ * Publishes one fixed transport per join. Current URL transports use sticky
+ * memberships when MSC4354 is available; older deployments keep state events.
+ * Membership identity is established before the SDK starts key distribution
+ * and is shared with every media connection. A rejoin gets a fresh member ID.
  */
 export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
+	const [localMembership, setLocalMembership] =
+		createSignal<LocalRtcMembership | null>(null);
+	const [publishedFocus, setPublishedFocus] =
+		createSignal<LivekitTransport | null>(null);
+	const stickyReady = supportsRtcMembership(opts.client);
 	const [status, setStatus] = createSignal<RtcStatus>("idle");
 	const [memberships, setMemberships] = createSignal<readonly CallMembership[]>(
 		[],
@@ -183,6 +191,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	const activeFocus = createMemo<LivekitTransport | null>(
 		() => {
 			if (status() !== "joined") return null;
+			if (publishedFocus()) return publishedFocus();
 			const list = memberships();
 			// Pull the oldest member's transport when joining an in-progress call;
 			// fall back to our offered focus if we are the first or the oldest
@@ -190,8 +199,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			const oldest = oldestMembership(list);
 			if (oldest) {
 				const transport = oldest.getTransport(oldest);
-				if (transport && isLivekitTransport(transport)) {
-					return transport;
+				const normalized = livekitTransport(transport, opts.roomId);
+				if (normalized) {
+					return normalized;
 				}
 			}
 			const fociList = foci();
@@ -209,7 +219,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			equals: (a, b) =>
 				a?.type === b?.type &&
 				a?.livekit_service_url === b?.livekit_service_url &&
-				a?.livekit_alias === b?.livekit_alias,
+				a?.livekit_alias === b?.livekit_alias &&
+				a?.url === b?.url,
 		},
 	);
 
@@ -221,6 +232,11 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		}
 		const s = opts.client.matrixRTC.getRoomSession(room);
 		setSession(s);
+		const joined = s.isJoined() ? joinedMemberships.get(s) : undefined;
+		if (joined) {
+			setLocalMembership(joined.own);
+			setPublishedFocus(joined.focus);
+		}
 		setMemberships([...s.memberships]);
 		setStatus(s.isJoined() ? "joined" : "idle");
 	});
@@ -273,7 +289,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			setStatus(stillJoined ? "joined" : "error");
 			// If the async failure means we never actually joined, run the
 			// same E2EE cleanup the synchronous catch arm in `join()` runs:
-			// detach the listener attached BEFORE joinRoomSession and bump
+			// detach the listener attached BEFORE join and bump
 			// `joinEpoch` so a late EncryptionKeyChanged event (the SDK can
 			// still emit one before tearing down the RTCEncryptionManager)
 			// bails on its `isLive` check instead of pumping a key from the
@@ -309,9 +325,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 	// Re-entrancy guard for join(): a double-click (or two effects firing)
 	// while foci discovery is still pending would otherwise have both
 	// invocations pass the synchronous `s.isJoined()` check, park on
-	// `await fociReady`, and then both run the attach+joinRoomSession
+	// `await fociReady`, and then both run the attach+join
 	// body — leaking the first E2EE listener and double-invoking
-	// joinRoomSession. Set before the first `await` so the second caller
+	// join. Set before the first `await` so the second caller
 	// short-circuits.
 	let joinInFlight = false;
 	// Ownership token for the joinInFlight slot. Bumped by every join()
@@ -341,7 +357,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// non-joined error arms, and onCleanup unconditionally). If
 		// the epoch advanced while we were parked, the user closed
 		// the overlay or hit Leave and we must NOT call
-		// joinRoomSession after the fact.
+		// join after the fact.
 		const startEpoch = joinEpoch;
 		try {
 			await joinInner(s, startEpoch);
@@ -375,7 +391,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		// parked.
 		if (s.isJoined()) return;
 		// Also re-check status: another in-flight join may have called
-		// joinRoomSession (fire-and-forget) and returned before the SDK
+		// join (fire-and-forget) and returned before the SDK
 		// flipped isJoined; status === "joining" reflects that window.
 		if (status() === "joining") return;
 		// Defensive re-check — defends against `room` being null at
@@ -394,33 +410,67 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		setStatus("joining");
 		const myEpoch = ++joinEpoch;
 		const ctx = opts.e2ee?.() ?? null;
-		// Attach the E2EE listener BEFORE joinRoomSession so the bridge
+		// Attach the E2EE listener BEFORE join so the bridge
 		// catches the initial EncryptionKeyChanged burst from the
 		// RTCEncryptionManager. Store detach immediately so a synchronous
-		// throw from joinRoomSession (validation) doesn't leak the
+		// throw from join (validation) doesn't leak the
 		// listener — the catch arm runs detach below.
 		if (ctx) {
 			detachE2EE = ctx.attach(s, () => joinEpoch === myEpoch);
 		}
 		try {
-			// Phase 4 join config:
-			//   manageMediaKeys: true (with e2ee) enables the to-device
-			//     key transport so the RTCEncryptionManager exchanges
-			//     keys with peers and emits EncryptionKeyChanged.
-			//   manageMediaKeys: false (no e2ee) keeps the Phase-1 quiet
-			//     path so callers without a bridge don't accidentally
-			//     start the crypto path.
-			//   unstableSendStickyEvents: false preserves our legacy publishing
-			//     identity until the coordinated membership/JWT migration (#505).
-			// joinRoomSession is fire-and-forget; this try/catch only covers
-			// synchronous validation throws. Async join failures arrive via
-			// MembershipManagerError → onManagerError.
-			s.joinRoomSession(fociList, undefined, {
+			const sticky = await stickyReady;
+			if (disposed || myEpoch !== joinEpoch) return;
+			const userId = opts.client.getUserId();
+			const deviceId = opts.client.getDeviceId();
+			if (!userId || !deviceId)
+				throw new Error(
+					"Matrix user and device IDs are required to join a call",
+				);
+			const oldest = oldestMembership(memberships());
+			const offered = fociList[0];
+			const elected =
+				oldest && membershipTransport(opts.client, opts.roomId, oldest, oldest);
+			// Current tokens are routed through the publishing user's server.
+			// Publish its advertised URL, never borrow a foreign peer's URL.
+			const selected =
+				sticky && typeof offered?.url === "string"
+					? offered
+					: elected?.livekit_service_url
+						? elected
+						: offered;
+			if (!selected) throw new Error("No LiveKit transport available");
+			const modern =
+				sticky && selected === offered && typeof selected.url === "string";
+			if (!modern && !selected.livekit_service_url)
+				throw new Error("This call requires sticky-event support (MSC4354)");
+			const focus = modern ? selected : { ...selected, url: undefined };
+			if (!canPublishMembership(opts.client, opts.roomId, modern))
+				throw new Error(
+					"You do not have permission to publish this call membership",
+				);
+			const memberId = modern ? crypto.randomUUID() : `${userId}:${deviceId}`;
+			const backendIdentity = modern
+				? await computeRtcIdentityRaw(userId, memberId)
+				: `${userId}:${deviceId}`;
+			if (disposed || myEpoch !== joinEpoch) return;
+			setLocalMembership({
+				roomId: opts.roomId,
+				userId,
+				deviceId,
+				memberId,
+				backendIdentity,
+				modern,
+			});
+			setPublishedFocus(focus);
+			const own = localMembership();
+			if (own) joinedMemberships.set(s, { own, focus });
+			s.join({ userId, deviceId, memberId }, [publishedTransport(focus)], {
 				manageMediaKeys: ctx !== null,
-				unstableSendStickyEvents: false,
+				unstableSendStickyEvents: modern,
 			});
 			// Pump any keys already negotiated through the bridge AFTER
-			// joinRoomSession (which spins up the RTCEncryptionManager).
+			// join (which spins up the RTCEncryptionManager).
 			// Reemitting earlier would no-op because the manager doesn't
 			// exist yet.
 			if (ctx) ctx.reemit(s);
@@ -471,7 +521,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		const s = session();
 		if (!s) return;
 		if (leavePending) return;
-		// Treat "joining" as needing a leave attempt too — joinRoomSession is
+		// Treat "joining" as needing a leave attempt too — join is
 		// fire-and-forget, so a close during pending join must still tear down
 		// any membership that has already been published or will be published.
 		const wasJoining = status() === "joining";
@@ -496,7 +546,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		setError(null);
 		setStatus("leaving");
 		try {
-			await s.leaveRoomSession(5_000);
+			await s.leave(5_000);
 			// Successful leave → detach the bridge and bump epoch so any
 			// in-flight key import bails. Doing this AFTER (not before)
 			// the await means an error path with `s.isJoined()` still
@@ -548,13 +598,14 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		const s = session();
 		if (!s || leavePending) return;
 		if (s.isJoined() || status() === "joining") {
-			void s.leaveRoomSession(5_000).catch(() => {
+			void s.leave(5_000).catch(() => {
 				/* swallow — component is gone, nowhere to surface this */
 			});
 		}
 	});
 
 	return {
+		localMembership,
 		status,
 		memberships,
 		error,

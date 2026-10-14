@@ -15,8 +15,8 @@ type Listener = (...args: unknown[]) => void;
 interface FakeSession {
 	memberships: CallMembership[];
 	isJoined: () => boolean;
-	joinRoomSession: ReturnType<typeof vi.fn>;
-	leaveRoomSession: ReturnType<typeof vi.fn>;
+	join: ReturnType<typeof vi.fn>;
+	leave: ReturnType<typeof vi.fn>;
 	reemitEncryptionKeys: ReturnType<typeof vi.fn>;
 	on: ReturnType<typeof vi.fn>;
 	off: ReturnType<typeof vi.fn>;
@@ -30,11 +30,11 @@ function createFakeSession(): FakeSession {
 		memberships: [],
 		_joined: false,
 		isJoined: () => session._joined,
-		joinRoomSession: vi.fn(() => {
+		join: vi.fn(() => {
 			session._joined = true;
 			session.emit(MatrixRTCSessionEvent.JoinStateChanged, true);
 		}),
-		leaveRoomSession: vi.fn(async () => {
+		leave: vi.fn(async () => {
 			session._joined = false;
 			session.emit(MatrixRTCSessionEvent.JoinStateChanged, false);
 			return true;
@@ -63,7 +63,20 @@ function createClient(opts: { roomFound?: boolean; session: FakeSession }): {
 } {
 	function makeClient() {
 		return {
-			getRoom: vi.fn(() => (opts.roomFound === false ? null : ({} as never))),
+			getUserId: () => "@alice:example.com",
+			getDeviceId: () => "DEVICE",
+			getRoom: vi.fn(() =>
+				opts.roomFound === false
+					? null
+					: ({
+							getMyMembership: () => "join",
+							currentState: {
+								maySendStateEvent: () => true,
+								maySendEvent: () => true,
+								getStateEvents: () => [],
+							},
+						} as never),
+			),
 			matrixRTC: {
 				getRoomSession: vi.fn(() => opts.session),
 			},
@@ -160,8 +173,8 @@ describe("useRtcSession", () => {
 		);
 		await result.join();
 		const fociArg = requiredAt(
-			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
-			0,
+			requiredAt(session.join.mock.calls, 0, "join call"),
+			1,
 			"foci argument",
 		);
 		expect(fociArg).toEqual(discovered);
@@ -188,8 +201,8 @@ describe("useRtcSession", () => {
 		expect(result.canJoin()).toBe(true);
 		await result.join();
 		const fociArg = requiredAt(
-			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
-			0,
+			requiredAt(session.join.mock.calls, 0, "join call"),
+			1,
 			"foci argument",
 		);
 		expect(fociArg).toEqual([
@@ -205,7 +218,7 @@ describe("useRtcSession", () => {
 		// Regression: a double-click (or two effects firing) before
 		// fociReady resolved would let both invocations pass the
 		// synchronous s.isJoined() guard, park on `await fociReady`,
-		// and then both attach E2EE + invoke joinRoomSession.
+		// and then both attach E2EE + invoke join.
 		let resolveDiscover: ((foci: LivekitTransport[]) => void) | undefined;
 		const pending = new Promise<LivekitTransport[]>((res) => {
 			resolveDiscover = res;
@@ -230,7 +243,7 @@ describe("useRtcSession", () => {
 			},
 		]);
 		await Promise.all([first, second]);
-		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.join).toHaveBeenCalledTimes(1);
 	});
 
 	it("does not join when leave() is called while foci discovery is pending", async () => {
@@ -264,7 +277,7 @@ describe("useRtcSession", () => {
 			},
 		]);
 		await joinPromise;
-		expect(session.joinRoomSession).not.toHaveBeenCalled();
+		expect(session.join).not.toHaveBeenCalled();
 	});
 
 	it("allows a re-Join click after leave() cancels a discovery-bound join", async () => {
@@ -293,7 +306,7 @@ describe("useRtcSession", () => {
 		await result.leave();
 		// Second Join click after the cancel. With the bug present
 		// (joinInFlight stuck true), this returns immediately and the
-		// promise resolves without ever calling joinRoomSession even
+		// promise resolves without ever calling join even
 		// after discovery completes.
 		const join2 = result.join();
 		resolveDiscover?.([
@@ -304,19 +317,19 @@ describe("useRtcSession", () => {
 			},
 		]);
 		await Promise.all([join1, join2]);
-		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.join).toHaveBeenCalledTimes(1);
 	});
 
 	it("ignores a second join() while the SDK is still in the joining phase", async () => {
 		// Regression (Copilot review on #134/e99542d): joinInFlight only
-		// guards before the first await. After joinRoomSession (fire-and-
+		// guards before the first await. After join (fire-and-
 		// forget) returns, the finally clears joinInFlight even though
 		// status() === "joining" and s.isJoined() is still false until the
 		// SDK emits JoinStateChanged. A second join() in that window would
-		// otherwise re-attach E2EE and call joinRoomSession again.
+		// otherwise re-attach E2EE and call join again.
 		const session = createFakeSession();
 		// Override the default sync-flip so we can hold the joining phase.
-		session.joinRoomSession = vi.fn(() => {
+		session.join = vi.fn(() => {
 			// Fire-and-forget: stay un-joined until we manually emit.
 		});
 		const { client } = createClient({ session });
@@ -330,10 +343,10 @@ describe("useRtcSession", () => {
 		await result.fociReady;
 		await result.join();
 		expect(result.status()).toBe("joining");
-		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.join).toHaveBeenCalledTimes(1);
 		// Second click during the joining window — must be ignored.
 		await result.join();
-		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.join).toHaveBeenCalledTimes(1);
 		// SDK eventually flips to joined.
 		session._joined = true;
 		session.emit(MatrixRTCSessionEvent.JoinStateChanged, true);
@@ -359,8 +372,8 @@ describe("useRtcSession", () => {
 		expect(result.canJoin()).toBe(true);
 		await result.join();
 		const fociArg = requiredAt(
-			requiredAt(session.joinRoomSession.mock.calls, 0, "join call"),
-			0,
+			requiredAt(session.join.mock.calls, 0, "join call"),
+			1,
 			"foci argument",
 		);
 		expect(fociArg).toEqual([
@@ -385,12 +398,12 @@ describe("useRtcSession", () => {
 		expect(rtc.canJoin()).toBe(false);
 	});
 
-	it("calls joinRoomSession with the no-bridge guardrail flags (manageMediaKeys: false)", async () => {
+	it("calls join with the no-bridge guardrail flags (manageMediaKeys: false)", async () => {
 		const { rtc, session } = renderRtc();
 		await rtc.join();
-		expect(session.joinRoomSession).toHaveBeenCalledTimes(1);
-		const [foci, multi, joinConfig] = requiredAt(
-			session.joinRoomSession.mock.calls,
+		expect(session.join).toHaveBeenCalledTimes(1);
+		const [identity, foci, joinConfig] = requiredAt(
+			session.join.mock.calls,
 			0,
 			"join call",
 		);
@@ -401,7 +414,11 @@ describe("useRtcSession", () => {
 				livekit_alias: "!room:example.com",
 			},
 		]);
-		expect(multi).toBeUndefined();
+		expect(identity).toEqual({
+			userId: "@alice:example.com",
+			deviceId: "DEVICE",
+			memberId: "@alice:example.com:DEVICE",
+		});
 		expect(joinConfig).toEqual({
 			manageMediaKeys: false,
 			unstableSendStickyEvents: false,
@@ -409,12 +426,12 @@ describe("useRtcSession", () => {
 		expect(rtc.status()).toBe("joined");
 	});
 
-	it("returns to idle after leaveRoomSession resolves", async () => {
+	it("returns to idle after leave resolves", async () => {
 		const { rtc, session } = renderRtc();
 		await rtc.join();
 		expect(rtc.status()).toBe("joined");
 		await rtc.leave();
-		expect(session.leaveRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.leave).toHaveBeenCalledTimes(1);
 		expect(rtc.status()).toBe("idle");
 	});
 
@@ -472,7 +489,7 @@ describe("useRtcSession", () => {
 	it("keeps status leaving when a MembershipManagerError fires mid-leave", async () => {
 		const session = createFakeSession();
 		let resolveLeave: (() => void) | undefined;
-		session.leaveRoomSession.mockImplementation(
+		session.leave.mockImplementation(
 			() =>
 				new Promise<boolean>((res) => {
 					resolveLeave = () => {
@@ -504,10 +521,10 @@ describe("useRtcSession", () => {
 		expect(result.error()).toBeNull();
 	});
 
-	it("does not invoke leaveRoomSession a second time on unmount when an explicit leave is in flight", async () => {
+	it("does not invoke leave a second time on unmount when an explicit leave is in flight", async () => {
 		const session = createFakeSession();
 		let resolveLeave: (() => void) | undefined;
-		session.leaveRoomSession.mockImplementation(
+		session.leave.mockImplementation(
 			() =>
 				new Promise<boolean>((res) => {
 					resolveLeave = () => {
@@ -530,12 +547,12 @@ describe("useRtcSession", () => {
 		cleanup();
 		resolveLeave?.();
 		await leavePromise;
-		expect(session.leaveRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.leave).toHaveBeenCalledTimes(1);
 	});
 
-	it("reverts status to joined when leaveRoomSession throws but SDK still reports joined", async () => {
+	it("reverts status to joined when leave throws but SDK still reports joined", async () => {
 		const session = createFakeSession();
-		session.leaveRoomSession.mockImplementation(async () => {
+		session.leave.mockImplementation(async () => {
 			// SDK didn't actually leave — _joined stays true.
 			throw new Error("network");
 		});
@@ -554,7 +571,7 @@ describe("useRtcSession", () => {
 		expect(result.error()?.message).toBe("network");
 	});
 
-	it("calls leaveRoomSession on unmount when the user closed without explicit leave", async () => {
+	it("calls leave on unmount when the user closed without explicit leave", async () => {
 		const session = createFakeSession();
 		const { client } = createClient({ session });
 		const { result, cleanup } = renderHook(() =>
@@ -565,16 +582,16 @@ describe("useRtcSession", () => {
 			}),
 		);
 		await result.join();
-		expect(session.leaveRoomSession).not.toHaveBeenCalled();
+		expect(session.leave).not.toHaveBeenCalled();
 		cleanup();
-		expect(session.leaveRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.leave).toHaveBeenCalledTimes(1);
 	});
 
-	it("calls leaveRoomSession on unmount when a join is still pending", async () => {
+	it("calls leave on unmount when a join is still pending", async () => {
 		const session = createFakeSession();
 		// Simulate a join that has been requested but the SDK has not yet
-		// flipped isJoined to true (joinRoomSession is fire-and-forget).
-		session.joinRoomSession.mockImplementation(() => {
+		// flipped isJoined to true (join is fire-and-forget).
+		session.join.mockImplementation(() => {
 			/* no isJoined flip, no JoinStateChanged */
 		});
 		const { client } = createClient({ session });
@@ -587,9 +604,9 @@ describe("useRtcSession", () => {
 		);
 		await result.join();
 		expect(result.status()).toBe("joining");
-		expect(session.leaveRoomSession).not.toHaveBeenCalled();
+		expect(session.leave).not.toHaveBeenCalled();
 		cleanup();
-		expect(session.leaveRoomSession).toHaveBeenCalledTimes(1);
+		expect(session.leave).toHaveBeenCalledTimes(1);
 	});
 
 	it("does NOT block join on encrypted rooms (Phase 4 lifted the gate)", async () => {
@@ -620,7 +637,6 @@ describe("useRtcSession", () => {
 
 	it("activeFocus uses the oldest member's LiveKit transport when present", async () => {
 		const { rtc, session } = renderRtc();
-		await rtc.join();
 		const oldestTransport = {
 			type: "livekit" as const,
 			livekit_service_url: "https://other-sfu.example.com/livekit/sfu/get",
@@ -643,6 +659,7 @@ describe("useRtcSession", () => {
 			[],
 			[younger, oldest],
 		);
+		await rtc.join();
 		expect(rtc.activeFocus()).toEqual(oldestTransport);
 	});
 
@@ -654,7 +671,6 @@ describe("useRtcSession", () => {
 		// MembershipsChanged tick even when the underlying focus URL is
 		// unchanged.
 		const { rtc, session } = renderRtc();
-		await rtc.join();
 		const url = "https://other-sfu.example.com/livekit/sfu/get";
 		const makeMember = (): CallMembership =>
 			({
@@ -678,6 +694,7 @@ describe("useRtcSession", () => {
 					[],
 					[makeMember()],
 				);
+				await rtc.join();
 				let emissions = 0;
 				createEffect(() => {
 					rtc.activeFocus();
@@ -699,7 +716,7 @@ describe("useRtcSession", () => {
 				await Promise.resolve();
 				expect(emissions).toBe(1);
 
-				// A genuine focus migration (different URL) must still propagate.
+				// A peer migration must not move our advertised publishing transport.
 				const migrated = {
 					userId: "@alice:example.com",
 					deviceId: "AAA",
@@ -712,7 +729,8 @@ describe("useRtcSession", () => {
 				} as unknown as CallMembership;
 				session.emit(MatrixRTCSessionEvent.MembershipsChanged, [], [migrated]);
 				await Promise.resolve();
-				expect(emissions).toBe(2);
+				expect(emissions).toBe(1);
+				expect(rtc.activeFocus()?.livekit_service_url).toBe(url);
 			} finally {
 				// Guarantee root disposal even if an expect() above throws,
 				// otherwise the leaked root can interfere with later tests.
@@ -742,18 +760,18 @@ describe("useRtcSession", () => {
 			return { ctx, attach, reemit, dispose, detach };
 		};
 
-		it("attaches the bridge BEFORE joinRoomSession and reemits AFTER", async () => {
+		it("attaches the bridge BEFORE join and reemits AFTER", async () => {
 			const { ctx, attach, reemit } = fakeCtx();
 			const { rtc, session } = renderRtc({ e2ee: () => ctx });
 			await rtc.join();
-			// Invocation-order assertion: attach < joinRoomSession < reemit.
+			// Invocation-order assertion: attach < join < reemit.
 			const attachOrder = requiredAt(
 				attach.mock.invocationCallOrder,
 				0,
 				"attach call order",
 			);
 			const joinOrder = requiredAt(
-				session.joinRoomSession.mock.invocationCallOrder,
+				session.join.mock.invocationCallOrder,
 				0,
 				"join call order",
 			);
@@ -770,11 +788,7 @@ describe("useRtcSession", () => {
 			const { ctx } = fakeCtx();
 			const { rtc, session } = renderRtc({ e2ee: () => ctx });
 			await rtc.join();
-			const joinConfig = requiredAt(
-				session.joinRoomSession.mock.calls,
-				0,
-				"join call",
-			)[2];
+			const joinConfig = requiredAt(session.join.mock.calls, 0, "join call")[2];
 			expect(joinConfig).toEqual({
 				manageMediaKeys: true,
 				// Phase 5+ owns this flag; must stay false until summaries.ts
@@ -824,10 +838,10 @@ describe("useRtcSession", () => {
 			expect(detach).toHaveBeenCalled();
 		});
 
-		it("detaches and bumps isLive when joinRoomSession synchronously throws", async () => {
+		it("detaches and bumps isLive when join synchronously throws", async () => {
 			const { ctx, attach, detach } = fakeCtx();
 			const session = createFakeSession();
-			session.joinRoomSession.mockImplementation(() => {
+			session.join.mockImplementation(() => {
 				throw new Error("validation failed");
 			});
 			const { rtc } = renderRtc({ session, e2ee: () => ctx });
@@ -847,10 +861,10 @@ describe("useRtcSession", () => {
 		it("detaches and bumps isLive on async MembershipManagerError when not joined", async () => {
 			const { ctx, attach, detach } = fakeCtx();
 			const session = createFakeSession();
-			// joinRoomSession returns OK synchronously without flipping
+			// join returns OK synchronously without flipping
 			// _joined — simulates an async join failure where the SDK
 			// fires MembershipManagerError before JoinStateChanged(true).
-			session.joinRoomSession.mockImplementation(() => {
+			session.join.mockImplementation(() => {
 				/* no _joined flip, no JoinStateChanged */
 			});
 			const { rtc } = renderRtc({ session, e2ee: () => ctx });
@@ -916,4 +930,45 @@ describe("useRtcSession", () => {
 			expect(isLive()).toBe(false);
 		});
 	});
+});
+
+it("publishes the locally advertised current transport instead of borrowing a foreign homeserver's URL", async () => {
+	const session = createFakeSession();
+	const { client } = createClient({ session });
+	const modernClient = {
+		...client,
+		doesServerSupportUnstableFeature: async () => true,
+	};
+	session.memberships = [
+		{
+			userId: "@foreign:elsewhere.org",
+			createdTs: () => 1,
+			getTransport: () => ({
+				type: "livekit",
+				url: "wss://foreign.example",
+				livekit_service_url: "https://foreign.example",
+			}),
+		},
+	] as never;
+	const { result } = renderHook(() =>
+		useRtcSession({
+			client: modernClient as never,
+			roomId: "!room:example.com",
+			elementCallUrl: "",
+			discoverFoci: async () => [
+				{
+					type: "livekit",
+					url: "wss://local.example",
+					livekit_service_url: "https://local.example",
+					livekit_alias: "!room:example.com",
+				},
+			],
+		}),
+	);
+	await result.join();
+	expect(result.activeFocus()?.url).toBe("wss://local.example");
+	expect(session.join.mock.calls[0]?.[1]).toEqual([
+		expect.objectContaining({ url: "wss://local.example" }),
+	]);
+	expect(result.localMembership()?.modern).toBe(true);
 });

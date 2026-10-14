@@ -186,12 +186,13 @@ describe("startOidcLogin", () => {
 		// The URL comes from the SDK's OAuth2 instance, called with query
 		// response mode and our state.
 		expect(generateUrlMock).toHaveBeenCalledTimes(1);
-		const [stateArg, responseMode] = requiredAt(
+		const [stateArg, redirectUri, responseMode] = requiredAt(
 			generateUrlMock.mock.calls,
 			0,
 			"generate URL call",
 		);
 		expect(responseMode).toBe("query");
+		expect(redirectUri).toBe(oidcRedirectUri());
 		expect(url).toContain(`state=${stateArg}`);
 
 		// The signin state stored for the callback carries the SDK-generated
@@ -434,9 +435,8 @@ describe("completeOidcLogin", () => {
 		expect(ctx).toMatchObject({
 			clientId: "client-xyz",
 			codeVerifier: "sdk-generated-verifier",
-			redirectUri: `${window.location.origin}/login/callback`,
 		});
-		expect(completeGrantMock).toHaveBeenCalledWith("abc");
+		expect(completeGrantMock).toHaveBeenCalledWith("abc", oidcRedirectUri());
 
 		expect(result).toEqual({
 			accessToken: "access-123",

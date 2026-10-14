@@ -8,21 +8,12 @@ import {
 	Show,
 } from "solid-js";
 import { useClient } from "../../../client/client";
-import { canSendStateEvent } from "../../../client/stateEventPermission";
 import { activeCallRoomId } from "../../../stores/activeCall";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import { currentCallSession } from "./rtc/callSessionStore";
+import { canPublishMembership, supportsRtcMembership } from "./rtc/rtcProtocol";
 import { switchCall } from "./rtc/switchCall";
-
-/**
- * State event type that matrix-js-sdk + Element Call currently write for
- * MatrixRTC memberships (legacy MSC3401 form). We gate the call button on
- * the user's ability to send this specific event type — checking the stable
- * `m.call.member` instead would over-restrict against Conduwuity, which
- * doesn't power-level it.
- */
-const CALL_MEMBER_EVENT_TYPE = "org.matrix.msc3401.call.member";
 
 interface CallButtonProps {
 	roomId: string;
@@ -45,6 +36,14 @@ interface CallButtonProps {
  */
 export const CallButton: Component<CallButtonProps> = (props) => {
 	const { client, summaries } = useClient();
+	const [sticky, setSticky] = createSignal(false);
+	let disposed = false;
+	void supportsRtcMembership(client).then((value) => {
+		if (!disposed) setSticky(value);
+	});
+	onCleanup(() => {
+		disposed = true;
+	});
 
 	// Bump on RoomStateEvent.Update so canStartCall recomputes when power
 	// levels or membership change. Same pattern as Layout.tsx canInviteHere.
@@ -71,11 +70,9 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const canStartCall = createMemo((): boolean => {
 		bump();
 		roomAvailableTick();
-		return canSendStateEvent(
-			client,
-			props.roomId,
-			CALL_MEMBER_EVENT_TYPE,
-			summaries,
+		return (
+			canPublishMembership(client, props.roomId, false, summaries) ||
+			(sticky() && canPublishMembership(client, props.roomId, true, summaries))
 		);
 	});
 

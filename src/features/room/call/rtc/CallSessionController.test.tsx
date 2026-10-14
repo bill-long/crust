@@ -98,6 +98,7 @@ vi.mock("./useRtcSession", () => ({
 		canJoin: () => true,
 		joinBlockReason: () => null,
 		activeFocus: () => null,
+		localMembership: () => null,
 		fociReady: Promise.resolve(),
 		join: hooksState.rtcJoin as unknown as () => Promise<void>,
 		leave: hooksState.rtcLeave as unknown as () => Promise<void>,

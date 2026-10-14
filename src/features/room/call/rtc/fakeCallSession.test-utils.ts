@@ -152,6 +152,7 @@ function makeFakeCallSessionImpl(
 		canJoin: rtcCanJoin,
 		joinBlockReason: rtcJoinBlockReason,
 		activeFocus: () => null,
+		localMembership: () => null,
 		fociReady: Promise.resolve(),
 		join: rtcJoin,
 		leave: rtcLeave,

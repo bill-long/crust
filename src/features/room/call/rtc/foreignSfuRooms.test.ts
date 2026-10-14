@@ -9,7 +9,9 @@ import { requiredAt } from "./testAssertions";
 
 // Hoisted so the vi.mock factory can reference it.
 const { jwtMock } = vi.hoisted(() => ({
-	jwtMock: vi.fn(async () => ({ url: "wss://sfu-foreign", jwt: "JWT-F" })),
+	jwtMock: vi.fn<typeof import("./fetchLivekitToken").fetchLivekitToken>(
+		async () => ({ url: "wss://sfu-foreign", jwt: "JWT-F" }),
+	),
 }));
 vi.mock("./fetchLivekitToken", () => ({ fetchLivekitToken: jwtMock }));
 
@@ -192,7 +194,10 @@ beforeEach(() => {
 	roomQueue.length = 0;
 	builtRooms.length = 0;
 	jwtMock.mockReset();
-	jwtMock.mockResolvedValue({ url: "wss://sfu-foreign", jwt: "JWT-F" });
+	jwtMock.mockImplementation(async (_focus, token) => {
+		if (typeof token === "function") await token();
+		return { url: "wss://sfu-foreign", jwt: "JWT-F" };
+	});
 	reportErrorMock.mockReset();
 });
 

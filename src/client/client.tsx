@@ -19,7 +19,7 @@ import {
 	type ParentComponent,
 	useContext,
 } from "solid-js";
-import { createOidcTokenRefreshFn } from "../features/auth/oidcRefresh";
+import { createOidcTokenRefreshCallback } from "../features/auth/oidcRefresh";
 import {
 	type CryptoStatus,
 	useCryptoStatus,
@@ -228,7 +228,7 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		return null;
 	};
 
-	const tokenRefreshFunction = createOidcTokenRefreshFn(props.session);
+	const onTokenRefresh = createOidcTokenRefreshCallback(props.session);
 	const matrixClient = createClient({
 		baseUrl: props.session.homeserverUrl,
 		accessToken: props.session.accessToken,
@@ -240,7 +240,9 @@ export const ClientProvider: ParentComponent<{ session: Session }> = (
 		...(props.session.refreshToken !== undefined
 			? { refreshToken: props.session.refreshToken }
 			: {}),
-		...(tokenRefreshFunction !== undefined ? { tokenRefreshFunction } : {}),
+		...(onTokenRefresh !== undefined && props.session.oidc
+			? { onTokenRefresh, oauthClientId: props.session.oidc.clientId }
+			: {}),
 		// Required for MatrixClient.getEventTimeline and
 		// TimelineWindow.load(eventId) - both throw synchronously without it.
 		// Off-cache pinned messages (#485) and jump-to-event for messages

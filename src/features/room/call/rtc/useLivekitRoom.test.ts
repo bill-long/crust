@@ -68,7 +68,9 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 			SignalReconnecting: "signalReconnecting",
 		},
 	};
-	const jwtMock = vi.fn(async () => ({ url: "wss://sfu", jwt: "JWT" }));
+	const jwtMock = vi.fn<typeof import("./fetchLivekitToken").fetchLivekitToken>(
+		async () => ({ url: "wss://sfu", jwt: "JWT" }),
+	);
 	return { roomFactory, lkMock, jwtMock };
 });
 
@@ -183,6 +185,7 @@ function createClient(): {
 		getOpenIdToken: ReturnType<typeof vi.fn>;
 		getUser: ReturnType<typeof vi.fn>;
 		getUserId: ReturnType<typeof vi.fn>;
+		getRoom: () => null;
 		getDeviceId: ReturnType<typeof vi.fn>;
 		mxcUrlToHttp: ReturnType<typeof vi.fn>;
 	};
@@ -196,6 +199,7 @@ function createClient(): {
 				expires_in: 3600,
 			})),
 			getUser: vi.fn(() => ({ displayName: "Alice" })),
+			getRoom: () => null,
 			getUserId: vi.fn(() => "@me:example.com"),
 			getDeviceId: vi.fn(() => "DEVABC123"),
 			mxcUrlToHttp: vi.fn(
@@ -220,13 +224,18 @@ const livekitFocus: LivekitTransport = {
  */
 function makeMembership(over?: {
 	rtcBackendIdentity?: string;
+	backendIdentities?: string[];
 	userId?: string;
 	transport?: LivekitTransport;
 }): CallMembership {
 	return {
 		rtcBackendIdentity: over?.rtcBackendIdentity ?? "remote-bid",
+		...(over?.backendIdentities
+			? { backendIdentities: over.backendIdentities }
+			: {}),
 		userId: over?.userId ?? "@bob:example.com",
 		deviceId: "BBB",
+		memberId: "member-test",
 		createdTs: () => 1,
 		getTransport: () => over?.transport ?? livekitFocus,
 	} as unknown as CallMembership;
@@ -238,7 +247,10 @@ beforeEach(() => {
 	roomFactory.lastOptions = null;
 	roomFactory.lastInstance = null;
 	jwtMock.mockReset();
-	jwtMock.mockResolvedValue({ url: "wss://sfu", jwt: "JWT" });
+	jwtMock.mockImplementation(async (_focus, token) => {
+		if (typeof token === "function") await token();
+		return { url: "wss://sfu", jwt: "JWT" };
+	});
 	playPresenceCueMock.mockReset();
 	// jsdom has no navigator.mediaDevices; provide getDisplayMedia so the
 	// screen-share feature-detect (`screenShareSupported`) is true by default.
@@ -307,8 +319,9 @@ describe("useLivekitRoom", () => {
 		// `device_id` (see fetchLivekitToken.ts jsdoc); confirm we forward it.
 		expect(jwtMock).toHaveBeenCalledWith(
 			livekitFocus,
-			expect.objectContaining({ access_token: "tok" }),
+			expect.any(Function),
 			"DEVABC123",
+			expect.objectContaining({ client }),
 		);
 		expect(fakeRoom.connect).toHaveBeenCalledWith("wss://sfu", "JWT");
 		expect(fakeRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(
@@ -667,7 +680,8 @@ describe("useLivekitRoom", () => {
 		);
 		const memberships: CallMembership[] = [
 			makeMembership({
-				rtcBackendIdentity: hashed,
+				rtcBackendIdentity: "legacy-identity",
+				backendIdentities: [hashed, "legacy-identity"],
 				userId: "@treamendous:matrix.org",
 			}),
 		];
@@ -1001,6 +1015,36 @@ describe("useLivekitRoom", () => {
 			return { primary, foreignRoom, result };
 		};
 
+		it("connects an alias-less current-protocol foreign SFU", async () => {
+			const { foreignRoom } = renderWithForeignPeer({
+				memberships: [
+					makeMembership({
+						rtcBackendIdentity: "current-peer",
+						userId: "@trea:matrix.org",
+						transport: {
+							type: "livekit",
+							livekit_service_url: "",
+							url: "wss://foreign.example.org",
+						},
+					}),
+				],
+			});
+			await waitFor(() => foreignRoom.connect.mock.calls.length > 0);
+			expect(jwtMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					url: "wss://foreign.example.org",
+					server_name: "matrix.org",
+					livekit_alias: "!room:example.com",
+				}),
+				expect.anything(),
+				"DEVABC123",
+				expect.objectContaining({ subscriber: true }),
+			);
+			expect(
+				foreignRoom.localParticipant.setMicrophoneEnabled,
+			).not.toHaveBeenCalled();
+		});
+
 		it("opens a subscriber-only connection to the foreign SFU and merges its publishing peer", async () => {
 			const { primary, foreignRoom, result } = renderWithForeignPeer();
 			// The peer joins OUR room subscriber-only (no publications)...
@@ -1082,46 +1126,95 @@ describe("useLivekitRoom", () => {
 			expect(peer?.isForeignSfu).toBe(true);
 		});
 
-		it("deduplicates an identity present in both rooms, preferring the publishing room", async () => {
-			const { primary, foreignRoom, result } = renderWithForeignPeer();
-			primary.remoteParticipants.set("hashed-peer", {
-				identity: "hashed-peer",
-				audioTrackPublications: new Map(),
-				videoTrackPublications: new Map(),
-			});
-			foreignRoom.remoteParticipants.set("hashed-peer", {
-				identity: "hashed-peer",
-				audioTrackPublications: new Map([
-					[
-						"sid-mic-f",
-						{ trackSid: "sid-mic-f", source: "microphone", isMuted: true },
+		it.each([
+			["hashed-peer", true],
+			["legacy-peer", true],
+			["legacy-peer", false],
+		] as const)(
+			"deduplicates membership aliases across rooms (%s), preferring the publisher",
+			async (primaryIdentity, microphone) => {
+				const { primary, foreignRoom, result } = renderWithForeignPeer({
+					memberships: [
+						makeMembership({
+							rtcBackendIdentity: "legacy-peer",
+							backendIdentities: ["hashed-peer", "legacy-peer"],
+							userId: "@trea:matrix.org",
+							transport: foreignTransport,
+						}),
 					],
-				]),
-				videoTrackPublications: new Map(),
-			});
-			// Our own identity in the foreign room must NOT become a remote row.
-			foreignRoom.remoteParticipants.set("local-id", {
-				identity: "local-id",
-				audioTrackPublications: new Map(),
-				videoTrackPublications: new Map(),
-			});
-			await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
-			await waitFor(() => {
-				const rows = result
-					.participants()
-					.filter((p) => p.identity === "hashed-peer");
-				return rows.length === 1 && rows[0]?.isMuted === true;
-			});
-			const rows = result.participants();
-			expect(rows.filter((p) => p.identity === "hashed-peer")).toHaveLength(1);
-			// The muted-mic publication from their room is the real state.
-			const peer = rows.find((p) => p.identity === "hashed-peer");
-			expect(peer?.isMuted).toBe(true);
-			expect(peer?.micUnavailable).toBe(false);
-			// Exactly one local row - our foreign-room echo was skipped.
-			expect(rows.filter((p) => p.isLocal)).toHaveLength(1);
-			expect(rows.filter((p) => p.identity === "local-id")).toHaveLength(1);
-		});
+				});
+				primary.remoteParticipants.set(primaryIdentity, {
+					identity: primaryIdentity,
+					audioTrackPublications: new Map(),
+					videoTrackPublications: new Map(),
+				});
+				foreignRoom.remoteParticipants.set("hashed-peer", {
+					identity: "hashed-peer",
+					audioTrackPublications: new Map(
+						microphone
+							? [
+									[
+										"sid-mic-f",
+										{
+											trackSid: "sid-mic-f",
+											source: "microphone",
+											isMuted: true,
+										},
+									],
+								]
+							: [],
+					),
+					videoTrackPublications: new Map([
+						["camera", { source: "camera", trackSid: "camera" }],
+					]),
+				});
+				const subscriber = "Xoawce5LcTJsJIgAQHoc4yWE+Ye9WkMhFEc98YmI/0I";
+				primary.remoteParticipants.set(subscriber, {
+					identity: subscriber,
+					audioTrackPublications: new Map(),
+					videoTrackPublications: new Map(),
+				});
+				const currentSubscriber = "lrLqa4FM0tIhBiyHJDU9lpkhc7PxWmfXmOMl46qEM5Y";
+				primary.remoteParticipants.set(currentSubscriber, {
+					identity: currentSubscriber,
+					audioTrackPublications: new Map(),
+					videoTrackPublications: new Map(),
+				});
+				// Our own identity in the foreign room must NOT become a remote row.
+				foreignRoom.remoteParticipants.set("local-id", {
+					identity: "local-id",
+					audioTrackPublications: new Map(),
+					videoTrackPublications: new Map(),
+				});
+				await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+				await waitFor(() => {
+					const rows = result
+						.participants()
+						.filter((p) => p.identity === "hashed-peer");
+					return rows.length === 1 && rows[0]?.isMuted === true;
+				});
+				const rows = result.participants();
+				expect(
+					rows.some(
+						(p) =>
+							p.identity === subscriber || p.identity === currentSubscriber,
+					),
+				).toBe(false);
+				expect(rows.filter((p) => p.identity === "hashed-peer")).toHaveLength(
+					1,
+				);
+				expect(rows.filter((p) => p.identity === "legacy-peer")).toHaveLength(
+					0,
+				);
+				// The muted-mic publication from their room is the real state.
+				const peer = rows.find((p) => p.identity === "hashed-peer");
+				expect(peer?.isMuted).toBe(true);
+				expect(peer?.micUnavailable).toBe(false);
+				// Exactly one local row - our foreign-room echo was skipped.
+				expect(rows.filter((p) => p.isLocal)).toHaveLength(1);
+				expect(rows.filter((p) => p.identity === "local-id")).toHaveLength(1);
+			},
+		);
 
 		it("disconnect tears the foreign room down and releases before teardownComplete resolves", async () => {
 			const { foreignRoom, result } = renderWithForeignPeer();
@@ -2288,6 +2381,7 @@ describe("useLivekitRoom", () => {
 				focusC,
 				expect.anything(),
 				"DEVABC123",
+				expect.any(Object),
 			);
 		});
 

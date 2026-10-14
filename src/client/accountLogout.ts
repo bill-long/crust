@@ -17,7 +17,7 @@
  * lives here with its bound rather than in the app layer.
  */
 import { createClient, type MatrixClient, Method } from "matrix-js-sdk";
-import { createOidcTokenRefreshFn } from "../features/auth/oidcRefresh";
+import { createOidcTokenRefreshCallback } from "../features/auth/oidcRefresh";
 import { reportError } from "../lib/reportError";
 import { removeAccount, type Session } from "../stores/session";
 import { withSessionLock } from "../stores/sessionLock";
@@ -92,7 +92,7 @@ export async function revokeSession(client: MatrixClient): Promise<void> {
 export function createAccountClient(
 	account: Session,
 ): ReturnType<typeof createClient> {
-	const tokenRefreshFunction = createOidcTokenRefreshFn(account);
+	const onTokenRefresh = createOidcTokenRefreshCallback(account);
 	return createClient({
 		baseUrl: account.homeserverUrl,
 		accessToken: account.accessToken,
@@ -107,7 +107,9 @@ export function createAccountClient(
 		...(account.refreshToken !== undefined
 			? { refreshToken: account.refreshToken }
 			: {}),
-		...(tokenRefreshFunction !== undefined ? { tokenRefreshFunction } : {}),
+		...(onTokenRefresh !== undefined && account.oidc
+			? { onTokenRefresh, oauthClientId: account.oidc.clientId }
+			: {}),
 	});
 }
 

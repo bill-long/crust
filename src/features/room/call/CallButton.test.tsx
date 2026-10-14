@@ -32,6 +32,7 @@ vi.mock("solid-refresh", () => ({
 interface MockRoomOpts {
 	roomId: string;
 	canSendCallMember: boolean;
+	canSendSticky?: boolean;
 	membership?: string;
 }
 
@@ -41,6 +42,7 @@ function makeMockRoom(opts: MockRoomOpts) {
 		roomId: opts.roomId,
 		getMyMembership: () => opts.membership ?? "join",
 		currentState: {
+			maySendEvent: () => opts.canSendSticky ?? false,
 			maySendStateEvent: (_type: string, _uid: string): boolean =>
 				opts.canSendCallMember,
 		},
@@ -56,12 +58,14 @@ function makeMockRoom(opts: MockRoomOpts) {
 interface MockClientOpts {
 	userId: string;
 	rooms: Record<string, ReturnType<typeof makeMockRoom>>;
+	sticky?: boolean;
 }
 
 function makeMockClient(opts: MockClientOpts) {
 	const clientListeners = new Set<(room: unknown) => void>();
 	return {
 		getUserId: () => opts.userId,
+		doesServerSupportUnstableFeature: async () => opts.sticky ?? false,
 		getRoom: (rid: string) => opts.rooms[rid] ?? null,
 		on: (_evt: unknown, fn: (room: unknown) => void) => {
 			clientListeners.add(fn);
@@ -74,14 +78,19 @@ function makeMockClient(opts: MockClientOpts) {
 
 function renderButton(opts: {
 	canSendCallMember: boolean;
+	canSendSticky?: boolean;
 	summaries?: SummariesStore;
 }) {
 	const room = makeMockRoom({
 		roomId: "!room:example.com",
 		canSendCallMember: opts.canSendCallMember,
+		...(opts.canSendSticky !== undefined
+			? { canSendSticky: opts.canSendSticky }
+			: {}),
 	});
 	const client = makeMockClient({
 		userId: "@me:example.com",
+		sticky: opts.canSendSticky ?? false,
 		rooms: { "!room:example.com": room },
 	});
 	const [syncState] = createSignal<AppSyncState>("live");
@@ -134,6 +143,15 @@ describe("CallButton visibility", () => {
 		_resetActiveCallForTests();
 		_resetCallSessionForTests();
 		_resetSwitchCallEpochForTests();
+	});
+
+	it("offers Join to a sticky-capable member without legacy state permission", async () => {
+		renderButton({ canSendCallMember: false, canSendSticky: true });
+		await vi.waitFor(() =>
+			expect(
+				screen.queryByRole("button", { name: "Start a call" }),
+			).toBeTruthy(),
+		);
 	});
 
 	it("visible when the user can send the call-member state event", () => {

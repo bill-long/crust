@@ -19,7 +19,6 @@ const NOW = 1_780_000_000_000;
 const USER = "@bob:example.org";
 const ROOM = "!sticky:example.org";
 const KEY = `_${USER}_DEVICE1`;
-const IDENTITY = "c53v4dTzaQzS4pI/jouU5eCVHNPFYvNSUhL6V6MFrEA";
 
 function sticky(
 	content: Record<string, unknown> = {},
@@ -42,7 +41,7 @@ function sticky(
 				published: [
 					{
 						type: "livekit",
-						livekit_service_url: "https://sfu.example.org",
+						url: "wss://sfu.example.org",
 						livekit_alias: ROOM,
 					},
 				],
@@ -296,7 +295,9 @@ describe("sticky call membership delivery (#504)", () => {
 		try {
 			room._unstable_addStickyEvents([sticky()]);
 			await vi.waitFor(() => expect(session.memberships).toHaveLength(1));
-			expect(session.memberships[0]?.rtcBackendIdentity).toBe(IDENTITY);
+			expect(session.memberships[0]?.backendIdentities).toEqual([
+				expect.stringMatching(/^[A-Za-z0-9+/]{43}$/),
+			]);
 			expect(session.memberships[0]?.userId).toBe(USER);
 			expect(changed).toHaveBeenCalled();
 			await vi.advanceTimersByTimeAsync(60_050);

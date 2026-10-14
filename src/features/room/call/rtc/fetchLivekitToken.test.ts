@@ -207,3 +207,166 @@ describe("fetchLivekitToken", () => {
 		},
 	);
 });
+
+const own = {
+	roomId: "!room:example.com",
+	userId: "@alice:example.com",
+	deviceId: fakeDeviceId,
+	memberId: "member-uuid",
+	backendIdentity: "current-hash",
+	modern: true,
+};
+
+describe("current MatrixRTC token contracts", () => {
+	it("uses flat member_id at the authenticated homeserver endpoint without sending OpenID there", async () => {
+		const authedRequest = vi.fn().mockResolvedValue({ jwt: "CURRENT" });
+		const fetchImpl = vi.fn();
+		const openId = vi.fn().mockRejectedValue(new Error("OpenID disabled"));
+		const response = await fetchLivekitToken(
+			livekitFocus({
+				url: "wss://sfu.example.com",
+				server_name: "foreign.example",
+			}),
+			openId,
+			fakeDeviceId,
+			{
+				client: { http: { authedRequest } } as never,
+				membership: own,
+				fetchImpl: asFetch(fetchImpl),
+			},
+		);
+		expect(response).toEqual({
+			url: "wss://sfu.example.com",
+			jwt: "CURRENT",
+			localIdentity: "current-hash",
+		});
+		expect(authedRequest).toHaveBeenCalledWith(
+			"POST",
+			"/rtc/livekit/get_token",
+			undefined,
+			{
+				url: "wss://sfu.example.com",
+				server_name: "foreign.example",
+				room_id: own.roomId,
+				slot_id: "m.call#ROOM",
+				member_id: own.memberId,
+			},
+			expect.objectContaining({
+				prefix: "/_matrix/client/unstable/io.element.msc4195",
+			}),
+		);
+		expect(fetchImpl).not.toHaveBeenCalled();
+		expect(openId).not.toHaveBeenCalled();
+	});
+	it("falls back to the advertised legacy publisher route only for an unsupported endpoint", async () => {
+		const authedRequest = vi
+			.fn()
+			.mockRejectedValue({ errcode: "M_UNRECOGNIZED" });
+		const { fetchImpl } = mockOk();
+		const response = await fetchLivekitToken(
+			livekitFocus({ url: "wss://sfu.example.com" }),
+			fakeToken,
+			fakeDeviceId,
+			{
+				client: { http: { authedRequest } } as never,
+				membership: own,
+				fetchImpl: asFetch(fetchImpl),
+			},
+		);
+		expect(fetchImpl.mock.calls[0]?.[0]).toContain("/sfu/get");
+		expect(response.localIdentity).toBe(`${own.userId}:${fakeDeviceId}`);
+	});
+	it.each([
+		{ errcode: "M_FORBIDDEN" },
+		{ httpStatus: 404 },
+		new TypeError("offline"),
+		new DOMException("aborted", "AbortError"),
+	])(
+		"does not downgrade a failed authenticated request (%s)",
+		async (error) => {
+			const fetchImpl = vi.fn();
+			await expect(
+				fetchLivekitToken(
+					livekitFocus({ url: "wss://sfu.example.com" }),
+					fakeToken,
+					fakeDeviceId,
+					{
+						client: {
+							http: { authedRequest: vi.fn().mockRejectedValue(error) },
+						} as never,
+						membership: own,
+						fetchImpl: asFetch(fetchImpl),
+					},
+				),
+			).rejects.toEqual(error);
+			expect(fetchImpl).not.toHaveBeenCalled();
+		},
+	);
+	it("tries the standalone hashed subscriber endpoint before legacy, using the Matrix room ID without an alias", async () => {
+		const fetchImpl = vi
+			.fn()
+			.mockResolvedValueOnce(new Response("missing", { status: 404 }))
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify({ url: "wss://sfu", jwt: "JWT" })),
+			);
+		await fetchLivekitToken(
+			{
+				type: "livekit",
+				livekit_service_url: "https://foreign.example/jwt/sfu/get?tenant=1",
+			},
+			fakeToken,
+			fakeDeviceId,
+			{ membership: own, subscriber: true, fetchImpl },
+		);
+		expect(fetchImpl.mock.calls.map((c) => c[0])).toEqual([
+			"https://foreign.example/jwt/get_token?tenant=1",
+			"https://foreign.example/jwt/sfu/get?tenant=1",
+		]);
+		expect(JSON.parse(fetchImpl.mock.calls[0]?.[1].body)).toEqual({
+			room_id: own.roomId,
+			slot_id: "m.call#ROOM",
+			openid_token: fakeToken,
+			member: {
+				id: own.memberId,
+				claimed_user_id: own.userId,
+				claimed_device_id: fakeDeviceId,
+			},
+		});
+		expect(JSON.parse(fetchImpl.mock.calls[1]?.[1].body).room).toBe(own.roomId);
+	});
+	it("does not send a legacy publisher to a hashed endpoint", async () => {
+		const { fetchImpl } = mockOk();
+		const authedRequest = vi.fn();
+		await fetchLivekitToken(
+			livekitFocus({ url: "wss://sfu" }),
+			fakeToken,
+			fakeDeviceId,
+			{
+				client: { http: { authedRequest } } as never,
+				membership: { ...own, modern: false },
+				fetchImpl: asFetch(fetchImpl),
+			},
+		);
+		expect(authedRequest).not.toHaveBeenCalled();
+		expect(fetchImpl.mock.calls[0]?.[0]).toContain("/sfu/get");
+	});
+	it("fails a URL-only transport without inventing a fallback service", async () => {
+		const fetchImpl = vi.fn();
+		const error = { errcode: "M_NOT_FOUND" };
+		await expect(
+			fetchLivekitToken(
+				{ type: "livekit", livekit_service_url: "", url: "wss://sfu" },
+				fakeToken,
+				fakeDeviceId,
+				{
+					client: {
+						http: { authedRequest: vi.fn().mockRejectedValue(error) },
+					} as never,
+					membership: own,
+					fetchImpl: asFetch(fetchImpl),
+				},
+			),
+		).rejects.toEqual(error);
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+});
