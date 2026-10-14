@@ -73,7 +73,9 @@ function createClient(opts: { roomFound?: boolean; session: FakeSession }): {
 							currentState: {
 								maySendStateEvent: () => true,
 								maySendEvent: () => true,
-								getStateEvents: () => [],
+								getStateEvents: () => [
+									{ getId: () => "$legacy", getContent: () => ({}) },
+								],
 							},
 						} as never),
 			),
@@ -643,6 +645,7 @@ describe("useRtcSession", () => {
 			livekit_alias: "!room:example.com",
 		};
 		const oldest = {
+			eventId: "$legacy",
 			userId: "@alice:example.com",
 			deviceId: "AAA",
 			createdTs: () => 1000,
@@ -674,6 +677,7 @@ describe("useRtcSession", () => {
 		const url = "https://other-sfu.example.com/livekit/sfu/get";
 		const makeMember = (): CallMembership =>
 			({
+				eventId: "$legacy",
 				userId: "@alice:example.com",
 				deviceId: "AAA",
 				createdTs: () => 1000,
@@ -983,7 +987,7 @@ it.each([true, false])(
 			expect.objectContaining(
 				ordinaryPermission
 					? { url: "wss://local.example" }
-					: { livekit_service_url: "https://foreign.example" },
+					: { livekit_service_url: "https://local.example" },
 			),
 		]);
 		expect(result.localMembership()?.modern).toBe(ordinaryPermission);

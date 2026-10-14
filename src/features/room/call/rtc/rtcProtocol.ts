@@ -94,7 +94,7 @@ export function membershipTransport(
 	client: MatrixClient,
 	roomId: string,
 	membership: CallMembership,
-	oldest: CallMembership,
+	memberships: readonly CallMembership[],
 ): LivekitTransport | null {
 	const state = client.getRoom(roomId)?.currentState;
 	const event = state
@@ -102,9 +102,9 @@ export function membershipTransport(
 		.find((e) => e.getId() === membership.eventId);
 	const elected =
 		event?.getContent().focus_active?.focus_selection === "oldest_membership"
-			? oldest
+			? (oldestLegacyMembership(client, roomId, memberships) ?? membership)
 			: membership;
-	const transport = livekitTransport(elected.getTransport(oldest), roomId);
+	const transport = livekitTransport(elected.getTransport(elected), roomId);
 	if (transport?.url)
 		transport.server_name = elected.userId.slice(
 			elected.userId.indexOf(":") + 1,
@@ -141,4 +141,49 @@ export async function standaloneSubscriberIdentity(
 		/=+$/,
 		"",
 	);
+}
+
+/** Legacy clients only elect members carried in room state, never sticky RTC events. */
+export function oldestLegacyMembership(
+	client: MatrixClient,
+	roomId: string,
+	members: readonly CallMembership[],
+): CallMembership | undefined {
+	const ids = new Set(
+		client
+			.getRoom(roomId)
+			?.currentState.getStateEvents(LEGACY_MEMBER_EVENT)
+			.map((e) => e.getId()) ?? [],
+	);
+	return members
+		.filter((m) => ids.has(m.eventId))
+		.reduce<CallMembership | undefined>(
+			(oldest, m) =>
+				!oldest || m.createdTs() < oldest.createdTs() ? m : oldest,
+			undefined,
+		);
+}
+
+/** One eligibility and format decision shared by the entry button and join operation. */
+export function selectRtcTransport(
+	client: MatrixClient,
+	roomId: string,
+	foci: readonly LivekitTransport[],
+	sticky: boolean,
+	members: readonly CallMembership[],
+	summaries?: SummariesStore,
+): { focus: LivekitTransport; modern: boolean } | null {
+	if (sticky && canPublishMembership(client, roomId, true, summaries)) {
+		const focus = foci.find((f) => typeof f.url === "string");
+		if (focus) return { focus, modern: true };
+	}
+	if (!canPublishMembership(client, roomId, false, summaries)) return null;
+	const oldest = oldestLegacyMembership(client, roomId, members);
+	const elected = oldest
+		? membershipTransport(client, roomId, oldest, members)
+		: null;
+	const focus = elected?.livekit_service_url
+		? elected
+		: foci.find((f) => f.livekit_service_url);
+	return focus ? { focus: { ...focus, url: undefined }, modern: false } : null;
 }

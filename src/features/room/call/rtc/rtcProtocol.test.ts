@@ -33,16 +33,27 @@ describe("RTC transport and permission boundaries", () => {
 		};
 		const peer = {
 			eventId: "$peer",
+			createdTs: () => 3,
 			getTransport: () => ({
 				type: "livekit",
 				livekit_service_url: "https://unused",
 			}),
 		};
-		const oldest = { getTransport: () => selected };
+		const oldest = {
+			eventId: "$legacy",
+			createdTs: () => 2,
+			getTransport: () => selected,
+		};
+		const sticky = {
+			eventId: "$sticky",
+			createdTs: () => 1,
+			getTransport: () => ({ type: "livekit", url: "wss://wrong" }),
+		};
 		const client = {
 			getRoom: () => ({
 				currentState: {
 					getStateEvents: () => [
+						{ getId: () => "$legacy", getContent: () => ({}) },
 						{
 							getId: () => "$peer",
 							getContent: () => ({
@@ -58,7 +69,7 @@ describe("RTC transport and permission boundaries", () => {
 				client as never,
 				"!room:example.org",
 				peer as never,
-				oldest as never,
+				[sticky, peer, oldest] as never,
 			)?.livekit_service_url,
 		).toBe("https://selected");
 	});

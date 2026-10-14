@@ -1,18 +1,22 @@
 import { RoomStateEvent } from "matrix-js-sdk";
+import { MatrixRTCSessionEvent } from "matrix-js-sdk/lib/matrixrtc/MatrixRTCSession";
 import {
 	type Component,
 	createEffect,
 	createMemo,
+	createResource,
 	createSignal,
 	onCleanup,
 	Show,
 } from "solid-js";
+import { useConfig } from "../../../app/ConfigProvider";
 import { useClient } from "../../../client/client";
 import { activeCallRoomId } from "../../../stores/activeCall";
 import { ConfirmDialog } from "../settings/ConfirmDialog";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import { currentCallSession } from "./rtc/callSessionStore";
-import { canPublishMembership, supportsRtcMembership } from "./rtc/rtcProtocol";
+import { discoverLivekitFoci } from "./rtc/discoverFoci";
+import { selectRtcTransport, supportsRtcMembership } from "./rtc/rtcProtocol";
 import { switchCall } from "./rtc/switchCall";
 
 interface CallButtonProps {
@@ -36,14 +40,24 @@ interface CallButtonProps {
  */
 export const CallButton: Component<CallButtonProps> = (props) => {
 	const { client, summaries } = useClient();
-	const [sticky, setSticky] = createSignal(false);
-	let disposed = false;
-	void supportsRtcMembership(client).then((value) => {
-		if (!disposed) setSticky(value);
-	});
-	onCleanup(() => {
-		disposed = true;
-	});
+	const config = useConfig();
+	let discoveryAbort: AbortController | undefined;
+	onCleanup(() => discoveryAbort?.abort());
+	const [transportOptions] = createResource(
+		() => props.roomId,
+		async (roomId) => {
+			discoveryAbort?.abort();
+			const controller = new AbortController();
+			discoveryAbort = controller;
+			const [sticky, foci] = await Promise.all([
+				supportsRtcMembership(client),
+				discoverLivekitFoci(client, config.elementCall.url, roomId, {
+					signal: controller.signal,
+				}),
+			]);
+			return { sticky, foci };
+		},
+	);
 
 	// Bump on RoomStateEvent.Update so canStartCall recomputes when power
 	// levels or membership change. Same pattern as Layout.tsx canInviteHere.
@@ -62,17 +76,29 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 			setBump((n) => n + 1);
 		};
 		room.on(RoomStateEvent.Update, onUpdate);
+		const session = client.matrixRTC?.getRoomSession(room);
+		session?.on(MatrixRTCSessionEvent.MembershipsChanged, onUpdate);
 		onCleanup(() => {
 			room.removeListener(RoomStateEvent.Update, onUpdate);
+			session?.off(MatrixRTCSessionEvent.MembershipsChanged, onUpdate);
 		});
 	});
 
 	const canStartCall = createMemo((): boolean => {
 		bump();
 		roomAvailableTick();
+		const available = transportOptions();
+		const room = client.getRoom(props.roomId);
+		if (!available || !room) return false;
 		return (
-			canPublishMembership(client, props.roomId, false, summaries) ||
-			(sticky() && canPublishMembership(client, props.roomId, true, summaries))
+			selectRtcTransport(
+				client,
+				props.roomId,
+				available.foci,
+				available.sticky,
+				client.matrixRTC?.getRoomSession(room).memberships ?? [],
+				summaries,
+			) !== null
 		);
 	});
 

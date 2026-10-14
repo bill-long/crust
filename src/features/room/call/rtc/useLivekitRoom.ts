@@ -43,7 +43,6 @@ import {
 	standaloneSubscriberIdentity,
 	transportAddress,
 } from "./rtcProtocol";
-import { oldestMembership } from "./useRtcSession";
 
 export type LivekitConnectionStatus =
 	| "idle"
@@ -483,7 +482,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	// snapshot.
 	const publishedLivekitTransport = (
 		membership: CallMembership,
-		oldest: CallMembership,
+		members: readonly CallMembership[],
 	): LivekitTransport | null => {
 		let transport: LivekitTransport | null;
 		try {
@@ -492,7 +491,7 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				opts.localMembership?.()?.roomId ??
 					String(opts.focus()?.livekit_alias ?? ""),
 				membership,
-				oldest,
+				members,
 			);
 		} catch (e) {
 			reportError(e, { logLabel: "rtc: cannot resolve published transport" });
@@ -544,12 +543,9 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 	const membershipInfo = createMemo(() => {
 		const list = opts.memberships();
 		const focusUrl = canonicalSfuUrl(transportAddress(opts.focus()));
-		const oldest = oldestMembership(list);
 		const map = new Map<string, MembershipEntry>();
 		for (const membership of list) {
-			const publishedTransport = oldest
-				? publishedLivekitTransport(membership, oldest)
-				: null;
+			const publishedTransport = publishedLivekitTransport(membership, list);
 			const publishedOrigin = publishedTransport
 				? canonicalSfuUrl(transportAddress(publishedTransport))
 				: null;

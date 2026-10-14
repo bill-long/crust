@@ -1,4 +1,4 @@
-import type { MatrixClient } from "matrix-js-sdk";
+import { type MatrixClient, RoomStateEvent } from "matrix-js-sdk";
 import type {
 	CallMembership,
 	LivekitTransport,
@@ -19,11 +19,9 @@ import {
 import { buildFallbackLivekitFoci, discoverLivekitFoci } from "./discoverFoci";
 import type { RtcE2EEContext } from "./rtcE2EEBridge";
 import {
-	canPublishMembership,
 	type LocalRtcMembership,
-	livekitTransport,
-	membershipTransport,
 	publishedTransport,
+	selectRtcTransport,
 	supportsRtcMembership,
 } from "./rtcProtocol";
 
@@ -97,21 +95,6 @@ export interface RtcSessionApi {
 }
 
 /**
- * Elects the oldest membership in a call (by `created_ts`) - the member
- * whose transport a legacy `oldest_membership` session follows. Single
- * definition shared by `activeFocus` below and `useLivekitRoom`'s
- * foreign-SFU detection so the election rule cannot drift between them.
- */
-export function oldestMembership(
-	list: readonly CallMembership[],
-): CallMembership | null {
-	return list.reduce<CallMembership | null>((acc, m) => {
-		if (acc === null) return m;
-		return m.createdTs() < acc.createdTs() ? m : acc;
-	}, null);
-}
-
-/**
  * Publishes one fixed transport per join. Current URL transports use sticky
  * memberships when MSC4354 is available; older deployments keep state events.
  * Membership identity is established before the SDK starts key distribution
@@ -122,7 +105,12 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		createSignal<LocalRtcMembership | null>(null);
 	const [publishedFocus, setPublishedFocus] =
 		createSignal<LivekitTransport | null>(null);
-	const stickyReady = supportsRtcMembership(opts.client);
+	const [stickySupport, setStickySupport] = createSignal(false);
+	const stickyReady = supportsRtcMembership(opts.client).then((value) => {
+		setStickySupport(value);
+		return value;
+	});
+	const [permissionsTick, setPermissionsTick] = createSignal(0);
 	const [status, setStatus] = createSignal<RtcStatus>("idle");
 	const [memberships, setMemberships] = createSignal<readonly CallMembership[]>(
 		[],
@@ -183,6 +171,17 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		if (list.length === 0) {
 			return "No MatrixRTC focus available - set elementCall.url in config.json, or have the homeserver advertise a LiveKit transport (MSC4519 /rtc/transports, or org.matrix.msc4143.rtc_foci in .well-known/matrix/client).";
 		}
+		permissionsTick();
+		if (
+			!selectRtcTransport(
+				opts.client,
+				opts.roomId,
+				list,
+				stickySupport(),
+				memberships(),
+			)
+		)
+			return "You do not have permission to publish a membership for an available call transport";
 		return null;
 	});
 
@@ -192,20 +191,15 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		() => {
 			if (status() !== "joined") return null;
 			if (publishedFocus()) return publishedFocus();
-			const list = memberships();
-			// Pull the oldest member's transport when joining an in-progress call;
-			// fall back to our offered focus if we are the first or the oldest
-			// member's transport isn't LiveKit.
-			const oldest = oldestMembership(list);
-			if (oldest) {
-				const transport = oldest.getTransport(oldest);
-				const normalized = livekitTransport(transport, opts.roomId);
-				if (normalized) {
-					return normalized;
-				}
-			}
-			const fociList = foci();
-			return fociList?.[0] ?? null;
+			return (
+				selectRtcTransport(
+					opts.client,
+					opts.roomId,
+					foci() ?? [],
+					stickySupport(),
+					memberships(),
+				)?.focus ?? null
+			);
 		},
 		null,
 		{
@@ -230,6 +224,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			setStatus("error");
 			return;
 		}
+		const updatePermissions = () => setPermissionsTick((n) => n + 1);
+		room.on?.(RoomStateEvent.Update, updatePermissions);
+		onCleanup(() => room.off?.(RoomStateEvent.Update, updatePermissions));
 		const s = opts.client.matrixRTC.getRoomSession(room);
 		setSession(s);
 		const joined = s.isJoined() ? joinedMemberships.get(s) : undefined;
@@ -382,6 +379,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		if (foci() === null) {
 			await fociReady;
 		}
+		await stickyReady;
 		// Cancelled while we were parked: leave() or onCleanup bumped
 		// joinEpoch. Bail before publishing a membership the user
 		// already asked us not to.
@@ -427,30 +425,18 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				throw new Error(
 					"Matrix user and device IDs are required to join a call",
 				);
-			const oldest = oldestMembership(memberships());
-			const offered = fociList[0];
-			const elected =
-				oldest && membershipTransport(opts.client, opts.roomId, oldest, oldest);
-			// Current tokens are routed through the publishing user's server.
-			// Publish its advertised URL, never borrow a foreign peer's URL.
-			const canUseModern =
-				sticky &&
-				typeof offered?.url === "string" &&
-				canPublishMembership(opts.client, opts.roomId, true);
-			const selected = canUseModern
-				? offered
-				: elected?.livekit_service_url
-					? elected
-					: offered;
-			if (!selected) throw new Error("No LiveKit transport available");
-			const modern = canUseModern && selected === offered;
-			if (!modern && !selected.livekit_service_url)
-				throw new Error("This call requires sticky-event support (MSC4354)");
-			const focus = modern ? selected : { ...selected, url: undefined };
-			if (!canPublishMembership(opts.client, opts.roomId, modern))
+			const selected = selectRtcTransport(
+				opts.client,
+				opts.roomId,
+				fociList,
+				sticky,
+				memberships(),
+			);
+			if (!selected)
 				throw new Error(
-					"You do not have permission to publish this call membership",
+					"You do not have permission to publish a membership for an available call transport",
 				);
+			const { focus, modern } = selected;
 			const memberId = modern ? crypto.randomUUID() : `${userId}:${deviceId}`;
 			const backendIdentity = modern
 				? await computeRtcIdentityRaw(userId, memberId)
