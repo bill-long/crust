@@ -75,5 +75,13 @@ export function createOidcTokenRefreshCallback(
 ): ((tokens: AccessTokens) => Promise<void>) | undefined {
 	if (!session.oidc) return undefined;
 	const identity = identityOf(session as Session & { oidc: SessionOidc });
-	return (tokens) => persistRefreshedTokens(identity, tokens);
+	let latestRefreshToken = session.refreshToken;
+	return (tokens) => {
+		// SDK 44 replaces its in-memory token with this object after the callback.
+		// Persist only the provider response so another tab's stored rotation survives.
+		const received = { ...tokens };
+		if (tokens.refreshToken) latestRefreshToken = tokens.refreshToken;
+		else if (latestRefreshToken) tokens.refreshToken = latestRefreshToken;
+		return persistRefreshedTokens(identity, received);
+	};
 }

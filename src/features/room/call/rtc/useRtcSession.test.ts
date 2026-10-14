@@ -932,43 +932,63 @@ describe("useRtcSession", () => {
 	});
 });
 
-it("publishes the locally advertised current transport instead of borrowing a foreign homeserver's URL", async () => {
-	const session = createFakeSession();
-	const { client } = createClient({ session });
-	const modernClient = {
-		...client,
-		doesServerSupportUnstableFeature: async () => true,
-	};
-	session.memberships = [
-		{
-			userId: "@foreign:elsewhere.org",
-			createdTs: () => 1,
-			getTransport: () => ({
-				type: "livekit",
-				url: "wss://foreign.example",
-				livekit_service_url: "https://foreign.example",
-			}),
-		},
-	] as never;
-	const { result } = renderHook(() =>
-		useRtcSession({
-			client: modernClient as never,
-			roomId: "!room:example.com",
-			elementCallUrl: "",
-			discoverFoci: async () => [
-				{
+it.each([true, false])(
+	"selects an owned current transport or permitted legacy fallback (ordinary permission: %s)",
+	async (ordinaryPermission) => {
+		const session = createFakeSession();
+		const { client } = createClient({ session });
+		client.getRoom.mockReturnValue({
+			getMyMembership: () => "join",
+			currentState: {
+				maySendEvent: () => ordinaryPermission,
+				maySendStateEvent: () => true,
+				getStateEvents: () => [],
+			},
+		} as never);
+		const modernClient = {
+			...client,
+			doesServerSupportUnstableFeature: async () => true,
+		};
+		session.memberships = [
+			{
+				userId: "@foreign:elsewhere.org",
+				createdTs: () => 1,
+				getTransport: () => ({
 					type: "livekit",
-					url: "wss://local.example",
-					livekit_service_url: "https://local.example",
-					livekit_alias: "!room:example.com",
-				},
-			],
-		}),
-	);
-	await result.join();
-	expect(result.activeFocus()?.url).toBe("wss://local.example");
-	expect(session.join.mock.calls[0]?.[1]).toEqual([
-		expect.objectContaining({ url: "wss://local.example" }),
-	]);
-	expect(result.localMembership()?.modern).toBe(true);
-});
+					url: "wss://foreign.example",
+					livekit_service_url: "https://foreign.example",
+				}),
+			},
+		] as never;
+		const { result } = renderHook(() =>
+			useRtcSession({
+				client: modernClient as never,
+				roomId: "!room:example.com",
+				elementCallUrl: "",
+				discoverFoci: async () => [
+					{
+						type: "livekit",
+						url: "wss://local.example",
+						livekit_service_url: "https://local.example",
+						livekit_alias: "!room:example.com",
+					},
+				],
+			}),
+		);
+		await result.join();
+		expect(result.activeFocus()?.url).toBe(
+			ordinaryPermission ? "wss://local.example" : undefined,
+		);
+		expect(session.join.mock.calls[0]?.[1]).toEqual([
+			expect.objectContaining(
+				ordinaryPermission
+					? { url: "wss://local.example" }
+					: { livekit_service_url: "https://foreign.example" },
+			),
+		]);
+		expect(result.localMembership()?.modern).toBe(ordinaryPermission);
+		expect(session.join.mock.calls[0]?.[2]).toMatchObject({
+			unstableSendStickyEvents: ordinaryPermission,
+		});
+	},
+);

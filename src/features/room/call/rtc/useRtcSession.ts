@@ -433,15 +433,17 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				oldest && membershipTransport(opts.client, opts.roomId, oldest, oldest);
 			// Current tokens are routed through the publishing user's server.
 			// Publish its advertised URL, never borrow a foreign peer's URL.
-			const selected =
-				sticky && typeof offered?.url === "string"
-					? offered
-					: elected?.livekit_service_url
-						? elected
-						: offered;
+			const canUseModern =
+				sticky &&
+				typeof offered?.url === "string" &&
+				canPublishMembership(opts.client, opts.roomId, true);
+			const selected = canUseModern
+				? offered
+				: elected?.livekit_service_url
+					? elected
+					: offered;
 			if (!selected) throw new Error("No LiveKit transport available");
-			const modern =
-				sticky && selected === offered && typeof selected.url === "string";
+			const modern = canUseModern && selected === offered;
 			if (!modern && !selected.livekit_service_url)
 				throw new Error("This call requires sticky-event support (MSC4354)");
 			const focus = modern ? selected : { ...selected, url: undefined };

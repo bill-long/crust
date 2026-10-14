@@ -206,59 +206,83 @@ describe("createOidcTokenRefreshCallback", () => {
 	});
 });
 
-it("lets SDK 44 refresh an expired request and persist rotated OAuth tokens", async () => {
-	saveSession(OIDC_SESSION);
-	const fetchImpl = vi.fn(
-		async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = String(input);
-			if (url === "https://auth.example.com/token") {
-				expect(String(init?.body)).toContain("refresh_token=refresh-old");
+it.each([
+	[undefined, undefined],
+	["", ""],
+	["new-refresh", undefined],
+	["new-refresh", ""],
+])(
+	"keeps SDK refresh working for consecutive rotations %j",
+	async (first, second) => {
+		const rotations = [first, second, undefined];
+		let refreshCount = 0;
+		let latestRefresh = "refresh-old";
+		const expired = new Set(["Bearer access-old"]);
+		saveSession(OIDC_SESSION);
+		const fetchImpl = vi.fn(
+			async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url = String(input);
+				if (url === "https://auth.example.com/token") {
+					expect(String(init?.body)).toContain(
+						`refresh_token=${latestRefresh}`,
+					);
+					const rotated = rotations[refreshCount++];
+					if (rotated) latestRefresh = rotated;
+					return new Response(
+						JSON.stringify({
+							access_token: `new-access-${refreshCount}`,
+							...(rotated !== undefined ? { refresh_token: rotated } : {}),
+							token_type: "Bearer",
+						}),
+						{ headers: { "Content-Type": "application/json" } },
+					);
+				}
+				if (expired.has(new Headers(init?.headers).get("Authorization") ?? ""))
+					return new Response(
+						JSON.stringify({ errcode: "M_UNKNOWN_TOKEN", error: "expired" }),
+						{ status: 401, headers: { "Content-Type": "application/json" } },
+					);
 				return new Response(
 					JSON.stringify({
-						access_token: "new-access",
-						refresh_token: "new-refresh",
-						token_type: "Bearer",
+						user_id: OIDC_SESSION.userId,
+						device_id: OIDC_SESSION.deviceId,
 					}),
 					{ headers: { "Content-Type": "application/json" } },
 				);
-			}
-			if (
-				new Headers(init?.headers).get("Authorization") === "Bearer access-old"
-			)
-				return new Response(
-					JSON.stringify({ errcode: "M_UNKNOWN_TOKEN", error: "expired" }),
-					{ status: 401, headers: { "Content-Type": "application/json" } },
-				);
-			return new Response(
-				JSON.stringify({
-					user_id: OIDC_SESSION.userId,
-					device_id: OIDC_SESSION.deviceId,
-				}),
-				{ headers: { "Content-Type": "application/json" } },
-			);
-		},
-	);
-	vi.stubGlobal("fetch", fetchImpl);
-	const callback = createOidcTokenRefreshCallback(OIDC_SESSION);
-	if (!callback) throw new Error("Missing callback");
-	const client = createClient({
-		baseUrl: OIDC_SESSION.homeserverUrl,
-		userId: OIDC_SESSION.userId,
-		deviceId: OIDC_SESSION.deviceId,
-		accessToken: OIDC_SESSION.accessToken,
-		refreshToken: "refresh-old",
-		oauthClientId: "client-xyz",
-		onTokenRefresh: callback,
-		fetchFn: fetchImpl,
-	});
-	client.http.opts.authMetadataCallback = async () =>
-		({
-			issuer: "https://auth.example.com/",
-			token_endpoint: "https://auth.example.com/token",
-		}) as never;
-	await expect(client.whoami()).resolves.toMatchObject({
-		user_id: OIDC_SESSION.userId,
-	});
-	await vi.waitFor(() => expect(stored()?.accessToken).toBe("new-access"));
-	expect(stored()?.refreshToken).toBe("new-refresh");
-});
+			},
+		);
+		vi.stubGlobal("fetch", fetchImpl);
+		const callback = createOidcTokenRefreshCallback(OIDC_SESSION);
+		if (!callback) throw new Error("Missing callback");
+		const client = createClient({
+			baseUrl: OIDC_SESSION.homeserverUrl,
+			userId: OIDC_SESSION.userId,
+			deviceId: OIDC_SESSION.deviceId,
+			accessToken: OIDC_SESSION.accessToken,
+			refreshToken: "refresh-old",
+			oauthClientId: "client-xyz",
+			onTokenRefresh: callback,
+			fetchFn: fetchImpl,
+		});
+		client.http.opts.authMetadataCallback = async () =>
+			({
+				issuer: "https://auth.example.com/",
+				token_endpoint: "https://auth.example.com/token",
+			}) as never;
+		await expect(client.whoami()).resolves.toMatchObject({
+			user_id: OIDC_SESSION.userId,
+		});
+		await vi.waitFor(() => expect(stored()?.accessToken).toBe("new-access-1"));
+		expired.add("Bearer new-access-1");
+		await expect(client.whoami()).resolves.toMatchObject({
+			user_id: OIDC_SESSION.userId,
+		});
+		expired.add("Bearer new-access-2");
+		await expect(client.whoami()).resolves.toMatchObject({
+			user_id: OIDC_SESSION.userId,
+		});
+		expect(refreshCount).toBe(3);
+		await vi.waitFor(() => expect(stored()?.accessToken).toBe("new-access-3"));
+		expect(stored()?.refreshToken).toBe(latestRefresh);
+	},
+);
