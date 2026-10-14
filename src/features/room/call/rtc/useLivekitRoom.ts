@@ -25,7 +25,6 @@ import {
 } from "solid-js";
 import { avatarHttpUrl } from "../../../../lib/avatar";
 import { displayNameOr } from "../../../../lib/displayName";
-import { reportError } from "../../../../lib/reportError";
 import {
 	SCREEN_SHARE_CONTENT_HINT,
 	SCREEN_SHARE_PUBLISH_OPTIONS,
@@ -484,20 +483,13 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 		membership: CallMembership,
 		members: readonly CallMembership[],
 	): LivekitTransport | null => {
-		let transport: LivekitTransport | null;
-		try {
-			transport = membershipTransport(
-				opts.client,
-				opts.localMembership?.()?.roomId ??
-					String(opts.focus()?.livekit_alias ?? ""),
-				membership,
-				members,
-			);
-		} catch (e) {
-			reportError(e, { logLabel: "rtc: cannot resolve published transport" });
-			return null;
-		}
-		return transport;
+		return membershipTransport(
+			opts.client,
+			opts.localMembership?.()?.roomId ??
+				String(opts.focus()?.livekit_alias ?? ""),
+			membership,
+			members,
+		);
 	};
 
 	interface MembershipEntry {

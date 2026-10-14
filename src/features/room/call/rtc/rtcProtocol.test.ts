@@ -26,53 +26,59 @@ describe("RTC transport and permission boundaries", () => {
 	])("rejects invalid transport destinations (%s)", (value) => {
 		expect(livekitTransport(value, "!room:example.org")).toBeNull();
 	});
-	it("resolves an oldest-membership peer to the elected transport, not its unused offer", () => {
-		const selected = {
-			type: "livekit",
-			livekit_service_url: "https://selected",
-		};
-		const peer = {
-			eventId: "$peer",
-			createdTs: () => 3,
-			getTransport: () => ({
+	it.each([false, true])(
+		"elects only legacy state members and tolerates malformed elected data (broken: %s)",
+		(broken) => {
+			const selected = {
 				type: "livekit",
-				livekit_service_url: "https://unused",
-			}),
-		};
-		const oldest = {
-			eventId: "$legacy",
-			createdTs: () => 2,
-			getTransport: () => selected,
-		};
-		const sticky = {
-			eventId: "$sticky",
-			createdTs: () => 1,
-			getTransport: () => ({ type: "livekit", url: "wss://wrong" }),
-		};
-		const client = {
-			getRoom: () => ({
-				currentState: {
-					getStateEvents: () => [
-						{ getId: () => "$legacy", getContent: () => ({}) },
-						{
-							getId: () => "$peer",
-							getContent: () => ({
-								focus_active: { focus_selection: "oldest_membership" },
-							}),
-						},
-					],
+				livekit_service_url: "https://selected",
+			};
+			const peer = {
+				eventId: "$peer",
+				createdTs: () => 3,
+				getTransport: () => ({
+					type: "livekit",
+					livekit_service_url: "https://unused",
+				}),
+			};
+			const oldest = {
+				eventId: "$legacy",
+				createdTs: () => 2,
+				getTransport: () => {
+					if (broken) throw new TypeError("missing foci_preferred");
+					return selected;
 				},
-			}),
-		};
-		expect(
-			membershipTransport(
-				client as never,
-				"!room:example.org",
-				peer as never,
-				[sticky, peer, oldest] as never,
-			)?.livekit_service_url,
-		).toBe("https://selected");
-	});
+			};
+			const sticky = {
+				eventId: "$sticky",
+				createdTs: () => 1,
+				getTransport: () => ({ type: "livekit", url: "wss://wrong" }),
+			};
+			const client = {
+				getRoom: () => ({
+					currentState: {
+						getStateEvents: () => [
+							{ getId: () => "$legacy", getContent: () => ({}) },
+							{
+								getId: () => "$peer",
+								getContent: () => ({
+									focus_active: { focus_selection: "oldest_membership" },
+								}),
+							},
+						],
+					},
+				}),
+			};
+			expect(
+				membershipTransport(
+					client as never,
+					"!room:example.org",
+					peer as never,
+					[sticky, peer, oldest] as never,
+				)?.livekit_service_url,
+			).toBe(broken ? undefined : "https://selected");
+		},
+	);
 	it("uses timeline permissions for sticky memberships and state permissions for legacy, always requiring room membership", () => {
 		let membership = "join";
 		const maySendEvent = vi.fn(() => true);

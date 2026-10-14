@@ -6,6 +6,7 @@ import type {
 } from "matrix-js-sdk/lib/matrixrtc";
 import { readMyMembership } from "../../../../client/stateEventPermission";
 import type { SummariesStore } from "../../../../client/summaries";
+import { reportError } from "../../../../lib/reportError";
 
 export interface LocalRtcMembership {
 	roomId: string;
@@ -104,7 +105,14 @@ export function membershipTransport(
 		event?.getContent().focus_active?.focus_selection === "oldest_membership"
 			? (oldestLegacyMembership(client, roomId, memberships) ?? membership)
 			: membership;
-	const transport = livekitTransport(elected.getTransport(elected), roomId);
+	let transport: LivekitTransport | null;
+	try {
+		transport = livekitTransport(elected.getTransport(elected), roomId);
+	} catch (error) {
+		// Some legacy events omit foci_preferred, which the SDK getter dereferences.
+		reportError(error, { logLabel: "rtc: cannot resolve published transport" });
+		return null;
+	}
 	if (transport?.url)
 		transport.server_name = elected.userId.slice(
 			elected.userId.indexOf(":") + 1,
