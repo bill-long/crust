@@ -8,7 +8,9 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { userEvent } from "vitest/browser";
 import "../../../styles/global.css";
 import { createMockClient, createMockRoom } from "../../../test/mockClient";
 import { TestClientProvider } from "../../../test/TimelineHarness";
@@ -165,6 +167,262 @@ describe("Composer attach-file button", () => {
 });
 
 describe("Composer caption input", () => {
+	it.each([
+		["attachment", "success"],
+		["attachment and text", "success"],
+		["text", "success"],
+		["attachment and text", "failure"],
+		["text", "failure"],
+	])(
+		"preserves an edit started while sending %s (%s)",
+		async (mode, outcome) => {
+			const client = makeClient();
+			let finishSend!: () => void;
+			client.sendMessage.mockImplementationOnce(
+				() =>
+					new Promise((resolve, reject) => {
+						finishSend = () =>
+							outcome === "failure"
+								? reject(new Error("Send failed"))
+								: resolve({ event_id: "$sent" });
+					}),
+			);
+			const [editing, setEditing] = createSignal<TimelineEvent | null>(null);
+			const onSent = vi.fn(() => setEditing(null));
+			const { container, getByLabelText, findByLabelText } = render(() => (
+				<TestClientProvider client={client}>
+					<Composer
+						roomId={ROOM}
+						packs={[]}
+						editingEvent={editing()}
+						onSent={onSent}
+					/>
+				</TestClientProvider>
+			));
+			if (mode !== "text") {
+				const input = container.querySelector<HTMLInputElement>(
+					"input[data-composer-file-input]",
+				);
+				if (!input) throw new Error("file input missing");
+				pickFiles(input, [
+					new File(["notes"], "notes.txt", { type: "text/plain" }),
+				]);
+				await findByLabelText("Caption for notes.txt");
+			}
+			const message = getByLabelText("Message");
+			if (mode !== "attachment")
+				await userEvent.fill(message, "Original draft");
+			await userEvent.click(message);
+			await userEvent.keyboard("{Enter}");
+			await expect.poll(() => client.sendMessage.mock.calls.length).toBe(1);
+			const editBody = outcome === "failure" ? "" : "Unfinished edit";
+			setEditing({
+				eventId: "$editing",
+				body: editBody,
+			} as TimelineEvent);
+			const edit = await findByLabelText("Edit message");
+			finishSend();
+			await expect
+				.poll(() => client.sendMessage.mock.calls.length)
+				.toBe(mode === "attachment and text" && outcome === "success" ? 2 : 1);
+			await tick();
+			expect(onSent).not.toHaveBeenCalled();
+			expect(getByLabelText("Edit message")).toBe(edit);
+			expect((edit as HTMLTextAreaElement).value).toBe(editBody);
+		},
+	);
+
+	it("waits for editing to end before retrying a voice upload that failed mid-edit", async () => {
+		const ctx = new AudioContext();
+		const oscillator = ctx.createOscillator();
+		const destination = ctx.createMediaStreamDestination();
+		oscillator.connect(destination);
+		oscillator.start();
+		const microphone = vi
+			.spyOn(navigator.mediaDevices, "getUserMedia")
+			.mockResolvedValue(destination.stream);
+		try {
+			const client = makeClient();
+			let rejectUpload!: (error: Error) => void;
+			client.uploadContent.mockImplementationOnce(
+				() =>
+					new Promise((_, reject) => {
+						rejectUpload = reject;
+					}),
+			);
+			const [editing, setEditing] = createSignal<TimelineEvent | null>(null);
+			const { getByLabelText, findByLabelText } = render(() => (
+				<TestClientProvider client={client}>
+					<Composer
+						roomId={ROOM}
+						packs={[]}
+						editingEvent={editing()}
+						onCancelEdit={() => setEditing(null)}
+					/>
+				</TestClientProvider>
+			));
+			await userEvent.click(getByLabelText("Message actions"));
+			const record = [
+				...document.body.querySelectorAll('[role="menuitem"]'),
+			].find((el) => el.textContent?.trim() === "Record voice message");
+			if (!record) throw new Error("record item missing");
+			await userEvent.click(record);
+			await userEvent.click(await findByLabelText("Send voice message"));
+			await expect.poll(() => client.uploadContent.mock.calls.length).toBe(1);
+			setEditing({
+				eventId: "$editing",
+				body: "Unfinished edit",
+			} as TimelineEvent);
+			// Entering edit mode focuses the message on the next frame. Let that
+			// finish before filling the caption, or browser fill can type into
+			// the message when focus moves between selecting and inserting text.
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+			rejectUpload(new Error("Upload failed"));
+			const caption = await findByLabelText("Caption for Voice message.webm");
+			await userEvent.fill(caption, "Keep the recording");
+			expect((caption as HTMLInputElement).value).toBe("Keep the recording");
+			expect(
+				(getByLabelText("Edit message") as HTMLTextAreaElement).value,
+			).toBe("Unfinished edit");
+			expect(document.activeElement).toBe(caption);
+			await userEvent.keyboard("{Enter}");
+			expect(client.sendMessage).not.toHaveBeenCalled();
+			expect(
+				(getByLabelText("Send attachments") as HTMLButtonElement).disabled,
+			).toBe(true);
+			await userEvent.click(getByLabelText("Cancel edit"));
+			await userEvent.click(caption);
+			await userEvent.keyboard("{Enter}");
+			await expect.poll(() => client.sendMessage.mock.calls.length).toBe(1);
+			expect(client.sendMessage).toHaveBeenCalledWith(
+				ROOM,
+				null,
+				expect.objectContaining({
+					msgtype: "m.audio",
+					body: "Keep the recording",
+				}),
+			);
+		} finally {
+			cleanup();
+			microphone.mockRestore();
+			await ctx.close();
+		}
+	});
+
+	it("keeps a failed attachment retryable and prevents duplicate pending sends", async () => {
+		const client = makeClient();
+		let rejectUpload!: (error: Error) => void;
+		client.uploadContent.mockImplementationOnce(
+			() =>
+				new Promise((_, reject) => {
+					rejectUpload = reject;
+				}),
+		);
+		const {
+			container,
+			findByLabelText,
+			getByLabelText,
+			findByRole,
+			queryByLabelText,
+		} = render(() => (
+			<TestClientProvider client={client}>
+				<Composer roomId={ROOM} packs={[]} />
+			</TestClientProvider>
+		));
+		const input = container.querySelector<HTMLInputElement>(
+			"input[data-composer-file-input]",
+		);
+		if (!input) throw new Error("file input missing");
+		pickFiles(input, [
+			new File(["notes"], "notes.txt", { type: "text/plain" }),
+		]);
+		const caption = await findByLabelText("Caption for notes.txt");
+		await userEvent.fill(caption, "Keep this caption");
+		await userEvent.keyboard("{Enter}");
+		await expect.poll(() => client.uploadContent.mock.calls.length).toBe(1);
+		expect(
+			(getByLabelText("Send attachments") as HTMLButtonElement).disabled,
+		).toBe(true);
+		const textarea = container.querySelector<HTMLTextAreaElement>(
+			"[data-composer-textarea]",
+		);
+		if (!textarea) throw new Error("textarea missing");
+		await userEvent.click(textarea);
+		await userEvent.keyboard("{Enter}");
+		expect(client.uploadContent).toHaveBeenCalledTimes(1);
+		rejectUpload(new Error("Upload failed"));
+		await findByRole("alert");
+		expect((caption as HTMLInputElement).value).toBe("Keep this caption");
+		await userEvent.click(getByLabelText("Send attachments"));
+		await expect.poll(() => client.sendMessage.mock.calls.length).toBe(1);
+		expect(queryByLabelText("Remove notes.txt")).toBeNull();
+	});
+
+	it.each(["caption Enter", "message Enter", "Send button"])(
+		"sends a selected file with %s",
+		async (method) => {
+			const client = makeClient();
+			const { container, getByLabelText, findByLabelText, queryByLabelText } =
+				render(() => (
+					<TestClientProvider client={client}>
+						<Composer roomId={ROOM} packs={[]} />
+					</TestClientProvider>
+				));
+			const input = container.querySelector<HTMLInputElement>(
+				"input[data-composer-file-input]",
+			);
+			if (!input) throw new Error("file input missing");
+			input.addEventListener("click", (e) => e.preventDefault());
+			await userEvent.click(getByLabelText("Message actions"));
+			const item = [
+				...document.body.querySelectorAll('[role="menuitem"]'),
+			].find((el) => el.textContent?.trim() === "Attach file");
+			if (!item) throw new Error("attach item missing");
+			await userEvent.click(item);
+			pickFiles(input, [
+				new File(["notes"], "notes.txt", { type: "text/plain" }),
+			]);
+			const caption = await findByLabelText("Caption for notes.txt");
+			await userEvent.fill(caption, "File caption");
+			for (const modifier of [{ shiftKey: true }, { isComposing: true }]) {
+				const event = new KeyboardEvent("keydown", {
+					key: "Enter",
+					bubbles: true,
+					cancelable: true,
+					...modifier,
+				});
+				caption.dispatchEvent(event);
+				expect(event.defaultPrevented).toBe(false);
+			}
+			expect(client.uploadContent).not.toHaveBeenCalled();
+			if (method === "Send button") {
+				await userEvent.click(getByLabelText("Send attachments"));
+			} else {
+				if (method === "message Enter") {
+					const textarea = container.querySelector<HTMLTextAreaElement>(
+						"[data-composer-textarea]",
+					);
+					if (!textarea) throw new Error("textarea missing");
+					await userEvent.click(textarea);
+				}
+				await userEvent.keyboard("{Enter}");
+			}
+			await expect.poll(() => client.sendMessage.mock.calls.length).toBe(1);
+			expect(client.sendMessage).toHaveBeenCalledWith(
+				ROOM,
+				null,
+				expect.objectContaining({
+					filename: "notes.txt",
+					body: "File caption",
+					msgtype: "m.file",
+				}),
+			);
+			expect(queryByLabelText("Remove notes.txt")).toBeNull();
+		},
+	);
+
 	// Regression: the tray iterated attachments with a reference-keyed <For>, but
 	// updateAttachment used to replace the attachment object wholesale, so every
 	// caption keystroke minted a new reference and <For> remounted the row,
