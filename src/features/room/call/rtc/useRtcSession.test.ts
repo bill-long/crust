@@ -996,3 +996,35 @@ it.each([true, false])(
 		});
 	},
 );
+
+it("retries a failed capability probe when joining without remounting", async () => {
+	const session = createFakeSession();
+	const { client } = createClient({ session });
+	const capability = vi
+		.fn()
+		.mockRejectedValueOnce(new Error("temporary versions failure"))
+		.mockResolvedValue(true);
+	const { result } = renderHook(() =>
+		useRtcSession({
+			client: {
+				...client,
+				doesServerSupportUnstableFeature: capability,
+			} as never,
+			roomId: "!room:example.com",
+			elementCallUrl: "",
+			discoverFoci: async () => [
+				{
+					type: "livekit",
+					livekit_service_url: "",
+					url: "wss://local.example",
+				},
+			],
+		}),
+	);
+	await result.fociReady;
+	expect(result.canJoin()).toBe(true);
+	await result.join();
+	expect(capability).toHaveBeenCalledTimes(2);
+	expect(result.localMembership()?.modern).toBe(true);
+	expect(result.status()).toBe("joined");
+});

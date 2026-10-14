@@ -105,7 +105,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 		createSignal<LocalRtcMembership | null>(null);
 	const [publishedFocus, setPublishedFocus] =
 		createSignal<LivekitTransport | null>(null);
-	const [stickySupport, setStickySupport] = createSignal(false);
+	const [stickySupport, setStickySupport] = createSignal<boolean | null>(null);
 	const stickyReady = supportsRtcMembership(opts.client).then((value) => {
 		setStickySupport(value);
 		return value;
@@ -177,7 +177,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 				opts.client,
 				opts.roomId,
 				list,
-				stickySupport(),
+				stickySupport() ?? true,
 				memberships(),
 			)
 		)
@@ -380,6 +380,8 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			await fociReady;
 		}
 		await stickyReady;
+		if (stickySupport() === null && joinEpoch === startEpoch && !disposed)
+			setStickySupport(await supportsRtcMembership(opts.client));
 		// Cancelled while we were parked: leave() or onCleanup bumped
 		// joinEpoch. Bail before publishing a membership the user
 		// already asked us not to.
@@ -417,7 +419,7 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			detachE2EE = ctx.attach(s, () => joinEpoch === myEpoch);
 		}
 		try {
-			const sticky = await stickyReady;
+			const sticky = stickySupport();
 			if (disposed || myEpoch !== joinEpoch) return;
 			const userId = opts.client.getUserId();
 			const deviceId = opts.client.getDeviceId();
@@ -434,7 +436,9 @@ export function useRtcSession(opts: UseRtcSessionOptions): RtcSessionApi {
 			);
 			if (!selected)
 				throw new Error(
-					"You do not have permission to publish a membership for an available call transport",
+					sticky === null
+						? "Could not check call capabilities. Try joining again."
+						: "You do not have permission to publish a membership for an available call transport",
 				);
 			const { focus, modern } = selected;
 			const memberId = modern ? crypto.randomUUID() : `${userId}:${deviceId}`;

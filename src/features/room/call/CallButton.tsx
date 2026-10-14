@@ -71,7 +71,8 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 				if (
 					current === "live" &&
 					previous !== "live" &&
-					transportOptions.latest?.foci.length === 0 &&
+					(transportOptions.latest?.foci.length === 0 ||
+						transportOptions.latest?.sticky === null) &&
 					!transportOptions.loading
 				)
 					void refetch();
@@ -127,7 +128,8 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		bump();
 		roomAvailableTick();
 		return (
-			transportOptions()?.foci.length === 0 &&
+			(transportOptions()?.foci.length === 0 ||
+				transportOptions()?.sticky === null) &&
 			(canPublishMembership(client, props.roomId, false, summaries) ||
 				canPublishMembership(client, props.roomId, true, summaries))
 		);
@@ -152,7 +154,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		summaries[props.roomId]?.name?.trim() || "this room";
 
 	const buttonLabel = (): string => {
-		if (canRetryDiscovery()) return "Retry call discovery";
+		if (!canStartCall() && canRetryDiscovery()) return "Retry call discovery";
 		if (otherCallActive()) return "Switch to call in this room";
 		return props.callActive() ? "Join call" : "Start a call";
 	};
@@ -160,7 +162,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const [switchOpen, setSwitchOpen] = createSignal(false);
 
 	const handleClick = (): void => {
-		if (canRetryDiscovery()) {
+		if (!canStartCall() && canRetryDiscovery()) {
 			if (!transportOptions.loading) void refetch();
 			return;
 		}
@@ -188,7 +190,9 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 				<button
 					type="button"
 					onClick={handleClick}
-					disabled={canRetryDiscovery() && transportOptions.loading}
+					disabled={
+						!canStartCall() && canRetryDiscovery() && transportOptions.loading
+					}
 					class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					title={buttonLabel()}
 					aria-label={buttonLabel()}

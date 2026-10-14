@@ -66,13 +66,19 @@ interface MockClientOpts {
 	userId: string;
 	rooms: Record<string, ReturnType<typeof makeMockRoom>>;
 	sticky?: boolean;
+	capabilityFailure?: boolean;
 }
 
 function makeMockClient(opts: MockClientOpts) {
 	const clientListeners = new Set<(room: unknown) => void>();
+	let capabilityAttempts = 0;
 	return {
 		getUserId: () => opts.userId,
-		doesServerSupportUnstableFeature: async () => opts.sticky ?? false,
+		doesServerSupportUnstableFeature: async () => {
+			if (opts.capabilityFailure && capabilityAttempts++ === 0)
+				throw new Error("temporary versions failure");
+			return opts.sticky ?? false;
+		},
 		getRoom: (rid: string) => opts.rooms[rid] ?? null,
 		on: (_evt: unknown, fn: (room: unknown) => void) => {
 			clientListeners.add(fn);
@@ -87,6 +93,7 @@ async function renderButton(opts: {
 	canSendCallMember: boolean;
 	canSendSticky?: boolean;
 	transport?: "url" | "service" | "dual";
+	capabilityFailure?: boolean;
 	summaries?: SummariesStore;
 }) {
 	discoverMock.mockResolvedValue([
@@ -108,6 +115,7 @@ async function renderButton(opts: {
 	const client = makeMockClient({
 		userId: "@me:example.com",
 		sticky: opts.canSendSticky ?? false,
+		...(opts.capabilityFailure ? { capabilityFailure: true } : {}),
 		rooms: { "!room:example.com": room },
 	});
 	const [syncState, setSyncState] = createSignal<AppSyncState>("live");
@@ -172,13 +180,21 @@ describe("CallButton visibility", () => {
 		);
 	});
 
-	it.each(["manual", "reconnect"])(
+	it.each([
+		{ recovery: "manual", failure: "transports" },
+		{ recovery: "reconnect", failure: "transports" },
+		{ recovery: "manual", failure: "versions" },
+		{ recovery: "reconnect", failure: "versions" },
+	])(
 		"recovers failed discovery via %s without navigating",
-		async (recovery) => {
+		async ({ recovery, failure }) => {
 			const before = discoverMock.mock.calls.length;
-			discoverMock.mockResolvedValueOnce([]);
+			if (failure === "transports") discoverMock.mockResolvedValueOnce([]);
 			const { setSyncState, onStart } = await renderButton({
-				canSendCallMember: true,
+				canSendCallMember: false,
+				canSendSticky: true,
+				transport: "url",
+				capabilityFailure: failure === "versions",
 			});
 			const retry = screen.getByRole("button", {
 				name: "Retry call discovery",

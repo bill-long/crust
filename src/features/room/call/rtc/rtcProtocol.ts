@@ -23,11 +23,12 @@ export const LEGACY_MEMBER_EVENT = "org.matrix.msc3401.call.member";
 
 export async function supportsRtcMembership(
 	client: MatrixClient,
-): Promise<boolean> {
+): Promise<boolean | null> {
 	try {
 		return await client.doesServerSupportUnstableFeature("org.matrix.msc4354");
 	} catch {
-		return false;
+		// Unknown is retryable; it must not become a cached unsupported result.
+		return null;
 	}
 }
 
@@ -177,7 +178,7 @@ export function selectRtcTransport(
 	client: MatrixClient,
 	roomId: string,
 	foci: readonly LivekitTransport[],
-	sticky: boolean,
+	sticky: boolean | null,
 	members: readonly CallMembership[],
 	summaries?: SummariesStore,
 ): { focus: LivekitTransport; modern: boolean } | null {
