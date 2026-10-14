@@ -6,6 +6,7 @@ import {
 	createMemo,
 	createResource,
 	createSignal,
+	on,
 	onCleanup,
 	Show,
 } from "solid-js";
@@ -16,7 +17,11 @@ import { ConfirmDialog } from "../settings/ConfirmDialog";
 import { useRoomAvailableTick } from "../useRoomAvailableTick";
 import { currentCallSession } from "./rtc/callSessionStore";
 import { discoverLivekitFoci } from "./rtc/discoverFoci";
-import { selectRtcTransport, supportsRtcMembership } from "./rtc/rtcProtocol";
+import {
+	canPublishMembership,
+	selectRtcTransport,
+	supportsRtcMembership,
+} from "./rtc/rtcProtocol";
 import { switchCall } from "./rtc/switchCall";
 
 interface CallButtonProps {
@@ -39,11 +44,11 @@ interface CallButtonProps {
  * controller surfaces the error inside its own leave-error dialog.
  */
 export const CallButton: Component<CallButtonProps> = (props) => {
-	const { client, summaries } = useClient();
+	const { client, summaries, syncState } = useClient();
 	const config = useConfig();
 	let discoveryAbort: AbortController | undefined;
 	onCleanup(() => discoveryAbort?.abort());
-	const [transportOptions] = createResource(
+	const [transportOptions, { refetch }] = createResource(
 		() => props.roomId,
 		async (roomId) => {
 			discoveryAbort?.abort();
@@ -57,6 +62,22 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 			]);
 			return { sticky, foci };
 		},
+	);
+
+	createEffect(
+		on(
+			syncState,
+			(current, previous) => {
+				if (
+					current === "live" &&
+					previous !== "live" &&
+					transportOptions.latest?.foci.length === 0 &&
+					!transportOptions.loading
+				)
+					void refetch();
+			},
+			{ defer: true },
+		),
 	);
 
 	// Bump on RoomStateEvent.Update so canStartCall recomputes when power
@@ -102,7 +123,16 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		);
 	});
 
-	const visible = (): boolean => canStartCall();
+	const canRetryDiscovery = createMemo(() => {
+		bump();
+		roomAvailableTick();
+		return (
+			transportOptions()?.foci.length === 0 &&
+			(canPublishMembership(client, props.roomId, false, summaries) ||
+				canPublishMembership(client, props.roomId, true, summaries))
+		);
+	});
+	const visible = (): boolean => canStartCall() || canRetryDiscovery();
 
 	// True when the user is in another room's call. With B-2c the
 	// button stays enabled — clicking opens a "Switch calls?" confirm
@@ -122,6 +152,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 		summaries[props.roomId]?.name?.trim() || "this room";
 
 	const buttonLabel = (): string => {
+		if (canRetryDiscovery()) return "Retry call discovery";
 		if (otherCallActive()) return "Switch to call in this room";
 		return props.callActive() ? "Join call" : "Start a call";
 	};
@@ -129,6 +160,10 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 	const [switchOpen, setSwitchOpen] = createSignal(false);
 
 	const handleClick = (): void => {
+		if (canRetryDiscovery()) {
+			if (!transportOptions.loading) void refetch();
+			return;
+		}
 		if (otherCallActive()) {
 			setSwitchOpen(true);
 			return;
@@ -153,6 +188,7 @@ export const CallButton: Component<CallButtonProps> = (props) => {
 				<button
 					type="button"
 					onClick={handleClick}
+					disabled={canRetryDiscovery() && transportOptions.loading}
 					class="relative inline-flex h-8 w-8 items-center justify-center rounded text-text-disabled transition-colors hover:bg-surface-2 hover:text-text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-hover any-pointer-coarse:h-11 any-pointer-coarse:w-11"
 					title={buttonLabel()}
 					aria-label={buttonLabel()}

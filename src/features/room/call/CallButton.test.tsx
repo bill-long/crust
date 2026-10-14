@@ -110,7 +110,7 @@ async function renderButton(opts: {
 		sticky: opts.canSendSticky ?? false,
 		rooms: { "!room:example.com": room },
 	});
-	const [syncState] = createSignal<AppSyncState>("live");
+	const [syncState, setSyncState] = createSignal<AppSyncState>("live");
 	const [cryptoState] = createSignal<CryptoState>("ready");
 	const summaries = opts.summaries ?? ({} as SummariesStore);
 	const onStart = vi.fn();
@@ -152,7 +152,7 @@ async function renderButton(opts: {
 		</ClientContext.Provider>
 	));
 	await new Promise((resolve) => setTimeout(resolve, 0));
-	return { ...result, onStart };
+	return { ...result, onStart, setSyncState };
 }
 
 describe("CallButton visibility", () => {
@@ -171,6 +171,28 @@ describe("CallButton visibility", () => {
 			).toBeTruthy(),
 		);
 	});
+
+	it.each(["manual", "reconnect"])(
+		"recovers failed discovery via %s without navigating",
+		async (recovery) => {
+			const before = discoverMock.mock.calls.length;
+			discoverMock.mockResolvedValueOnce([]);
+			const { setSyncState, onStart } = await renderButton({
+				canSendCallMember: true,
+			});
+			const retry = screen.getByRole("button", {
+				name: "Retry call discovery",
+			});
+			if (recovery === "manual") retry.click();
+			else {
+				setSyncState("error");
+				setSyncState("live");
+			}
+			await screen.findByRole("button", { name: "Start a call" });
+			expect(discoverMock.mock.calls.length).toBe(before + 2);
+			expect(onStart).not.toHaveBeenCalled();
+		},
+	);
 
 	it.each([
 		{
