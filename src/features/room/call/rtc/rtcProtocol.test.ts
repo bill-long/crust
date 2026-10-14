@@ -20,6 +20,39 @@ describe("RTC transport and permission boundaries", () => {
 		});
 	});
 	it.each([
+		{
+			input: {
+				livekit_service_url: "https://legacy.example",
+				url: "https://invalid-current.example",
+			},
+			expected: {
+				livekit_service_url: "https://legacy.example",
+				livekit_alias: "!room",
+			},
+		},
+		{
+			input: {
+				livekit_service_url: "javascript:invalid",
+				url: "wss://current.example",
+			},
+			expected: { url: "wss://current.example" },
+		},
+	])(
+		"preserves the valid endpoint when its optional counterpart is malformed: %j",
+		({ input, expected }) => {
+			const transport = livekitTransport(
+				{ type: "livekit", ...input },
+				"!room",
+			);
+			expect(transport).not.toBeNull();
+			if (!transport) throw new Error("Missing usable endpoint");
+			expect(publishedTransport(transport)).toEqual({
+				type: "livekit",
+				...expected,
+			});
+		},
+	);
+	it.each([
 		{ type: "livekit", url: "/relative" },
 		{ type: "livekit", url: "https://sfu" },
 		{ type: "livekit", livekit_service_url: "javascript:alert(1)" },

@@ -40,11 +40,11 @@ export function livekitTransport(
 	if (!value || typeof value !== "object") return null;
 	const t = value as Record<string, unknown>;
 	if (t.type !== "livekit") return null;
-	const service =
+	let service =
 		typeof t.livekit_service_url === "string"
 			? t.livekit_service_url.trim()
 			: "";
-	const url = typeof t.url === "string" ? t.url.trim() : "";
+	let url = typeof t.url === "string" ? t.url.trim() : "";
 	const valid = (s: string, protocols: string[]) => {
 		try {
 			return protocols.includes(new URL(s).protocol);
@@ -52,8 +52,8 @@ export function livekitTransport(
 			return false;
 		}
 	};
-	if (service && !valid(service, ["https:", "http:"])) return null;
-	if (url && !valid(url, ["wss:", "ws:"])) return null;
+	if (service && !valid(service, ["https:", "http:"])) service = "";
+	if (url && !valid(url, ["wss:", "ws:"])) url = "";
 	if (!service && !url) return null;
 	return {
 		type: "livekit",
