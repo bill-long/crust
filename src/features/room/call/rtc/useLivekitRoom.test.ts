@@ -39,6 +39,7 @@ const { roomFactory, lkMock, jwtMock } = vi.hoisted(() => {
 		Room: MockRoom,
 		RoomEvent: {
 			ParticipantConnected: "participantConnected",
+			ParticipantPermissionsChanged: "participantPermissionsChanged",
 			ParticipantDisconnected: "participantDisconnected",
 			ActiveSpeakersChanged: "activeSpeakersChanged",
 			TrackMuted: "trackMuted",
@@ -1256,6 +1257,63 @@ describe("useLivekitRoom", () => {
 				// Exactly one local row - our foreign-room echo was skipped.
 				expect(rows.filter((p) => p.isLocal)).toHaveLength(1);
 				expect(rows.filter((p) => p.identity === "local-id")).toHaveLength(1);
+			},
+		);
+
+		it.each(["primary", "foreign"] as const)(
+			"omits an unmatched receive-only connection on the %s SFU without hiding publishers",
+			async (source) => {
+				const { primary, foreignRoom, result } = renderWithForeignPeer();
+				const subscriberRoom = source === "primary" ? primary : foreignRoom;
+				// Captured from the live Element/matrix.org reproduction. This
+				// subscriber hash does not match the advertised publisher identity.
+				const identity = "s1cdPmSup0E13nmj9q4c+PdmBXU6C9nE8qFV9AmNF/4";
+				const subscriber = {
+					identity,
+					permissions: { canPublish: false },
+					audioTrackPublications: new Map(),
+					videoTrackPublications: new Map(),
+				};
+				subscriberRoom.remoteParticipants.set(identity, subscriber);
+				foreignRoom.remoteParticipants.set("hashed-peer", {
+					identity: "hashed-peer",
+					permissions: { canPublish: true },
+					audioTrackPublications: new Map([
+						["mic", { source: "microphone", isMuted: false }],
+					]),
+					videoTrackPublications: new Map(),
+				});
+				await waitFor(() => foreignRoom.connect.mock.calls.length === 1);
+				await waitFor(() =>
+					result.participants().some((p) => p.identity === "hashed-peer"),
+				);
+				expect(result.participants().filter((p) => !p.isLocal)).toMatchObject([
+					{
+						identity: "hashed-peer",
+						displayName: "Trea",
+						isUnresolved: false,
+						isMuted: false,
+					},
+				]);
+				// A permission upgrade must expose an unidentified potential
+				// publisher immediately, even before it publishes any tracks.
+				subscriber.permissions.canPublish = true;
+				subscriberRoom.emit("participantPermissionsChanged", {}, subscriber);
+				expect(
+					result.participants().find((p) => p.identity === identity)
+						?.isUnresolved,
+				).toBe(true);
+				subscriber.permissions.canPublish = false;
+				subscriberRoom.emit("participantPermissionsChanged", {}, subscriber);
+				expect(result.participants().some((p) => p.identity === identity)).toBe(
+					false,
+				);
+				// Do not hide existing media during a permission downgrade.
+				subscriber.videoTrackPublications.set("camera", { source: "camera" });
+				subscriberRoom.emit("participantPermissionsChanged", {}, subscriber);
+				expect(result.participants().some((p) => p.identity === identity)).toBe(
+					true,
+				);
 			},
 		);
 

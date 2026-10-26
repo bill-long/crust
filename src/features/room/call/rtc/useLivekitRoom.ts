@@ -718,6 +718,16 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 				if (p.identity === localIdentity) continue;
 				const entry = membershipInfo().get(p.identity);
 				const member = entry?.membership;
+				// Element uses opaque identities for its extra receive-only
+				// connections. They are transports, not additional call members.
+				// Keep unmatched potential publishers visible until membership sync.
+				if (
+					!member &&
+					p.permissions?.canPublish === false &&
+					p.audioTrackPublications.size === 0 &&
+					p.videoTrackPublications.size === 0
+				)
+					continue;
 				if (
 					member &&
 					member.userId === opts.client.getUserId() &&
@@ -1196,6 +1206,10 @@ export function useLivekitRoom(opts: UseLivekitRoomOptions): LivekitRoomApi {
 					snapshotParticipants(r);
 					presenceCue.schedule();
 				}),
+			);
+			r.on(
+				lk.RoomEvent.ParticipantPermissionsChanged,
+				ifLive(() => snapshotParticipants(r)),
 			);
 			r.on(
 				lk.RoomEvent.ActiveSpeakersChanged,
