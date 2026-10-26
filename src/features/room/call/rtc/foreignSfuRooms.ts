@@ -434,6 +434,10 @@ export function createForeignSfuRooms(
 				ifLive(() => deps.onChanged()),
 			);
 			r.on(
+				lk.RoomEvent.ParticipantPermissionsChanged,
+				ifLive(() => deps.onRosterChanged()),
+			);
+			r.on(
 				lk.RoomEvent.ParticipantConnected,
 				ifLive(() => deps.onRosterChanged()),
 			);
