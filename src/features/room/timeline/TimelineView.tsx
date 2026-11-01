@@ -919,6 +919,7 @@ const TimelineView: Component<{
 	};
 
 	const {
+		onReply,
 		onReact,
 		onDelete,
 		onRetry,
@@ -1166,7 +1167,7 @@ const TimelineView: Component<{
 													}
 													onEndPoll={() => void endPoll(event.eventId)}
 													onOpenThread={props.onOpenThread}
-													onReply={() => setReplyTo(event)}
+													onReply={() => onReply(event)}
 													onForward={
 														canForward(event)
 															? () => setForwardTarget(event)

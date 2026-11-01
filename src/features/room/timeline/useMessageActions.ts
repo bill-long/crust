@@ -105,8 +105,8 @@ export function useMessageActions(
 	};
 
 	/**
-	 * Move keyboard focus to the room's composer textarea. Used after
-	 * Retry / Discard / Cancel since the failed- or pending-banner
+	 * Move keyboard focus to the room's composer textarea. Used for Reply
+	 * and after Retry / Discard / Cancel since the failed- or pending-banner
 	 * button the user activated disappears and would otherwise strand
 	 * focus on `document.body`.
 	 *
@@ -299,6 +299,11 @@ export function useMessageActions(
 		focusComposer(originalRoomId);
 	};
 
+	const onReply = (ev: TimelineEvent): void => {
+		deps.setReplyTo(ev);
+		focusComposer(roomId());
+	};
+
 	const onEdit = (ev: TimelineEvent): void => {
 		// Get current body from SDK event for accurate prefill
 		// Use getContent() (includes edits) not getOriginalContent()
@@ -315,6 +320,7 @@ export function useMessageActions(
 	};
 
 	return {
+		onReply,
 		onReact,
 		onDelete,
 		onRetry,
